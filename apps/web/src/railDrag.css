@@ -1,0 +1,212 @@
+/* Rail launcher drag (railDrag.ts) ------------------------------------------
+ * The ghost is a body-level floating copy of the lifted icon; the icon's own
+ * slot stays as a quiet hole. Neighbour motion is FLIP (WAAPI) in railDrag.ts,
+ * so these rules only paint states. Reduced motion skips every transition.
+ */
+.rail-drag-ghost {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
+  contain: layout style;
+}
+
+.rail-drag-ghost-body {
+  --rail-ghost-tilt: 0deg;
+  --rail-ghost-fit: 1;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--contour), var(--shadow-sm);
+  transform: scale(var(--rail-ghost-fit)) rotate(var(--rail-ghost-tilt));
+  transition:
+    transform 180ms cubic-bezier(0.34, 1.4, 0.5, 1),
+    opacity var(--motion-normal) var(--motion-ease),
+    box-shadow 200ms var(--motion-ease);
+}
+.rail-drag-ghost-body > svg { display: block; flex: none; }
+.rail-drag-ghost-body.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--elevated));
+}
+.rail-drag-ghost-body.is-lifted {
+  transform: scale(calc(var(--rail-ghost-fit) * 1.14)) rotate(var(--rail-ghost-tilt));
+  box-shadow: 0 0 0 1px var(--accent-line), 0 10px 26px -8px rgba(0, 0, 0, 0.55), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* A cloned row (rail editor) keeps its own layout and lifts only slightly. */
+.rail-drag-ghost-body.is-clone { display: block; overflow: hidden; }
+.rail-drag-ghost-body.is-clone > * { width: 100%; height: 100%; margin: 0; }
+.rail-drag-ghost-body.is-clone.is-lifted {
+  transform: scale(1.02) rotate(calc(var(--rail-ghost-tilt) * 0.2));
+}
+
+/* Pulled far from every rail (railDrag.ts REMOVE_DISTANCE_PX): the ghost goes
+   translucent and a "Remove" pill rides above it. Let go and the icon is gone
+   in a puff of smoke, as when an icon is dragged out of the macOS Dock. The
+   pill sits beside the body, so it stays level while the body leans. */
+.rail-drag-ghost-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--material-glass-border));
+  border-radius: var(--radius-round);
+  background: var(--material-glass);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, 6px) scale(0.9);
+  transform-origin: 50% 100%;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform 220ms cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+.rail-drag-ghost[data-removing="true"] .rail-drag-ghost-body {
+  opacity: 0.6;
+  transform: scale(calc(var(--rail-ghost-fit) * 0.9)) rotate(var(--rail-ghost-tilt));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 55%, transparent), var(--shadow-sm);
+}
+.rail-drag-ghost[data-removing="true"] .rail-drag-ghost-label {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+/* No room above (the ghost is near the top of the window): the pill drops below. */
+.rail-drag-ghost[data-label="below"] .rail-drag-ghost-label {
+  top: calc(100% + 10px);
+  bottom: auto;
+  transform: translate(-50%, -6px) scale(0.9);
+  transform-origin: 50% 0;
+}
+.rail-drag-ghost[data-label="below"][data-removing="true"] .rail-drag-ghost-label {
+  transform: translate(-50%, 0) scale(1);
+}
+
+/* The smoke an icon leaves behind (railDrag.ts playPoof): soft circles that
+   bloom, drift up and fade, all on transform and opacity. The ink follows the
+   theme, so it reads as smoke on light and dark surfaces alike. */
+.rail-poof {
+  --rail-poof-ink: color-mix(in srgb, var(--text) 60%, var(--bg));
+  position: fixed;
+  z-index: 10000;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  contain: layout style;
+}
+.rail-poof-puff {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--rail-puff-size, 24px);
+  height: var(--rail-puff-size, 24px);
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--rail-poof-ink) 70%, transparent) 0%,
+    color-mix(in srgb, var(--rail-poof-ink) 40%, transparent) 58%,
+    transparent 100%);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* The lifted icon's home: invisible but still holding its place. */
+[data-rail-drag-source="true"] {
+  visibility: hidden;
+}
+
+/* Landing slot for an icon arriving from the other rail. */
+.rail-drag-slot {
+  display: inline-block;
+  flex: none;
+  pointer-events: none;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* The rail under the pointer glows softly so the destination is never a guess. */
+:is(.view-switcher-pill, .rail-icon-scroll, .header-actions-rail) {
+  transition: box-shadow var(--motion-normal) var(--motion-ease), background-color var(--motion-normal) var(--motion-ease);
+}
+:is(.view-switcher-pill, .rail-icon-scroll, .header-actions-rail)[data-rail-drop-target="true"] {
+  box-shadow: 0 0 0 1px var(--accent-line);
+  background-color: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.rail-icon-scroll[data-rail-drop-target="true"],
+.header-actions-rail[data-rail-drop-target="true"] { border-radius: var(--radius-control); }
+
+/* While dragging: one grabbing cursor, no hover flicker or text selection. */
+body[data-rail-dragging="true"],
+body[data-rail-dragging="true"] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+/* Desktop: the header is a window-drag region, which swallows pointer moves
+   and the release over its gaps and the landing slot, so an icon could never
+   be dropped into (or carried across) the top rail. Lift it for the drag. */
+body.desktop-app[data-rail-dragging="true"] .header,
+body.desktop-app[data-rail-dragging="true"] .header * {
+  -webkit-app-region: no-drag;
+}
+@media (hover: hover) {
+  body[data-rail-dragging="true"] :is(.view-icon, .strip-btn, .rail-widget-item .ui-icon-btn):hover:where(:not(:disabled)) {
+    background: transparent;
+  }
+  body[data-rail-dragging="true"] :is(.view-icon, .strip-btn).active:hover:where(:not(:disabled)) {
+    background: var(--accent-wash);
+  }
+}
+
+/* Placed widgets as rail items (components/RailZoneWidgets.tsx). The wrapper
+   is the drag handle; its control takes the rail's own icon box so a widget
+   carried between rails matches the launchers around it. */
+.rail-widget-item {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+.view-switcher-pill .rail-widget-item .ui-icon-btn {
+  width: var(--rail-icon-size-top, var(--control-h-sm));
+  height: var(--rail-icon-size-top, var(--control-h-sm));
+}
+.plugin-strip .rail-widget-item .ui-icon-btn {
+  width: var(--rail-icon-size-right, var(--control-h-sm));
+  height: var(--rail-icon-size-right, var(--control-h-sm));
+}
+/* Inside the top rail's pill a widget reads as one of its icons, not as a
+   framed header control (`.header .ui-icon-btn` and its glass edge). */
+body .view-switcher-pill .rail-widget-item .ui-icon-btn:not(:hover):not(:active) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The top-right header rail (Header.tsx HeaderActionsRail). */
+.header-actions-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-h-sm);
+}
+.header-rail-slot {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+}
+/* A launcher carried into the header wears the header icons' material
+   (styles.css lists it with `.header .ui-icon-btn`) and their ink. */
+.header-actions-rail .capability-launcher:not(.active) { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-drag-ghost-body,
+  .rail-drag-ghost-label,
+  :is(.view-switcher-pill, .rail-icon-scroll, .header-actions-rail) { transition: none; }
+}
+:root[data-reduce-animations="true"] :is(.rail-drag-ghost-body, .rail-drag-ghost-label, .view-switcher-pill, .rail-icon-scroll, .header-actions-rail) { transition: none; }

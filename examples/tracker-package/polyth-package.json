@@ -1,0 +1,25 @@
+{
+  "manifestVersion": 1,
+  "id": "com-example-tracker",
+  "version": "1.0.0",
+  "engines": { "polyth": ">=0.1.0" },
+  "display": {
+    "name": "Example tracker",
+    "description": "Generic list, cards, badges, and session attachments. No tracker types in Polyth core."
+  },
+  "runtime": {
+    "kind": "sandboxed",
+    "ui": { "entry": "src/index.ts" }
+  },
+  "contributes": {
+    "surfaces": [{ "id": "main", "title": "Tracker" }],
+    "composerActions": [{ "id": "attach-item", "label": "Attach tracker item" }]
+  },
+  "capabilities": [
+    "ui.render",
+    "ui.toast",
+    "composer.write",
+    "attachments.create",
+    "project.readMetadata"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "@polyth/git",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./diff": "./widgets/prDiff.ts",
+    "./stack": "./src/stackTypes.ts",
+    "./stack-types": "./src/stackTypes.ts",
+    "./stack-client": "./src/stackClient.ts",
+    "./acting": "./src/actingPerson.ts",
+    "./person-accounts": "./src/personHostingAccounts.ts",
+    "./hunks": "./src/hunks.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/sourceControlServerEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Git",
+      "description": "Source control status, diffs, commits, and worktrees.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "git",
+      "hasSettings": true,
+      "category": "engineering",
+      "projectAffinity": {
+        "directions": [
+          "engineering"
+        ],
+        "recommended": true
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/handoff": "0.1.0",
+    "@polyth/kernel": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/web": "0.1.0"
+  },
+  "devDependencies": {
+    "@polyth/browser": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

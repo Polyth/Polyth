@@ -1,0 +1,37 @@
+import type { ModelDescriptor, SessionProjection } from "@polyth/contracts";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
+import { englishHandoff, type HandoffTranslate } from "./i18n.ts";
+
+export function formatTokenEstimate(tokens: number): string {
+  if (tokens < 1000) return `≈${tokens}`;
+  const rounded = tokens >= 10_000
+    ? `${Math.round(tokens / 1000)}k`
+    : `${(tokens / 1000).toFixed(1)}k`;
+  return `≈${rounded}`;
+}
+
+export function deriveSessionTargetLabel(
+  session: SessionProjection | null,
+  harnessName: string | null,
+  models: readonly ModelDescriptor[],
+  translate: HandoffTranslate = englishHandoff,
+): string | null {
+  if (!session) return null;
+  const harnessLabel = harnessName ?? session.resolvedHarnessId ?? translate("handoff.status.agent");
+  const modelLabel = session.model
+    ? resolveModelPresentation(session.model, models, session.resolvedHarnessId).name
+    : null;
+  const status = session.status === "working"
+    ? translate("handoff.status.working")
+    : session.status === "waiting" ? translate("handoff.status.waiting") : translate("handoff.status.idle");
+  return modelLabel ? `${harnessLabel} · ${modelLabel} · ${status}` : `${harnessLabel} · ${status}`;
+}
+
+export function dockPasteTargetName(input: {
+  providerId: string;
+  providerName: string;
+  tabTitle?: string | null;
+}): string {
+  if (input.providerId === "custom" && input.tabTitle?.trim()) return input.tabTitle.trim();
+  return input.providerName;
+}

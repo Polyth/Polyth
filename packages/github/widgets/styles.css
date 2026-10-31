@@ -1,0 +1,28 @@
+/* GitHub link dialog opened from the composer add menu. */
+.github-link-dialog { width: min(440px, calc(100vw - 32px)); }
+.github-link-copy { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--font-meta); }
+.github-link-error { margin-top: var(--space-2); color: var(--red); font-size: var(--font-meta); }
+
+/* Settings → Source control → This project → GitHub: the CLI's own note
+   (why it cannot read the repository) under the rows. */
+.pkg-github-project-note {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-github-project-note[role="alert"] {
+  color: var(--red);
+}
+
+.pkg-github-project-repo {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  .pkg-github-project-repo:hover {
+    text-decoration: underline;
+  }
+}

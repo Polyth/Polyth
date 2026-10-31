@@ -1,0 +1,1223 @@
+/* Edited files above the composer: a quiet line, not a card. It matches the
+   agent status line it replaces when a turn ends (ui/AgentStatusDock.css):
+   no plate, border, shadow or glass. Folded it is one summary line; open,
+   the files hang from the same thread as activity steps and the actions are
+   text. Chat settings pick the look (body[data-composer-status-style]):
+   `line` is this base, `tab` sets it in a faint tab on the composer's top
+   edge, `capsule` gives it a hairline outline. */
+.pending-changes-bar {
+  --pending-changes-row: max(32px, var(--hit-min));
+  --pending-changes-mark: var(--icon-md);
+  container: pending-changes / inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
+  margin-inline: auto;
+  padding: 0 var(--space-1) var(--space-2);
+  color: var(--text);
+}
+.pending-changes-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--pending-changes-row);
+}
+.pending-changes-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.pending-changes-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--pending-changes-mark);
+  height: var(--pending-changes-mark);
+  color: var(--green);
+}
+.pending-changes-copy {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.pending-changes-title {
+  flex: 0 1 auto;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1.3;
+}
+.pending-changes-bar .pending-change-stats {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font: 400 var(--font-meta) var(--mono);
+  line-height: 1;
+  white-space: nowrap;
+}
+.pending-changes-head .pending-change-stats {
+  font-family: inherit;
+  font-weight: 500;
+  line-height: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.pending-changes-bar .pending-change-stats .additions { color: color-mix(in srgb, var(--green) 80%, var(--muted)); }
+.pending-changes-bar .pending-change-stats .deletions { color: color-mix(in srgb, var(--red) 80%, var(--muted)); }
+.pending-changes-bar .pending-changes-file .pending-change-stats {
+  flex: none;
+}
+.pending-changes-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  margin-inline-start: auto;
+}
+/* The actions are words, not buttons on a plate. Review is the one that
+   leads, so it alone takes the accent, as the host's text-safe accent ink
+   (tokens.css --chat-ink-accent): a theme's accent is tuned as a fill, and
+   as small text on a wallpaper or a pale theme (Solar) it fell under 4.5:1.
+   Both are ghost buttons, and the bar is in the selectors so these words
+   outrank a theme style's button inks (html[data-theme-style] .ui-btn--*). */
+.pending-changes-bar .pending-changes-actions .ui-btn,
+.pending-changes-bar .pending-changes-actions .ui-icon-btn,
+.pending-changes-bar .pending-changes-more {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+.pending-changes-bar .pending-changes-actions .pending-changes-review { color: var(--chat-ink-accent, var(--accent)); }
+@media (hover: hover) {
+  .pending-changes-actions :is(.ui-btn, .ui-icon-btn):hover:where(:not(:disabled)),
+  .pending-changes-bar .pending-changes-more:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+/* Files hang from a hairline under the mark, like activity steps. The
+   thread is drawn from --borderless-edge so Borderless keeps it. */
+.pending-changes-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  padding: var(--space-1) 0 0 calc(var(--pending-changes-mark) + var(--space-2));
+}
+.pending-changes-list::before {
+  content: "";
+  position: absolute;
+  inset-block: 0 var(--space-1);
+  inset-inline-start: calc(var(--pending-changes-mark) / 2 - .5px);
+  width: 1px;
+  background: var(--borderless-edge);
+  pointer-events: none;
+}
+.pending-changes-file {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--control-h-sm);
+  margin-inline-start: calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: 400 var(--font-meta) / 1.4 var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+/* Grow the tap box on coarse pointers without stretching the visible row. */
+.pending-changes-file::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, var(--hit-min));
+  height: max(100%, var(--hit-min));
+  transform: translate(-50%, -50%);
+}
+.pending-changes-file:focus-visible {
+  background: var(--surface-overlay-hover);
+}
+@media (hover: hover) {
+  .pending-changes-file:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+  }
+  .pending-changes-file:hover:where(:not(:disabled)) .pending-changes-file-name { color: var(--text); }
+}
+.pending-changes-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  color: var(--muted);
+}
+.pending-changes-bar .pending-changes-more {
+  align-self: start;
+  width: max-content;
+  min-height: 26px;
+  margin-inline-start: calc(var(--pending-changes-mark) + var(--space-1));
+  padding-inline: var(--space-1);
+}
+/* Folded: one summary line. The title already carries the count. */
+.pending-changes-bar--collapsed {
+  padding: 0;
+  color: var(--text-dim);
+}
+.pending-changes-bar--collapsed > .ui-run-summary {
+  --run-summary-surface: transparent;
+  min-height: var(--pending-changes-row);
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  box-shadow: none;
+  color: var(--muted);
+}
+.pending-changes-bar--collapsed .ui-run-summary-mark { width: var(--pending-changes-mark); }
+.pending-changes-bar--collapsed .ui-run-summary-copy strong { color: var(--text-dim); font-size: var(--font-meta); font-weight: 500; }
+.pending-changes-bar--collapsed .ui-run-summary-diff { font-size: var(--font-meta); }
+.pending-changes-bar--collapsed .ui-run-summary-diff .positive { color: color-mix(in srgb, var(--green) 80%, var(--muted)); }
+.pending-changes-bar--collapsed .ui-run-summary-diff .negative { color: color-mix(in srgb, var(--red) 80%, var(--muted)); }
+.pending-changes-bar--collapsed .ui-run-summary-chevron { color: var(--faint); }
+@media (hover: hover) {
+  .pending-changes-bar--collapsed > .ui-run-summary:hover:where(:not(:disabled)) { background: transparent; }
+  .pending-changes-bar--collapsed > .ui-run-summary:hover:where(:not(:disabled)) :is(.ui-run-summary-copy strong, .ui-run-summary-chevron) { color: var(--text); }
+}
+@container pending-changes (max-width: 360px) {
+  .pending-changes-head {
+    flex-wrap: wrap;
+  }
+  .pending-changes-lead {
+    flex: 1 1 100%;
+  }
+  .pending-changes-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-inline-start: 0;
+  }
+}
+
+/* Tab: a faint tab growing out of the composer's top edge, inset from its
+   rounded corners. It abuts the composer, never tucks under its glass. */
+body[data-composer-status-style="tab"] .pending-changes-bar {
+  width: calc(min(var(--chat-measure), 100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset))) - 2 * var(--composer-status-tab-inset, var(--space-4)));
+  padding-inline: var(--space-3);
+  border-radius: calc(var(--radius-card) + 4px) calc(var(--radius-card) + 4px) 0 0;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+body[data-composer-status-style="tab"] .pending-changes-bar--collapsed { padding-inline: var(--space-2); }
+
+/* Capsule: folded it is a centred pill that hugs its words; open, the list
+   sits in a hairline frame. Outlines are shadows so Borderless keeps them. */
+body[data-composer-status-style="capsule"] .pending-changes-bar {
+  margin-block-end: var(--space-2);
+  padding-inline: var(--space-3);
+  border-radius: calc(var(--radius-card) + 6px);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
+}
+body[data-composer-status-style="capsule"] .pending-changes-bar--collapsed {
+  align-items: center;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+body[data-composer-status-style="capsule"] .pending-changes-bar--collapsed > .ui-run-summary {
+  width: fit-content;
+  max-width: 100%;
+  min-height: max(30px, var(--hit-min));
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-round);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
+}
+/* Settings → Source Control: the conflict-agent prompt editor. */
+.git-conflict-agent-prompt {
+  width: min(520px, 100%); min-height: 96px; height: auto; padding: 9px 11px;
+  resize: vertical; line-height: 1.45;
+}
+
+/* Clone repository — inline in the folder picker. One reading column:
+   address, then account + commit author as one decision, then the folder
+   name, then destination beside the actions. */
+.git-clone-panel { gap: var(--space-4); }
+.git-clone-panel .folder-source-field { gap: var(--space-1); min-width: 0; }
+.git-clone-panel .folder-source-field > span { line-height: var(--font-meta-lh, 1.35); }
+.git-clone-detected {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1);
+  min-width: 0; min-height: 1lh;
+  color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh, 1.35);
+  overflow-wrap: anywhere;
+}
+.git-clone-detected strong { color: var(--text-dim); font-weight: 650; }
+.git-clone-detected.is-invalid { color: var(--red); }
+
+.git-clone-access {
+  display: grid; gap: var(--space-3); min-width: 0;
+  margin: 0; padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--sunken) 70%, transparent);
+}
+/* A floated legend stays inside the card's padding instead of notching the border. */
+.git-clone-access > legend {
+  float: inline-start; width: 100%; margin: 0; padding: 0;
+  color: var(--text); font-size: var(--font-label); font-weight: 650;
+}
+.git-clone-access > legend + * { clear: both; }
+.git-clone-access-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.git-clone-panel .git-clone-picker { display: flex; width: 100%; }
+.git-clone-panel .git-clone-picker .picker-chip {
+  width: 100%; min-height: max(var(--control-h), var(--hit-min));
+  justify-content: space-between; text-align: start;
+  /* Read as a field beside the text inputs, not as a bold chip. */
+  font-size: var(--font-input); font-weight: 500;
+}
+.git-clone-access-foot {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3);
+  padding-top: var(--space-3); border-top: 1px solid var(--hair);
+}
+.git-clone-access-note {
+  flex: 1; min-width: 0; margin: 0;
+  color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh, 1.4);
+  overflow-wrap: anywhere;
+}
+/* The ghost action keeps its hit area but aligns its label with the note. */
+.git-clone-access-foot .git-clone-manage { flex-shrink: 0; margin-block: calc(var(--space-1) * -1); margin-inline-end: calc(var(--control-pad-x-sm) * -1); }
+
+.git-clone-panel .folder-error { margin: 0; }
+.git-clone-panel .git-clone-actions { gap: var(--space-2); }
+.git-clone-destination {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  min-width: 0; flex: 1; margin: 0; margin-inline-end: var(--space-2);
+  color: var(--muted); font-size: var(--font-meta);
+}
+.git-clone-destination > span { flex-shrink: 0; }
+.git-clone-destination > bdi {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.git-project-account { display: grid; gap: var(--space-1); width: min(100%, 22rem); }
+.git-project-account .git-project-account-picker { display: flex; width: 100%; }
+.git-project-account .git-project-account-picker .picker-chip { width: 100%; justify-content: space-between; }
+
+@container (max-width: 560px) {
+  .git-clone-access { padding: var(--space-3); }
+  .git-clone-access-grid { grid-template-columns: minmax(0, 1fr); }
+  .git-clone-access-foot { flex-direction: column; gap: var(--space-2); }
+  .git-clone-access-foot .git-clone-manage { margin: 0 0 0 calc(var(--control-pad-x-sm) * -1); }
+  .git-clone-panel .git-clone-actions { flex-wrap: wrap; }
+  .git-clone-destination { flex-basis: 100%; margin-inline-end: 0; }
+  .git-clone-panel .git-clone-actions .ui-btn--primary { margin-inline-start: auto; }
+}
+
+/* Isolation card — the one place a session says what will happen to its work.
+   It reads as a quiet stack: identity glyph + title, then optional detail,
+   then the actions. The glass dock owns the surface (border, background,
+   shadow), so nothing here re-declares those. The radius is the card radius,
+   like the pending-changes bar it stacks with: the dock's floating-island
+   radius reads as a pill on a block this tall. */
+.isolation-card {
+  container: isolation-card / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
+  margin: var(--space-2) auto 0;
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  /* Body rows hang under the title, not under the glyph. */
+  --isolation-card-indent: calc(var(--icon-sm) + var(--space-2));
+  /* The card's own motion curve (isolationCardMotion.ts uses the same). */
+  --isolation-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Anchors the progress sheen; the glass dock owns the surface. */
+  position: relative;
+}
+/* Warn states tint the edge only: the glyph already carries the meaning, so
+   the glass stays intact and nothing depends on color alone. */
+.isolation-card--warn {
+  border-color: color-mix(in srgb, var(--amber) 38%, var(--material-glass-border));
+}
+.isolation-card--warn .isolation-card-glyph {
+  color: var(--amber);
+}
+.isolation-card--warn {
+  transition: border-color 420ms ease;
+}
+.isolation-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.isolation-card-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  align-self: flex-start;
+  /* Matches the title's first-line box so the glyph optically centres on it. */
+  width: var(--icon-sm);
+  min-height: calc(var(--font-label) * 1.35);
+  color: var(--accent);
+  transition: color var(--motion-surface) ease;
+}
+/* One glyph at a time; a new one mounts fresh (keyed) and crossfades in. */
+.isolation-card-glyph-swap {
+  display: grid;
+  place-items: center;
+}
+.isolation-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.isolation-card-title {
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+/* The branch name is the one part worth truncating: the label before it is
+   short and fixed, the branch can be arbitrarily long. */
+.isolation-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.isolation-card-meta > :not(svg) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.isolation-card-note {
+  margin: 0;
+  padding-inline-start: var(--isolation-card-indent);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.isolation-card-path {
+  margin: 0;
+  margin-inline-start: var(--isolation-card-indent);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+/* Recovery steps: a fixed mark column so labels line up whatever the mark. */
+.isolation-card-progress {
+  margin: 0;
+  padding: 0 0 0 var(--isolation-card-indent);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--text-dim);
+}
+.isolation-card-progress li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-2);
+  transition: color var(--motion-surface) ease;
+}
+.isolation-card-progress-label {
+  min-width: 0;
+}
+/* Marks are drawn, not typed: a quiet ring waits, a dot (or, while the
+   request is moving, a turning arc) marks the current step, and a finished
+   step draws its check. Every state is its own element, so the change itself
+   is the animation. */
+.isolation-card-progress-mark {
+  display: block;
+  justify-self: center;
+  box-sizing: border-box;
+  border-radius: 50%;
+}
+.isolation-card-progress-mark[data-state="pending"] {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 72%, transparent);
+}
+.isolation-card-progress-mark[data-state="current"] {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.isolation-card[data-moving] .isolation-card-progress-mark[data-state="current"] {
+  width: 12px;
+  height: 12px;
+  background: none;
+  box-shadow: none;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-top-color: var(--accent);
+}
+.isolation-card--warn .isolation-card-progress-mark[data-state="current"] {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 18%, transparent);
+}
+.isolation-card--warn[data-moving] .isolation-card-progress-mark[data-state="current"] {
+  background: none;
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--amber) 24%, transparent);
+  border-top-color: var(--amber);
+}
+.isolation-card-progress-mark.isolation-card-check {
+  width: 13px;
+  height: 13px;
+  border-radius: 0;
+}
+.isolation-card-progress [aria-current="step"] {
+  color: var(--text);
+  font-weight: 550;
+}
+.isolation-card-progress-done {
+  color: var(--muted);
+}
+/* The drawn check: a soft success disc with a stroked tick. */
+.isolation-card-check {
+  display: block;
+  overflow: visible;
+}
+.isolation-card-check-disc {
+  fill: color-mix(in srgb, var(--success) 16%, transparent);
+}
+.isolation-card-check-tick {
+  fill: none;
+  stroke: var(--success);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.isolation-card-done-mark {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+.isolation-card-done-mark .isolation-card-check-disc {
+  fill: color-mix(in srgb, var(--success) 20%, transparent);
+}
+/* Merged: the work is back home. The edge warms to success for the beat
+   before the card hands over to the transcript notice. */
+.isolation-card--done {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--material-glass-border));
+  transition: border-color 420ms ease;
+}
+.isolation-card--done .isolation-card-glyph {
+  color: var(--success);
+}
+/* Inline conflict file list — clickable paths that open the diff directly.
+   Capped at 8 visible; the rest are shown as a "+N more" note. */
+.isolation-card-conflict-files {
+  margin: 0;
+  /* Rows carry their own hover inset; cancel it so text aligns with the title. */
+  padding: 0 0 0 calc(var(--isolation-card-indent) - var(--space-2));
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.isolation-card-conflict-file {
+  all: unset;
+  display: block;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-meta);
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  background: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.isolation-card-conflict-file:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+@media (hover: hover) {
+  .isolation-card-conflict-file:hover:where(:not(:disabled)) {
+    color: var(--text);
+    background: var(--surface-hover);
+  }
+}
+.isolation-card-conflict-more {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+/* Delegated agents are listed by title, not path: interface face, read and
+   truncated from the start like any other label. */
+.isolation-card-conflict-file.isolation-card-delegated-agent {
+  font-family: inherit;
+  direction: ltr;
+}
+/* Actions sit at the end of the stack and align right, so the primary verb
+   lands nearest the thumb on desktop and reads as the resolution of the card. */
+.isolation-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex: none;
+  margin-block-start: var(--space-1);
+}
+.isolation-card-actions:empty {
+  display: none;
+}
+.isolation-card-overflow {
+  flex: none;
+}
+.isolation-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--green);
+  cursor: default;
+}
+.isolation-lock svg { width: calc(var(--icon-sm) - 3px); height: calc(var(--icon-sm) - 3px); }
+.isolation-list-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.isolation-list-badge svg { width: calc(var(--icon-sm) - 3px); height: calc(var(--icon-sm) - 3px); }
+.isolation-list-badge.is-merged { color: var(--success); }
+.isolation-push-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-block-end: var(--space-3);
+}
+/* Narrow: the primary verb takes its own full-width row at the bottom of the
+   card (it is last in DOM order), and the secondary verbs share the row above
+   it. Both stay at the tap floor, so this is the phone layout too. */
+@container isolation-card (max-width: 420px) {
+  .isolation-card-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .isolation-card-actions > :not(.isolation-card-primary) {
+    flex: 1 1 auto;
+  }
+  .isolation-card-primary {
+    flex: 1 0 100%;
+    justify-content: center;
+  }
+}
+
+/* Isolation card motion. The box itself (grow in, morph between states,
+   collapse out) is driven by isolationCardMotion.ts so the transcript glides
+   with it; these rules only animate what mounts inside the box. New content
+   arrives slightly after the box starts to make room for it, so nothing
+   squeezes into view, and swapped copy crossfades instead of popping. */
+@media (prefers-reduced-motion: no-preference) {
+  .isolation-card-meta,
+  .isolation-card-note,
+  .isolation-card-path,
+  .isolation-card-conflict-files,
+  .isolation-card-actions,
+  .isolation-card-progress li {
+    animation: isolation-card-reveal 380ms var(--isolation-ease) 70ms both;
+  }
+  .isolation-card-progress li {
+    animation-delay: calc(70ms + var(--isolation-step, 0) * 55ms);
+  }
+  .isolation-card-title,
+  .isolation-card-progress-label {
+    animation: isolation-card-text-in 320ms var(--isolation-ease) both;
+  }
+  .isolation-card-glyph-swap {
+    animation: isolation-card-glyph-in 420ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  }
+  .isolation-card-progress-mark {
+    animation: isolation-card-mark-in 360ms cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  }
+  .isolation-card[data-moving] .isolation-card-progress-mark[data-state="current"] {
+    animation:
+      isolation-card-mark-fade 240ms ease both,
+      isolation-card-spin 900ms linear infinite;
+  }
+  .isolation-card-check-tick {
+    stroke-dasharray: 1;
+    animation: isolation-card-tick 440ms cubic-bezier(0.65, 0, 0.35, 1) 120ms both;
+  }
+  /* While a request moves the work, a soft light travels along the top edge:
+     progress without a bar that would claim to know how far along it is. */
+  .isolation-card[data-moving]::after {
+    content: "";
+    position: absolute;
+    /* Inside the corner radius, and the light travels by background position,
+       so it never leaves the card's top edge. */
+    inset-inline: var(--radius-card);
+    inset-block-start: -1px;
+    block-size: 1px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 80%, transparent), transparent) no-repeat;
+    background-size: 42% 100%;
+    animation: isolation-card-sheen 2.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  .isolation-card--warn[data-moving]::after {
+    background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--amber) 80%, transparent), transparent);
+  }
+}
+@keyframes isolation-card-reveal {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+}
+@keyframes isolation-card-text-in {
+  from { opacity: 0; transform: translate3d(0, 3px, 0); filter: blur(2px); }
+}
+@keyframes isolation-card-glyph-in {
+  from { opacity: 0; transform: scale(0.55); }
+}
+@keyframes isolation-card-mark-in {
+  from { opacity: 0; transform: scale(0.4); }
+}
+@keyframes isolation-card-mark-fade {
+  from { opacity: 0; }
+}
+@keyframes isolation-card-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes isolation-card-tick {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes isolation-card-sheen {
+  0% { opacity: 0; background-position: -60% 0; }
+  30%, 70% { opacity: 1; }
+  100% { opacity: 0; background-position: 160% 0; }
+}
+
+/* Compact Canvas summary widget (git.recent). Read-only: links into the
+   full Source control surface instead of embedding GitView in a small card. */
+.git-recent-widget {
+  container: git-recent / size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-2);
+  overflow: hidden;
+  color: var(--text);
+}
+.git-recent-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.git-recent-head .source-branch {
+  max-width: 100%;
+}
+.git-recent-summary {
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.git-recent-head .git-ahead-behind {
+  margin-left: 0;
+}
+.git-recent-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow: auto;
+}
+.git-recent-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.git-recent-file:focus-visible {
+  background: var(--raised);
+}
+@media (hover: hover) {
+  .git-recent-file:hover:where(:not(:disabled)) {
+    background: var(--raised);
+  }
+}
+.git-recent-file .git-file-letter {
+  flex: none;
+}
+.git-recent-path {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  line-height: 1.3;
+}
+.git-recent-name,
+.git-recent-directory {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-recent-directory {
+  color: var(--muted);
+  font-size: max(10px, var(--font-meta));
+}
+.git-recent-foot {
+  flex: none;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--hair);
+}
+.git-recent-open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.git-recent-open:focus-visible {
+  background: var(--raised);
+}
+@media (hover: hover) {
+  .git-recent-open:hover:where(:not(:disabled)) {
+    background: var(--raised);
+  }
+}
+.git-recent-open .ui-icon {
+  flex: none;
+  color: var(--accent);
+}
+
+@container git-recent (max-height: 220px) {
+  .git-recent-widget {
+    gap: var(--space-1);
+  }
+
+  .git-recent-foot {
+    padding-top: 0;
+  }
+}
+
+@container git-recent (max-width: 320px) {
+  .git-recent-head {
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .git-recent-summary {
+    order: 3;
+    flex: 1 1 100%;
+    margin-inline-start: 0;
+  }
+}
+
+/* The compact Canvas summary follows the same basename-first scanning rule. */
+.git-recent-path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.git-recent-name,
+.git-recent-directory {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-recent-name {
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.git-recent-directory {
+  color: var(--faint);
+  font: 400 var(--font-meta) / 1.15 var(--mono);
+}
+
+/* Authentication setup is a companion guide, not a credential editor. Keep
+   the private-key boundary and the external setup actions explicit. */
+.source-control-auth-guide {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-block: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+
+.source-control-auth-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.source-control-auth-head > div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.source-control-auth-head strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.source-control-auth-head span,
+.source-control-auth-foot span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.source-control-auth-head .source-control-auth-remote {
+  flex: none;
+  max-width: 45%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-round);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-control-auth-guide .ui-notice {
+  margin: 0;
+}
+
+.source-control-auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.source-control-auth-card {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+}
+
+.source-control-auth-card--recommended {
+  border-color: var(--accent-line);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.source-control-auth-card-head {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.source-control-auth-card-head strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.source-control-auth-card-head span,
+.source-control-auth-card p,
+.source-control-auth-card li {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.source-control-auth-card-head .source-control-auth-recommended {
+  width: max-content;
+  padding: 0.1em 0.45em;
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 650;
+}
+
+.source-control-auth-card p {
+  margin: 0;
+}
+
+.source-control-auth-card ol {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-inline-start: 1.25em;
+}
+
+.source-control-auth-card code {
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.source-control-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.source-control-auth-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--hair);
+}
+
+@container feature-panel (max-width: 700px) {
+  .source-control-auth-head,
+  .source-control-auth-foot {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-control-auth-head .source-control-auth-remote {
+    max-width: 100%;
+    align-self: flex-start;
+  }
+
+  .source-control-auth-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-control-auth-foot .ui-btn {
+    justify-self: start;
+  }
+}
+
+/* Repository identity and transport target are deliberately quiet, separate
+   controls. The selected remote is the Git authority used by sync actions. */
+.source-control-identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* A toolbar pop-up: no fill, a hairline that keeps it a control on touch
+   (borderless appearance clears it), and the ghost button's hover wash. */
+.source-control-identity .source-control-identity-trigger {
+  max-width: 18rem;
+  border-color: var(--hair-strong);
+  font-size: var(--font-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-control-identity .source-control-identity-compact-label {
+  display: none;
+}
+
+/* A member without a commit identity: Polyth refuses their commits. */
+.source-control-identity .source-control-identity-trigger[data-attention="true"] {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+/* Phones give the identity its own row, so only a sliver of a pane swaps the
+   value for the short caption. */
+@container git-page (max-width: 299px) {
+  .git-page .source-control-identity-value {
+    display: none;
+  }
+
+  .git-page .source-control-identity-compact-label {
+    display: inline;
+  }
+}
+
+/* The identity menu's status footer reads as one more section of the menu:
+   below its divider, on the rows' label column, at the rows' type scale. */
+.source-control-identity-details {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  max-width: min(22rem, 78vw);
+  padding: var(--space-1) var(--control-pad-x-sm);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.ui-menu:has(.ui-menu-item-check) .source-control-identity-details {
+  padding-inline-start: var(--menu-leading-column);
+}
+
+.source-control-identity-details > div:first-child {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  min-width: 0;
+  font-size: var(--font-label);
+}
+
+.source-control-identity-details strong {
+  font-weight: 600;
+}
+
+.source-control-identity-details small {
+  font-size: inherit;
+}
+
+.source-control-provider-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  margin-top: var(--space-1);
+}
+
+.source-control-provider-summary:empty {
+  display: none;
+}
+
+.source-control-detail-label {
+  color: var(--muted);
+}
+
+/* A compact chip on the label column; the fill keeps it a control when the
+   borderless appearance clears its hairline. */
+.source-control-provider-summary .ui-btn {
+  border-color: var(--hair-strong);
+  background: var(--surface-overlay);
+  font-size: var(--font-meta);
+}
+
+.source-control-provider-summary .gitlab-identity,
+.source-control-provider-summary .github-repository-provider {
+  max-width: 100%;
+}
+
+.source-control-provider-summary .github-repository-provider {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@container git-page (max-width: 519px) {
+  .git-page .source-control-identity-trigger {
+    max-width: 100%;
+    padding-inline: var(--space-2);
+  }
+
+  .git-page .source-control-identity-trigger .ui-btn-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (pointer: coarse) {
+  .source-control-identity-trigger { min-height: var(--tap); }
+}
+
+.source-control-profile-ssh-row { display: flex; gap: var(--space-2, 8px); align-items: center; }
+.source-control-profile-ssh-row > :first-child { flex: 1; min-width: 0; }

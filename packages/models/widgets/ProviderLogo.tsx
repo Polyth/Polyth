@@ -1,0 +1,359 @@
+import type { CSSProperties } from "react";
+import "./provider-logo-styles.css";
+
+const PROVIDERS = [
+  ["opencode-go", ["opencode-go", "opencode go"]],
+  ["opencode-zen", ["opencode-zen", "opencode zen"]],
+  ["opencode", ["opencode"]],
+  ["cursor", ["cursor"]],
+  ["openrouter", ["openrouter"]],
+  ["commandcode", ["commandcode", "command-code", "command code"]],
+  // The Kimi coding endpoint in this catalog is served by Z.AI.
+  ["zai", ["kimi", "moonshot", "z.ai", "zai", "zhipu"]],
+  ["cerebras", ["cerebras"]],
+  ["claude", ["claude"]],
+  ["anthropic", ["anthropic"]],
+  ["azure", ["azure"]],
+  ["openai", ["openai", "chatgpt", "gpt", "codex"]],
+  ["vertex", ["vertex"]],
+  ["gemini", ["gemini", "google"]],
+  // Google Antigravity is a first-class harness identity with its own mark;
+  // it keeps a dedicated key (and data-provider) instead of collapsing into
+  // the Gemini provider it serves models from.
+  ["antigravity", ["antigravity"]],
+  // The Pi harness carries a dedicated two-letter identity. Short keys are
+  // resolved exactly (see resolveProviderKey), never as loose substrings.
+  ["pi", ["pi"]],
+  ["copilot", ["copilot", "github"]],
+  ["xai", ["xai", "grok"]],
+  ["groq", ["groq"]],
+  ["mistral", ["mistral"]],
+  ["llama", ["llama", "meta"]],
+  ["bedrock", ["bedrock", "amazon", "aws"]],
+  ["together", ["together"]],
+  ["fireworks", ["fireworks"]],
+  ["deepseek", ["deepseek"]],
+  ["ollama", ["ollama"]],
+  ["nvidia", ["nvidia"]],
+  ["huggingface", ["huggingface", "hugging face"]],
+  ["cohere", ["cohere"]],
+  ["perplexity", ["perplexity"]],
+] as const;
+
+type ProviderKey = (typeof PROVIDERS)[number][0];
+
+const PROVIDER_MARK_KEYS = new Set<string>(PROVIDERS.map(([key]) => key));
+
+const strokeProps = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.8,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+  focusable: "false" as const,
+};
+
+const fillProps = {
+  viewBox: "0 0 24 24",
+  fill: "currentColor",
+  "aria-hidden": true,
+  focusable: "false" as const,
+};
+
+function findProviderKey(value: string): ProviderKey | undefined {
+  const tokens = value.split(/\s+/);
+  return PROVIDERS.find(([, aliases]) => aliases.some((alias) =>
+    // Two-letter keys (pi) are ambiguous as substrings ("Spicy", "Pipeline");
+    // longer aliases keep matching inside hyphenated provider ids.
+    alias.length > 2 ? value.includes(alias) : tokens.includes(alias),
+  ))?.[0];
+}
+
+/** Harness families that register extra native logins as `<family>-<account>`
+ *  harnesses. The account part is user text, so it must never pick the mark. */
+const ACCOUNT_FAMILIES = new Set(["antigravity", "claude", "codex", "commandcode", "cursor", "deepseek", "grok", "omp", "pi"]);
+const accountFamily = (value: string | undefined): string | undefined => {
+  const match = /^([a-z]+)-[a-z0-9][a-z0-9-]*$/.exec(value?.trim().toLowerCase() ?? "");
+  return match && ACCOUNT_FAMILIES.has(match[1]!) ? match[1] : undefined;
+};
+
+/** Resolve the mark for a logo request. A dedicated harness identity is an
+ *  exact match so short keys cannot be lost to an earlier alias in the id;
+ *  provider names and aliases (codex, github, opencode zen) fall through to
+ *  the fuzzy alias scan. */
+function resolveProviderKey(
+  providerID: string | undefined,
+  providerName: string | undefined,
+  harnessId: string | undefined,
+): ProviderKey | undefined {
+  const family = accountFamily(harnessId) ?? (harnessId ? undefined : accountFamily(providerID));
+  if (family) return PROVIDER_MARK_KEYS.has(family) ? family as ProviderKey : findProviderKey(family);
+  const harness = harnessId?.trim().toLowerCase() ?? "";
+  const brandHarness = harness && harness !== ROUTER_HARNESS_ID ? harness : "";
+  if (brandHarness && PROVIDER_MARK_KEYS.has(brandHarness)) return brandHarness as ProviderKey;
+  const id = `${brandHarness} ${providerID ?? ""} ${providerName ?? ""}`.trim().toLowerCase() || "polyth";
+  return findProviderKey(id);
+}
+
+function SvgMark({ provider }: { provider: ProviderKey }) {
+  // Keep the distinctive Command Code command-glyph, but render it like the
+  // rest of Polyth's provider marks: transparent canvas and theme color.
+  if (provider === "commandcode") {
+    return (
+      <svg viewBox="20 20 96 96" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="m93.6604 26.1784c-8.982 0-16.2887 7.3067-16.2887 16.2888v6.9809h-18.6158v-6.9809c0-8.9821-7.3067-16.2888-16.2887-16.2888-8.9821 0-16.2888 7.3067-16.2888 16.2888s7.3067 16.2887 16.2888 16.2887h6.9809v18.6158h-6.9809c-8.9821 0-16.2888 7.3067-16.2888 16.2888 0 8.9825 7.3067 16.2885 16.2888 16.2885 8.982 0 16.2887-7.306 16.2887-16.2885v-6.981h18.6158v6.981c0 8.9825 7.3067 16.2885 16.2887 16.2885 8.9826 0 16.2886-7.306 16.2886-16.2885 0-8.9821-7.306-16.2888-16.2886-16.2888h-6.9809v-18.6158h6.9809c8.9826 0 16.2886-7.3066 16.2886-16.2887s-7.306-16.2888-16.2886-16.2888zm-6.9809 23.2697v-6.9809c0-3.8628 3.1182-6.9809 6.9809-6.9809 3.8628 0 6.9806 3.1181 6.9806 6.9809 0 3.8627-3.1178 6.9809-6.9806 6.9809zm-44.2123 0c-3.8628 0-6.9809-3.1182-6.9809-6.9809 0-3.8628 3.1181-6.9809 6.9809-6.9809 3.8627 0 6.9809 3.1181 6.9809 6.9809v6.9809zm16.2887 27.9236v-18.6158h18.6158v18.6158zm34.9045 23.2693c-3.8627 0-6.9809-3.1178-6.9809-6.9805v-6.981h6.9809c3.8628 0 6.9806 3.1182 6.9806 6.981 0 3.8627-3.1178 6.9805-6.9806 6.9805zm-51.1932 0c-3.8628 0-6.9809-3.1178-6.9809-6.9805 0-3.8628 3.1181-6.981 6.9809-6.981h6.9809v6.981c0 3.8627-3.1182 6.9805-6.9809 6.9805z" />
+      </svg>
+    );
+  }
+  // Go and Zen are OpenCode service tiers, so they share its brand mark.
+  if (provider === "opencode" || provider === "opencode-go" || provider === "opencode-zen") {
+    return (
+      <svg {...fillProps}>
+        <path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" />
+      </svg>
+    );
+  }
+  if (provider === "cursor") {
+    return (
+      <svg {...fillProps}>
+        <path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23" />
+      </svg>
+    );
+  }
+  if (provider === "zai") {
+    return (
+      <svg {...fillProps}>
+        <path d="M12.105 2 9.927 4.953H.653L2.83 2h9.276zM23.254 19.048 21.078 22h-9.242l2.174-2.952h9.244zM24 2 9.264 22H0L14.736 2H24z" />
+      </svg>
+    );
+  }
+  if (provider === "cerebras") {
+    return (
+      <svg {...fillProps}>
+        <path d="M14.121 2.701a9.299 9.299 0 0 0 0 18.598V22.7c-5.91 0-10.7-4.791-10.7-10.701S8.21 1.299 14.12 1.299V2.7zm4.752 3.677A7.353 7.353 0 1 0 9.42 17.643l-.901 1.074a8.754 8.754 0 0 1-1.08-12.334 8.755 8.755 0 0 1 12.335-1.08l-.901 1.075zm-2.255.844a5.407 5.407 0 0 0-5.048 9.563l-.656 1.24a6.81 6.81 0 0 1 6.358-12.043l-.654 1.24zM14.12 8.539a3.46 3.46 0 1 0 0 6.922v1.402a4.863 4.863 0 0 1 0-9.726v1.402z" />
+        <path d="M15.407 10.836a2.24 2.24 0 0 0-.51-.409 1.084 1.084 0 0 0-.544-.152c-.255 0-.483.047-.684.14a1.58 1.58 0 0 0-.84.912c-.074.203-.11.416-.11.631 0 .218.036.43.11.631a1.594 1.594 0 0 0 .84.913c.2.093.43.14.684.14.216 0 .417-.046.602-.135.188-.09.35-.225.475-.392l.928 1.006c-.14.14-.3.261-.482.363a3.367 3.367 0 0 1-1.083.38c-.17.026-.317.04-.44.04a3.315 3.315 0 0 1-1.182-.21 2.825 2.825 0 0 1-.961-.597 2.816 2.816 0 0 1-.644-.929 2.987 2.987 0 0 1-.238-1.21c0-.444.08-.847.238-1.21.15-.35.368-.666.643-.929.278-.261.605-.464.962-.596a3.315 3.315 0 0 1 1.182-.21c.355 0 .712.068 1.072.204.361.138.685.36.944.649l-.962.97z" />
+      </svg>
+    );
+  }
+  // Anthropic's consumer brand mark is the Claude spark. The letterform "A"
+  // reads as a missing logo at chip size, so both keys share this path.
+  if (provider === "anthropic" || provider === "claude") {
+    return (
+      <svg {...fillProps}>
+        <path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 0 1-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" />
+      </svg>
+    );
+  }
+  if (provider === "openai") {
+    return (
+      <svg {...fillProps}>
+        <path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 0 0-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 0 1 .476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 0 1 4.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 0 1-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 0 0 5.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0 0 10.205 0a5.947 5.947 0 0 0-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 0 0 4.162 1.713z" />
+      </svg>
+    );
+  }
+  // Official Google Antigravity mark (via the lobehub/lobe-icons static set,
+  // MIT). Monochrome currentColor keeps it consistent with the other marks.
+  if (provider === "antigravity") {
+    return (
+      <svg {...fillProps} fillRule="evenodd">
+        <path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" />
+      </svg>
+    );
+  }
+  if (provider === "gemini") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M12 2.8c.65 5.15 4.05 8.55 9.2 9.2-5.15.65-8.55 4.05-9.2 9.2-.65-5.15-4.05-8.55-9.2-9.2 5.15-.65 8.55-4.05 9.2-9.2Z" />
+      </svg>
+    );
+  }
+  if (provider === "copilot") {
+    return (
+      <svg {...fillProps}>
+        <path d="M19.245 5.364c1.322 1.36 1.877 3.216 2.11 5.817.622 0 1.2.135 1.592.654l.73.964c.21.278.323.61.323.955v2.62c0 .339-.173.669-.453.868C20.239 19.602 16.157 21.5 12 21.5c-4.6 0-9.205-2.583-11.547-4.258-.28-.2-.452-.53-.453-.868v-2.62c0-.345.113-.679.321-.956l.73-.963c.392-.517.974-.654 1.593-.654l.029-.297c.25-2.446.81-4.213 2.082-5.52 2.461-2.54 5.71-2.851 7.146-2.864h.198c1.436.013 4.685.323 7.146 2.864zm-7.244 4.328c-.284 0-.613.016-.962.05-.123.447-.305.85-.57 1.108-1.05 1.023-2.316 1.18-2.994 1.18-.638 0-1.306-.13-1.851-.464-.516.165-1.012.403-1.044.996a65.882 65.882 0 0 0-.063 2.884l-.002.48c-.002.563-.005 1.126-.013 1.69.002.326.204.63.51.765 2.482 1.102 4.83 1.657 6.99 1.657 2.156 0 4.504-.555 6.985-1.657a.854.854 0 0 0 .51-.766c.03-1.682.006-3.372-.076-5.053-.031-.596-.528-.83-1.046-.996-.546.333-1.212.464-1.85.464-.677 0-1.942-.157-2.993-1.18-.266-.258-.447-.661-.57-1.108-.32-.032-.64-.049-.96-.05zm-2.525 4.013c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 0 1-.976-.95v-1.752c0-.525.437-.951.976-.951zm5 0c.539 0 .976.426.976.95v1.753c0 .525-.437.95-.976.95a.964.964 0 0 1-.976-.95v-1.752c0-.525.437-.951.976-.951zM7.635 5.087c-1.05.102-1.935.438-2.385.906-.975 1.037-.765 3.668-.21 4.224.405.394 1.17.657 1.995.657h.09c.649-.013 1.785-.176 2.73-1.11.435-.41.705-1.433.675-2.47-.03-.834-.27-1.52-.63-1.813-.39-.336-1.275-.482-2.265-.394zm6.465.394c-.36.292-.6.98-.63 1.813-.03 1.037.24 2.06.675 2.47.968.957 2.136 1.104 2.776 1.11h.044c.825 0 1.59-.263 1.995-.657.555-.556.765-3.187-.21-4.224-.45-.468-1.335-.804-2.385-.906-.99-.088-1.875.058-2.265.394zM12 7.615c-.24 0-.525.015-.84.044.03.16.045.336.06.526l-.001.159a2.94 2.94 0 0 1-.014.25c.225-.022.425-.027.612-.028h.366c.187 0 .387.006.612.028-.015-.146-.015-.277-.015-.409.015-.19.03-.365.06-.526a9.29 9.29 0 0 0-.84-.044z" />
+      </svg>
+    );
+  }
+  if (provider === "xai") {
+    return (
+      <svg {...strokeProps} strokeWidth="2.2">
+        <path d="m4.5 4.5 15 15M18.9 4.5 4.5 18.9M15.4 4.5h3.5v3.5" />
+      </svg>
+    );
+  }
+  if (provider === "groq") {
+    return (
+      <svg {...strokeProps} strokeWidth="2.3">
+        <path d="M18.2 7.1A7.6 7.6 0 1 0 19.6 14H13v-3.8h7.2" />
+        <circle cx="12" cy="12" r="2.1" />
+      </svg>
+    );
+  }
+  if (provider === "mistral") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M3 4h4v3h2v3h2V7h2v3h2V7h2V4h4v16h-5v-6h-2v3h-4v-3H8v6H3V4Z" />
+      </svg>
+    );
+  }
+  if (provider === "openrouter") {
+    return (
+      <svg {...fillProps}>
+        <path d="M18.654 3.87a5.087 5.087 0 1 1 0 10.174L23.7 19.09c.64.641.187 1.737-.72 1.737H8.48a8.479 8.479 0 0 1 0-16.958h10.175zM8.479 7.26a5.087 5.087 0 1 0 0 10.176 5.087 5.087 0 0 0 0-10.175z" />
+      </svg>
+    );
+  }
+  if (provider === "vertex") {
+    return (
+      <svg {...strokeProps}>
+        <path d="M12 3 3.8 18.7h16.4L12 3Z" />
+        <path d="m12 3 2.6 10.7 5.6 5M12 3 9.4 13.7l-5.6 5M9.4 13.7h5.2" />
+      </svg>
+    );
+  }
+  if (provider === "llama") {
+    return (
+      <svg {...strokeProps} strokeWidth="2">
+        <path d="M3.2 13.5c1.5-5 4-7.5 7-7.5 4.6 0 4.5 7.7 7.7 7.7 1.5 0 2.4-1 2.9-2.2M20.8 10.5c-1.5 5-4 7.5-7 7.5-4.6 0-4.5-7.7-7.7-7.7-1.5 0-2.4 1-2.9 2.2" />
+      </svg>
+    );
+  }
+  if (provider === "bedrock") {
+    return (
+      <svg {...strokeProps}>
+        <path d="m12 3 7 3.8v7.9L12 21l-7-6.3V6.8L12 3Z" />
+        <path d="m5 6.8 7 4 7-4M12 10.8V21M7.8 14.5l4.2 2.4 4.2-2.4" />
+      </svg>
+    );
+  }
+  if (provider === "azure") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M10.1 3h6.2L9.9 18.6 3.5 17l6.6-14Zm1.1 13.1 3.1-7.6L21 20H8.3l2.9-3.9Z" />
+      </svg>
+    );
+  }
+  if (provider === "together") {
+    return (
+      <svg {...strokeProps}>
+        <circle cx="9" cy="9" r="4.5" />
+        <circle cx="15" cy="9" r="4.5" />
+        <circle cx="12" cy="15" r="4.5" />
+      </svg>
+    );
+  }
+  if (provider === "fireworks") {
+    return (
+      <svg {...strokeProps}>
+        <path d="M12 2.5v5M12 16.5v5M2.5 12h5M16.5 12h5M5.3 5.3l3.5 3.5M15.2 15.2l3.5 3.5M18.7 5.3l-3.5 3.5M8.8 15.2l-3.5 3.5" />
+        <circle cx="12" cy="12" r="2.5" />
+      </svg>
+    );
+  }
+  // Official DeepSeek whale mark (simple-icons, CC0), monochrome on the theme
+  // color like every other provider identity.
+  if (provider === "deepseek") {
+    return (
+      <svg {...fillProps}>
+        <path d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287.3.3 0 0 1 .113.074.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078.253.253 0 0 1-.114-.358 1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.392.451.462.576.685.915.176.264.336.536.446.848.066.194-.02.353-.25.45" />
+      </svg>
+    );
+  }
+  if (provider === "ollama") {
+    return (
+      <svg {...strokeProps}>
+        <path d="M8 8V5.2C8 3.7 9 3 10.1 3c1.2 0 1.9.9 1.9 2.2V8m0 0V5.2C12 3.7 13 3 14.1 3 15.3 3 16 3.9 16 5.2V8" />
+        <path d="M6.5 10.5C6.5 8.8 8 8 12 8s5.5.8 5.5 2.5V19H6.5v-8.5ZM9.5 12h.1m4.8 0h.1M9.5 15.3c1.7.7 3.3.7 5 0" />
+      </svg>
+    );
+  }
+  if (provider === "nvidia") {
+    return (
+      <svg {...strokeProps}>
+        <path d="M3 12c2.4-3.3 5.5-5 9.2-5 3.4 0 6.4 1.5 8.8 4.5-2.2 3.6-5.2 5.5-9 5.5-3.7 0-6.7-1.7-9-5Z" />
+        <path d="M7.2 12a5 5 0 0 1 8.9-3.1 3.7 3.7 0 1 1-6.7 2.2 2.4 2.4 0 1 1 4.4 1.8" />
+      </svg>
+    );
+  }
+  if (provider === "huggingface") {
+    return (
+      <svg {...strokeProps}>
+        <circle cx="12" cy="12" r="7" />
+        <path d="M9.3 10h.1m5.2 0h.1M8.8 14c1.8 2 4.6 2.3 6.4 0M5.5 6.5 3.2 4.2M18.5 6.5l2.3-2.3M5 17l-2.6 2M19 17l2.6 2" />
+      </svg>
+    );
+  }
+  if (provider === "cohere") {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M8.128 14.099c.592 0 1.77-.033 3.398-.703 1.897-.781 5.672-2.2 8.395-3.656 1.905-1.018 2.74-2.366 2.74-4.18A4.56 4.56 0 0 0 18.1 1H7.549A6.55 6.55 0 0 0 1 7.55c0 3.617 2.745 6.549 7.128 6.549z" />
+        <path d="M9.912 18.61a4.387 4.387 0 0 1 2.705-4.052l3.323-1.38c3.361-1.394 7.06 1.076 7.06 4.715a5.104 5.104 0 0 1-5.105 5.104l-3.597-.001a4.386 4.386 0 0 1-4.386-4.387z" />
+        <path d="M4.776 14.962A3.775 3.775 0 0 0 1 18.738v.489a3.776 3.776 0 0 0 7.551 0v-.49a3.775 3.775 0 0 0-3.775-3.775z" />
+      </svg>
+    );
+  }
+  if (provider === "perplexity") {
+    return (
+      <svg {...strokeProps}>
+        <path d="M7 3v18M17 3v18M3 8h18M3 16h18M7 8l10 8M17 8 7 16M12 3v18" />
+      </svg>
+    );
+  }
+  if (provider === "pi") {
+    // Official Pi agent mark, monochrome on the theme color like every other
+    // provider identity mark.
+    return (
+      <svg viewBox="0 0 800 800" fill="currentColor" aria-hidden="true" focusable="false">
+        <path d="M165.29 165.29H517.36V400H400V282.65H165.29Z" />
+        <path d="M165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" />
+        <path d="M517.36 400H634.72V634.72H517.36Z" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+const ROUTER_HARNESS_ID = "opencode";
+
+/** True when `value` is exactly a canonical provider mark key (not an alias or
+ *  a substring). Harness package manifests reuse these keys to render the
+ *  shared brand mark instead of a generic package glyph. */
+export function isProviderMarkKey(value: string | undefined): value is ProviderKey {
+  return value !== undefined && PROVIDER_MARK_KEYS.has(value.trim().toLowerCase());
+}
+
+export default function ProviderLogo({
+  providerID,
+  providerName,
+  harnessId,
+  size = "regular",
+  className = "",
+  tint,
+}: {
+  providerID?: string;
+  providerName?: string;
+  /** Brand harness identity for dedicated runtimes. Ignored for the OpenCode router. */
+  harnessId?: string;
+  size?: "compact" | "regular";
+  className?: string;
+  /** The harness profile's color (`harnessColor`); absent keeps the theme color. */
+  tint?: string;
+}) {
+  const key = resolveProviderKey(providerID, providerName, harnessId);
+  const fallback = (providerName || providerID || "P").trim().slice(0, 2).toUpperCase();
+  const label = providerName || providerID || "Polyth";
+  return (
+    <span
+      className={`provider-logo provider-logo--${size} provider-${key ?? "other"}${className ? ` ${className}` : ""}`}
+      data-provider={key ?? "other"}
+      data-tinted={tint ? "true" : undefined}
+      style={tint ? { "--provider-logo-tint": tint } as CSSProperties : undefined}
+      aria-hidden="true"
+      title={label}
+    >
+      {key ? <SvgMark provider={key} /> : <span className="provider-logo-fallback">{fallback}</span>}
+    </span>
+  );
+}

@@ -1,0 +1,522 @@
+/* Liquid Glass theme style — macOS 27, Polyth's base theme.
+   Applies while the active theme declares `style: "liquid-glass"`; theme.ts
+   then publishes html[data-theme-style="liquid-glass"] and the macOS 27
+   derived roles (separators, subtle fills, smoke, elevation). The palette
+   stays in the theme and every rule here reads the canonical tokens, so a
+   user's colours (a skin with this style), Rounding, Glass, Hide interface
+   borders, density, fonts and reduced motion all layer on top unchanged.
+   Contract and the reasoning behind each number: docs/dev/styles.md
+   "Liquid Glass theme style". */
+
+/* ---- geometry, type, motion --------------------------------------------- */
+html[data-theme-style="liquid-glass"] {
+  /* macOS 27 rounds by size: small controls 6–8px, grouped cards 12px,
+     windows and popovers 16px, alerts and sheets 22px; large controls,
+     search fields and toolbar items are capsules. Rounding is measured from its default (9 → scale 1.8, uiPrefs.ts),
+     which draws these radii exactly; lower squares them, higher rounds a
+     little past macOS. */
+  --lg-round: calc(var(--corner-radius-scale) / 1.8);
+  --radius-control: calc(8px * var(--lg-round));
+  --radius-card: calc(12px * var(--lg-round));
+  --radius-surface: calc(16px * var(--lg-round));
+  --radius-sheet: calc(22px * var(--lg-round));
+  --radius-activity: calc(10px * var(--lg-round));
+  --radius-island: calc(26px * var(--lg-round));
+  --radius-dock: calc(22px * var(--lg-round));
+  --radius-composer: calc(22px * var(--lg-round));
+  --radius-bubble: calc(18px * var(--lg-round));
+  /* A capsule for every control up to 44px tall; it squares with Rounding. */
+  --lg-radius-capsule: calc(22px * var(--lg-round));
+  --lg-radius-menu: calc(12px * var(--lg-round));
+  --lg-radius-tooltip: calc(6px * var(--lg-round));
+
+  /* The kit's large controls are 28px; fields and list rows sit one step up.
+     Capsules carry wider side padding. Compact controls keep their --hit-min
+     floor on coarse pointers. */
+  --control-h-sm: 28px;
+  --control-h: 32px;
+  --control-h-lg: 36px;
+  --control-pad-x-sm: 10px;
+  --control-pad-x: 14px;
+
+  /* Liquid Glass settles rather than slides: a fast attack and a long,
+     soft landing. State changes stay quick. */
+  --motion-fast: 120ms;
+  --motion-normal: 220ms;
+  --motion-surface: 300ms;
+  --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --focus-ring: var(--lg-focus-ring);
+
+  /* Materials. Glass tints with the elevated surface; chrome with the
+     sidebar; alerts, sheets and the composer use the stronger glass. */
+  --material-glass: var(--elevated);
+  --material-glass-strong: var(--elevated);
+  --material-glass-medium: color-mix(in srgb, var(--elevated) 70%, var(--panel));
+  --material-glass-chrome: var(--panel);
+  /* The style's one contour for every glass surface and shell control. */
+  --contour: var(--lg-stroke-glass);
+  --material-glass-border: var(--contour);
+  --material-glass-highlight: var(--lg-rim);
+  --material-glass-shadow: var(--shadow-md);
+}
+
+/* Strokes, fills and the specular rim (macOS 27 kit). Controls are flat
+   fills with no outline; glass carries a bright rim instead of a border. */
+html[data-theme-style="liquid-glass"][data-appearance="light"] {
+  --lg-stroke-glass: rgba(0, 0, 0, 0.07);
+  --lg-stroke-field: rgba(0, 0, 0, 0.12);
+  --lg-stroke-strong: rgba(0, 0, 0, 0.2);
+  --lg-separator: rgba(0, 0, 0, 0.08);
+  --lg-rim: inset 0 0.5px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 0.5px rgba(255, 255, 255, 0.5);
+  --lg-fill: rgba(0, 0, 0, 0.078);
+  --lg-fill-hover: rgba(0, 0, 0, 0.1);
+  --lg-fill-pressed: rgba(0, 0, 0, 0.16);
+  --lg-well: rgba(0, 0, 0, 0.06);
+  --lg-track: rgba(0, 0, 0, 0.09);
+  --lg-knob: #ffffff;
+  --lg-press: linear-gradient(rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.14));
+  --lg-focus-ring: color-mix(in srgb, var(--accent) 45%, transparent);
+  --lg-selection: color-mix(in srgb, var(--accent) 24%, transparent);
+  --lg-glyph: var(--accent);
+  --lg-tint: 14%;
+}
+html[data-theme-style="liquid-glass"][data-appearance="dark"] {
+  --lg-stroke-glass: rgba(255, 255, 255, 0.1);
+  --lg-stroke-field: rgba(255, 255, 255, 0.12);
+  --lg-stroke-strong: rgba(255, 255, 255, 0.24);
+  --lg-separator: rgba(255, 255, 255, 0.08);
+  --lg-rim: inset 0 0.5px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --lg-fill: rgba(255, 255, 255, 0.1);
+  --lg-fill-hover: rgba(255, 255, 255, 0.13);
+  --lg-fill-pressed: rgba(255, 255, 255, 0.2);
+  --lg-well: rgba(255, 255, 255, 0.08);
+  --lg-track: rgba(255, 255, 255, 0.14);
+  --lg-knob: #ffffff;
+  --lg-press: linear-gradient(rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.14));
+  --lg-focus-ring: color-mix(in srgb, var(--accent) 60%, transparent);
+  --lg-selection: color-mix(in srgb, var(--accent) 40%, transparent);
+  /* A sidebar glyph on the dark sidebar lifts the accent toward white, as
+     the kit's brighter dark blue does. */
+  --lg-glyph: color-mix(in srgb, var(--accent) 72%, #ffffff);
+  --lg-tint: 22%;
+}
+
+/* Interface font: San Francisco where the platform has it, Inter (the closest
+   bundled face) elsewhere. Only the default faces (Open Sans now, Inter for
+   older profiles) yield to it; an explicitly chosen font keeps its place. The
+   setting is an inline style on <html>, so html keeps a copy and body prepends
+   the system face to it (a property cannot reference itself). */
+html[data-theme-style="liquid-glass"] { --lg-font-chosen: var(--ui-font-family); }
+html[data-theme-style="liquid-glass"][data-font="theme"] body {
+  --ui-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", Inter, var(--lg-font-chosen);
+}
+
+/* ---- materials ------------------------------------------------------------ */
+/* Liquid Glass: a light tint over a wide blur with strong saturation, so the
+   wallpaper's colour reaches through while text keeps its floor. Clear thins
+   the tint; Off falls back to the solid surface, as macOS with Reduce
+   transparency on. */
+html[data-theme-style="liquid-glass"] body {
+  --material-glass-blur: 28px;
+  --material-glass-saturation: 190%;
+  --material-glass-readable-fill: 82%;
+  --material-glass-readable-edge: 76%;
+  --material-glass-readable-control-fill: 64%;
+  --material-glass-readable-control-edge: 56%;
+  --material-glass-mobile-chrome-fill: 76%;
+  --material-glass-mobile-chrome-edge: 70%;
+}
+html[data-theme-style="liquid-glass"] body[data-glass="clear"] {
+  --material-glass-blur: 22px;
+  --material-glass-saturation: 210%;
+  --material-glass-readable-fill: 66%;
+  --material-glass-readable-edge: 58%;
+  --material-glass-readable-control-fill: 48%;
+  --material-glass-readable-control-edge: 40%;
+  --material-glass-mobile-chrome-fill: 60%;
+  --material-glass-mobile-chrome-edge: 54%;
+}
+/* Window chrome (sidebar, header, rail host, status bar) is the sidebar tint
+   over a heavier blur, opaque enough that secondary ink keeps its contrast. */
+html[data-theme-style="liquid-glass"] :is(.sidebar, .app > .header, .railbar, .statusbar) {
+  --sidebar-glass-surface: var(--panel);
+  --material-glass-readable-fill: 88%;
+  --material-glass-readable-edge: 84%;
+  --material-glass-blur: 44px;
+  --material-glass-saturation: 190%;
+}
+
+/* ---- toolbar: glass capsules and circles --------------------------------- */
+/* Toolbar items float as Liquid Glass: grouped items share one capsule, a
+   lone glyph is a circle, the session title is a capsule. */
+html[data-theme-style="liquid-glass"] :is(.view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .sidebar-search) {
+  border-radius: var(--lg-radius-capsule);
+}
+/* Segments inside a capsule are capsules, so the selected plate stays
+   concentric with the group. */
+html[data-theme-style="liquid-glass"] :is(.view-switcher-pill .view-icon, .workspace-mode-switch button) { border-radius: var(--lg-radius-capsule); }
+html[data-theme-style="liquid-glass"] :is(.header .ui-icon-btn, .header-actions-rail .capability-launcher) { border-radius: var(--lg-radius-capsule); }
+html[data-theme-style="liquid-glass"] body:not([data-glass="off"]) :is(
+  .header-control,
+  .header .ui-icon-btn,
+  .header-actions-rail .capability-launcher,
+  .workspace-mode-switch,
+  .view-switcher-pill,
+  .sidebar-search,
+  .desktop-session-status-trigger
+) {
+  box-shadow: var(--lg-rim), var(--shadow-sm);
+}
+
+/* ---- overlays: menu, popover, tooltip, dialog ---------------------------- */
+html[data-theme-style="liquid-glass"] :is(.ui-popover, .picker-pop, .menu-popup) {
+  border-color: var(--lg-stroke-glass);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--lg-rim), var(--shadow-md);
+}
+/* Menus: 12px corners, 5px inset, rows on a 26px pitch with a 7px highlight
+   concentric with the menu. */
+html[data-theme-style="liquid-glass"] :is(.ui-popover.ui-menu, .menu-popup) {
+  padding: 5px;
+  border-radius: var(--lg-radius-menu);
+}
+html[data-theme-style="liquid-glass"] .ui-menu { --menu-row-gap: 0px; --menu-leading-column: calc(10px + var(--icon-sm) + 8px); }
+html[data-theme-style="liquid-glass"] .ui-menu-item {
+  gap: 8px;
+  min-height: max(26px, var(--hit-min));
+  padding: 3px 10px;
+  border-radius: max(0px, calc(var(--lg-radius-menu) - 5px));
+  font-weight: 400;
+}
+html[data-theme-style="liquid-glass"] .ui-menu-item .ui-icon { color: currentColor; }
+/* The highlighted item is an accent plate with white ink, icons, details and
+   checkmarks included; a destructive item highlights in red. */
+html[data-theme-style="liquid-glass"] .ui-menu-item:focus-visible {
+  background: var(--accent);
+  color: var(--accent-ink);
+  outline: none;
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .ui-menu-item:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+  html[data-theme-style="liquid-glass"] .ui-menu-item:hover:not(:disabled) :is(.ui-icon, .ui-menu-item-detail) { color: currentColor; }
+  html[data-theme-style="liquid-glass"] .ui-menu-item--danger:hover:not(:disabled) { background: var(--red); color: var(--red-ink); }
+}
+html[data-theme-style="liquid-glass"] .ui-menu-item:focus-visible :is(.ui-icon, .ui-menu-item-detail) { color: currentColor; }
+html[data-theme-style="liquid-glass"] .ui-menu-item--danger:focus-visible { background: var(--red); color: var(--red-ink); }
+html[data-theme-style="liquid-glass"] .ui-menu-item:active:not(:disabled) { background: var(--lg-press), var(--accent); color: var(--accent-ink); }
+html[data-theme-style="liquid-glass"] .ui-menu-item--danger:active:not(:disabled) { background: var(--lg-press), var(--red); color: var(--red-ink); }
+/* A row carrying a switch keeps a neutral highlight, so the checked track
+   still reads against it. */
+html[data-theme-style="liquid-glass"] .ui-menu-item:has(> .ui-menu-item-switch):focus-visible,
+html[data-theme-style="liquid-glass"] .ui-menu-item:has(> .ui-menu-item-switch):active:not(:disabled) {
+  background: var(--surface-overlay-strong);
+  color: var(--text);
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .ui-menu-item:has(> .ui-menu-item-switch):hover:not(:disabled) {
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+/* Menu separators group commands, so they stay even when interface borders
+   are hidden: an 8% line inset to the text column, 5px clear of each row. */
+html[data-theme-style="liquid-glass"] .ui-menu .ui-separator--horizontal { margin: 5px 10px; background: var(--lg-separator); }
+html[data-theme-style="liquid-glass"] .menu-sep { margin: 5px 10px; background: var(--lg-separator); }
+html[data-theme-style="liquid-glass"] .menu-popup button {
+  min-height: max(26px, var(--hit-min)); padding: 0 10px; gap: 8px;
+  border-radius: max(0px, calc(var(--lg-radius-menu) - 5px)); color: var(--text);
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .menu-popup button:hover:where(:not(:disabled)) { background: var(--accent); color: var(--accent-ink); }
+  html[data-theme-style="liquid-glass"] .menu-popup button:hover:where(:not(:disabled)) .menu-kbd { color: currentColor; }
+}
+/* Key equivalents are plain glyphs at the trailing edge, not keycaps. */
+html[data-theme-style="liquid-glass"] .menu-kbd {
+  padding: 0; border: 0; background: none;
+  color: var(--faint); font: 400 var(--font-meta)/1 var(--ui-font-family);
+}
+
+/* Help tag: a small plate on the glass stroke. */
+html[data-theme-style="liquid-glass"] .ui-tooltip {
+  padding: 4px 9px;
+  border-color: var(--lg-stroke-glass);
+  border-radius: var(--lg-radius-tooltip);
+  box-shadow: var(--lg-rim), var(--shadow-sm);
+  color: var(--text);
+}
+
+/* Alert and sheet: strong glass on the glass stroke under the alert shadow;
+   title and commands share it, with no rules or bands between. */
+html[data-theme-style="liquid-glass"] .dialog-panel {
+  border-color: var(--lg-stroke-glass);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--lg-rim), var(--shadow-lg);
+}
+html[data-theme-style="liquid-glass"] .ui-dialog-head { border-bottom-color: transparent; }
+html[data-theme-style="liquid-glass"] .ui-dialog-title { font-weight: 650; letter-spacing: 0; }
+html[data-theme-style="liquid-glass"] .ui-dialog-foot { border-top-color: transparent; }
+/* Settings is a window: it sits on the sidebar colour with window corners. */
+html[data-theme-style="liquid-glass"] .settings-shell { --material-glass-strong: var(--panel); border-radius: var(--radius-surface); }
+
+/* ---- buttons -------------------------------------------------------------- */
+/* Push buttons are capsules: a flat fill with no outline or bevel, a little
+   denser under the pointer and when pressed. */
+html[data-theme-style="liquid-glass"] .ui-btn {
+  border-radius: var(--lg-radius-capsule);
+  font-weight: 500;
+  box-shadow: none;
+  transition: background-color var(--motion-fast) linear, color var(--motion-fast) linear;
+}
+html[data-theme-style="liquid-glass"] :is(.ui-btn--quiet, .ui-icon-btn--quiet) {
+  background: var(--lg-fill);
+  border-color: transparent;
+  box-shadow: none;
+}
+html[data-theme-style="liquid-glass"] .ui-btn--quiet { color: var(--text); }
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] :is(.ui-btn--quiet, .ui-icon-btn--quiet):hover:not(:disabled) {
+    background: var(--lg-fill-hover);
+    border-color: transparent;
+  }
+}
+html[data-theme-style="liquid-glass"] :is(.ui-btn--quiet, .ui-icon-btn--quiet):active:not(:disabled) {
+  background: var(--lg-fill-pressed);
+  border-color: transparent;
+}
+/* Destructive: the tinted red capsule of the kit, red label. */
+html[data-theme-style="liquid-glass"] .ui-btn--danger {
+  background: color-mix(in srgb, var(--red) var(--lg-tint), transparent);
+  border-color: transparent;
+  color: var(--red);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .ui-btn--danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 6%), transparent);
+    border-color: transparent;
+    color: var(--red);
+  }
+}
+html[data-theme-style="liquid-glass"] .ui-btn--danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 12%), transparent);
+}
+/* Default button: the flat accent capsule; pressing darkens it. */
+html[data-theme-style="liquid-glass"] .ui-btn--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .ui-btn--primary:hover:not(:disabled) {
+    background: var(--accent-hi);
+    border-color: transparent;
+    color: var(--accent-ink);
+  }
+}
+html[data-theme-style="liquid-glass"] .ui-btn--primary:active:not(:disabled) {
+  background: var(--lg-press), var(--accent);
+  border-color: transparent;
+}
+/* Borderless toolbar item: label ink, a fill only under the pointer. */
+html[data-theme-style="liquid-glass"] .ui-btn--ghost { color: var(--text-dim); }
+html[data-theme-style="liquid-glass"] :is(.ui-btn--ghost, .ui-icon-btn:not(.ui-icon-btn--quiet)):active:not(:disabled) { background: var(--lg-fill-pressed); }
+
+/* ---- text fields ----------------------------------------------------------- */
+/* A field is the content surface on a fine ring; focus draws the wide, soft
+   accent halo around it instead of recolouring the edge. A .ui-field-well is
+   the field around its icon and controls, so the input inside it is bare. */
+html[data-theme-style="liquid-glass"] :is(.ui-input, .ui-textarea, .sel select, .ui-field-well):not(:where(.ui-field-well, .ui-field-frame) *) {
+  background: var(--input-bg);
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  box-shadow: 0 0 0 0.5px var(--lg-stroke-field), 0 0.5px 1px rgba(0, 0, 0, 0.04);
+}
+html[data-theme-style="liquid-glass"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *) { color: var(--text); }
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .sel select:hover { background: var(--input-bg); }
+}
+html[data-theme-style="liquid-glass"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *):is(:focus, :focus-visible),
+html[data-theme-style="liquid-glass"] .ui-field-well:focus-within {
+  outline: 3.5px solid var(--lg-focus-ring);
+  outline-offset: 0;
+  border-color: transparent;
+  box-shadow: 0 0 0 0.5px var(--lg-stroke-field);
+}
+
+/* ---- check box, switch, segmented control, tabs ---------------------------- */
+html[data-theme-style="liquid-glass"] .ui-checkbox-box {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-width: 1px;
+  border-color: var(--lg-stroke-field);
+  border-radius: calc(5px * var(--lg-round));
+  background: var(--input-bg);
+  box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.08);
+}
+html[data-theme-style="liquid-glass"] .ui-checkbox input:checked + .ui-checkbox-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+html[data-theme-style="liquid-glass"] .ui-checkbox input:focus-visible + .ui-checkbox-box {
+  outline: 3px solid var(--lg-focus-ring);
+  outline-offset: 0;
+}
+
+/* Switch: a 40×22 capsule whose white pill knob (24×18) rides on a soft
+   shadow; on, the track takes the accent. */
+html[data-theme-style="liquid-glass"] .switch-track {
+  width: 40px;
+  height: 22px;
+  padding: 2px;
+  border-width: 0;
+  background: var(--lg-track);
+  box-shadow: none;
+}
+html[data-theme-style="liquid-glass"] .switch i {
+  width: 22px;
+  height: 18px;
+  border-radius: var(--radius-round);
+  background: var(--lg-knob);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+html[data-theme-style="liquid-glass"] .switch:is([aria-checked="true"], [data-checked="true"]) .switch-track {
+  background: var(--accent);
+  box-shadow: none;
+}
+html[data-theme-style="liquid-glass"] .switch:is([aria-checked="true"], [data-checked="true"]) i { transform: translateX(14px); background: #ffffff; }
+html[data-theme-style="liquid-glass"] .switch:dir(rtl):is([aria-checked="true"], [data-checked="true"]) i { transform: translateX(-14px); }
+
+/* Segmented control and tabs: a recessed capsule well; the selected segment
+   is an accent capsule with white ink, as macOS 27 draws a selectable
+   segment. Unselected labels stay in label ink. */
+html[data-theme-style="liquid-glass"] :is(.seg, .ui-tabs) {
+  gap: 2px;
+  padding: 2px;
+  border-color: transparent;
+  border-radius: var(--lg-radius-capsule);
+  background: var(--lg-well);
+}
+html[data-theme-style="liquid-glass"] :is(.seg button, .ui-tab) {
+  border-radius: var(--lg-radius-capsule);
+  color: var(--text);
+  font-weight: 500;
+}
+html[data-theme-style="liquid-glass"] :is(.seg button.active, .seg button.on, .ui-tab--selected) {
+  color: var(--accent-ink);
+  background: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] :is(.seg button, .ui-tab):not(.active):not(.on):not(.ui-tab--selected):hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+  }
+  html[data-theme-style="liquid-glass"] :is(.seg button.active, .seg button.on, .ui-tab--selected):hover:where(:not(:disabled)) {
+    color: var(--accent-ink);
+    background: var(--accent);
+    box-shadow: var(--shadow-sm);
+  }
+}
+
+/* ---- navigation: sidebar selection ---------------------------------------- */
+/* Sidebar rows select the macOS 27 way while focus is in the content: a
+   rounded unemphasized plate behind an unchanged label. */
+html[data-theme-style="liquid-glass"] .session-row:hover .session-btn::before { background: var(--surface-overlay-hover); }
+html[data-theme-style="liquid-glass"] .session-row.active .session-btn::before {
+  background: var(--surface-overlay-strong);
+  box-shadow: none;
+}
+html[data-theme-style="liquid-glass"] .settings-nav-item { font-weight: 400; }
+/* Sidebar glyphs take the accent and section titles are quiet sentence-case
+   labels, as in a macOS 27 source list. */
+html[data-theme-style="liquid-glass"] .settings-nav-icon { color: var(--lg-glyph); }
+html[data-theme-style="liquid-glass"] .settings-nav-group {
+  color: var(--muted);
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Search fields are capsules. */
+html[data-theme-style="liquid-glass"] :is(.ui-input.settings-nav-search, .settings-nav-search-shell.ui-field-well) { border-radius: var(--lg-radius-capsule); }
+@media (min-width: 701px) {
+  html[data-theme-style="liquid-glass"] .settings-nav-item.active { color: var(--text); background: var(--surface-overlay-strong); }
+  @media (hover: hover) {
+    html[data-theme-style="liquid-glass"] .settings-nav-item.active:hover:where(:not(:disabled)) { color: var(--text); background: var(--surface-overlay-strong); }
+  }
+  html[data-theme-style="liquid-glass"] .settings-nav-item.active::before { content: none; }
+}
+
+/* ---- composer and conversation --------------------------------------------- */
+/* The composer is a Liquid Glass card: the style's contour, the specular rim
+   and the floating shadow. The contour composites over the workspace, like the
+   rails'. Focus firms it; it adds no accent outline. */
+html[data-theme-style="liquid-glass"] .composer-card {
+  border-color: var(--contour);
+  background-clip: padding-box;
+  box-shadow: var(--lg-rim), var(--shadow-md);
+}
+html[data-theme-style="liquid-glass"] .composer-card:focus-within {
+  border-color: var(--lg-stroke-strong);
+  box-shadow: var(--lg-rim), var(--shadow-md);
+}
+/* The phone composer drops its shadow (styles.css); the rim stays. The top
+   islands are the same floating glass, so they carry the same rim. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  html[data-theme-style="liquid-glass"] .composer-mobile .composer-card { box-shadow: var(--lg-rim); }
+  html[data-theme-style="liquid-glass"] .composer-mobile .composer-card:focus-within { box-shadow: var(--lg-rim); }
+  html[data-theme-style="liquid-glass"] .mobile-session-floats .ui-glass-island:not([data-attention]) { box-shadow: var(--lg-rim); }
+}
+html[data-theme-style="liquid-glass"] .msg.user .bubble { box-shadow: none; }
+/* Links take `blue`, separate from the accent as in AppKit. In the user's own
+   accent-tinted message (which otherwise keeps the browser's link blue) it
+   leans toward the label ink to hold 4.5:1 on the tint. */
+html[data-theme-style="liquid-glass"] .msg { --lg-link: var(--blue); }
+html[data-theme-style="liquid-glass"] .msg.user .bubble { --lg-link: color-mix(in srgb, var(--blue) 82%, var(--text)); }
+html[data-theme-style="liquid-glass"] :is(.msg.assistant > .bubble, .msg.user .bubble) a {
+  color: var(--lg-link);
+  text-decoration-color: color-mix(in srgb, var(--lg-link) 40%, transparent);
+}
+html[data-theme-style="liquid-glass"] :is(.msg.assistant > .bubble, .msg.user .bubble) a:hover { color: var(--lg-link); text-decoration-color: currentColor; }
+
+/* ---- progress, spinner, scrollbars, selection, focus ------------------------ */
+/* A flat accent bar in a rounded track. */
+html[data-theme-style="liquid-glass"] .ui-progress { border: 0; background: var(--lg-track); }
+html[data-theme-style="liquid-glass"] .ui-progress-fill { background: var(--accent); }
+html[data-theme-style="liquid-glass"] .ui-spinner { border-color: var(--lg-track); border-top-color: var(--accent); }
+/* Overlay scroller: a thin capsule in 30% ink on no track. */
+html[data-theme-style="liquid-glass"] * { scrollbar-color: color-mix(in srgb, var(--text) 30%, transparent) transparent; }
+html[data-theme-style="liquid-glass"] ::selection { background: var(--lg-selection); }
+/* Same weight as the base rule, so component-specific rings still win. */
+:where(html[data-theme-style="liquid-glass"]) :focus-visible {
+  outline: 3px solid var(--lg-focus-ring);
+  outline-offset: 0;
+  box-shadow: none;
+}
+
+/* ---- Hide interface borders ---------------------------------------------- */
+/* Borderless appearance still clears structural borders and separators.
+   Liquid Glass draws control and glass edges as rings and rims (shadows),
+   which it leaves alone; the stroke of a menu, popover, help tag or alert
+   identifies the surface, and focus is the halo alone, so those keep their
+   look. */
+html[data-theme-style="liquid-glass"] body[data-hide-borders="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ui-tooltip, .dialog-panel) {
+  border-color: var(--lg-stroke-glass) !important;
+}
+html[data-theme-style="liquid-glass"] body[data-hide-borders="true"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *):focus-visible {
+  border-color: transparent !important;
+}
+html[data-theme-style="liquid-glass"] body[data-hide-borders="true"] .ui-checkbox-box {
+  border-color: var(--lg-stroke-field) !important;
+}
+html[data-theme-style="liquid-glass"] body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box {
+  border-color: var(--accent) !important;
+}
+/* The composer keeps the style's contour (styles.css); focus firms it rather
+   than drawing the shared accent edge. */
+html[data-theme-style="liquid-glass"] body[data-hide-borders="true"] .composer-card:focus-within {
+  border-color: var(--lg-stroke-strong) !important;
+}
+
+/* Disabled controls keep the shared neutral look (styles.css, !important). */

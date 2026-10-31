@@ -1,0 +1,7 @@
+[
+  "ssh.test.ts",
+  "sshHarnesses.test.ts",
+  "sshOwnership.test.ts",
+  "sshProcessCommand.test.ts",
+  "sshRoutes.test.ts"
+]

@@ -1,0 +1,144 @@
+import { controlError, type ControlPlane } from '@polyth/control-plane';
+import { validateNewPassword, type PasswordService } from './passwords.ts';
+import { displayName, loginName, opaqueId } from './validation.ts';
+import { requireOwnerCredential } from './access.ts';
+import type { SessionService } from './sessions.ts';
+import type { IdentityUser } from './types.ts';
+
+const expected = (revision: number): void => {
+  if (!Number.isSafeInteger(revision) || revision < 1) throw controlError('invalid-input', 'Expected revision is required');
+};
+export function createAccounts(control: ControlPlane, passwords: PasswordService, sessions: SessionService, now: () => number) {
+  const hasOwnerRole = (userId: string): boolean => !!control.get(
+    "SELECT 1 FROM instance_roles WHERE user_id=? AND role='owner'",
+    userId,
+  );
+  const owner = (token: string, elevated = true): string => {
+    const actor = sessions.require(token, elevated);
+    if (!hasOwnerRole(actor.userId)) throw controlError('forbidden', 'Instance owner access required');
+    return actor.userId;
+  };
+  const get = (id: string): IdentityUser => {
+    const row = control.get<Omit<IdentityUser, 'managed' | 'login'> & { managed: number; login: string | null }>(
+      `SELECT u.id,u.display_name AS displayName,c.login_name AS login,u.managed,p.status,p.revision
+         FROM users u JOIN principals p ON p.id=u.id
+         LEFT JOIN password_credentials c ON c.user_id=u.id
+        WHERE u.id=?`, id,
+    );
+    if (!row) throw controlError('not-found', 'Account not found');
+    const { login, ...rest } = row;
+    return { ...rest, ...(login ? { login } : {}), managed: !!row.managed };
+  };
+  /** The single active instance owner. Local-only loopback-trusted profiles
+   *  (agent beta / local debug agent access) project this account without a
+   *  browser credential; no other caller may assume an owner. */
+  const activeOwnerUserId = (): string | undefined => control.get<{ user_id: string }>(
+    `SELECT r.user_id FROM instance_roles r JOIN principals p ON p.id=r.user_id
+      WHERE r.role='owner' AND p.status='active' AND p.kind='user' ORDER BY r.user_id LIMIT 1`,
+  )?.user_id;
+  return {
+    activeOwnerUserId,
+    current(token: string): IdentityUser { return get(sessions.require(token).userId); },
+    canManage(token: string): boolean { return hasOwnerRole(sessions.require(token).userId); },
+    list(token: string): IdentityUser[] {
+      const actor = sessions.require(token);
+      if (!hasOwnerRole(actor.userId)) return [get(actor.userId)];
+      return control.all<{ id: string }>(
+        'SELECT u.id FROM users u JOIN principals p ON p.id=u.id ORDER BY u.created_at_ms,u.id',
+      ).map(row => get(row.id));
+    },
+    async createLocal(token: string, input: { login: string; name: string; password: string }) {
+      // A credential-less owner protects their own account before anyone else
+      // gets one; checked before the elevation a password-less owner can't give.
+      sessions.require(token);
+      requireOwnerCredential(control);
+      owner(token);
+      const login = loginName(input.login), name = displayName(input.name);
+      validateNewPassword(input.password);
+      const encoded = await passwords.hash(input.password);
+      return control.transaction(() => {
+        requireOwnerCredential(control);
+        const actor = owner(token);
+        if (control.get('SELECT 1 FROM password_credentials WHERE login_name=?', login)) throw controlError('conflict', 'Login name is already in use');
+        const id = opaqueId('usr'), time = now();
+        control.run("INSERT INTO principals(id,kind,status) VALUES(?,'user','active')", id);
+        control.run('INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES(?,?,?,?)', id, name, time, time);
+        control.run('INSERT INTO password_credentials VALUES(?,?,?,?)', id, login, encoded, time);
+        control.bumpEpoch(); control.audit(actor, 'identity.local-account-created', id);
+        // An account is NOT a grant of organization, Space or project access.
+        return get(id);
+      });
+    },
+    renameSelf(token: string, name: string, revision: number) {
+      expected(revision); const normalized = displayName(name);
+      return control.transaction(() => {
+        const actor = sessions.require(token), user = get(actor.userId);
+        if (user.managed) throw controlError('managed-identity', 'This profile is managed by its identity provider');
+        if (user.revision !== revision) throw controlError('conflict', 'Account changed; refresh before saving');
+        control.run('UPDATE users SET display_name=?,updated_at_ms=? WHERE id=?', normalized, now(), actor.userId);
+        control.run('UPDATE principals SET revision=revision+1 WHERE id=?', actor.userId);
+        control.audit(actor.userId, 'identity.profile-renamed', actor.userId);
+        return get(actor.userId); // ID, credential mapping and auth epoch remain stable.
+      });
+    },
+    /** Instance owner renames another account. The login, ID and sessions stay. */
+    renameAccount(token: string, userId: string, name: string, revision: number) {
+      expected(revision); const normalized = displayName(name);
+      return control.transaction(() => {
+        const actor = owner(token), user = get(userId);
+        if (user.managed) throw controlError('managed-identity', 'This profile is managed by its identity provider');
+        if (user.revision !== revision) throw controlError('conflict', 'Account changed; refresh before saving');
+        control.run('UPDATE users SET display_name=?,updated_at_ms=? WHERE id=?', normalized, now(), userId);
+        control.run('UPDATE principals SET revision=revision+1 WHERE id=?', userId);
+        control.audit(actor, 'identity.profile-renamed', userId);
+        return get(userId);
+      });
+    },
+    /**
+     * Instance owner sets a new password for another local account, e.g. one
+     * whose holder forgot it. Every session of that account ends. Owners change
+     * their own password through the elevated self-service flow instead.
+     */
+    async resetPassword(token: string, userId: string, password: string) {
+      owner(token);
+      validateNewPassword(password);
+      const encoded = await passwords.hash(password);
+      return control.transaction(() => {
+        const actor = owner(token), user = get(userId);
+        if (actor === userId || hasOwnerRole(userId)) throw controlError('forbidden', 'Owners change their own password in Account settings');
+        if (user.managed) throw controlError('managed-identity', 'This account signs in through its identity provider');
+        if (user.status === 'disabled' || user.status === 'offboarding') throw controlError('invalid-transition', 'This account is disabled');
+        if (!control.get('SELECT 1 FROM password_credentials WHERE user_id=?', userId)) {
+          throw controlError('invalid-input', 'This account has no password sign-in');
+        }
+        control.run('UPDATE password_credentials SET password_hash=?,changed_at_ms=? WHERE user_id=?', encoded, now(), userId);
+        control.run('UPDATE principals SET auth_epoch=auth_epoch+1 WHERE id=?', userId);
+        control.run('DELETE FROM auth_sessions WHERE user_id=?', userId);
+        control.bumpEpoch(); control.audit(actor, 'auth.password-reset', userId);
+        return get(userId);
+      });
+    },
+    setStatus(token: string, userId: string, status: IdentityUser['status'], revision: number) {
+      expected(revision);
+      if (!['active', 'suspended', 'offboarding', 'disabled'].includes(status)) throw controlError('invalid-input', 'Invalid account state');
+      return control.transaction(() => {
+        const actor = owner(token), user = get(userId);
+        if (user.managed) throw controlError('managed-identity', 'This account lifecycle is externally managed');
+        if (user.revision !== revision) throw controlError('conflict', 'Account changed; refresh before saving');
+        if (user.status === status) return user;
+        // Disabled/offboarding is not a reversible suspension. Provisioning and
+        // offboarding workflows must perform the required cleanup explicitly.
+        if (user.status === 'disabled' || (user.status === 'offboarding' && status !== 'disabled')) throw controlError('invalid-transition', 'Use the account restoration workflow');
+        if (status !== 'active' && hasOwnerRole(userId)
+          && !control.get("SELECT 1 FROM instance_roles r JOIN principals p ON p.id=r.user_id WHERE r.role='owner' AND p.status='active' AND p.id<>?", userId)) {
+          throw controlError('last-owner', 'The last active instance owner must be preserved');
+        }
+        control.run('UPDATE principals SET status=?,revision=revision+1,auth_epoch=auth_epoch+1 WHERE id=?', status, userId);
+        control.run('UPDATE users SET updated_at_ms=? WHERE id=?', now(), userId);
+        control.run('DELETE FROM auth_sessions WHERE user_id=?', userId);
+        control.bumpEpoch(); control.audit(actor, `identity.${status}`, userId);
+        return get(userId);
+      });
+    },
+  };
+}

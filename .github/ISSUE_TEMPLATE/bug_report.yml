@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in Polyth does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems go through a private advisory
+        (see SECURITY.md), never a public issue.** Remove tokens, passwords,
+        private hostnames and personal data from anything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Send …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Polyth version or commit
+      description: Settings → About shows the version; for a checkout, `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Release channel
+      options:
+        - Stable (master)
+        - Nightly (devel)
+        - Source checkout
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How Polyth runs
+      multiple: true
+      options:
+        - Local server (npm start / npm run watch)
+        - Desktop app
+        - Docker image
+        - Mobile app
+        - Behind a reverse proxy or Polyth Link
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Coding agent and model, if relevant
+      placeholder: Claude Code 2.x with …, Codex …, OpenCode …
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and browser
+      placeholder: macOS 15.5, Safari 19 / Ubuntu 24.04, Chrome …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Server output, browser console errors or screenshots. Redact secrets first.
+      render: text

@@ -1,0 +1,1027 @@
+/* Adaptive composer polish ---------------------------------------------------
+   Loaded after the core/module styles. The shell owns the final composer
+   composition because the composer is an extension host.
+
+   Contract:
+   - one unified writing surface, with text always starting from one origin;
+   - the model, its pending effort and the context pie share one quiet row
+     above the editor on both desktop and mobile; the rail below stays
+     Add · extensions · Send;
+   - Add stays at the far left; input-method + primary action stay grouped at
+     the trailing edge;
+   - only the primary action is visually strong;
+   - Send / running delivery / Stop share one stable primary-action slot;
+   - attachments remain visible above the writing surface. */
+
+.composer-simple .composer-card {
+  position: relative;
+}
+
+/* Attachments are next-turn context, not text-field chrome. The strip
+   scrolls sideways, which clips both axes — so it pads the cards' focus ring
+   and every control stays inside its own card (styles.css). */
+.composer-simple > .attachment-pills {
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-2);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.composer-simple > .attachment-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-simple > .attachment-pills .attachment-pill {
+  max-width: min(260px, 70vw);
+  flex: 0 0 auto;
+  border-color: var(--hair-strong);
+  background: var(--surface-overlay-hover);
+  box-shadow: none;
+}
+
+.composer-simple > .attachment-pills .attachment-pill.att-tile {
+  background: var(--sunken);
+}
+
+.composer-simple > .attachment-pills .attachment-open,
+.composer-simple > .attachment-pills .att-remove {
+  border: 0;
+  box-shadow: none;
+}
+
+/* Configuration row: the model and its pending effort share one quiet line
+   above the editor on both desktop and mobile. Thinking effort sits right
+   next to the model picker itself, and the editor below sheds the top padding
+   the row now provides. */
+.composer-simple .composer-config-row {
+  order: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-4) 0;
+}
+
+.composer-simple .composer-config-row .model-picker-trigger {
+  padding-inline-start: 0;
+}
+
+.composer-simple .composer-effort-trigger {
+  flex: none;
+}
+
+.composer-simple .composer-card:has(> .composer-config-row) textarea {
+  padding-top: var(--space-1);
+}
+
+@container composer-widget (max-width: 520px) {
+  /* A squeezed chat scrolls the configuration line instead of clipping it. */
+  .composer-simple .composer-config-row {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+  }
+}
+
+/* Quiet secondary controls -------------------------------------------------- */
+.composer-simple .composer-rail :is(
+  .composer-add-trigger,
+  .config-chip,
+  .picker-chip,
+  .model-picker-trigger,
+  .composer-send-options,
+  .icon-btn,
+  .header-action,
+  .ui-icon-btn,
+  .ui-btn--quiet
+) {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.composer-simple .composer-rail :is(
+  .composer-add-trigger,
+  .config-chip,
+  .picker-chip,
+  .model-picker-trigger,
+  .composer-send-options,
+  .icon-btn,
+  .header-action,
+  .ui-icon-btn
+) {
+  background: transparent;
+}
+
+@media (hover: hover) {
+  .composer-simple .composer-rail :is(
+    .composer-add-trigger,
+    .config-chip,
+    .picker-chip,
+    .model-picker-trigger,
+    .composer-send-options,
+    .icon-btn,
+    .header-action,
+    .ui-icon-btn
+  ):hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--surface-overlay-hover);
+    box-shadow: none;
+  }
+}
+
+.composer-simple .composer-rail .send,
+.composer-simple .composer-rail .stop {
+  border: 0;
+}
+
+.composer-simple .composer-running-send .composer-action-label {
+  display: none;
+}
+
+/* A running turn keeps Send and its alternatives inside one pill-shaped
+   control. The divider, neutral segment and elevation belong to the container;
+   neither child can read as a second round button. */
+.composer-simple .composer-rail .composer-send-split {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: var(--control-h);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--material-glass-border);
+  isolation: isolate;
+}
+
+.composer-simple .composer-rail .composer-send-split > :is(.send, .composer-send-options) {
+  height: var(--control-h);
+  border: 0;
+  box-shadow: none;
+}
+
+.composer-simple .composer-rail .composer-send-split > .send {
+  width: var(--tap);
+  min-width: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-start-start-radius: var(--radius-round);
+  border-end-start-radius: var(--radius-round);
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.composer-simple .composer-rail .composer-send-split > .send > svg,
+.composer-simple .composer-rail .composer-send-split > .send > .context-liquid > .context-liquid-front > svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.composer-simple .composer-rail .composer-send-split > .composer-running-send > svg,
+.composer-simple .composer-rail .composer-send-split > .composer-running-send > .context-liquid > .context-liquid-front > svg {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+}
+
+.composer-simple .composer-rail .composer-send-split > .send .composer-action-label {
+  display: none;
+}
+
+.composer-simple .composer-rail .composer-send-split > .composer-send-options {
+  position: relative;
+  width: calc(var(--control-h-sm) + var(--space-1));
+  min-width: calc(var(--control-h-sm) + var(--space-1));
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-start-end-radius: var(--radius-round);
+  border-end-end-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+}
+
+.composer-simple .composer-rail .composer-send-split > .composer-send-options::before {
+  content: "";
+  position: absolute;
+  inset-block: var(--space-2);
+  inset-inline-start: 0;
+  inline-size: 1px;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  pointer-events: none;
+}
+
+.composer-simple .composer-rail .composer-send-split > .composer-send-options[aria-expanded="true"] {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+@media (hover: hover) {
+  .composer-simple .composer-rail .composer-send-split > .composer-send-options:hover:not(:disabled) {
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+
+.composer-simple .composer-rail .composer-send-split > .composer-send-options svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.composer-simple .composer-rail .composer-send-split > .composer-send-options[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.composer-simple .composer-rail .composer-send-split > button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+/* The send menu stays anchored to the split control without a decorative
+   pointer; its placement is owned by the shared anchored-position primitive.
+   It holds two short actions, so it is only as wide as their labels. */
+.ui-menu.composer-send-menu {
+  width: max-content;
+  min-width: 0;
+  max-width: calc(100vw - 2 * var(--screen-gutter));
+  padding: var(--space-2);
+  background: var(--material-glass-strong);
+}
+
+/* Mobile ------------------------------------------------------------------ */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  /* Both phone states live here. Shared chrome and engaged geometry first;
+     resting dissolves the rail into one compact input/action row below. */
+  .composer-mobile .composer-card {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    overflow: visible;
+    border-color: var(--material-glass-border);
+    border-radius: var(--radius-composer);
+    background: var(--material-glass-strong);
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-card:focus-within {
+    border-color: var(--material-glass-border);
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-input {
+    order: 1;
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  /* Placeholder, one-line drafts and long drafts share one top-left origin.
+     min-height stays on the textarea so a short keyboard band can not inherit
+     a card from a taller state. */
+  .composer-mobile .composer-card textarea {
+    min-height: var(--control-h-sm);
+    font-size: max(var(--font-input), var(--font-response));
+    max-height: min(var(--composer-max-input-height), 18dvh);
+    padding: var(--space-3) var(--space-4) var(--space-1);
+    overflow-x: hidden;
+    overflow-y: auto;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    text-overflow: clip;
+  }
+
+  /* A resting phone composer is a single 56px control. Symmetric padding
+     around the normal response line keeps the placeholder optically centered
+     instead of inheriting the textarea's top-aligned multi-line geometry. */
+  .composer-mobile.composer-collapsed .composer-card textarea {
+    box-sizing: border-box;
+    height: var(--composer-height);
+    min-height: var(--composer-height);
+    max-height: var(--composer-height);
+    padding-block: max(0px, calc((var(--composer-height) - var(--font-response-lh)) / 2));
+    padding-inline: 0;
+    line-height: var(--font-response-lh);
+  }
+
+  /* The rail is one optical baseline. It is two blocks with one rhythm: Add
+     leads the first block and every contributed control follows at the same
+     gap the lanes use internally, while the trailing group plus the primary
+     action form the second block, pushed to the end by the group's own auto
+     margin. Nothing distributes free space between the blocks: that produced
+     three different gap sizes (2px, 7px, 24px) in one row, reported as icons
+     that are not aligned. */
+  .composer-mobile .composer-rail {
+    --composer-rail-gap: 7px;
+    order: 2;
+    width: 100%;
+    min-height: var(--tap);
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: var(--composer-rail-gap);
+    padding: 0 var(--space-4) var(--space-2);
+  }
+
+  /* Resting flattens the leading wrapper so Voice can share the input row.
+     While engaged, keep Add and contributed leading controls in one block. */
+  .composer-mobile .composer-leading-zone {
+    display: contents;
+  }
+
+  .composer-mobile.composer-expanded .composer-leading-zone {
+    display: inline-flex;
+    order: 1;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: var(--composer-rail-gap);
+  }
+
+  .composer-mobile .composer-add {
+    order: 1;
+    flex: none;
+  }
+
+  .composer-mobile .composer-execution {
+    order: 2;
+    min-width: 0;
+    max-width: 52vw;
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--space-1) / 2);
+    flex: 0 1 auto;
+    overflow: visible;
+  }
+
+  /* Nothing currently publishes into this slot. Left in flow it would still
+     eat one rail gap on each side, splitting Add away from mic for no
+     reason; collapse it so Add and mic read as one leading section, matching
+     the desktop rail's two-section shape. */
+  .composer-mobile .composer-execution:empty {
+    display: none;
+  }
+
+  /* Leading slot: the input method lives here (dictation registers the
+     lowest leading order). Each composer state owns the lane's bound: one tap
+     at rest, natural width while engaged. */
+  .composer-mobile .composer-mobile-extensions {
+    order: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--composer-rail-gap);
+    width: auto;
+    min-width: 0;
+    /* A few px taller than the tap target: the mic's listening state paints a
+       halo up to 5px past its own box (the dictation package's widget styles),
+       and overflow-y: hidden below was clipping it into a flat-topped square. */
+    height: calc(var(--tap) + 10px);
+    flex: 0 1 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .composer-mobile .composer-mobile-extensions::-webkit-scrollbar,
+  .composer-mobile .composer-actions > .composer-extensions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .composer-mobile .composer-mobile-extensions:empty,
+  .composer-mobile .composer-actions > .composer-extensions:empty {
+    display: none;
+  }
+
+  /* Leading and trailing slots use the same controls as desktop. The lanes
+     shrink (and scroll internally) instead of pushing the terminal Send
+action off a narrow phone's composer. */
+  .composer-mobile .composer-mobile-extensions > .placed-mini-widget,
+  .composer-mobile .composer-actions > .composer-extensions > .placed-mini-widget {
+    display: contents;
+  }
+
+  /* Trailing block: the trailing lane and the primary action, pushed to the
+     end of the rail by this group's own auto margin. */
+  .composer-mobile .composer-actions {
+    order: 4;
+    display: flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: var(--composer-rail-gap);
+    margin-inline-start: auto;
+  }
+
+  .composer-mobile .composer-actions > .composer-extensions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--composer-rail-gap);
+    width: auto;
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+  }
+
+  .composer-mobile .composer-actions > .composer-config {
+    display: none;
+  }
+
+  /* Engaged phone rail: the row is the only place these controls live, so the
+     lanes keep their natural width and the leftover space is distributed
+     between them. They stay shrinkable and internally scrollable, which is
+     what keeps the row inside the card when a phone really cannot fit every
+     control; Add and the primary action never shrink, so Send can never leave
+     the composer. */
+  .composer-mobile.composer-expanded .composer-mobile-extensions,
+  .composer-mobile.composer-expanded .composer-actions > .composer-extensions {
+    max-width: none;
+  }
+
+  /* Resting phone row: add · placeholder · voice · Send.
+     A resting phone shows a placeholder, not a workbench, so contributed
+     composer controls belong to the engaged rail below the editor. In the
+     resting row the trailing lane only parked a redundant control beside Send
+     (reported as an unwanted prompt-improve / "magic" button) and an
+     over-subscribed leading lane squeezed every control below one tap,
+     leaving the microphone clipped and floating away from Send. Give the input
+     method its own full tap box — dictation has the lowest leading order, so
+     the visible control is the microphone — and keep it flush against Send.
+     Add and the lane stop exactly where Send begins, so the resting row can
+     never overflow the card. */
+  .composer-mobile.composer-collapsed .composer-actions > .composer-extensions {
+    display: none;
+  }
+
+  .composer-mobile.composer-collapsed .composer-mobile-extensions {
+    width: var(--tap);
+    max-width: var(--tap);
+    flex: 0 0 var(--tap);
+  }
+
+  .composer-mobile .composer-primary {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: calc(var(--space-1) / 2);
+    margin-inline-start: 0;
+  }
+
+  /* Model is a quiet text control. The provider mark and caret belong in the
+     picker, not in the composer chrome. */
+  .composer-mobile .composer-execution > .picker,
+  .composer-mobile .composer-execution .model-picker {
+    min-width: 0;
+    max-width: 32vw;
+    flex: 0 1 auto;
+  }
+
+  .composer-mobile .composer-execution .model-picker-trigger {
+    min-width: 0;
+    width: auto;
+    max-width: 32vw;
+    height: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding-inline: var(--space-1);
+    border: 0;
+    color: var(--text-dim);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* The model/effort row is shared with desktop, but its model control must
+     use the space left by the optional effort control instead of the old
+     28vw mobile cap. The wrapper grows while the label still truncates. */
+  .composer-mobile .composer-config-row > .picker-model {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  /* The row otherwise inherits the desktop-shared top padding, which reads as
+     too much air above the model chip on a short phone card. */
+  .composer-mobile .composer-config-row {
+    padding-top: var(--space-1);
+  }
+
+  .composer-mobile .composer-config-row .model-picker-trigger {
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  /* A touch-height cell, narrower than a full tap square so the model label
+     keeps its room; the glyph grows with the larger phone type. */
+  .composer-mobile .composer-config-row .composer-context-pie {
+    width: 36px;
+    min-height: var(--tap);
+  }
+
+  .composer-mobile .composer-context-pie .context-pie-glyph {
+    width: 18px;
+    height: 18px;
+  }
+
+  .composer-mobile .model-picker-trigger .model-trigger-logo,
+  .composer-mobile .model-picker-trigger .config-chip-caret {
+    display: none;
+  }
+
+  .composer-mobile .composer-config-row .model-picker-trigger .model-trigger-logo,
+  .composer-mobile .composer-config-row .model-picker-trigger .config-chip-caret {
+    display: inline-flex;
+  }
+
+  .composer-mobile .model-picker-trigger .model-trigger-name {
+    min-width: 0;
+    overflow: hidden;
+    color: inherit;
+    font-size: var(--font-label);
+    font-weight: 600;
+    letter-spacing: -.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .composer-mobile .composer-mobile-extensions .mic-btn,
+  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn,
+  .composer-mobile .composer-actions > .composer-extensions .mic-btn {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+  }
+
+  /* The has-draft variant above outranks the dictation package's .listening
+     rule (one more compounded class), so it must not also reset the visual
+     state or a draft would silently kill the recording halo. Idle color only. */
+  .composer-mobile .composer-mobile-extensions .mic-btn:not(.listening),
+  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn:not(.listening),
+  .composer-mobile .composer-actions > .composer-extensions .mic-btn:not(.listening) {
+    color: var(--text-dim);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .composer-mobile .composer-add-trigger,
+  .composer-mobile .composer-send-options,
+  .composer-mobile .composer-mobile-extensions :is(button, .ui-icon-btn),
+  .composer-mobile .composer-actions > .composer-extensions :is(button, .ui-icon-btn) {
+    border: 0;
+    box-shadow: none;
+  }
+
+  /* Resting and engaged phones expose the same lower action set as desktop;
+     contributors remain available even before a draft exists. */
+  .composer-mobile.composer-collapsed:not(.composer-has-draft) .composer-goals,
+  .composer-mobile.composer-collapsed .composer-workflow {
+    display: inline-flex;
+  }
+
+  .composer-mobile .composer-add-trigger {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    padding: 0;
+    background: transparent;
+  }
+
+  .composer-mobile .composer-action-label,
+  .composer-mobile .composer-running-send .composer-action-label {
+    display: none;
+  }
+
+  /* Send, running delivery and Stop keep one final touch baseline. While a turn runs,
+     the primary and chevron remain two segments of the same 44px control. */
+  .composer-mobile .composer-primary > .send,
+  .composer-mobile .composer-send-split > .composer-running-send {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    flex: 0 0 var(--tap);
+    padding: 0;
+  }
+
+  .composer-mobile .composer-send-split {
+    min-height: var(--tap);
+    gap: 0;
+  }
+
+  .composer-mobile .composer-send-split > .composer-send-options {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    flex: 0 0 var(--tap);
+    margin-inline-start: 0;
+    color: var(--muted);
+  }
+
+  .composer-mobile > .attachment-pills {
+    padding-inline: 0;
+  }
+
+  .composer-mobile > .attachment-pills .attachment-pill {
+    max-width: min(220px, 68vw);
+  }
+}
+
+/* Tight phones keep the same semantic order and trim only the model label. */
+@media (max-width: 340px) {
+  .composer-mobile .composer-execution {
+    max-width: 46vw;
+  }
+
+  .composer-mobile .composer-execution > .picker,
+  .composer-mobile .composer-execution .model-picker,
+  .composer-mobile .composer-execution .model-picker-trigger {
+    max-width: 24vw;
+  }
+}
+
+/* Desktop ----------------------------------------------------------------- */
+@media (min-width: 961px) and (min-height: 481px), (min-width: 961px) and (pointer: fine) {
+  .composer-simple .composer-rail {
+    gap: var(--space-1);
+    padding-inline: var(--space-3);
+  }
+
+  .composer-simple .composer-leading-zone,
+  .composer-simple .composer-execution,
+  .composer-simple .composer-extensions,
+  .composer-simple .composer-config,
+  .composer-simple .composer-actions,
+  .composer-simple .composer-primary {
+    gap: var(--space-1);
+  }
+
+  .composer-simple .composer-actions {
+    margin-inline-start: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .composer-simple .composer-actions > .composer-extensions {
+    min-width: 0;
+    max-width: min(30vw, 260px);
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .composer-simple .composer-actions > .composer-extensions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .composer-simple .composer-config {
+    flex: 0 0 auto;
+    margin-inline: 0;
+  }
+
+  .composer-simple .composer-config .model-picker-trigger {
+    max-width: min(240px, 24vw);
+  }
+
+  .composer-simple .composer-primary {
+    margin-inline-start: 0;
+    flex: 0 0 auto;
+  }
+}
+
+/* The Add glyph shares the editor's text origin. Keep its hit box generous
+   while placing the visible glyph at the same inline start on every rail. */
+.composer-simple .composer-rail {
+  padding-inline: var(--space-4);
+}
+
+.composer-simple .composer-add-trigger {
+  justify-content: flex-start;
+  padding-inline: 0;
+}
+
+/* Rail rhythm: the visible space between neighbouring glyphs is identical
+   left and right. Every quiet control centres one glyph size in one square
+   box (phones already give each one a full tap box). Desktop Add keeps its
+   glyph on the text origin and drops the half-box in front of it. Filled
+   Send/Stop shows its edge rather than a glyph, so it is inset by the
+   half-box a quiet neighbour would leave (the engaged phone rail solves its
+   own inset below); the resting phone row has no glyph beside Send to
+   match, so Mic stays flush there. */
+.composer-simple .composer-rail {
+  --composer-rail-box: var(--control-h-sm);
+  --composer-rail-glyph: 20px;
+  --composer-rail-inset: calc((var(--composer-rail-box) - var(--composer-rail-glyph)) / 2);
+}
+
+@media (pointer: coarse) {
+  .composer-simple .composer-rail { --composer-rail-box: var(--tap); }
+}
+
+.composer-simple:not(.composer-mobile) .composer-rail .composer-extensions :is(.ui-icon-btn, .header-action, .icon-btn, .mic-btn),
+.composer-simple:not(.composer-mobile) .composer-rail .composer-add-trigger {
+  width: var(--composer-rail-box);
+  min-width: var(--composer-rail-box);
+  height: var(--composer-rail-box);
+  min-height: var(--composer-rail-box);
+  padding: 0;
+  justify-content: center;
+}
+
+.composer-simple .composer-rail :is(.composer-extensions, .mobile-composer-launcher) :is(.ui-icon-btn, .header-action, .icon-btn, .mic-btn) svg,
+.composer-simple .composer-rail .composer-add-trigger svg {
+  width: var(--composer-rail-glyph);
+  height: var(--composer-rail-glyph);
+}
+
+/* The leading 1px border keeps the glyph on the text origin; the trailing
+   side carries exactly one inset. */
+.composer-simple:not(.composer-mobile) .composer-rail .composer-add-trigger {
+  width: calc(1px + var(--composer-rail-glyph) + var(--composer-rail-inset));
+  min-width: calc(1px + var(--composer-rail-glyph) + var(--composer-rail-inset));
+  border-inline-end-width: 0;
+  justify-content: flex-start;
+}
+
+.composer-simple:not(.composer-mobile) .composer-rail .composer-primary {
+  margin-inline-start: var(--composer-rail-inset);
+}
+
+/* Engaged phone rail: launcher lanes stretch to share the row, so Send's
+   inset follows the lane width L, solved from the rail width W with
+   n·L + (L − glyph)/2 + tap = W. Lanes touch (each is already a full tap
+   target), which keeps six launchers beside Send on a 390px phone. */
+.composer-mobile.composer-mobile-grid:not(.composer-collapsed) .mobile-composer-rail:not([data-editing]) {
+  --mobile-rail-gap: 0px;
+  container-type: inline-size;
+}
+
+.composer-mobile.composer-mobile-grid:not(.composer-collapsed) .mobile-composer-rail:not([data-editing]) .composer-primary {
+  margin-inline-start: calc(
+    (100cqw - var(--tap) + var(--composer-rail-glyph) / 2) / (var(--mobile-rail-lanes) + .5) / 2
+    - var(--composer-rail-glyph) / 2
+  );
+}
+
+/* Send is the stable terminal action. Dictation is an input method and never
+   replaces or follows the primary action, including an empty phone draft. */
+.composer-simple .composer-primary .send {
+  display: inline-flex;
+}
+
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  .composer-mobile .composer-primary .send {
+    display: inline-flex;
+  }
+}
+
+/* Context pie --------------------------------------------------------------
+   The session's context-window share on the model line, right after the
+   effort chip (after the model when the model has no effort). A quiet glyph
+   like the rest of the line — a thin ring with the used slice inside — that only warms
+   to amber at 70% and red at 90%, the same thresholds and tones as the
+   session overview meter. A dashed empty ring means tokens are observed but
+   the window limit is unknown; a dimmed pie is the last known value of the
+   same context while fresh telemetry is pending. */
+.composer-simple .composer-context-pie {
+  flex: none;
+  justify-content: center;
+  width: 30px;
+  padding: 0;
+}
+
+.composer-simple .composer-context-pie[data-level="yellow"] { color: var(--amber); }
+.composer-simple .composer-context-pie[data-level="red"] { color: var(--red); }
+
+.context-pie-glyph {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.context-pie-track {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  opacity: .42;
+}
+
+.context-pie-sector {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 7;
+  transition: stroke-dasharray 600ms var(--motion-ease);
+}
+
+.composer-context-pie[data-level="unknown"] .context-pie-track {
+  stroke-dasharray: 1.6 1.9;
+  opacity: .7;
+}
+
+/* Reduced motion and low-resource modes are owned by the global rules. */
+.composer-context-pie[data-pending="true"] .context-pie-glyph { opacity: .45; }
+
+/* The popover is the card: the shared context card drops its own frame. */
+.composer-context-pop.ui-popover {
+  width: min(280px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left) - var(--safe-right)));
+  padding: var(--space-1);
+}
+
+.composer-context-pop .session-activity-context-card {
+  padding: var(--space-2);
+  border: 0;
+  background: transparent;
+}
+
+/* Below the card: the delegation note, package details (cache warmth) and
+   the compact action, on the card's own inset. */
+.composer-context-note {
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.composer-context-compact.ui-btn {
+  /* A button never stretches with `width: auto`. */
+  width: calc(100% - 2 * var(--space-2));
+  margin: 0 var(--space-2) var(--space-2);
+}
+
+/* Context liquid ------------------------------------------------------------
+   While a turn runs, its primary action (Stop, or the Send/queue segment) is
+   also the session's context gauge: an outline in the action's own solid
+   color while the context is empty, filling with that color as the context
+   grows and solid once it is full. The solid rules publish the colors as
+   --context-liquid-tone/-ink. ContextLiquid repeats the host glyph inside the
+   liquid, so the submerged part of the glyph flips to the ink color along the
+   same wave. --context-fill is registered, so a new usage sample pours the
+   level up instead of jumping. The drifting waves are activity semantics,
+   like a spinner; reduced-motion and low-resource modes keep a still level
+   through the global animation rules. */
+@property --context-fill {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+
+/* Animated on each wave itself and not inherited: a swell frame restyles the
+   two waves, not the whole gauge and the glyph inside it. */
+@property --context-liquid-swell {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+.composer-simple .composer-rail :is(.send, .stop).context-liquid-host {
+  position: relative;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--context-liquid-tone) 7%, transparent);
+  color: var(--context-liquid-tone);
+}
+
+@media (hover: hover) {
+  .composer-simple .composer-rail :is(.send, .stop).context-liquid-host:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--context-liquid-tone) 14%, transparent);
+  }
+}
+
+/* The outline is its own layer so the shared focus ring keeps its box-shadow.
+   Inside the split it stays open toward the chevron segment. */
+.composer-simple .composer-rail :is(.send, .stop).context-liquid-host::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 1.5px solid var(--context-liquid-tone);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.composer-simple .composer-rail .composer-send-split > .context-liquid-host::after {
+  border-inline-end-width: 0;
+}
+
+.context-liquid {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  transition: --context-fill 1.4s var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
+
+/* A harness switch clears the session's context window for a moment. The gauge
+   keeps its last known fill instead of unmounting; dimming it says "this value
+   is not current yet" without moving the primary action. */
+.context-liquid[data-pending="true"] { opacity: .45; }
+
+/* Rows a harness switch or runtime recovery add above the composer. The dock
+   lays its children out with no gap, so the row owns its own height
+   transition: a notice that appears or resolves collapses instead of popping
+   the composer. The inner box clips the row's own margins while it folds. */
+.composer-notice-row {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--motion-normal) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+
+.composer-notice-row[data-open="false"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.composer-notice-row-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Each wave is a mask three button-heights tall with its waterline in the
+   middle. A mask-position-y of 20% + fill × 0.6 keeps the crests just below
+   the bottom edge when empty and the troughs just above the top edge when
+   full; the swell raises one wave while it lowers the other. */
+.context-liquid-wave {
+  --context-liquid-level: calc(20% + var(--context-fill) * .6 + var(--context-liquid-swell));
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: var(--context-liquid-tone);
+  color: var(--context-liquid-ink);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 300' preserveAspectRatio='none'%3E%3Cpath d='M0 150Q25 138 50 150T100 150V300H0Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 300' preserveAspectRatio='none'%3E%3Cpath d='M0 150Q25 138 50 150T100 150V300H0Z'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  -webkit-mask-size: 36px 300%;
+  mask-size: 36px 300%;
+  -webkit-mask-position: 0 var(--context-liquid-level);
+  mask-position: 0 var(--context-liquid-level);
+  animation: context-liquid-front 4s linear infinite, context-liquid-swell 3.4s ease-in-out infinite alternate;
+}
+
+.context-liquid-back {
+  --context-liquid-level: calc(21% + var(--context-fill) * .6 - var(--context-liquid-swell));
+  opacity: .38;
+  -webkit-mask-size: 52px 300%;
+  mask-size: 52px 300%;
+  animation: context-liquid-back 5.8s linear infinite, context-liquid-swell 3.4s ease-in-out infinite alternate;
+}
+
+/* Both ends name the level, so each loop reads the wave's live swell at its
+   start too (an implicit start would freeze it at the loop's first frame). */
+@keyframes context-liquid-front {
+  from {
+    -webkit-mask-position: 0 var(--context-liquid-level);
+    mask-position: 0 var(--context-liquid-level);
+  }
+  to {
+    -webkit-mask-position: 36px var(--context-liquid-level);
+    mask-position: 36px var(--context-liquid-level);
+  }
+}
+
+@keyframes context-liquid-back {
+  from {
+    -webkit-mask-position: 0 var(--context-liquid-level);
+    mask-position: 0 var(--context-liquid-level);
+  }
+  to {
+    -webkit-mask-position: -52px var(--context-liquid-level);
+    mask-position: -52px var(--context-liquid-level);
+  }
+}
+
+@keyframes context-liquid-swell {
+  from { --context-liquid-swell: -1.2%; }
+  to { --context-liquid-swell: 1.2%; }
+}

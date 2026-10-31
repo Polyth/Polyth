@@ -1,0 +1,37 @@
+# Polyth on this machine (Linux Docker Engine), loopback only.
+#
+#   cd deploy/docker
+#   docker compose run --rm polyth setup-claim   # first run only, server stopped
+#   docker compose up -d
+#   open http://127.0.0.1:4400
+#
+# Host networking is required: without a TLS origin, Polyth accepts browser
+# identity only from a direct loopback connection, and a published bridge port
+# reaches the container from the Docker gateway address instead.
+# See docs/operations/docker.md.
+name: polyth
+
+services:
+  polyth:
+    image: ${POLYTH_IMAGE:-polyth:local}
+    build:
+      context: ../..
+      target: ${POLYTH_TARGET:-polyth}
+      args:
+        POLYTH_UID: ${POLYTH_UID:-1000}
+        POLYTH_GID: ${POLYTH_GID:-1000}
+        POLYTH_LINK: ${POLYTH_LINK:-host}
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      HOST: 127.0.0.1
+      PORT: ${POLYTH_PORT:-4400}
+    volumes:
+      - polyth-data:/data
+      - polyth-home:/home/node
+      - ${POLYTH_WORKSPACE:-./workspace}:/workspace
+
+volumes:
+  polyth-data:
+  polyth-home:

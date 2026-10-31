@@ -1,0 +1,14 @@
+{
+  "name": "@polyth/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Command-line interface for a Polyth server or Polyth Desktop.",
+  "bin": {
+    "polyth": "./bin/polyth.mjs"
+  },
+  "exports": {
+    ".": "./src/main.ts",
+    "./target": "./src/target.ts",
+    "./client": "./src/client.ts"
+  }
+}

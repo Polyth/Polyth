@@ -1,0 +1,6 @@
+[
+  "probe.test.ts",
+  "protocol.test.ts",
+  "provisioner.test.ts",
+  "remoteExecution.test.ts"
+]

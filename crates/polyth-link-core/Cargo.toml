@@ -1,0 +1,44 @@
+[package]
+name = "polyth-link-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Polyth Link protocol, pairing, and identity core"
+
+[lib]
+name = "polyth_link_core"
+path = "src/lib.rs"
+
+[dependencies]
+iroh.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hex.workspace = true
+base64.workspace = true
+zeroize.workspace = true
+ciborium.workspace = true
+rand.workspace = true
+tokio.workspace = true
+opaque-ke = { version = "4.0.1", features = ["argon2"] }
+url = "2.5.4"
+qrcode = "0.14.1"
+httparse = "1.10.1"
+time = { version = "0.3.41", default-features = false, features = ["formatting", "parsing", "std"] }
+tokio-tungstenite = { version = "0.26.2", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3.31", default-features = false, features = ["sink", "std"] }
+# Raw DEFLATE for WebSocket frames on the Link leg (pure Rust: builds for iOS/Android
+# without a C toolchain; one small transitive crate).
+miniz_oxide = "=0.9.1"
+
+[dev-dependencies]
+tempfile = "3.20.0"
+proptest = "1.6.0"
+tokio = { workspace = true, features = ["test-util"] }
+
+[[bin]]
+name = "polyth-link-ws-echo"
+path = "src/bin/ws_echo.rs"

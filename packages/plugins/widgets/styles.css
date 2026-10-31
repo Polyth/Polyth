@@ -1,0 +1,821 @@
+/* Settings → Packages → Added packages. One package root (`.pkg-plugins`),
+   container queries for the settings pane, and only canonical tokens. Rows
+   are the host `ItemList`/`ItemRow`; this sheet styles what is the
+   library's own: the empty invite, the detail page, the gallery and the
+   install dialog (portaled, so scoped by its own class). */
+
+.pkg-plugins {
+  container: plugins-page / inline-size;
+  min-width: 0;
+}
+
+/* ── library ──────────────────────────────────────────────────────────── */
+
+.pkg-plugins .plugin-library-meta {
+  margin-inline-end: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pkg-plugins .plugin-row-version {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pkg-plugins .plugin-mark-glyph,
+.plugin-hero-tile .plugin-mark-glyph {
+  font-size: var(--icon-lg);
+  line-height: 1;
+}
+
+/* A dragged ZIP can land anywhere on the library; the list answers with the
+   accent outline the focus ring uses, not a new surface. */
+.pkg-plugins.is-dragging .settings-list,
+.pkg-plugins.is-dragging .plugin-empty {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+.pkg-plugins .plugin-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px dashed var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+
+.pkg-plugins.is-dragging .plugin-empty {
+  background: var(--raised);
+}
+@media (hover: hover) {
+  .pkg-plugins .plugin-empty:hover:where(:not(:disabled)) {
+    background: var(--raised);
+  }
+}
+
+.pkg-plugins .plugin-empty-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--control-h-sm) + var(--space-1));
+  height: calc(var(--control-h-sm) + var(--space-1));
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.pkg-plugins .plugin-empty-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.pkg-plugins .plugin-empty-copy strong {
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.pkg-plugins .plugin-empty-copy span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ── detail ───────────────────────────────────────────────────────────── */
+
+.pkg-plugins .plugin-detail {
+  display: grid;
+  min-width: 0;
+}
+
+.pkg-plugins .plugin-detail-back {
+  margin-inline-start: calc(-1 * var(--space-2));
+}
+
+/* Directional marks point the way the reading order goes. */
+html[dir="rtl"] .pkg-plugins .plugin-detail-back .ui-icon,
+html[dir="rtl"] .plugin-shot-dialog .ui-dialog-foot .ui-icon {
+  transform: scaleX(-1);
+}
+
+.pkg-plugins .plugin-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "tile copy primary menu";
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+.plugin-hero-tile {
+  grid-area: tile;
+  display: grid;
+  place-items: center;
+  width: var(--control-h-lg);
+  height: var(--control-h-lg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  box-shadow: var(--inset-hi), var(--shadow-sm);
+  color: var(--text-dim);
+}
+
+.plugin-hero-tile .plugin-mark-glyph {
+  font-size: var(--icon-xl);
+}
+
+.pkg-plugins .plugin-hero-copy {
+  grid-area: copy;
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.pkg-plugins .plugin-hero-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.pkg-plugins .plugin-hero-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pkg-plugins .plugin-hero-version {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.pkg-plugins .plugin-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-plugins .plugin-hero-meta > :not(.ui-badge) + :not(.ui-badge)::before {
+  margin-inline-end: var(--space-2);
+  color: var(--faint);
+  content: "·";
+}
+
+.pkg-plugins .plugin-hero-primary {
+  grid-area: primary;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-inline-start: var(--space-1);
+}
+
+.pkg-plugins .plugin-hero-menu {
+  grid-area: menu;
+  display: flex;
+}
+
+.pkg-plugins .plugin-detail > .settings-error.is-compact {
+  margin-bottom: var(--space-3);
+}
+
+.pkg-plugins .plugin-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pkg-plugins .plugin-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--amber);
+}
+
+/* Overview */
+
+.pkg-plugins .plugin-overview,
+.pkg-plugins .plugin-permissions {
+  display: grid;
+  min-width: 0;
+}
+
+.pkg-plugins .plugin-about {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 68ch;
+  margin-top: var(--space-4);
+}
+
+.pkg-plugins .plugin-overview > :first-child {
+  margin-top: 0;
+}
+
+.pkg-plugins .plugin-about p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.55;
+}
+
+.pkg-plugins .plugin-about .plugin-lede {
+  color: var(--text);
+}
+
+.pkg-plugins .plugin-facts {
+  display: grid;
+  margin: var(--space-2) 0 0;
+}
+
+.pkg-plugins .plugin-facts > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
+  gap: var(--space-4);
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+}
+
+.pkg-plugins .plugin-facts > div:first-child {
+  border-top: 0;
+}
+
+.pkg-plugins .plugin-facts dt {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-plugins .plugin-facts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.pkg-plugins .plugin-facts--compact > div {
+  grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding-block: var(--space-1);
+}
+
+.pkg-plugins .plugin-trust {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: 72ch;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-plugins .plugin-trust > .ui-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--muted);
+}
+
+/* Gallery */
+
+.pkg-plugins .plugin-gallery {
+  display: grid;
+  gap: var(--space-2);
+  width: min(100%, 42rem);
+  margin: var(--space-4) 0 0;
+}
+
+.pkg-plugins .plugin-shot {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--sunken);
+  box-shadow: var(--shadow-sm);
+  cursor: zoom-in;
+}
+
+.pkg-plugins .plugin-shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  transition: transform var(--motion-surface) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .pkg-plugins .plugin-shot:hover:where(:not(:disabled)) img {
+    transform: scale(1.012);
+  }
+}
+
+.pkg-plugins .plugin-shot-expand {
+  position: absolute;
+  inset-block-end: var(--space-2);
+  inset-inline-end: var(--space-2);
+  display: grid;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  place-items: center;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-control);
+  background: var(--material-glass-strong);
+  color: var(--text);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.pkg-plugins .plugin-shot:is(:hover, :focus-visible):where(:not(:disabled)) .plugin-shot-expand {
+  opacity: 1;
+}
+
+.pkg-plugins .plugin-shot-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.pkg-plugins .plugin-shot-rail {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+
+.pkg-plugins .plugin-shot-thumb {
+  width: calc(var(--control-h-lg) * 1.5);
+  aspect-ratio: 16 / 10;
+  flex: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  opacity: 0.6;
+  transition: opacity var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.pkg-plugins .plugin-shot-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+@media (hover: hover) {
+  .pkg-plugins .plugin-shot-thumb:hover:where(:not(:disabled)) {
+    opacity: 0.9;
+  }
+}
+
+.pkg-plugins .plugin-shot-thumb.on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.pkg-plugins .plugin-shot-caption {
+  min-width: 0;
+  flex: 1 1 12rem;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* The viewer is a portal on document.body, scoped by its own class. */
+.plugin-shot-dialog .ui-dialog-body {
+  display: grid;
+  padding: var(--space-3);
+}
+
+.plugin-shot-stage {
+  display: grid;
+  min-height: 40vh;
+  place-items: center;
+  padding: var(--space-2);
+  border-radius: var(--radius-card);
+  background: var(--sunken);
+}
+
+.plugin-shot-stage img {
+  max-width: 100%;
+  max-height: 72vh;
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-md);
+  object-fit: contain;
+}
+
+.plugin-shot-dialog .ui-dialog-foot .plugin-shot-count {
+  margin-inline-end: auto;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Permissions */
+
+.pkg-plugins .plugin-review {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+}
+
+.pkg-plugins .plugin-review-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.pkg-plugins .plugin-review-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  border-radius: var(--radius-round);
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+}
+
+.pkg-plugins .plugin-review-head strong {
+  display: block;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.pkg-plugins .plugin-review-head p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-plugins .plugin-review .plugin-access {
+  margin: 0;
+  padding-inline-start: calc(var(--control-h-sm) + var(--space-3));
+}
+
+.pkg-plugins .plugin-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-inline-start: calc(var(--control-h-sm) + var(--space-3));
+}
+
+.pkg-plugins .plugin-access {
+  display: grid;
+  max-width: 72ch;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pkg-plugins .plugin-access-item {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+}
+
+.pkg-plugins .plugin-access-item:first-child {
+  border-top: 0;
+}
+
+.pkg-plugins .plugin-access-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.pkg-plugins .plugin-access-name strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.pkg-plugins .plugin-access-detail {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.pkg-plugins .plugin-connection-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-1);
+}
+
+.pkg-plugins .plugin-connection-label {
+  color: var(--faint);
+  font-size: var(--font-meta);
+}
+
+.pkg-plugins .plugin-quiet {
+  margin: var(--space-3) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* Panels without a heading of their own (the tab names them) */
+
+.pkg-plugins .plugin-panel-lede,
+.pkg-plugins .plugin-review-note {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-plugins .plugin-review-note {
+  margin-top: var(--space-3);
+}
+
+.pkg-plugins .plugin-contributions > .plugin-panel-lede + .settings-section {
+  margin-top: var(--space-4);
+}
+
+.pkg-plugins .plugin-panel-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-2);
+}
+
+.pkg-plugins .plugin-rows > .set-row:last-child {
+  border-bottom: 0;
+}
+
+/* Quiet buttons on an elevated card need a surface of their own. */
+.pkg-plugins .plugin-review .ui-btn--quiet {
+  background: var(--raised);
+}
+
+@media (hover: hover) {
+  .pkg-plugins .plugin-review .ui-btn--quiet:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--raised) 70%, var(--accent-wash));
+  }
+}
+
+/* Logs */
+
+.pkg-plugins .plugin-log {
+  max-height: 24rem;
+  padding: var(--space-2) var(--space-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-plugins .plugin-log-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.pkg-plugins .plugin-log-line time {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pkg-plugins .plugin-log-line span {
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pkg-plugins .plugin-log-empty {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--ui-font-family);
+}
+
+/* ── install dialog (portaled) ────────────────────────────────────────── */
+
+.plugin-install-dialog .plugin-install {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.plugin-install-dialog .plugin-install-tabs {
+  justify-self: start;
+}
+
+/* Both sources keep one panel height, so switching tabs never resizes and
+   re-centers the dialog under the pointer. */
+.plugin-install-dialog .plugin-install-panel {
+  min-width: 0;
+  min-height: 12.5rem;
+  outline: none;
+}
+
+.plugin-install-dialog .plugin-drop {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  border: 1.5px dashed var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+/* Borderless appearance keeps the drop target's dashed edge: it is the
+   affordance, not decoration. */
+body[data-hide-borders="true"] .plugin-install-dialog .plugin-drop {
+  border-color: var(--borderless-edge) !important;
+}
+
+.plugin-install-dialog .plugin-drop:hover,
+.plugin-install-dialog .plugin-install.is-dragging .plugin-drop {
+  background: var(--accent-wash);
+}
+
+body .plugin-install-dialog .plugin-drop:is(:hover, .is-dragging, .has-file),
+body .plugin-install-dialog .plugin-install.is-dragging .plugin-drop {
+  border-color: var(--accent-line) !important;
+}
+
+.plugin-install-dialog .plugin-drop:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.plugin-install-dialog .plugin-drop-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.plugin-install-dialog .plugin-drop-icon {
+  display: grid;
+  width: var(--control-h-lg);
+  height: var(--control-h-lg);
+  place-items: center;
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.plugin-install-dialog .plugin-drop-copy {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  gap: 2px;
+}
+
+.plugin-install-dialog .plugin-drop-copy strong {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-install-dialog .plugin-drop-copy small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.plugin-install-dialog .plugin-install-link {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.plugin-install-dialog .plugin-install-resolved {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.plugin-install-dialog .plugin-install-options {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.plugin-install-dialog .plugin-install-strategy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-inline-start: calc(18px + var(--space-2));
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.plugin-install-dialog .plugin-install-error {
+  margin: 0;
+}
+
+/* ── narrow settings pane ─────────────────────────────────────────────── */
+
+@container plugins-page (max-width: 640px) {
+  .pkg-plugins .plugin-library-meta {
+    display: none;
+  }
+
+  .pkg-plugins .plugin-hero {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "tile copy menu";
+  }
+
+  .pkg-plugins .plugin-hero.has-primary {
+    grid-template-areas:
+      "tile copy menu"
+      "primary primary primary";
+  }
+
+  .pkg-plugins .plugin-hero-menu {
+    align-self: start;
+  }
+
+  .pkg-plugins .plugin-hero-primary {
+    justify-content: flex-start;
+    margin-inline-start: 0;
+  }
+
+  .pkg-plugins .plugin-facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .pkg-plugins .plugin-review {
+    padding: var(--space-3);
+  }
+
+  .pkg-plugins .plugin-review .plugin-access,
+  .pkg-plugins .plugin-review-actions {
+    padding-inline-start: 0;
+  }
+
+  .pkg-plugins .plugin-log-line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+@media (pointer: coarse) {
+  .pkg-plugins .plugin-empty {
+    min-height: var(--tap);
+  }
+}

@@ -1,0 +1,126 @@
+/* Share a chat: type over boxes. Two quiet sections — who can open it, then
+   the people — separated by space, not frames. The chosen audience is the
+   tinted row with a check; the access level is the people row's only control. */
+.session-sharing-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.sheet .session-sharing-body { padding: var(--space-2) var(--space-2) var(--space-3); }
+
+.session-sharing-section { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.session-sharing-heading {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+.session-sharing-audience { display: flex; flex-direction: column; gap: 2px; }
+.session-sharing-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: max(var(--control-h-lg), var(--hit-min));
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .session-sharing-choice:hover:not(:disabled) { background: var(--surface-overlay-hover); }
+}
+.session-sharing-choice[aria-checked="true"] { background: var(--surface-overlay); }
+.session-sharing-choice:disabled { opacity: .5; cursor: default; }
+.session-sharing-choice-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.session-sharing-audience.is-static { padding: 0 var(--space-3); }
+.session-sharing-choice-label { font-size: var(--font-label); font-weight: 550; }
+.session-sharing-choice-hint { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.session-sharing-check { flex: none; color: var(--accent); }
+
+.session-sharing-people { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.session-sharing-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: max(48px, var(--hit-min));
+  padding: var(--space-1) var(--space-3);
+}
+.session-sharing-person .user-avatar { width: 28px; height: 28px; font-size: var(--font-meta); }
+.session-sharing-person-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 1px; }
+/* A name is the row's point: it wraps to a second line before it truncates. */
+.session-sharing-person-name {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 550;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.session-sharing-person-detail { color: var(--muted); font-size: var(--font-meta); }
+.session-sharing-access { flex: 0 1 auto; min-width: 0; max-width: 60%; }
+.session-sharing-add { align-self: flex-start; margin-inline-start: var(--space-3); }
+
+.session-sharing-empty,
+.session-sharing-note {
+  margin: 0;
+  padding: 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.session-sharing-notice {
+  margin: 0;
+  padding: 0 var(--space-3);
+  color: var(--amber);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.session-sharing-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-dim);
+}
+.session-sharing-state p { margin: 0; max-width: 60ch; }
+
+.session-sharing-sheet-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-block-end: var(--space-2);
+}
+.session-sharing-sheet-foot > .ui-btn { flex: 1; }
+
+/* Overview line (session status popover and phone overview). */
+.session-sharing-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.session-sharing-line > .ui-icon { flex: none; }
+.session-sharing-line-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.desktop-session-status-popover > header > .session-sharing-line { padding: 0 var(--space-2) var(--space-2) var(--space-3); }
+@container session-status (min-width: 560px) {
+  .desktop-session-status-popover > header > .session-sharing-line { flex: none; max-width: 50%; padding: 0 var(--space-2) 0 0; }
+}
+.mobile-island-sheet .sheet-body > .session-sharing-line { padding: var(--space-2) var(--space-2) 0; }

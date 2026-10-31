@@ -1,0 +1,854 @@
+.perm-banner {
+  container: permission-banner / inline-size;
+  display: flex;
+  max-height: min(46dvh, 380px);
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.perm-banner.permission-toast {
+  min-width: 0;
+  /* Keep an unresolved action reachable while someone reads earlier history. */
+  position: sticky;
+  inset-block-end: 0;
+  /* A transcript card, concentric with the Chat bubbles, notices and tool
+     cards it sits beside. GlassDock publishes the rounder dock/island radius
+     for floating persistent layers; on a request pinned inside the
+     conversation that reads as a different product, so this surface takes
+     the card role explicitly. */
+  border-radius: var(--radius-card);
+}
+
+.perm-banner .perm-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+
+/* The one accent on the card: it is waiting for this person. */
+.perm-banner .permission-mode-icon {
+  display: grid;
+  width: calc(var(--icon-md) + var(--space-1));
+  height: calc(var(--icon-md) + var(--space-1));
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent-hi);
+}
+
+.perm-banner .permission-mode-icon svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+/* The card keeps its height cap, but the decision row never leaves view. One
+   request: the row is a column whose explanation (the body) scrolls while its
+   actions stay below it. Several stacked requests: the card scrolls and the
+   actions of the request being read stick to its bottom edge. */
+.perm-banner > .perm-title,
+.perm-banner > .ui-separator { flex: none; }
+
+.perm-banner .permission-request {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.perm-banner .permission-request-body {
+  min-width: 0;
+  min-height: 0;
+  flex: 0 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.perm-banner .permission-request-content {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+/* Scroll-edge fades: phones hide scrollbars, so a body with more content above
+   or below says so with the same glass fade the stacked action rows use. The
+   card marks the body with `data-more-above` / `data-more-below` (scroll and
+   resize observers, every browser); no animation, so nothing for reduced
+   motion to stop. The edges take no space and never catch a tap. */
+.perm-banner .permission-scroll-edge {
+  position: sticky;
+  z-index: 1;
+  display: block;
+  height: var(--space-5);
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.perm-banner .permission-scroll-edge[data-edge="start"] {
+  inset-block-start: 0;
+  margin-block-end: calc(-1 * var(--space-5));
+  background: linear-gradient(to top, transparent, var(--material-glass));
+}
+
+.perm-banner .permission-scroll-edge[data-edge="end"] {
+  inset-block-end: 0;
+  margin-block-start: calc(-1 * var(--space-5));
+  background: linear-gradient(to bottom, transparent, var(--material-glass));
+}
+
+.perm-banner .permission-request-body[data-more-above] > .permission-scroll-edge[data-edge="start"],
+.perm-banner .permission-request-body[data-more-below] > .permission-scroll-edge[data-edge="end"] {
+  visibility: visible;
+}
+
+/* Reduced transparency (system or Polyth's glass setting): a solid hairline
+   marks the edge instead of a see-through fade. */
+@media (prefers-reduced-transparency: reduce) {
+  .perm-banner .permission-scroll-edge { height: 1px; }
+  .perm-banner .permission-scroll-edge[data-edge="start"] { margin-block-end: -1px; background: var(--border); }
+  .perm-banner .permission-scroll-edge[data-edge="end"] { margin-block-start: -1px; background: var(--border); }
+}
+
+body[data-glass="off"] .perm-banner .permission-scroll-edge { height: 1px; }
+body[data-glass="off"] .perm-banner .permission-scroll-edge[data-edge="start"] { margin-block-end: -1px; background: var(--border); }
+body[data-glass="off"] .perm-banner .permission-scroll-edge[data-edge="end"] { margin-block-start: -1px; background: var(--border); }
+
+.perm-banner .permission-request > :not(.permission-request-body) { flex: none; }
+
+.perm-banner:has(> .permission-request ~ .permission-request) > .permission-request { flex: none; }
+
+.perm-banner:has(> .permission-request ~ .permission-request) .permission-request-body { overflow: visible; }
+
+.perm-banner:has(> .permission-request ~ .permission-request) .permission-scroll-edge { display: none; }
+
+.perm-banner:has(> .permission-request ~ .permission-request) .perm-actions {
+  position: sticky;
+  z-index: 1;
+  inset-block-end: calc(-1 * var(--space-3));
+  margin-block-end: calc(-1 * var(--space-3));
+  padding-block: var(--space-2) var(--space-3);
+  /* Opaque glass under the buttons, fading into the text scrolling past. */
+  background: linear-gradient(to bottom, transparent, var(--material-glass) var(--space-2));
+}
+
+.perm-banner .permission-request-title {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.perm-banner .permission-browser-capabilities,
+.perm-banner .permission-waiting,
+.perm-banner .permission-error {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.perm-banner .permission-error { color: var(--red); }
+
+.perm-banner .permission-request-count {
+  justify-self: start;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-meta-lh);
+}
+
+/* A parent's mirrored card names the subagent that asked. */
+.perm-banner .permission-source {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.perm-banner .permission-source > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex: none;
+  color: var(--muted);
+}
+
+.perm-banner .permission-source-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perm-banner .permission-source-open {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+.perm-banner .permission-delegated { color: var(--accent-hi); }
+
+/* Auto-Approve's Judgment second opinion left this routine request for the person. */
+.perm-banner .permission-outside-task {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--border-soft));
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* A high-risk request: Auto-Approve never answers it, so the card says why. */
+.perm-banner .permission-risk {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--red) 30%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.perm-banner .permission-risk strong {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.perm-banner .permission-risk ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-inline-start: var(--space-4);
+}
+
+.perm-banner .permission-blast {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-block-start: var(--space-1);
+  border-block-start: 1px solid var(--border-soft);
+}
+
+.perm-banner .permission-blast-heading {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.perm-banner .permission-blast li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The path, branch or statement itself: technical text, kept whole and
+   left-to-right even inside right-to-left copy. */
+.perm-banner .permission-blast-target {
+  font-family: var(--mono);
+  font-size: var(--font-technical);
+  line-height: var(--font-technical-lh);
+  overflow-wrap: anywhere;
+}
+
+.perm-banner .permission-blast-note {
+  color: var(--text-dim);
+}
+
+.perm-banner .permission-blast-note::before {
+  content: " · ";
+}
+
+.perm-banner .permission-preview {
+  display: flex;
+  max-width: 100%;
+  max-height: 92px;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  box-shadow: var(--inset-hi);
+  font-family: var(--mono);
+  font-size: var(--font-technical);
+  line-height: var(--font-technical-lh);
+}
+
+.perm-banner .permission-preview code {
+  padding: 0;
+  overflow-wrap: anywhere;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Terminal preview for commands */
+.perm-banner .permission-terminal {
+  display: flex;
+  max-width: 100%;
+  max-height: 180px;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--term-bg);
+  color: var(--term-fg);
+  box-shadow: var(--inset-hi);
+  font-family: var(--mono);
+}
+
+.perm-banner .permission-terminal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  max-height: 140px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.perm-banner .permission-terminal-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.perm-banner .permission-terminal-prompt {
+  color: var(--term-cursor);
+  font-family: var(--mono);
+  font-weight: 600;
+  user-select: none;
+  flex: none;
+  line-height: var(--font-technical-lh);
+}
+
+.perm-banner .permission-terminal-code {
+  color: var(--term-fg);
+  background: transparent;
+  padding: 0;
+  border: 0;
+  font-family: inherit;
+  font-size: var(--font-technical);
+  line-height: var(--font-technical-lh);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  flex: 1;
+}
+
+/* Human-readable MCP preview */
+.perm-banner .permission-mcp {
+  display: flex;
+  max-width: 100%;
+  max-height: 180px;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  box-shadow: var(--inset-hi);
+  font-family: var(--font-sans);
+}
+
+.perm-banner .permission-mcp-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.perm-banner .permission-mcp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  color: var(--accent-hi);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.perm-banner .permission-mcp-badge svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.perm-banner .permission-mcp-tool {
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--font-label);
+  overflow-wrap: anywhere;
+}
+
+.perm-banner .permission-mcp-params {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.perm-banner .permission-mcp-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--font-technical);
+  line-height: var(--font-technical-lh);
+}
+
+.perm-banner .permission-mcp-key {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: var(--font-meta);
+  min-width: 80px;
+  max-width: 140px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.perm-banner .permission-mcp-val {
+  color: var(--text);
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.perm-banner .permission-mcp-val code {
+  font-family: var(--mono);
+  background: var(--sunken);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  color: var(--syntax-str);
+  font-size: inherit;
+}
+
+.perm-banner .permission-mcp-link {
+  color: var(--accent-hi);
+  text-decoration: underline;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.perm-banner .permission-mcp-link svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+/* One row of equal, bounded decisions. Every action is a real control on the
+   same baseline; the row never wraps a decision onto its own line. */
+.perm-banner .perm-actions {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+/* A subagent card adds "Let agent decide" as a fourth action. */
+.perm-banner .perm-actions:has(> :nth-child(4)) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Full labels in every language: a long label wraps inside its button
+   (which grows taller) instead of being cut off with an ellipsis. */
+.perm-banner .perm-actions > .ui-btn {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: var(--space-1) var(--space-2);
+  white-space: normal;
+}
+
+.perm-banner .perm-actions .ui-btn-label {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+/* The routine policy action keeps the shared button geometry; only its ink
+   differs, so the row reads as one control group. */
+.perm-banner .permission-session {
+  border-color: var(--accent-line);
+  color: var(--accent-hi);
+}
+
+.perm-banner .permission-action-short { display: none; }
+
+/* The host owns composer geometry; this package only communicates its state,
+   by icon colour alone: `background: none` also cancels the host's
+   `.ui-icon-btn[aria-pressed="true"]` wash. */
+.composer-auto-approve.on {
+  color: var(--green);
+  background: none;
+}
+
+/* Full access approves everything, so the control reads as a warning. */
+.composer-auto-approve.on.full {
+  color: var(--red);
+}
+
+/* Full access ("Allow all") sits on the same row as Deny and Allow once. The
+   warning ink and hover wash still read as the dangerous escalation, and its
+   confirmation dialog is unchanged. */
+.perm-banner .perm-actions > .permission-allow-all {
+  color: var(--red);
+}
+
+@media (hover: hover) {
+  .perm-banner .perm-actions > .permission-allow-all:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--red) 42%, var(--border));
+    background: var(--red-wash);
+    color: var(--red);
+  }
+}
+
+.composer-auto-approve > svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+/* Approval level picker: the shared Popover owns material, placement and
+   dismissal; this package owns only the tiny icon-only segmented track. No
+   copy inside, so the surface never resizes or re-anchors while switching. */
+.approval-level-pop.ui-popover {
+  min-width: 0;
+  padding: 3px;
+  border-radius: var(--radius-round);
+}
+
+.approval-level-track {
+  display: flex;
+  gap: 2px;
+}
+
+.approval-level-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.approval-level-option,
+.approval-level-reset {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: max(30px, var(--hit-min));
+  height: max(30px, var(--hit-min));
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.approval-level-option > svg,
+.approval-level-reset > svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+@media (hover: hover) {
+  .approval-level-option:hover:where(:not(:disabled)),
+  .approval-level-reset:hover:where(:not(:disabled)) { color: var(--text); background: var(--surface-overlay-hover); }
+}
+
+.approval-level-option:focus-visible,
+.approval-level-reset:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* "Use default" is an action, not a level: a hairline sets it apart. */
+.approval-level-divider {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: var(--space-1) 2px;
+  background: var(--hair-strong);
+}
+
+.approval-level-option[aria-checked="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+@media (hover: hover) {
+  .approval-level-option[aria-checked="true"]:hover:where(:not(:disabled)) {
+    background: var(--raised);
+    color: var(--text);
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+}
+
+.approval-level-option[data-level="routine"][aria-checked="true"] { color: var(--green); }
+.approval-level-option[data-level="all"][aria-checked="true"] { color: var(--red); }
+
+/* Phones: finger-sized segments. */
+.approval-level-pop[data-compact="true"] .approval-level-option,
+.approval-level-pop[data-compact="true"] .approval-level-reset {
+  width: var(--tap);
+  height: var(--tap);
+}
+
+/* Narrow cards (phones): two columns, so every full label has room in any
+   language. Deny and Allow share the first row; the policy action takes the
+   second (two rows of two on a subagent card). Short labels remain only for
+   very narrow placements. */
+@container permission-banner (max-width: 420px) {
+  .perm-banner .perm-actions,
+  .perm-banner .perm-actions:has(> :nth-child(4)) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* A lone trailing decision takes the full row instead of a half column. */
+  .perm-banner .perm-actions > :nth-child(3):last-child { grid-column: 1 / -1; }
+}
+
+@container permission-banner (max-width: 260px) {
+  .perm-banner .permission-action-full { display: none; }
+  .perm-banner .permission-action-short { display: inline; }
+}
+
+/* Settings → Permissions and Project settings → Approvals. The level list
+   shares the settings item-list surface: one quiet card, a row per level, the
+   level's glyph on a tile, the choice marked by a wash and a trailing check.
+   Glyph colors match the approval switch (green Auto-Approve, red Full
+   access); Full access keeps its red even when chosen. */
+.approval-choices {
+  display: grid;
+  min-width: 0;
+  margin-top: var(--space-3);
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+}
+
+.approval-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) var(--icon-sm);
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: max(var(--control-h-lg), var(--hit-min));
+  padding: var(--space-3);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+
+.approval-choice + .approval-choice { border-top: 1px solid var(--border-soft); }
+.approval-choice:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.approval-choices[aria-busy="true"] .approval-choice { cursor: progress; }
+
+@media (hover: hover) and (pointer: fine) {
+  .approval-choice[aria-checked="false"]:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+
+.approval-choice[aria-checked="true"] { background: var(--accent-wash); }
+.approval-choice[data-level="all"][aria-checked="true"] { background: var(--red-wash); }
+
+.approval-choice-mark {
+  display: grid;
+  place-items: center;
+  width: calc(var(--control-h-sm) + var(--space-1));
+  height: calc(var(--control-h-sm) + var(--space-1));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  box-shadow: var(--inset-hi);
+  color: var(--text-dim);
+  transition: color var(--motion-normal) var(--motion-ease);
+}
+
+.approval-choice[data-level="routine"][aria-checked="true"] .approval-choice-mark { color: var(--green); }
+.approval-choice[data-level="all"] .approval-choice-mark { color: var(--red); }
+.approval-choice[data-level="off"][aria-checked="true"] .approval-choice-mark { color: var(--text); }
+
+.approval-choice-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.approval-choice-title {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.approval-choice-detail {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.approval-choice-check {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
+.approval-choice[data-level="all"] .approval-choice-check { color: var(--red); }
+
+.approval-notice { margin-top: var(--space-3); }
+
+/* What Auto-Approve leaves for a person, folded away until asked for. */
+.approval-still-asks {
+  margin-top: var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.approval-still-asks > summary {
+  width: fit-content;
+  min-height: var(--hit-min);
+  padding-block: var(--space-1);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.approval-still-asks > summary:hover { color: var(--text); }
+.approval-still-asks > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.approval-still-asks > p {
+  max-width: 68ch;
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--muted);
+}
+
+.approval-still-asks > ul {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  columns: 2 18rem;
+  column-gap: var(--space-6);
+}
+
+.approval-still-asks li {
+  break-inside: avoid;
+  padding-block: 1px;
+}
+
+/* Paths are a quiet second line, never the reason a row grows. */
+.approval-projects .settings-list-desc {
+  overflow: hidden;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One width for every level control, so the column reads as a column. */
+.approval-projects .approval-project-level { inline-size: clamp(12rem, 36cqi, 17rem); }
+
+/* The list is already the elevated surface: the control takes the raised
+   step, so it stays a visible control when borders are hidden (the default). */
+.approval-projects .approval-project-level .picker-chip { background: var(--raised); }
+@media (hover: hover) {
+  .approval-projects .approval-project-level .picker-chip:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--raised) 70%, var(--surface-overlay-hover));
+  }
+}
+
+/* Narrow lists (phones): the control takes its own line under the name
+   instead of squeezing it. */
+@container settings-list (max-width: 520px) {
+  .approval-projects .settings-list-row {
+    grid-template-areas:
+      "tile title title chevron"
+      "tile desc desc desc"
+      "tile trailing trailing trailing"
+      "tile error error error";
+  }
+
+  .approval-projects .settings-list-trailing {
+    justify-content: flex-start;
+    margin-top: var(--space-2);
+  }
+
+  .approval-projects .approval-project-level { inline-size: 100%; }
+}
+
+/* Someone who may not change the level sees it as a statement. */
+.approval-choices.is-static .approval-choice { cursor: default; }
+.approval-choices.is-static .approval-choice[data-level="routine"] .approval-choice-mark { color: var(--green); }
+.approval-choices.is-static .approval-choice[data-level="off"] .approval-choice-mark { color: var(--text); }
+
+.approval-project-value {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+
+.approval-project-page {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.approval-project-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.approval-project-hint {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.approval-project-page .approval-choices { margin-top: 0; }

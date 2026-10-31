@@ -1,0 +1,580 @@
+// Model-facing tool bridge. This is NOT polyth-mcp (control plane).
+// Harnesses receive a scoped stdio MCP that can invoke only currently
+// registered package tools for the token's Space/project/session.
+import { existsSync } from "node:fs";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import type {
+  AgentCapabilityContribution,
+  AgentCapabilityDescriptor,
+  AgentToolAuthorizationGrant,
+  JsonObject,
+  RouteHandler,
+  SpaceStorage,
+  ToolExecutor,
+} from "@polyth/contracts";
+import { semanticCapabilityRevision } from "@polyth/harness-runtime";
+import { READ_FILE_TOOL_NAME, type SessionOutputCache } from "@polyth/session/output-cache";
+
+export const AGENT_TOOLS_MCP_NAME = "polyth-agent-tools";
+export const AGENT_TOOLS_PATH = "/internal/agent-tools";
+export const AGENT_TOOLS_MCP_PATH = `${AGENT_TOOLS_PATH}/mcp`;
+const POLYTH_SESSION_CONTROL_TOOL_ID = "harness-runtime.polyth-control";
+
+export interface AgentToolBinding {
+  id: string;
+  owner: string;
+  revision: string;
+  trust: Extract<AgentCapabilityDescriptor, { kind: "tool" }>["trust"];
+  mutating: boolean;
+  /** Full semantic hash of the descriptor at mint time, independent of
+   * whatever `revision` string the contribution happened to carry. Recomputed
+   * from the live contribution at invoke time so any drift — not just a
+   * `revision` field change — fails closed. */
+  digest: string;
+}
+
+export interface AgentToolGrant {
+  token: string;
+  spaceId: string;
+  projectId: string;
+  cwd: string;
+  harnessId?: string;
+  sessionId?: string;
+  tools: Array<Extract<AgentCapabilityDescriptor, { kind: "tool" }>>;
+  bindings: AgentToolBinding[];
+}
+
+export type AgentToolAuthz = "allow" | "deny" | "permission-required";
+
+/** Human-readable scope for a failed tool-authorization response. Values come
+ * from the caller's own grant, so they disclose nothing the caller does not
+ * already operate with. */
+const sessionScope = (grant: Pick<AgentToolGrant, "projectId" | "cwd" | "harnessId">): string =>
+  `project ${grant.projectId}${grant.harnessId ? ` (${grant.harnessId})` : ""} at ${grant.cwd}`;
+
+export interface AgentToolBridge {
+  mint(grant: Omit<AgentToolGrant, "token" | "bindings">): AgentToolGrant;
+  revoke(token: string): void;
+  stdioCommand(endpoint: string, token: string): { command: string; args: string[]; env: Record<string, string> };
+  route: RouteHandler;
+}
+
+const mcpScript = (): string => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // Electron adds resourcesPath to process in the packaged desktop server.
+  const resourcesPath = (process as { resourcesPath?: unknown }).resourcesPath;
+  const candidates = [
+    join(here, "agentToolsMcp.mjs"),
+    typeof resourcesPath === "string" ? join(resourcesPath, "server", "agentToolsMcp.mjs") : "",
+  ].filter(Boolean);
+  return candidates.find((path) => existsSync(path)) ?? candidates[0]!;
+};
+
+const nodeCommand = (): { command: string; env: Record<string, string> } => {
+  if (process.versions.electron) {
+    return { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: "1" } };
+  }
+  return { command: process.execPath, env: {} };
+};
+
+const equal = (left: string, right: string): boolean => {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
+const defaultAuthorize = (
+  tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
+): AgentToolAuthz =>
+  tool.trust === "pure" && tool.mutating === false ? "allow" : "permission-required";
+
+const SUMMARY_SENSITIVE_KEYS = /token|secret|password|credential|apikey|api_key|auth/i;
+const SUMMARY_LIMIT = 5;
+const SUMMARY_VALUE_CHARS = 200;
+
+/** Bounded scalar view of a tool call's arguments for its permission card, so
+ * a person approving (for example) a send can see recipients and files. Short
+ * values come first; credential-named fields and nested objects are omitted,
+ * and the preview builder redacts secret-looking text. */
+export function summarizeToolInput(input: JsonObject): JsonObject | undefined {
+  const entries: Array<[string, string]> = [];
+  for (const [key, value] of Object.entries(input)) {
+    if (SUMMARY_SENSITIVE_KEYS.test(key)) continue;
+    let text: string | undefined;
+    if (typeof value === "string") text = value;
+    else if (typeof value === "number" || typeof value === "boolean") text = String(value);
+    else if (Array.isArray(value) && value.every((item) => typeof item === "string" || typeof item === "number")) text = value.join(", ");
+    if (!text?.trim()) continue;
+    entries.push([key, text.length > SUMMARY_VALUE_CHARS ? `${text.slice(0, SUMMARY_VALUE_CHARS)}…` : text]);
+  }
+  entries.sort((a, b) => a[1].length - b[1].length);
+  return entries.length ? Object.fromEntries(entries.slice(0, SUMMARY_LIMIT)) : undefined;
+}
+
+/** Permission-engine verdict plus optional contribution auto-approve and UI prompt. */
+export async function authorizePackageToolAfterPermissions(input: {
+  tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>;
+  grant: AgentToolAuthorizationGrant;
+  contribution?: Pick<AgentCapabilityContribution, "autoApprove">;
+  permissionVerdict: "allow" | "deny" | "ask";
+  storage?: SpaceStorage;
+  signal?: AbortSignal;
+  /** Argument summary shown on the permission card (see summarizeToolInput). */
+  metadata?: JsonObject;
+  requestPermission?: (
+    grant: AgentToolAuthorizationGrant & {
+      toolId: string;
+      toolName: string;
+      owner: string;
+      signal?: AbortSignal;
+      metadata?: JsonObject;
+    },
+  ) => Promise<AgentToolAuthz>;
+}): Promise<AgentToolAuthz> {
+  if (input.permissionVerdict === "allow") return "allow";
+  if (input.permissionVerdict === "deny") return "deny";
+  const grant: AgentToolAuthorizationGrant = {
+    ...input.grant,
+    ...(input.storage ? { storage: input.storage } : {}),
+  };
+  if (input.contribution?.autoApprove) {
+    try {
+      if (await input.contribution.autoApprove(grant)) return "allow";
+    } catch {
+      // Fail closed to the permission prompt.
+    }
+  }
+  if (!input.requestPermission) return "permission-required";
+  try {
+    const decision = await input.requestPermission({
+      ...grant,
+      toolId: input.tool.id,
+      toolName: input.tool.name,
+      owner: input.tool.owner,
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+    });
+    return decision === "allow" || decision === "permission-required" || decision === "deny"
+      ? decision
+      : "deny";
+  } catch {
+    return "deny";
+  }
+}
+
+const bindingOf = (
+  tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
+): AgentToolBinding => ({
+  id: tool.id,
+  owner: tool.owner,
+  revision: tool.revision,
+  trust: tool.trust,
+  mutating: tool.mutating,
+  digest: semanticCapabilityRevision(tool),
+});
+
+const stringProjectTarget = (input: JsonObject): string | undefined => {
+  const parameters = input.parameters;
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return undefined;
+  const projectId = (parameters as Record<string, unknown>).projectId;
+  return typeof projectId === "string" && projectId.trim() ? projectId.trim() : undefined;
+};
+
+const runtimeSessionId = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 && value.length <= 256 ? value : undefined;
+
+const runtimeSessionIdFromMeta = (value: unknown): string | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const meta = value as Record<string, unknown>;
+  return runtimeSessionId(meta.sessionID) ?? runtimeSessionId(meta.sessionId);
+};
+
+/**
+ * Core Polyth session control is intentionally frictionless inside the caller's
+ * own project, while any explicit external project target gets an independent
+ * durable permission subject. The normal permission engine can therefore offer
+ * once/session/project ("always") without granting every external project at
+ * once. A deny on the base tool still wins before target-specific evaluation.
+ */
+export function polythSessionAuthorizationSubjects(
+  tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
+  grant: Pick<AgentToolGrant, "projectId">,
+  input: JsonObject,
+): Array<Extract<AgentCapabilityDescriptor, { kind: "tool" }>> {
+  if (tool.id !== POLYTH_SESSION_CONTROL_TOOL_ID) return [tool];
+  const baseGuard = { ...tool, trust: "pure" as const, mutating: false };
+  const targetProjectId = stringProjectTarget(input);
+  if (!targetProjectId || targetProjectId === grant.projectId) return [baseGuard];
+  const targetKey = createHash("sha256").update(targetProjectId).digest("hex").slice(0, 20);
+  return [
+    baseGuard,
+    {
+      ...tool,
+      id: `${tool.id}.external-project.${targetKey}`,
+      name: `polyth external project ${targetProjectId}`,
+    },
+  ];
+}
+
+/**
+ * Bounded delivery for an oversized tool result.
+ *
+ * The bridge is the one point every Polyth-owned tool result passes through, so
+ * it is where oversized output is paged. A paged result keeps the head and tail
+ * (the invocation and the failure) and points the model at the virtual URI it
+ * can page. The paging tool itself is exempt: re-paging a line slice the model
+ * deliberately asked for would hide the very lines it requested.
+ */
+export function pageToolOutput(
+  cache: SessionOutputCache | undefined,
+  sessionId: string | undefined,
+  tool: Pick<Extract<AgentCapabilityDescriptor, { kind: "tool" }>, "name">,
+  result: { output: string; metadata?: JsonObject },
+): { output: string; metadata?: JsonObject } {
+  if (!cache || !sessionId || tool.name === READ_FILE_TOOL_NAME) return result;
+  // A package tool that returns a non-string output is malformed; paging it
+  // would replace the tool's own error with a cache miss.
+  if (typeof result.output !== "string") return result;
+  const paged = cache.page(sessionId, result.output, { tool: tool.name });
+  if (!paged.paged) return result;
+  return {
+    output: paged.output,
+    metadata: {
+      ...(result.metadata ?? {}),
+      outputPaged: true,
+      outputCacheUri: paged.uri,
+      outputTotalLines: paged.totalLines,
+      outputTotalChars: paged.totalChars,
+    },
+  };
+}
+
+export function createAgentToolBridge(opts: {
+  executor(id: string): ToolExecutor | undefined;
+  contribution?(id: string): { descriptor: AgentCapabilityDescriptor; execute?: ToolExecutor } | undefined;
+  resolveSession?: (grant: AgentToolGrant, runtimeSessionId?: string) => Promise<string | undefined>;
+  requested?: (tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>, grant: AgentToolGrant) => Promise<void>;
+  authorize?: (
+    tool: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
+    grant: AgentToolGrant,
+    signal?: AbortSignal,
+    input?: JsonObject,
+  ) => AgentToolAuthz | Promise<AgentToolAuthz>;
+  /** Session-scoped oversized-output paging cache. Absent → outputs pass through. */
+  outputCache?: SessionOutputCache;
+  /** The person the session acts for when the call runs (its `actor`). */
+  actorOf?: (sessionId: string) => Promise<string | undefined>;
+}): AgentToolBridge {
+  const grants = new Map<string, AgentToolGrant>();
+  const grantFor = (token: string | undefined): AgentToolGrant | undefined => {
+    if (!token) return undefined;
+    for (const grant of grants.values()) {
+      if (equal(grant.token, token)) return grant;
+    }
+    return undefined;
+  };
+
+  const matchesBinding = (
+    binding: AgentToolBinding,
+    descriptor: Extract<AgentCapabilityDescriptor, { kind: "tool" }>,
+  ): boolean =>
+    binding.id === descriptor.id
+    && binding.owner === descriptor.owner
+    && binding.revision === descriptor.revision
+    && binding.trust === descriptor.trust
+    && binding.mutating === descriptor.mutating
+    && binding.digest === semanticCapabilityRevision(descriptor);
+
+  type InvocationResult = { status: number; body: JsonObject } | undefined;
+  const invoke = async (
+    token: string,
+    grant: AgentToolGrant,
+    id: string,
+    input: JsonObject,
+    signal: AbortSignal,
+    runtimeSessionId?: string,
+  ): Promise<InvocationResult> => {
+    const fail = (status: number, code: string, message: string): InvocationResult => ({
+      status,
+      body: { error: { code, message } },
+    });
+    const tool = grant.tools.find((item) => item.id === id);
+    const binding = grant.bindings.find((item) => item.id === id);
+    const contribution = opts.contribution?.(id);
+    const descriptor = contribution?.descriptor.kind === "tool" ? contribution.descriptor : undefined;
+    const execute = contribution?.execute;
+    if (!tool || !binding || !contribution || !descriptor || !execute) {
+      return fail(404, "not-found", "tool is not available");
+    }
+    if (!matchesBinding(binding, descriptor)) {
+      return fail(403, "stale-capability", "tool grant no longer matches the registered capability");
+    }
+    const sessionId = opts.resolveSession ? await opts.resolveSession(grant, runtimeSessionId) : grant.sessionId;
+    if (opts.resolveSession && !sessionId) {
+      return fail(403, "session-unavailable",
+        `No live Polyth session owns this tool call: expected the granted session or a session sharing its runtime leg to be running a turn in ${sessionScope(grant)}`);
+    }
+    const scopedGrant = { ...grant, ...(sessionId ? { sessionId } : {}) };
+    if (signal.aborted) return undefined;
+    await opts.requested?.(descriptor, scopedGrant);
+    const authorize = opts.authorize ?? defaultAuthorize;
+    for (const subject of polythSessionAuthorizationSubjects(descriptor, scopedGrant, input)) {
+      const decision = await authorize(subject, scopedGrant, signal, input);
+      if (decision === "deny") return fail(403, "forbidden", "tool is not permitted");
+      if (decision === "permission-required") {
+        return fail(403, "permission-required", "Polyth authorization is required before this tool can run");
+      }
+    }
+    const liveGrant = grantFor(token);
+    const liveBinding = liveGrant?.bindings.find((item) => item.id === id);
+    const liveContribution = opts.contribution?.(id);
+    const liveDescriptor = liveContribution?.descriptor.kind === "tool"
+      ? liveContribution.descriptor
+      : undefined;
+    const liveExecute = liveContribution?.execute;
+    if (!liveGrant || !liveBinding || !liveDescriptor || !liveExecute) {
+      return fail(404, "not-found", "tool is not available");
+    }
+    if (liveContribution !== contribution || !matchesBinding(liveBinding, liveDescriptor)) {
+      return fail(403, "stale-capability", "tool grant no longer matches the registered capability");
+    }
+    if (signal.aborted) return undefined;
+    if (opts.resolveSession && await opts.resolveSession(scopedGrant, runtimeSessionId) !== sessionId) {
+      return fail(403, "session-unavailable",
+        `The Polyth session that owned this tool call stopped running its turn in ${sessionScope(grant)}`);
+    }
+    if (signal.aborted) return undefined;
+    if (grantFor(token) !== liveGrant || opts.contribution?.(id) !== liveContribution
+      || !matchesBinding(liveBinding, liveDescriptor)) {
+      return fail(403, "stale-capability", "tool grant is no longer active");
+    }
+    try {
+      // Resolved per call: a shared session's actor changes with each person's
+      // turn, and a tool must use the current person's account, never a grant's.
+      const actorUserId = sessionId && opts.actorOf ? await opts.actorOf(sessionId) : undefined;
+      if (signal.aborted) return undefined;
+      const result = await liveExecute(input, {
+        sessionId: sessionId ?? "",
+        signal,
+        projectId: liveGrant.projectId,
+        cwd: liveGrant.cwd,
+        spaceId: liveGrant.spaceId,
+        ...(actorUserId ? { actorUserId } : {}),
+      });
+      return { status: 200, body: pageToolOutput(opts.outputCache, sessionId, liveDescriptor, result) };
+    } catch (error) {
+      return fail(400, "tool-failed", (error as Error).message);
+    }
+  };
+  const pendingMcp = new Map<string, AbortController>();
+  const mcpRequestKey = (token: string, id: unknown): string => `${token}\0${JSON.stringify(id)}`;
+
+  return {
+    mint(input) {
+      const token = randomBytes(32).toString("hex");
+      const grant: AgentToolGrant = {
+        ...input,
+        token,
+        bindings: input.tools.map(bindingOf),
+      };
+      grants.set(token, grant);
+      return grant;
+    },
+    revoke(token) {
+      grants.delete(token);
+    },
+    stdioCommand(endpoint, token) {
+      const node = nodeCommand();
+      return {
+        command: node.command,
+        args: [mcpScript()],
+        env: {
+          ...node.env,
+          POLYTH_AGENT_TOOLS_URL: endpoint,
+          POLYTH_AGENT_TOOLS_TOKEN: token,
+        },
+      };
+    },
+    async route(rc) {
+      if (rc.path !== AGENT_TOOLS_PATH && rc.path !== AGENT_TOOLS_MCP_PATH) return false;
+      if (rc.ingress.kind !== "public-http" || rc.ingress.loopback !== true) {
+        rc.json(403, { error: { code: "forbidden", message: "agent tools are local-only" } });
+        return true;
+      }
+      const header = rc.req.headers.authorization;
+      const token = typeof header === "string" && header.startsWith("Bearer ")
+        ? header.slice(7)
+        : undefined;
+      const grant = grantFor(token);
+      if (!grant) {
+        rc.json(401, { error: { code: "unauthorized", message: "invalid tool token" } });
+        return true;
+      }
+      if (rc.path === AGENT_TOOLS_MCP_PATH) {
+        if (rc.method !== "POST") {
+          rc.json(405, { error: { code: "invalid-input", message: "POST required" } });
+          return true;
+        }
+        const body = await rc.body();
+        const requestId = body.id;
+        const respond = (result: JsonObject) => {
+          if (requestId === undefined) rc.json(202, {});
+          else rc.json(200, { jsonrpc: "2.0", id: requestId, result });
+        };
+        const method = typeof body.method === "string" ? body.method : "";
+        if (body.jsonrpc !== "2.0" || !method) {
+          rc.json(400, { jsonrpc: "2.0", id: requestId ?? null, error: { code: -32600, message: "Invalid Request" } });
+          return true;
+        }
+        if (method === "initialize") {
+          respond({
+            protocolVersion: "2024-11-05",
+            capabilities: { tools: { listChanged: false } },
+            serverInfo: { name: AGENT_TOOLS_MCP_NAME, version: "0.1.0" },
+          });
+          return true;
+        }
+        if (method === "notifications/initialized" || method === "initialized") {
+          respond({});
+          return true;
+        }
+        if (method === "notifications/cancelled") {
+          const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
+            ? body.params as Record<string, unknown>
+            : {};
+          pendingMcp.get(mcpRequestKey(token!, params.requestId))?.abort();
+          respond({});
+          return true;
+        }
+        if (method === "ping") {
+          respond({});
+          return true;
+        }
+        if (method === "tools/list") {
+          respond({
+            tools: grant.tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.inputSchema,
+            })),
+          });
+          return true;
+        }
+        if (method !== "tools/call") {
+          rc.json(200, { jsonrpc: "2.0", id: requestId ?? null, error: { code: -32601, message: "Method not found" } });
+          return true;
+        }
+        const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
+          ? body.params as Record<string, unknown>
+          : {};
+        const name = typeof params.name === "string" ? params.name : "";
+        const id = grant.tools.find((item) => item.name === name)?.id ?? "";
+        if (!id) {
+          respond({ content: [{ type: "text", text: "tool is not available" }], isError: true });
+          return true;
+        }
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const key = mcpRequestKey(token!, requestId);
+        if (requestId !== undefined) {
+          pendingMcp.get(key)?.abort();
+          pendingMcp.set(key, controller);
+        }
+        rc.req.once?.("aborted", abort);
+        rc.res?.once?.("close", abort);
+        try {
+          const input = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
+            ? params.arguments as JsonObject
+            : {};
+          const outcome = await invoke(
+            token!,
+            grant,
+            id,
+            input,
+            controller.signal,
+            runtimeSessionIdFromMeta(params._meta),
+          );
+          if (!outcome || controller.signal.aborted || rc.req.aborted || rc.res?.destroyed) return true;
+          const error = outcome.body.error as { message?: unknown } | undefined;
+          if (outcome.status >= 400 || error) {
+            respond({
+              content: [{ type: "text", text: typeof error?.message === "string" ? error.message : "tool failed" }],
+              isError: true,
+            });
+          } else {
+            respond({
+              content: [{ type: "text", text: String(outcome.body.output ?? "") }],
+              ...(outcome.body.metadata && typeof outcome.body.metadata === "object"
+                ? { structuredContent: outcome.body.metadata }
+                : {}),
+            });
+          }
+          return true;
+        } finally {
+          if (pendingMcp.get(key) === controller) pendingMcp.delete(key);
+          rc.req.off?.("aborted", abort);
+          rc.res?.off?.("close", abort);
+        }
+      }
+      if (rc.method === "GET") {
+        rc.json(200, {
+          tools: grant.tools.map((tool) => ({
+            id: tool.id,
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          })),
+        });
+        return true;
+      }
+      if (rc.method !== "POST") {
+        rc.json(405, { error: { code: "invalid-input", message: "GET or POST required" } });
+        return true;
+      }
+      const body = await rc.body();
+      const id = typeof body.id === "string" ? body.id : "";
+      if (!id) {
+        rc.json(400, { error: { code: "invalid-input", message: "tool id is required" } });
+        return true;
+      }
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      rc.req.once?.("aborted", abort);
+      rc.res?.once?.("close", abort);
+      try {
+        const input = (body.arguments ?? {}) as JsonObject;
+        const outcome = await invoke(
+          token!,
+          grant,
+          id,
+          input,
+          controller.signal,
+          runtimeSessionId(body.runtimeSessionId),
+        );
+        if (outcome && !controller.signal.aborted && !rc.req.aborted && !rc.res?.destroyed) {
+          rc.json(outcome.status, outcome.body);
+        }
+        return true;
+      } finally {
+        rc.req.off?.("aborted", abort);
+        rc.res?.off?.("close", abort);
+      }
+    },
+  };
+}
+
+/** JSON Schema writeOnly fields are execution inputs, never audit content. */
+export function redactToolInput(input: JsonObject, schema: JsonObject): JsonObject {
+  const visit = (value: unknown, definition: unknown): unknown => {
+    if (!definition || typeof definition !== "object" || Array.isArray(definition)) return value;
+    const rule = definition as Record<string, unknown>;
+    if (rule.writeOnly === true) return "[redacted]";
+    if (Array.isArray(value)) return value.map((item) => visit(item, rule.items));
+    if (!value || typeof value !== "object") return value;
+    const properties = rule.properties as Record<string, unknown> | undefined;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item, properties?.[key])]));
+  };
+  return visit(input, schema) as JsonObject;
+}

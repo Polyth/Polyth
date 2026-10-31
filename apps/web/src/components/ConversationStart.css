@@ -1,0 +1,56 @@
+/* Choosing conversation messages for an agent session. The entry action and
+   the "N selected" bar live in the composer dock (styles.css); here are the
+   selectable rows and the start dialog's quoted sources. */
+.person-message.is-selectable.is-selecting {
+  cursor: pointer;
+  margin-inline: calc(-1 * var(--space-2));
+  padding: var(--space-1) var(--space-2);
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.person-message.is-selecting.is-selected { background: var(--accent-wash); }
+@media (hover: hover) {
+  .person-message.is-selecting:not(.is-selected):hover { background: var(--surface-overlay-hover); }
+}
+.person-message.is-selecting:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+/* While choosing, a round check leads every row, beside its bubble. */
+.person-message > .person-message-check {
+  grid-area: check;
+  align-self: center;
+  margin-inline-end: var(--space-3);
+  border-radius: var(--radius-round);
+}
+.person-message.is-selected .person-message-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* What the agent will receive, quoted in the start dialog. */
+.conversation-start-sources {
+  display: grid;
+  gap: var(--space-2);
+  max-block-size: 30vh;
+  overflow-y: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--sunken);
+}
+.conversation-start-source {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--border-soft);
+}
+.conversation-start-source-author { color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; }
+.conversation-start-source-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  line-height: var(--font-meta-lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}

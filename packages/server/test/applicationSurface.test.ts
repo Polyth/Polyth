@@ -1,0 +1,120 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import {
+  browserReachableHttpOrigin,
+  createServerApplicationSurface,
+} from "../src/applicationSurface.ts";
+
+test("controlled Browser self-origins follow listener lifetime and strict UI authentication", async () => {
+  const listener = createServer((_request, response) => response.end("ok"));
+  let authRequired = false;
+  const surface = createServerApplicationSurface({
+    localTrustedDeployment: true,
+    hostname: "0.0.0.0",
+    listener: () => listener,
+    authenticationRequired: () => authRequired,
+    localhostAuthOptional: false,
+  });
+
+  assert.deepEqual(surface.controlledBrowserSelfOrigins(), [], "not exposed before listener/auth readiness");
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  const address = listener.address();
+  assert.ok(address && typeof address !== "string");
+  assert.deepEqual(surface.controlledBrowserSelfOrigins(), [], "auth-off loopback must not inherit owner authority");
+  authRequired = true;
+  assert.deepEqual(surface.controlledBrowserSelfOrigins(), [`http://127.0.0.1:${address.port}`]);
+  authRequired = false;
+  assert.deepEqual(surface.controlledBrowserSelfOrigins(), [], "an existing Browser rechecks live auth state");
+  authRequired = true;
+
+  const closed = once(listener, "close");
+  listener.close();
+  assert.deepEqual(surface.controlledBrowserSelfOrigins(), [], "listener close revokes the origin before port reuse");
+  await closed;
+
+  const live = createServer((_request, response) => response.end("ok"));
+  live.listen(0, "127.0.0.1");
+  await once(live, "listening");
+  const bypassed = createServerApplicationSurface({
+    localTrustedDeployment: true,
+    hostname: "127.0.0.1",
+    listener: () => live,
+    authenticationRequired: () => true,
+    localhostAuthOptional: true,
+  });
+  assert.deepEqual(bypassed.controlledBrowserSelfOrigins(), [], "localhost bypass is ambient authority");
+
+  const hosted = createServerApplicationSurface({
+    localTrustedDeployment: false,
+    hostname: "127.0.0.1",
+    listener: () => live,
+    authenticationRequired: () => true,
+    localhostAuthOptional: false,
+  });
+  assert.deepEqual(hosted.controlledBrowserSelfOrigins(), [], "hosted tenants get no loopback login primitive");
+  const liveClosed = once(live, "close");
+  live.close();
+  await liveClosed;
+});
+
+test("declared canonical origin is always a self-origin, with the login origin added when eligible", async () => {
+  const listener = createServer((_request, response) => response.end("ok"));
+  listener.listen(0, "127.0.0.1");
+  await once(listener, "listening");
+  const address = listener.address();
+  assert.ok(address && typeof address !== "string");
+
+  const canonical = createServerApplicationSurface({
+    localTrustedDeployment: false,
+    hostname: "127.0.0.1",
+    listener: () => listener,
+    authenticationRequired: () => false,
+    localhostAuthOptional: true,
+    canonicalOrigin: "https://polyth.example.com/",
+  });
+  assert.deepEqual(
+    canonical.controlledBrowserSelfOrigins(),
+    ["https://polyth.example.com"],
+    "operator-declared canonical origin needs no listener or auth exception",
+  );
+
+  const combined = createServerApplicationSurface({
+    localTrustedDeployment: true,
+    hostname: "127.0.0.1",
+    listener: () => listener,
+    authenticationRequired: () => true,
+    localhostAuthOptional: false,
+    canonicalOrigin: "https://polyth.example.com",
+  });
+  assert.deepEqual(combined.controlledBrowserSelfOrigins(), [
+    "https://polyth.example.com",
+    `http://127.0.0.1:${address.port}`,
+  ]);
+
+  const invalid = createServerApplicationSurface({
+    localTrustedDeployment: true,
+    hostname: "127.0.0.1",
+    listener: () => listener,
+    authenticationRequired: () => false,
+    localhostAuthOptional: false,
+    canonicalOrigin: "not a url",
+  });
+  assert.deepEqual(invalid.controlledBrowserSelfOrigins(), []);
+
+  const closed = once(listener, "close");
+  listener.close();
+  await closed;
+});
+
+test("browser-reachable listener origins normalize wildcards and IPv6 exactly", () => {
+  assert.equal(browserReachableHttpOrigin(undefined, 4400), "http://127.0.0.1:4400");
+  assert.equal(browserReachableHttpOrigin("0.0.0.0", 4400), "http://127.0.0.1:4400");
+  assert.equal(browserReachableHttpOrigin("::", 4400), "http://[::1]:4400");
+  assert.equal(browserReachableHttpOrigin("::1", 4400), "http://[::1]:4400");
+  assert.equal(browserReachableHttpOrigin("localhost", 4400), "http://localhost:4400");
+  assert.equal(browserReachableHttpOrigin("127.0.0.1", 0), null);
+  assert.equal(browserReachableHttpOrigin("bad host", 4400), null);
+});

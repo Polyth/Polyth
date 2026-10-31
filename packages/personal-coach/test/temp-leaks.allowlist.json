@@ -1,0 +1,16 @@
+[
+  "capabilities.test.ts",
+  "home.test.ts",
+  "insights.test.ts",
+  "migration.test.ts",
+  "onboarding.test.ts",
+  "personIsolation.test.ts",
+  "proposalRoutes.test.ts",
+  "proposals.test.ts",
+  "reminderRoutes.test.ts",
+  "reset.test.ts",
+  "resetRoute.test.ts",
+  "routes.test.ts",
+  "sessionRoute.test.ts",
+  "store.test.ts"
+]

@@ -1,0 +1,46 @@
+{
+  "name": "@polyth/browser",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./chromium": "./src/chromium.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Browser",
+      "description": "A shared internal browser for users, agents, and element context.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "globe",
+      "hasSettings": true,
+      "category": "research",
+      "projectAffinity": {
+        "directions": [
+          "research",
+          "engineering"
+        ],
+        "recommended": true
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0",
+    "playwright-core": "^1.62.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@polyth/goals": "0.1.0"
+  }
+}

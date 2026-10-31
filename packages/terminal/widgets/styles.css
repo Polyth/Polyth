@@ -1,0 +1,540 @@
+/* Package-owned terminal web styles. */
+.term-view {
+container: terminal-workspace / inline-size;
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+}
+.term-initial-container {
+position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
+}
+.term-initial-container .term-initial-size {
+position: absolute; inset: 0; visibility: hidden; pointer-events: none;
+}
+.term-tabs {
+display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-3);
+  background: var(--panel); border-bottom: 1px solid var(--surface-divider);
+}
+.term-repository-scope {
+flex: 0 0 auto; max-width: 45%; min-width: 0;
+}
+.term-tab-group {
+display: inline-flex; align-items: stretch; min-height: var(--control-h-sm);
+  border: 1px solid var(--control-border); border-radius: var(--radius-control); overflow: hidden;
+}
+.term-tab-group.active {
+border-color: var(--accent-line); background: var(--accent-wash);
+}
+.term-tab-group:not(.active):hover {
+background: var(--elevated);
+}
+.term-tab {
+border: none; border-radius: 0; color: var(--muted);
+  min-height: var(--control-h-sm); padding: 0 var(--control-pad-x-sm);
+  font-size: var(--font-meta); font-family: var(--mono); background: transparent;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+@media (hover: hover) {
+  .term-tab:hover:where(:not(:disabled)) {
+  background: transparent; border-color: transparent;
+  }
+}
+.term-tab.active {
+color: var(--accent); background: transparent;
+}
+.term-tab-group > .term-tab:active:not(:disabled) {
+background: transparent; border-color: transparent; transform: none;
+}
+.term-connection {
+width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%;
+  background: var(--faint);
+}
+.term-connection.connected {
+background: var(--green);
+}
+.term-connection.connecting,
+.term-connection.reconnecting {
+background: var(--amber);
+  animation: term-connect-pulse calc(var(--motion-surface) * 5) var(--motion-ease) infinite;
+}
+.term-tab-group > .term-tab-x {
+border: none; border-left: 1px solid var(--border-soft); border-radius: 0;
+  align-self: stretch; width: 30px; min-width: 30px;
+  height: auto; min-height: var(--control-h-sm);
+  color: var(--muted); padding: 0; font-size: var(--font-meta); background: transparent;
+}
+.term-tab-x svg,
+.term-new svg {
+width: var(--icon-sm); height: var(--icon-sm);
+}
+@media (hover: hover) {
+  .term-tab-group > .term-tab-x:hover:not(:disabled) {
+  color: var(--red); background: transparent; border-color: var(--border-soft);
+  }
+}
+.term-tab-group > .term-tab-x:active:not(:disabled) {
+background: transparent; transform: none;
+}
+.term-tab-rename {
+border: none; border-radius: 0; width: 120px;
+  padding: 5px 10px; font-size: var(--font-meta); font-family: var(--mono);
+  background: var(--elevated); color: var(--text);
+}
+.term-tab-dead {
+color: var(--muted); font-size: var(--font-meta);
+}
+.term-new {
+flex: none;
+}
+.term-actions {
+display: flex; align-items: center; gap: var(--space-1);
+}
+.term-pane {
+position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--term-bg);
+}
+.term-mobile-input {
+/* Native mobile keyboards only open for editable controls. Keep this bridge
+   measurable and focused without adding a second visible input or caret. */
+position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0;
+  border: 0; opacity: 0; pointer-events: none; caret-color: transparent;
+}
+.term-body {
+--term-pad-block: 8px; --term-pad-start: 12px;
+flex: 1; margin: 0; border: 0; border-radius: 0; background: var(--term-bg);
+  font-family: var(--mono); font-size: var(--terminal-font-size, 14px);
+  font-variant-ligatures: none; letter-spacing: 0;
+  line-height: 1.4; color: var(--term-fg);
+  padding: var(--term-pad-block) 0 var(--term-pad-block) var(--term-pad-start);
+  overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain; outline: none; cursor: text;
+  -webkit-user-select: none; user-select: none;
+}
+.term-body:focus-visible {
+outline: 2px solid var(--focus-ring); outline-offset: -2px;
+}
+.term-body.touch-input {
+/* Touch selects through the terminal's own selection (long press, handles,
+   selection bar); the platform's long-press callout stays out of it. */
+-webkit-touch-callout: none;
+}
+.term-body.reverse {
+filter: invert(1) hue-rotate(180deg);
+}
+.term-sizer {
+position: relative;
+}
+.term-measure {
+position: absolute; display: inline-block; visibility: hidden; pointer-events: none;
+  min-width: 0; width: max-content; white-space: pre;
+}
+.term-row {
+position: absolute; left: 0; right: 0; white-space: pre;
+}
+.term-row-sel,
+.term-row-find {
+position: absolute; top: 0; bottom: 0; pointer-events: none;
+}
+.term-row-sel {
+background: var(--term-sel);
+}
+.term-row-find {
+background: var(--term-find); border-radius: calc(2px * var(--corner-radius-scale));
+}
+.term-row-find.cur {
+background: var(--term-find-cur); outline: 1px solid var(--accent);
+}
+/* Touch selection chrome. The layer reaches into the output's padding and
+   clips there; the origin restores row coordinates inside it. */
+.term-select-layer {
+position: absolute; z-index: 3; overflow: hidden; pointer-events: none;
+  inset: calc(-1 * var(--term-pad-block)) 0 calc(-1 * var(--term-pad-block)) calc(-1 * var(--term-pad-start));
+}
+.term-select-origin {
+position: absolute; top: var(--term-pad-block); left: var(--term-pad-start);
+}
+/* A stem the height of the row with a knob above the start and below the
+   end, centred in a finger-sized hit area. */
+.term-select-handle {
+position: absolute; width: var(--tap, 44px); margin-left: calc(var(--tap, 44px) / -2);
+  pointer-events: auto; touch-action: none; cursor: grab;
+}
+.term-select-handle::before,
+.term-select-handle::after {
+content: ""; position: absolute; left: 50%; background: var(--accent);
+}
+.term-select-handle::before {
+width: 2px; margin-left: -1px;
+}
+.term-select-handle::after {
+width: 11px; height: 11px; margin-left: -5.5px; border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--term-bg);
+}
+.term-select-handle.start::before { top: 18px; bottom: 0; }
+.term-select-handle.start::after { top: 8px; }
+.term-select-handle.end::before { top: 0; bottom: 18px; }
+.term-select-handle.end::after { bottom: 8px; }
+.term-select-bar {
+position: absolute; left: 0; top: 0; z-index: 4;
+  display: flex; align-items: center; padding: 2px;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--elevated); box-shadow: var(--shadow-lg);
+  font-family: var(--ui-font-family); line-height: normal; white-space: nowrap; cursor: default;
+  transition: opacity var(--motion-fast) var(--motion-ease), visibility var(--motion-fast);
+}
+.term-select-bar[data-hidden] {
+opacity: 0; visibility: hidden; pointer-events: none;
+}
+.term-select-bar > .ui-btn + .ui-btn {
+position: relative;
+}
+.term-select-bar > .ui-btn + .ui-btn::before {
+content: ""; position: absolute; left: 0; top: 25%; bottom: 25%;
+  border-left: 1px solid var(--border-soft);
+}
+.term-row .tb {
+font-weight: 700;
+}
+.term-row .td {
+opacity: 0.55;
+}
+.term-row .ti {
+font-style: italic;
+}
+.term-row .tu {
+text-decoration: underline; text-underline-offset: 2px;
+}
+.term-row .ts {
+text-decoration: line-through;
+}
+.term-row .tu.ts {
+text-decoration: underline line-through;
+}
+.term-row .tk {
+animation: blink 1s steps(1) infinite;
+}
+.term-row .th {
+color: transparent !important;
+}
+.term-row .to {
+text-decoration: overline;
+}
+.term-row .tlink {
+text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer;
+}
+.term-row .tlink:hover {
+color: var(--term-link); text-decoration: underline;
+}
+.term-cursor {
+position: absolute; pointer-events: none; z-index: 2;
+  background: var(--term-cursor); mix-blend-mode: normal; opacity: 0.85;
+}
+.term-cursor.blink {
+animation: blink 1.1s steps(1) infinite;
+}
+.term-cursor.style-bar {
+width: 2px !important;
+}
+.term-cursor.style-underline {
+top: auto; height: 2px !important; margin-top: -2px;
+}
+.term-cursor.unfocused {
+background: transparent; outline: 1px solid var(--term-cursor); opacity: 0.7; animation: none;
+}
+.term-pane.bell::after {
+content: ""; position: absolute; inset: 0; background: var(--term-fg);
+  opacity: 0.12; pointer-events: none; animation: term-bell var(--motion-normal) var(--motion-ease) forwards;
+}
+/* Zero-height flex item between the output and the touch chrome: the pill
+   positions against the output's bottom edge, not the pane's, so it never sits
+   over the bottom keys. */
+.term-follow-anchor {
+position: relative; flex: none; height: 0;
+}
+.term-follow {
+position: absolute; right: 16px; bottom: 14px; z-index: 3;
+box-shadow: var(--shadow-lg);
+}
+.term-search {
+position: absolute; top: 8px; right: 14px; z-index: 4;
+  display: flex; align-items: center; gap: var(--space-1);
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--elevated); padding: 0 var(--space-1); box-shadow: var(--shadow-lg);
+}
+.term-search .ui-input {
+width: 16ch; border: none; background: transparent; color: var(--text);
+  font-size: var(--font-meta); padding: 3px 6px; outline: none;
+}
+.term-search .ui-input.no-match {
+color: var(--red);
+}
+.term-search .term-search-count {
+color: var(--muted); font-size: var(--font-meta); min-width: 32px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.term-search button[aria-pressed="true"] {
+color: var(--accent); background: var(--accent-wash);
+}
+.term-exit-note {
+position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3;
+  border: 1px solid var(--border); border-radius: var(--radius-round); background: var(--elevated);
+  color: var(--muted); font-size: var(--font-meta); padding: 4px 12px; pointer-events: none;
+}
+@container terminal-workspace (max-width: 520px) {
+.term-tabs {
+overflow-x: auto; flex-wrap: nowrap;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+
+.term-tabs::-webkit-scrollbar {
+display: none;
+}
+
+.term-tab-group {
+flex-shrink: 0;
+}
+
+.term-new,
+.term-tab-x {
+min-width: 40px; min-height: 40px;
+    display: inline-grid; place-items: center;
+}
+}
+@media (pointer: coarse) {
+.term-search input {
+font-size: var(--font-input);
+}
+}
+@container terminal-workspace (max-width: 480px) {
+.term-search input { font-size: var(--font-input); }
+}
+.term-view,
+.term-tabs,
+.term-pane {
+min-width: 0; max-width: 100%;
+}
+.term-view {
+overflow: hidden;
+}
+.term-tabs {
+overflow: hidden;
+}
+/* Scroll behavior comes from the core .ui-scroll-tabs primitive. */
+.term-tab-list {
+display: flex; align-items: stretch; gap: 4px; flex: 1; overflow-y: hidden;
+}
+.term-tab-group {
+flex: none;
+}
+.term-actions {
+flex: none;
+}
+.term-body {
+max-width: 100%; overflow-x: auto; overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+.term-sizer {
+min-width: 100%;
+}
+.term-row {
+right: auto; width: max-content; min-width: 100%;
+}
+@container terminal-workspace (max-width: 520px) {
+.term-tabs {
+padding-inline: 6px;
+}
+
+.term-tab,
+.term-tab-x,
+.term-actions button {
+min-height: var(--tap);
+}
+
+.term-tab {
+max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.term-tab-group > .term-tab-x {
+width: var(--tap); padding: 0;
+}
+
+.term-actions button {
+width: var(--tap); height: var(--tap);
+}
+
+.term-search {
+left: 8px; right: 8px; display: flex; flex-wrap: nowrap;
+    gap: var(--space-1); padding-inline: var(--space-1);
+}
+
+.term-search .ui-input {
+flex: 1 1 12ch; width: auto; min-width: 0; min-height: var(--tap);
+}
+
+.term-search .term-search-count {
+flex: 0 1 auto; min-width: 0;
+}
+
+.term-search button {
+flex: 0 0 var(--tap); width: var(--tap); height: var(--tap); padding: 0;
+}
+}
+@media (pointer: coarse) {
+.term-tab,
+.term-tab-x,
+.term-actions button {
+min-height: var(--tap);
+}
+
+.term-tab-group > .term-tab-x,
+.term-actions button {
+width: var(--tap); height: var(--tap);
+}
+
+/* A full-cell block cursor is disproportionate at phone text sizes and can
+   obscure the character being entered. Preserve underline cursors, while
+   rendering block/bar cursor modes as a conventional thin insertion bar. */
+.term-cursor:not(.style-underline) { width: 2px !important; }
+
+.term-view {
+/* Give the output area room for terminal tabs, the mobile controls, and a
+   useful number of rows. The canvas itself remains the scroll container. */
+min-block-size: min(26rem, calc(var(--visual-vh, 100dvh) - 8rem));
+}
+}
+
+/* Touch chrome: Termux-style extra keys and the text-input row under the
+   output. "auto" shows it for coarse pointers, "on" everywhere; "off" keeps
+   only the menu/keyboard pair, floating over the output's bottom edge. The
+   hosting layer owns the home-indicator and keyboard clearance. */
+.term-touch-chrome {
+display: none; position: relative; flex: none; flex-direction: column;
+  border-top: 1px solid var(--border-soft); background: var(--term-bg);
+}
+.term-pane[data-extra-keys="on"] .term-touch-chrome {
+display: flex;
+}
+@media (pointer: coarse) {
+  .term-pane:is([data-extra-keys="auto"], [data-extra-keys="off"]) .term-touch-chrome { display: flex; }
+  .term-pane[data-extra-keys="off"] .term-touch-chrome:not([data-text-input]) { border-top: 0; }
+  .term-pane[data-extra-keys="off"] .term-extra-keys-grid { display: none; }
+  .term-pane[data-extra-keys="off"] .term-extra-keys {
+    position: absolute; inset-inline-end: var(--space-2); bottom: calc(100% + var(--space-2));
+    border: 1px solid var(--border-soft); border-radius: var(--radius-round);
+    background: var(--elevated); box-shadow: var(--shadow-lg);
+  }
+  .term-pane[data-extra-keys="off"] .term-extra-keys-trailing { flex-direction: row; border-inline-start: 0; }
+  .term-pane[data-extra-keys="off"] .term-follow { inset-inline-end: calc(var(--tap) * 2 + var(--space-4)); }
+}
+.term-extra-keys {
+display: flex; align-items: stretch; min-width: 0;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  touch-action: none;
+}
+.term-extra-keys-grid {
+display: flex; flex-direction: column; flex: 1; min-width: 0;
+}
+.term-extra-keys-row {
+display: grid; min-width: 0;
+}
+.term-extra-key {
+position: relative; display: grid; place-items: center; min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min)); padding: 0 2px;
+  border: 0; border-radius: 0; background: transparent; color: var(--term-fg);
+  font-family: var(--mono); font-size: var(--font-meta); font-weight: 600; letter-spacing: 0;
+  white-space: nowrap; overflow: visible; cursor: pointer;
+}
+.term-extra-key-label {
+max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.term-extra-key[data-glyph] {
+font-size: var(--font-label);
+}
+.term-extra-key[data-pressed] {
+background: var(--accent-wash);
+}
+.term-extra-key[data-level="1"] {
+color: var(--accent);
+}
+.term-extra-key[data-level="1"] .term-extra-key-label {
+text-decoration: underline; text-underline-offset: 3px;
+}
+.term-extra-key[data-level="2"] {
+color: var(--accent); background: var(--accent-wash); box-shadow: inset 0 -2px 0 var(--accent);
+}
+.term-extra-key:focus-visible {
+outline: 2px solid var(--focus-ring); outline-offset: -2px;
+}
+/* The swipe-up alternate, as on a phone keyboard's long-press hint. */
+.term-extra-key-alt {
+position: absolute; top: 1px; inset-inline-end: 3px;
+  color: var(--muted); font-size: calc(var(--font-meta) * .72); font-weight: 400; line-height: 1;
+  pointer-events: none;
+}
+.term-extra-key-popup {
+position: absolute; bottom: calc(100% + var(--space-1)); left: 50%; transform: translateX(-50%); z-index: 4;
+  min-width: var(--tap); padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent-line); border-radius: var(--radius-control);
+  background: var(--elevated); color: var(--accent); box-shadow: var(--shadow-lg);
+  font-size: var(--font-label); text-align: center; pointer-events: none;
+}
+.term-extra-keys-trailing {
+display: flex; flex-direction: column; flex: none; border-inline-start: 1px solid var(--border-soft);
+}
+.term-extra-keys-trailing > .ui-icon-btn {
+flex: 1; width: max(var(--control-h-sm), var(--hit-min)); height: auto;
+  min-height: max(var(--control-h-sm), var(--hit-min)); border-radius: 0; color: var(--term-fg);
+}
+.term-text-input {
+display: flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.term-text-input .ui-input {
+flex: 1; min-width: 0; font-family: var(--mono);
+}
+@media (pointer: coarse) {
+  .term-text-input .ui-input { font-size: var(--font-input); }
+}
+@media (pointer: coarse) {
+  /* A ring around the whole output reads as an error state on a phone; the
+     cursor's focused and unfocused styles already show where typing goes. */
+  .term-body:focus-visible { outline: none; }
+}
+/* Screen-owning programs (vim, less, htop) take touch drags as scroll input. */
+.term-body.app-scroll.touch-input {
+touch-action: none;
+}
+.term-dialog-note {
+margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--font-meta);
+}
+.term-dialog-error {
+margin: var(--space-2) 0 0; color: var(--red); font-size: var(--font-meta);
+}
+.term-extra-keys-source {
+width: 100%; font-family: var(--mono);
+}
+.term-url-list {
+margin: 0; padding: 0; list-style: none;
+}
+.term-url-row {
+display: flex; align-items: center; gap: var(--space-1); min-height: var(--tap);
+  border-bottom: 1px solid var(--border-soft);
+}
+.term-url-text {
+flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: var(--font-meta);
+}
+
+/* Keyframes moved from core: terminal-only status animations. */
+@keyframes term-connect-pulse { 50% { opacity: 0.35; } }
+@keyframes term-bell { to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .term-view .term-connection,
+  .term-view .term-row .tk,
+  .term-view .term-cursor {
+    animation: none;
+  }
+  .term-view .term-pane.bell::after {
+    display: none;
+  }
+  .term-view .term-select-bar {
+    transition: none;
+  }
+}

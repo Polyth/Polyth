@@ -1,0 +1,35 @@
+{
+  "name": "@polyth/custom-titles",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./settings": "./src/settings.ts",
+    "./title": "./src/title.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Custom Titles",
+      "description": "Reliable generated session titles with configurable model, language, and style.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "edit",
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

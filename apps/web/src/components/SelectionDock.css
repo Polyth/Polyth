@@ -1,0 +1,210 @@
+/* Touch selection dock (SelectionDock.tsx). The frame is the measured
+   interaction frame (it ends at --layer-frame-bottom, so an open keyboard
+   lifts the dock with the composer); only the card itself takes pointers.
+   Motion: the card rises on `translate`/`scale`/`opacity` while a drag owns
+   `transform`, so a finger never fights a running animation. Reduced motion
+   and low-resource mode are stopped globally (styles.css). Glass and its
+   fallbacks share the selection-menu rules in styles.css. */
+.selection-dock-frame {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  height: var(--layer-frame-bottom, var(--visual-frame-bottom, 100dvh));
+  z-index: var(--z-popover);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding:
+    0
+    max(var(--space-3), var(--safe-right))
+    max(var(--space-3), var(--safe-bottom))
+    max(var(--space-3), var(--safe-left));
+  pointer-events: none;
+}
+
+.selection-dock {
+  --selection-dock-drag: 0px;
+  /* A larger card than the desktop toolbar, with thumb targets over body
+     text: floor the shared selection material higher so the transcript
+     never reads through the labels. */
+  --selection-menu-glass-fill: calc(92% + var(--material-glass-fill) * 0.2);
+  --selection-menu-glass-edge: calc(86% + var(--material-glass-edge) * 0.3);
+  --selection-menu-glass-blur: calc(var(--material-glass-blur) * 3.2);
+  pointer-events: auto;
+  position: relative;
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-2);
+  border: 1px solid var(--material-glass-border);
+  border-radius: calc(var(--radius-sheet) * 1.5);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-lg);
+  color: var(--text);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  transform: translate3d(0, var(--selection-dock-drag), 0);
+  transition: transform var(--motion-surface) var(--motion-ease);
+  animation: selection-dock-rise var(--motion-surface) var(--motion-ease) backwards;
+  will-change: transform, translate, opacity;
+}
+.selection-dock[data-dragging="true"] { transition: none; }
+.selection-dock[data-phase="closing"] {
+  pointer-events: none;
+  animation: selection-dock-sink var(--motion-surface) var(--motion-ease) both;
+}
+/* Swiped away: the card keeps the finger's offset and simply continues down. */
+.selection-dock[data-phase="closing"][data-exit="drag"] { animation-name: selection-dock-drag-out; }
+
+.selection-dock-grabber {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: var(--space-2) auto 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+  transition: background-color var(--motion-fast) var(--motion-ease), width var(--motion-fast) var(--motion-ease);
+}
+.selection-dock[data-dragging="true"] .selection-dock-grabber {
+  width: 44px;
+  background: color-mix(in srgb, var(--text) 40%, transparent);
+}
+
+/* The quote preview: an accent rule and the selection itself, two lines max.
+   It refreshes per frame while the handles move, without layout shifts. */
+.selection-dock-preview {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-height: calc(var(--font-meta) * 1.4 * 2);
+  padding: var(--space-1) var(--space-2) 0;
+}
+.selection-dock-preview::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: .85;
+}
+.selection-dock-preview-text {
+  margin: 0;
+  min-width: 0;
+  align-self: center;
+  font-size: var(--font-meta);
+  line-height: 1.4;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.selection-dock-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+.selection-dock-action {
+  appearance: none;
+  min-width: 0;
+  min-height: 64px;
+  margin: 0;
+  padding: var(--space-1) 2px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1.15;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  animation: selection-dock-action-in var(--motion-surface) var(--motion-ease) backwards;
+  animation-delay: calc(40ms + var(--selection-dock-i, 0) * 30ms);
+}
+.selection-dock-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.selection-dock-action:disabled { opacity: .42; cursor: default; }
+.selection-dock-action-icon {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 6%, transparent);
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease);
+}
+.selection-dock-action[data-primary="true"] .selection-dock-action-icon {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.selection-dock-action:not(:disabled):active .selection-dock-action-icon {
+  transform: scale(.88);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.selection-dock-action[data-primary="true"]:not(:disabled):active .selection-dock-action-icon {
+  background: var(--accent-hi);
+}
+.selection-dock-action-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+/* Copy outcome: the glyph remounts and pops into the confirmed state. */
+.selection-dock-action[data-state="done"] .selection-dock-action-icon {
+  background: color-mix(in srgb, var(--success) 22%, transparent);
+  color: var(--success);
+  animation: selection-dock-pop var(--motion-surface) var(--motion-ease);
+}
+.selection-dock-action[data-state="failed"] .selection-dock-action-icon {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+  animation: selection-dock-pop var(--motion-surface) var(--motion-ease);
+}
+
+@keyframes selection-dock-rise {
+  from { translate: 0 calc(100% + var(--space-4)); scale: .96; opacity: 0; }
+  to { translate: 0 0; scale: 1; opacity: 1; }
+}
+@keyframes selection-dock-sink {
+  from { translate: 0 0; scale: 1; opacity: 1; }
+  to { translate: 0 calc(50% + var(--space-4)); scale: .97; opacity: 0; }
+}
+@keyframes selection-dock-drag-out {
+  from { translate: 0 0; opacity: 1; }
+  to { translate: 0 calc(100% + var(--space-4)); opacity: 0; }
+}
+@keyframes selection-dock-action-in {
+  from { translate: 0 6px; scale: .92; opacity: 0; }
+  to { translate: 0 0; scale: 1; opacity: 1; }
+}
+@keyframes selection-dock-pop {
+  from { scale: .6; }
+  to { scale: 1; }
+}

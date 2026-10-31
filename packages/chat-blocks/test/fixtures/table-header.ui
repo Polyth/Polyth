@@ -1,0 +1,5 @@
+table Vulnerabilities · sort=-Severity
+- Package | Severity | Fixed in
+- lodash | 7.5 | `4.17.21`
+- minimist | 9.8 | 1.2.6
+- qs \| legacy | 5.3 | https://example.com/qs

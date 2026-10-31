@@ -1,0 +1,249 @@
+/* The document also contains portaled modals and the native connection screen.
+   Allow scrolling, but not pinch/double-tap zoom, even when viewport scale
+   directives are ignored. Desktop mouse/keyboard zoom is unchanged. */
+@media (any-pointer: coarse) {
+  html {
+    touch-action: pan-x pan-y;
+  }
+}
+
+/* The measured interaction frame and the decorative canvas have different
+   lifetimes. Never grow the flex layout just to paint a safe-area strip.
+   This sheet is the final mobile viewport owner (see docs/dev/mobile-viewport.md). */
+@media (max-width: 1024px), (max-height: 480px) and (pointer: coarse) {
+  /* The shell is an interaction frame, not a document scroller: the document
+     must have no scrollable overflow, or a focused editor lets Safari pan the
+     whole shell off the top.
+     Do not size this chain from the viewport while the keyboard can be open.
+     Safari resolves `height: 100%`,
+     `100vh` and `100dvh` — and the containing block of a `position: fixed`
+     box — against the LARGE viewport, which the on-screen keyboard does not
+     shrink. Measured on iOS 26 with `innerHeight` down to
+     428px, `html { height: 100% }` still computed to 775px, leaving 347px of
+     scroll range that Safari immediately panned to the end — `sY 347`,
+     `root -347..81`, composer at the top of the screen.
+     The measured frame is the only height that tracks the keyboard, so every
+     box from the document root to `.app` takes its BOTTOM edge
+     (`--visual-frame-bottom` = pan offset + visible height). The bottom edge,
+     not the height alone: when Safari pans the visual viewport down to reveal
+     the composer above the keyboard, an app bounded only by the visible height
+     stays at the document origin and the rest of the panned band exposes the
+     canvas — reported as a strip that covers most of the screen while typing.
+     The pan offset is `visualViewport.offsetTop`, never the document-level
+     `pageTop`/`scrollY`, so the box stays within the layout viewport and the
+     document keeps no scroll range. Internal timelines and
+     sheets own their scrolling explicitly. The one exception is the installed
+     iOS web app filling `100vh` while the keyboard is closed, below.
+     `--visual-frame-top` is still published for a real visual-viewport pan,
+     but nothing consumes it until a device measurement shows a non-zero
+     offsetTop without document scroll: a margin would re-create the scroll
+     range, and a transform would turn `#root` into the containing block of
+     every fixed overlay inside it. */
+  /* The chain ends on `--layer-frame-bottom`: the measured frame's lower edge
+     plus, while the keyboard is open in a compact Safari frame,
+     WebKit's text-input accessory (the floating form assistant above the
+     keyboard). WebKit keeps that accessory inside the keyboard frame but never
+     reports it to the page, so the measured band ends above the space iOS
+     still leaves visible, and a phone composer floated the difference above
+     the keyboard — reported as a large gap between the composer and the
+     keyboard. Engines that resize the layout viewport with the keyboard
+     (Chrome/Android) already end the frame at the keyboard, and so does the
+     native iOS app (its plugin hides the accessory and ends the WebView at the
+     keyboard). mobileViewport.ts adds the band (`--keyboard-accessory-band`,
+     tokens.css) in that one case and publishes the sum; deciding it here,
+     with rules on <html> and <body> that reacted to the body's keyboard
+     attributes, restyled the whole document on every keyboard state change. The canvas keeps painting
+     the rest of that band, so nothing here can leave an unpainted strip. */
+  html:not([data-desktop-app]),
+  body:not(.desktop-app),
+  body:not(.desktop-app) #root {
+    height: var(--layer-frame-bottom, var(--visual-frame-bottom, 100dvh));
+    max-height: var(--layer-frame-bottom, var(--visual-frame-bottom, 100dvh));
+    min-height: 0;
+  }
+  html:not([data-desktop-app]),
+  body:not(.desktop-app) {
+    /* `hidden` still creates a scroll container in Safari. During keyboard
+       focus handoff Safari can pan that container even when its overflow is
+       clipped; `clip` removes the scroll boundary entirely. */
+    overflow: clip;
+    overscroll-behavior: none;
+  }
+  body:not(.desktop-app) #root {
+    overflow: clip;
+  }
+
+  body:not(.desktop-app) #root > .app {
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+  }
+
+  /* The chain never transitions. The iOS app's WebView is resized only after
+     its keyboard has finished sliding (plus 0.2 s); the composer dock rides
+     the keyboard on the compositor meanwhile (keyboardRide.ts) and the frame
+     is committed once, when the keyboard has landed. Easing these heights
+     re-laid and — on <html>/<body> — restyled the whole app every time. */
+
+  /* Installed iOS web apps have a long-standing WebKit geometry bug: the
+     dynamic viewport (and `window.innerHeight` with it) can stop above the
+     Home-indicator canvas of the physical screen, leaving a permanent strip
+     below `.app` that no measurement can reach. iOS standalone historically
+     paints correctly at the layout viewport (`100vh`), so the installed app
+     fills that box while the keyboard is closed — the measured frame remains
+     the only owner once the keyboard is open. `data-keyboard-frame` is
+     published by mobileViewport.ts with the frame, before paint, and the rule
+     is scoped to WebKit standalone so Android Chrome cannot grow the document
+     past its WebView. */
+  @supports (-webkit-touch-callout: none) {
+    @media (display-mode: standalone) {
+      html:not([data-keyboard-frame="open"]) body:not(.desktop-app),
+      html:not([data-keyboard-frame="open"]) body:not(.desktop-app) #root {
+        min-height: 100vh;
+      }
+    }
+  }
+
+  /* The wallpaper below a keyboard-short frame is painted by the decorative
+     band layer next to the root wallpaper rules in styles.css; nothing in
+     this sheet is fixed (see docs/dev/mobile-viewport.md). */
+}
+
+/* Full-height layers (Settings, the phone navigator, module/panel layers and
+   the narrow drawer) are `position: fixed`, so they are laid out against the
+   LAYOUT viewport. While the keyboard is open the user only sees the visual
+   band [--visual-frame-top, --layer-frame-bottom]: Safari pans that band down
+   inside the unresized layout to reveal a focused field, so a layer pinned to
+   `top: 0` (or sized by `--visual-vh` from there) slides out of view and lets
+   the chat show through below it. A native-resize WebView instead shrinks the
+   layout itself and also publishes `--keyboard-inset`, which a layer must not
+   subtract a second time. The frame variables are correct in both engine
+   models, so while the keyboard is open every such layer takes the band
+   outright: its top at `--visual-frame-top`, its bottom at the same edge the
+   app chain above ends on. `--layer-frame-bottom` (default in tokens.css,
+   published by mobileViewport.ts with the WebKit accessory band included) is
+   that edge, and `mobileViewportLayers.test.ts` pins every layer's bottom to
+   `#root`'s. With the keyboard closed none of this applies and `inset: 0`
+   still reaches the physical screen edge that no measurement can. */
+@media (max-width: 1024px), (max-height: 480px) and (pointer: coarse) {
+  body:not(.desktop-app)[data-keyboard="open"] :is(.scrim.settings-scrim, .mobile-navigator) {
+    top: var(--visual-frame-top, 0px);
+    bottom: auto;
+    height: calc(var(--layer-frame-bottom) - var(--visual-frame-top, 0px));
+  }
+  /* The shell fills the band-anchored scrim instead of re-deriving its own
+     height from `--visual-vh`, which would stop short of the extended band. */
+  body:not(.desktop-app)[data-keyboard="open"] .scrim.settings-scrim > .settings-shell {
+    max-height: 100%;
+  }
+  @media (max-width: 700px) {
+    body:not(.desktop-app)[data-keyboard="open"] .scrim.settings-scrim > .settings-shell {
+      height: 100%;
+    }
+  }
+}
+
+/* The same contract for the layers that are only fixed on narrow shells. Their
+   own `padding-block-end: max(--safe-bottom, --keyboard-inset)` stays for the
+   closed state; with the keyboard open the layer already ends at the band, so
+   the bottom clearance is dropped rather than subtracted twice (a native-resize
+   WebView measured a 9% scroll area before this). The layers cover the shell
+   header, so the only top clearance is the status bar and notch, which stay
+   at the physical top: `--safe-top`, exactly as in the closed state. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  body:not(.desktop-app)[data-keyboard="open"] :is(
+    .sidebar,
+    .module-view--main,
+    .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> :is(.rail-fullscreen, .panel-sheet))
+  ) {
+    top: var(--visual-frame-top, 0px);
+    bottom: auto;
+    height: calc(var(--layer-frame-bottom) - var(--visual-frame-top, 0px));
+  }
+  body:not(.desktop-app)[data-keyboard="open"] :is(.module-view--main, .rail-fullscreen, .panel-sheet) {
+    padding-block-start: var(--safe-top);
+    padding-block-end: 0;
+  }
+}
+
+/* A bottom sheet that holds a search field (the widget catalog) is pinned with
+   `bottom: 0`, so it sits behind a keyboard that a Safari pan left uncovered in
+   the layout. A percentage `bottom` resolves against the containing block's
+   height, so `100%` minus the band's lower edge is how far that edge is above
+   the containing block's bottom: the whole hidden remainder in a pan, and 0 in
+   a WebView whose layout already ended at the keyboard. The sheet may not grow
+   past the band, and the home-indicator clearance goes with the keyboard. */
+@media (max-width: 700px) {
+  body:not(.desktop-app)[data-keyboard="open"] :is(.widget-workspace > .widget-add-panel, .widget-menu-single) {
+    bottom: calc(100% - var(--layer-frame-bottom));
+    max-height: min(78dvh, 680px, calc(var(--layer-frame-bottom) - var(--visual-frame-top, 0px)));
+    padding-bottom: 10px;
+  }
+}
+
+/* The home-indicator inset belongs to the outer dock once, in both chat
+   states. With a keyboard the already-resized viewport needs only the optical
+   gap, not the full-screen safe area. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* A short keyboard/landscape band hides .hero-body; retain the bottom
+     anchor even when that flex spacer is absent. */
+  .stage-new .hero-dock {
+    margin-block-start: auto;
+  }
+  .conversation-composer-dock {
+    padding-bottom: max(var(--space-1), var(--safe-bottom));
+    animation-name: mobile-chat-bottom-fade;
+    animation-duration: var(--motion-surface);
+    animation-timing-function: var(--motion-ease);
+    animation-fill-mode: both;
+  }
+  body[data-keyboard="open"] .conversation-composer-dock {
+    padding-bottom: 0;
+    /* A dock mounted behind an open keyboard settles at once. Never switch
+       the entrance off by name: restoring the name when the keyboard closed
+       replayed it, and the composer faded in from nothing on every close. */
+    animation-duration: 0s;
+  }
+  /* The home-indicator clearance hands over to the keyboard the moment it
+     sets off (these follow the cheap keyboard state, not the frame): the
+     docks' and the composer's own optical gap alike — an open keyboard gives
+     the phone composer 4px of bottom padding (styles.css). The dock's ride
+     (keyboardRide.ts) starts from where the composer was before the switch,
+     so the switch itself never shows as a jump. */
+  body[data-keyboard="open"] .hero-dock {
+    padding-bottom: var(--space-1);
+  }
+  /* A long draft's editor is capped at 18% of the viewport, but the iOS
+     app's WebView takes the keyboard's size only after the slide (+0.2 s), so
+     an 18dvh cap shrank the engaged card once everything else had settled
+     (~11px on a Pro Max, ~50px on an SE). While the native keyboard drives
+     the frame the cap follows the band the keyboard is going to leave — the
+     Composer publishes it on its own root as `--composer-band`, which only
+     restyles the composer — and eases there on the keyboard's curve. Where
+     the WebView resizes with the keyboard (Android) the band is the dvh it
+     replaces. */
+  /* A docked composer and its transcript are compositor layers while a
+     keyboard ride may start or is running (keyboardRide.ts primes them on a
+     touch or focus): a layer created when the ride starts is painted first
+     and shows the ride late. */
+  [data-keyboard-rider] {
+    will-change: transform;
+  }
+  body[data-keyboard-source="native"] .composer-mobile .composer-card textarea {
+    max-height: min(var(--composer-max-input-height), calc(var(--composer-band, var(--visual-vh, 100dvh)) * .18));
+    transition: border-color var(--motion-fast) var(--motion-ease), max-height var(--motion-keyboard) var(--motion-keyboard-ease);
+  }
+}
+
+/* Bottom fade-in for mobile chat composer dock — mirrors the top-sheet
+   drop animation so the bottom surface rises consistently from beneath. */
+@keyframes mobile-chat-bottom-fade {
+  from {
+    transform: translate3d(0, calc(var(--space-5) * 1), 0) scale(.994);
+    opacity: .68;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}

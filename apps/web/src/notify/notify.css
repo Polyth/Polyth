@@ -1,0 +1,566 @@
+/* ---------- transient notifications (notify/NotificationStack.tsx) ----------
+   The one visual standard for every passing message. Quiet Glass card on the
+   canonical material, a tinted glyph that carries the kind (shared with the
+   notification centre's rows through NotificationGlyph), calm type, and a
+   hairline that spends the card's lifetime. Geometry is transform-only: the
+   stack sets each card's offset (its siblings glide on `transform`), a card
+   enters on `translate`/`scale`/`opacity` with a short spring, and leaves as
+   an exit ghost. Glass blur/off/low-resource variants join the shared material
+   lists in styles.css (`.notify-card`). */
+
+.notify-stack {
+  /* +1: the stack's edge is below (desktop corner); -1: above (phone header). */
+  --notify-edge: 1;
+  --notify-gap: var(--space-2);
+  --notify-enter: calc(var(--motion-stack) * 1.4);
+  --notify-spring: var(--motion-stack-ease);
+  position: fixed;
+  z-index: var(--z-toast);
+  inset-inline-end: calc(var(--safe-right) + var(--space-3));
+  bottom: calc(max(var(--space-3), var(--safe-bottom)) + var(--notify-lift, 0px));
+  /* Narrow enough to read as a notice, wide enough that the reference update
+     notice keeps a one-line title and body and its two actions share a row,
+     translated labels included. */
+  inline-size: min(336px, calc(100vw - var(--safe-left) - var(--safe-right) - 2 * var(--space-3)));
+  block-size: var(--notify-stack-h, 0px);
+  pointer-events: auto;
+}
+.notify-stack[data-empty] { pointer-events: none; }
+body:has(.statusbar) .notify-stack[data-shell="desktop"] { --notify-lift: calc(var(--statusbar-h) + var(--space-1)); }
+.notify-stack[data-shell="phone"] {
+  --notify-edge: -1;
+  top: calc(var(--safe-top) + var(--mobile-session-header-height) + var(--space-2));
+  bottom: auto;
+  inset-inline: calc(var(--safe-left) + var(--space-2)) calc(var(--safe-right) + var(--space-2));
+  inline-size: auto;
+}
+/* A spring that settles with a hint of overshoot, where `linear()` exists. */
+@supports (animation-timing-function: linear(0, 1)) {
+  .notify-stack {
+    --notify-spring: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 20.3%,
+      1.043 24%, 1.044 27.1%, 1.03 31.7%, 1.008 39.2%, 0.998 46.3%, 0.997 58.3%, 1);
+  }
+}
+
+.notify-card {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  overflow: hidden;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-surface);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  transform-origin: 50% 0;
+  transition:
+    transform var(--motion-stack) var(--motion-stack-ease),
+    opacity var(--motion-normal) var(--motion-ease);
+  animation: notify-in var(--notify-enter) var(--notify-spring) backwards;
+  touch-action: pan-y;
+}
+/* On phone the card owns both axes: inline swipe and the flick up. */
+.notify-stack[data-shell="phone"] .notify-card { top: 0; bottom: auto; transform-origin: 50% 100%; touch-action: none; }
+
+/* Kind → tone, for the card (hairline) and the shared glyph. Accent carries
+   what the app itself is doing (progress, an update); info stays neutral so
+   the accent keeps its meaning; a hint is teal, derived from the theme's own
+   green and blue so it differs from the accent in every theme. */
+:is(.notify-card, .notify-glyph, .ntc-row) {
+  --notify-tone: var(--accent);
+  --notify-wash: color-mix(in srgb, var(--notify-tone) 15%, transparent);
+}
+:is(.notify-card, .notify-glyph, .ntc-row)[data-kind="error"] { --notify-tone: var(--red); }
+:is(.notify-card, .notify-glyph, .ntc-row)[data-kind="warning"] { --notify-tone: var(--amber); }
+:is(.notify-card, .notify-glyph, .ntc-row)[data-kind="success"] { --notify-tone: var(--green); }
+:is(.notify-card, .notify-glyph, .ntc-row)[data-kind="news"] { --notify-tone: var(--purple); }
+:is(.notify-card, .notify-glyph, .ntc-row)[data-kind="hint"] { --notify-tone: color-mix(in oklab, var(--green) 45%, var(--blue)); }
+:is(.notify-card, .notify-glyph, .ntc-row)[data-kind="info"] {
+  --notify-tone: var(--muted);
+  --notify-wash: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* Type: a 14px title over a 13px body (at the default text size), one line
+   box each. Two tracks, glyph and text: the close is not a column but sits in
+   the card's corner, so only the title's first line steps around it and the
+   body, excerpt, progress and actions run to the content's right edge. That
+   keeps the card balanced: --notify-pad on every side, the glyph and the X's
+   painted stroke the same distance from their own edges, and no dead rail
+   down the right. A title with a body starts on the glyph's top edge; a title
+   alone (and its close) is centred on the glyph. */
+.notify-card-inner {
+  --notify-pad: calc(var(--space-3) + 2px);
+  --notify-glyph-size: calc(var(--icon-lg) + var(--space-3));
+  /* The control's own 24px box (.ui-icon-btn--sm). */
+  --notify-close-size: 24px;
+  /* A lucide X paints ~57% of its box (12 of 24 viewBox units plus the 1.75
+     stroke), so the 16px control glyph carries this much empty box per side.
+     Offsetting the control by the padding it hides, plus the difference
+     between its box and the glyph, puts the *visible* X — not its box — on the
+     glyph's --space-3 corners, which is what the eye reads as aligned. */
+  --notify-close-ink-pad: calc(var(--icon-sm) * (1 - 13.75 / 24) / 2);
+  --notify-close-nudge: calc((var(--notify-close-size) - var(--icon-sm)) / 2 + var(--notify-close-ink-pad));
+  --notify-title-size: calc(var(--font-body) - 1px);
+  --notify-title-lh: calc(var(--notify-title-size) * 1.43);
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--notify-glyph-size) minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--space-3);
+  padding: var(--notify-pad);
+  transition: opacity var(--motion-normal) var(--motion-ease);
+}
+/* Folded behind the front card: only its edge shows, its content waits. */
+.notify-card[data-folded] .notify-card-inner { opacity: 0; }
+
+.notify-glyph {
+  display: grid;
+  place-items: center;
+  inline-size: var(--notify-glyph-size);
+  block-size: var(--notify-glyph-size);
+  flex: none;
+  border-radius: var(--radius-round);
+  color: var(--notify-tone);
+  /* The wash lit from above, ringed inside its own edge: a lens of the tone
+     rather than a flat disc, and the ring never grows the glyph's footprint. */
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--notify-tone) 10%, transparent), transparent),
+    var(--notify-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--notify-tone) 26%, transparent);
+}
+
+.notify-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-inline-size: 0;
+  /* As tall as the glyph: a title alone centres on it; a title with a body is
+     taller, so its first line box starts on the glyph's top edge. */
+  min-block-size: var(--notify-glyph-size);
+}
+.notify-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--notify-title-size);
+  line-height: var(--notify-title-lh);
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Only the title steps around the corner close; everything under it runs to
+   the content's right edge. */
+.notify-card-inner[data-closable] .notify-title { padding-inline-end: var(--notify-close-size); }
+/* The body one step under the title (13px at the default text size). */
+.notify-body {
+  color: var(--text-dim);
+  font-size: calc(var(--font-body) - 2px);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Excerpt, progress and actions run full-bleed under the title and close. */
+.notify-excerpt,
+.notify-progress,
+.notify-actions { grid-column: 2 / -1; }
+.notify-excerpt {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  max-block-size: calc(5lh + 2 * var(--space-2));
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: calc(var(--font-meta) - 0.5px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Long output fades in from the top: the newest line is what matters. */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--space-3));
+}
+.notify-card[data-kind="error"] .notify-excerpt { background: var(--red-wash); }
+.notify-progress { margin-block-start: var(--space-2); }
+
+.notify-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-start: var(--space-3);
+}
+.notify-actions-spacer { flex: 1; }
+/* Labelled actions are flat: the card is already a raised glass surface, so
+   the primary is a plain accent fill (no gradient, no glow) and the others a
+   translucent wash of the ink — never an opaque slab on glass. They share the
+   text column's width evenly, so the row ends on the same right edge the
+   glyph's inset mirrors on the left; a label too long for its share wraps the
+   row instead of truncating. Beside icon-only actions they keep their size. */
+.notify-actions .notify-action.ui-btn {
+  flex: 1 1 0;
+  min-inline-size: fit-content;
+  min-block-size: max(30px, var(--hit-min));
+  padding-inline: var(--space-3);
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  font-size: calc(var(--font-body) - 2px);
+  font-weight: 600;
+  box-shadow: none;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.notify-actions .notify-action.ui-btn--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+@media (hover: hover) {
+  .notify-actions .notify-action.ui-btn--primary:hover:not(:disabled) { background: var(--accent-hi); border-color: transparent; }
+}
+.notify-actions .notify-action.ui-btn--primary:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
+.notify-actions .notify-action.ui-btn--quiet {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+@media (hover: hover) {
+  .notify-actions .notify-action.ui-btn--quiet:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 11%, transparent); border-color: transparent; }
+}
+.notify-actions .notify-action.ui-btn--quiet:active:not(:disabled) { background: color-mix(in srgb, var(--text) 14%, transparent); }
+.notify-actions:has(.notify-actions-spacer) .notify-action.ui-btn { flex: none; }
+.notify-card .notify-close {
+  color: var(--muted);
+  /* The close keeps the glyph's --notify-pad insets with the X's visible
+     stroke: the control is pulled out of its own padding by the empty box the
+     icon leaves, so the ink edge, not the 24px box, sits on the content
+     corner. Beside a title alone it centres on the glyph instead. */
+  position: absolute;
+  inset-block-start: calc(var(--notify-pad) - var(--notify-close-nudge));
+  inset-inline-end: calc(var(--notify-pad) - var(--notify-close-nudge));
+}
+.notify-card .notify-card-inner[data-title-only] .notify-close {
+  inset-block-start: calc(var(--notify-pad) + (var(--notify-glyph-size) - var(--notify-close-size)) / 2);
+}
+.notify-close:focus-visible { color: var(--text); }
+@media (hover: hover) {
+  .notify-close:hover:where(:not(:disabled)) { color: var(--text); }
+}
+/* Touch: every control reaches the --tap floor. Labelled buttons grow; the
+   close and icon-only actions keep their 24px look and get an invisible hit
+   area, which the card's padding keeps inside its clip. */
+@media (pointer: coarse) {
+  .notify-actions .notify-action.ui-btn,
+  .notify-more .ui-btn { min-block-size: var(--tap); }
+  .notify-card :is(.notify-close, .notify-action.ui-icon-btn)::after {
+    inline-size: max(100%, var(--tap));
+    block-size: max(100%, var(--tap));
+  }
+  /* The nudged close sits against the card's corner, where a --tap square
+     centred on the control would be clipped by the card. Anchor the hit area
+     to the control's outer corner instead: it grows back toward the content
+     and keeps its whole --tap size inside the clip. */
+  .notify-card .notify-close::after {
+    left: auto;
+    top: auto;
+    inset-block-start: 0;
+    inset-inline-end: 0;
+    transform: none;
+  }
+}
+
+/* ---------- a person's message (ConversationCard.tsx) ----------
+   A messenger card: the sender's monogram in their colour (the same one the
+   chat gives them), their name over the chat's, the newest lines of a burst
+   — each voice named in its colour when there are several — and a reply
+   field under the text column. The avatar is the newest sender's. The head
+   is one button that opens the chat;
+   it lights up under the pointer like a row. The stack widens a little while
+   one is showing so a line of conversation fits. */
+.notify-stack[data-shell="desktop"]:has(.notify-card[data-conversation]) {
+  inline-size: min(360px, calc(100vw - var(--safe-left) - var(--safe-right) - 2 * var(--space-3)));
+}
+.notify-card-inner.notify-conversation {
+  --notify-avatar: 40px;
+  grid-template-columns: var(--notify-avatar) minmax(0, 1fr) var(--notify-close-size);
+  row-gap: var(--space-3);
+}
+.notify-conversation > .notify-close { grid-column: 3; grid-row: 1; }
+
+.notify-conversation-open {
+  grid-column: 1 / 3;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: var(--notify-avatar) minmax(0, 1fr);
+  grid-template-areas:
+    "avatar head"
+    "avatar where"
+    "avatar lines";
+  grid-template-rows: auto auto 1fr;
+  column-gap: var(--space-3);
+  align-items: start;
+  min-inline-size: 0;
+  /* The hit area reaches into the card's padding; the content stays put. */
+  margin: calc(-1 * var(--space-2));
+  padding: var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-surface) - var(--space-1));
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .notify-conversation-open:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--text) 4%, transparent); }
+}
+.notify-conversation-open:active:where(:not(:disabled)) { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.notify-conversation-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.notify-conversation-avatar {
+  grid-area: avatar;
+  position: relative;
+  inline-size: var(--notify-avatar);
+  block-size: var(--notify-avatar);
+}
+.notify-conversation-mark {
+  inline-size: 100%;
+  block-size: 100%;
+  font-size: calc(var(--font-body) - 1px);
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+.notify-conversation-mark.is-empty { background: var(--notify-wash); color: var(--notify-tone); }
+/* A mention: a small @ on the avatar's corner, in the room's one accent. */
+.notify-conversation-badge {
+  position: absolute;
+  inset-block-end: -3px;
+  inset-inline-end: -3px;
+  display: grid;
+  inline-size: 18px;
+  block-size: 18px;
+  place-items: center;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 2px var(--material-glass-strong);
+}
+.notify-conversation-badge .ui-icon { inline-size: 11px; block-size: 11px; }
+.notify-conversation-badge svg { inline-size: 11px; block-size: 11px; stroke-width: 2.5; }
+
+.notify-conversation-head {
+  grid-area: head;
+  display: flex;
+  min-inline-size: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.notify-conversation-title {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--notify-title-size);
+  font-weight: 600;
+  line-height: var(--notify-title-lh);
+  letter-spacing: -0.006em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notify-conversation-time {
+  flex: none;
+  color: var(--muted);
+  font-size: calc(var(--font-body) - 3px);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.notify-conversation-where {
+  grid-area: where;
+  display: flex;
+  min-inline-size: 0;
+  gap: .4em;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: calc(var(--font-body) - 2px);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.notify-conversation-where > * { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.notify-conversation-mentioned { flex: none; color: var(--accent); font-weight: 600; }
+.notify-conversation-mentioned::after { content: "·"; margin-inline-start: .4em; color: var(--muted); font-weight: 400; }
+
+/* The words themselves: full ink, the card's main event. One message may run
+   three lines; in a burst each line is one, the newest two. */
+.notify-conversation-lines {
+  grid-area: lines;
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: 3px;
+  margin-block-start: calc(var(--space-1) + 2px);
+  color: var(--text);
+  font-size: calc(var(--font-body) - 1px);
+  line-height: 1.4;
+}
+.notify-conversation-line {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+.notify-conversation-line:last-child { -webkit-line-clamp: 2; }
+.notify-conversation-lines[data-count="1"] .notify-conversation-line { -webkit-line-clamp: 3; }
+.notify-conversation-who { margin-inline-end: .4em; color: var(--person-tone, var(--text-dim)); font-weight: 600; }
+.notify-conversation-earlier { color: var(--muted); font-size: calc(var(--font-body) - 3px); }
+
+/* Reply in place: a quiet pill under the text column, the send turning to the
+   accent once there is something to send. */
+.notify-reply,
+.notify-reply-sent { grid-column: 2 / -1; }
+.notify-reply { display: flex; flex-direction: column; gap: var(--space-1); }
+.notify-reply-field {
+  display: flex;
+  min-block-size: 34px;
+  align-items: center;
+  gap: var(--space-1);
+  padding-inline: var(--space-3) 4px;
+  border: 1px solid color-mix(in srgb, var(--text) 9%, transparent);
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  transition: border-color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.notify-reply-field:focus-within {
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  box-shadow: 0 0 0 3px var(--focus-wash);
+}
+.notify-reply-input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: calc(var(--font-body) - 1px);
+  line-height: 1.3;
+  outline: none;
+}
+.notify-reply-input::placeholder { color: var(--muted); opacity: 1; }
+.notify-reply-input:focus-visible { outline: none; }
+.notify-reply-input:disabled { opacity: .6; }
+.notify-reply-field .notify-reply-send.ui-icon-btn {
+  flex: none;
+  border-radius: var(--radius-round);
+  color: var(--muted);
+}
+.notify-reply-field .notify-reply-send.ui-icon-btn[data-ready] { background: var(--accent); color: var(--accent-ink); }
+@media (hover: hover) {
+  .notify-reply-field .notify-reply-send.ui-icon-btn[data-ready]:hover:not(:disabled) { background: var(--accent-hi); color: var(--accent-ink); }
+}
+.notify-reply-error { color: var(--red); font-size: calc(var(--font-body) - 3px); line-height: 1.35; }
+.notify-reply-sent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  color: var(--green);
+  font-size: calc(var(--font-body) - 2px);
+  font-weight: 550;
+}
+@media (pointer: coarse) {
+  .notify-reply-field { min-block-size: var(--tap); }
+  .notify-reply-field .notify-reply-send.ui-icon-btn::after {
+    inline-size: max(100%, var(--tap));
+    block-size: max(100%, var(--tap));
+  }
+}
+
+/* The lifetime, spent left to right; frozen while the stack is paused. */
+.notify-life {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  block-size: 2px;
+  background: linear-gradient(to right, var(--notify-tone), color-mix(in srgb, var(--notify-tone) 45%, transparent));
+  transform-origin: left center;
+  animation: notify-life var(--notify-life, 5s) linear both;
+  pointer-events: none;
+}
+html[dir="rtl"] .notify-life { transform-origin: right center; }
+.notify-stack[data-paused] .notify-life { animation-play-state: paused; }
+/* A folded card keeps what it had left (the store holds its countdown). */
+.notify-card[data-folded] .notify-life { opacity: 0; animation-play-state: paused; }
+
+/* The waiting count: a real control inside the stack, past the cards (above
+   them on desktop, below them on phone). */
+.notify-more {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+.notify-stack[data-shell="phone"] .notify-more { top: auto; bottom: 0; }
+.notify-more .ui-btn {
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-round);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-shadow);
+  color: var(--text-dim);
+}
+@media (hover: hover) {
+  .notify-more .ui-btn:hover:where(:not(:disabled)) { color: var(--text); }
+}
+
+/* Exit ghosts (exitGhost.ts): a dismissed or expired card sinks back toward
+   its edge; a swiped one carries on from where the finger let go. */
+.notify-card[data-exit-ghost] { pointer-events: none; }
+.notify-card[data-exit-ghost="notification"] {
+  animation: notify-out var(--motion-normal) var(--motion-ease) both !important;
+}
+.notify-card[data-exit-ghost="notification-swipe"] {
+  animation: notify-swipe-out var(--notify-settle, var(--motion-surface)) var(--motion-stack-ease) both !important;
+}
+.notify-card[data-exit-ghost="notification-lift"] {
+  animation: notify-lift-out var(--motion-surface) var(--motion-stack-ease) both !important;
+}
+
+@keyframes notify-in {
+  from { opacity: 0; translate: 0 calc(var(--notify-edge) * 45%); scale: 0.95; }
+}
+@keyframes notify-out {
+  to { opacity: 0; translate: 0 calc(var(--notify-edge) * 30%); scale: 0.96; }
+}
+@keyframes notify-swipe-out {
+  from { translate: var(--notify-from, 0px) 0; }
+  to { translate: calc(var(--stack-dir, 1) * 110%) 0; opacity: 0; }
+}
+@keyframes notify-lift-out {
+  from { translate: 0 var(--notify-from-y, 0px); }
+  to { translate: 0 calc(var(--notify-edge) * 140%); opacity: 0; }
+}
+@keyframes notify-life {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+/* Reduced motion, the in-app setting and low-resource desktop: cards appear
+   and reflow in place; only the lifetime hairline still moves. */
+@media (prefers-reduced-motion: reduce) {
+  .notify-card, .notify-card-inner { animation: none; transition: none; }
+}
+html[data-reduce-animations="true"] :is(.notify-card, .notify-card-inner),
+body[data-desktop-low-resource="true"] :is(.notify-card, .notify-card-inner) {
+  animation: none;
+  transition: none;
+}

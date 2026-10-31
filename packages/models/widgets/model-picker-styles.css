@@ -1,0 +1,528 @@
+/* Shell-owned ModelPicker styles: imported by ModelPicker.tsx so the composer's
+   picker ships in the shell stylesheet instead of waiting for the Models package
+   activation to attach its stylesheet. */
+/* ---- P2-W3A model picker: quiet chip trigger + one catalog surface ------- */
+.model-picker-trigger {
+max-width: 310px; min-height: max(30px, var(--hit-min)); gap: 6px;
+}
+.model-trigger-logo {
+flex: none; color: var(--text-dim);
+}
+/* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
+.model-pop {
+  width: min(360px, calc(100vw - var(--space-6)));
+  min-width: min(360px, calc(100vw - var(--space-6)));
+  height: min(560px, 72vh);
+  max-height: min(560px, 72vh);
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+@media (pointer: coarse) {
+  .model-pop {
+    width: min(360px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left) - var(--safe-right)));
+    min-width: 0;
+    height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
+    max-height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
+    border-radius: var(--radius-surface);
+    padding: var(--space-2);
+  }
+}
+/* Touch row geometry lives in the "Touch surface" block at the end of this
+   file, after the base row rules it has to override. */
+/* ProviderLogo defaults to the strong text color; inherit the tab color so
+   selected and unselected harness marks remain visually distinguishable. */
+.model-pop .pkg-harnesses-tablist .provider-logo { color: currentColor; }
+.model-picker-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+/* Harness tabs: one row that scrolls sideways rather than wrapping, so the
+   bar keeps one height however many harnesses are runnable. */
+.model-picker-bar {
+  flex: none;
+  min-width: 0;
+  padding: var(--space-1) var(--space-1) var(--space-2);
+}
+.model-pop .pkg-harnesses-picker-tabs-head .pkg-harnesses-tablist {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.model-pop .pkg-harnesses-tablist::-webkit-scrollbar { display: none; }
+.model-pop .pkg-harnesses-tablist .ui-tab { flex: 1 0 auto; }
+.model-pop-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+/* The field is standing chrome at the edge nearest the trigger (bottom for
+   the composer's upward picker): a phone tap lands on a real input, and the
+   surface never mounts, hides or reflows anything when the keyboard opens. */
+.model-pop-search {
+ position: relative;
+ flex: none;
+ display: flex;
+ align-items: center;
+ margin: 2px 2px var(--space-2);
+}
+.model-pop-content.search-end .model-pop-search { order: 1; margin: var(--space-2) 2px 2px; }
+.model-pop-search-input::-webkit-search-cancel-button,
+.model-pop-search-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+.model-pop-search:has(.model-pop-search-clear) .model-pop-search-input { padding-inline-end: calc(var(--control-h-sm) + 2px); }
+.model-pop-search-clear {
+ position: absolute;
+ inset-inline-end: 2px;
+ top: 50%;
+ translate: 0 -50%;
+ width: max(var(--control-h-sm), var(--hit-min));
+ height: max(var(--control-h-sm), var(--hit-min));
+ display: inline-grid;
+ place-items: center;
+ padding: 0;
+ border: 0;
+ border-radius: var(--radius-control);
+ background: transparent;
+ color: var(--faint);
+ cursor: pointer;
+ touch-action: manipulation;
+ transition: color var(--motion-fast) var(--motion-ease);
+}
+.model-pop-search-clear:focus-visible { color: var(--text); }
+@media (hover: hover) {
+  .model-pop-search-clear:hover:where(:not(:disabled)) { color: var(--text); }
+}
+.model-pop-search-clear svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* Same quiet inset well as the host picker's filter (.picker-search): a soft
+   tint and glyph, no ring — the field owns focus while the popover is open,
+   so focus brightens the well and lights the glyph instead. */
+.model-pop-search-icon {
+ position: absolute;
+ inset-inline-start: 10px;
+ top: 50%;
+ translate: 0 -50%;
+ display: inline-flex;
+ color: var(--faint);
+ pointer-events: none;
+ transition: color var(--motion-fast) var(--motion-ease);
+}
+.model-pop-search:focus-within .model-pop-search-icon { color: var(--accent); }
+.model-pop-search-icon svg { width: var(--icon-sm); height: var(--icon-sm); }
+.model-pop-search-input {
+ flex: 1 1 auto;
+ min-width: 0;
+ min-height: var(--control-h-sm);
+ height: var(--control-h-sm);
+ padding-inline: 32px var(--control-pad-x-sm);
+ border: 0;
+ background: var(--surface-overlay-hover);
+ box-shadow: inset 0 0 0 1px var(--border-soft);
+ caret-color: var(--accent);
+ letter-spacing: -0.006em;
+ transition: background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.model-pop-search-input::placeholder { color: var(--faint); }
+.model-pop-search-input:is(:focus, :focus-visible) {
+ outline: 0;
+ background: color-mix(in srgb, var(--input-bg) 55%, transparent);
+ box-shadow: inset 0 0 0 1px var(--hair-strong);
+}
+@media (pointer: coarse) {
+  /* 16px: below this iOS zooms the page on focus. */
+  .model-pop-search-input { min-height: var(--tap); font-size: max(16px, var(--font-input)); }
+}
+
+.model-picker-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.model-provider-section {
+border-top: 1px solid var(--border-soft);
+}
+/* The unlabeled favorites + recents block opens the list without a rule. */
+.model-picker-quick {
+border-top: 0; padding-bottom: var(--space-1);
+}
+.model-provider-head {
+width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+.model-provider-head.static {
+ cursor: default;
+}
+.model-provider-head.static strong {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 640;
+  letter-spacing: .02em;
+}
+.model-provider-head strong {
+
+  flex: 1; overflow: hidden; color: var(--text); font-size: max(var(--font-label), 1rem);
+  font-weight: 680; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.model-provider-head small {
+  color: var(--faint); font-size: var(--font-meta); font-variant-numeric: tabular-nums;
+  padding: 2px 6px; border-radius: var(--radius-round); background: var(--surface-overlay);
+}
+
+.model-provider-caret {
+display: inline-flex; color: var(--faint); transition: transform var(--motion-fast) var(--motion-ease);
+}
+.model-provider-caret svg {
+width: 14px; height: 14px;
+}
+.model-provider-caret:not(.open) {
+transform: rotate(-90deg);
+}
+.model-provider-grip {
+color: var(--faint); font-size: var(--font-meta); cursor: grab;
+}
+.model-provider-section[draggable],
+.model-picker-row[draggable] {
+cursor: grab;
+}
+.model-provider-section.dragging,
+.model-picker-row.dragging {
+opacity: .56;
+}
+.model-provider-section[draggable]:active,
+.model-picker-row[draggable]:active,
+.model-provider-grip:active,
+.model-picker-grip:active {
+cursor: grabbing;
+}
+.model-provider-logo {
+width: 18px; height: 18px;
+}
+.model-picker-row {
+  min-height: var(--control-h-sm);
+  display: flex;
+  align-items: center;
+   gap: 6px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.model-picker-row:hover {
+  background: var(--surface-overlay-hover);
+}
+.model-picker-row.active {
+  background: var(--surface-overlay);
+}
+.model-picker-row.current {
+  background: var(--accent-wash);
+  box-shadow: inset 3px 0 0 var(--accent);
+  padding-inline-end: calc(var(--space-2) + var(--icon-lg));
+}
+.model-picker-row.current strong { color: var(--text); font-weight: 620; }
+.model-picker-row[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
+.model-picker-row.drop-target::before {
+  content: ""; position: absolute; inset: -1px var(--space-2) auto; height: 1px; background: var(--accent);
+}
+.model-picker-row { position: relative; }
+.model-row-selected {
+  position: absolute;
+  inset-inline-end: var(--space-2);
+  display: inline-flex;
+  color: var(--accent);
+  pointer-events: none;
+}
+.model-row-selected svg { width: var(--icon-sm); height: var(--icon-sm); }
+
+.model-picker-grip {
+  width: 8px; color: var(--faint); font-size: 12px; cursor: grab; opacity: .62;
+}
+.model-picker-grip.spacer { cursor: default; opacity: 0; }
+.model-picker-copy {
+  min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 0;
+}
+.model-picker-copy strong {
+   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 400;
+}
+.model-picker-copy small {
+  overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
+}
+.model-capability-icons {
+  display: none; align-items: center; gap: 3px; flex: none; color: var(--faint);
+}
+.model-capability-icons > span { display: inline-flex; }
+.model-capability-icons svg { width: 12px; height: 12px; }
+.model-row-offline {
+margin-inline-start: 6px; color: var(--amber); font-size: var(--font-meta); font-style: normal; font-weight: 520;
+}
+/* Row tools stay invisible until the row is hovered or keyboard-active, so
+   the list reads as names, not as a button grid. */
+.model-picker-row .model-star-btn {
+flex: none;
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  opacity: .7;
+}
+.model-picker-row:hover .model-star-btn,
+.model-picker-row.active .model-star-btn,
+.model-picker-row .model-star-btn[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--amber);
+}
+.model-picker-row .model-star-btn.on svg { fill: currentColor; }
+@media (hover: hover) {
+  .model-picker-row .model-star-btn:hover:where(:not(:disabled)) {
+  color: var(--text); background: var(--surface-overlay);
+  }
+}
+.model-thinking-control {
+  flex: none;
+  display: inline-flex;
+}
+.model-thinking-trigger {
+  flex: none;
+  min-width: max(var(--control-h-sm), var(--hit-min));
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.model-thinking-trigger[aria-expanded="true"] {
+  background: var(--surface-overlay);
+  color: var(--text);
+}
+@media (hover: hover) {
+  .model-thinking-trigger:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay);
+    color: var(--text);
+  }
+}
+.model-thinking-trigger svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+/* Adjacent details panel: portaled beside the picker shell, never inside it. */
+.model-details-panel {
+  position: fixed; z-index: var(--z-tooltip); top: 0; left: 0;
+  width: min(272px, calc(100vw - var(--space-6))); max-height: min(430px, 56vh); overflow-y: auto;
+  padding: var(--space-3); border: 1px solid var(--material-glass-border); border-radius: var(--radius-surface);
+  background: var(--material-glass); box-shadow: var(--material-glass-shadow); animation: model-details-in var(--motion-fast) var(--motion-ease);
+}
+.model-hover-details { display: flex; flex-direction: column; gap: var(--space-3); }
+.model-hover-details header { display: flex; align-items: flex-start; gap: var(--space-2); }
+.model-hover-details header > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.model-hover-details header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 680; }
+.model-hover-details header small { color: var(--muted); font-size: var(--font-meta); }
+.model-hover-star { width: var(--icon-lg); height: var(--icon-lg); color: var(--amber); flex: none; }
+.model-hover-star.on { fill: currentColor; }
+.model-hover-capabilities { display: flex; gap: var(--space-2); color: var(--text-dim); }
+.model-hover-capabilities span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--radius-control); background: var(--surface-overlay); }
+.model-hover-capabilities svg { width: 14px; height: 14px; }
+.model-hover-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.model-hover-tags span { padding: 3px 6px; border-radius: var(--radius-control); background: var(--surface-overlay); color: var(--text-dim); font-size: 10px; }
+.model-hover-context { margin: 0; color: var(--text-dim); font-size: var(--font-meta); }
+.model-hover-pricing { display: grid; gap: 6px; padding: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--surface-overlay); font-size: var(--font-meta); }
+.model-hover-pricing span { display: flex; justify-content: space-between; gap: var(--space-2); }
+.model-hover-pricing b { font-weight: 620; white-space: nowrap; }
+.model-hover-pricing i { color: var(--muted); font-style: normal; font-weight: 400; }
+@keyframes model-details-in { from { opacity: 0; transform: translateX(-2px); } to { opacity: 1; transform: none; } }
+/* ---- model details card (shared by popover and sheet) -------------------- */
+.model-details {
+display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1);
+}
+.model-details-panel .model-details {
+  padding: 0;
+}
+.model-details-back {
+align-self: flex-start;
+}
+.model-details-head {
+display: flex; align-items: center; gap: var(--space-2); padding: 0 4px;
+}
+.model-details-title {
+min-width: 0; display: flex; flex-direction: column; gap: 1px;
+}
+.model-details-title strong {
+overflow: hidden; font-size: var(--font-label); font-weight: 640; text-overflow: ellipsis; white-space: nowrap;
+}
+.model-details-title small {
+overflow: hidden; color: var(--faint); font-family: var(--mono); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap;
+}
+.model-details-grid {
+margin: 0; padding: 0 var(--space-1); display: flex; flex-direction: column; gap: var(--space-2);
+}
+.model-details-grid > div {
+display: grid; grid-template-columns: minmax(88px, 34%) minmax(0, 1fr); gap: var(--space-2); align-items: baseline;
+}
+.model-details-grid dt {
+color: var(--muted); font-size: var(--font-meta);
+}
+.model-details-grid dd {
+margin: 0; min-width: 0; font-size: var(--font-meta); overflow-wrap: anywhere;
+}
+.model-details-warn {
+color: var(--amber);
+}
+.model-details-usage {
+display: flex; flex-direction: column; gap: 4px;
+}
+.model-details-meter {
+display: block; height: 4px; border-radius: var(--radius-round); background: var(--surface-overlay); overflow: hidden;
+}
+.model-details-meter b {
+display: block; height: 100%; border-radius: inherit; background: var(--accent);
+}
+.model-details-actions {
+padding: 2px 4px 4px;
+}
+.model-details-use {
+width: 100%;
+}
+.model-details-current {
+display: inline-flex; align-items: center; gap: 5px; min-height: 28px;
+  color: var(--muted); font-size: var(--font-meta);
+}
+.model-trigger-name {
+/* Column-flex parent with align-items: flex-start sizes children to their
+   content; the explicit max-width keeps long model names truncating inside
+   the trigger instead of painting over adjacent controls. */
+min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.model-row-provider-logo {
+width: 16px;
+  height: 16px;
+  color: var(--text-dim);
+}
+@container feature-panel (max-width: 700px) {
+.model-picker {
+width: 100%;
+    min-width: 0;
+    max-width: 100%;
+}
+}
+.model-star-btn.on,
+.model-star-btn[aria-pressed="true"] { color: var(--amber); }
+/* The highlighted row is the keyboard indicator while the listbox owns focus. */
+.model-picker-list:focus-visible { outline: none; }
+
+/* ---- Touch surface (phone and tablet) -------------------------------------
+   One inline inset for everything: the harness strip, provider headings and
+   model rows share the popover's padding, so logos, names and trailing
+   controls sit on the same columns. Every row and heading is one tap tall,
+   the favourite star is a full tap target, and every row reserves the
+   trailing check slot so effort and star never shift on the current row.
+   Phone has no search field; the list runs to the surface edge. */
+@property --model-tabs-fade-start { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --model-tabs-fade-end { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes model-tabs-edge-fade {
+  0% { --model-tabs-fade-start: 0px; --model-tabs-fade-end: 28px; }
+  12% { --model-tabs-fade-start: 28px; }
+  88% { --model-tabs-fade-end: 28px; }
+  100% { --model-tabs-fade-start: 28px; --model-tabs-fade-end: 0px; }
+}
+@media (pointer: coarse) {
+  .model-pop .model-picker-bar { padding: 0 0 var(--space-2); }
+  /* A strip wider than the surface fades out at the edge it continues past
+     instead of cutting a harness mark in half; the fades follow the scroll
+     position, so a strip that fits (or is scrolled to its end) stays crisp. */
+  @supports (animation-timeline: scroll()) {
+    .model-pop .pkg-harnesses-picker-tabs-head .pkg-harnesses-tablist {
+      --model-tabs-fade-direction: to right;
+      mask-image: linear-gradient(var(--model-tabs-fade-direction), transparent, #000 var(--model-tabs-fade-start), #000 calc(100% - var(--model-tabs-fade-end)), transparent);
+      animation: model-tabs-edge-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+    .model-pop .pkg-harnesses-picker-tabs-head .pkg-harnesses-tablist:dir(rtl) { --model-tabs-fade-direction: to left; }
+  }
+  .model-picker-list { overscroll-behavior: contain; }
+  .model-picker-row {
+    min-height: var(--tap);
+    gap: var(--space-1);
+    padding-inline: var(--space-2) calc(var(--space-2) + var(--icon-lg));
+  }
+  .model-picker-grip,
+  .model-provider-grip { display: none; }
+  .model-picker-row .model-row-provider-logo { margin-inline-end: var(--space-1); }
+  /* Wash, weight and the check mark carry selection; the inset accent edge
+     only drew a curved sliver on a rounded touch row. */
+  .model-picker-row.current { box-shadow: none; }
+  .model-picker-row.current strong { font-weight: 600; }
+  .model-row-selected {
+    width: var(--icon-lg);
+    justify-content: center;
+  }
+  .model-picker-row .model-star-btn {
+    width: var(--tap);
+    height: var(--tap);
+  }
+  .model-picker-row .model-star-btn svg { width: var(--icon-md); height: var(--icon-md); }
+  .model-thinking-trigger { padding-inline: var(--space-2) 0; }
+  .model-provider-head {
+    min-height: var(--tap);
+    gap: var(--space-2);
+    padding-inline: var(--space-2);
+    border-radius: var(--radius-control);
+  }
+  .model-provider-head strong {
+    font-size: var(--font-label);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .model-provider-caret {
+    width: var(--icon-lg);
+    justify-content: center;
+  }
+  .model-picker-more {
+    width: 100%;
+    min-height: var(--tap);
+    margin-top: var(--space-1);
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--accent-text, var(--accent));
+    font: inherit;
+    font-size: var(--font-label);
+    text-align: start;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .model-picker-more:active:where(:not(:disabled)) { background: var(--surface-overlay); }
+}
+/* No keyboard drives a touch list: the keyboard-active row must not read as a
+   second selection beside the current one. */
+@media (hover: none) {
+  .model-picker-row.active:not(.current) { background: transparent; }
+}

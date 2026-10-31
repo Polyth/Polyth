@@ -1,0 +1,770 @@
+{
+  "schemaVersion": 1,
+  "baseline": "d70f875ecb919a0a7d59488fc7ddafc47915b558",
+  "notes": "Navigation hints, not an exhaustive dependency graph or proof of feature readiness. Test hints must exist before running.",
+  "areas": [
+    {
+      "id": "orientation",
+      "title": "Task routing and evidence",
+      "skill": ".agents/skills/polyth-orientation/SKILL.md",
+      "match": [],
+      "entrypoints": [
+        "package.json",
+        "packages/plugins/src/serverPackage.ts"
+      ],
+      "references": [
+        "docs/agents/architecture.md",
+        "docs/agents/evidence.md"
+      ],
+      "testHints": [],
+      "risk": "normal"
+    },
+    {
+      "id": "packages",
+      "title": "Feature package development",
+      "skill": ".agents/skills/polyth-packages/SKILL.md",
+      "match": [
+        "packages/plugins/src/installSources.ts",
+        "packages/plugins/src/installSourceContract.ts",
+        "packages/plugins/src/managedRegistry.ts",
+        "packages/plugins/src/trustedServerEntry.ts",
+        "packages/plugins/test/installRepository.test.ts",
+        "packages/*/src/serverEntry.ts",
+        "packages/*/package.json"
+      ],
+      "entrypoints": [
+        "packages/example-feature/src/serverEntry.ts",
+        "packages/plugins/src/serverPackage.ts",
+        "packages/usage/widgets/index.tsx",
+        "packages/web-sdk/src/index.ts"
+      ],
+      "references": [
+        "docs/dev/extensions.md",
+        "docs/dev/README.md",
+        "docs/agents/security.md"
+      ],
+      "testHints": [
+        "packages/plugins/test/installRepository.test.ts",
+        "packages/plugins/test/installSourceContract.test.ts",
+        "scripts/test/packageRemovability.test.ts",
+        "apps/web/test/packageContainment.test.ts",
+        "packages/plugins/test/serverPackage.test.ts",
+        "packages/plugins/test/managedCapabilityOwnership.test.ts",
+        "packages/server/test/packageDiscovery.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "design",
+      "title": "Design, styling and accessibility",
+      "skill": ".agents/skills/polyth-design/SKILL.md",
+      "match": [
+        "apps/web/src/*.css",
+        "apps/web/src/theme.ts",
+        "packages/*/widgets/**/*.css",
+        "apps/mobile/src/styles.css"
+      ],
+      "entrypoints": [
+        "apps/web/src/tokens.css",
+        "apps/web/src/theme.ts",
+        "apps/web/src/uiPrefs.ts"
+      ],
+      "references": [
+        "docs/dev/styles.md",
+        "docs/dev/components.md",
+        "docs/agents/ui-checklist.md"
+      ],
+      "testHints": [
+        "apps/web/test/packageContainment.test.ts",
+        "apps/web/test/buttonStates.test.ts"
+      ],
+      "risk": "normal"
+    },
+    {
+      "id": "web-ui",
+      "title": "Web UI, widgets and workbench",
+      "skill": ".agents/skills/polyth-web-ui/SKILL.md",
+      "match": [
+        "packages/*/widgets/**",
+        "apps/web/src/components/**",
+        "apps/web/src/workspace/**",
+        "apps/web/src/widgets/**"
+      ],
+      "entrypoints": [
+        "packages/usage/widgets/index.tsx",
+        "packages/web-sdk/src/index.ts",
+        "apps/web/test/packageContainment.test.ts"
+      ],
+      "references": [
+        "docs/dev/ui.md",
+        "docs/dev/widgets.md",
+        "docs/dev/components.md",
+        "docs/agents/ui-checklist.md",
+        "docs/dev/workspace.md"
+      ],
+      "testHints": [
+        "apps/web/test/packageContainment.test.ts"
+      ],
+      "risk": "normal"
+    },
+    {
+      "id": "architecture",
+      "title": "Core architecture and system evolution",
+      "skill": ".agents/skills/polyth-architecture/SKILL.md",
+      "match": [
+        "packages/kernel/**",
+        "packages/server/src/index.ts",
+        "packages/package-sdk/**",
+        "packages/judgment/**",
+        "packages/judgment-judges/**",
+        "docs/architecture/adr-judgment.md"
+      ],
+      "entrypoints": [
+        "packages/kernel",
+        "packages/server/src/index.ts",
+        "packages/plugins/src/serverPackage.ts",
+        "packages/web-sdk/src/index.ts",
+        "packages/judgment/src/index.ts",
+        "packages/judgment/src/server.ts",
+        "packages/judgment/src/uses.ts"
+      ],
+      "references": [
+        "docs/agents/architecture.md",
+        "docs/dev/architecture.md",
+        "packages/judgment/README.md",
+        "packages/judgment-judges/README.md",
+        "docs/architecture/adr-judgment.md",
+        "docs/dev/workspace.md"
+      ],
+      "testHints": [
+        "packages/server/test/packageDiscovery.test.ts",
+        "packages/judgment/test/runtime.test.ts",
+        "packages/judgment/test/server.test.ts"
+      ],
+      "risk": "critical"
+    },
+    {
+      "id": "contracts",
+      "title": "Public contracts and browser boundaries",
+      "skill": ".agents/skills/polyth-contracts/SKILL.md",
+      "match": [
+        "packages/contracts/**",
+        "packages/web-sdk/**",
+        "packages/plugins/src/index.ts",
+        "packages/commands/src/catalog.ts"
+      ],
+      "entrypoints": [
+        "packages/contracts",
+        "packages/web-sdk/src/index.ts",
+        "packages/plugins/src/index.ts",
+        "packages/commands/package.json",
+        "packages/contracts/src/workspace.ts"
+      ],
+      "references": [
+        "docs/agents/architecture.md",
+        "docs/agents/verification.md"
+      ],
+      "testHints": [
+        "apps/web/test/packageContainment.test.ts",
+        "packages/contracts/test/workspace.test.ts"
+      ],
+      "risk": "critical"
+    },
+    {
+      "id": "sessions",
+      "title": "Canonical sessions, events and recovery",
+      "skill": ".agents/skills/polyth-sessions/SKILL.md",
+      "match": [
+        "packages/session/**",
+        "packages/server/src/*session*",
+        "packages/server/src/*runtime*",
+        "apps/web/src/reduce.ts",
+        "apps/web/src/store.ts"
+      ],
+      "entrypoints": [
+        "packages/session",
+        "packages/server/src/index.ts",
+        "packages/server/src/sessionWatches.ts",
+        "packages/plugins/src/serverPackage.ts",
+        "apps/web/src/reduce.ts"
+      ],
+      "references": [
+        "docs/agents/architecture.md",
+        "docs/architecture/multi-harness.md"
+      ],
+      "testHints": [
+        "packages/server/test/harnessSwitch.test.ts",
+        "packages/server/test/sessionWatches.test.ts"
+      ],
+      "risk": "critical"
+    },
+    {
+      "id": "harnesses",
+      "title": "Harness integration and safe switching",
+      "skill": ".agents/skills/polyth-harnesses/SKILL.md",
+      "match": [
+        "packages/backend-*/**",
+        "packages/harness-runtime/**"
+      ],
+      "entrypoints": [
+        "packages/harness-runtime",
+        "packages/backend-codex/src/index.ts",
+        "packages/plugins/src/serverPackage.ts"
+      ],
+      "references": [
+        "docs/architecture/multi-harness.md",
+        "docs/agents/known-drift.md"
+      ],
+      "testHints": [
+        "packages/harness-runtime/test/registry.test.ts",
+        "packages/harness-runtime/test/rpc.test.ts",
+        "packages/server/test/harnessSwitch.test.ts",
+        "packages/backend-codex/test/protocol.test.ts",
+        "packages/backend-opencode/test/releasedInference.live.ts"
+      ],
+      "risk": "critical"
+    },
+    {
+      "id": "models",
+      "title": "Model catalogs, capabilities and provider settings",
+      "skill": ".agents/skills/polyth-models/SKILL.md",
+      "match": [
+        "packages/models/**",
+        "packages/opencode/**",
+        "packages/harness-runtime/**",
+        "apps/web/src/profiles.ts"
+      ],
+      "entrypoints": [
+        "packages/models",
+        "packages/opencode",
+        "packages/backend-codex/src/index.ts",
+        "packages/harness-runtime"
+      ],
+      "references": [
+        "docs/agents/known-drift.md",
+        "docs/agents/verification.md"
+      ],
+      "testHints": [
+        "packages/backend-codex/test/protocol.test.ts",
+        "packages/harness-runtime/test/registry.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "mobile",
+      "title": "Mobile iOS and Android development",
+      "skill": ".agents/skills/polyth-mobile/SKILL.md",
+      "match": [
+        "apps/mobile/**",
+        "apps/web/src/components/mobile/**",
+        "apps/web/src/mobileViewport.ts",
+        "apps/web/src/mobileViewport.css",
+        "apps/web/src/mobileFieldReveal.ts",
+        "apps/web/src/mobileLayerStack.ts",
+        "apps/web/src/mobileWorkspaceNavigation.ts",
+        "apps/web/src/mobileGestures.ts",
+        "apps/web/src/edgeSwipeBack.ts",
+        "apps/web/src/useEdgeSwipeBack.ts",
+        "apps/web/src/swipeSurface.ts",
+        "apps/web/src/shellSwipe.ts",
+        "apps/web/src/stackNavigation.css",
+        "apps/web/src/surfaceMotion.css",
+        "apps/web/src/exitGhost.ts",
+        "apps/web/src/sheetDrag.ts",
+        "apps/web/src/settingsPresentation.ts",
+        "apps/web/src/launchVeil.ts",
+        "apps/web/src/launchReveal.ts"
+      ],
+      "entrypoints": [
+        "apps/mobile/package.json",
+        "apps/mobile/src/ConnectionScreen.tsx",
+        "apps/mobile/src/runtime.ts",
+        "apps/mobile/src/nativeBridge.ts",
+        "apps/mobile/src/polythLink.ts",
+        "apps/mobile/src/launch.ts"
+      ],
+      "references": [
+        "docs/agents/mobile-matrix.md",
+        "docs/mobile/platform-behavior.md",
+        "docs/dev/mobile-viewport.md",
+        "docs/architecture/polyth-link.md",
+        "docs/agents/ui-checklist.md"
+      ],
+      "testHints": [
+        "apps/mobile/test/runtime.test.ts",
+        "apps/mobile/test/connectionUi.test.ts",
+        "apps/web/test/mobileViewportLayers.test.ts",
+        "apps/web/test/mobileViewportFrame.test.ts",
+        "apps/web/test/mobileViewportResume.test.ts",
+        "apps/web/test/mobileLayerStackMounted.test.ts",
+        "apps/web/test/stackNavigation.test.ts",
+        "apps/web/test/edgeSwipeBack.test.ts",
+        "apps/web/test/swipeSurface.test.ts",
+        "apps/web/test/phoneShellSwipes.test.ts",
+        "apps/web/test/surfaceMotion.test.ts",
+        "apps/web/test/sheetDrag.test.ts",
+        "apps/mobile/test/launch.test.ts",
+        "apps/mobile/test/assets.test.ts",
+        "apps/web/test/launchReveal.test.ts",
+        "apps/web/test/launchVeil.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "link",
+      "title": "Polyth Link, QR pairing and remote policy",
+      "skill": ".agents/skills/polyth-link/SKILL.md",
+      "match": [
+        "packages/tunnel/**",
+        "packages/pairing-qr/**",
+        "crates/polyth-link-*/**",
+        "packages/server/src/remotePolicy.ts"
+      ],
+      "entrypoints": [
+        "docs/architecture/polyth-link.md",
+        "packages/plugins/src/serverPackage.ts",
+        "apps/mobile/src/polythLink.ts",
+        "Cargo.toml"
+      ],
+      "references": [
+        "docs/agents/security.md",
+        "docs/agents/mobile-matrix.md"
+      ],
+      "testHints": [
+        "packages/server/test/remotePolicy.test.ts",
+        "packages/server/test/wsRemoteAuth.test.ts"
+      ],
+      "risk": "critical"
+    },
+    {
+      "id": "desktop",
+      "title": "Desktop shell and distribution",
+      "skill": ".agents/skills/polyth-desktop/SKILL.md",
+      "match": [
+        "apps/desktop/**"
+      ],
+      "entrypoints": [
+        "apps/desktop",
+        "docs/dev/desktop.md",
+        ".github/workflows/build-apps.yml",
+        ".github/workflows/release.yml"
+      ],
+      "references": [
+        "docs/agents/verification.md"
+      ],
+      "testHints": [
+        "apps/desktop/test/configuration.test.ts",
+        "apps/desktop/test/serverPackages.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "debug",
+      "title": "Debugging and regression diagnosis",
+      "skill": ".agents/skills/polyth-debug/SKILL.md",
+      "match": [],
+      "entrypoints": [
+        "package.json",
+        "scripts/ci/select-tests.mjs"
+      ],
+      "references": [
+        "docs/agents/debug-playbook.md",
+        "docs/agents/evidence.md"
+      ],
+      "testHints": [],
+      "risk": "normal"
+    },
+    {
+      "id": "performance",
+      "title": "Performance, resource use and responsiveness",
+      "skill": ".agents/skills/polyth-performance/SKILL.md",
+      "match": [
+        "packages/server/src/spawnTelemetry.ts",
+        "packages/server/src/runtimeIdle.ts",
+        "packages/server/src/runtimeWarmPolicy.ts",
+        "packages/server/test/runtimeWarmPolicy.test.ts",
+        "packages/server/test/*SpawnTelemetry.test.ts",
+        "packages/server/test/spawnTelemetry.test.ts"
+      ],
+      "entrypoints": [
+        "apps/web/src/store.ts",
+        "packages/models",
+        "packages/harness-runtime",
+        "packages/server/src/index.ts",
+        "packages/server/src/spawnTelemetry.ts",
+        "packages/server/src/runtimeWarmPolicy.ts"
+      ],
+      "references": [
+        "docs/agents/performance.md",
+        "docs/agents/verification.md"
+      ],
+      "testHints": [
+        "packages/server/test/spawnTelemetry.test.ts",
+        "packages/server/test/sessionSpawnTelemetry.test.ts",
+        "packages/server/test/runtimeWarmPolicy.test.ts",
+        "packages/server/test/runtimePoolLifecycle.test.ts",
+        "packages/opencode/test/runtimePolicy.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "testing",
+      "title": "Risk-based testing and honest completion",
+      "skill": ".agents/skills/polyth-testing/SKILL.md",
+      "match": [
+        "scripts/test/**",
+        "apps/*/test/**",
+        "packages/*/test/**"
+      ],
+      "entrypoints": [
+        "package.json",
+        "scripts/ci/select-tests.mjs",
+        ".github/workflows/ci.yml"
+      ],
+      "references": [
+        "docs/agents/verification.md",
+        "docs/agents/evidence.md"
+      ],
+      "testHints": [],
+      "risk": "normal"
+    },
+    {
+      "id": "security",
+      "title": "Security, Spaces and authorization",
+      "skill": ".agents/skills/polyth-security/SKILL.md",
+      "match": [
+        "packages/tenancy/**",
+        "packages/permissions/**",
+        "packages/secure-safe/**",
+        "packages/server/src/*auth*",
+        "packages/server/src/space*",
+        "packages/server/src/behavior.ts",
+        "packages/plugins/src/wsAttach.ts"
+      ],
+      "entrypoints": [
+        "packages/plugins/src/serverPackage.ts",
+        "packages/tenancy",
+        "docs/architecture/spaces-and-tenancy.md"
+      ],
+      "references": [
+        "docs/agents/security.md"
+      ],
+      "testHints": [
+        "packages/server/test/authIngress.test.ts",
+        "packages/server/test/remotePolicyHttp.test.ts",
+        "packages/server/test/settings.test.ts"
+      ],
+      "risk": "critical"
+    },
+    {
+      "id": "storage",
+      "title": "Persistence and migrations",
+      "skill": ".agents/skills/polyth-storage/SKILL.md",
+      "match": [
+        "packages/session/**",
+        "packages/tenancy/**",
+        "packages/*/src/*store*",
+        "packages/plugins/src/atomicWrite.ts"
+      ],
+      "entrypoints": [
+        "packages/session",
+        "packages/tenancy",
+        "packages/plugins/src/serverPackage.ts"
+      ],
+      "references": [
+        "docs/agents/security.md",
+        "docs/agents/templates/migration.md"
+      ],
+      "testHints": [],
+      "risk": "critical"
+    },
+    {
+      "id": "build-release",
+      "title": "Build failures, CI and releases",
+      "skill": ".agents/skills/polyth-build-release/SKILL.md",
+      "match": [
+        ".github/workflows/**",
+        "scripts/ci/**",
+        "scripts/release*",
+        "scripts/bump-version.mjs",
+        "apps/web/build*",
+        "package.json",
+        "Cargo.toml",
+        "Dockerfile",
+        ".dockerignore",
+        "deploy/docker/**"
+      ],
+      "entrypoints": [
+        "package.json",
+        ".github/workflows/ci.yml",
+        ".github/workflows/build-apps.yml",
+        ".github/workflows/release.yml",
+        "scripts/ci/release-quality.mjs",
+        "scripts/ci/remote-build.mjs",
+        "scripts/ci/update-feed.mjs",
+        "scripts/ci/mac-legacy.mjs",
+        "scripts/ci/release-notes.mjs",
+        "scripts/release-version.mjs",
+        "scripts/bump-version.mjs",
+        "Cargo.toml",
+        "Dockerfile"
+      ],
+      "references": [
+        "docs/agents/commands.md",
+        "docs/agents/verification.md",
+        "docs/operations/releases.md",
+        "docs/operations/docker.md"
+      ],
+      "testHints": [
+        "scripts/test/release-version.test.ts",
+        "scripts/test/bump-version.test.ts",
+        "scripts/test/release-quality-gates.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "integrations",
+      "title": "External integrations and tools",
+      "skill": ".agents/skills/polyth-integrations/SKILL.md",
+      "match": [
+        "packages/github/**",
+        "packages/google/**",
+        "packages/task-trackers/**",
+        "packages/ssh/**",
+        "packages/browser/**",
+        "packages/terminal/**",
+        "packages/docker/**",
+        "packages/terraform/**",
+        "packages/outbound/**",
+        "packages/custom-action/**",
+        "packages/judgment-jev/**",
+        "packages/judgment-local/**",
+        "packages/share-chat/**",
+        "packages/glance/**"
+      ],
+      "entrypoints": [
+        "packages/plugins/src/serverPackage.ts",
+        "packages/permissions",
+        "packages/secure-safe",
+        "packages/judgment-jev/src/adapter.ts",
+        "packages/judgment-local/src/engine.ts"
+      ],
+      "references": [
+        "docs/agents/security.md",
+        "docs/agents/verification.md",
+        "docs/dev/infrastructure-tools.md",
+        "packages/custom-action/README.md",
+        "packages/google/README.md",
+        "packages/judgment-jev/README.md",
+        "packages/judgment-local/README.md",
+        "packages/share-chat/README.md",
+        "packages/glance/README.md",
+        "packages/task-trackers/README.md"
+      ],
+      "testHints": [
+        "packages/judgment-jev/test/adapter.test.ts",
+        "packages/judgment-jev/test/server.test.ts",
+        "packages/docker/test/docker.test.ts",
+        "packages/terraform/test/terraform.test.ts",
+        "packages/custom-action/test/routes.test.ts",
+        "packages/terminal/test/projectTools.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "voice",
+      "title": "Voice, dictation and media pipelines",
+      "skill": ".agents/skills/polyth-voice/SKILL.md",
+      "match": [
+        "packages/dictation/**",
+        "packages/voice-mode/**",
+        "apps/mobile/src/nativeBridge.ts"
+      ],
+      "entrypoints": [
+        "packages/dictation",
+        "packages/voice-mode",
+        "apps/mobile/src/nativeBridge.ts",
+        "packages/plugins/src/serverPackage.ts"
+      ],
+      "references": [
+        "docs/agents/mobile-matrix.md",
+        "docs/agents/security.md",
+        "docs/agents/performance.md"
+      ],
+      "testHints": [
+        "packages/dictation/test/speech.test.ts",
+        "packages/dictation/test/speechOutput.test.ts",
+        "packages/dictation/test/micControls.test.ts",
+        "packages/voice-mode/test/controller.test.ts",
+        "packages/voice-mode/test/presentation.test.ts",
+        "packages/voice-mode/test/web.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "files-editor",
+      "title": "Files, resources and editor workflows",
+      "skill": ".agents/skills/polyth-files-editor/SKILL.md",
+      "match": [
+        "packages/files/**",
+        "packages/editor/**",
+        "packages/git/**",
+        "apps/web/src/resources/**"
+      ],
+      "entrypoints": [
+        "packages/files",
+        "packages/editor",
+        "packages/git",
+        "apps/web/test/packageContainment.test.ts"
+      ],
+      "references": [
+        "docs/dev/ui.md",
+        "docs/agents/security.md",
+        "docs/dev/workspace.md"
+      ],
+      "testHints": [
+        "apps/web/test/packageContainment.test.ts"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "orchestration",
+      "title": "Multi-agent execution and handoff",
+      "skill": ".agents/skills/polyth-orchestration/SKILL.md",
+      "match": [
+        "packages/workflow/**",
+        "docs/dev/workflows.md",
+        "packages/multirun/**",
+        "packages/fusion/**",
+        "packages/goals/**",
+        "packages/handoff/**",
+        ".cursor/agents/**"
+      ],
+      "entrypoints": [
+        "packages/workflow",
+        "packages/multirun",
+        "packages/fusion",
+        "packages/goals",
+        "packages/handoff"
+      ],
+      "references": [
+        "docs/dev/workflows.md",
+        "docs/agents/orchestration.md",
+        "docs/agents/templates/handoff.md"
+      ],
+      "testHints": [
+        "packages/workflow/test"
+      ],
+      "risk": "high"
+    },
+    {
+      "id": "snapshot",
+      "title": "Snapshot import and continuity",
+      "skill": ".agents/skills/polyth-snapshot/SKILL.md",
+      "match": [
+        "packages/session-import/**"
+      ],
+      "entrypoints": [
+        "packages/session-import",
+        "packages/harness-runtime",
+        "packages/session"
+      ],
+      "references": [
+        "docs/architecture/multi-harness.md",
+        "docs/agents/known-drift.md"
+      ],
+      "testHints": [
+        "packages/session-import/test/snapshot.test.ts",
+        "packages/server/test/harnessSwitch.test.ts"
+      ],
+      "risk": "critical"
+    },
+    {
+      "id": "refactor",
+      "title": "Refactoring and simplification",
+      "skill": ".agents/skills/polyth-refactor/SKILL.md",
+      "match": [],
+      "entrypoints": [
+        "package.json",
+        "apps/web/test/packageContainment.test.ts"
+      ],
+      "references": [
+        "docs/agents/architecture.md",
+        "docs/agents/verification.md"
+      ],
+      "testHints": [],
+      "risk": "high"
+    },
+    {
+      "id": "review",
+      "title": "Code review and acceptance",
+      "skill": ".agents/skills/polyth-review/SKILL.md",
+      "match": [],
+      "entrypoints": [
+        "AGENTS.md",
+        "docs/agents/task-map.json"
+      ],
+      "references": [
+        "docs/agents/verification.md",
+        "docs/agents/templates/evidence.md"
+      ],
+      "testHints": [],
+      "risk": "normal"
+    },
+    {
+      "id": "knowledge",
+      "title": "Agent knowledge maintenance",
+      "skill": ".agents/skills/polyth-knowledge/SKILL.md",
+      "match": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md",
+        ".agents/**",
+        ".claude/**",
+        ".cursor/rules/**",
+        "docs/agents/**",
+        "docs/dev/README.md",
+        "scripts/agent-kit*"
+      ],
+      "entrypoints": [
+        "docs/agents/task-map.json",
+        "docs/agents/evidence.json",
+        "scripts/agent-kit.mjs"
+      ],
+      "references": [
+        "docs/agents/maintenance.md",
+        "docs/agents/client-compatibility.md"
+      ],
+      "testHints": [
+        "scripts/test/agent-kit.test.ts"
+      ],
+      "risk": "normal"
+    },
+    {
+      "id": "live-control",
+      "title": "Authorized live Polyth control",
+      "skill": ".agents/skills/polyth-live-control/SKILL.md",
+      "match": [
+        "packages/polyth-mcp/**",
+        "packages/cli/**",
+        ".opencode/skill/polyth-control/**"
+      ],
+      "entrypoints": [
+        "packages/polyth-mcp",
+        "packages/cli/src/main.ts",
+        ".opencode/opencode.json"
+      ],
+      "references": [
+        "docs/agents/security.md",
+        "docs/agents/evidence.md",
+        "docs/dev/cli.md"
+      ],
+      "testHints": [
+        "packages/polyth-mcp/test/control.test.ts",
+        "packages/cli/test/cli.test.ts",
+        "packages/server/test/cliAccess.test.ts"
+      ],
+      "risk": "critical"
+    }
+  ]
+}

@@ -1,0 +1,347 @@
+.pkg-tunnel {
+  container: tunnel-page / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* This computer: status, the address browsers use, sign-in, Pair */
+
+.pkg-tunnel-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.pkg-tunnel-hero-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.pkg-tunnel-hero-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.pkg-tunnel-hero-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pkg-tunnel-hero-copy strong {
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.pkg-tunnel-hero-copy span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-tunnel-facts {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--hair);
+}
+
+.pkg-tunnel-fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--control-h-sm);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.pkg-tunnel-fact dt {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-tunnel-fact dd {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+  margin: 0;
+  font-size: var(--font-label);
+  text-align: end;
+}
+
+.pkg-tunnel-address {
+  overflow: hidden;
+  font-size: var(--font-meta);
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pkg-tunnel-hero-pair {
+  align-self: flex-end;
+}
+
+/* Devices */
+
+.pkg-tunnel-devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pkg-tunnel-device {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  transition: border-color var(--motion-fast) var(--motion-ease);
+}
+
+.pkg-tunnel-device.is-open {
+  border-color: var(--border);
+}
+
+.pkg-tunnel-device-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+}
+
+.pkg-tunnel-dot {
+  flex: 0 0 auto;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--faint);
+}
+
+.pkg-tunnel-dot.is-online {
+  background: var(--green);
+  box-shadow: 0 0 0 3px var(--green-wash);
+}
+
+.pkg-tunnel-device-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pkg-tunnel-device-copy strong {
+  overflow: hidden;
+  font-size: var(--font-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pkg-tunnel-device-copy span,
+.pkg-tunnel-meta {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-tunnel-disclose svg {
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.pkg-tunnel-disclose[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.pkg-tunnel-device-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+
+.pkg-tunnel-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-4) var(--space-5);
+  padding-top: var(--space-2);
+}
+
+.pkg-tunnel-group h4 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 650;
+}
+
+.pkg-tunnel-group .settings-check-group {
+  justify-content: start;
+}
+
+.pkg-tunnel-device-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Advanced */
+
+.pkg-tunnel-advanced > summary {
+  width: fit-content;
+  padding: var(--space-1) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+
+.pkg-tunnel-advanced[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pkg-tunnel-fingerprint {
+  display: inline-block;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.pkg-tunnel-diagnostics {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Pairing dialog */
+
+.pkg-tunnel-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+}
+
+.pkg-tunnel-pair.is-loading {
+  min-height: 18rem;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.pkg-tunnel-lead {
+  margin: 0;
+  max-width: 30ch;
+  color: var(--text);
+  font-size: var(--font-body);
+}
+
+.pkg-tunnel-pair .pkg-tunnel-meta {
+  margin: 0;
+  min-height: 1.4em;
+}
+
+.pkg-tunnel-meta strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+
+.pkg-tunnel-qr svg {
+  display: block;
+  width: min(100%, 240px);
+  height: auto;
+  border-radius: var(--radius-card);
+  /* QR stays dark-on-light in every theme so phone cameras read it. */
+  background: #fff;
+  fill: #111;
+  box-shadow: 0 0 0 1px var(--border-soft), var(--shadow-sm);
+}
+
+.pkg-tunnel-access {
+  width: 100%;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-tunnel-access > summary {
+  width: fit-content;
+  margin-inline: auto;
+  cursor: pointer;
+}
+
+.pkg-tunnel-access[open] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pkg-tunnel-access .pkg-tunnel-meta {
+  margin: 0;
+}
+
+.pkg-tunnel-phrase {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pkg-tunnel-phrase li {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--font-title);
+  font-weight: 650;
+}
+
+@container tunnel-page (max-width: 30rem) {
+  .pkg-tunnel-device-head {
+    flex-wrap: wrap;
+  }
+
+  .pkg-tunnel-hero-pair {
+    align-self: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pkg-tunnel-device,
+  .pkg-tunnel-disclose svg {
+    transition: none;
+  }
+}

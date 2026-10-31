@@ -1,0 +1,344 @@
+/* Split sessions view (SessionSplitView.tsx). One host always wraps the live
+   chat surface; with the split on, two panes share the workspace and the
+   start pane takes --split-ratio of it. Places are CSS `order`, so the live
+   chat never remounts. Motion runs on transform/opacity only. */
+
+@property --split-ratio {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.5;
+}
+
+.session-split {
+  --split-divider: 1px;
+  --split-header-h: calc(36px * var(--density-scale, 1));
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.session-split-pane {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-split[data-split="on"] > .session-split-pane[data-side="0"] {
+  flex: 0 0 calc((100% - var(--split-divider)) * var(--split-ratio));
+}
+.session-split[data-split="on"] > .session-split-pane[data-side="1"] {
+  flex: 1 1 0;
+}
+
+/* ---- pane header ------------------------------------------------------- */
+
+.session-split-header {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  block-size: var(--split-header-h);
+  padding-inline: var(--space-3) var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  border-block-end: 1px solid var(--hair);
+  user-select: none;
+  transition: color var(--motion-normal) var(--motion-ease);
+}
+.session-split-header[data-focused="true"] { color: var(--text); }
+/* The focus mark: an accent hairline that grows under the focused chat and
+   withdraws from the other, on the window clock. */
+.session-split-header::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--space-3);
+  inset-block-end: -1px;
+  block-size: 2px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  transform: scaleX(0);
+  opacity: 0;
+  transition:
+    transform var(--motion-window) var(--motion-window-ease),
+    opacity var(--motion-normal) var(--motion-ease);
+}
+.session-split-header[data-focused="true"]::after { transform: scaleX(1); opacity: 1; }
+
+.session-split-status {
+  flex: none;
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text-dim) 45%, transparent);
+  transition: background-color var(--motion-normal) var(--motion-ease);
+}
+.session-split-status[data-tone="working"] {
+  background: var(--accent);
+  animation: session-split-breathe 1.6s var(--motion-ease) infinite;
+}
+.session-split-status[data-tone="attention"] { background: var(--amber); }
+.session-split-status[data-tone="failed"] { background: var(--red); }
+
+@keyframes session-split-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+.session-split-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-label);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.session-split-project {
+  flex: none;
+  max-inline-size: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+}
+.session-split-actions {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--motion-normal) var(--motion-ease);
+}
+.session-split-pane:hover .session-split-actions,
+.session-split-header:focus-within .session-split-actions { opacity: 1; }
+@media (pointer: coarse) {
+  .session-split-actions { opacity: 1; }
+}
+
+/* ---- companion pane ---------------------------------------------------- */
+
+.session-split-pane[data-role="companion"] { cursor: default; }
+.session-split-companion .timeline-wrap { position: relative; }
+.session-split-pane[data-role="companion"][data-enter="open"] {
+  animation: session-split-arrive var(--motion-window) var(--motion-window-ease) both;
+}
+.session-split-pane[data-role="companion"][data-enter="replace"] > .session-split-companion,
+.session-split-pane[data-role="companion"][data-enter="focus"] .session-split-ghost-dock {
+  animation: session-split-settle var(--motion-surface) var(--motion-ease) both;
+}
+
+@keyframes session-split-arrive {
+  from { opacity: 0; transform: translateX(calc(var(--stack-dir, 1) * 48px)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes session-split-settle {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Closing: the companion's last frame withdraws toward the far edge while
+   the focused chat glides into the whole workspace (exitGhost.ts). */
+.session-split > [data-exit-ghost="session-split-companion"] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: var(--split-ghost-start, 50%);
+  inline-size: var(--split-ghost-width, 50%);
+  pointer-events: none;
+  animation: session-split-leave var(--motion-window-exit) var(--motion-window-exit-ease) both;
+}
+@keyframes session-split-leave {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(calc(var(--stack-dir, 1) * 40px)); }
+}
+
+.session-split-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--conversation-frame-inline-end) var(--space-6) var(--conversation-frame-inline-start);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+.session-split-skeleton {
+  display: block;
+  block-size: 12px;
+  inline-size: 100%;
+  border-radius: var(--radius-round);
+  background: linear-gradient(90deg, var(--surface-overlay) 0%, var(--surface-overlay-strong) 45%, var(--surface-overlay) 90%);
+  background-size: 220% 100%;
+  animation: session-split-shimmer 1.4s linear infinite;
+}
+.session-split-skeleton.short { inline-size: 62%; }
+@keyframes session-split-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* The resting composer of the background chat: one quiet pill that says the
+   pane answers a click. It is a view of the real one, not an editor. */
+.session-split-ghost-dock {
+  padding: var(--space-3) var(--conversation-frame-inline-end) var(--space-5) var(--conversation-frame-inline-start);
+}
+.session-split-ghost {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  min-block-size: 48px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-composer);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-input);
+  text-align: start;
+  cursor: text;
+  transition:
+    border-color var(--motion-normal) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease),
+    color var(--motion-normal) var(--motion-ease);
+}
+.session-split-pane[data-role="companion"]:hover .session-split-ghost,
+.session-split-ghost:focus-visible {
+  border-color: var(--accent-line);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm), 0 0 0 3px var(--focus-wash);
+  color: var(--text);
+  outline: none;
+}
+.session-split-ghost-icon { flex: none; display: inline-flex; color: var(--faint); }
+.session-split-ghost-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-split-ghost-hint,
+.session-split-ghost-status {
+  flex: none;
+  font-size: var(--font-meta);
+  color: var(--faint);
+}
+.session-split-ghost-status {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+}
+.session-split-ghost-status[data-tone="working"] { color: var(--accent-text); background: var(--accent-wash); }
+.session-split-ghost-status[data-tone="attention"] { color: var(--amber-on-wash); background: var(--amber-wash); }
+.session-split-ghost-status[data-tone="failed"] { color: var(--red-ink); background: var(--red-wash); }
+
+/* ---- divider ----------------------------------------------------------- */
+
+.session-split-divider {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 var(--split-divider);
+  background: var(--hair);
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  transition: background-color var(--motion-normal) var(--motion-ease);
+}
+/* A generous invisible grab area around the hairline. */
+.session-split-divider::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline: -5px;
+}
+@media (pointer: coarse) {
+  .session-split-divider::before { inset-inline: calc(var(--tap, 44px) / -2); }
+}
+.session-split-divider-grip {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  inline-size: 4px;
+  block-size: 36px;
+  border-radius: var(--radius-round);
+  background: var(--hair-strong);
+  transform: translate(-50%, -50%) scaleY(0.6);
+  opacity: 0;
+  transition:
+    opacity var(--motion-normal) var(--motion-ease),
+    transform var(--motion-surface) var(--motion-ease),
+    background-color var(--motion-normal) var(--motion-ease);
+}
+.session-split-divider:hover,
+.session-split-divider:focus-visible,
+.session-split[data-resizing="true"] .session-split-divider { background: var(--accent-line); }
+.session-split-divider:hover .session-split-divider-grip,
+.session-split-divider:focus-visible .session-split-divider-grip,
+.session-split[data-resizing="true"] .session-split-divider-grip {
+  opacity: 1;
+  background: var(--accent);
+  transform: translate(-50%, -50%) scaleY(1);
+}
+body[data-split-resizing="true"] { cursor: col-resize; user-select: none; }
+body[data-split-resizing="true"] .session-split-pane { pointer-events: none; }
+
+/* ---- drop target ------------------------------------------------------- */
+
+.session-split-drop {
+  position: absolute;
+  z-index: 3;
+  inset-block: var(--space-3);
+  inline-size: calc(50% - var(--space-4));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--accent-line);
+  border-radius: var(--radius-sheet);
+  background: color-mix(in srgb, var(--accent-wash) 70%, transparent);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  animation: session-split-drop-in var(--motion-surface) var(--motion-ease) both;
+}
+.session-split-drop[data-side="1"] { inset-inline-end: var(--space-3); }
+.session-split-drop[data-side="0"] { inset-inline-start: var(--space-3); }
+.session-split[data-split="on"] > .session-split-drop[data-side="0"] {
+  inline-size: calc((100% - var(--split-divider)) * var(--split-ratio) - var(--space-5));
+}
+.session-split[data-split="on"] > .session-split-drop[data-side="1"] {
+  inline-size: calc((100% - var(--split-divider)) * (1 - var(--split-ratio)) - var(--space-5));
+}
+.session-split-drop-label {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-round);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  color: var(--accent-text);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+@keyframes session-split-drop-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- reduced motion ---------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .session-split-pane[data-role="companion"],
+  .session-split-pane[data-role="companion"] *,
+  .session-split-drop,
+  .session-split-status { animation: none !important; }
+  .session-split-header::after { transition: none; }
+}
+html[data-reduce-animations="true"] .session-split-pane[data-role="companion"],
+html[data-reduce-animations="true"] .session-split-drop,
+html[data-reduce-animations="true"] .session-split-status { animation: none; }

@@ -1,0 +1,8 @@
+.terminal-tool-command { display: grid; gap: var(--space-4); color: var(--text); }
+.terminal-tool-command p { margin: 0; color: var(--text-dim); line-height: 1.5; }
+.terminal-tool-command dl { margin: 0; display: grid; gap: var(--space-1); }
+.terminal-tool-command dt { color: var(--muted); font-size: var(--font-meta); }
+.terminal-tool-command dd { margin: 0; font: var(--font-code)/1.5 var(--mono); overflow-wrap: anywhere; }
+.terminal-tool-command pre { margin: 0; padding: var(--space-3); border-radius: var(--radius-control); background: var(--sunken); font: var(--font-code)/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.terminal-tool-command p[role="alert"] { color: var(--red); }
+.terminal-tool-command__actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }

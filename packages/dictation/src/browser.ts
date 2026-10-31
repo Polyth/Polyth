@@ -1,0 +1,270 @@
+// Browser-safe dictation contracts and helpers. Server provider transports and
+// local model lifecycle code stay behind the package's default Node entry.
+import {
+  DEFAULT_DICTATION_PREFERENCES,
+  migrateDictationPreferences,
+  type DictationLatencyPreference,
+  type DictationProcessingPolicy,
+  type DictationProviderId,
+  type DictationTransport,
+} from "./providers.ts";
+
+export {
+  createDictationService, createChunkBuffer, DICTATION_FORMAT,
+  type DictationFormat, type DictationSessionDto, type DictationChunkResult,
+  type DictationService, type DictationServiceOptions,
+  type SttAdapter, type SttStream, type ChunkBuffer, type BufferedChunk,
+  type DictationTimingDto, type DictationMetricsDto,
+} from "./streaming.ts";
+export {
+  createWhisperSttAdapter, downsampleToPcm16, pcmToWav,
+  type WhisperSttOptions,
+} from "./whisper.ts";
+export {
+  DEFAULT_LOCAL_MODEL_ID,
+  localModelCatalog,
+  type LocalModelDescriptor,
+  type LocalModelPreset,
+  type LocalModelState,
+  type LocalModelStatus,
+} from "./localModelCatalog.ts";
+export {
+  createFailoverSttAdapter,
+  type FailoverSttOptions,
+} from "./failover.ts";
+export { providerToSttAdapter } from "./providerBridge.ts";
+export {
+  selectDictationAdapter,
+  type DictationRoutingInput,
+} from "./routing.ts";
+export * from "./providers.ts";
+export * from "./wire.ts";
+export * from "./speech.ts";
+export * from "./ttsCatalog.ts";
+
+export type VoiceEngine = "browser" | "server";
+/** Read aloud: the browser's voices, a built-in voice on the Polyth server
+ *  ("local"), or a custom OpenAI-compatible voice server ("server"). */
+export type TtsEngine = VoiceEngine | "local";
+
+export interface VoicePrefs {
+  /** Show the mic button and allow dictation. */
+  dictation: boolean;
+  /** @deprecated Automatic playback is disabled; retained for preference migration. */
+  tts: boolean;
+  /** BCP-47 recognition + speech language, e.g. "en-US". */
+  lang: string;
+  /** Speech rate 0.5–2. */
+  rate: number;
+  /** Preferred speechSynthesis voice name. */
+  voice?: string;
+  /** Compatibility placement switch; provider/transport own new STT routing. */
+  sttEngine: VoiceEngine;
+  /** Read-aloud engine. */
+  ttsEngine: TtsEngine;
+  /** Built-in voice id on the Polyth server. */
+  localVoice?: string;
+  /** Speaker inside a multi-speaker built-in voice. */
+  localSpeaker?: number;
+  pitch: number;
+  volume: number;
+  summarize: boolean;
+  /** Provider-neutral realtime dictation preferences. */
+  dictationProvider: DictationProviderId;
+  dictationTransport: DictationTransport;
+  dictationModel?: string;
+  localModel?: string;
+  contextInjection: boolean;
+  processingPolicy: DictationProcessingPolicy;
+  fallbackProvider?: DictationProviderId;
+  /** @deprecated compatibility mirror; processingPolicy owns routing. */
+  cloudFallback: boolean;
+  latencyPreference: DictationLatencyPreference;
+  /** Turn spoken "comma", "period", "new line" into punctuation (English
+   *  browser recognition, which does not punctuate by itself). */
+  spokenPunctuation: boolean;
+  /** Ask the browser recognizer to stay on this device when it can. */
+  onDeviceSpeech: boolean;
+}
+
+export const VOICE_PREFS_KEY = "polyth.voice";
+
+/** One microphone owner at a time. Voice mode and the dictation mic live in
+ *  separately bundled packages, so they coordinate through this window event:
+ *  the owner that starts capturing announces itself and the others stop. */
+export const MICROPHONE_CLAIM_EVENT = "polyth:microphone-claim";
+
+export function claimMicrophone(owner: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(MICROPHONE_CLAIM_EVENT, { detail: { owner } }));
+}
+
+export function defaultVoicePrefs(): VoicePrefs {
+  return {
+    dictation: true,
+    tts: false,
+    lang: "en-US",
+    rate: 1,
+    sttEngine: "server",
+    ttsEngine: "browser",
+    pitch: 1,
+    volume: 1,
+    summarize: false,
+    dictationProvider: DEFAULT_DICTATION_PREFERENCES.provider,
+    dictationTransport: DEFAULT_DICTATION_PREFERENCES.transport,
+    contextInjection: DEFAULT_DICTATION_PREFERENCES.contextInjection,
+    processingPolicy: DEFAULT_DICTATION_PREFERENCES.processingPolicy,
+    cloudFallback: DEFAULT_DICTATION_PREFERENCES.cloudFallback,
+    latencyPreference: DEFAULT_DICTATION_PREFERENCES.latencyPreference,
+    spokenPunctuation: true,
+    onDeviceSpeech: true,
+  };
+}
+
+const engineOf = (v: unknown, fallback: VoiceEngine): VoiceEngine =>
+  v === "browser" || v === "server" ? v : fallback;
+
+export function parseVoicePrefs(raw: string | null): VoicePrefs {
+  const d = defaultVoicePrefs();
+  try {
+    const data = JSON.parse(raw ?? "") as Partial<VoicePrefs> & Record<string, unknown>;
+    const dictation = migrateDictationPreferences({
+      ...data,
+      provider: data.dictationProvider,
+      transport: data.dictationTransport,
+      model: data.dictationModel,
+      language: data.lang,
+    });
+    return {
+      dictation: typeof data.dictation === "boolean" ? data.dictation : d.dictation,
+      tts: typeof data.tts === "boolean" ? data.tts : d.tts,
+      lang: typeof data.lang === "string" && data.lang ? data.lang : d.lang,
+      rate: typeof data.rate === "number" && data.rate >= 0.5 && data.rate <= 2 ? data.rate : d.rate,
+      ...(typeof data.voice === "string" && data.voice ? { voice: data.voice } : {}),
+      sttEngine: engineOf(data.sttEngine, d.sttEngine),
+      ttsEngine: data.ttsEngine === "local" ? "local" : engineOf(data.ttsEngine, "browser"),
+      ...(typeof data.localVoice === "string" && data.localVoice ? { localVoice: data.localVoice } : {}),
+      ...(Number.isInteger(data.localSpeaker) ? { localSpeaker: data.localSpeaker } : {}),
+      pitch: typeof data.pitch === "number" && data.pitch >= 0.5 && data.pitch <= 2 ? data.pitch : d.pitch,
+      volume: typeof data.volume === "number" && data.volume >= 0 && data.volume <= 1 ? data.volume : d.volume,
+      summarize: typeof data.summarize === "boolean" ? data.summarize : d.summarize,
+      dictationProvider: dictation.provider,
+      dictationTransport: dictation.transport,
+      ...(dictation.model ? { dictationModel: dictation.model } : {}),
+      ...(dictation.localModel ? { localModel: dictation.localModel } : {}),
+      contextInjection: dictation.contextInjection,
+      processingPolicy: dictation.processingPolicy,
+      ...(dictation.fallbackProvider ? { fallbackProvider: dictation.fallbackProvider } : {}),
+      cloudFallback: dictation.cloudFallback,
+      latencyPreference: dictation.latencyPreference,
+      spokenPunctuation: typeof data.spokenPunctuation === "boolean" ? data.spokenPunctuation : d.spokenPunctuation,
+      onDeviceSpeech: typeof data.onDeviceSpeech === "boolean" ? data.onDeviceSpeech : d.onDeviceSpeech,
+    };
+  } catch {
+    return d;
+  }
+}
+
+export function serializeVoicePrefs(p: VoicePrefs): string {
+  return JSON.stringify(p);
+}
+
+/** Append a finalized recognition chunk with sane single-space joining. */
+export function mergeTranscript(current: string, chunk: string): string {
+  const next = chunk.trim();
+  if (!next) return current;
+  if (!current) return next;
+  return `${current.replace(/\s+$/, "")} ${next}`;
+}
+
+/** Strip markdown noise so read-aloud doesn't spell out syntax. */
+export function speakableText(markdown: string, maxChars = 2000): string {
+  const text = markdown
+    .replace(/```[\s\S]*?```/g, " code block omitted. ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " image ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_~>#|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+/** Resolve only the assistant event whose action the user pressed. Keeping
+ * this selection exact prevents a delayed click from reading a newer reply. */
+export function assistantReplyTextAt(
+  events: readonly { seq: number; type: string; data: unknown }[],
+  eventSeq: number,
+): string {
+  const event = events.find((candidate) =>
+    candidate.seq === eventSeq && candidate.type === "assistant/message");
+  if (!event || !event.data || typeof event.data !== "object" || Array.isArray(event.data)) return "";
+  return speakableText(String((event.data as { text?: unknown }).text ?? ""));
+}
+
+interface SpeechWindowLike {
+  SpeechRecognition?: unknown;
+  webkitSpeechRecognition?: unknown;
+  speechSynthesis?: unknown;
+}
+
+export function speechSupport(w: unknown): { stt: boolean; tts: boolean } {
+  const win = (w ?? {}) as SpeechWindowLike;
+  return {
+    stt: typeof win.SpeechRecognition === "function" || typeof win.webkitSpeechRecognition === "function",
+    tts: typeof win.speechSynthesis === "object" && win.speechSynthesis !== null,
+  };
+}
+
+export function recognitionCtor(w: unknown): (new () => SpeechRecognitionLike) | null {
+  const win = (w ?? {}) as SpeechWindowLike;
+  const ctor = win.SpeechRecognition ?? win.webkitSpeechRecognition;
+  return typeof ctor === "function" ? (ctor as new () => SpeechRecognitionLike) : null;
+}
+
+export type OnDeviceSpeechAvailability = "available" | "downloadable" | "downloading" | "unavailable";
+
+interface OnDeviceRecognitionStatics {
+  available?(options: { langs: string[]; processLocally: boolean }): Promise<string>;
+  install?(options: { langs: string[]; processLocally: boolean }): Promise<boolean>;
+}
+
+/** On-device availability of browser speech recognition for `lang`
+ *  (`SpeechRecognition.available`, on-device Web Speech). Browsers without the API, or
+ *  that throw for the tag, report "unavailable" — never a guess. */
+export async function onDeviceSpeechAvailability(w: unknown, lang: string): Promise<OnDeviceSpeechAvailability> {
+  const ctor = recognitionCtor(w) as unknown as OnDeviceRecognitionStatics | null;
+  if (!ctor || typeof ctor.available !== "function" || !lang || lang === "auto") return "unavailable";
+  try {
+    const result = await ctor.available({ langs: [lang], processLocally: true });
+    return result === "available" || result === "downloadable" || result === "downloading" ? result : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
+/** Download the on-device recognizer for `lang`. Must run from a user gesture. */
+export async function installOnDeviceSpeech(w: unknown, lang: string): Promise<boolean> {
+  const ctor = recognitionCtor(w) as unknown as OnDeviceRecognitionStatics | null;
+  if (!ctor || typeof ctor.install !== "function" || !lang || lang === "auto") return false;
+  try {
+    return await ctor.install({ langs: [lang], processLocally: true });
+  } catch {
+    return false;
+  }
+}
+
+export interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  /** On-device Web Speech: keep audio and transcript on the device. */
+  processLocally?: boolean;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+}

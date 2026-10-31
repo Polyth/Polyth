@@ -1,0 +1,7 @@
+[
+  "accountIsolation.test.ts",
+  "pairingCommit.test.ts",
+  "routes.test.ts",
+  "store.test.ts",
+  "trustMutations.test.ts"
+]

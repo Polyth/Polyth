@@ -1,0 +1,274 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { COMMANDCODE_BRIDGE_SOURCE } from "../src/bridgeSource.ts";
+import { createCommandCodeTranslateState, translateCommandCodeRecord } from "../src/protocol.ts";
+import { COMMANDCODE_CAPABILITIES } from "../src/runtime.ts";
+import { COMMANDCODE_WORKER_SOURCE } from "../src/workerSource.ts";
+
+test("Command Code advertises only the native surfaces Polyth actually integrates", () => {
+  assert.equal(COMMANDCODE_CAPABILITIES.streaming, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.steering, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.resume, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.usage, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.subagents, false);
+  assert.equal(COMMANDCODE_CAPABILITIES.mcp, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.questions, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.compaction, true);
+  assert.equal(COMMANDCODE_CAPABILITIES.contextOccupancy, "derived");
+
+  // Polyth does not yet replace Command Code's interactive per-tool permission
+  // prompt. Follow-Polyth and Plan mode both stay inside the native engine.
+  assert.equal(COMMANDCODE_CAPABILITIES.permissions, false);
+  assert.equal(COMMANDCODE_CAPABILITIES.fork, false);
+  assert.equal(COMMANDCODE_CAPABILITIES.cost, false);
+  assert.deepEqual(COMMANDCODE_CAPABILITIES.commands, {
+    discovery: "unsupported",
+    invoke: "unsupported",
+  });
+});
+
+test("Command Code native delegation tools are blocked in favor of canonical Polyth children", () => {
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /isNativeDelegationTool/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /spawn\[_-\]\?agent/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /invoke\[_-\]\?subagent/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /agent\[_-\]\?output/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /action agent\.spawn/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /block: true/);
+});
+
+test("Command Code headless launch stays explicit, exact-resume and fail-closed", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"-p"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--output-format", "json"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--skip-onboarding"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--no-auto-update"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /"--tools-enable", "todo_write,ask_user_question"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /args\.push\("--resume", message\.nativeSessionId\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /message\.permissionMode === "auto-accept" \|\| message\.permissionMode === "plan"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /args\.push\("--permission-mode", permissionMode\)/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--yolo|--dangerously-skip-permissions/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--trust/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /--continue/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /permissionMode === "default"/);
+});
+
+test("Command Code admission waits for the exact current turn receipt, not a stale resumed session id", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /acceptedMutations/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /entry\?\.operationId === operationId && entry\?\.mutationKind === mutationKind/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /waitForTurnAdmission\([\s\S]*message\.operationId/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /const readNativeSessionId/);
+});
+
+test("Command Code worker emits terminal evidence only after admission or observed native run evidence", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /if \(admission \|\| turn\.runObserved\)/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /eventType === "run_start" \|\| eventType === "turn_start"/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /!turn\.runObserved && !durableAdmission/);
+});
+
+test("resuming Command Code receives the latest canonical Polyth title", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /POLYTH_COMMANDCODE_TITLE: compactControl \? "" : message\.title \|\| ""/);
+  assert.doesNotMatch(COMMANDCODE_WORKER_SOURCE, /POLYTH_COMMANDCODE_TITLE: message\.nativeSessionId \?/);
+});
+
+test("worker diagnostics are redacted before crossing the worker IPC boundary", () => {
+  assert.match(COMMANDCODE_WORKER_SOURCE, /\$1\[redacted\]/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /authorization\|cookie\|credential\|password\|secret\|token\|api/);
+});
+
+test("native ask_user_question is intercepted before headless auto-answer", () => {
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /beforeToolCall/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /toolName !== "ask_user_question"/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /await waitForQuestionAnswer/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /persistMutationReceipt\(operationId, mutationKind, requestId\)/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /pending\.resolve\(answer\)/);
+  assert.ok(
+    COMMANDCODE_BRIDGE_SOURCE.indexOf("persistMutationReceipt(operationId, mutationKind, requestId)")
+      < COMMANDCODE_BRIDGE_SOURCE.indexOf("pending.resolve(answer)"),
+    "question response must be durably receipted before the Mod hook is released",
+  );
+});
+
+test("native manual compaction is consumed before the model loop and durably receipted", () => {
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /transformInput/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /await cmd\.sessions\.compact\(\)/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /persistMutationReceipt\(requestedOperationId, "session-compact"\)/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /session-control input unexpectedly reached the model loop/);
+  assert.match(COMMANDCODE_WORKER_SOURCE, /mutationKind: compactControl \? "session-compact" : "turn-submit"/);
+});
+
+test("Command Code question schema is normalized at the adapter boundary", () => {
+  const state = createCommandCodeTranslateState("turn-question");
+  assert.deepEqual(
+    translateCommandCodeRecord({
+      type: "event",
+      event: {
+        type: "tool_queued",
+        toolCallId: "ask-1",
+        toolName: "ask_user_question",
+        input: {
+          questions: [
+            {
+              question: "Which framework?",
+              header: "Framework",
+              options: [
+                { label: "React", description: "Use React" },
+                { label: "Vue", description: "Use Vue" },
+              ],
+              multiSelect: false,
+            },
+            {
+              question: "Which extras?",
+              header: "Extras",
+              options: [{ label: "Tests" }, { label: "Docs" }],
+              multiSelect: true,
+            },
+          ],
+        },
+      },
+    }, state),
+    [{
+      type: "question/asked",
+      requestId: "ask-1",
+      questions: [
+        {
+          id: "q1",
+          title: "Framework",
+          prompt: "Which framework?",
+          type: "single",
+          options: [
+            { value: "React", label: "React", description: "Use React" },
+            { value: "Vue", label: "Vue", description: "Use Vue" },
+          ],
+          required: true,
+          allowOther: true,
+        },
+        {
+          id: "q2",
+          title: "Extras",
+          prompt: "Which extras?",
+          type: "multi",
+          options: [{ value: "Tests", label: "Tests" }, { value: "Docs", label: "Docs" }],
+          required: true,
+          allowOther: true,
+        },
+      ],
+    }],
+  );
+  assert.deepEqual(
+    translateCommandCodeRecord({
+      type: "event",
+      event: { type: "tool_hook_blocked", toolCallId: "ask-1", toolName: "ask_user_question", hookOutput: "answered" },
+    }, state),
+    [],
+  );
+});
+
+test("native Command Code AgentEvents never create shadow Polyth subagents", () => {
+  const state = createCommandCodeTranslateState("turn-subagent");
+  for (const event of [
+    { type: "subagent_start", toolCallId: "child-1", subagentType: "explore" },
+    { type: "subagent_progress", toolCallId: "child-1", subagentType: "explore", toolName: "read" },
+    { type: "subagent_stop", toolCallId: "child-1", subagentType: "explore" },
+  ]) {
+    assert.deepEqual(translateCommandCodeRecord({ type: "event", event }, state), []);
+  }
+});
+
+test("model request usage also reports honest last-request context occupancy", () => {
+  const state = createCommandCodeTranslateState("turn-context", {
+    providerID: "anthropic",
+    modelID: "anthropic/claude-sonnet-4-5",
+  });
+  const events = translateCommandCodeRecord({
+    type: "event",
+    event: {
+      type: "model_request_end",
+      model: "anthropic/claude-sonnet-4-5",
+      usage: { input_tokens: 82_000, output_tokens: 1_200 },
+    },
+  }, state);
+  const context = events.find((event) => event.type === "context/updated");
+  assert.ok(context && context.type === "context/updated");
+  if (context?.type === "context/updated") {
+    assert.equal(context.usedTokens, 82_000);
+    assert.equal(context.source, "derived");
+    assert.equal(context.limitTokens, undefined);
+    assert.equal(context.fraction, undefined);
+  }
+  const usage = events.find((event) => event.type === "usage/recorded");
+  assert.equal(usage?.type, "usage/recorded");
+  if (usage?.type === "usage/recorded") {
+    assert.equal(usage.tokens.input, 82_000);
+    assert.equal(usage.tokens.output, 1_200);
+  }
+});
+
+test("missing native input usage is not misreported as zero context occupancy", () => {
+  const state = createCommandCodeTranslateState("turn-output-only", {
+    providerID: "anthropic",
+    modelID: "anthropic/claude-sonnet-4-5",
+  });
+  const events = translateCommandCodeRecord({
+    type: "event",
+    event: { type: "model_request_end", usage: { output_tokens: 77 } },
+  }, state);
+  assert.equal(events.some((event) => event.type === "context/updated"), false);
+  assert.equal(events.some((event) => event.type === "usage/recorded"), true);
+});
+
+test("compaction events report lifecycle without inventing post-compact token counts", () => {
+  const state = createCommandCodeTranslateState("turn-compact");
+  const started = translateCommandCodeRecord({ type: "event", event: { type: "compaction_start" } }, state);
+  assert.equal(started[0]?.type, "context/updated");
+  if (started[0]?.type === "context/updated") {
+    assert.equal(started[0].source, "unknown");
+    assert.equal(started[0].compaction?.active, true);
+    assert.equal(started[0].usedTokens, undefined);
+  }
+
+  const done = translateCommandCodeRecord({ type: "event", event: { type: "compaction_done", tokensSaved: 41_300 } }, state);
+  assert.equal(done[0]?.type, "session/compacted");
+  assert.equal(done[1]?.type, "context/updated");
+  if (done[1]?.type === "context/updated") {
+    assert.equal(done[1].source, "unknown");
+    assert.equal(done[1].compaction?.active, false);
+    assert.equal(typeof done[1].compaction?.lastAt, "number");
+    assert.equal(done[1].usedTokens, undefined);
+  }
+});
+
+
+test("Command Code cache counters are removed from input while occupancy keeps the whole prompt", () => {
+  const state = createCommandCodeTranslateState("turn-cache", {
+    providerID: "deepseek",
+    modelID: "deepseek/deepseek-v4.1-flash",
+  });
+  // Real gateway shape: `inputTokens` counts the whole prompt and the cache
+  // counters are a subset of it. The published observation keeps only the
+  // non-cached remainder so `input + cacheRead` is the prompt size, not twice
+  // the cached part; the context gauge still reports the whole prompt.
+  const events = translateCommandCodeRecord({
+    type: "event",
+    event: {
+      type: "model_request_end",
+      model: "deepseek/deepseek-v4.1-flash",
+      usage: { inputTokens: 82_482, outputTokens: 718, cacheReadTokens: 76_544, cacheWriteTokens: 1_000 },
+    },
+  }, state);
+  const usage = events.find((event) => event.type === "usage/recorded");
+  assert.ok(usage && usage.type === "usage/recorded");
+  if (usage?.type === "usage/recorded") {
+    assert.deepEqual(usage.tokens, { input: 4_938, output: 718, cacheRead: 76_544, cacheWrite: 1_000 });
+  }
+  const context = events.find((event) => event.type === "context/updated");
+  assert.ok(context && context.type === "context/updated");
+  if (context?.type === "context/updated") assert.equal(context.usedTokens, 82_482);
+});
+
+test("agent beta Command Code bridge blocks native filesystem tools without disabling Polyth tools", () => {
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /POLYTH_AGENT_BETA/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /isFilesystemMutationTool/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /run\[_-\]\?command/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /apply\[_-\]\?patch/);
+  assert.match(COMMANDCODE_BRIDGE_SOURCE, /toolName !== "ask_user_question"/);
+  assert.doesNotMatch(COMMANDCODE_BRIDGE_SOURCE, /todo_write.*filesystem/i);
+});

@@ -1,0 +1,7 @@
+compare Laptops · pick=one
+- | Air 13 | XPS 13
+- image | https://cdn.example/air.jpg | https://cdn.example/xps.jpg
+- Battery ↑ | 18 h | 12 h
+- Weight ↓ | 1.24 kg | 1.19 kg
+- Price ↓ | $999 | $999
+> Buy

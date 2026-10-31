@@ -1,0 +1,209 @@
+// Bundle apps/web to dist/ — runnable from repo root: node apps/web/build.ts
+import { build, type Metafile } from "esbuild";
+import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
+import {
+  browserBuildOptions,
+  chunkNamesForBuild,
+  shellModuleName,
+  shellModuleUrl,
+  uiFontScalePlugin,
+  versionUnhashedShellUrls,
+} from "./buildConfig.ts";
+import { discoverWebPackages } from "./webPackages.ts";
+import { writeThirdPartyNotices } from "../../scripts/third-party-notices.mjs";
+
+const here = import.meta.dirname;
+const dist = join(here, "dist");
+const repositoryRoot = resolve(here, "../..");
+const packagesDir = resolve(repositoryRoot, "packages");
+const projectIcons = join(here, "src", "assets", "project-icons");
+const fontsDir = join(here, "src", "assets", "fonts");
+const sourceDateEpoch = Number(process.env.SOURCE_DATE_EPOCH ?? "");
+const buildId = process.env.POLYTH_WEB_BUILD_ID?.trim()
+  || (Number.isFinite(sourceDateEpoch) && sourceDateEpoch > 0
+    ? Math.round(sourceDateEpoch * 1000).toString(36)
+    : Date.now().toString(36));
+const buildFreshnessEnv = (process.env.POLYTH_WEB_BUILD_FRESHNESS ?? "").trim().toLowerCase();
+const buildFreshnessEnabled = !["0", "false", "off", "disabled"].includes(buildFreshnessEnv);
+const chunkNames = chunkNamesForBuild(buildId);
+const webPackages = await discoverWebPackages(packagesDir);
+const packageManifests = await Promise.all(webPackages.map(async (pkg) => {
+  const parsed = JSON.parse(
+    await readFile(resolve(pkg.dir, "dist", "web", "package-manifest.json"), "utf8"),
+  ) as {
+    id?: unknown;
+    module?: unknown;
+    styles?: unknown;
+    shellEntries?: unknown;
+  };
+  if (
+    parsed.id !== pkg.id
+    || typeof parsed.module !== "string"
+    || !Array.isArray(parsed.styles)
+    || !parsed.styles.every((style) => typeof style === "string")
+    || !Array.isArray(parsed.shellEntries)
+    || !parsed.shellEntries.every((entry) => typeof entry === "string")
+  ) {
+    throw new Error(`invalid package web manifest for "${pkg.id}"`);
+  }
+  return {
+    id: pkg.id,
+    module: parsed.module,
+    styles: parsed.styles as string[],
+    shellEntries: parsed.shellEntries as string[],
+  };
+}));
+
+await rm(dist, { recursive: true, force: true });
+await mkdir(dist, { recursive: true });
+const shared = join(dist, "shared");
+
+// React stays shell-owned. Package bundles import these same browser modules.
+const sharedResult = await build({
+  entryPoints: {
+    react: join(here, "src/shared/react.ts"),
+    "react-dom": join(here, "src/shared/react-dom.ts"),
+    "react-dom-client": join(here, "src/shared/react-dom-client.ts"),
+    "react-jsx-runtime": join(here, "src/shared/react-jsx-runtime.ts"),
+    "react-jsx-dev-runtime": join(here, "src/shared/react-jsx-dev-runtime.ts"),
+  },
+  bundle: true,
+  platform: "browser",
+  format: "esm",
+  splitting: true,
+  sourcemap: true,
+  minify: true,
+  // Escaped \uXXXX sequences bloat non-ASCII strings 6x; every response is
+  // served as UTF-8 anyway.
+  charset: "utf8",
+  metafile: true,
+  outdir: shared,
+  entryNames: "[name]",
+  chunkNames,
+  define: { "process.env.NODE_ENV": '"production"' },
+  logLevel: "info",
+});
+
+const shellEntries: Record<string, string> = {
+  main: join(here, "src/main.tsx"),
+};
+const shellSources = new Set(packageManifests.flatMap((manifest) => manifest.shellEntries));
+for (const source of shellSources) {
+  shellEntries[shellModuleName(source)] = resolve(repositoryRoot, source);
+}
+
+// This graph contains only shell-owned entries. Explicit shell API entries let
+// independently emitted packages consume stateful shell seams as singletons.
+const appResult = await build({
+  ...browserBuildOptions,
+  chunkNames,
+  entryPoints: shellEntries,
+  metafile: true,
+  outdir: dist,
+  define: {
+    ...browserBuildOptions.define,
+    __POLYTH_WEB_BUILD_ID__: JSON.stringify(buildId),
+    __POLYTH_WEB_BUILD_FRESHNESS_ENABLED__: JSON.stringify(buildFreshnessEnabled),
+  },
+  plugins: [uiFontScalePlugin],
+});
+await writeFile(
+  join(dist, "packages-manifest.json"),
+  `${JSON.stringify({
+    // Package stylesheets are unhashed; entry modules are versioned by the import map.
+    packages: packageManifests.map(({ id, module, styles }) => ({
+      id,
+      module,
+      styles: styles.map((style) => `${style}?b=${buildId}`),
+    })),
+  })}\n`,
+);
+// ---- modulepreload injection --------------------------------------------
+// Preload the imports required by main.js and the importmap-ed React entries.
+// Bootstrap evaluates after the shell has established the navigation and auth
+// state. Preloading its entire static closure sent nearly 100 simultaneous
+// requests at a cold browser, so only the bootstrap file itself is preloaded.
+const outUrl = (outPath: string): string =>
+  "/" + relative(dist, resolve(outPath)).split("\\").join("/");
+
+/** Transitive static-import closure over metafile outputs (skips externals). */
+const staticClosure = (metafile: Metafile, roots: string[]): string[] => {
+  const seen = new Set<string>();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (seen.has(cur) || !metafile.outputs[cur]) continue;
+    seen.add(cur);
+    for (const imp of metafile.outputs[cur]!.imports) {
+      if (imp.kind === "import-statement" && !imp.external) queue.push(imp.path);
+    }
+  }
+  return [...seen];
+};
+
+const findOutput = (metafile: Metafile, predicate: (outPath: string, out: Metafile["outputs"][string]) => boolean): string | null => {
+  for (const [outPath, out] of Object.entries(metafile.outputs)) {
+    if (outPath.endsWith(".js") && predicate(outPath, out)) return outPath;
+  }
+  return null;
+};
+
+const mainOut = findOutput(appResult.metafile, (_p, out) => (out.entryPoint ?? "").endsWith("src/main.tsx"));
+const sharedRoots = ["react.ts", "react-dom.ts", "react-dom-client.ts", "react-jsx-runtime.ts"]
+  .map((name) => findOutput(sharedResult.metafile, (_p, out) => (out.entryPoint ?? "").endsWith(`src/shared/${name}`)))
+  .filter((p): p is string => p !== null);
+
+const shellPreloadUrls = [
+  ...staticClosure(sharedResult.metafile, sharedRoots),
+  ...staticClosure(appResult.metafile, mainOut ? [mainOut] : []),
+].map(outUrl);
+// The bootstrap chunk itself (one request, not its closure) is the largest
+// file on the boot path. Fetching it while CSS and the auth status are still in
+// flight takes its download off the critical chain; it still evaluates only
+// when main.js imports it after auth.
+const bootstrapOut = findOutput(appResult.metafile, (_p, out) => (out.entryPoint ?? "").endsWith("src/bootstrap.tsx"));
+const preloadUrls = [...new Set([
+  ...shellPreloadUrls,
+  ...(bootstrapOut ? [outUrl(bootstrapOut)] : []),
+])].filter((url) => url !== "/main.js"); // main.js is the script tag itself
+
+const preloadTags = preloadUrls
+  .map((url) => `    <link rel="modulepreload" href="${url}" />`)
+  .join("\n");
+const htmlSource = await readFile(join(here, "src/index.html"), "utf8");
+const mainScriptTag = '<script type="module" src="/main.js"></script>';
+if (!htmlSource.includes(mainScriptTag)) throw new Error("index.html: main.js script tag not found for modulepreload injection");
+await writeFile(
+  join(dist, "index.html"),
+  versionUnhashedShellUrls(
+    htmlSource.replace(mainScriptTag, `${preloadTags}\n    ${mainScriptTag}`),
+    buildId,
+    [...[...shellSources].map(shellModuleUrl), ...packageManifests.map((manifest) => manifest.module)],
+  ),
+);
+const projectIconNames = (await readdir(projectIcons))
+  .filter((name) => name.endsWith(".svg"))
+  .sort();
+await cp(projectIcons, join(dist, "assets", "project-icons"), { recursive: true });
+await cp(fontsDir, join(dist, "assets", "fonts"), { recursive: true });
+await writeFile(join(dist, "project-icons.json"), JSON.stringify(projectIconNames));
+await copyFile(join(here, "src", "assets", "completion.mp3"), join(dist, "assets", "completion.mp3"));
+// Package bundles carry their own notices in packages/<id>/dist/web.
+await writeThirdPartyNotices(join(dist, "THIRD_PARTY_NOTICES.txt"), [sharedResult.metafile, appResult.metafile], {
+  product: "The Polyth web app",
+});
+// PWA files live at the origin root and are copied verbatim instead of bundled.
+await Promise.all([
+  copyFile(join(here, "sw.js"), join(dist, "sw.js")),
+  copyFile(join(here, "manifest.json"), join(dist, "manifest.json")),
+  copyFile(join(here, "icon-192.png"), join(dist, "icon-192.png")),
+  copyFile(join(here, "icon-512.png"), join(dist, "icon-512.png")),
+]);
+
+// Publish the generation marker last. A client that observes this build id can
+// safely reload knowing every shell/package/static artifact for it is ready.
+await writeFile(
+  join(dist, "build-id.json"),
+  `${JSON.stringify({ build: buildId })}\n`,
+);

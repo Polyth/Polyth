@@ -1,0 +1,13 @@
+{
+  "name": "@polyth/identity",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./http": "./src/http.ts"
+  },
+  "dependencies": {
+    "@polyth/control-plane": "0.1.0"
+  }
+}

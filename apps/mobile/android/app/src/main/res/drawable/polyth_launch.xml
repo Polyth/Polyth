@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UX-LAUNCH: the launch picture as a window background and the legacy
+     splash: the 112dp mark centred on the brand night. Layers keep their own
+     size, so no screen shape can stretch the mark. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/polyth_launch_background" />
+    <item
+        android:width="112dp"
+        android:height="112dp"
+        android:gravity="center"
+        android:drawable="@drawable/polyth_launch_mark" />
+</layer-list>

@@ -1,0 +1,330 @@
+.pkg-dictation {
+  container: dictation-settings / inline-size;
+}
+
+/* Dictation shows its state through the microphone alone — transcribed words
+   land in the composer, so nothing is rendered beside the button. `--mic-level`
+   is written by the widget from measured speech loudness (0 silent, 1 talking);
+   reading it through `--mic-speech` keeps that inline value overridable by the
+   reduced-motion rule below. */
+.mic-control {
+  --mic-level: 0;
+  --mic-speech: var(--mic-level);
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.mic-control .mic-btn {
+  flex: none;
+  color: var(--muted);
+}
+
+/* Listening is legible at rest and brightens with the voice it hears. The
+   level is carried mostly by the wash and halo, which grow the same way in
+   every theme; the ink shifts only far enough toward the page's own contrast
+   to read as brighter without losing the recording hue on light themes. */
+.mic-control .mic-btn.listening {
+  color: color-mix(in srgb, var(--text) calc(var(--mic-speech) * 28%), var(--red));
+  background: color-mix(in srgb, var(--red) calc(16% + var(--mic-speech) * 26%), transparent);
+  box-shadow: 0 0 0 calc(var(--mic-speech) * 5px)
+    color-mix(in srgb, var(--red) calc(var(--mic-speech) * 36%), transparent);
+  transition:
+    color var(--motion-fast) linear,
+    background-color var(--motion-fast) linear,
+    box-shadow var(--motion-fast) linear;
+}
+
+.mic-control .mic-icon {
+  display: grid;
+  place-items: center;
+}
+
+.mic-control .mic-icon > svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+body[data-dictate="false"] .mic-control .mic-btn {
+  display: none;
+}
+
+/* Voice settings page. Rows, sections and save bars come from the shared
+   settings primitives; only the voice-specific controls are styled here. */
+.pkg-dictation .voice-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-dictation .voice-status::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .8;
+}
+
+.pkg-dictation .voice-status.is-ok { color: var(--green); }
+.pkg-dictation .voice-status.is-warn { color: var(--warning); }
+.pkg-dictation .voice-status.is-error { color: var(--red); }
+.pkg-dictation .voice-status.is-muted::before { opacity: .45; }
+
+.pkg-dictation .voice-ok { color: var(--green); }
+
+/* Text fields and pickers share one control width so their edges line up;
+   `100%` would resolve against the shrink-to-fit control cell, so the width
+   is fixed on desktop and phones fall back to the shared full-width rule. */
+@media (min-width: 701px) {
+  .pkg-dictation.pkg-dictation .set-row:not(.is-stacked) > .set-row-control > :is(.ui-input, .picker-select),
+  .pkg-dictation :is(.voice-range, .voice-stack, .set-row-control > .voice-key) {
+    width: var(--settings-control-w, 300px);
+  }
+}
+
+@media (max-width: 700px) {
+  .pkg-dictation :is(.voice-range, .voice-stack, .voice-key) { width: 100%; }
+}
+
+/* Write-only key field; Remove sits beside it only while a key is saved. */
+.pkg-dictation .voice-key {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.pkg-dictation .voice-key > .ui-input { flex: 1 1 auto; min-width: 0; }
+
+.pkg-dictation .picker-select .picker-chip-text { flex: 1; overflow: hidden; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
+
+.pkg-dictation .voice-mono.ui-input,
+.pkg-dictation .voice-mono .ui-input,
+.pkg-dictation input.voice-mono {
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+}
+
+/* Slider with its value beside it, sized to the shared control column. */
+.pkg-dictation .voice-range {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pkg-dictation .voice-range input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.pkg-dictation .voice-range output {
+  flex: none;
+  min-width: 5ch;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.pkg-dictation .voice-stack {
+  display: grid;
+  justify-items: end;
+  gap: var(--space-2);
+}
+
+.pkg-dictation .voice-stack > .picker-select { width: 100%; }
+
+.pkg-dictation .voice-inline,
+.pkg-dictation .voice-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pkg-dictation .voice-progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-block: calc(var(--space-1) * -1) var(--space-2);
+  accent-color: var(--accent);
+}
+
+.pkg-dictation .voice-note {
+  margin: var(--space-3) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-dictation .settings-field-error { margin: var(--space-2) 0 0; }
+
+/* Quick setup fills a server group with a known endpoint. */
+.pkg-dictation .voice-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+.pkg-dictation .set-row-hint .voice-presets { margin: var(--space-2) 0 0; }
+
+.pkg-dictation .voice-presets-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* The read-aloud server's fields, two columns when wide. */
+
+.pkg-dictation .voice-server-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+}
+
+.pkg-dictation .voice-server-grid > .settings-field + .settings-field { margin-top: 0; }
+
+@container dictation-settings (min-width: 560px) {
+  .pkg-dictation .voice-server-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (pointer: coarse) {
+  .pkg-dictation .voice-range input[type="range"] { min-height: var(--tap); }
+}
+
+@media (pointer: coarse) {
+  .mic-control .mic-btn {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+}
+
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .composer-mobile .composer-mobile-extensions .mic-control { display: contents; }
+
+  .composer-mobile .composer-mobile-extensions .mic-btn {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    padding: 0;
+  }
+
+}
+
+/* Reduced motion wants the state, not the movement: listening stays at a
+   steady bright level instead of tracking the voice. */
+@media (prefers-reduced-motion: reduce) {
+  .mic-control {
+    --mic-speech: 1;
+  }
+
+  .mic-control .mic-btn.listening {
+    transition: none;
+  }
+}
+
+/* Built-in voices: a recommendation card, then one row per voice. */
+.pkg-dictation .voice-local {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.pkg-dictation .voice-local-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border-subtle));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+}
+
+.pkg-dictation .voice-local-hero > div { min-width: 0; flex: 1 1 260px; }
+
+.pkg-dictation .voice-local-hero p { margin: 0; }
+
+.pkg-dictation .voice-local-hero-title {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-dictation .voice-local-hero-voice {
+  margin: var(--space-1) 0 !important;
+  font-size: var(--font-title);
+  line-height: var(--font-title-lh);
+}
+
+.pkg-dictation .voice-local-hero .voice-note { margin-top: var(--space-1); }
+
+.pkg-dictation .voice-local-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.pkg-dictation .voice-local-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: var(--space-2) var(--space-3);
+}
+
+.pkg-dictation .voice-local-item + .voice-local-item { border-top: 1px solid var(--border-subtle); }
+
+.pkg-dictation .voice-local-item[data-active] {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.pkg-dictation .voice-local-meta {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.pkg-dictation .voice-local-name { font-weight: 600; }
+
+.pkg-dictation .voice-local-detail,
+.pkg-dictation .voice-local-warn {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-dictation .voice-local-warn { color: var(--warning); }
+
+.pkg-dictation .voice-local-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.pkg-dictation .voice-local > .ui-btn { justify-self: start; }
+
+@container dictation-settings (max-width: 520px) {
+  .pkg-dictation .voice-local-item { flex-direction: column; align-items: stretch; }
+  .pkg-dictation .voice-local-actions { justify-content: flex-start; }
+}

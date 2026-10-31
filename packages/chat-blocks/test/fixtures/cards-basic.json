@@ -1,0 +1,74 @@
+{
+  "view": "cards",
+  "title": "Headphones under $400",
+  "options": {
+    "pick": "many",
+    "sort": "-value"
+  },
+  "pick": "many",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "Sony WH-1000XM6",
+      "cells": [
+        "https://cdn.example/xm6.jpg",
+        "Sony WH-1000XM6",
+        "ANC · 30 h",
+        "$399",
+        "★4.8",
+        "https://shop.example/xm6"
+      ],
+      "image": "https://cdn.example/xm6.jpg",
+      "subtitle": "ANC · 30 h",
+      "value": "$399",
+      "badge": "★4.8",
+      "link": "https://shop.example/xm6"
+    },
+    {
+      "index": 1,
+      "selected": true,
+      "title": "Bose QC Ultra",
+      "cells": [
+        "https://cdn.example/qc.jpg",
+        "Bose QC Ultra",
+        "comfort",
+        "$379",
+        "★4.7"
+      ],
+      "image": "https://cdn.example/qc.jpg",
+      "subtitle": "comfort",
+      "value": "$379",
+      "badge": "★4.7"
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "B&W Px8",
+      "cells": [
+        "B&W Px8",
+        "leather, tuned",
+        "$349"
+      ],
+      "subtitle": "leather, tuned",
+      "value": "$349"
+    }
+  ],
+  "actions": [
+    {
+      "label": "Compare selected",
+      "message": "Compare these in detail: {sel}"
+    },
+    {
+      "label": "More options"
+    }
+  ],
+  "notes": [
+    "Prices from three shops, checked today."
+  ],
+  "invalid": [],
+  "problems": []
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@polyth/web-search",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./settings": "./src/settings.ts",
+    "./client": "./src/client.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Web Search",
+      "description": "Privacy-aware web discovery with keyless search and optional credentialed providers.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "telescope",
+      "hasSettings": true,
+      "category": "research",
+      "projectAffinity": {
+        "directions": [
+          "research",
+          "engineering"
+        ],
+        "recommended": true
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/outbound": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

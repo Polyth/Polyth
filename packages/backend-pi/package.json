@@ -1,0 +1,26 @@
+{
+  "name": "@polyth/backend-pi",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Pi harness",
+      "description": "Pi native RPC with scoped Polyth tool projection",
+      "core": false,
+      "enabled": true,
+      "icon": "pi",
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
+    }
+  }
+}

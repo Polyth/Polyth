@@ -1,0 +1,112 @@
+// Item-level settings search — diacritics, duplicate ids, disposed
+// plugin items, hidden pages, no matches.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import {
+  fold, listSettingsItems, registerSettingsItems, searchSettingsItems,
+} from "../src/settings/registry.ts";
+
+const PAGES: Record<string, string> = {
+  general: "General", appearance: "Appearance", chat: "Chat", notifications: "Notifications",
+  behavior: "Behavior", mcp: "MCP", plugins: "Plugins", about: "About", voice: "Voice",
+  models: "Providers & Models", agents: "Agents", projects: "Projects",
+};
+
+test("fold strips diacritics and case", () => {
+  assert.equal(fold("Résumé"), "resume");
+  assert.equal(fold("ÜBER"), "uber");
+});
+
+test("search matches label, description, and keywords; groups carry page labels", () => {
+  const byLabel = searchSettingsItems("terminal font", PAGES);
+  assert.ok(byLabel.some((h) => h.item.id === "appearance.terminalFontSize"));
+  assert.equal(byLabel.find((h) => h.item.id === "appearance.terminalFontSize")!.pageLabel, "Appearance");
+
+  const editor = searchSettingsItems("editor font", PAGES);
+  assert.ok(editor.some((h) => h.item.id === "appearance.editorFontSize"));
+
+  const byKeyword = searchSettingsItems("radius", PAGES);
+  assert.ok(byKeyword.some((h) => h.item.id === "appearance.rounding"));
+
+  const byMirror = searchSettingsItems("mirror layout", PAGES);
+  assert.ok(byMirror.some((h) => h.item.id === "appearance.mirrorLayout"));
+  assert.equal(byMirror.find((h) => h.item.id === "appearance.mirrorLayout")!.pageLabel, "Appearance");
+  assert.ok(searchSettingsItems("ide", PAGES).some((h) => h.item.id === "appearance.mirrorLayout"));
+  assert.ok(searchSettingsItems("sidebar", PAGES).some((h) => h.item.id === "appearance.mirrorLayout"));
+
+  const byDescription = searchSettingsItems("agents.md", PAGES);
+  assert.ok(byDescription.some((h) => h.item.id === "behavior.instructions"));
+  assert.ok(byDescription.some((h) => h.item.id === "behavior.workspaceInstructions"));
+  assert.ok(searchSettingsItems("delegate", PAGES).some((h) => h.item.id === "behavior.favoriteSubagents"));
+  assert.ok(searchSettingsItems("project default model", PAGES).some((h) => h.item.id === "projects.defaultModel"));
+  assert.ok(searchSettingsItems("default harness", PAGES).some((h) => h.item.id === "projects.executionHarness"));
+  assert.ok(searchSettingsItems("icon", PAGES).some((h) => h.item.id === "projects.appearance"));
+  assert.ok(searchSettingsItems("prompt bookmark", PAGES).some((h) => h.item.id === "chat.pinLatestPrompt"));
+  assert.ok(searchSettingsItems("mobile session title", PAGES).some((h) => h.item.id === "chat.mobileSessionTitle"));
+  assert.ok(searchSettingsItems("status bar", PAGES).some((h) => h.item.id === "appearance.statusBar"));
+  assert.ok(searchSettingsItems("footer", PAGES).some((h) => h.item.id === "appearance.statusBar"));
+});
+
+test("diacritic query matches plain text", () => {
+  const hits = searchSettingsItems("dénsity", PAGES);
+  assert.ok(hits.some((h) => h.item.id === "appearance.density"));
+});
+
+test("no matches yields an empty list, blank query too", () => {
+  assert.deepEqual(searchSettingsItems("zzzz-nothing", PAGES), []);
+  assert.deepEqual(searchSettingsItems("   ", PAGES), []);
+});
+
+test("Settings has no Widgets & Layout customizer; canvas widgets stay in the header Canvas", async () => {
+  const widgetItems = listSettingsItems().filter((item) => item.pageId === "widgets");
+  assert.deepEqual(widgetItems, []);
+  assert.equal(searchSettingsItems("zones", PAGES).some((hit) => hit.item.id === "widgets.capabilities"), false);
+  assert.equal(searchSettingsItems("Widgets & Layout", PAGES).length, 0);
+
+  const [shell, settings, packages, canvas] = await Promise.all([
+    readFile(new URL("../src/shell.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/settings/PackagesPage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
+  assert.doesNotMatch(settings, /Choose a setup/);
+  assert.doesNotMatch(settings, /WidgetsPage|settingsview\.widgetsLayout|id: "widgets"/);
+  assert.match(packages, /<PageHead title=\{tr\("settings\.packagespage\.packages"\)\}/);
+  assert.match(canvas, /<WidgetMenu /);
+  assert.match(canvas, /data-widget-surface="workspace-canvas"/);
+});
+
+test("items on hidden/unknown pages are skipped", () => {
+  const un = registerSettingsItems([
+    { id: "ghost.item", pageId: "slot:ghost", label: "Ghost setting", focusTarget: "ghost" },
+  ]);
+  try {
+    // Page not present in the page map → item never surfaces as a dead link.
+    assert.deepEqual(searchSettingsItems("ghost setting", PAGES), []);
+    // Once its page exists, the same item is findable.
+    const hits = searchSettingsItems("ghost setting", { ...PAGES, "slot:ghost": "Ghost" });
+    assert.equal(hits.length, 1);
+  } finally {
+    un();
+  }
+});
+
+test("same-owner ids replace; stale unregister keeps the newer item", () => {
+  const before = listSettingsItems().length;
+  const un1 = registerSettingsItems([
+    { id: "dup.x", pageId: "chat", label: "First", focusTarget: "x" },
+  ]);
+  const un2 = registerSettingsItems([
+    { id: "dup.x", pageId: "chat", label: "Second", focusTarget: "x" },
+  ]);
+  assert.equal(listSettingsItems().length, before + 1, "same id registered once");
+  assert.equal(searchSettingsItems("second", PAGES)[0]?.item.label, "Second");
+
+  un1();
+  assert.equal(searchSettingsItems("second", PAGES)[0]?.item.label, "Second");
+  un2();
+  assert.equal(listSettingsItems().length, before, "disposed plugin items are gone");
+  assert.deepEqual(searchSettingsItems("second", PAGES), []);
+});

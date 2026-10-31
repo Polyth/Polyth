@@ -1,0 +1,144 @@
+<!doctype html>
+<!-- The small update window (see updateWindowView.ts). It lives outside the
+     web shell, so it carries the Default palette from apps/web/src/tokens.css
+     and follows the system light/dark scheme. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'unsafe-inline'; img-src 'self' file:">
+  <meta name="color-scheme" content="dark light">
+  <title>Polyth update</title>
+  <style>
+    :root {
+      --bg: #14171d;
+      --line: #2c3240;
+      --text: #e8eaf0;
+      --muted: #8f96a8;
+      --track: rgba(232, 234, 240, 0.09);
+      --hover: rgba(232, 234, 240, 0.07);
+      --accent: #7aa2f7;
+      --accent-hi: #8fb3ff;
+      --accent-ink: #0a0f1a;
+      --focus: rgba(122, 162, 247, 0.55);
+      color-scheme: dark;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #ffffff;
+        --line: #d9dde6;
+        --text: #171a21;
+        --muted: #5d6475;
+        --track: rgba(23, 26, 33, 0.08);
+        --hover: rgba(23, 26, 33, 0.06);
+        --accent: #3d6fe0;
+        --accent-hi: #305fcc;
+        --accent-ink: #ffffff;
+        --focus: rgba(61, 111, 224, 0.45);
+        color-scheme: light;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 12px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Inter", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      user-select: none;
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      height: 100%;
+      padding: 14px 16px 14px;
+      border: 1px solid var(--line);
+      -webkit-app-region: drag;
+    }
+    .head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .mark { width: 20px; height: 20px; flex: none; border-radius: 5px; }
+    h1 {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .detail {
+      margin: 0;
+      color: var(--muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+    }
+    .spacer { flex: 1; margin-top: -8px; }
+    .progress { display: flex; align-items: center; gap: 10px; }
+    .progress[hidden] { display: none; }
+    .track { position: relative; flex: 1; height: 4px; border-radius: 999px; background: var(--track); overflow: hidden; }
+    .fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: var(--accent); transition: width 240ms ease-out; }
+    .progress.indeterminate .fill { width: 34%; animation: slide 1.3s ease-in-out infinite; }
+    .pct { min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+    .progress.indeterminate .pct { display: none; }
+    @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+    @media (prefers-reduced-motion: reduce) {
+      .fill { transition: none; }
+      .progress.indeterminate .fill { animation: none; width: 100%; opacity: 0.45; }
+    }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; min-height: 28px; }
+    button {
+      -webkit-app-region: no-drag;
+      font: inherit;
+      color: var(--text);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      height: 28px;
+      padding: 0 12px;
+      cursor: default;
+    }
+    button:hover { background: var(--hover); }
+    button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+    button.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+    button:disabled { opacity: 0.55; }
+    .close {
+      flex: none;
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+    }
+    .close:hover { color: var(--text); }
+    .close[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <header class="head">
+      <img class="mark" src="../build/icon.png" alt="">
+      <h1 id="title">Polyth update</h1>
+      <button id="close" class="close" type="button" aria-label="Hide" title="Hide">
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <p id="detail" class="detail" aria-live="polite"></p>
+    <div class="spacer"></div>
+    <div id="progress" class="progress" role="progressbar" aria-labelledby="title" aria-valuemin="0" aria-valuemax="100" hidden>
+      <div class="track"><div class="fill"></div></div>
+      <span class="pct"></span>
+    </div>
+    <footer id="actions" class="actions"></footer>
+  </main>
+  <script src="update-window.js"></script>
+</body>
+</html>

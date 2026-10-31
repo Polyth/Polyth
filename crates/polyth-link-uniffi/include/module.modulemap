@@ -1,0 +1,4 @@
+module PolythLinkCore {
+  header "polyth_link.h"
+  export *
+}

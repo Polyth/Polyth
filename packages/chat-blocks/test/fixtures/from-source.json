@@ -1,0 +1,23 @@
+{
+  "view": "cards",
+  "title": "Hotels",
+  "options": {
+    "from": "_out/hotels.jsonl",
+    "map": "title:name,value:price"
+  },
+  "pick": "none",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [],
+  "actions": [
+    {
+      "label": "Book",
+      "message": "Book: {sel}"
+    }
+  ],
+  "notes": [],
+  "invalid": [],
+  "problems": [],
+  "source": "_out/hotels.jsonl"
+}

@@ -1,0 +1,49 @@
+{
+  "name": "@polyth/agents",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "formerIds": ["schedule"],
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Agents",
+      "description": "Agents that wake on a schedule or on demand and keep a journal.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "bot",
+      "hasSettings": false,
+      "category": "operations",
+      "projectAffinity": {
+        "directions": [
+          "operations",
+          "home",
+          "wellbeing",
+          "finance"
+        ],
+        "recommended": true
+      }
+    }
+  },
+  "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "^0.32.0",
+    "@polyth/contracts": "1.2.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/usage": "0.1.0",
+    "@polyth/web-sdk": "0.1.0",
+    "cron-parser": "^5.10.2",
+    "quickjs-emscripten-core": "^0.32.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

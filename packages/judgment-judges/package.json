@@ -1,0 +1,34 @@
+{
+  "name": "@polyth/judgment-judges",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/types.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Judges",
+      "description": "Completion check, waiting-for-you detection, keeping unfinished chats' caches warm, and your own judges: questions after a turn, on a permission request or at a usage limit, with optional actions that use your access.",
+      "core": false,
+      "enabled": true,
+      "hasSettings": true,
+      "settingsGroup": "Engineering",
+      "icon": "circle-check",
+      "category": "system",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/judgment": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/usage": "0.1.0",
+    "@polyth/web": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": { "react": "^19.0.0" }
+}

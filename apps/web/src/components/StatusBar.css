@@ -1,0 +1,286 @@
+/* The optional status bar under the workspace (Settings → Appearance → Status
+   bar). Host chrome: it reads canonical tokens and follows density, font size,
+   corner rounding, glass and motion preferences instead of drawing its own.
+
+   Material comes from the shared glass lists in styles.css (`.statusbar` sits in
+   the blur, glass-off and low-resource groups), so this file sets only the
+   opaque fallback. A separating border is never drawn: with "Hide interface
+   borders" (the default) every border is transparent, so the edge is a light
+   inset highlight plus the material change. */
+
+/* Defined on <body>, where the density scale lives, so the bar and the fixed
+   corner affordances that must clear it read the same height. */
+body { --statusbar-h: max(24px, calc(30px * var(--density-scale))); }
+
+.statusbar {
+  --statusbar-chip-h: calc(var(--statusbar-h) - 8px);
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  /* Touch grows the bar to the shared hit size; the home-indicator inset is
+     added below the content so the material runs to the screen edge. */
+  min-block-size: calc(max(var(--statusbar-h), var(--hit-min)) + var(--safe-bottom));
+  padding-block: 0 var(--safe-bottom);
+  padding-inline: var(--space-2);
+  overflow: hidden;
+  /* A size container: path lengths and optional detail follow the bar's own
+     width, not the viewport, because the bar only spans the workspace column. */
+  container: statusbar / inline-size;
+  background: var(--material-glass);
+  box-shadow: var(--inset-hi);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1;
+  /* Chrome, not content: a double-click on a segment must not select it (the
+     full value is in its tooltip). */
+  -webkit-user-select: none;
+  user-select: none;
+  animation: statusbar-in var(--motion-normal) var(--motion-ease) both;
+}
+@keyframes statusbar-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The idle launcher strip floats over the workspace's inline end (styles.css
+   "2026 workspace shell"), and the bar spans the workspace. In the wide shell
+   the strip is a full-height column, so the bar ends one column gap short of
+   it — the gap that parts it from the navigator — instead of running
+   underneath; Floating columns move the strip in by --shell-edge
+   (shellLayout.css). In the tablet band the strip is a cluster at the top that
+   can grow down the edge, so the bar keeps its full width and only holds its
+   segments clear of it. An open pane returns to flow or owns that edge, and a
+   hidden strip has no lane, so neither reserves anything. The workspace keeps
+   the document direction in a mirrored shell (shellDirection.ts), where the
+   strip is at its inline start. */
+@container app-shell (min-width: 1401px) {
+  .app-shell:not(:has(.railbar-open)):not(:has(> .railbar[data-rail-strip="none"])) .statusbar {
+    margin-inline-end: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--shell-edge, 0px) + var(--space-2));
+  }
+  .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(> .railbar[data-rail-strip="none"])) .statusbar {
+    margin-inline: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--shell-edge, 0px) + var(--space-2)) 0;
+  }
+}
+@container app-shell (min-width: 961px) and (max-width: 1400px) {
+  .app-shell:not(:has(.railbar-open)):not(:has(> .railbar[data-rail-strip="none"])) .statusbar {
+    padding-inline-end: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-3));
+  }
+  .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(> .railbar[data-rail-strip="none"])) .statusbar {
+    padding-inline: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-3)) var(--space-2);
+  }
+}
+
+/* The quick-background button that Shift reveals is a fixed corner affordance;
+   with the bar present it floats above it instead of over its last segments. */
+.app:has(.statusbar) > .background-quick-trigger {
+  inset-block-end: calc(var(--safe-bottom) + max(var(--statusbar-h), var(--hit-min)) + var(--space-3));
+}
+
+/* ---- the two ends ---------------------------------------------------------- */
+.statusbar-cluster {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  min-block-size: var(--statusbar-chip-h);
+  border-radius: var(--radius-control);
+  transition: background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+/* The leading end takes the free space (a generous drop target); the trailing
+   end is as wide as its content, up to half the bar. */
+.statusbar-cluster[data-end="leading"] { flex: 1 1 0; overflow: hidden; }
+.statusbar-cluster[data-end="trailing"] { flex: 0 1 auto; max-width: 50%; overflow: hidden; }
+/* Segments that do not fit leave the layout and the tab order. */
+.statusbar .statusbar-cluster > [data-fit="hidden"] { display: none !important; }
+.statusbar-cluster[data-drop-target] {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+/* A region that holds a live announcement must not add a box of its own. */
+.sb-region { display: contents; }
+
+/* ---- segments -------------------------------------------------------------- */
+.sb {
+  display: inline-flex;
+  align-items: center;
+  /* Segments are rigid: an end that is too narrow drops whole segments (see
+     statusbar/fitSegments.ts) rather than squeezing every one of them. */
+  flex: none;
+  gap: 6px;
+  box-sizing: border-box;
+  min-block-size: var(--statusbar-chip-h);
+  margin: 0;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sb .ui-icon { width: 13px; height: 13px; flex: none; color: var(--faint); }
+.sb .mono { font-size: inherit; color: var(--text-dim); }
+.sb-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Long names are capped, not squeezed; the full value is in the tooltip. */
+.sb-project .sb-text { max-width: 28ch; color: var(--text-dim); font-weight: 600; }
+.sb-branch .sb-text { max-width: 32ch; }
+.sb-model .sb-text { max-width: 26ch; }
+
+/* Segments that act are real buttons with a quiet chip on hover/press. The
+   specificity beats the global button rule (border, padding, scale on press). */
+.sb.sb-action {
+  cursor: pointer;
+  min-block-size: max(var(--statusbar-chip-h), var(--hit-min));
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .sb.sb-action:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+  .sb.sb-action:hover:where(:not(:disabled)) .ui-icon { color: var(--text-dim); }
+  /* Tone is state, not decoration: hover keeps it. */
+  .sb.sb-reconnect:hover:where(:not(:disabled)) { color: var(--accent-hi); }
+}
+.sb.sb-action:not(:disabled):active {
+  background: var(--surface-overlay-strong);
+  box-shadow: none;
+  transform: none;
+}
+.sb.sb-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* Connection dot: the one live colour in the bar. */
+.sb-live {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 3px var(--green-wash);
+}
+.sb-live[data-connection="pending"] {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-wash);
+  animation: statusbar-pulse 1.4s var(--motion-ease) infinite;
+}
+.sb-live[data-connection="down"] {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--red-wash);
+}
+@keyframes statusbar-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+.sb-reconnect { color: var(--accent); font-weight: 600; }
+
+/* Git: branch with the unpublished/unmerged counts, and the change summary. */
+.sb-delta { color: var(--faint); font-size: .92em; direction: ltr; unicode-bidi: isolate; }
+.sb-changes { color: var(--text-dim); }
+.sb-changes.is-clean { color: var(--faint); }
+.sb-changes.is-clean .ui-icon { color: var(--green); }
+
+/* The open file: the directory gives way, the file name never does. */
+.sb-editor { color: var(--text-dim); }
+.sb-path { display: inline-flex; min-width: 0; max-width: min(34cqi, 44ch); }
+.sb-path-dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--faint); }
+.sb-path-base { flex: none; }
+.sb-meta { color: var(--faint); }
+
+/* Desktop keep-awake: a quiet cup while off or waiting for work, green while
+   the blocker is held. Tone is state, so the bar's hover keeps it. */
+.sb-keep-awake[data-state="off"] .ui-icon { color: var(--faint); opacity: .7; }
+.sb-keep-awake[data-state="armed"] .ui-icon { color: var(--muted); }
+.sb-keep-awake[data-state="active"],
+.sb-keep-awake[data-state="active"] .ui-icon { color: var(--green); }
+@media (hover: hover) {
+  .sb.sb-action.sb-keep-awake[data-state="active"]:hover:where(:not(:disabled)),
+  .sb.sb-action.sb-keep-awake[data-state="active"]:hover:where(:not(:disabled)) .ui-icon { color: var(--green); }
+}
+
+.sb-view { color: var(--muted); font-weight: 600; }
+.sb-view .sb-text { max-width: 30ch; }
+
+/* Launchers dropped into the bar (search, settings, workspace tools) shrink to
+   the chip height instead of keeping their header size. */
+.statusbar .header-action { display: inline-flex; align-items: center; }
+.statusbar .header-action .ui-icon-btn,
+.statusbar .capability-launcher {
+  width: var(--statusbar-chip-h);
+  height: var(--statusbar-chip-h);
+  min-width: 0;
+  min-height: max(var(--statusbar-chip-h), var(--hit-min));
+  padding: 0;
+}
+.statusbar .capability-launcher > svg,
+.statusbar .header-action .ui-icon-btn .ui-icon { width: 13px; height: 13px; }
+/* The notification bell: its unread badge sits beside the small glyph rather
+   than on top of it. */
+.statusbar .notification-bell { padding-inline-end: 8px; }
+.statusbar .notification-badge {
+  right: auto;
+  inset-inline-end: 0;
+  inset-block-start: 2px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  font: 700 8px/12px var(--mono);
+}
+
+/* ---- narrow bars ------------------------------------------------------------
+   Which segments stay is decided by what actually fits (fitSegments.ts). The
+   optional detail of the open file is the one thing that goes first. */
+@container statusbar (max-width: 640px) {
+  .sb-meta { display: none; }
+  .sb-path { max-width: 28cqi; }
+}
+
+/* ---- customizing ------------------------------------------------------------ */
+/* The Customize pencil follows the shared zone pattern (absolute at rest, in
+   flow while the zone is being customized); it only takes the chip size. */
+.statusbar > .zone-edit-button {
+  flex: none;
+  width: var(--statusbar-chip-h);
+  height: var(--statusbar-chip-h);
+  min-height: 0;
+}
+/* The icon-button primitive extends its hit area with an absolutely positioned
+   ::after anchored to the button. While the zone is being customized the
+   pencil is static (not a containing block), so that pseudo-element would be
+   sized to the whole bar and swallow every pointer event on it — the segments
+   could not be dragged. The pencil needs no extension: it only exists with a
+   fine pointer (touch hides it). */
+.statusbar > .zone-edit-button::after { content: none; }
+
+/* An accent veil over the whole bar while it can be rearranged. */
+.statusbar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent-wash);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  body[data-shift-held] .statusbar:hover::after,
+  body[data-ui-editing] .statusbar::after { opacity: .5; }
+  /* Segments become drag handles: the wrapper is the draggable element, so its
+     buttons must not swallow the pointer. Only while the bar is the zone being
+     customized — Shift held elsewhere leaves it alone. */
+  body[data-shift-held] .statusbar:hover .placed-mini-widget[data-widget-editing="true"] {
+    border-radius: var(--radius-control);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+  }
+  body[data-shift-held] .statusbar:hover .placed-mini-widget[data-widget-editing="true"] > * { pointer-events: none; }
+  /* An end with nothing visible stays reachable as a drop target while
+     customizing (its widgets may all render nothing, so :empty is not enough). */
+  body[data-shift-held] .statusbar:hover .statusbar-cluster:not(:has(> .placed-mini-widget > *, > :not(.placed-mini-widget))),
+  body[data-ui-editing] .statusbar .statusbar-cluster:not(:has(> .placed-mini-widget > *, > :not(.placed-mini-widget))) {
+    min-inline-size: 72px;
+    outline: 1px dashed var(--accent-line);
+    outline-offset: -1px;
+  }
+}
+
+@media (forced-colors: active) {
+  .sb.sb-action:focus-visible { outline-color: Highlight; }
+  .sb-live { forced-color-adjust: none; }
+}

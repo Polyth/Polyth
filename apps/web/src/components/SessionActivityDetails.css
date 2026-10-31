@@ -1,0 +1,235 @@
+.session-activity-details {
+  --session-activity-card: var(--sunken);
+  container: session-activity / inline-size;
+  min-width: 0;
+  color: var(--text);
+}
+
+.session-activity-swipe-content { touch-action: pan-y; }
+
+body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .session-activity-details {
+  --session-activity-card: color-mix(in srgb, var(--sunken) var(--material-glass-readable-fill), var(--panel));
+}
+
+body[data-glass="off"] .session-activity-details,
+body[data-desktop-low-resource="true"] .session-activity-details {
+  --session-activity-card: var(--sunken);
+}
+
+.session-activity-hero {
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.session-activity-section-label {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: .06em;
+  line-height: var(--font-meta-lh);
+  text-transform: uppercase;
+}
+
+.session-activity-context-head,
+.session-activity-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.session-activity-title {
+  display: -webkit-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--font-heading);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -.015em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.session-activity-details .session-activity-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin: var(--space-3) var(--space-3) 0;
+  padding: var(--space-1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-round);
+  background: var(--session-activity-card);
+}
+
+.session-activity-tabs button {
+  min-width: 0;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--muted);
+  font: 600 var(--font-meta) / var(--font-meta-lh) var(--ui-font-family);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-activity-tabs button[aria-selected="true"] {
+  background: var(--elevated);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+}
+
+.session-activity-tabs button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.session-activity-panel {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.session-activity-context-card,
+.session-activity-stat {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--session-activity-card);
+}
+
+.session-activity-context-card,
+.session-activity-plan { display: grid; gap: var(--space-2); }
+/* The request and the plan read as text, like the chat's activity block:
+   no cards. Figures keep their tiles; words do not need boxes. */
+.session-activity-intent,
+.session-activity-plan { min-width: 0; padding-inline: var(--space-3); }
+/* Their copy starts where the tiles' copy does; without boxes, air
+   separates them instead. */
+.session-activity-intent + .session-activity-plan { margin-block-start: var(--space-2); }
+.session-activity-context-head strong,
+.session-activity-section-head strong { display: block; margin-top: var(--space-1); font-size: var(--font-label); line-height: 1.2; }
+.session-activity-context-percent,
+.session-activity-plan-percent { flex: none; color: var(--accent); font: 650 var(--font-technical) / var(--font-technical-lh) var(--mono); }
+.session-activity-context-model { overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap; }
+
+.session-activity-meter {
+  height: var(--space-1);
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--muted) 22%, transparent);
+}
+
+.session-activity-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--motion-normal) var(--motion-ease);
+}
+
+.session-activity-meter.level-yellow > span { background: var(--amber); }
+.session-activity-meter.level-red > span { background: var(--red); }
+.session-activity-meter.level-unknown > span { background: var(--muted); }
+
+.session-activity-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+/* A label that wraps (long locales) keeps the row's figures on one line. */
+.session-activity-stat { display: grid; align-content: space-between; gap: var(--space-1); }
+.session-activity-stat-label { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.session-activity-stat-value { overflow: hidden; font: 650 var(--font-technical) / var(--font-technical-lh) var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+
+.session-activity-intent p { margin: var(--space-2) 0 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.session-activity-plan-meter { margin-top: var(--space-1); }
+.session-activity-plan-meter { margin-block-end: var(--space-1); }
+/* Steps hang from one thread (drawn from --borderless-edge, so it survives
+   Borderless appearance); the step in progress lights its own stretch. */
+.session-activity-task-list {
+  --session-task-thread-x: calc(var(--icon-md) / 2 - .5px);
+  position: relative;
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0 0 0 calc(var(--icon-md) + var(--space-2));
+  list-style: none;
+}
+.session-activity-task-list::before,
+.session-activity-task-list li.is-active::before {
+  content: "";
+  position: absolute;
+  width: 1px;
+  pointer-events: none;
+}
+.session-activity-task-list::before {
+  inset-block: var(--space-1);
+  inset-inline-start: var(--session-task-thread-x);
+  background: var(--borderless-edge);
+}
+.session-activity-task-list li {
+  position: relative;
+  min-width: 0;
+  min-height: max(32px, var(--hit-min));
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  color: var(--text-dim);
+  font: 400 var(--font-technical) / var(--font-technical-lh) var(--ui-font-family);
+}
+.session-activity-task-list li.is-active::before {
+  inset-block: 0;
+  inset-inline-start: calc(var(--session-task-thread-x) - var(--icon-md) - var(--space-2));
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.session-activity-task-list li.is-active { color: var(--text); font-weight: 500; }
+.session-activity-task-list li.is-done { color: var(--muted); }
+.session-activity-task-list li.is-done > span:last-child { text-decoration: line-through; text-decoration-color: var(--faint); }
+/* A failure is told by its mark; the words stay readable, not alarmed. */
+.session-activity-task-list li.is-failed { color: var(--text-dim); }
+.session-activity-task-mark { width: var(--icon-md); height: var(--icon-md); display: inline-grid; place-items: center; color: var(--muted); font-weight: 650; }
+.session-activity-task-mark.is-done { color: color-mix(in srgb, var(--green) 74%, var(--muted)); }
+.session-activity-task-mark.is-failed { color: var(--red); }
+.session-activity-task-mark.is-active { box-shadow: 0 0 0 2px var(--accent); border-radius: var(--radius-round); }
+.session-activity-task-mark.is-active i { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-round); background: var(--accent); }
+.session-activity-task-mark.is-pending { width: calc(var(--icon-md) - 4px); height: calc(var(--icon-md) - 4px); margin: 2px; box-shadow: 0 0 0 1px var(--muted); border-radius: var(--radius-round); }
+
+/* Wider surfaces (the desktop overview spans the chat column) reflow the
+   figures instead of stretching them: four across, then at a full chat
+   column the context card stands beside them. Words stay one column, so a
+   short request never leaves a hole beside a long plan. */
+@container session-activity (min-width: 540px) {
+  .session-activity-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* Two tabs stay a compact switch, not a bar across the column. */
+  .session-activity-details .session-activity-tabs { width: min(360px, 100% - 2 * var(--space-3)); margin-inline: auto; }
+}
+@container session-activity (min-width: 720px) {
+  .session-activity-usage { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+  .session-activity-usage > .session-activity-context-card { grid-template-rows: 1fr auto auto; }
+  .session-activity-usage > .session-activity-context-card > .session-activity-context-head { align-self: start; }
+}
+
+.session-activity-combined { display: grid; gap: 0; }
+.session-activity-combined .session-activity-panel + .session-activity-panel {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+
+@media (pointer: coarse) {
+  .session-activity-tabs button { min-height: var(--tap); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-activity-meter > span { transition: none; }
+}
+
+html[data-reduce-animations="true"] .session-activity-meter > span,
+body[data-desktop-low-resource="true"] .session-activity-meter > span { transition: none; }

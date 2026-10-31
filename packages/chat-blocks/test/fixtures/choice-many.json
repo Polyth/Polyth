@@ -1,0 +1,47 @@
+{
+  "view": "choice",
+  "title": "Which sources should I read?",
+  "options": {
+    "pick": "many"
+  },
+  "pick": "many",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": true,
+      "title": "Docs",
+      "cells": [
+        "Docs",
+        "the official guide"
+      ],
+      "subtitle": "the official guide"
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "Issues",
+      "cells": [
+        "Issues",
+        "last 90 days",
+        "id=gh-issues"
+      ],
+      "subtitle": "last 90 days",
+      "id": "gh-issues"
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "Blog posts",
+      "cells": [
+        "Blog posts"
+      ]
+    }
+  ],
+  "actions": [],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

@@ -1,0 +1,51 @@
+{
+  "view": "table",
+  "title": "Vulnerabilities",
+  "options": {
+    "sort": "-Severity"
+  },
+  "pick": "none",
+  "columns": [
+    "Package",
+    "Severity",
+    "Fixed in"
+  ],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "lodash",
+      "cells": [
+        "lodash",
+        "7.5",
+        "`4.17.21`"
+      ]
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "minimist",
+      "cells": [
+        "minimist",
+        "9.8",
+        "1.2.6"
+      ]
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "qs | legacy",
+      "cells": [
+        "qs | legacy",
+        "5.3",
+        "https://example.com/qs"
+      ]
+    }
+  ],
+  "actions": [],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

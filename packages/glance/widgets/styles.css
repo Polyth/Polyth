@@ -1,0 +1,152 @@
+/* Glance tiles: a quiet card that fills its board/canvas cell. */
+.glance-tile {
+  container: glance-tile / inline-size;
+  box-sizing: border-box;
+  block-size: 100%;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+  color: var(--text);
+}
+.glance-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.glance-clock {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+.glance-clock-time {
+  font-size: var(--font-title);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-title-lh);
+  white-space: nowrap;
+}
+.glance-clock[data-unknown] .glance-clock-time { color: var(--muted); }
+@container glance-tile (min-width: 320px) {
+  .glance-clock-time { font-size: calc(var(--font-title) * 1.5); }
+}
+
+.glance-world {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  list-style: none;
+}
+.glance-world-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-block-size: var(--control-h-sm, 28px);
+}
+.glance-world-name {
+  overflow: hidden;
+  font-size: var(--font-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glance-world-time {
+  font-size: var(--font-heading);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.glance-world-row[data-unknown] .glance-world-time { color: var(--muted); }
+.glance-world-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-align: center;
+}
+
+/* Weather: icon + temperature + text; the wide size adds a row of days. */
+.glance-weather {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+.glance-weather[data-state="loading"] { opacity: 0.85; }
+.glance-weather-now {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+.glance-weather-icon {
+  flex: none;
+  inline-size: 28px;
+  block-size: 28px;
+  color: var(--muted);
+}
+.glance-weather-temp {
+  flex: none;
+  font-size: var(--font-title);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-title-lh);
+}
+.glance-weather-text {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+.glance-weather-name {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glance-weather-details { white-space: normal; }
+.glance-weather-details > span > span { white-space: nowrap; }
+.glance-weather[data-size="compact"] .glance-weather-now { flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.glance-weather[data-size="compact"] .glance-weather-text { flex-basis: 100%; }
+@container glance-tile (min-width: 320px) {
+  .glance-weather-icon { inline-size: 36px; block-size: 36px; }
+  .glance-weather-temp { font-size: calc(var(--font-title) * 1.5); }
+}
+.glance-weather-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  border-block-start: 1px solid var(--border-soft);
+  list-style: none;
+}
+.glance-weather-days li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+.glance-weather-days .glance-weather-icon { inline-size: 22px; block-size: 22px; }
+.glance-weather-range {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.glance-weather-range strong { color: var(--text); font-weight: 600; }
+.glance-weather-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-align: center;
+}

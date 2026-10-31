@@ -1,0 +1,57 @@
+/* The person's hosting accounts (HostingAccounts.tsx) inside a settings
+   Section: the list and empty state come from the settings primitives; this
+   only lays out the connect form under them. */
+/* A provider's brand mark on the account tile, at the tile glyph size. */
+.hosting-account-mark {
+  display: inline-grid;
+  place-items: center;
+}
+
+.hosting-account-mark svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  stroke-width: 1.75;
+}
+
+.hosting-accounts-form {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+
+.hosting-accounts-form .settings-field {
+  margin-top: 0;
+}
+
+.hosting-accounts-form .ui-input {
+  width: 100%;
+}
+
+/* Label and server share a row where they fit and stack on narrow panes. */
+.hosting-accounts-form .hosting-accounts-form-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.hosting-accounts-form .hosting-accounts-form-pair > .settings-field {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.hosting-accounts-form .hosting-accounts-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.settings-section .hosting-accounts-error {
+  margin-top: var(--space-3);
+}

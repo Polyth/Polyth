@@ -1,0 +1,97 @@
+.files-repositories-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.files-repositories-intro,
+.files-repositories-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.files-repositories-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.files-repository-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+}
+
+.files-repository-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.files-repository-path,
+.files-repository-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-repository-path {
+  color: var(--text);
+  font: var(--font-technical)/var(--font-technical-lh) var(--mono);
+}
+
+.files-repository-id {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.files-repository-actions,
+.files-repositories-add {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.files-repository-actions .ui-input {
+  width: min(14rem, 30vw);
+}
+
+.files-repositories-add {
+  align-items: stretch;
+}
+
+.files-repositories-add .ui-input:first-child {
+  flex: 1 1 16rem;
+}
+
+.files-repositories-add .ui-input:nth-child(2) {
+  flex: 0 1 12rem;
+}
+
+@container feature-panel (max-width: 700px) {
+  .files-repository-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .files-repository-actions .ui-input {
+    flex: 1 1 10rem;
+    width: auto;
+  }
+}
+
+
+.files-repositories-discovery { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); }
+.files-repositories-discovery label { display: flex; gap: var(--space-2); align-items: center; min-height: var(--tap); }
+.files-repositories-discovery small { display: block; color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
+.files-repositories-recent { display: flex; flex-direction: column; }
+.files-repositories-recent .ui-button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }

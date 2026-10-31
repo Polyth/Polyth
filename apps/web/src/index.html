@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en" data-launch="veiled">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover exposes the safe-area insets used by the shell.
+         UX-MOBILE-01 §45: resizes-content makes the OS shrink the layout
+         viewport when the keyboard appears. Without it the page's bottom
+         edge stays below the keyboard and the keyboard is hidden behind it:
+         the composer is still "at the bottom of the page" — just offscreen.
+         interactive-widget is harmlessly ignored by engines that use
+         visualViewport geometry instead (iOS Safari 15.4+). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0f1115" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <script>
+      try {
+        const bg = JSON.parse(localStorage.getItem("polyth.background.v1") || "null");
+        const settings = JSON.parse(localStorage.getItem("polyth.productSettings.v1") || "null");
+        const light = settings?.appearanceMode === "light"
+          || (settings?.appearanceMode !== "dark" && matchMedia("(prefers-color-scheme: light)").matches);
+        const systemBars = {
+          "signal-bloom": { dark: "#173a3b", light: "#dcebe7" },
+          "blue-hour": { dark: "#16364a", light: "#dce8f1" },
+          "ember-veil": { dark: "#4a2d31", light: "#f0e3dc" },
+          "moss-circuit": { dark: "#243a2f", light: "#e2eadf" },
+          "paper-prism": { dark: "#43595f", light: "#e3eef1" },
+          "linen-dawn": { dark: "#191717", light: "#f6f2ee" },
+          "drafting-grid": { dark: "#12151c", light: "#f0f3f7" },
+          "cloud-drift": { dark: "#12141a", light: "#f4f5fa" },
+          "basalt": { dark: "#15171b", light: "#f1f1f3" },
+          "aurora": { dark: "#11141f", light: "#f1f3f9" },
+          "dusk-ridge": { dark: "#0f1118", light: "#f0f2f7" },
+        };
+        const systemBar = systemBars[bg?.id]?.[light ? "light" : "dark"];
+        if (systemBar) {
+          document.documentElement.style.setProperty("--app-system-bar-color", systemBar);
+          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", systemBar);
+        }
+      } catch {}
+    </script>
+    <title>Polyth</title>
+    <!-- Launch veil (docs/mobile/platform-behavior.md "Launch and reveal"):
+         the first paint of a phone or native boot. It is drawn before any
+         stylesheet or script loads and is pixel-identical to the native launch
+         screen (brand night, the 112px mark at the viewport centre), so the
+         native splash can hand over to it, and be raised over it across page
+         swaps, without a visible change. launchVeil.ts drives it; the app and
+         the Connection Hub decide when it lifts. Keep the geometry in sync
+         with apps/mobile/scripts/generate-assets.mjs and the Link bootstrap
+         page (crates/polyth-link-core/src/local_proxy.rs). -->
+    <link rel="preload" as="image" href="/icon-512.png" fetchpriority="high" />
+    <style>
+      .polyth-launch {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        background: #07091c;
+        contain: strict;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+      .polyth-launch[hidden] { display: none; }
+      /* icon-512.png draws the mark 338px tall in a 512px canvas: this box
+         makes the visible mark exactly 112px tall, centred like the native
+         launch screen. */
+      .polyth-launch-mark {
+        position: absolute;
+        inset: 0;
+        width: calc(112px * 512 / 338);
+        height: calc(112px * 512 / 338);
+        margin: auto;
+        pointer-events: none;
+      }
+      .polyth-launch-status {
+        position: absolute;
+        top: calc(50% + 56px + 30px);
+        left: 12vw;
+        right: 12vw;
+        margin: 0;
+        overflow: hidden;
+        color: rgb(222 226 255 / 0.6);
+        font: 500 13px/18px -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+        letter-spacing: 0.01em;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        opacity: 0;
+        transform: translate3d(0, 4px, 0);
+        transition: opacity 320ms ease-out, transform 480ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .polyth-launch[data-status] .polyth-launch-status {
+        opacity: 1;
+        transform: none;
+      }
+      .polyth-launch[data-state="waiting"] .polyth-launch-mark {
+        animation: polyth-launch-breathe 2600ms ease-in-out infinite;
+      }
+      .polyth-launch[data-state="leaving"] {
+        pointer-events: none;
+      }
+      @keyframes polyth-launch-breathe {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.86; transform: scale(0.97); }
+      }
+    </style>
+    <!-- Root-absolute asset URLs (EXT-SEAMS-V3): this shell is also served as
+         the SPA fallback for nested routes like /p/:projectId/s/:sessionId, so
+         relative assets would resolve under the route and break refresh. -->
+    <link rel="stylesheet" href="/main.css" />
+    <!-- A manifest fetch defaults to credentials=omit. Polyth can protect the
+         shell with session authentication, so explicitly send the same-origin
+         credentials that already authorized this document. -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <!-- Inline PNG favicon: a URL here would 404 on a nested route during
+         refresh replay (EXT-SEAMS-V3), and an /icon-192.png tab icon renders
+         the launcher mark too small. -->
+    <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,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" />
+  </head>
+  <body>
+    <div id="polyth-launch" class="polyth-launch" aria-hidden="true">
+      <img class="polyth-launch-mark" src="/icon-512.png" alt="" draggable="false" decoding="sync" fetchpriority="high" />
+      <p class="polyth-launch-status"></p>
+    </div>
+    <script>
+      // Phones, touch tablets and the native app boot behind the veil (it is
+      // visible by default so no frame can paint without it); a desktop
+      // browser drops it before its first paint and draws the shell directly.
+      (function () {
+        var capacitor = window.Capacitor;
+        var native = !!(capacitor && typeof capacitor.isNativePlatform === "function" && capacitor.isNativePlatform());
+        var touch = true;
+        try {
+          touch = matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 620px)").matches;
+        } catch (e) {}
+        var veil = document.getElementById("polyth-launch");
+        if (native || touch) {
+          // The app lifts the veil itself. Only a page whose scripts never
+          // rendered anything falls back to showing what is underneath.
+          setTimeout(function () {
+            var root = document.getElementById("root");
+            if (veil && root && !root.hasChildNodes()) {
+              veil.hidden = true;
+              document.documentElement.removeAttribute("data-launch");
+            }
+          }, 20000);
+          return;
+        }
+        document.documentElement.removeAttribute("data-launch");
+        if (veil) veil.remove();
+      })();
+    </script>
+    <div id="root"></div>
+    <script>window.__errs=[];const ce=console.error.bind(console);console.error=(...a)=>{__errs.push(a.map(String).join(' '));ce(...a)};window.addEventListener('error',e=>__errs.push('win:'+e.message));window.addEventListener('unhandledrejection',e=>__errs.push('rej:'+(e.reason&&e.reason.message||e.reason)));</script>
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "/shared/react.js",
+          "react-dom": "/shared/react-dom.js",
+          "react-dom/client": "/shared/react-dom-client.js",
+          "react/jsx-runtime": "/shared/react-jsx-runtime.js",
+          "react/jsx-dev-runtime": "/shared/react-jsx-dev-runtime.js"
+        }
+      }
+    </script>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,388 @@
+/* Shared rail / zone editor (RailEditor.tsx) ---------------------------------
+ * One premium editor for every icon rail and shell zone. Desktop and tablet get
+ * an anchored glass panel; phones a tall sheet. The panel keeps its header and
+ * footer fixed and scrolls only the body, so a long library never pushes the
+ * controls off screen. Rows and tiles inherit density, font and motion
+ * preferences through the canonical tokens.
+ */
+
+.ui-popover.rail-editor-overlay {
+  width: min(400px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left, 0px) - var(--safe-right, 0px)));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rail-editor {
+  --rail-editor-pad: var(--space-3);
+  --rail-editor-glyph: 28px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: inherit;
+  flex: 1 1 auto;
+  color: var(--text);
+}
+.rail-editor[data-presentation="sheet"] { --rail-editor-pad: var(--space-2); }
+
+/* ---- header ------------------------------------------------------------- */
+.rail-editor-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--rail-editor-pad) var(--rail-editor-pad) var(--space-2);
+}
+.rail-editor-heading { display: grid; gap: 2px; min-width: 0; }
+.rail-editor-eyebrow {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rail-editor-heading h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-editor-count {
+  flex: none;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--surface-overlay-strong);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- search ------------------------------------------------------------- */
+.rail-editor-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--rail-editor-pad) var(--space-2);
+  padding-inline: var(--space-2);
+  min-height: var(--control-h-sm);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--muted);
+}
+.rail-editor-search:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-wash); }
+.rail-editor-search > svg { width: var(--icon-sm, 14px); height: var(--icon-sm, 14px); flex: none; }
+.rail-editor-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-label);
+}
+.rail-editor-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+/* ---- body + sections ---------------------------------------------------- */
+.rail-editor-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--rail-editor-pad) var(--space-2);
+  scrollbar-gutter: stable;
+}
+.rail-editor-section + .rail-editor-section { margin-top: var(--space-3); }
+.rail-editor-section-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) 2px var(--space-1);
+  background: linear-gradient(var(--material-glass, var(--elevated)) 70%, transparent);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.rail-editor-section-head small {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.rail-editor-empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-2);
+  border: 1px dashed var(--hair-strong);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-align: center;
+}
+.rail-editor-all-added { margin-top: var(--space-3); border-style: solid; border-color: transparent; }
+
+/* ---- shown list (ordered, reorderable rows) ------------------------------ */
+.rail-editor-shown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  box-shadow: inset 0 0 0 1px var(--hair);
+}
+.rail-editor-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px var(--rail-editor-glyph) minmax(0, 1fr) var(--control-h-sm);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--control-h-sm) + 4px);
+  padding: 2px 2px 2px 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.rail-editor-row:hover { background: var(--surface-overlay-hover); }
+.rail-editor-row[data-reorderable="true"] { cursor: grab; touch-action: pan-y; }
+.rail-editor-row.rail-drag-slot { min-height: calc(var(--control-h-sm) + 4px); }
+.rail-editor-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.rail-editor-grip {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: var(--control-h-sm);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  opacity: 0.55;
+  cursor: grab;
+  transition: opacity var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.rail-editor-row:hover .rail-editor-grip,
+.rail-editor-grip:focus-visible { opacity: 1; color: var(--text-dim); }
+.rail-editor-grip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 4px; }
+
+/* One glyph treatment for tools and widgets, in rows and tiles alike. */
+.rail-editor-glyph {
+  display: grid;
+  place-items: center;
+  width: var(--rail-editor-glyph);
+  height: var(--rail-editor-glyph);
+  flex: none;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+}
+.rail-editor-glyph svg { width: var(--icon-md, 16px); height: var(--icon-md, 16px); }
+.rail-editor-glyph .widget-choice-glyph {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+.rail-editor-glyph .widget-choice-glyph svg { width: var(--icon-md, 16px); height: var(--icon-md, 16px); }
+
+.rail-editor-row-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-editor-remove,
+.rail-editor-lock {
+  display: grid;
+  place-items: center;
+  justify-self: end;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--faint);
+}
+.rail-editor-remove {
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .rail-editor-remove:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+}
+.rail-editor-remove:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.rail-editor-lock { opacity: 0.6; }
+
+/* ---- library tiles ------------------------------------------------------- */
+.rail-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 4px;
+}
+.rail-editor-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--space-2) 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .rail-editor-tile:hover:where(:not(:disabled)) {
+    border-color: var(--hair-strong);
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+.rail-editor-tile:active:where(:not(:disabled)) { transform: scale(0.97); }
+.rail-editor-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.rail-editor-tile .rail-editor-glyph {
+  --rail-editor-glyph: var(--control-h);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay-strong);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.rail-editor-tile .rail-editor-glyph svg { width: var(--icon-lg, 18px); height: var(--icon-lg, 18px); }
+@media (hover: hover) {
+  .rail-editor-tile:hover:where(:not(:disabled)) .rail-editor-glyph { background: var(--accent-wash); color: var(--accent); }
+}
+.rail-editor-tile-label {
+  display: -webkit-box;
+  width: 100%;
+  overflow: hidden;
+  font-size: var(--font-meta);
+  font-weight: 550;
+  line-height: 1.25;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.rail-editor-tile-add {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 4px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+.rail-editor-tile-add svg { width: 12px; height: 12px; }
+.rail-editor-tile:is(:hover, :focus-visible):where(:not(:disabled)) .rail-editor-tile-add { opacity: 1; transform: none; }
+/* Touch has no hover: the add affordance is always visible. */
+@media (hover: none) {
+  .rail-editor-tile-add { opacity: 1; transform: none; }
+}
+/* A tile living in another rail names it; choosing it moves the icon here. */
+.rail-editor-tile.is-elsewhere .rail-editor-glyph { opacity: 0.72; }
+.rail-editor-tile-where {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-overlay-strong);
+  color: var(--muted);
+  font-size: calc(var(--font-meta) * 0.9);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- footer ------------------------------------------------------------- */
+.rail-editor-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--rail-editor-pad);
+  border-top: 1px solid var(--surface-divider);
+}
+.rail-editor-note {
+  flex: 1 1 180px;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh, 1.4);
+}
+.rail-editor-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .rail-editor-action:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.rail-editor-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* ---- phone sheet ---------------------------------------------------------- */
+.rail-editor[data-presentation="sheet"] .rail-editor-body { padding-bottom: var(--space-3); }
+.rail-editor[data-presentation="sheet"] .rail-editor-grid { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
+.rail-editor[data-presentation="sheet"] .rail-editor-row { min-height: var(--tap, 44px); }
+.rail-editor[data-presentation="sheet"] .rail-editor-remove { width: var(--tap, 44px); height: var(--tap, 44px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-editor-row,
+  .rail-editor-tile,
+  .rail-editor-tile-add,
+  .rail-editor-grip { transition: none; }
+}
+:root[data-reduce-animations="true"] :is(.rail-editor-row, .rail-editor-tile, .rail-editor-tile-add, .rail-editor-grip) { transition: none; }
+
+/* Touch tablets: full-size targets without changing the desktop rhythm. */
+@media (pointer: coarse) {
+  .rail-editor-row { min-height: 40px; }
+  .rail-editor-remove { width: 36px; height: 36px; }
+  .rail-editor-grip { width: 24px; }
+  .rail-editor-row { grid-template-columns: 24px var(--rail-editor-glyph) minmax(0, 1fr) 36px; }
+}

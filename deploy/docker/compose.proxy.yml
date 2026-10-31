@@ -1,0 +1,90 @@
+# Polyth behind a TLS-terminating Caddy proxy on a public HTTPS origin.
+#
+#   cd deploy/docker
+#   cp .env.example .env    # set POLYTH_DOMAIN (DNS must point at this host)
+#   docker compose -f compose.proxy.yml build
+#   docker compose -f compose.proxy.yml run --rm polyth setup-claim
+#   docker compose -f compose.proxy.yml --profile setup up polyth-setup  # see below
+#   docker compose -f compose.proxy.yml up -d
+#   open https://$POLYTH_DOMAIN
+#
+# Polyth trusts forwarded headers only from the exact proxy address listed in
+# POLYTH_TRUSTED_PROXIES, so the proxy gets a fixed address on a private
+# network and Polyth publishes no port of its own.
+# See docs/operations/docker.md.
+name: polyth-proxy
+
+services:
+  polyth:
+    image: ${POLYTH_IMAGE:-polyth:local}
+    build:
+      context: ../..
+      target: ${POLYTH_TARGET:-polyth}
+      args:
+        POLYTH_UID: ${POLYTH_UID:-1000}
+        POLYTH_GID: ${POLYTH_GID:-1000}
+        POLYTH_LINK: ${POLYTH_LINK:-host}
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4400
+      POLYTH_PUBLIC_ORIGIN: https://${POLYTH_DOMAIN:?set POLYTH_DOMAIN in .env}
+      POLYTH_TRUSTED_PROXIES: ${POLYTH_PROXY_IP:-172.29.84.2}
+    volumes:
+      - polyth-data:/data
+      - polyth-home:/home/node
+      - ${POLYTH_WORKSPACE:-./workspace}:/workspace
+    networks:
+      polyth:
+        ipv4_address: ${POLYTH_APP_IP:-172.29.84.3}
+
+  # First-run setup only. The setup server does not accept proxy-terminated
+  # TLS, so the owner account is created over loopback on the same data
+  # volume, then the stack runs behind the proxy:
+  #   docker compose -f compose.proxy.yml --profile setup up polyth-setup
+  # Reach http://127.0.0.1:${POLYTH_SETUP_PORT:-4400} on this host (from
+  # another machine: ssh -L 4400:127.0.0.1:4400 <host>), finish, Ctrl-C.
+  polyth-setup:
+    image: ${POLYTH_IMAGE:-polyth:local}
+    profiles: [setup]
+    network_mode: host
+    environment:
+      HOST: 127.0.0.1
+      PORT: ${POLYTH_SETUP_PORT:-4400}
+    volumes:
+      - polyth-data:/data
+      - polyth-home:/home/node
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - polyth
+    ports:
+      - "${POLYTH_HTTP_PORT:-80}:80"
+      - "${POLYTH_HTTPS_PORT:-443}:443"
+      - "${POLYTH_HTTPS_PORT:-443}:443/udp"
+    environment:
+      POLYTH_DOMAIN: ${POLYTH_DOMAIN}
+      POLYTH_TLS: ${POLYTH_TLS:-}
+      POLYTH_UPSTREAM: ${POLYTH_APP_IP:-172.29.84.3}:4400
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      polyth:
+        ipv4_address: ${POLYTH_PROXY_IP:-172.29.84.2}
+
+networks:
+  polyth:
+    ipam:
+      config:
+        - subnet: ${POLYTH_SUBNET:-172.29.84.0/24}
+
+volumes:
+  polyth-data:
+  polyth-home:
+  caddy-data:
+  caddy-config:

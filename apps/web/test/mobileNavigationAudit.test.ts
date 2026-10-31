@@ -1,0 +1,165 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { readWebStyles } from "./webStyles.ts";
+
+const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
+
+test("every phone view uses the same three-segment shell bar", async () => {
+  const [header, mobileHeader, workspacePanel, prefs, shell, css] = await Promise.all([
+    read("../src/components/Header.tsx"),
+    read("../src/components/mobile/MobileSessionHeader.tsx"),
+    read("../src/components/mobile/WorkspacePanel.tsx"),
+    read("../src/uiPrefs.ts"),
+    read("../src/shell.ts"),
+    readWebStyles(),
+  ]);
+
+  assert.match(header, /if \(mode === "phone"\) \{\s*return \(\s*<>\s*\{pageOpen \? null : chatSurface \? <MobileSessionHeader \/> : <MobileViewHeader \/>\}[\s\S]*?<MobileWorkspaceLayer \/>\s*\{windowControls\}\s*<\/>\s*\);\s*\}/s);
+  assert.doesNotMatch(header, /WorkspaceBottomNav/);
+  assert.match(mobileHeader, /label=\{tr\("mobile\.island\.openNavigation"\)\}/);
+  assert.match(mobileHeader, /label=\{tr\("mobile\.island\.newSession"\)\}/);
+  assert.match(mobileHeader, /label=\{tr\("mobile\.island\.openTools"\)\}/);
+  // The header labels are localized; keep their English accessible names pinned.
+  const en = await read("../src/i18n/locales/en.ts");
+  for (const [key, label] of [
+    ["openNavigation", "Open navigation"],
+    ["newSession", "New session"],
+    ["openTools", "Open tools"],
+    ["viewNavigation", "View navigation"],
+    ["workspaceNavigation", "Workspace navigation"],
+  ]) {
+    assert.ok(en.includes(`"mobile.island.${key}": "${label}",`), `mobile.island.${key} keeps its English accessible name`);
+  }
+  assert.match(mobileHeader, /origin="top"/);
+  assert.match(workspacePanel, /title=\{editing \? tr\("workspace\.panel\.editTitle"\) : tr\("workspace\.panel\.title"\)\}/);
+  assert.match(workspacePanel, /<WorkspaceGallery/);
+  assert.equal((workspacePanel.match(/<Sheet/g) ?? []).length, 1);
+  assert.doesNotMatch(mobileHeader, /Icon\.plus/);
+  // The reserved band clears the floating island: safe area, the island's own
+  // height (never below the tap floor), and the chrome inset around it.
+  assert.match(css, /\.app-shell\s*\{[^}]*padding-top:\s*calc\(var\(--safe-top\) \+ var\(--conversation-chrome-inset\) \+ max\(var\(--tap\), var\(--mobile-island-height\)\) \+ var\(--space-4\)\)/s);
+  assert.match(prefs, /mobileShortcuts:\s*\[[\s\S]*"notification-centre"/);
+  const defaultsStart = prefs.indexOf("export const UI_DEFAULTS");
+  const defaultsEnd = prefs.indexOf("\n  jsonTreeDefault", defaultsStart);
+  const defaultShortcuts = prefs.slice(defaultsStart, defaultsEnd);
+  assert.match(defaultShortcuts, /mobileShortcuts:\s*\[[\s\S]*"files"[\s\S]*"settings"/);
+  assert.doesNotMatch(defaultShortcuts, /"session"/);
+  assert.match(shell, /hint:\s*hintOf\("notificationCentre"\)/);
+  assert.match(shell, /notificationCentre:\s*\(\) => toggleRailPlugin\("slot:notification-centre"\)/);
+  assert.equal(shell.match(/window\.addEventListener\("keydown", onKey\)/g)?.length, 1);
+});
+
+test("mobile workspace hosts resolve project scope from the active session", async () => {
+  const [mobileHeader, workspacePanel, contextRail] = await Promise.all([
+    read("../src/components/mobile/MobileSessionHeader.tsx"),
+    read("../src/components/mobile/WorkspacePanel.tsx"),
+    read("../src/components/ContextRail.tsx"),
+  ]);
+
+  for (const source of [mobileHeader, workspacePanel, contextRail]) {
+    assert.match(source, /workspaceProjectId/);
+    assert.doesNotMatch(
+      source,
+      /useStore\(\([^)]*\)\s*=>\s*[^)]*activeProjectId/,
+      "mobile workspace chrome must never bypass the session-aware project resolver",
+    );
+  }
+
+  assert.equal((contextRail.match(/useStore\(workspaceProjectId\)/g) ?? []).length, 2);
+  assert.equal((workspacePanel.match(/useStore\(workspaceProjectId\)/g) ?? []).length, 1);
+  assert.equal((mobileHeader.match(/useStore\(workspaceProjectId\)/g) ?? []).length, 1);
+});
+
+test("compact project drawer is above its scrim", async () => {
+  const css = await readWebStyles();
+  const drawerStart = css.indexOf("/* Project/session drawer:");
+  assert.ok(drawerStart >= 0, "compact drawer style block is present");
+  const drawerStyles = css.slice(drawerStart, css.indexOf("\n}", drawerStart));
+  assert.match(
+    drawerStyles,
+    /\.sidebar\s*\{[\s\S]*?z-index:\s*var\(--z-overlay\)/,
+    "the open project/session drawer must share the overlay layer",
+  );
+  assert.match(
+    css,
+    /\.sidebar-backdrop\s*\{[^}]*z-index:\s*calc\(var\(--z-overlay\)\s*-\s*1\)/,
+    "the drawer scrim must stay below the drawer",
+  );
+});
+
+test("compact project drawer shares the mobile Workspace surface", async () => {
+  const [css, navigation] = await Promise.all([
+    readWebStyles(),
+    read("../src/components/Navigation.tsx"),
+  ]);
+
+  assert.match(navigation, /mode === "phone" \? <MobileNavigator \/> : <Sidebar \/>/,
+    "the compact width uses the Sidebar drawer path");
+
+  const drawerStart = css.indexOf("/* Project/session drawer:");
+  assert.ok(drawerStart >= 0, "compact drawer style block is present");
+  const drawerSidebarStart = css.indexOf("  .sidebar {", drawerStart);
+  const drawerSidebarEnd = css.indexOf("\n  }", drawerSidebarStart);
+  assert.ok(drawerSidebarStart >= 0 && drawerSidebarEnd > drawerSidebarStart,
+    "compact drawer surface override is present");
+  assert.match(
+    css.slice(drawerSidebarStart, drawerSidebarEnd),
+    /--sidebar-glass-surface:\s*var\(--material-glass-strong\)/,
+    "the compact drawer selects the sheet-grade surface",
+  );
+
+  const toolbarStart = css.indexOf("/* The compact drawer trades", drawerStart);
+  const toolbarEnd = css.indexOf("\n  }", toolbarStart);
+  assert.ok(toolbarStart >= 0 && toolbarEnd > toolbarStart,
+    "compact drawer toolbar style block is present");
+  assert.match(
+    css.slice(toolbarStart, toolbarEnd),
+    /\.sidebar-drawer-header\s*\{[\s\S]*?background:\s*transparent;/,
+    "the drawer toolbar remains part of the same surface",
+  );
+
+  assert.match(
+    css,
+    /color-mix\(in srgb, var\(--sidebar-glass-surface, var\(--material-glass\)\) var\(--material-glass-readable-fill\)/,
+    "the final glass recipe resolves the compact drawer's surface token",
+  );
+});
+
+test("compact rail presentation widens the drawer for the project switcher", async () => {
+  const [css, sidebar] = await Promise.all([
+    readWebStyles(),
+    read("../src/components/Sidebar.tsx"),
+  ]);
+
+  assert.match(
+    sidebar,
+    /railView && compact \? " sidebar--compact-rail"/,
+    "the compact rail marks the drawer for its wider geometry",
+  );
+  assert.match(
+    css,
+    /\.sidebar--compact-rail\s*\{\s*width:\s*min\(400px, calc\(100vw - 24px\)\)/,
+    "the rail drawer reserves room for both the switcher and the sessions column",
+  );
+});
+
+test("horizontal tabs and chips retain a visible scroll affordance", async () => {
+  const css = await readWebStyles();
+
+  assert.match(css, /--scroll-affordance:\s*18px/);
+  assert.match(
+    css,
+    /\.ui-scroll-tabs\s*\{[\s\S]*?mask-image:\s*linear-gradient/,
+  );
+});
+
+test("mobile widget library preview is viewport-bounded without a 420px floor", async () => {
+  const css = await readWebStyles();
+
+  assert.doesNotMatch(css, /\.widget-library-preview\s*\{\s*min-height:\s*420px/);
+  assert.match(
+    css,
+    /\.widget-library-preview\s*\{[^}]*min-height:\s*0[^}]*max-height:\s*min\(360px, 42dvh\)/s,
+  );
+});

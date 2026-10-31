@@ -1,0 +1,393 @@
+name: Nightly
+run-name: "Nightly ${{ github.event_name == 'workflow_dispatch' && inputs.ref || 'devel' }} #${{ github.run_number }}"
+
+# Nightly builds of `devel`, published as `vX.Y.N-nightly` prereleases of this
+# repository for clients on the Nightly update channel (scripts/ci/update-feed.mjs,
+# docs/operations/releases.md#nightly-builds-from-devel). Stable releases stay
+# with release.yml, which builds `master`.
+#
+# Scheduled and dispatched runs stay off until the repository variable
+# POLYTH_NIGHTLY is `1`; a manual run always works. GitHub delays scheduled
+# events, so an external `repository_dispatch` (type `nightly`) may trigger the
+# morning build and the schedule slots act as fallbacks: only the first nightly
+# of each Kyiv day that did not fail builds, and a devel commit that already
+# has a nightly is not built again.
+on:
+  schedule:
+    - cron: '17 5 * * *'
+      timezone: Europe/Kyiv
+    - cron: '47 9 * * *'
+      timezone: Europe/Kyiv
+    - cron: '17 14 * * *'
+      timezone: Europe/Kyiv
+  repository_dispatch:
+    types: [nightly]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Source branch, tag or commit
+        type: string
+        required: true
+        default: devel
+      target:
+        description: Build target (only `all` publishes a release)
+        type: choice
+        required: true
+        default: all
+        options: [all, android-apk, ios-app, mac-dmg, mac-dmg-legacy, windows-exe, linux-appimage, npm-packages]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  # Repositories lose scheduled workflows after 60 days without activity;
+  # re-enabling through the API resets that timer.
+  keepalive:
+    if: github.event_name == 'schedule' && vars.POLYTH_NIGHTLY == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Keep schedule enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly.yml/enable"
+
+  plan:
+    if: github.event_name == 'workflow_dispatch' || vars.POLYTH_NIGHTLY == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      publish: ${{ steps.plan.outputs.publish }}
+      source: ${{ steps.plan.outputs.source }}
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - id: plan
+        name: Plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.client_payload.ref || 'devel' }}
+          TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
+          BUILD_OFFSET: ${{ vars.POLYTH_NIGHTLY_BUILD_OFFSET || '0' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const env = process.env;
+          const output = (line) => fs.appendFileSync(env.GITHUB_OUTPUT, `${line}\n`);
+          const api = async (path) => {
+            const response = await fetch(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/${path}`,
+              { headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: 'application/vnd.github+json' } });
+            if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
+            return response.json();
+          };
+          const automatic = env.EVENT !== 'workflow_dispatch';
+
+          // Every job builds this one commit even if the branch moves mid-run;
+          // the release notes record it as the next nightly's starting point.
+          const source = (await api(`commits/${encodeURIComponent(env.REF)}`)).sha;
+          if (!/^[0-9a-f]{40}$/.test(source)) throw new Error(`Could not resolve ${env.REF}`);
+          console.log(`Source: ${env.REF} = ${source}`);
+
+          if (automatic) {
+            const kyivDay = (value) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv' }).format(new Date(value));
+            const current = Number(env.GITHUB_RUN_ID);
+            const runs = (await api('actions/workflows/nightly.yml/runs?per_page=30')).workflow_runs
+              .filter((run) => run.event !== 'workflow_dispatch');
+            const today = kyivDay(runs.find((run) => run.id === current)?.created_at ?? Date.now());
+            // A failed nightly does not count: the next fallback slot retries it.
+            const earlier = runs.find((run) => run.id < current && kyivDay(run.created_at) === today
+              && (run.status !== 'completed' || run.conclusion === 'success'));
+            if (earlier) {
+              console.log(`The nightly for ${today} already ran as #${earlier.run_number}; skipping.`);
+              output('run=false');
+              process.exit(0);
+            }
+            const releases = await api('releases?per_page=30');
+            const previous = releases.find((release) => /-nightly$/.test(release.tag_name) && !release.draft);
+            const built = /<!-- polyth-release: [^>]*source=([0-9a-f]{40})/.exec(previous?.body ?? '')?.[1];
+            if (built === source) {
+              console.log(`${previous.tag_name} already holds ${source}; skipping.`);
+              output('run=false');
+              process.exit(0);
+            }
+          }
+
+          // iOS needs the Xcode 27.1 SDK (iPhone Duo edge to edge), which only
+          // the `xcode-27` image carries; remote-build.mjs asserts the version.
+          const entries = [
+            { target: 'android-apk', artifact: 'android-apk', runner: 'ubuntu-24.04', java: true, rust: true, rust_targets: 'aarch64-linux-android,x86_64-linux-android' },
+            { target: 'ios-app', artifact: 'ios-app', runner: 'xcode-27', java: false, rust: true, rust_targets: 'aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios' },
+            { target: 'mac-dmg', artifact: 'mac-dmg-arm64', runner: 'macos-15', remote_arch: 'arm64', java: false, rust: true, rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin' },
+            { target: 'mac-dmg', artifact: 'mac-dmg-x64', runner: 'macos-15-intel', remote_arch: 'x64', java: false, rust: true, rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin' },
+            // macOS 12 (Electron 43, Intel only; scripts/ci/mac-legacy.mjs). Never blocks publication.
+            { target: 'mac-dmg-legacy', artifact: 'mac-dmg-legacy', runner: 'macos-15-intel', java: false, rust: true, rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin' },
+            { target: 'windows-exe', artifact: 'windows-exe', runner: 'windows-2025', java: false, rust: false, rust_targets: '' },
+            { target: 'linux-appimage', artifact: 'linux-appimage', runner: 'ubuntu-24.04', java: false, rust: true, rust_targets: '' },
+            { target: 'npm-packages', artifact: 'npm-packages', runner: 'ubuntu-24.04', java: false, rust: false, rust_targets: '' },
+          ];
+          const selected = env.TARGET === 'all' ? entries : entries.filter((entry) => entry.target === env.TARGET);
+          if (selected.length === 0) throw new Error(`Unknown target ${env.TARGET}`);
+          // X.Y.Z + build N -> X.Y.N-nightly; N must exceed Z (scripts/ci/update-feed.mjs).
+          const offset = Number(env.BUILD_OFFSET);
+          if (!Number.isInteger(offset) || offset < 0) throw new Error('POLYTH_NIGHTLY_BUILD_OFFSET must be a non-negative integer');
+          output('run=true');
+          output(`source=${source}`);
+          output(`build=${Number(env.GITHUB_RUN_NUMBER) + offset}`);
+          output(`matrix=${JSON.stringify({ include: selected })}`);
+          // Only a full build carries every desktop platform the update feed needs.
+          output(`publish=${env.TARGET === 'all'}`);
+          NODE
+
+  # Nightly users get devel only when the deterministic release gate is green.
+  verify:
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.plan.outputs.source }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run the release quality gate
+        run: node scripts/ci/release-quality.mjs
+
+  build:
+    needs: [plan, verify]
+    if: needs.plan.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.plan.outputs.source }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        if: matrix.java
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: dtolnay/rust-toolchain@f00cc37de62c899691b45db1cc585604520c95a7 # 1.91.0
+        if: matrix.rust && matrix.rust_targets == ''
+
+      - uses: dtolnay/rust-toolchain@f00cc37de62c899691b45db1cc585604520c95a7 # 1.91.0
+        if: matrix.rust && matrix.rust_targets != ''
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Select pinned Xcode
+        if: matrix.target == 'ios-app'
+        shell: bash
+        env:
+          WANT: ${{ vars.POLYTH_IOS_XCODE_VERSION || '27.1' }}
+          # `secrets` is unavailable in a step `if`, but it is allowed here.
+          SIGNING: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID != '' }}
+        run: |
+          set -euo pipefail
+          # remote-build.mjs refuses to sign under an unexpected toolchain; the
+          # unsigned simulator build continues on the runner default.
+          app="/Applications/Xcode_${WANT}.app"
+          if [ -d "$app" ]; then
+            sudo xcode-select -s "$app/Contents/Developer"
+          elif [ "$SIGNING" = "true" ]; then
+            echo "Xcode $WANT is required to sign and is not on this runner. Available:" >&2
+            ls -d /Applications/Xcode*.app 2>/dev/null >&2 || echo "  (none)" >&2
+            echo "Set the POLYTH_IOS_XCODE_VERSION repository variable to one of them." >&2
+            exit 1
+          else
+            echo "::warning::Xcode $WANT absent; unsigned build continues on the runner default."
+          fi
+          xcodebuild -version
+
+      - name: Install iOS signing tools
+        if: matrix.target == 'ios-app'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # keychain / app-store-connect / xcode-project for the signed path,
+          # in a venv because the runner's Python is externally managed.
+          python3 -m venv "$RUNNER_TEMP/cmtools"
+          "$RUNNER_TEMP/cmtools/bin/pip" install --quiet --upgrade codemagic-cli-tools
+          echo "$RUNNER_TEMP/cmtools/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        id: execute
+        shell: bash
+        env:
+          REMOTE_BUILD_TARGET: ${{ matrix.target }}
+          REMOTE_BUILD_ARCH: ${{ matrix.remote_arch || '' }}
+          REMOTE_BUILD_OUTPUT: ${{ runner.temp }}/build-output
+          POLYTH_RELEASE_CHANNEL: nightly
+          POLYTH_UPDATE_REPOSITORY: ${{ github.repository }}
+          POLYTH_BUILD_NUMBER: ${{ needs.plan.outputs.build }}
+          # Developer ID signing + notarization, scoped to the macOS jobs so the
+          # key never reaches another runner; unset = ad-hoc signing.
+          CSC_LINK: ${{ startsWith(matrix.target, 'mac-dmg') && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ startsWith(matrix.target, 'mac-dmg') && secrets.CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ startsWith(matrix.target, 'mac-dmg') && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(matrix.target, 'mac-dmg') && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ startsWith(matrix.target, 'mac-dmg') && secrets.APPLE_TEAM_ID || '' }}
+          # Signed iOS archive and TestFlight upload, scoped to the iOS job;
+          # unset = unsigned simulator build.
+          APP_STORE_CONNECT_ISSUER_ID: ${{ matrix.target == 'ios-app' && secrets.APP_STORE_CONNECT_ISSUER_ID || '' }}
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ matrix.target == 'ios-app' && secrets.APP_STORE_CONNECT_KEY_IDENTIFIER || '' }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ matrix.target == 'ios-app' && secrets.APP_STORE_CONNECT_PRIVATE_KEY || '' }}
+          CERTIFICATE_PRIVATE_KEY: ${{ matrix.target == 'ios-app' && secrets.CERTIFICATE_PRIVATE_KEY || '' }}
+          APP_STORE_APPLE_ID: ${{ matrix.target == 'ios-app' && secrets.APP_STORE_APPLE_ID || '' }}
+          POLYTH_IOS_XCODE_VERSION: ${{ vars.POLYTH_IOS_XCODE_VERSION || '27.1' }}
+        run: |
+          set +e
+          # Stream as well as capture: a hung step still shows its progress, and
+          # PIPESTATUS keeps node's exit code rather than tee's.
+          node scripts/ci/remote-build.mjs 2>&1 | tee "$RUNNER_TEMP/build.log"
+          code=${PIPESTATUS[0]}
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -ne 0 ]; then
+            echo "::group::Build failure tail"
+            tail -n 120 "$RUNNER_TEMP/build.log"
+            echo "::endgroup::"
+          fi
+          exit 0
+
+      - name: Upload product outputs
+        id: products
+        if: steps.execute.outputs.code == '0'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: products-${{ matrix.artifact }}
+          retention-days: 3
+          path: ${{ runner.temp }}/build-output
+          if-no-files-found: error
+
+      - name: Report failure
+        if: always() && (steps.execute.outputs.code != '0' || steps.products.outcome == 'failure')
+        shell: bash
+        run: |
+          echo "Build failed. Inspect the step logs."
+          exit 1
+
+  # One prerelease per full build, holding the installers and electron-updater
+  # metadata. Runs even when a non-desktop target failed; assembling refuses an
+  # incomplete desktop set, so clients never see a partial release.
+  publish:
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.publish == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.plan.outputs.source }}
+          # Blob-less full history for the release notes.
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: products-*
+          path: ${{ runner.temp }}/products
+
+      - name: Assemble feed
+        id: feed
+        env:
+          POLYTH_RELEASE_CHANNEL: nightly
+        run: node scripts/ci/update-feed.mjs assemble "$RUNNER_TEMP/products" "$RUNNER_TEMP/feed"
+
+      - name: Write release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.feed.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          node scripts/ci/release-notes.mjs --repo . --channel nightly --version "$VERSION" \
+            --releases "$RUNNER_TEMP/releases.json" --out "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.feed.outputs.version }}
+          PRERELEASE: ${{ steps.feed.outputs.prerelease }}
+          TITLE: ${{ steps.notes.outputs.title }}
+          SOURCE: ${{ needs.plan.outputs.source }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VERSION"
+          test -n "$TITLE"
+          if [ "$PRERELEASE" != "true" ] || [[ "$VERSION" != *-nightly ]]; then
+            echo "Refusing to publish $VERSION from the nightly workflow" >&2
+            exit 1
+          fi
+          tag="v$VERSION"
+          draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          if [ "$draft" = "false" ]; then
+            echo "Release $tag is already public; leaving it untouched."
+            exit 0
+          fi
+          if [ "$draft" = "missing" ]; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$SOURCE" --title "$TITLE" \
+              --notes-file "$RUNNER_TEMP/notes.md" --prerelease --draft
+          else
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+              --notes-file "$RUNNER_TEMP/notes.md" --prerelease
+          fi
+          # Upload into a draft, then publish: the updater never sees a half-uploaded release.
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "$RUNNER_TEMP"/feed/*
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+
+      - name: Prune old nightlies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the three newest nightlies, ordered by version. Stable and test
+          # releases belong to release.yml and are never touched here.
+          gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName \
+            --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly$"))]
+              | sort_by(.tagName | ltrimstr("v") | sub("-.*$"; "") | split(".") | map(tonumber)) | reverse | .[3:]
+              | .[].tagName' |
+          while IFS= read -r tag; do
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done

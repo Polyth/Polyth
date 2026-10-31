@@ -1,0 +1,518 @@
+/* Fluent theme style — Windows 11.
+   Applies while the active theme declares `style: "fluent"`; theme.ts then
+   publishes html[data-theme-style="fluent"] and the Fluent derived roles
+   (strokes, subtle fills, smoke, elevation). The palette stays in the theme;
+   this file re-binds geometry, materials and the core primitives only, so
+   packages follow through the canonical tokens. Contract and the reasoning
+   behind each number: docs/dev/styles.md "Fluent theme style". */
+
+/* ---- geometry, type, motion --------------------------------------------- */
+html[data-theme-style="fluent"] {
+  /* Two radii, as in Windows 11: 4px for in-page controls and rows, 8px for
+     everything that frames or floats (cards, flyouts, dialogs, the composer).
+     Rounding is measured from its default (9 → scale 1.8, uiPrefs.ts),
+     which draws these radii exactly; lower squares them, higher rounds a
+     little past Fluent. */
+  --fluent-round: calc(var(--corner-radius-scale) / 1.8);
+  --radius-control: calc(4px * var(--fluent-round));
+  --radius-card: calc(8px * var(--fluent-round));
+  --radius-surface: calc(8px * var(--fluent-round));
+  --radius-sheet: calc(8px * var(--fluent-round));
+  --radius-activity: calc(4px * var(--fluent-round));
+  --radius-island: calc(8px * var(--fluent-round));
+  --radius-dock: calc(8px * var(--fluent-round));
+  --radius-composer: calc(8px * var(--fluent-round));
+
+  /* 32px is the Windows standard control, 40px a list row; compact controls
+     keep their --hit-min floor on coarse pointers. */
+  --control-h-sm: 32px;
+  --control-h: 36px;
+  --control-h-lg: 40px;
+  --control-pad-x-sm: 8px;
+  --control-pad-x: 12px;
+
+  /* Control state changes are near-instant; surfaces decelerate on the
+     Fluent "fast out, slow in" curve. */
+  --motion-fast: 83ms;
+  --motion-normal: 167ms;
+  --motion-surface: 250ms;
+  --motion-ease: cubic-bezier(0, 0, 0, 1);
+
+  /* Windows draws keyboard focus in ink (2px outer, 1px inner contrast
+     stroke), not in the accent. */
+  --focus-ring: var(--text);
+
+  /* The Display cut is for 20px+ titles; Text for everything else. */
+  --fluent-font-display: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", var(--fluent-font-chosen);
+
+  /* Selection pill of navigation and list rows. */
+  --fluent-pill-w: 3px;
+  --fluent-pill-h: 16px;
+
+  /* Materials. Acrylic tint = the flyout surface; Mica = the window base. */
+  --material-glass: var(--elevated);
+  --material-glass-strong: var(--elevated);
+  --material-glass-medium: color-mix(in srgb, var(--elevated) 70%, var(--bg));
+  --material-glass-chrome: var(--panel);
+  /* The style's one contour for every glass surface and shell control. */
+  --contour: var(--fluent-stroke-surface);
+  --material-glass-border: var(--contour);
+  --material-glass-shadow: var(--shadow-md);
+  /* Acrylic grain: 2-3% luminance noise on a 128px tile. */
+  --fluent-acrylic-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 .032'/%3E%3C/filter%3E%3Crect width='128' height='128' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Stroke and fill recipes (WinUI 3 theme resources). Edge top/bottom form the
+   control elevation border: light themes darken the bottom edge, dark themes
+   lighten the top one. */
+html[data-theme-style="fluent"][data-appearance="light"] {
+  --fluent-stroke-control: rgba(0, 0, 0, 0.0578);
+  --fluent-stroke-control-2: rgba(0, 0, 0, 0.1622);
+  --fluent-stroke-strong: rgba(0, 0, 0, 0.4458);
+  --fluent-stroke-card: rgba(0, 0, 0, 0.0578);
+  --fluent-stroke-divider: rgba(0, 0, 0, 0.0803);
+  --fluent-stroke-surface: rgba(117, 117, 117, 0.4);
+  --fluent-edge-top: var(--fluent-stroke-control);
+  --fluent-edge-bottom: var(--fluent-stroke-control-2);
+  --fluent-fill-control: rgba(255, 255, 255, 0.7);
+  --fluent-fill-control-hover: rgba(249, 249, 249, 0.5);
+  --fluent-fill-control-pressed: rgba(249, 249, 249, 0.3);
+  --fluent-fill-input-active: #ffffff;
+  --fluent-fill-alt: rgba(0, 0, 0, 0.0241);
+  --fluent-fill-alt-hover: rgba(0, 0, 0, 0.0578);
+  --fluent-on-accent-edge-top: rgba(255, 255, 255, 0.08);
+  --fluent-on-accent-edge-bottom: rgba(0, 0, 0, 0.4);
+  --fluent-on-accent-pressed: rgba(255, 255, 255, 0.7);
+  --fluent-focus-inner: rgba(255, 255, 255, 0.7);
+}
+html[data-theme-style="fluent"][data-appearance="dark"] {
+  --fluent-stroke-control: rgba(255, 255, 255, 0.0706);
+  --fluent-stroke-control-2: rgba(255, 255, 255, 0.094);
+  --fluent-stroke-strong: rgba(255, 255, 255, 0.5442);
+  --fluent-stroke-card: rgba(0, 0, 0, 0.098);
+  --fluent-stroke-divider: rgba(255, 255, 255, 0.0837);
+  --fluent-stroke-surface: rgba(117, 117, 117, 0.4);
+  --fluent-edge-top: var(--fluent-stroke-control-2);
+  --fluent-edge-bottom: var(--fluent-stroke-control);
+  --fluent-fill-control: rgba(255, 255, 255, 0.0605);
+  --fluent-fill-control-hover: rgba(255, 255, 255, 0.0837);
+  --fluent-fill-control-pressed: rgba(255, 255, 255, 0.0326);
+  --fluent-fill-input-active: rgba(30, 30, 30, 0.7);
+  --fluent-fill-alt: rgba(0, 0, 0, 0.1);
+  --fluent-fill-alt-hover: rgba(255, 255, 255, 0.0419);
+  --fluent-on-accent-edge-top: rgba(255, 255, 255, 0.08);
+  --fluent-on-accent-edge-bottom: rgba(0, 0, 0, 0.14);
+  --fluent-on-accent-pressed: rgba(0, 0, 0, 0.5);
+  --fluent-focus-inner: rgba(0, 0, 0, 0.7);
+}
+
+/* Interface font: Segoe UI Variable where Windows has it. Only the default
+   faces (Open Sans now, Inter for older profiles) yield to it; an explicitly
+   chosen font keeps its place, and without Segoe the stack falls through to
+   the chosen one. The setting is an inline style on <html>, so html keeps a
+   copy and body prepends Segoe to it (a property cannot reference itself). */
+html[data-theme-style="fluent"] { --fluent-font-chosen: var(--ui-font-family); }
+html[data-theme-style="fluent"][data-font="theme"] body {
+  --ui-font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", var(--fluent-font-chosen);
+}
+html[data-theme-style="fluent"][data-font="theme"] :is(h1, h2) {
+  font-family: var(--fluent-font-display);
+  font-weight: 600;
+}
+
+/* ---- materials ------------------------------------------------------------ */
+/* Acrylic for transient surfaces: one even tint (no vignette), 30px blur,
+   125% saturation. Clear thins the tint; Off falls back to the solid
+   surface exactly like Windows with Transparency effects turned off. */
+html[data-theme-style="fluent"] body {
+  --material-glass-blur: 30px;
+  --material-glass-saturation: 125%;
+  --material-glass-readable-fill: 86%;
+  --material-glass-readable-edge: 86%;
+  --material-glass-readable-control-fill: 72%;
+  --material-glass-readable-control-edge: 72%;
+  --material-glass-mobile-chrome-fill: 80%;
+  --material-glass-mobile-chrome-edge: 80%;
+}
+html[data-theme-style="fluent"] body[data-glass="clear"] {
+  --material-glass-blur: 24px;
+  --material-glass-saturation: 150%;
+  --material-glass-readable-fill: 70%;
+  --material-glass-readable-edge: 70%;
+  --material-glass-readable-control-fill: 56%;
+  --material-glass-readable-control-edge: 56%;
+  --material-glass-mobile-chrome-fill: 64%;
+  --material-glass-mobile-chrome-edge: 64%;
+}
+html[data-theme-style="fluent"] :is(.ui-popover, .picker-pop, .menu-popup, .ui-tooltip, .selection-menu, .prompt-nav-panel) {
+  --material-glass-texture: var(--fluent-acrylic-noise);
+}
+/* Mica for the window chrome: the base colour, opaque enough to read as a
+   solid surface, with only a heavily blurred hint of the wallpaper. */
+html[data-theme-style="fluent"] :is(.sidebar, .app > .header, .railbar, .statusbar) {
+  --sidebar-glass-surface: var(--panel);
+  --material-glass-readable-fill: 92%;
+  --material-glass-readable-edge: 92%;
+  --material-glass-blur: 60px;
+  --material-glass-saturation: 140%;
+}
+
+/* ---- overlays: flyout, menu, tooltip, dialog ----------------------------- */
+html[data-theme-style="fluent"] :is(.ui-popover, .picker-pop, .menu-popup) {
+  border-radius: var(--radius-surface);
+  border-color: var(--fluent-stroke-surface);
+  box-shadow: var(--shadow-md);
+}
+html[data-theme-style="fluent"] .menu-popup { padding: var(--space-1); }
+/* 30px rows on a 2px gap: the 32px pitch of the Windows context menu. The
+   shared icon column is wider here: a row's inset 11px + glyph + 12px gap. */
+html[data-theme-style="fluent"] .ui-menu { --menu-row-gap: 2px; --menu-leading-column: calc(11px + var(--icon-sm) + 12px); }
+html[data-theme-style="fluent"] .ui-menu-item {
+  position: relative;
+  gap: 12px;
+  min-height: max(30px, var(--hit-min));
+  padding: 0 11px;
+  border-radius: var(--radius-control);
+  font-weight: 400;
+}
+html[data-theme-style="fluent"] .ui-menu-item .ui-icon { width: var(--icon-sm); height: var(--icon-sm); color: currentColor; }
+html[data-theme-style="fluent"] .ui-menu-item:focus-visible { background: var(--surface-overlay-hover); }
+@media (hover: hover) {
+  html[data-theme-style="fluent"] .ui-menu-item:hover:not(:disabled) { background: var(--surface-overlay-hover); }
+}
+html[data-theme-style="fluent"] .ui-menu-item:active:not(:disabled) { background: var(--surface-overlay); color: var(--text-dim); }
+html[data-theme-style="fluent"] .ui-menu-item-detail { color: var(--text-dim); }
+/* Menu separators group commands, so they stay even when interface borders
+   are hidden: a divider stroke as wide as the rows, 4px clear of each. */
+html[data-theme-style="fluent"] .ui-menu .ui-separator--horizontal { margin: 2px 0; background: var(--fluent-stroke-divider); }
+html[data-theme-style="fluent"] .menu-sep { margin: 4px 0; background: var(--fluent-stroke-divider); }
+html[data-theme-style="fluent"] .menu-popup button {
+  min-height: 32px; padding: 0 11px; gap: 12px;
+  border-radius: var(--radius-control); color: var(--text); font-size: var(--font-label);
+}
+@media (hover: hover) {
+  html[data-theme-style="fluent"] .menu-popup button:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+/* Keyboard accelerators are plain secondary text in Windows, not keycaps. */
+html[data-theme-style="fluent"] .menu-kbd {
+  padding: 0; border: 0; background: none;
+  color: var(--text-dim); font: 400 var(--font-meta)/1 var(--ui-font-family);
+}
+
+html[data-theme-style="fluent"] .ui-tooltip {
+  padding: 5px 8px 7px;
+  border-color: var(--fluent-stroke-surface);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+}
+
+html[data-theme-style="fluent"] .dialog-panel {
+  border-color: var(--fluent-stroke-surface);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-lg);
+}
+/* ContentDialog: the title sits in the content area (no rule under it) and
+   the commands stand on a recessed base band with a card stroke above. */
+html[data-theme-style="fluent"] .ui-dialog-head { border-bottom-color: transparent; }
+html[data-theme-style="fluent"] .ui-dialog-title { font-weight: 600; letter-spacing: 0; }
+html[data-theme-style="fluent"] .ui-dialog-foot {
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--fluent-stroke-card);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+/* Settings is a window, not a flyout: Mica base, cards on top. */
+html[data-theme-style="fluent"] .settings-shell { --material-glass-strong: var(--panel); }
+
+/* ---- buttons -------------------------------------------------------------- */
+html[data-theme-style="fluent"] .ui-btn {
+  border-radius: var(--radius-control);
+  font-weight: 400;
+  box-shadow: none;
+  transition: background-color var(--motion-fast) linear, border-color var(--motion-fast) linear, color var(--motion-fast) linear;
+}
+/* Standard button: control fill on the elevation border. */
+html[data-theme-style="fluent"] :is(.ui-btn--quiet, .ui-btn--danger, .ui-icon-btn--quiet) {
+  background: var(--fluent-fill-control);
+  border-color: var(--fluent-edge-top) var(--fluent-stroke-control) var(--fluent-edge-bottom);
+  box-shadow: none;
+}
+html[data-theme-style="fluent"] .ui-btn--quiet { color: var(--text); }
+@media (hover: hover) {
+  html[data-theme-style="fluent"] :is(.ui-btn--quiet, .ui-icon-btn--quiet):hover:not(:disabled) {
+    background: var(--fluent-fill-control-hover);
+    border-color: var(--fluent-edge-top) var(--fluent-stroke-control) var(--fluent-edge-bottom);
+  }
+  html[data-theme-style="fluent"] .ui-btn--danger:hover:not(:disabled) {
+    background: var(--red-wash);
+    border-color: var(--fluent-edge-top) var(--fluent-stroke-control) var(--fluent-edge-bottom);
+  }
+}
+html[data-theme-style="fluent"] :is(.ui-btn--quiet, .ui-btn--danger, .ui-icon-btn--quiet):active:not(:disabled) {
+  background: var(--fluent-fill-control-pressed);
+  border-color: var(--fluent-stroke-control);
+  color: var(--text-dim);
+}
+/* Accent button: a flat accent plate; hover and press lower its opacity. */
+html[data-theme-style="fluent"] .ui-btn--primary {
+  background: var(--accent);
+  border-color: var(--fluent-on-accent-edge-top) var(--fluent-on-accent-edge-top) var(--fluent-on-accent-edge-bottom);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  html[data-theme-style="fluent"] .ui-btn--primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 90%, transparent);
+    border-color: var(--fluent-on-accent-edge-top) var(--fluent-on-accent-edge-top) var(--fluent-on-accent-edge-bottom);
+    color: var(--accent-ink);
+  }
+}
+html[data-theme-style="fluent"] .ui-btn--primary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+  border-color: var(--fluent-on-accent-edge-top);
+  color: var(--fluent-on-accent-pressed);
+}
+/* Subtle button. */
+html[data-theme-style="fluent"] .ui-btn--ghost { color: var(--text); }
+@media (hover: hover) {
+  html[data-theme-style="fluent"] .ui-btn--ghost:hover:not(:disabled) { background: var(--surface-overlay-hover); }
+}
+html[data-theme-style="fluent"] .ui-btn--ghost:active:not(:disabled) { background: var(--surface-overlay); color: var(--text-dim); }
+html[data-theme-style="fluent"] .ui-icon-btn:active:not(:disabled) { background: var(--surface-overlay); }
+
+/* ---- text fields ----------------------------------------------------------- */
+/* TextBox: a control stroke with a strong bottom edge; focus swaps the fill
+   to the solid input surface and the bottom edge to a 2px accent underline.
+   A .ui-field-well is the TextBox around its icon and controls, so the input
+   inside it is bare. */
+html[data-theme-style="fluent"] :is(.ui-input, .ui-textarea, .sel select, .ui-field-well):not(:where(.ui-field-well, .ui-field-frame) *) {
+  background: var(--fluent-fill-control);
+  border-color: var(--fluent-stroke-control) var(--fluent-stroke-control) var(--fluent-stroke-strong);
+  border-radius: var(--radius-control);
+}
+html[data-theme-style="fluent"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *) { color: var(--text); }
+@media (hover: hover) {
+  html[data-theme-style="fluent"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *):hover:not(:disabled):not(:focus),
+  html[data-theme-style="fluent"] .ui-field-well:hover:not(:focus-within) {
+    background: var(--fluent-fill-control-hover);
+  }
+}
+html[data-theme-style="fluent"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *):is(:focus, :focus-visible),
+html[data-theme-style="fluent"] .ui-field-well:focus-within {
+  outline: none;
+  background: var(--fluent-fill-input-active);
+  border-color: var(--fluent-stroke-control) var(--fluent-stroke-control) var(--accent);
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+html[data-theme-style="fluent"] :is(.ui-input, .ui-textarea)::placeholder { color: var(--text-dim); }
+
+/* ---- check box, toggle switch, segmented, tabs ------------------------------ */
+html[data-theme-style="fluent"] .ui-checkbox-box {
+  width: 20px;
+  height: 20px;
+  margin-top: 0;
+  border: 1px solid var(--fluent-stroke-strong);
+  border-radius: var(--radius-control);
+  background: var(--fluent-fill-alt);
+}
+html[data-theme-style="fluent"] .ui-checkbox:hover:not(.ui-checkbox--disabled) .ui-checkbox-box {
+  border-color: var(--fluent-stroke-strong);
+  background: var(--fluent-fill-alt-hover);
+}
+html[data-theme-style="fluent"] .ui-checkbox input:checked + .ui-checkbox-box { background: var(--accent); border-color: var(--accent); }
+
+/* ToggleSwitch: a 40×20 pill; the 12px knob grows to 14px under the pointer. */
+html[data-theme-style="fluent"] .switch { width: 40px; height: 20px; }
+html[data-theme-style="fluent"] .switch-track {
+  display: flex;
+  align-items: center;
+  width: 40px;
+  height: 20px;
+  padding: 0 3px;
+  border: 1px solid var(--fluent-stroke-strong);
+  background: var(--fluent-fill-alt);
+}
+html[data-theme-style="fluent"] .switch i {
+  --fluent-knob: 1;
+  width: 12px;
+  height: 12px;
+  background: var(--text-dim);
+  box-shadow: none;
+  transform: translateX(0) scale(var(--fluent-knob));
+}
+@media (hover: hover) {
+  html[data-theme-style="fluent"] .switch:hover:not(:disabled) i { --fluent-knob: 1.1667; }
+  html[data-theme-style="fluent"] .switch:hover:not(:disabled):not([aria-checked="true"]) .switch-track {
+    border-color: var(--fluent-stroke-strong);
+    background: var(--fluent-fill-alt-hover);
+  }
+}
+html[data-theme-style="fluent"] .switch:is([aria-checked="true"], [data-checked="true"]) .switch-track {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+html[data-theme-style="fluent"] .switch:is([aria-checked="true"], [data-checked="true"]) i {
+  background: var(--accent-ink);
+  transform: translateX(20px) scale(var(--fluent-knob));
+}
+html[data-theme-style="fluent"] .switch:dir(rtl):is([aria-checked="true"], [data-checked="true"]) i {
+  transform: translateX(-20px) scale(var(--fluent-knob));
+}
+
+/* Segmented control and tabs: a recessed well; the selected segment is a
+   standard-button card carrying the accent pill under its label. */
+html[data-theme-style="fluent"] :is(.seg, .ui-tabs) {
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--fluent-stroke-control);
+  border-radius: var(--radius-control);
+  background: var(--fluent-fill-alt);
+}
+html[data-theme-style="fluent"] :is(.seg button, .ui-tab) {
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-control) - 1px);
+  color: var(--text-dim);
+  font-weight: 400;
+}
+@media (hover: hover) {
+  html[data-theme-style="fluent"] :is(.seg button, .ui-tab):hover:where(:not(:disabled)) {
+    color: var(--text);
+    background: var(--surface-overlay-hover);
+  }
+}
+html[data-theme-style="fluent"] :is(.seg button.active, .seg button.on, .ui-tab--selected) {
+  color: var(--text);
+  background: var(--fluent-fill-control);
+  border-color: var(--fluent-edge-top) var(--fluent-stroke-control) var(--fluent-edge-bottom);
+  box-shadow: none;
+}
+@media (hover: hover) {
+  html[data-theme-style="fluent"] :is(.seg button.active, .seg button.on, .ui-tab--selected):hover:where(:not(:disabled)) {
+    color: var(--text);
+    background: var(--fluent-fill-control-hover);
+    box-shadow: none;
+  }
+}
+html[data-theme-style="fluent"] :is(.seg button.active, .seg button.on, .ui-tab--selected)::after {
+  content: "";
+  position: absolute;
+  inset-block-end: 1px;
+  inset-inline-start: calc(50% - 8px);
+  width: 16px;
+  height: var(--fluent-pill-w);
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* ---- navigation: selection pill ------------------------------------------- */
+/* NavigationView: the selected row keeps a subtle backplate and carries a
+   3×16px accent pill on its inline-start edge; the label stays ink. */
+html[data-theme-style="fluent"] .session-row.active .session-btn::before {
+  background: var(--surface-overlay-hover);
+  box-shadow: none;
+}
+html[data-theme-style="fluent"] .session-row.active .session-btn::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - var(--fluent-pill-h) / 2);
+  inset-inline-start: calc(var(--session-body-start) - var(--session-pill-inset));
+  width: var(--fluent-pill-w);
+  height: var(--fluent-pill-h);
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  pointer-events: none;
+}
+html[data-theme-style="fluent"] .settings-nav-item { font-weight: 400; }
+@media (min-width: 701px) {
+  html[data-theme-style="fluent"] .settings-nav-item { min-height: 36px; }
+  html[data-theme-style="fluent"] .settings-nav-item.active { color: var(--text); background: var(--surface-overlay-hover); }
+  @media (hover: hover) {
+    html[data-theme-style="fluent"] .settings-nav-item.active:hover:where(:not(:disabled)) { color: var(--text); background: var(--surface-overlay-strong); }
+  }
+  html[data-theme-style="fluent"] .settings-nav-item.active::before {
+    inset-block: auto;
+    top: calc(50% - var(--fluent-pill-h) / 2);
+    width: var(--fluent-pill-w);
+    height: var(--fluent-pill-h);
+    border-radius: var(--radius-round);
+  }
+}
+
+/* ---- composer and conversation --------------------------------------------- */
+/* The composer is a glass surface on the style's contour, and the app's main
+   text field: while it has focus it keeps the contour and takes the field's
+   2px accent underline instead of a halo. The contour composites over the
+   workspace, like the rails'. */
+html[data-theme-style="fluent"] .composer-card {
+  border-color: var(--contour);
+  background-clip: padding-box;
+  box-shadow: var(--shadow-md);
+}
+html[data-theme-style="fluent"] .composer-card:focus-within {
+  border-color: var(--contour) var(--contour) var(--accent);
+  box-shadow: var(--shadow-md), inset 0 -1px 0 var(--accent);
+}
+/* Fluent floats the phone composer on its shadow too; the top islands are the
+   same floating glass, so they take the composer's contour and shadow. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  html[data-theme-style="fluent"] .mobile-session-floats .ui-glass-island:not([data-attention]) { box-shadow: var(--shadow-md); }
+}
+html[data-theme-style="fluent"] .msg.user .bubble { box-shadow: none; }
+
+/* ---- progress, spinner, scrollbars, selection, focus ------------------------ */
+/* ProgressBar: a 1px track line under a 3px rounded accent indicator. */
+html[data-theme-style="fluent"] .ui-progress {
+  height: 3px;
+  border: 0;
+  background: linear-gradient(transparent 1px, var(--fluent-stroke-strong) 1px, var(--fluent-stroke-strong) 2px, transparent 2px);
+}
+html[data-theme-style="fluent"] .ui-progress-fill { background: var(--accent); }
+/* ProgressRing: an accent arc with no visible track. */
+html[data-theme-style="fluent"] .ui-spinner { border-color: transparent; border-top-color: var(--accent); }
+html[data-theme-style="fluent"] * { scrollbar-color: color-mix(in srgb, var(--text) 38%, transparent) transparent; }
+html[data-theme-style="fluent"] ::selection { background: var(--accent); color: var(--accent-ink); }
+/* Same weight as the base rule, so component-specific rings still win. */
+:where(html[data-theme-style="fluent"]) :focus-visible {
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px var(--fluent-focus-inner);
+}
+
+/* ---- Hide interface borders ---------------------------------------------- */
+/* Borderless appearance still clears structural borders and separators. The
+   Fluent material edges are not decoration: like the composer outline and
+   the checkbox, a control's elevation edge and a flyout's surface stroke
+   identify the thing itself, so they stay. */
+html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ui-tooltip, .dialog-panel) {
+  border-color: var(--fluent-stroke-surface) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.ui-btn--quiet, .ui-btn--danger, .ui-icon-btn--quiet, .seg button.active, .seg button.on, .ui-tab--selected):not(:disabled) {
+  border-color: var(--fluent-edge-top) var(--fluent-stroke-control) var(--fluent-edge-bottom) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] .ui-btn--primary:not(:disabled) {
+  border-color: var(--fluent-on-accent-edge-top) var(--fluent-on-accent-edge-top) var(--fluent-on-accent-edge-bottom) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.seg, .ui-tabs) {
+  border-color: var(--fluent-stroke-control) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.ui-input, .ui-textarea, .sel select, .ui-field-well):not(:where(.ui-field-well, .ui-field-frame) *) {
+  border-color: var(--fluent-stroke-control) var(--fluent-stroke-control) var(--fluent-stroke-strong) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *):is(:focus, :focus-visible),
+html[data-theme-style="fluent"] body[data-hide-borders="true"] .ui-field-well:focus-within {
+  border-color: var(--fluent-stroke-control) var(--fluent-stroke-control) var(--accent) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] .ui-checkbox-box,
+html[data-theme-style="fluent"] body[data-hide-borders="true"] .switch-track {
+  border-color: var(--fluent-stroke-strong) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box,
+html[data-theme-style="fluent"] body[data-hide-borders="true"] .switch:is([aria-checked="true"], [data-checked="true"]) .switch-track {
+  border-color: var(--accent) !important;
+}
+html[data-theme-style="fluent"] body[data-hide-borders="true"] .composer-card:focus-within {
+  border-color: var(--contour) var(--contour) var(--accent) !important;
+}
+
+/* Disabled controls keep the shared neutral look (styles.css, !important). */

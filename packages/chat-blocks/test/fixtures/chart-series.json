@@ -1,0 +1,63 @@
+{
+  "view": "chart",
+  "title": "Visits",
+  "options": {
+    "type": "line",
+    "unit": "k"
+  },
+  "pick": "none",
+  "columns": [],
+  "columnImages": [],
+  "series": [
+    "Online",
+    "Shop"
+  ],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "Jan",
+      "cells": [
+        "Jan",
+        "12",
+        "4"
+      ],
+      "values": [
+        12,
+        4
+      ]
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "Feb",
+      "cells": [
+        "Feb",
+        "15",
+        "5"
+      ],
+      "values": [
+        15,
+        5
+      ]
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "Mar",
+      "cells": [
+        "Mar",
+        "14",
+        "x"
+      ],
+      "values": [
+        14,
+        null
+      ]
+    }
+  ],
+  "actions": [],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

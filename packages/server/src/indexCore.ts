@@ -1,0 +1,3559 @@
+// Polyth server boot. Composition root: kernel context + plugins + gateway.
+//
+// Feature packages are NOT imported here. Every workspace package that
+// declares a polyth.serverEntry marker is discovered at boot, constructs its
+// own services, and publishes them in the shared service registry
+// (serverServiceKey). This file only composes infrastructure (session store,
+// runtime pool, HTTP/WS gateway) plus the few genuinely cross-cutting seams
+// (session service wiring and track workflow).
+import { createHash } from "node:crypto";
+import { createConnection, createServer as createNetServer } from "node:net";
+import { DatabaseSync } from "node:sqlite";
+import { chmodSync, mkdirSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { dirname, join, posix, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createCapabilityContributionRegistry, createHarnessPool, createHarnessRegistry, releaseProcessExecution, type RuntimeAcquisitionInfo } from "@polyth/harness-runtime";
+import { createContext, loadPlugin } from "@polyth/kernel";
+import {
+  activePinnedMessages,
+  compactionRecoveryText,
+  createStore,
+  deriveMessages,
+  unrestoredCompactionSeq,
+} from "@polyth/session";
+import { SessionOutputCache } from "@polyth/session/output-cache";
+import {
+  CAP,
+  HARNESS_PERSON_DEFAULTS_SERVICE,
+  SERVER_CAPABILITY_IDS,
+  type AgentRuntime,
+  type Disposable,
+  type HarnessConfigurationMetadata,
+  type HarnessContext,
+  type HarnessPersonDefaults,
+  type HarnessProvider,
+  type NotificationRecord,
+  type PackageDescriptorDto,
+  type RemoteHost,
+  type RuntimeEndpoint,
+  type RuntimeEvent,
+  type RuntimeSessionBinding,
+  type RuntimeSnapshot,
+  type SessionEvent,
+  type SessionProjection,
+  type SessionService,
+} from "@polyth/contracts";
+import {
+  createConfigApplier,
+  createOpenCodeRuntime,
+  createRemoteOpenCodeRuntime,
+  installRemoteOpenCode,
+  inspectOpenCodeEngine,
+  peekOpenCodeLaunchOverlay,
+  probeRemoteOpenCode,
+  resolveOpenCodeBinary,
+  sweepOpenCodeRuntimes,
+  type OpenCodeAdapterOptions,
+} from "@polyth/backend-opencode";
+import {
+  bindPackageServices,
+  createServerServiceRegistry,
+  discoverServerPackages,
+  packageDataRoot,
+  SERVER_OPENCODE_RUNTIME_POLICY,
+  PairedSocketRegistry,
+  SERVER_APPLICATION_SURFACE,
+  SERVER_SESSION_TITLE_GENERATOR,
+  SERVER_SESSION_WATCHES,
+  SERVER_MODEL_FAVORITES,
+  SERVER_RUNTIME_CATALOG,
+  SERVER_TURN_COMPLETION_BUS,
+  SERVER_TURN_STOPPED_BUS,
+  SERVER_PERMISSION_WAITING_BUS,
+  SESSION_ATTENTION_SERVICE,
+  SESSION_PURPOSES,
+  SERVER_BEHAVIOR_SECTIONS,
+  serverServiceKey,
+  type HttpServerContext,
+  type PluginRegistry,
+  type ServerPackageFactory,
+  type ServerPackageHost,
+} from "@polyth/plugins";
+import { createProjectService } from "./projects.ts";
+import { createPermissionWaitingBus } from "./permissionWaiting.ts";
+import { watchEventLoopStalls } from "./eventLoopStall.ts";
+import {
+  createSpaceGateway,
+  spaceCookieHeader,
+  type SpaceGateway,
+} from "./spaces.ts";
+import { spaceRoutes } from "./routes/spaces.ts";
+import { AUDIT, createAuditSink, createSpaceStorage, spaceStorageDir } from "@polyth/tenancy";
+import { projectRoutes } from "./routes/projects.ts";
+import { createPackageRegistry } from "./packages.ts";
+import { createPeopleStore, peopleRootDir } from "./people.ts";
+import { harnessAccessOf } from "./accountPermissions.ts";
+import {
+  createSessionService,
+  type Broadcaster,
+  type RuntimeEpochSessionService,
+  type RuntimePool,
+} from "./sessions.ts";
+import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
+import { sessionStatusAfterBoot, type BootTurnState } from "./resourceStartupReconciliation.ts";
+import {
+  PRISTINE_SESSION_SWEEP_INTERVAL_MS,
+  sweepPristineSessions,
+} from "./sessionSweep.ts";
+import { createRuntimeCatalog } from "./runtimeCatalog.ts";
+import { createHttpHandler, createInternalControlServer, createPublicHttpServer, createTunnelIngress, type RouteHandler } from "./http.ts";
+import { createProxyTrust } from "./trustedProxy.ts";
+import { drainAndCloseServer, HTTP_DRAIN_MS } from "./httpDrain.ts";
+import { createHttpAdmission } from "./httpAdmission.ts";
+import { packageRoutes } from "./routes/packages.ts";
+import { createPackageResidue, personPackageResidueRoots, type PackageResidueRoot } from "./packageResidue.ts";
+import { adoptRenamedPackageData } from "./packageRename.ts";
+import { contextRoutes } from "./routes/context.ts";
+import { orgRoutes } from "./routes/org.ts";
+import { sessionRetentionRoutes } from "./routes/sessionRetention.ts";
+import { settingsRoutes } from "./routes/settings.ts";
+import { opencodePendingRoutes } from "./routes/opencodePending.ts";
+import { browseRoutes } from "./routes/browse.ts";
+import { iconifyRoutes } from "./routes/iconify.ts";
+import { releasesRoutes } from "./routes/releases.ts";
+import { authRequestLike, createAuthService, publicHttpIngress } from "./auth.ts";
+import { createSessionEventWaiters } from "./sessionEventWaiters.ts";
+import { createServerApplicationSurface } from "./applicationSurface.ts";
+import { authRoutes } from "./routes/auth.ts";
+import { createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
+import { pushRoutes } from "./routes/push.ts";
+import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
+import { notificationRoutes } from "./routes/notifications.ts";
+import { createNativePushService, nativePushRoutes } from "./nativePush.ts";
+import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
+import { queueRoutes } from "./routes/queue.ts";
+import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
+import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
+import { createFailedStartupCleanupPolicy } from "./failedStartupCleanup.ts";
+import { createMcpConfigService, mcpEntriesFromBackendConfig, PERSONAL_MCP_PACKAGE } from "./mcp.ts";
+import { createCapabilityProvisioningController, reconcilePinnedHarness } from "./capabilityProvisioning.ts";
+import { guardedPermissions, spaceHasGuardedMember } from "./accountGuardrails.ts";
+import { AGENT_TOOLS_PATH, authorizePackageToolAfterPermissions, createAgentToolBridge, redactToolInput, summarizeToolInput } from "./agentTools.ts";
+import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
+import { createModelVisibilityService, parseVisibility } from "./modelVisibility.ts";
+import { createVoiceSettings } from "./voice.ts";
+import {
+  buildNotePrompt,
+  parseNoteReply,
+} from "./assist.ts";
+import { assistRoutes } from "./routes/assist.ts";
+import { promptHistoryRoutes } from "./routes/promptHistory.ts";
+import { sharingRoutes } from "./routes/sharing.ts";
+import { createSessionSharingService, privateSessionOwner, sessionAccess } from "./sessionSharing.ts";
+import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
+import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
+import { canonicalSecurity } from "./runtimeSecurity.ts";
+import { oneShot } from "./oneshot.ts";
+import {
+  createSmallModelService,
+  smallModelExecutionRoute,
+  smallModelPreference,
+  summarizeSessionFirst,
+} from "./smallModel.ts";
+import { createWsGateway, type WsGateway } from "./ws.ts";
+import { createRouteRegistry } from "./routeRegistry.ts";
+import { createPackageLifecycle } from "./packageLifecycle.ts";
+import {
+  createDeferredConfigApplier,
+  createOpenCodePendingService,
+  inspectOpenCodeConfiguration,
+  physicalRestartKeysFor,
+  type PendingRestartPlan,
+} from "./opencodePending.ts";
+import { restartAssessmentSkips } from "./opencodeRestartSafety.ts";
+import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
+import { runtimeEpochRoutes } from "./routes/runtimeEpoch.ts";
+import { runtimeDiagnosticsRoutes } from "./routes/runtimeDiagnostics.ts";
+import { createRuntimeDiagnostics } from "./runtimeDiagnostics.ts";
+import { createSessionWatchCoordinator } from "./sessionWatches.ts";
+import { settleAllOrThrow } from "./settle.ts";
+import {
+  createRuntimeIdleController,
+  idleRuntimeEvictable,
+  type RuntimeIdleController,
+} from "./runtimeIdle.ts";
+import { createRuntimeWarmPolicy } from "./runtimeWarmPolicy.ts";
+import { admissionBlockingOperations } from "./operationAdmission.ts";
+import {
+  createKeyedRuntimeOwner,
+  createRuntimeAcquisitionTracker,
+  type SharedRuntimeOccupancy,
+} from "./runtimeOccupancy.ts";
+import { createRuntimeStorageMaintenance } from "./runtimeStorageMaintenance.ts";
+
+/** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
+const smallModel = (): { providerID: string; modelID: string } | undefined => {
+  const raw = process.env.POLYTH_SMALL_MODEL;
+  if (!raw || !raw.includes("/")) return undefined;
+  const i = raw.indexOf("/");
+  return { providerID: raw.slice(0, i), modelID: raw.slice(i + 1) };
+};
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export interface BootOptions {
+  port?: number;
+  dataDir?: string;
+  /** Optional listen address. The desktop host pins this to loopback. */
+  hostname?: string;
+  /** Operator-declared canonical identity origin from the trusted bootstrap.
+   *  Hosts must not derive it from request input. */
+  canonicalOrigin?: string;
+  /** Static SPA directory override for packaged hosts. */
+  webDist?: string;
+  opencode?: Partial<OpenCodeAdapterOptions>;
+  /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
+  packagesDir?: string;
+  /** Optional packages root override used only for built web assets. */
+  webPackagesDir?: string;
+  /**
+   * Statically bundled feature entries. Packaged hosts use this because their
+   * server code lives in one bundle and cannot be found through filesystem
+   * discovery. Omit it for the normal workspace package scan.
+   */
+  serverPackages?: readonly ServerPackageRegistration[];
+  /**
+   * Polyth Desktop only. Exposes, in-process and never over HTTP, the first-run
+   * `completeLocalSetup` (an owner without a credential) and
+   * `issueLocalOwnerSession` (the Desktop window's owner session while that
+   * owner has no credential). Other hosts leave it unset.
+   */
+  desktopOwnerChannel?: boolean;
+}
+
+/** Keep protocol identity behind the runtime pool's stable facade, including
+ * lifecycle-backed runtimes and generation replacement. */
+export function createRuntimeProtocolForwarder(
+  current: () => AgentRuntime,
+): NonNullable<AgentRuntime["protocol"]> {
+  return async () => {
+    const runtime = current();
+    if (typeof runtime.protocol === "function") return runtime.protocol();
+    const lifecycle = (
+      runtime as AgentRuntime & {
+        lifecycle?: Pick<Required<AgentRuntime>, "protocol">;
+      }
+    ).lifecycle;
+    if (typeof lifecycle?.protocol === "function") return lifecycle.protocol();
+    throw Object.assign(new Error("runtime protocol identity is unavailable"), {
+      code: "unsupported",
+    });
+  };
+}
+
+/** A feature package entry supplied by a bundled host such as Electron. */
+export interface ServerPackageRegistration {
+  id: string;
+  descriptor: PackageDescriptorDto;
+  factory: ServerPackageFactory;
+  /** Ids the package was installed under before (`polyth.formerIds`). */
+  formerIds?: readonly string[];
+}
+
+export { isPackageEnabled } from "./packages.ts";
+
+export function openCodeRuntimeId(projectId: string, cwd: string): string {
+  return createHash("sha256")
+    .update(projectId)
+    .update("\0")
+    .update(resolve(cwd))
+    .digest("hex")
+    .slice(0, 24);
+}
+
+export function openCodeRemoteRuntimeId(
+  connectionIdentity: string,
+  projectId: string,
+  cwd: string,
+): string {
+  return createHash("sha256")
+    .update(connectionIdentity)
+    .update("\0")
+    .update(projectId)
+    .update("\0")
+    .update(posix.normalize(cwd))
+    .digest("hex")
+    .slice(0, 24);
+}
+
+export interface DataDirectoryLease {
+  canonicalDataDir: string;
+  release(): Promise<void>;
+}
+
+export interface RuntimeAdmissionBarrier {
+  fenced(): boolean;
+  admit<T>(action: () => Promise<T>): Promise<T>;
+  run<T>(action: () => Promise<T>): Promise<T>;
+  trackTurn(sessionId: string, active: boolean): void;
+  drain<T>(action: () => Promise<T>): Promise<T>;
+}
+
+/** Reader/exclusive gate for turn admission versus config replacement.
+ * Admissions join synchronously before their first await. An exclusive caller
+ * fences new admissions, waits for current admissions to settle, then holds
+ * the fence through its complete critical section. */
+export function createRuntimeAdmissionBarrier(options?: {
+  isShuttingDown?: () => boolean;
+}): RuntimeAdmissionBarrier {
+  let fenceDepth = 0;
+  let activeAdmissions = 0;
+  let exclusiveTail = Promise.resolve();
+  const idleWaiters = new Set<() => void>();
+  const activeTurns = new Set<string>();
+  const turnIdleWaiters = new Set<() => void>();
+
+  const waitForIdle = (): Promise<void> => {
+    if (activeAdmissions === 0) return Promise.resolve();
+    return new Promise<void>((resolveIdle) => {
+      idleWaiters.add(resolveIdle);
+    });
+  };
+
+  const waitForTurnsIdle = (): Promise<void> => {
+    if (activeTurns.size === 0) return Promise.resolve();
+    return new Promise<void>((resolveIdle) => {
+      turnIdleWaiters.add(resolveIdle);
+    });
+  };
+
+  const runExclusive = async <T,>(
+    action: () => Promise<T>,
+    waitForTurns: boolean,
+  ): Promise<T> => {
+    const previous = exclusiveTail;
+    let releaseExclusive!: () => void;
+    exclusiveTail = new Promise<void>((resolveExclusive) => {
+      releaseExclusive = resolveExclusive;
+    });
+    fenceDepth += 1;
+    try {
+      await previous;
+      await waitForIdle();
+      if (waitForTurns) await waitForTurnsIdle();
+      return await action();
+    } finally {
+      fenceDepth -= 1;
+      releaseExclusive();
+    }
+  };
+
+  return {
+    fenced: () => fenceDepth > 0,
+    async admit<T>(action: () => Promise<T>): Promise<T> {
+      if (options?.isShuttingDown?.()) {
+        throw Object.assign(
+          new Error("runtime admission is fenced for shutdown"),
+          { code: "shutting_down" },
+        );
+      }
+      if (fenceDepth > 0) {
+        throw Object.assign(
+          new Error("runtime admission is fenced for configuration restart"),
+          { code: "restart-deferred" },
+        );
+      }
+      activeAdmissions += 1;
+      try {
+        return await action();
+      } finally {
+        activeAdmissions -= 1;
+        if (activeAdmissions === 0) {
+          for (const resolveIdle of idleWaiters) resolveIdle();
+          idleWaiters.clear();
+        }
+      }
+    },
+    run: (action) => runExclusive(action, false),
+    trackTurn(sessionId, active) {
+      if (active) {
+        activeTurns.add(sessionId);
+      } else {
+        activeTurns.delete(sessionId);
+        if (activeTurns.size === 0) {
+          for (const resolveIdle of turnIdleWaiters) resolveIdle();
+          turnIdleWaiters.clear();
+        }
+      }
+    },
+    drain: (action) => runExclusive(action, true),
+  };
+}
+
+const DATA_DIRECTORY_LEASE_HOST = "127.0.0.1";
+const DATA_DIRECTORY_LEASE_PORT_BASE = 49_152;
+const DATA_DIRECTORY_LEASE_PORT_SPAN = 16_384;
+const DATA_DIRECTORY_LEASE_PREFIX = "polyth-writer-v1:";
+const DATA_DIRECTORY_LEASE_FILE = ".polyth-writer.lock";
+const SQLITE_BUSY = 5;
+
+const dataDirectoryLeaseIdentity = (canonicalDataDir: string): string =>
+  createHash("sha256")
+    .update(process.platform === "win32" ? canonicalDataDir.toLowerCase() : canonicalDataDir)
+    .digest("hex");
+
+const dataDirectoryLeasePort = (identity: string): number =>
+  DATA_DIRECTORY_LEASE_PORT_BASE
+  + (Number.parseInt(identity.slice(0, 4), 16) % DATA_DIRECTORY_LEASE_PORT_SPAN);
+
+const openDataDirectoryFileLease = (canonicalDataDir: string): DatabaseSync => {
+  const file = join(canonicalDataDir, DATA_DIRECTORY_LEASE_FILE);
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(file);
+    db.exec(
+      "PRAGMA busy_timeout=0; "
+      + "CREATE TABLE IF NOT EXISTS lease(singleton INTEGER PRIMARY KEY CHECK(singleton=1)); "
+      + "BEGIN EXCLUSIVE;",
+    );
+    chmodSync(file, 0o600);
+    return db;
+  } catch (error) {
+    try { db?.close(); } catch { /* preserve the acquisition failure */ }
+    const sqliteError = error as Error & { errcode?: number };
+    if (sqliteError.errcode === SQLITE_BUSY || /database is locked/i.test(sqliteError.message)) {
+      throw Object.assign(
+        new Error(`another Polyth server already owns data directory ${canonicalDataDir}`),
+        { code: "data-directory-locked" },
+      );
+    }
+    throw Object.assign(
+      new Error(`OS data-directory lease is unavailable: ${sqliteError.message}`),
+      { code: "data-directory-lock-unavailable" },
+    );
+  }
+};
+
+type DataDirectoryLeaseProbe = "same-owner" | "occupied" | "gone";
+
+const probeDataDirectoryLease = (
+  port: number,
+  identity: string,
+): Promise<DataDirectoryLeaseProbe> =>
+  new Promise((resolveProbe) => {
+    const socket = createConnection({ host: DATA_DIRECTORY_LEASE_HOST, port });
+    let output = "";
+    let settled = false;
+    const finish = (result: DataDirectoryLeaseProbe): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolveProbe(result);
+    };
+    const timer = setTimeout(() => finish("occupied"), 250);
+    timer.unref?.();
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      if (output.length < 256) {
+        const text = String(chunk);
+        output += text.slice(0, 256 - output.length);
+      }
+      const newline = output.indexOf("\n");
+      if (newline < 0) return;
+      finish(
+        output.slice(0, newline) === `${DATA_DIRECTORY_LEASE_PREFIX}${identity}`
+          ? "same-owner"
+          : "occupied",
+      );
+    });
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      finish(error.code === "ECONNREFUSED" ? "gone" : "occupied");
+    });
+    socket.once("close", () => finish("occupied"));
+  });
+
+const listenDataDirectoryLease = (
+  port: number,
+  identity: string,
+): Promise<ReturnType<typeof createNetServer>> =>
+  new Promise((resolveListen, rejectListen) => {
+    const server = createNetServer((socket) => {
+      socket.end(`${DATA_DIRECTORY_LEASE_PREFIX}${identity}\n`);
+    });
+    const onError = (error: Error): void => {
+      server.off("listening", onListening);
+      rejectListen(error);
+    };
+    const onListening = (): void => {
+      server.off("error", onError);
+      resolveListen(server);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen({
+      host: DATA_DIRECTORY_LEASE_HOST,
+      port,
+      exclusive: true,
+    });
+  });
+
+/** Hold a kernel-owned writer lease for the canonical data directory without
+ * relying on platform utilities. SQLite provides the primary cross-platform
+ * file lock; the legacy loopback listener is retained as a compatibility guard
+ * against older Polyth processes that do not yet participate in the file lease. */
+export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDirectoryLease> {
+  mkdirSync(dataDir, { recursive: true });
+  const canonicalDataDir = realpathSync.native(dataDir);
+  const fileLease = openDataDirectoryFileLease(canonicalDataDir);
+  const identity = dataDirectoryLeaseIdentity(canonicalDataDir);
+  const port = dataDirectoryLeasePort(identity);
+  let holder: ReturnType<typeof createNetServer> | undefined;
+  let compatibilityListenerOptional = false;
+
+  try {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        holder = await listenDataDirectoryLease(port, identity);
+        holder.unref();
+        break;
+      } catch (error) {
+        const systemError = error as NodeJS.ErrnoException;
+
+        // Windows can reserve dynamic TCP ranges and reports WSAEACCES for a
+        // bind inside them. The SQLite EXCLUSIVE transaction above is already
+        // the authoritative OS-backed writer lease, so the compatibility
+        // listener may be omitted only for this Windows-specific condition.
+        if (process.platform === "win32" && systemError.code === "EACCES") {
+          compatibilityListenerOptional = true;
+          break;
+        }
+
+        if (systemError.code !== "EADDRINUSE") {
+          throw Object.assign(
+            new Error(`OS data-directory lease is unavailable: ${systemError.message}`),
+            { code: "data-directory-lock-unavailable" },
+          );
+        }
+
+        const probe = await probeDataDirectoryLease(port, identity);
+        if (probe === "same-owner") {
+          throw Object.assign(
+            new Error(`another Polyth server already owns data directory ${canonicalDataDir}`),
+            { code: "data-directory-locked" },
+          );
+        }
+        if (probe === "gone") {
+          await new Promise<void>((resolveRetry) => setTimeout(resolveRetry, 10));
+          continue;
+        }
+
+        throw Object.assign(
+          new Error(
+            `cannot safely acquire the Polyth writer lease for ${canonicalDataDir}: local lease port ${port} is already used by another service`,
+          ),
+          { code: "data-directory-lock-unavailable" },
+        );
+      }
+    }
+
+    if (!holder && !compatibilityListenerOptional) {
+      throw Object.assign(
+        new Error(
+          `cannot safely acquire the Polyth writer lease for ${canonicalDataDir} after transient local port contention`,
+        ),
+        { code: "data-directory-lock-unavailable" },
+      );
+    }
+
+    let released = false;
+    return {
+      canonicalDataDir,
+      async release() {
+        if (released) return;
+        released = true;
+        try {
+          if (holder) {
+            await new Promise<void>((resolveClose) => holder!.close(() => resolveClose()));
+          }
+        } finally {
+          fileLease.close();
+        }
+      },
+    };
+  } catch (error) {
+    try { holder?.close(); } catch { /* preserve acquisition failure */ }
+    try { fileLease.close(); } catch { /* preserve acquisition failure */ }
+    throw error;
+  }
+}
+
+// ---- structural views of package-owned services -----------------------------------
+// The composition root never imports feature packages; where it consumes their
+// services it declares only the surface it calls.
+
+type SessionDeps = Parameters<typeof createSessionService>[0];
+
+/** The SSH transport surface used by the runtime pool and shutdown. */
+interface SshTransportService {
+  host(connectionId: string): RemoteHost;
+  /** Optional so older transports keep the default (local configuration). */
+  get?(connectionId: string): { harnessConfig?: Record<string, string> } | undefined;
+  /** Connection ownership (Spaces §14.6); absent on older transports. */
+  usable?: RemoteOpenCodeAccessDeps["usable"];
+  disconnectAll(): Promise<void>;
+}
+
+/** @polyth/commands' expansion surface consumed by the session service. */
+interface CommandExpandService {
+  expand(
+    root: string,
+    text: string,
+    context?: {
+      space?: import("@polyth/contracts").SpaceContext;
+      projectId?: string;
+      /** The admitted author; their personal commands expand too. */
+      actorUserId?: string;
+    },
+  ): Promise<{ text: string; raw: string; usedCommand?: string; agent?: string; model?: string }>;
+}
+
+/** The goals workflow surface consumed by the composition root. */
+interface GoalServiceForCore {
+  get(sessionId: string): { status?: string; objective?: string } | undefined;
+  rehydrate(
+    sessionId: string,
+    events: readonly SessionEvent[],
+  ): { status?: string; objective?: string } | undefined
+    | Promise<{ status?: string; objective?: string } | undefined>;
+  onTurnCompleted(sessionId: string, assistantText: string): Promise<unknown>;
+  onSessionStopped(sessionId: string): Promise<unknown>;
+  recordUsage(sessionId: string, usage: unknown): unknown;
+}
+
+type BrowserForWs = NonNullable<Parameters<typeof createWsGateway>[1]>;
+type DictationForWs = NonNullable<Parameters<typeof createWsGateway>[2]>;
+
+export async function boot(opts: BootOptions = {}) {
+  const port = opts.port ?? Number(process.env.PORT ?? 4400);
+  opts.hostname ??= process.env.HOST;
+  const localhostAuthOptional = process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional";
+  let publicServerForSurface: import("node:http").Server | null = null;
+  let uiAuthentication: Pick<ReturnType<typeof createAuthService>, "enabled"> | null = null;
+  const requestedDataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
+  const writerLease = await acquireDataDirectoryLease(requestedDataDir);
+  const dataDir = writerLease.canonicalDataDir;
+  try {
+  // Warm the engine identity cache while the rest of boot (sweep, packages,
+  // HTTP) runs so the first owned spawn does not wait on `--version`/`db path`
+  // / hashing the OpenCode binary.
+  void resolveOpenCodeBinary({
+    ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
+    ...(opts.opencode?.binarySource
+      ? { binarySource: opts.opencode.binarySource }
+      : {}),
+  })
+    .then((binary) => inspectOpenCodeEngine(binary.executablePath))
+    .catch(() => {});
+  const openCodeRuntimesDir = join(dataDir, "runtimes", "opencode");
+  await sweepOpenCodeRuntimes(openCodeRuntimesDir);
+  const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");
+  const bundledServerPackages = opts.serverPackages;
+  const discoveredPackageManifests = bundledServerPackages
+    ? []
+    : await discoverServerPackages(packagesDir);
+  const packageDescriptors = bundledServerPackages?.map((pkg) => pkg.descriptor)
+    ?? discoveredPackageManifests.map((pkg) => pkg.descriptor);
+  // Packages installed under another id before (`polyth.formerIds`).
+  const renameSources: ReadonlyArray<{ id: string; formerIds?: readonly string[] }> = bundledServerPackages ?? discoveredPackageManifests;
+  const packageRenames = renameSources.flatMap((pkg) => pkg.formerIds?.length ? [{ id: pkg.id, formerIds: pkg.formerIds }] : []);
+  const routeRegistry = createRouteRegistry();
+  const packageLifecycle = createPackageLifecycle(routeRegistry);
+  let capabilityController: ReturnType<typeof createCapabilityProvisioningController> | null = null;
+  let personalMcpReprovision: PersonalMcpReprovisioner | undefined;
+
+  // Sessions and package transitions can emit before WS attaches. This box
+  // starts forwarding as soon as the live broadcaster is installed.
+  let live: WsGateway | null = null;
+  const eventWaiters = createSessionEventWaiters();
+  const broadcast: Broadcaster = {
+    event: (e: SessionEvent) => { live?.event(e); eventWaiters.event(e.sessionId); },
+    projection: (p: SessionProjection) => { live?.projection(p); eventWaiters.projection(); personalMcpReprovision?.projectionChanged(p); },
+    notification: (n, recipient) => live?.notification?.(n, recipient),
+    pluginChanged: (packageId) => live?.pluginChanged?.(packageId),
+    packageChanged: (pkg) => live?.packageChanged?.(pkg),
+    clientSettingsChanged: (userId, settings) => live?.clientSettingsChanged?.(userId, settings),
+    projectPresentationChanged: (spaceId, projectId, settings) => live?.projectPresentationChanged?.(spaceId, projectId, settings),
+    worktreesChanged: (projectId) => live?.worktreesChanged?.(projectId),
+    sessionAccessChanged: (projections, formerReaders) => {
+      live?.sessionAccessChanged?.(projections, formerReaders);
+      eventWaiters.projection();
+    },
+  };
+  const packageRegistry = createPackageRegistry({
+    file: `${dataDir}/packages.json`,
+    descriptors: packageDescriptors,
+    formerIds: Object.fromEntries(packageRenames.map(({ id, formerIds }) => [id, formerIds])),
+    onSetEnabled: (id, enabled) => enabled
+      ? packageLifecycle.enable(id)
+      : packageLifecycle.disable(id),
+    onChanged: (pkg) => {
+      broadcast.packageChanged?.(pkg);
+      if (capabilityController) {
+        void capabilityController.reconcileAllActiveTargets().catch((error) => {
+          console.warn("[polyth] capability reconcile after package change failed", error);
+        });
+      }
+    },
+  });
+
+  // --- kernel composition root
+  const root = createContext("root");
+  const store = createStore(`${dataDir}/sessions.db`);
+  await store.recoverExecutingOperations();
+  for (const projection of await store.projections()) {
+    // The same gate as send admission and idle release: an `unknown` outcome
+    // that a later confirmed epoch reset or restart recovery superseded is
+    // audit history, not a reason to publish the session as uncertain again.
+    const interrupted = (await admissionBlockingOperations(store, projection.id))
+      .some((operation) => operation.state === "unknown");
+    // Durable turn closure is only consulted for uncertain statuses, and never
+    // when an operation outcome is still unknown. `lastTurnEventType` is an
+    // indexed lookup; a store without it simply keeps the conservative path.
+    const lastTurn = !interrupted
+      && (projection.status === "working"
+        || projection.status === "reconciling"
+        || projection.status === "unknown")
+      ? await store.lastTurnEventType?.(projection.id)
+      : undefined;
+    const turnState: BootTurnState = lastTurn === "stopped"
+      ? "closed"
+      : lastTurn === "started" ? "open" : "none";
+    const recoveredStatus = sessionStatusAfterBoot(projection.status, interrupted, turnState);
+    if (!recoveredStatus) continue;
+    await store.upsertProjection({
+      ...projection,
+      status: recoveredStatus,
+      updatedAt: Date.now(),
+    });
+  }
+  root.provide(CAP.sessionPersistence, store);
+  let shuttingDown = false;
+  const isShuttingDown = (): boolean => shuttingDown;
+  const beginShutdown = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log("[polyth] server.shutdown.quiescing reason=signal");
+  };
+  const admissionBarrier = createRuntimeAdmissionBarrier({
+    isShuttingDown,
+  });
+  let cleanupProjectCapabilities: (project: import("@polyth/contracts").Project) => void | Promise<void> = () => {};
+  const projects = createProjectService(dataDir, {
+    onRemoved: (project) => cleanupProjectCapabilities(project),
+  });
+  root.provide(CAP.projects, projects);
+
+  // --- tenancy boundary. Built as early as possible so that package hosts,
+  // route wiring, and the WS gateway can only ever be handed SCOPED services.
+  // `sessions` is captured lazily: the session service is composed further
+  // down from package-owned dependencies.
+  let sessionsRef: SessionService | null = null;
+  // Who may use each restricted harness account (private owner, shared
+  // allowlists). Called at request time, after the harness registry below
+  // exists; descriptors read their account record live.
+  const harnessAccess = () => harnessAccessOf(harnesses.providers().map((provider) => provider.descriptor));
+  const { gateway: spaceGateway } = await createSpaceGateway({
+    dataDir,
+    registry: projects,
+    store,
+    sessions: () => {
+      if (!sessionsRef) throw new Error("session service is not composed yet");
+      return sessionsRef;
+    },
+    // Read per call, after the harness registry below exists.
+    harnessAccess,
+    // harness-runtime owns the person's saved default; resolved per create.
+    personHarnessDefault: async (ctx) => services
+      .get(serverServiceKey<HarnessPersonDefaults>(HARNESS_PERSON_DEFAULTS_SERVICE))
+      ?.usableDefault(ctx),
+  });
+  // Every directory that holds `<id>` package data: deployment-wide, per
+  // Space, and each person's own storage and secrets.
+  const packageDataRoots = (): PackageResidueRoot[] => [
+    { spaceId: null, dir: packageDataRoot(dataDir) },
+    ...spaceGateway.store.allSpaces().map((space) => ({
+      spaceId: space.id,
+      dir: join(spaceStorageDir(dataDir, space), "packages"),
+    })),
+    ...personPackageResidueRoots(peopleRootDir(dataDir)),
+  ];
+  // A renamed package finds its data under its new id before anything at boot
+  // can create the new directory (registration, storage or route wiring).
+  if (packageRenames.length > 0) {
+    const adopted = adoptRenamedPackageData(packageDataRoots(), packageRenames);
+    for (const { from, to } of adopted.moved) console.log(`[polyth] renamed package data ${from} -> ${to}`);
+    for (const path of adopted.kept) console.warn(`[polyth] package data ${path} is left in place: its package already has data under its new id`);
+    for (const { path, error } of adopted.failed) console.error(`[polyth] could not move renamed package data ${path}`, error);
+    try {
+      const projectsChanged = projects.renamePackageChoices(packageRenames);
+      if (projectsChanged > 0) console.log(`[polyth] moved renamed package choices in ${projectsChanged} project(s)`);
+    } catch (error) {
+      console.error("[polyth] could not move renamed package choices", error);
+    }
+  }
+  const spaceServices = (ctx: Parameters<SpaceGateway["services"]>[0]) =>
+    spaceGateway.services(ctx);
+
+
+  // --- cross-package service seam. Discovered packages publish the services
+  // they construct here; the composition root publishes the infrastructure
+  // seams packages consume. Everything cross-package resolves lazily.
+  const services = createServerServiceRegistry();
+  services.provide(SERVER_APPLICATION_SURFACE, createServerApplicationSurface({
+    localTrustedDeployment: spaceGateway.deployment === "local-trusted",
+    hostname: opts.hostname,
+    listener: () => publicServerForSurface,
+    authenticationRequired: () => uiAuthentication?.enabled() ?? false,
+    localhostAuthOptional,
+    canonicalOrigin: opts.canonicalOrigin ?? null,
+  }));
+  const harnesses = createHarnessRegistry();
+  services.provide(serverServiceKey("harnesses"), harnesses);
+  const capabilityContributions = createCapabilityContributionRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), capabilityContributions);
+  const provideService = <T,>(name: string, service: T): void =>
+    services.provide(serverServiceKey<T>(name), service);
+  const svc = <T,>(name: string): T | undefined => services.get(serverServiceKey<T>(name));
+  const requireSvc = <T,>(name: string): T => services.require(serverServiceKey<T>(name));
+  // The bootstrap owner exists even when local password auth is disabled.
+  // Secondary account existence is wired to the auth store later in boot;
+  // until then notification delivery for them fails closed.
+  let notificationAccountExists = (userId: string): boolean => userId === "usr_owner";
+  const notificationAccess = ({ userId, spaceId }: { userId: string; spaceId: string }): boolean =>
+    notificationAccountExists(userId) && Boolean(spaceGateway.store.roleOf(userId, spaceId));
+  provideService("tenancy.membership", {
+    hasAccess: (userId: string, spaceId: string) => notificationAccess({ userId, spaceId }),
+  });
+  // Oversized package-tool output is paged through a bounded in-memory cache.
+  // One process-wide instance owns every session's entries; the session service
+  // ages them per turn and clears them on archive/close, and the agent-tool
+  // bridge mints the virtual URIs the model pages with `read_file`.
+  const outputCache = new SessionOutputCache();
+  provideService("session.output-cache", outputCache);
+
+  // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
+  const runtimeDiagnostics = createRuntimeDiagnostics();
+  const openCodeRuntimes = createKeyedRuntimeOwner<AgentRuntime>();
+  const occupancyByFacade = new WeakMap<AgentRuntime, SharedRuntimeOccupancy>();
+  const spawnTimingByRuntime = new WeakMap<AgentRuntime, number>();
+  const openCodeAcquisitionInfo = createRuntimeAcquisitionTracker<AgentRuntime>();
+  const idleByFacade = new WeakMap<AgentRuntime, RuntimeIdleController>();
+  const warmRegistrationByFacade = new WeakMap<AgentRuntime, Disposable>();
+  let hasCanonicalRuntimeLease = (_runtime: AgentRuntime): boolean => false;
+  const warmPolicy = createRuntimeWarmPolicy({
+    readPolicy: (spaceId) => services.get(SERVER_OPENCODE_RUNTIME_POLICY)?.read(spaceGateway.resolveInternal(spaceId)),
+    onError: () => console.warn("[polyth] OpenCode warm retention check unavailable"),
+  });
+  const runtimeRestarters = new Map<string, {
+    runtime: AgentRuntime;
+    localConfigAuthority: boolean;
+    restart(): Promise<void>;
+    withConfigRestart<T>(
+      action: (restart: () => Promise<void>) => Promise<T>,
+    ): Promise<T>;
+  }>();
+  const localConfigRuntimeKeys = new Set<string>();
+  const runtimeRestartListeners = new Set<(runtime: AgentRuntime) => Promise<void>>();
+  const runtimeEvictionListeners = new Set<
+    (runtime: AgentRuntime) => void | Promise<void>
+  >();
+  let canEvictRuntime = async (
+    _runtime: AgentRuntime,
+    _inspectionRuntime: AgentRuntime,
+    _expected: { authorityId: string; generation: number },
+    _liveStreamSessionIds: readonly string[],
+  ): Promise<{ safe: true } | { safe: false; reason: string }> => ({
+    safe: false,
+    reason: "runtime eviction safety is not initialized",
+  });
+  let runtimeCreationFenceDepth = 0;
+  const sessionIdMap = new Map<string, string>(); // canonical -> backend
+  const configDir = opts.opencode?.configDir ?? opts.opencode?.dataDir;
+  const configIdentityProbe = createConfigApplier({
+    ...(configDir ? { configDir } : {}),
+  });
+  const localConfigTargetId =
+    opts.opencode?.configTargetId ?? configIdentityProbe.configTargetId!();
+  const directConfigApplier = createConfigApplier({
+    ...(configDir ? { configDir } : {}),
+    targetId: localConfigTargetId,
+    // Local configuration is writable only while an exact owned-local lease
+    // for this target is live. SSH/borrowed-only pools remain read-only.
+    authority: () => localConfigRuntimeKeys.size > 0
+      ? { kind: "writable", targetId: localConfigTargetId }
+      : { kind: "read-only" },
+  });
+  let refreshSafeBehavior: () => Promise<void> = async () => {};
+
+  const isTransportError = (err: unknown): boolean =>
+    /fetch failed|terminated|ECONNRESET|ECONNREFUSED/i.test(
+      err instanceof Error ? `${err.message} ${String(err.cause ?? "")}` : String(err),
+    );
+
+  // The pool key must be the *resolved* cwd, never the raw argument: callers
+  // that only know the project (`/api/models`) and callers that also pass the
+  // project path (session start) address the same working tree. Keying them
+  // apart spawned two `opencode serve` for one cwd, and the second spawn reaps
+  // the first through the cwd-keyed pidfile — leaving the surviving facade
+  // pointing at a killed process, so model/agent lookups came back empty.
+  const cwdFor = async (projectId: string, cwd?: string): Promise<string> =>
+    resolve(cwd ?? (await projects.get(projectId))?.path ?? process.cwd());
+
+  // In-memory lifecycle key. Disk identity stays `openCodeRuntimeId` /
+  // `openCodeRemoteRuntimeId` and must not change. Remote scope includes the
+  // SSH connection; local does not.
+  const sharedRuntimePoolKey = (
+    projectId: string,
+    cwd: string,
+    connectionId?: string,
+  ): string => `opencode:${connectionId ?? "local"}:${projectId}:${cwd}`;
+
+  const remoteOpenCodeAccess = (ssh: SshTransportService): RemoteOpenCodeAccessDeps => ({
+    ...(ssh.usable ? { usable: ssh.usable.bind(ssh) } : {}),
+    actorOf: async (sessionId) => (await store.projection(sessionId))?.actor?.userId,
+    personSpaceContext: (userId, spaceId) => {
+      if (!canonicalSecurity() || userId.startsWith("system:")) return undefined;
+      try {
+        return spaceGateway.resolver.forUser(userId, spaceId) as { instanceOwner?: boolean };
+      } catch {
+        return undefined;
+      }
+    },
+  });
+
+  const spawnRuntime = async (projectId: string, cwd: string): Promise<AgentRuntime> => {
+    // Remote-bound projects run `opencode serve` ON the remote host through
+    // the SSH transport. Runtime HTTP uses a local forward; scoped package
+    // tools add a reverse loopback forward for the Polyth MCP bridge.
+    const project = await projects.get(projectId);
+    const spaceId = project ? spaceGateway.resolveInternal(project.spaceId).spaceId : undefined;
+    const remoteBinding = project?.remote;
+    if (remoteBinding?.kind === "ssh") {
+      const ssh = svc<SshTransportService>("ssh");
+      if (!ssh) {
+        throw Object.assign(new Error("SSH support unavailable: the ssh package did not load"), { code: "unavailable" });
+      }
+      // A (re)spawn nobody asked for in person runs on the project's binding.
+      if (spaceId) await assertRemoteOpenCodeUsable(remoteOpenCodeAccess(ssh), { connectionId: remoteBinding.connectionId, spaceId });
+      const remoteStateKey = openCodeRemoteRuntimeId(
+        remoteBinding.connectionId,
+        projectId,
+        cwd,
+      );
+      // Each SSH connection chooses per harness whether the host runs on this
+      // machine's configuration (default) or only on its own.
+      const usesLocalConfig =
+        ssh.get?.(remoteBinding.connectionId)?.harnessConfig?.opencode !== "remote";
+      return createRemoteOpenCodeRuntime({
+        host: ssh.host(remoteBinding.connectionId),
+        ...(usesLocalConfig ? { localConfig: () => directConfigApplier.readConfig() } : {}),
+        connectionIdentity: remoteBinding.connectionId,
+        projectId,
+        ...(spaceId ? { spaceId } : {}),
+        remotePath: cwd,
+        remoteStateKey,
+        capabilityOverlay: () => peekOpenCodeLaunchOverlay({
+          cwd,
+          ...(spaceId ? { spaceId } : {}),
+          projectId,
+        }),
+        ...(opts.opencode?.runtimeDir
+          ? { runtimeDir: posix.join(opts.opencode.runtimeDir, remoteStateKey) }
+          : {}),
+        leaseStateFile: join(dataDir, "opencode-ssh", `${remoteStateKey}.lease.json`),
+        sessionIdMap,
+      });
+    }
+    const localStateKey = openCodeRuntimeId(projectId, cwd);
+    let runtimeSpawnMs: number | undefined;
+    const runtime = await createOpenCodeRuntime({
+        projectId, cwd, sessionIdMap,
+        ...(spaceId ? { spaceId } : {}),
+        ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
+        ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
+        ...(opts.opencode?.binarySource
+          ? { binarySource: opts.opencode.binarySource }
+          : {}),
+        ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
+        ...(configDir ? { configDir } : {}),
+        runtimeDir: join(openCodeRuntimesDir, localStateKey),
+        stateFile: opts.opencode?.stateFile
+          ?? join(dataDir, "opencode-local", `${localStateKey}.lease.json`),
+        ...(opts.opencode?.protocol ? { protocol: opts.opencode.protocol } : {}),
+        ...(opts.opencode?.startupDeadlineMs
+          ? { startupDeadlineMs: opts.opencode.startupDeadlineMs }
+          : {}),
+        ...(opts.opencode?.probeDeadlineMs
+          ? { probeDeadlineMs: opts.opencode.probeDeadlineMs }
+          : {}),
+        configTargetId: localConfigTargetId,
+        onRuntimeSpawnTiming: (durationMs) => { runtimeSpawnMs = durationMs; },
+      });
+    if (runtimeSpawnMs !== undefined) spawnTimingByRuntime.set(runtime, runtimeSpawnMs);
+    return runtime;
+  };
+
+  // Stable facade per pool key. Neither queries nor mutations destructively
+  // respawn it: owned replacement is admitted only through the pool restart
+  // barrier, while lifecycle disconnect handling owns natural-death recovery.
+  const facadeFor = (
+    key: string,
+    projectId: string,
+    cwd: string,
+    first: AgentRuntime,
+    configRestartable: boolean,
+    localConfigAuthority: boolean,
+    occupancy: SharedRuntimeOccupancy,
+  ): { facade: AgentRuntime; dispose: () => Promise<void> } => {
+    let inner = first;
+    let idleController: RuntimeIdleController | undefined;
+    const liveStreamSessionIds = new Set<string>();
+    const setTurnActive = (sessionId: string, active: boolean): void => {
+      const transient = sessionId.startsWith("oneshot-");
+      if (active) {
+        if (liveStreamSessionIds.has(sessionId)) return;
+        if (!(transient
+          ? occupancy.beginTransientExecution(sessionId)
+          : occupancy.beginExecution(sessionId))) {
+          throw Object.assign(
+            new Error(`runtime ${occupancy.key} is not accepting executions`),
+            { code: "unavailable" },
+          );
+        }
+        liveStreamSessionIds.add(sessionId);
+      } else if (!liveStreamSessionIds.delete(sessionId)) {
+        return;
+      } else {
+        if (transient) occupancy.endTransientExecution(sessionId);
+        else occupancy.endExecution(sessionId);
+      }
+      admissionBarrier.trackTurn(sessionId, active);
+    };
+    const clearActiveTurns = (): void => {
+      for (const sessionId of liveStreamSessionIds) {
+        admissionBarrier.trackTurn(sessionId, false);
+        if (sessionId.startsWith("oneshot-")) occupancy.endTransientExecution(sessionId);
+        else occupancy.endExecution(sessionId);
+      }
+      liveStreamSessionIds.clear();
+    };
+    const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
+    const observationListeners = new Set<
+      Parameters<NonNullable<AgentRuntime["onObservation"]>>[0]
+    >();
+    const lifecycleListeners = new Set<
+      Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]
+    >();
+    const observeRuntimeEvent = (sessionId: string, ev: RuntimeEvent): void => {
+      if (ev.type === "turn/started") setTurnActive(sessionId, true);
+      else if (ev.type === "turn/stopped") setTurnActive(sessionId, false);
+      idleController?.touch();
+    };
+    const fanout = (sessionId: string, ev: RuntimeEvent) => {
+      observeRuntimeEvent(sessionId, ev);
+      for (const cb of listeners) cb(sessionId, ev);
+    };
+    const fanoutObservation: Parameters<NonNullable<AgentRuntime["onObservation"]>>[0] =
+      (sessionId, observation) => {
+        for (const event of observation.events) observeRuntimeEvent(sessionId, event);
+        for (const cb of observationListeners) cb(sessionId, observation);
+      };
+    const fanoutLifecycle: Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0] =
+      (notification) => {
+        idleController?.touch();
+        for (const cb of lifecycleListeners) cb(notification);
+      };
+    const subscribeInner = (): Disposable[] => [
+      inner.onEvent(fanout),
+      ...(inner.onObservation ? [inner.onObservation(fanoutObservation)] : []),
+      ...(inner.onLifecycle ? [inner.onLifecycle(fanoutLifecycle)] : []),
+    ];
+    let innerSubs = subscribeInner();
+    let restarting: Promise<void> | null = null;
+
+    type RuntimeReliabilityBridge = {
+      endpoint(): Promise<RuntimeEndpoint>;
+      protocol?(): Promise<"legacy" | "v2">;
+      reconcile(
+        binding: RuntimeSessionBinding & {
+          protocol?: "legacy" | "v2";
+          reconciliationOrdinal?: number;
+        },
+        after?: string,
+      ): Promise<RuntimeSnapshot>;
+    };
+    const directReliability = (): Partial<RuntimeReliabilityBridge> =>
+      inner as AgentRuntime & Partial<RuntimeReliabilityBridge>;
+    const lifecycleReliability = (): Partial<RuntimeReliabilityBridge> | undefined =>
+      (inner as AgentRuntime & { lifecycle?: Partial<RuntimeReliabilityBridge> }).lifecycle;
+    const endpoint = async (): Promise<RuntimeEndpoint> => {
+      const direct = directReliability();
+      if (typeof direct.endpoint === "function") return direct.endpoint();
+      const lifecycle = lifecycleReliability();
+      if (typeof lifecycle?.endpoint === "function") return lifecycle.endpoint();
+      throw Object.assign(new Error("runtime endpoint identity is unavailable"), {
+        code: "unsupported",
+      });
+    };
+    const protocol = createRuntimeProtocolForwarder(() => inner);
+    const reconcile = async (
+      binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
+      after?: string,
+    ): Promise<RuntimeSnapshot> => {
+      const direct = directReliability();
+      let snapshot: RuntimeSnapshot;
+      if (typeof direct.reconcile === "function") {
+        snapshot = await direct.reconcile(binding, after);
+      } else {
+        const lifecycle = lifecycleReliability();
+        if (typeof lifecycle?.reconcile !== "function") {
+          throw Object.assign(new Error("runtime reconciliation is unavailable"), {
+            code: "unsupported",
+          });
+        }
+        snapshot = await lifecycle.reconcile({ ...binding, protocol: await protocol() }, after);
+      }
+      if (snapshot.state.value === "running") setTurnActive(binding.canonicalSessionId, true);
+      else if (snapshot.state.value !== "unknown") setTurnActive(binding.canonicalSessionId, false);
+      return snapshot;
+    };
+
+    const respawnOnce = async (): Promise<void> => {
+      for (const subscription of innerSubs) subscription.dispose();
+      await inner.dispose().catch(() => {});
+      inner = await spawnRuntime(projectId, cwd);
+      clearActiveTurns();
+      innerSubs = subscribeInner();
+      await settleAllOrThrow(
+        [...runtimeRestartListeners].map((listener) => listener(facade)),
+      );
+    };
+    const replaceGeneration = async (): Promise<void> => {
+      const lifecycle = (
+        inner as AgentRuntime & {
+          lifecycle?: {
+            control: RuntimeEndpoint["control"];
+            restart?(reason: "crash" | "config" | "manual"): Promise<RuntimeEndpoint>;
+          };
+        }
+      ).lifecycle;
+      if (lifecycle?.control.kind === "owned" && lifecycle.restart) {
+        await lifecycle.restart("config");
+        await settleAllOrThrow(
+          [...runtimeRestartListeners].map((listener) => listener(facade)),
+        );
+        return;
+      }
+      // Compatibility runtimes without the lifecycle seam are replaced as a
+      // unit. Production OpenCode runtimes always take the generation path.
+      await respawnOnce();
+    };
+    const withConfigRestart = async <T,>(
+      action: (restart: () => Promise<void>) => Promise<T>,
+    ): Promise<T> => {
+      const lifecycle = (
+        inner as AgentRuntime & {
+          lifecycle?: {
+            control: RuntimeEndpoint["control"];
+            withConfigRestart?<R>(
+              action: (restart: () => Promise<RuntimeEndpoint>) => Promise<R>,
+            ): Promise<R>;
+          };
+        }
+      ).lifecycle;
+      if (lifecycle?.control.kind === "owned" && lifecycle.withConfigRestart) {
+        return lifecycle.withConfigRestart(async (restartGeneration) =>
+          action(async () => {
+            await restartGeneration();
+            await settleAllOrThrow(
+              [...runtimeRestartListeners].map((listener) => listener(facade)),
+            );
+          }));
+      }
+      // Compatibility runtimes have no autonomous lifecycle replacement path,
+      // so the server-owned facade restart itself is the complete interlock.
+      return action(restart);
+    };
+    const restart = (): Promise<void> => {
+      if (!restarting) {
+        restarting = replaceGeneration().finally(() => { restarting = null; });
+      }
+      return restarting;
+    };
+
+    const useRuntime = <T,>(action: () => Promise<T>): Promise<T> =>
+      idleController ? idleController.use(action) : action();
+    let disposal: Promise<void> | undefined;
+    const teardownPhysical = (): Promise<void> => {
+      if (disposal) return disposal;
+      disposal = (async () => {
+        for (const subscription of innerSubs) subscription.dispose();
+        innerSubs = [];
+        clearActiveTurns();
+        await inner.dispose();
+      })();
+      return disposal;
+    };
+    const facade: AgentRuntime = {
+      capabilities: () => useRuntime(() => inner.capabilities()),
+      models: () => useRuntime(() => inner.models()),
+      agents: () => useRuntime(() => inner.agents()),
+      ...(inner.listAllProviders
+        ? { listAllProviders: () => useRuntime(() => inner.listAllProviders!()) }
+        : {}),
+      ...(inner.providerAuthMethods
+        ? { providerAuthMethods: () => useRuntime(() => inner.providerAuthMethods!()) }
+        : {}),
+      ...(inner.providerAuthorize
+        ? {
+            providerAuthorize: (providerID: string, method: number, inputs?: Record<string, string>) =>
+              useRuntime(() => inner.providerAuthorize!(providerID, method, inputs)),
+          }
+        : {}),
+      ...(inner.providerAuthCallback
+        ? {
+            providerAuthCallback: (providerID: string, method: number, code?: string) =>
+              useRuntime(() => inner.providerAuthCallback!(providerID, method, code)),
+          }
+        : {}),
+      ...(inner.setProviderApiKey
+        ? {
+            setProviderApiKey: (providerID: string, key: string, metadata?: Record<string, string>) =>
+              useRuntime(() => inner.setProviderApiKey!(providerID, key, metadata)),
+          }
+        : {}),
+      ...(inner.setProviderAuth
+        ? {
+            setProviderAuth: (providerID: string, info: import("@polyth/contracts").ProviderAuthWrite) =>
+              useRuntime(() => inner.setProviderAuth!(providerID, info)),
+          }
+        : {}),
+      ...(inner.removeProviderAuth
+        ? { removeProviderAuth: (providerID: string) => useRuntime(() => inner.removeProviderAuth!(providerID)) }
+        : {}),
+      sessions: () => useRuntime(() => inner.sessions()),
+      history: (sessionId) => useRuntime(() => inner.history(sessionId)),
+      ensureSession: (canonical) => useRuntime(() => inner.ensureSession(canonical)),
+      createSessionOperation: (canonical, operationId) =>
+        useRuntime(() => inner.createSessionOperation
+          ? inner.createSessionOperation(canonical, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware session creation",
+            })),
+      async resetSession(canonical) {
+        return useRuntime(async () => {
+          if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
+          const backendSessionId = await inner.resetSession(canonical);
+          setTurnActive(canonical.sessionId, false);
+          return backendSessionId;
+        });
+      },
+      resetSessionOperation: (canonical, operationId) =>
+        useRuntime(async () => {
+          const outcome = inner.resetSessionOperation
+          ? inner.resetSessionOperation(canonical, operationId)
+          : Promise.resolve({
+              kind: "rejected" as const,
+              code: "capability-unsupported",
+              message: "runtime lacks operation-aware session reset",
+            });
+          const result = await outcome;
+          if (result.kind === "confirmed") setTurnActive(canonical.sessionId, false);
+          return result;
+        }),
+      // Exact-history branching passes through the facade so
+      // the session service never learns backend/OpenCode details.
+      async branchSession(request) {
+        return useRuntime(async () => {
+          if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
+          const backendSessionId = await inner.branchSession(request);
+          setTurnActive(request.target.sessionId, false);
+          return backendSessionId;
+        });
+      },
+      branchSessionOperation: (request, operationId) =>
+        useRuntime(async () => {
+          const outcome = inner.branchSessionOperation
+          ? inner.branchSessionOperation(request, operationId)
+          : Promise.resolve({
+              kind: "rejected" as const,
+              code: "capability-unsupported",
+              message: "runtime lacks operation-aware session branching",
+            });
+          const result = await outcome;
+          if (result.kind === "confirmed") setTurnActive(request.target.sessionId, false);
+          return result;
+        }),
+      async discardSession(sessionId) {
+        await useRuntime(async () => {
+          await inner.discardSession?.(sessionId);
+          setTurnActive(sessionId, false);
+        });
+      },
+      discardSessionOperation: (sessionId, operationId) =>
+        useRuntime(async () => {
+          const outcome = inner.discardSessionOperation
+          ? inner.discardSessionOperation(sessionId, operationId)
+          : Promise.resolve({
+              kind: "unknown" as const,
+              operationId,
+              message: "runtime lacks operation-aware session deletion",
+            });
+          const result = await outcome;
+          if (result.kind === "confirmed") setTurnActive(sessionId, false);
+          return result;
+        }),
+      startTurn: (req) => useRuntime(async () => {
+        setTurnActive(req.sessionId, true);
+        try {
+          await inner.startTurn(req);
+        } catch (error) {
+          setTurnActive(req.sessionId, false);
+          throw error;
+        }
+      }),
+      startTurnOperation: (req, operationId) =>
+        useRuntime(async () => {
+          setTurnActive(req.sessionId, true);
+          const outcome = inner.startTurnOperation
+          ? inner.startTurnOperation(req, operationId)
+          : Promise.resolve({
+              kind: "unknown" as const,
+              operationId,
+              message: "runtime lacks operation-aware turn submission",
+            });
+          const result = await outcome;
+          if (result.kind === "rejected") setTurnActive(req.sessionId, false);
+          return result;
+        }),
+      ...(inner.completeSmallModel
+        ? { completeSmallModel: (request: Parameters<NonNullable<AgentRuntime["completeSmallModel"]>>[0]) =>
+            useRuntime(() => inner.completeSmallModel!(request)) }
+        : {}),
+      steer: (sessionId, text, model, agent) =>
+        useRuntime(() => inner.steer?.(sessionId, text, model, agent) ?? Promise.resolve(false)),
+      steerOperation: (sessionId, text, operationId, model, agent) =>
+        useRuntime(() => inner.steerOperation
+          ? inner.steerOperation(sessionId, text, operationId, model, agent)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware steering",
+            })),
+      abort: (sessionId) => useRuntime(() => inner.abort(sessionId)),
+      abortOperation: (sessionId, operationId) =>
+        useRuntime(() => inner.abortOperation
+          ? inner.abortOperation(sessionId, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware abort",
+            })),
+      commands: (sessionId) => useRuntime(() => inner.commands?.(sessionId) ?? Promise.resolve([])),
+      compact: (sessionId, model) => useRuntime(async () => {
+        if (!inner.compact) throw Object.assign(new Error("runtime does not support compaction"), { code: "unsupported" });
+        await inner.compact(sessionId, model);
+      }),
+      compactOperation: (sessionId, operationId, model) =>
+        useRuntime(() => inner.compactOperation
+          ? inner.compactOperation(sessionId, operationId, model)
+          : Promise.resolve({
+              kind: "rejected",
+              code: "capability-unsupported",
+              message: "runtime lacks operation-aware compaction",
+            })),
+      replyPermission: (sessionId, requestId, reply) =>
+        useRuntime(() => inner.replyPermission(sessionId, requestId, reply)),
+      replyPermissionOperation: (sessionId, requestId, reply, operationId) =>
+        useRuntime(() => inner.replyPermissionOperation
+          ? inner.replyPermissionOperation(sessionId, requestId, reply, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware permission reply",
+            })),
+      replyQuestion: (sessionId, requestId, answers) =>
+        useRuntime(() => inner.replyQuestion(sessionId, requestId, answers)),
+      replyQuestionOperation: (sessionId, requestId, answers, operationId) =>
+        useRuntime(() => inner.replyQuestionOperation
+          ? inner.replyQuestionOperation(sessionId, requestId, answers, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware question reply",
+            })),
+      ...(inner.replySecret
+        ? { replySecret: (sessionId: string, requestId: string, result: Parameters<NonNullable<AgentRuntime["replySecret"]>>[2]) =>
+            useRuntime(() => inner.replySecret!(sessionId, requestId, result)) }
+        : {}),
+      ...(inner.replySecretOperation
+        ? {
+            replySecretOperation: (
+              sessionId: string,
+              requestId: string,
+              result: Parameters<NonNullable<AgentRuntime["replySecretOperation"]>>[2],
+              operationId: string,
+            ) => useRuntime(() =>
+              inner.replySecretOperation!(sessionId, requestId, result, operationId)),
+          }
+        : {}),
+      releaseExecution: (binding, operationId) => admissionBarrier.run(async () => {
+        if (!inner.releaseExecution) {
+          return {
+            kind: "unknown" as const,
+            operationId,
+            message: "This harness cannot prove execution has stopped",
+          };
+        }
+        const outcome = await inner.releaseExecution(binding, operationId);
+        if (outcome.kind !== "confirmed") return outcome;
+        if (
+          outcome.value.authorityId !== binding.authorityId
+          || outcome.value.generation !== binding.generation
+          || outcome.value.backendSessionId !== binding.backendSessionId
+        ) {
+          return {
+            kind: "unknown" as const,
+            operationId,
+            message: "release proof does not name this execution incarnation",
+          };
+        }
+        setTurnActive(binding.canonicalSessionId, false);
+        return outcome;
+      }),
+      endpoint: () => useRuntime(endpoint),
+      protocol: () => useRuntime(protocol),
+      reconcile: (binding, after) => useRuntime(() => reconcile(binding, after)),
+      onObservation(cb) {
+        observationListeners.add(cb);
+        return { dispose: () => { observationListeners.delete(cb); } };
+      },
+      onLifecycle(cb) {
+        lifecycleListeners.add(cb);
+        return { dispose: () => { lifecycleListeners.delete(cb); } };
+      },
+      onEvent(cb) {
+        listeners.add(cb);
+        return { dispose: () => { listeners.delete(cb); } };
+      },
+      dispose: async () => {
+        await openCodeRuntimes.dispose(key);
+      },
+    };
+    idleController = createRuntimeIdleController({
+      onActivity: warmPolicy.activity,
+      withAdmissionBarrier: (action) => admissionBarrier.run(action),
+      canEvict: async () => {
+        // A new physical facade can precede canonical wiring. Discovery,
+        // factory completion and the native-create lease protect that gap.
+        if (isShuttingDown()
+          || openCodeRuntimes.peek(key)?.value !== facade
+          || warmPolicy.isAcquiring(key)
+          || hasCanonicalRuntimeLease(facade)) return false;
+        return idleRuntimeEvictable({
+          occupancy: occupancy.snapshot(),
+          liveStreams: liveStreamSessionIds.size,
+          endpoint,
+          canEvictRuntime: (expected) => canEvictRuntime(
+            facade,
+            inner,
+            expected,
+            [...liveStreamSessionIds],
+          ),
+        });
+      },
+      evict: async () => {
+        await facade.dispose();
+      },
+    });
+    idleByFacade.set(facade, idleController);
+    if (configRestartable) {
+      runtimeRestarters.set(key, {
+        runtime: facade,
+        localConfigAuthority,
+        restart,
+        withConfigRestart,
+      });
+    }
+    if (localConfigAuthority) localConfigRuntimeKeys.add(key);
+    stampRuntimeIdentity(facade, projectId, cwd);
+    occupancyByFacade.set(facade, occupancy);
+    return {
+      facade,
+      dispose: async () => {
+        idleController?.stop();
+        runtimeRestarters.delete(key);
+        localConfigRuntimeKeys.delete(key);
+        await teardownPhysical();
+        warmRegistrationByFacade.get(facade)?.dispose();
+        warmRegistrationByFacade.delete(facade);
+        await settleAllOrThrow(
+          [...runtimeEvictionListeners].map(async (listener) => listener(facade)),
+        );
+      },
+    };
+  };
+
+  const stampRuntimeIdentity = (runtime: AgentRuntime, projectId: string, cwd: string) => {
+    Object.defineProperty(runtime, "projectId", { value: projectId, configurable: true });
+    Object.defineProperty(runtime, "cwd", { value: cwd, configurable: true });
+  };
+
+  type RuntimeRestartFingerprint = {
+    authorityId: string;
+    generation: number;
+  };
+  type RuntimeRestartState = Map<string, RuntimeRestartFingerprint>;
+  let reconcileRuntimeForConfigRestart = async (
+    sessionId: string,
+    _runtime: AgentRuntime,
+    _expected: RuntimeRestartFingerprint,
+  ): Promise<{ safe: true } | { safe: false; reason: string }> => ({
+    safe: false,
+    reason: `session ${sessionId} restart reconciliation is not initialized`,
+  });
+
+  const runtimeRestarterEntries = (plan?: PendingRestartPlan) => {
+    const entries = [...runtimeRestarters];
+    if (!plan || plan.mode === "all") return entries;
+    if (plan.mode === "exact") {
+      return entries.filter(([key]) => plan.keys.has(key));
+    }
+    return entries.filter(([key, restarter]) =>
+      restarter.localConfigAuthority || plan.keys.has(key));
+  };
+
+  const captureRuntimeRestartState = async (plan?: PendingRestartPlan): Promise<RuntimeRestartState> => {
+    const state: RuntimeRestartState = new Map();
+    const entries = runtimeRestarterEntries(plan);
+    await settleAllOrThrow(entries.map(async ([key, restarter]) => {
+      const endpoint = await restarter.runtime.endpoint?.();
+      if (!endpoint) {
+        throw Object.assign(
+          new Error(`runtime ${key} endpoint identity is unavailable for config restart`),
+          { code: "restart-deferred" },
+        );
+      }
+      state.set(key, {
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+      });
+    }));
+    return state;
+  };
+
+  const restartRuntimeEntries = async (
+    expected?: RuntimeRestartState,
+    plan?: PendingRestartPlan,
+  ): Promise<number> => {
+    const entries = runtimeRestarterEntries(plan);
+    const restarted = await settleAllOrThrow(entries.map(async ([key, restarter]) => {
+      const prior = expected?.get(key);
+      if (expected && !prior) {
+        throw Object.assign(
+          new Error(`runtime ${key} materialized after config restart capture`),
+          { code: "restart-deferred" },
+        );
+      }
+      if (prior) {
+        const current = await restarter.runtime.endpoint?.().catch(() => undefined);
+        if (
+          current
+          && (
+            current.authorityId !== prior.authorityId
+            || current.generation !== prior.generation
+          )
+        ) {
+          // The config transaction holds every owned lifecycle replacement
+          // lock, so drift here means the interlock was not established. A
+          // generation number alone cannot prove which config was loaded.
+          throw Object.assign(
+            new Error(`runtime ${key} changed generation during config apply`),
+            { code: "restart-deferred" },
+          );
+        }
+      }
+      const restart = activeConfigRestartCapabilities?.get(key);
+      if (activeConfigRestartCapabilities && !restart) {
+        throw Object.assign(
+          new Error(`runtime ${key} is outside the config replacement interlock`),
+          { code: "restart-deferred" },
+        );
+      }
+      await (restart ?? restarter.restart)();
+      return true;
+    }));
+    return restarted.filter(Boolean).length;
+  };
+
+  let activeConfigRestartCapabilities: ReadonlyMap<
+    string,
+    () => Promise<void>
+  > | null = null;
+  const withRuntimeReplacementInterlock = async <T,>(
+    action: () => Promise<T>,
+    plan?: PendingRestartPlan,
+  ): Promise<T> => {
+    runtimeCreationFenceDepth += 1;
+    try {
+      // A pool promise created before the synchronous fence may still be
+      // installing its facade. Let it finish so it is included below.
+      await openCodeRuntimes.settleCreates();
+      const entries = runtimeRestarterEntries(plan);
+      const capabilities = new Map<string, () => Promise<void>>();
+      const acquire = async (index: number): Promise<T> => {
+        const entry = entries[index];
+        if (!entry) {
+          activeConfigRestartCapabilities = capabilities;
+          try {
+            return await action();
+          } finally {
+            activeConfigRestartCapabilities = null;
+          }
+        }
+        const [key, restarter] = entry;
+        return restarter.withConfigRestart(async (restart) => {
+          capabilities.set(key, restart);
+          try {
+            return await acquire(index + 1);
+          } finally {
+            capabilities.delete(key);
+          }
+        });
+      };
+      return await acquire(0);
+    } finally {
+      runtimeCreationFenceDepth -= 1;
+    }
+  };
+
+  // Cold-boot `/api/models` (and the eager catalog warm-up below) fans out to
+  // every project with Promise.allSettled. Spawning all `opencode serve`
+  // processes at once OOMs/swap-thrashes the host — the Node event loop then
+  // stalls in memory reclaim and HTTP stops answering. Cap concurrent first
+  // spawns; cached lookups still share the same Promise.
+  const maxConcurrentSpawns = Math.max(
+    1,
+    Number(process.env.POLYTH_RUNTIME_SPAWN_CONCURRENCY ?? 2) || 2,
+  );
+  let activeSpawns = 0;
+  const spawnWaiters: Array<() => void> = [];
+  const withSpawnSlot = async <T>(work: () => Promise<T>): Promise<T> => {
+    // Re-check after every wake: a single release can race with a fresh
+    // caller that saw the free slot first.
+    while (activeSpawns >= maxConcurrentSpawns) {
+      await new Promise<void>((resolve) => { spawnWaiters.push(resolve); });
+    }
+    activeSpawns += 1;
+    try {
+      return await work();
+    } finally {
+      activeSpawns -= 1;
+      spawnWaiters.shift()?.();
+    }
+  };
+
+  const occupancyOf = (runtime: AgentRuntime): SharedRuntimeOccupancy | undefined =>
+    occupancyByFacade.get(runtime);
+
+  const acquireOpenCodeRuntime = async (projectId: string, cwd?: string, sessionId?: string): Promise<{
+    runtime: AgentRuntime;
+    info: RuntimeAcquisitionInfo;
+  }> => {
+    const dir = await cwdFor(projectId, cwd);
+    const project = await projects.get(projectId);
+    const spaceId = spaceGateway.resolveInternal(project?.spaceId).spaceId;
+    const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
+    // The chat's acting person must be able to use the SSH connection, warm
+    // runtime or not (§14.6); without one the project's binding decides.
+    const ssh = connectionId ? svc<SshTransportService>("ssh") : undefined;
+    if (connectionId && ssh) {
+      await assertRemoteOpenCodeUsable(remoteOpenCodeAccess(ssh), { connectionId, spaceId, ...(sessionId ? { sessionId } : {}) });
+    }
+    const key = sharedRuntimePoolKey(projectId, dir, connectionId);
+    if (isShuttingDown()) {
+      const existing = openCodeRuntimes.peek(key);
+      if (!existing) {
+        throw Object.assign(
+          new Error("runtime creation is fenced for shutdown"),
+          { code: "shutting_down" },
+        );
+      }
+      return { runtime: existing.value, info: { warmRuntimeHit: true } };
+    }
+    if (runtimeCreationFenceDepth > 0 && !openCodeRuntimes.busy(key)) {
+      throw Object.assign(
+        new Error("runtime creation is fenced for configuration restart"),
+        { code: "restart-deferred" },
+      );
+    }
+    const record = await runtimeDiagnostics.observe(key, { projectId, cwd: dir }, () =>
+      openCodeRuntimes.acquire(key, async (occupancy) => withSpawnSlot(async () => {
+        // Physical creation flight. Harness-cache beforeCreate may have run
+        // before this acquire waited out a previous dispose; that dispose's
+        // onEvict drops the overlay. Reconcile here so spawn sees the overlay
+        // for THIS generation.
+        if (capabilityController) {
+          const project = await projects.get(projectId);
+          const space = spaceGateway.resolveInternal(project?.spaceId);
+          const context = {
+            projectId,
+            spaceId: space.spaceId,
+            space,
+            cwd: dir,
+            remote: Boolean(project?.remote),
+          };
+          await reconcilePinnedHarness(capabilityController, harnesses, "opencode", context);
+        }
+        const localConfigAuthority = !(await projects.get(projectId))?.remote;
+        const spawn = async () => {
+          const inner = await spawnRuntime(projectId, dir);
+          const built = facadeFor(
+            key,
+            projectId,
+            dir,
+            inner,
+            true,
+            localConfigAuthority,
+            occupancy,
+          );
+          const runtimeSpawnMs = spawnTimingByRuntime.get(inner);
+          if (runtimeSpawnMs !== undefined) spawnTimingByRuntime.set(built.facade, runtimeSpawnMs);
+          if (localConfigAuthority) await refreshSafeBehavior();
+          return { value: built.facade, dispose: built.dispose };
+        };
+        try {
+          return await spawn();
+        } catch (err) {
+          if (!isTransportError(err)) throw err;
+          return spawn();
+        }
+      })));
+    // Register retention only after the physical owner committed creation.
+    // A failed spawn/config preparation must not leave a policy entry behind.
+    if (!warmRegistrationByFacade.has(record.value)) {
+      const controller = idleByFacade.get(record.value)!;
+      const registration = warmPolicy.register(key, spaceId, controller, () => {
+        const state = record.occupancy.snapshot();
+        return state.bindings > 0 || state.executions > 0
+          || openCodeRuntimes.peek(key)?.value !== record.value || hasCanonicalRuntimeLease(record.value);
+      });
+      warmRegistrationByFacade.set(record.value, registration);
+    }
+    const runtimeSpawnMs = record.warmRuntimeHit ? undefined : spawnTimingByRuntime.get(record.value);
+    return {
+      runtime: record.value,
+      info: {
+        warmRuntimeHit: record.warmRuntimeHit,
+        ...(runtimeSpawnMs !== undefined ? { runtimeSpawnMs } : {}),
+      },
+    };
+  };
+
+  const openCodePool: RuntimePool = {
+    async forProject(projectId, cwd) {
+      return (await acquireOpenCodeRuntime(projectId, cwd)).runtime;
+    },
+    async restartAll() {
+      return restartRuntimeEntries();
+    },
+    onRestart(listener) {
+      runtimeRestartListeners.add(listener);
+      return { dispose: () => { runtimeRestartListeners.delete(listener); } };
+    },
+    onEvict(listener) {
+      runtimeEvictionListeners.add(listener);
+      return { dispose: () => { runtimeEvictionListeners.delete(listener); } };
+    },
+    bindSession(sessionId, runtime) {
+      occupancyOf(runtime)?.acquireBinding(sessionId);
+      idleByFacade.get(runtime)?.touch();
+    },
+    unbindSession(sessionId, runtime) {
+      const occupancy = occupancyOf(runtime);
+      if (!occupancy) return;
+      occupancy.releaseBinding(sessionId, {
+        abandonExecution: !occupancy.snapshot().accepting,
+      });
+      idleByFacade.get(runtime)?.touch();
+    },
+  };
+  const runtimeStorageMaintenance = createRuntimeStorageMaintenance({
+    root: openCodeRuntimesDir,
+    pool: openCodeRuntimes,
+    storageKey: openCodeRuntimeId,
+    poolKey: sharedRuntimePoolKey,
+    withReferencesLease: (projectId, cwd, work) => store.withRuntimeStorageLease(projectId, cwd, work),
+    shuttingDown: isShuttingDown,
+  });
+  services.provide(serverServiceKey("opencode.storage-maintenance"), { snapshot: runtimeStorageMaintenance.snapshot });
+  // The desktop supplies its pinned download as the bundled binary. Expose the
+  // effective source so backend-opencode can register that Polyth-owned runtime
+  // as an Auto fallback instead of preempting a harness the user installed and
+  // authorized on the host.
+  services.provide(
+    serverServiceKey<"bundled" | "configured">("opencode.binary-source"),
+    opts.opencode?.binarySource ?? "configured",
+  );
+  services.provide(serverServiceKey("opencode.runtime"), async (context: HarnessContext) => {
+    const { runtime, info } = await acquireOpenCodeRuntime(context.projectId, context.cwd, context.sessionId);
+    // Resolution may start the physical runtime during discovery, then the
+    // factory looks it up again with this same acquisition context. Retain
+    // that cold evidence rather than mislabeling the whole lookup as warm.
+    openCodeAcquisitionInfo.observe(context, runtime, info);
+    return runtime;
+  });
+  services.provide(
+    serverServiceKey<NonNullable<HarnessProvider["releaseExecution"]>>("opencode.runtime.release-execution"),
+    async (context, binding, operationId) => {
+      if (context.remote || process.platform !== "linux") {
+        return { kind: "rejected", code: "unsupported", message: "local Linux runtime authority required" };
+      }
+      const localStateKey = openCodeRuntimeId(context.projectId, context.cwd);
+      return releaseProcessExecution(
+        join(openCodeRuntimesDir, localStateKey, "opencode.pid.json.supervisor.json"),
+        binding,
+        operationId,
+      );
+    },
+  );
+  services.provide(serverServiceKey<{
+    onRestart(listener: (runtime: AgentRuntime) => void | Promise<void>): Disposable;
+  }>("opencode.runtime.events"), {
+    onRestart: (listener) => openCodePool.onRestart?.(async (runtime) => { await listener(runtime); })
+      ?? { dispose() {} },
+  });
+  const harnessPool = createHarnessPool({
+    registry: harnesses,
+    legacyHarnessId: "opencode",
+    acquisitionInfo: (_provider, context, runtime) => openCodeAcquisitionInfo.get(context, runtime),
+    async context(projectId, cwd, sessionId) {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      // The acting person lets contextual tools offer only what they can use;
+      // the list is minted with the runtime, calls resolve the actor again.
+      const actorUserId = sessionId ? (await store.projection(sessionId))?.actor?.userId : undefined;
+      return {
+        projectId, spaceId: space.spaceId, space, cwd: await cwdFor(projectId, cwd), sessionId, remote: Boolean(project?.remote),
+        ...(actorUserId ? { actorUserId } : {}),
+      };
+    },
+    async releaseRuntime(runtime, dispose) {
+      const occupancy = occupancyOf(runtime)?.snapshot();
+      if (occupancy && (occupancy.bindings > 0 || occupancy.executions > 0)) return;
+      await dispose();
+    },
+    async beforeCreate(provider, context) {
+      if (!capabilityController) return;
+      await capabilityController.reconcile(provider, context);
+    },
+    allowProviderUnregistration: isShuttingDown,
+  });
+  hasCanonicalRuntimeLease = harnessPool.hasSessionLease;
+  const acquireWorkspaceRuntime = async <T,>(projectId: string, cwd: string | undefined, action: () => Promise<T>): Promise<T> => {
+    const dir = await cwdFor(projectId, cwd);
+    const project = await projects.get(projectId);
+    const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
+    return warmPolicy.acquire(sharedRuntimePoolKey(projectId, dir, connectionId), action);
+  };
+  const runtimes: RuntimePool = {
+    ...harnessPool,
+    forSession: (projection, cwd, targetHarnessId) => acquireWorkspaceRuntime(projection.projectId, cwd, () => harnessPool.forSession(projection, cwd, targetHarnessId)),
+    forProject: (projectId, cwd, targetHarnessId) => acquireWorkspaceRuntime(projectId, cwd, () => harnessPool.forProject(projectId, cwd, targetHarnessId)),
+    async retireSession(sessionId) {
+      try { await harnessPool.retireSession(sessionId); }
+      finally { warmPolicy.activity(); }
+    },
+    async retireWorkspace(cwd) {
+      try { await harnessPool.retireWorkspace(cwd); }
+      finally { warmPolicy.activity(); }
+    },
+    forgetSession(sessionId) {
+      harnessPool.forgetSession(sessionId);
+      warmPolicy.activity();
+    },
+    restartAll: openCodePool.restartAll,
+    onRestart: openCodePool.onRestart,
+    onEvict: openCodePool.onEvict,
+    bindSession: openCodePool.bindSession,
+    unbindSession: openCodePool.unbindSession,
+  };
+  openCodePool.onEvict?.(async (runtime) => {
+    try {
+      harnessPool.forgetRuntime(runtime);
+    } catch (err) {
+      console.warn("[polyth] harness pool forgetRuntime on evict skipped", err);
+    }
+    if (!capabilityController) return;
+    const projectId = (runtime as AgentRuntime & { projectId?: string }).projectId;
+    const cwd = (runtime as AgentRuntime & { cwd?: string }).cwd;
+    if (!projectId || !cwd) return;
+    try {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      // Physical OpenCode eviction — not a session occupancy release.
+      capabilityController.release({
+        spaceId: space.spaceId,
+        space,
+        projectId,
+        cwd,
+        remote: Boolean(project?.remote),
+      }, "opencode");
+    } catch (err) {
+      console.warn("[polyth] capability overlay release on evict skipped", err);
+    }
+  });
+  // The server catalog cache and the harness snapshot cache both hold model
+  // lists, so they are invalidated as one: a stale half is what makes "only
+  // some models show up" survive until a restart.
+  let invalidateModelCatalog = (): void => {};
+  openCodePool.onRestart?.(async () => { harnesses.invalidate({ harnessId: "opencode" }); invalidateModelCatalog(); });
+  const runtimeCatalog = createRuntimeCatalog({
+    projects,
+    runtimes,
+    enrichModels: async (models) => svc<{
+      enrich(models: readonly import("@polyth/contracts").ModelDescriptor[]): Promise<import("@polyth/contracts").ModelDescriptor[]>;
+    }>("models.context")?.enrich(models) ?? [...models],
+    onModelsInvalidated: () => harnesses.invalidate({ harnessId: "opencode" }),
+    invalidateHarness: (harnessId) => harnesses.invalidate({ harnessId }),
+  });
+  invalidateModelCatalog = () => runtimeCatalog.invalidateModels();
+  services.provide(SERVER_RUNTIME_CATALOG, {
+    invalidateModels: () => runtimeCatalog.invalidateModels(),
+    models: (options) => runtimeCatalog.models(options),
+  });
+
+  const parseModel = (raw?: string) => {
+    if (!raw || !raw.includes("/")) return undefined;
+    const i = raw.indexOf("/");
+    return { providerID: raw.slice(0, i), modelID: raw.slice(i + 1) };
+  };
+
+  // --- goals workflow package (listens on the turn seam, never touches the
+  // loop). The service itself lives in its own package and is resolved lazily.
+  const trackWorkflow = () =>
+    svc<{ completeForSession(sessionId: string): Promise<unknown> }>("tracks.workflow");
+  const goalService = () => svc<GoalServiceForCore>("goals");
+  const ensureGoalState = async (sessionId: string) => {
+    const goals = goalService();
+    if (!goals) return null;
+    const known = goals.get(sessionId);
+    if (known) return known;
+    return goals.rehydrate(sessionId, await store.events(sessionId)); // survives restart
+  };
+
+  // Streaming dictation: the settings live here (server-owned data
+  // dir); the dictation package builds its adapter from them on every call.
+  const voiceSettings = createVoiceSettings({ file: `${dataDir}/voice.json` });
+  provideService("voice.settings", voiceSettings);
+
+  // --- behavior instructions, MCP config, managed plugins (adapter-applied)
+  const pendingOpenCode = createOpenCodePendingService({
+    canRestart: async (captured, plan) => {
+      const expected = captured as RuntimeRestartState | undefined;
+      const selectedKeys = new Set(runtimeRestarterEntries(plan).map(([key]) => key));
+      // Sequential, first refusal wins: a workspace can hold hundreds of
+      // sessions, and assessing them all at once is a reconcile storm.
+      for (const projection of await store.projections()) {
+        const project = await projects.get(projection.projectId);
+        const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
+        const connectionId = project?.remote?.kind === "ssh" ? project.remote.connectionId : undefined;
+        const key = sharedRuntimePoolKey(projection.projectId, cwd, connectionId);
+        // A scoped restart (runtime-capabilities for one physical target)
+        // must not be blocked by an unrelated project's live session — only
+        // sessions on the restarting target(s) need to be safety-checked.
+        if (!selectedKeys.has(key)) continue;
+        const restarter = runtimeRestarters.get(key);
+        if (!restarter) continue;
+        const fingerprint = expected?.get(key);
+        if (!fingerprint) {
+          return {
+            safe: false as const,
+            reason: `runtime ${key} was not captured before config restart`,
+          };
+        }
+        // Sharing the workspace key is not sharing the runtime: per-session
+        // harnesses (Claude, Codex, Pi, ...) and older OpenCode generations
+        // are bound elsewhere, and this restart cannot touch them. Reconciling
+        // them against the OpenCode facade reads as a binding mismatch, marks
+        // every one epoch-pending and replaces its native session.
+        if (restartAssessmentSkips(projection, fingerprint)) continue;
+        const assessment = await reconcileRuntimeForConfigRestart(
+          projection.id,
+          restarter.runtime,
+          fingerprint,
+        );
+        if (!assessment.safe) return assessment;
+      }
+      return { safe: true as const };
+    },
+    withAdmissionBarrier: (action, plan) =>
+      admissionBarrier.run(() => withRuntimeReplacementInterlock(action, plan)),
+    captureRestartState: (plan) => captureRuntimeRestartState(plan),
+    restart: (state, plan) => restartRuntimeEntries(state as RuntimeRestartState | undefined, plan),
+  });
+  const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
+  provideService(
+    "opencode.configuration-status",
+    (context: HarnessContext): HarnessConfigurationMetadata | undefined =>
+      inspectOpenCodeConfiguration(pendingOpenCode, context),
+  );
+  const credentialAudit = createAuditSink();
+  const secureSafe = createSecureSafeService({
+    dataDir,
+    onChanged: () => refreshSafeBehavior(),
+    onResolved: ({ space, projectId, handles }) => {
+      if (!space) return;
+      for (const handle of handles) {
+        credentialAudit.record(space, AUDIT.secretResolved, {
+          resource: { kind: "credential", id: handle },
+          detail: { projectId },
+        });
+      }
+    },
+  });
+  // Package-owned behavior sections (e.g. the Todos rule), appended after the
+  // host-owned credential boundary.
+  const behaviorSections = createBehaviorSectionRegistry();
+  const decorateBehavior = (text: string): string => {
+    const base = text.trimEnd();
+    const section = secureSafeBehaviorSection(`${dataDir}/forbidden-config.json`, secureSafe.manifest());
+    const sections = [section, ...behaviorSections.sections()].join("\n\n");
+    return `${base}${base ? "\n\n" : ""}${sections}\n`;
+  };
+  const reconcileLive = async (): Promise<void> => {
+    if (!capabilityController) return;
+    await capabilityController.reconcileAllActiveTargets();
+  };
+  const reprojectBehavior = async (): Promise<void> => {
+    try {
+      await reconcileLive();
+    } catch (err) {
+      console.warn("[polyth] behavior section refresh skipped", err);
+    }
+  };
+  services.provide(SERVER_BEHAVIOR_SECTIONS, behaviorSections.registry(reprojectBehavior));
+  const behavior = createBehaviorService({
+    file: `${dataDir}/behavior.md`,
+    policyFile: `${dataDir}/behavior-policy.json`,
+    onChanged: reconcileLive,
+    decorate: decorateBehavior,
+  });
+  refreshSafeBehavior = async () => {
+    try {
+      await reconcileLive();
+    } catch (err) {
+      console.warn("[polyth] Credential Vault behavior refresh skipped", err);
+    }
+  };
+  await secureSafe.syncForbiddenConfig();
+  // Person-owned MCP servers (§14.6) use host.people, built further down.
+  let personalMcpPeople: import("@polyth/plugins").PeopleHost | undefined;
+  const mcp = createMcpConfigService({
+    dataDir,
+    deployment: spaceGateway.deployment,
+    defaultSpaceId: spaceGateway.resolveInternal().spaceId,
+    assertProject: (space, projectId) => {
+      if (projects.spaceOfProject(projectId) !== space.spaceId) {
+        throw Object.assign(new Error("project not found"), { code: "not-found" });
+      }
+    },
+    projectForProbe: (space, projectId) => projects.forSpace(space).get(projectId),
+    onChanged: async (space) => {
+      await capabilityController?.reconcileSpace(space);
+    },
+    people: () => personalMcpPeople,
+    privateOwner: privateSessionOwner,
+  });
+  cleanupProjectCapabilities = (project) => {
+    if (!project.spaceId) return;
+    const space = spaceGateway.resolveInternal(project.spaceId);
+    mcp.removeProject(space, project.id);
+    svc<{ removeProject(space: import("@polyth/contracts").SpaceContext, projectId: string): void }>("skills")
+      ?.removeProject(space, project.id);
+  };
+
+  // Provider/model visibility: seeds from opencode.json (disabled_providers +
+  // provider blacklists), then mirrors every toggle back to it. The toggles
+  // themselves are account-owned (see {@link VisibilityAccounts}); the host
+  // store is the physical OpenCode mirror plus the migration seed for accounts
+  // that predate the synced `modelVisibility` section. `clientSettings` is
+  // created later in boot, so the port resolves it lazily on first use.
+  let clientSettingsForVisibility: ReturnType<typeof createClientSettings> | undefined;
+  /** The account store is created later in boot; a visibility read or write
+   *  that reaches this port before then is a boot-order bug, not a reason to
+   *  silently fall back to another account's list. */
+  const requireClientSettings = (): ReturnType<typeof createClientSettings> => {
+    if (!clientSettingsForVisibility) {
+      throw Object.assign(new Error("client settings are not available yet"), { code: "unavailable" });
+    }
+    return clientSettingsForVisibility;
+  };
+  const visibility = createModelVisibilityService({
+    file: `${dataDir}/model-visibility.json`,
+    applier: configApplier,
+    accounts: {
+      read: (userId) => {
+        const section = requireClientSettings().get(userId).settings.modelVisibility;
+        return section === undefined ? undefined : parseVisibility(section);
+      },
+      write: (userId, state) => {
+        if (!userId) return false;
+        requireClientSettings().patchSection(userId, "modelVisibility", state);
+        return true;
+      },
+      states: () => requireClientSettings().userIds()
+        .map((userId) => requireClientSettings().get(userId).settings.modelVisibility)
+        .map((section) => section === undefined ? undefined : parseVisibility(section)),
+    },
+    // Another client of the same account must see the change without a reload.
+    onAccountChange: (userId) => {
+      broadcast.clientSettingsChanged?.(userId, requireClientSettings().get(userId));
+    },
+  });
+  await visibility.seed();
+
+  // An empty Polyth MCP store adopts whatever OpenCode already has configured,
+  // so the settings page reflects reality instead of an empty list. Adoption is
+  // default-Space + local-trusted only.
+  const defaultSpace = spaceGateway.resolveInternal();
+  if (spaceGateway.deployment === "local-trusted" && mcp.list(defaultSpace).length === 0) {
+    try {
+      for (const entry of mcpEntriesFromBackendConfig(await configApplier.readConfig())) {
+        await mcp.create(defaultSpace, entry).catch((err: unknown) =>
+          console.warn(`[polyth] MCP seed skipped for "${entry.name}"`, err));
+      }
+    } catch (err) {
+      console.warn("[polyth] MCP seed from backend config skipped", err);
+    }
+  }
+  let requestAgentToolPermission:
+    RuntimeEpochSessionService["requestAgentToolPermission"] | undefined;
+  let resolveAgentToolSession: RuntimeEpochSessionService["resolveAgentToolSession"] | undefined;
+  const agentTools = createAgentToolBridge({
+    executor: (id) => capabilityContributions.executor(id),
+    contribution: (id) => capabilityContributions.contribution(id),
+    outputCache,
+    actorOf: async (sessionId) => (await store.projection(sessionId))?.actor?.userId,
+    resolveSession: (grant, runtimeSessionId) => resolveAgentToolSession?.({ ...grant, runtimeSessionId }) ?? Promise.resolve(undefined),
+    requested: async (tool, grant) => {
+      const event = await store.append(grant.sessionId!, "package-tool/requested", {
+        toolId: tool.id, toolName: tool.name, owner: tool.owner,
+      }, { ignorable: true, producerPlugin: tool.owner });
+      broadcast.event(event);
+    },
+    authorize: async (tool, grant, signal, input) => {
+      const ownerAllowed = (() => {
+        if (tool.owner === "polyth") return true;
+        try {
+          const space = spaceGateway.resolveInternal(grant.spaceId);
+          const managed = svc<import("@polyth/plugins").PluginRegistry>("plugins.managed");
+          if (managed?.has(tool.owner)) {
+            const storage = createSpaceStorage(space.storageDir);
+            if (managed.detail(tool.owner, storage).runtimeKind === "sandboxed") return false;
+            return managed.isEnabled(tool.owner, storage);
+          }
+          const known = packageRegistry.get(tool.owner);
+          return known ? known.enabled : true;
+        } catch {
+          return false;
+        }
+      })();
+      if (!ownerAllowed) return "deny";
+      const permissions = svc<{
+        evaluate(permission: string, patterns: string[], projectId?: string, sessionId?: string): "allow" | "deny" | "ask";
+      }>("permissions");
+      if (tool.trust === "pure" && tool.mutating === false) {
+        return permissions?.evaluate("package-tool", [tool.id], grant.projectId, grant.sessionId) === "deny"
+          ? "deny"
+          : "allow";
+      }
+      const guardedSpace = spaceHasGuardedMember(grant.spaceId);
+      const rawVerdict = permissions?.evaluate("package-tool", [tool.id], grant.projectId, grant.sessionId) ?? "ask";
+      // Guarded Spaces never act on standing approvals or tool auto-approve.
+      const verdict = guardedSpace && rawVerdict === "allow" ? "ask" : rawVerdict;
+      let storage: ReturnType<typeof createSpaceStorage> | undefined;
+      try {
+        storage = createSpaceStorage(spaceGateway.resolveInternal(grant.spaceId).storageDir);
+      } catch {
+        storage = undefined;
+      }
+      const permissionRequester = requestAgentToolPermission;
+      const summary = input ? summarizeToolInput(input) : undefined;
+      return authorizePackageToolAfterPermissions({
+        tool,
+        grant: {
+          spaceId: grant.spaceId,
+          projectId: grant.projectId,
+          cwd: grant.cwd,
+          ...(grant.harnessId ? { harnessId: grant.harnessId } : {}),
+          ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
+        },
+        contribution: guardedSpace ? undefined : capabilityContributions.contribution(tool.id),
+        permissionVerdict: verdict,
+        storage,
+        signal,
+        ...(summary ? { metadata: summary } : {}),
+        requestPermission: permissionRequester
+          ? (input) => permissionRequester(input)
+          : undefined,
+      });
+    },
+  });
+  capabilityController = createCapabilityProvisioningController({
+    contributions: capabilityContributions,
+    harnesses,
+    behavior,
+    mcp,
+    file: `${dataDir}/capability-status.json`,
+    contributionAllowed: (owner, context) => {
+      if (owner === "polyth") return true;
+      const managed = svc<import("@polyth/plugins").PluginRegistry>("plugins.managed");
+      if (managed?.has(owner)) {
+        if (!context.space) return false;
+        const storage = createSpaceStorage(context.space.storageDir);
+        const detail = managed.detail(owner, storage);
+        if (detail.runtimeKind === "sandboxed") return false;
+        return managed.isEnabled(owner, storage);
+      }
+      const known = packageRegistry.get(owner);
+      return known ? known.enabled : true;
+    },
+    onOpenCodeCapabilityRestart: (context, desiredRevision) => {
+      // Stage synchronously. pending-restart is only raised for a live
+      // physical generation, so `runtimeRestarters` already holds the exact
+      // pool key (local or remote). An async `projects.get` here used to
+      // leave applyAndRestart racing an empty queue.
+      const fallback = sharedRuntimePoolKey(context.projectId, context.cwd);
+      pendingOpenCode.stage({
+        id: `runtime-capabilities:${context.spaceId}:${context.projectId}:${context.cwd}`,
+        kind: "runtime-capabilities",
+        label: "OpenCode runtime capabilities",
+        desiredRevision,
+        restartKeys: physicalRestartKeysFor(
+          runtimeRestarters.keys(),
+          context.projectId,
+          context.cwd,
+          fallback,
+        ),
+        apply: async () => {},
+      });
+    },
+    onOpenCodeCapabilitySettled: (input) => {
+      pendingOpenCode.settleRuntimeCapabilities(input);
+    },
+    tools: agentTools,
+    toolsEndpoint: () => `http://127.0.0.1:${port}${AGENT_TOOLS_PATH}`,
+  });
+  provideService("harness.provisioning", {
+    status: (context: import("@polyth/contracts").HarnessContext, harnessId?: string) =>
+      capabilityController!.status(context, harnessId),
+    reconcileSpace: (space: Pick<import("@polyth/contracts").SpaceContext, "spaceId">) =>
+      capabilityController!.reconcileSpace(space),
+  });
+
+  // Infrastructure seams consumed by discovered packages.
+  provideService("mcp.project", mcp);
+  provideService("secure-safe", secureSafe);
+  provideService("plugins.config", configApplier);
+  provideService("models.visibility", visibility);
+  provideService("models.invalidate-catalog", () => { runtimeCatalog.invalidateModels(); });
+  // The probe stays bound here so no feature package ever imports
+  // backend-opencode; routes consuming it never learn OpenCode specifics.
+  provideService("ssh.probe-runtime", async (connectionId: string) => {
+    const ssh = svc<SshTransportService>("ssh");
+    if (!ssh) {
+      throw Object.assign(new Error("SSH support unavailable: the ssh package did not load"), { code: "unavailable" });
+    }
+    return probeRemoteOpenCode(ssh.host(connectionId));
+  });
+  provideService("ssh.install-runtime", async (connectionId: string) => {
+    const ssh = svc<SshTransportService>("ssh");
+    if (!ssh) {
+      throw Object.assign(new Error("SSH support unavailable: the ssh package did not load"), { code: "unavailable" });
+    }
+    await installRemoteOpenCode(ssh.host(connectionId));
+  });
+
+  // Packages that report their own sessions' outcomes (agents) take over the
+  // routine turn notifications of exactly those sessions.
+  const turnNotificationClaims = new Set<(sessionId: string) => boolean>();
+  // --- Web push (VAPID keys minted once into the data dir) + the
+  // notifier bridging the session service's attention/turn-stopped seam.
+  // Auto-accepted permissions never reach this seam, so they never push.
+  const push = createPushService({
+    file: `${dataDir}/push.json`,
+    hasAccess: notificationAccess,
+  });
+  // NTF-01: durable inbox recorded at the ONE transition-tight seam — the
+  // notifier's send sink, after buildPushPayload. Order per record: JSON
+  // store commit → recipient-filtered WS broadcast → independent Web/native
+  // push attempts. A transport failure keeps the durable row; a store failure
+  // emits nothing (contained by the notifier's fire-and-forget boundary). /api/push/test calls
+  // push.send directly and therefore never creates a centre row.
+  const notifications = createNotificationStore({
+    file: `${dataDir}/notifications.json`,
+    hasAccess: notificationAccess,
+  });
+  const nativePush = createNativePushService({
+    file: `${dataDir}/native-push.json`,
+    relayOrigin: process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN,
+    authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
+  });
+  // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
+  // broadcast -> independent Web/native push. Shared by the turn notifier and
+  // by person-message notifications so neither duplicates the ordering.
+  const deliverToRecipient = async (
+    recipient: NotificationAccount,
+    payload: PushPayload,
+    people?: Pick<NotificationRecord, "author" | "chat">,
+  ): Promise<void> => {
+    const { key, projectId } = payload;
+    if (!key || !payload.sessionId || !projectId) {
+      throw Object.assign(new Error("notification payload missing key/session/project"), { code: "invalid-input" });
+    }
+    const record = await notifications.add(recipient, {
+      key, kind: payload.kind, sessionId: payload.sessionId, projectId,
+      title: payload.title, body: payload.body,
+      ...people,
+    });
+    if (!record) return;
+    broadcast.notification?.(record, recipient);
+    // Delivery transports are independent best-effort legs after the durable
+    // row + WS fan-out. A failed or stalled leg cannot suppress the other.
+    await Promise.allSettled([
+      push.send(recipient, payload),
+      nativePush.send({
+        userId: recipient.userId, spaceId: recipient.spaceId,
+        notificationId: record.id, kind: record.kind, transitionKey: record.key,
+        title: record.title, body: record.body,
+      }),
+    ]);
+  };
+  // A `person/message`: named people get kind `mention`; a conversation's
+  // other participants get kind `message`. Access and mute are rechecked at
+  // delivery, so a person who can no longer open the chat is never told.
+  const deliverPersonMessage = async (input: {
+    sessionId: string;
+    seq: number;
+    author: { userId: string; name?: string };
+    text: string;
+    mentions: Array<{ userId: string; name?: string }>;
+    audience: Array<{ userId: string; name?: string }>;
+  }): Promise<void> => {
+    const target = await store.projection(input.sessionId);
+    if (!target || !target.spaceId) return;
+    const spaceId = target.spaceId;
+    const authorName = input.author.name?.trim() || input.author.userId;
+    const sessionTitle = target.title || "Session";
+    const excerpt = plainTextExcerpt(input.text, 200);
+    const deliver = (person: { userId: string }, kind: "mention" | "message"): void => {
+      // Recheck at delivery: content never reaches someone outside the audience.
+      if (!sessionAccess(person.userId, spaceId, input.sessionId)) return;
+      // Read like a messenger: who and where in the title, the words in the body.
+      const title = kind === "mention" ? `${authorName} mentioned you · ${sessionTitle}` : `${authorName} · ${sessionTitle}`;
+      const payload: PushPayload = {
+        kind,
+        sessionId: input.sessionId,
+        title: plainTextExcerpt(title, 100),
+        body: excerpt || sessionTitle,
+        // One notification per chat: the service worker stacks a burst into
+        // it (`chat`/`line`) instead of piling up one alert per message.
+        tag: `polyth-people-${input.sessionId}`,
+        key: `person-message:${input.sessionId}:${input.seq}:${kind}`,
+        projectId: target.projectId,
+        chat: plainTextExcerpt(sessionTitle, 100),
+        line: plainTextExcerpt(`${authorName}: ${excerpt}`, 160),
+      };
+      // The inbox row also names the author and chat, so a client can draw
+      // who wrote it (identity colour, monogram) without parsing the title.
+      const people = { author: { userId: input.author.userId, name: authorName }, chat: plainTextExcerpt(sessionTitle, 100) };
+      void deliverToRecipient({ userId: person.userId, spaceId }, payload, people).catch((error) => {
+        console.error("[polyth] person message notification failed", error);
+      });
+    };
+    for (const person of input.mentions) deliver(person, "mention");
+    for (const person of input.audience) deliver(person, "message");
+  };
+  const pushNotifier = createPushNotifier({
+    send: async (payload) => {
+      const { key, projectId } = payload;
+      if (!key || !payload.sessionId || !projectId) {
+        throw Object.assign(new Error("notification payload missing key/session/project"), { code: "invalid-input" });
+      }
+      // Ownership: the target session (when it still exists) must belong to
+      // the payload's project before the record is published.
+      const target = await store.projection(payload.sessionId);
+      if (!target || target.projectId !== projectId || !target.spaceId) {
+        throw Object.assign(new Error("notification target belongs to another project"), { code: "invalid-input" });
+      }
+      const recipient = await notifications.recipientForSession(payload.sessionId, { spaceId: target.spaceId });
+      if (!recipient) return;
+      await deliverToRecipient(recipient, payload);
+    },
+    projection: (sessionId) => store.projection(sessionId),
+    attention: async (sessionId) => (await store.attentionFor([sessionId]))[sessionId],
+    // Bounded keyset paging backwards (indexed, size-capped): notification
+    // content never replays a session log, and walks at most a few pages.
+    tail: (sessionId, beforeSeq) => store.events(sessionId, 0, {
+      limit: 80,
+      maxBytes: 128 * 1024,
+      ...(beforeSeq !== undefined ? { beforeSeq } : {}),
+    }),
+    claimed: (sessionId) => {
+      for (const owns of turnNotificationClaims) {
+        try {
+          if (owns(sessionId)) return true;
+        } catch (error) {
+          console.error("[polyth] turn notification claim failed", error);
+        }
+      }
+      return false;
+    },
+  });
+
+  // --- multirun/fusion/goals resolve the parent session's project/runtime
+  // lazily through this binding, so they work for any session.
+  const resolveSessionRuntime = (sessionId: string) =>
+    resolveSessionRuntimeBinding(sessionId, { store, projects, runtimes });
+
+  // --- autonomous package discovery. The session service is composed AFTER
+  // the packages load (it consumes their services: permissions, git
+  // worktrees, terminal shell, command expansion, attachment stat). Packages
+  // capture this stable delegate; invoking it before composition finishes is
+  // a package bug surfaced with an explicit error.
+  let sessionsImpl: SessionService | null = null;
+  const httpAdmission = createHttpAdmission();
+  const lazySessions: SessionService = new Proxy({} as SessionService, {
+    get(_target, property) {
+      httpAdmission.assertLive();
+      if (!sessionsImpl) {
+        throw new Error(
+          `session service accessed during package load (property "${String(property)}"); resolve it lazily inside onEnable or route handlers`,
+        );
+      }
+      const value = Reflect.get(sessionsImpl, property) as unknown;
+      return typeof value === "function"
+        ? (value as (...args: unknown[]) => unknown).bind(sessionsImpl)
+        : value;
+    },
+  });
+
+  const sessionWatches = createSessionWatchCoordinator({
+    store,
+    sessions: () => {
+      if (!sessionsImpl) {
+        throw Object.assign(new Error("session service is not composed yet"), { code: "unavailable" });
+      }
+      return sessionsImpl;
+    },
+    broadcast,
+  });
+  services.provide(SERVER_SESSION_WATCHES, sessionWatches);
+
+  // WS upgrade channels registered by packages (e.g. the terminal channel)
+  // attach through this seam once the HTTP server exists — always BEFORE the
+  // core session gateway, which aborts upgrades whose path it does not match.
+  const httpServerCallbacks: Array<(ctx: HttpServerContext) => void> = [];
+  let httpServerContext: HttpServerContext | null = null;
+  const attachedHttpServers = new WeakSet<import("node:http").Server>();
+  let httpHandlerRef: import("./http.ts").HttpHandler | null = null;
+  const pairedSockets = new PairedSocketRegistry();
+  const attachHttpChannels = (ctx: HttpServerContext): void => {
+    if (attachedHttpServers.has(ctx.server)) return;
+    attachedHttpServers.add(ctx.server);
+    for (const cb of httpServerCallbacks) cb(ctx);
+    live?.attach(ctx.server, {
+      authorize: ctx.authorize,
+      identity: ctx.identity,
+      refreshPrincipal: ctx.refreshPrincipal,
+      pairedSockets: ctx.pairedSockets,
+    });
+  };
+  const onHttpServer = (cb: (ctx: HttpServerContext) => void): void => {
+    httpServerCallbacks.push(cb);
+    if (httpServerContext) cb(httpServerContext);
+  };
+  const startTunnelIngress = async (opts: {
+    socketPath: string;
+    secret: string;
+    lookup(connectionId: string): Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }> | null;
+  }) => {
+    if (!httpHandlerRef) {
+      throw Object.assign(new Error("HTTP handler not ready"), { code: "unavailable" });
+    }
+    const handle = createTunnelIngress({
+      handler: httpHandlerRef,
+      secret: opts.secret,
+      socketPath: opts.socketPath,
+      lookup: opts.lookup,
+      resolve: (request, ingress) => auth.resolve(request, ingress),
+      attachChannels: attachHttpChannels,
+      pairedSockets,
+    });
+    await handle.listen();
+    return { close: () => handle.close() };
+  };
+  const queuedPairedResolvers: Array<(ingress: Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }>) => import("@polyth/contracts").AuthPrincipal | null> = [];
+  type PairedDeviceResolverFn = typeof queuedPairedResolvers[number];
+  let attachLivePairedResolver: ((resolver: PairedDeviceResolverFn) => void) | null = null;
+  const attachPairedDeviceResolver = (
+    resolver: (ingress: Extract<import("@polyth/contracts").RequestIngress, { kind: "polyth-link" }>) => import("@polyth/contracts").AuthPrincipal | null,
+  ): void => {
+    queuedPairedResolvers.push(resolver);
+    attachLivePairedResolver?.(resolver);
+  };
+
+  const smallModels = createSmallModelService(store, {
+    modelCatalogStale: (signal) => { runtimeCatalog.modelsStale(signal); },
+  });
+
+  // Server-persisted, cross-device client preferences. Created here (ahead of
+  // the settings route) so small-model generation can honour the model the user
+  // picked in Settings → Sessions → Small Model, not just POLYTH_SMALL_MODEL.
+  const clientSettings = createClientSettings({ file: `${dataDir}/client-settings.json` });
+  clientSettingsForVisibility = clientSettings;
+  services.provide(SERVER_MODEL_FAVORITES, {
+    favorites: (userId) => modelFavoriteKeys(clientSettings.get(userId).settings),
+  });
+  const resolveSmallModel = (userId?: string): ({ providerID: string; modelID: string } & { harnessId?: string }) | undefined =>
+    (userId ? smallModelPreference(clientSettings.get(userId).settings) : undefined)
+    ?? smallModel();
+  // "Delete failed startup sessions" is a synced client setting; every
+  // server-side automatic removal honours the owning account's choice.
+  const failedStartupCleanupAllowed = createFailedStartupCleanupPolicy({
+    spaceOf: (projection) => projection.spaceId ?? projects.spaceOfProject(projection.projectId),
+    accountForSession: async (sessionId, spaceId) =>
+      (await notifications.recipientForSession(sessionId, { spaceId }))?.userId,
+    members: (spaceId) => spaceGateway.store.users()
+      .map((user) => user.id)
+      .filter((userId) => Boolean(spaceGateway.store.roleOf(userId, spaceId))),
+    settingsFor: (userId) => clientSettings.get(userId).settings,
+    projection: (sessionId) => store.projection(sessionId),
+  });
+
+  const turnCompletedListeners = new Set<
+    (event: { sessionId: string; assistantText: string; userId?: string }) => void | Promise<void>
+  >();
+  services.provide(SESSION_ATTENTION_SERVICE, {
+    waitingForPerson: (sessionId) => pushNotifier.waitingForPerson(sessionId),
+    claimTurnNotifications(owns) {
+      turnNotificationClaims.add(owns);
+      return { dispose: () => { turnNotificationClaims.delete(owns); } };
+    },
+    notify: (sessionId, input) => pushNotifier.report(sessionId, input.kind, input.statusText, input.key),
+  });
+  services.provide(SERVER_TURN_COMPLETION_BUS, {
+    subscribe(listener) {
+      turnCompletedListeners.add(listener);
+      return { dispose: () => { turnCompletedListeners.delete(listener); } };
+    },
+  });
+  const turnStoppedListeners = new Set<
+    (event: { sessionId: string; reason: "completed" | "aborted" | "error" }) => void | Promise<void>
+  >();
+  services.provide(SERVER_TURN_STOPPED_BUS, {
+    subscribe(listener) {
+      turnStoppedListeners.add(listener);
+      return { dispose: () => { turnStoppedListeners.delete(listener); } };
+    },
+  });
+  const publishTurnStopped = (sessionId: string, reason: "completed" | "aborted" | "error"): void => {
+    for (const listener of [...turnStoppedListeners]) {
+      void Promise.resolve()
+        .then(() => listener({ sessionId, reason }))
+        .catch((error) => console.error("[polyth] package turn stop listener failed", error));
+    }
+  };
+  // A card waits for a person's decision; listeners learn whether the Space answers automatically at all.
+  const permissionWaiting = createPermissionWaitingBus({
+    projection: (sessionId) => store.projection(sessionId),
+    guardedSpace: spaceHasGuardedMember,
+  });
+  services.provide(SERVER_PERMISSION_WAITING_BUS, permissionWaiting.service);
+  const purposeContexts = new Map<string, (session: SessionProjection) => string>();
+  services.provide(SESSION_PURPOSES, {
+    register(purpose, context) {
+      if (purposeContexts.has(purpose)) {
+        throw Object.assign(new Error(`session purpose already registered: ${purpose}`), { code: "conflict" });
+      }
+      purposeContexts.set(purpose, context);
+      return {
+        dispose: () => {
+          if (purposeContexts.get(purpose) === context) purposeContexts.delete(purpose);
+        },
+      };
+    },
+  });
+  // A package fault degrades to an ordinary turn instead of blocking the chat.
+  const purposeContext = (session: SessionProjection): string | undefined => {
+    const context = session.purpose ? purposeContexts.get(session.purpose) : undefined;
+    if (!context) return undefined;
+    try {
+      return context(session) || undefined;
+    } catch (error) {
+      console.error(`[polyth] session purpose context failed: ${session.purpose}`, error);
+      return undefined;
+    }
+  };
+  // The account a session belongs to: the recipient registered when it was
+  // created in its Space. Absent for legacy or Space-less sessions.
+  const sessionAccountId = async (
+    projection: Pick<SessionProjection, "id" | "spaceId"> | null | undefined,
+    purpose: string,
+  ): Promise<string | undefined> => {
+    if (!projection?.spaceId) return undefined;
+    try {
+      return (await notifications.recipientForSession(projection.id, { spaceId: projection.spaceId }))?.userId;
+    } catch (error) {
+      console.warn(`[polyth] ${purpose} account lookup failed`, error);
+      return undefined;
+    }
+  };
+  const publishTurnCompleted = async (sessionId: string, assistantText: string): Promise<void> => {
+    if (turnCompletedListeners.size === 0) return;
+    let userId: string | undefined;
+    try {
+      userId = await sessionAccountId(await store.projection(sessionId), "turn completion");
+    } catch (error) {
+      console.warn("[polyth] turn completion account lookup failed", error);
+    }
+    const event = { sessionId, assistantText, ...(userId ? { userId } : {}) };
+    for (const listener of [...turnCompletedListeners]) {
+      try {
+        await listener(event);
+      } catch (error) {
+        console.error("[polyth] package turn completion listener failed", error);
+      }
+    }
+  };
+
+  const packageSpaces = () =>
+    spaceGateway.store.allSpaces().map((space) => ({
+      spaceId: space.id,
+      storage: createSpaceStorage(spaceStorageDir(dataDir, space)),
+    }));
+
+  // Person-owned package data (§14.4). Each package gets a facade bound to
+  // its own id, so it cannot reach another package's person storage/secrets.
+  const people = createPeopleStore({
+    dataDir,
+    spaceRoot: (spaceId) => spaceGateway.resolveInternal(spaceId).storageDir,
+    isMember: (userId, spaceId) => {
+      try {
+        spaceGateway.store.requireMembership(userId, spaceId);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+  personalMcpPeople = people.forPackage(PERSONAL_MCP_PACKAGE);
+
+  // The one place package services are bound (built-in factories, discovered
+  // packages and, through the manager, managed entries); loaders only check.
+  const hostFor = (id: string): ServerPackageHost => ({
+    ...packageHost,
+    pluginId: id,
+    services: bindPackageServices(services, id),
+    ...(/^[a-z0-9][a-z0-9-]{0,63}$/.test(id) ? { people: people.forPackage(id) } : {}),
+    ...(id === "plugins" ? {
+      packageSpaces,
+      managedPackageServices: (packageId: string) => bindPackageServices(services, packageId),
+    } : {}),
+  });
+
+  const packageHost: Omit<ServerPackageHost, "pluginId"> = {
+    forSpace: spaceServices,
+    systemSpaceContext: (spaceId) => spaceGateway.resolveInternal(spaceId),
+    // Only canonical installs have more than one person to tell apart.
+    personSpaceContext: (userId, spaceId) => {
+      if (!canonicalSecurity() || !userId || userId.startsWith("system:")) return undefined;
+      try {
+        return spaceGateway.resolver.forUser(userId, spaceId);
+      } catch {
+        return undefined;
+      }
+    },
+    storageDir: dataDir,
+    deployment: spaceGateway.deployment,
+    spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),
+    routes: routeRegistry,
+    root,
+    projects,
+    sessions: lazySessions,
+    store,
+    broadcast,
+    runtimes,
+    services,
+    events: {
+      append: async (sessionId, type, data, eventOpts) => {
+        const ev = await store.append(sessionId, type, data, eventOpts);
+        broadcast.event(ev);
+        return ev;
+      },
+    },
+    oneShot: (runtime, options) => oneShot(runtime, options, store),
+    smallModelComplete: (runtime, options) => smallModels.complete(runtime, options),
+    smallModelInputBudget: (runtime, model, maxOutputTokens) => smallModels.inputBudget(runtime, model, maxOutputTokens),
+    smallModel: resolveSmallModel,
+    resolveSessionRuntime,
+    loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
+    onHttpServer,
+    attachHttpChannels,
+    startTunnelIngress,
+    remotePolicies: () => routeRegistry.policies(),
+    attachPairedDeviceResolver,
+    closePairedDevice: (deviceId: string) => pairedSockets.closeDevice(deviceId),
+    pairedSockets,
+  };
+  const discoveredPackages = await (bundledServerPackages
+    ? (async () => {
+      const registered: string[] = [];
+      for (const source of bundledServerPackages) {
+        try {
+          const pkg = await source.factory(hostFor(source.id));
+          registerServerPackage({ lifecycle: packageLifecycle, routes: routeRegistry }, source.id, pkg);
+          registered.push(source.id);
+        } catch (error) {
+          console.error(`[polyth] server package "${source.id}" failed to load`, error);
+        }
+      }
+      return registered;
+    })()
+    : registerDiscoveredPackages({
+      packagesDir,
+      discovered: discoveredPackageManifests,
+      host: packageHost,
+      hostFor,
+      lifecycle: packageLifecycle,
+      routes: routeRegistry,
+      onError: (id, error) => console.error(`[polyth] server package "${id}" failed to load`, error),
+    }));
+  if (discoveredPackages.length > 0) {
+    console.log(`[polyth] discovered server packages: ${discoveredPackages.join(", ")}`);
+  }
+  const warmPolicySubscription = services.get(SERVER_OPENCODE_RUNTIME_POLICY)?.onChange((spaceId) => warmPolicy.refresh(spaceId));
+  warmPolicy.refresh();
+
+  // --- session service composition. Package-owned dependencies come from the
+  // registry; optional seams degrade honestly when a package failed to load.
+  const gitService = svc<{ worktrees: NonNullable<SessionDeps["worktrees"]> }>("git");
+  const temporaryWorktreeBranches = svc<{
+    renameForSessionTitle(sessionId: string, title: string): Promise<string | null>;
+  }>("git.temporary-worktree-branches");
+  const terminalService = svc<NonNullable<SessionDeps["shell"]>>("terminal");
+  const commandService = svc<CommandExpandService>("commands");
+  // Attachment preparation seam (stat + `_inbox/*` materialize). Optional: if
+  // the files package failed to load it is absent and the session service
+  // raises a typed error for any staged `_inbox/*` attachment.
+  const attachmentGuard = svc<NonNullable<SessionDeps["attachments"]>>("files.attachments");
+  // Memory is an optional package-owned runtime seam. Resolve it only after
+  // package discovery; the adapter itself validates Space/project scope and
+  // fences policy revisions before session delivery.
+  const memoryService = svc<NonNullable<SessionDeps["memory"]>>("memory.runtime");
+  const workspaceInstructions = svc<NonNullable<SessionDeps["workspaceInstructions"]>>(
+    "files.workspace-instructions",
+  );
+  // Workspace policy is fail-closed when its opt-in setting is enabled:
+  // without the files-owned reader Polyth cannot establish that AGENTS.md is
+  // absent, so it must not admit a turn as though no repository instructions
+  // existed.
+  const requiredWorkspaceInstructions: NonNullable<SessionDeps["workspaceInstructions"]> =
+    workspaceInstructions ?? {
+      async read() {
+        throw Object.assign(new Error("Workspace instructions are unavailable"), { code: "unavailable" });
+      },
+    };
+  const autoAcceptStore = svc<NonNullable<SessionDeps["autoAccept"]>>("permissions.auto-accept");
+  const approvalDefaults = svc<NonNullable<SessionDeps["approvalDefaults"]>>("permissions.approval-defaults");
+  // The browser package owns its captures; resolve its service per call so a
+  // disabled or removed package simply means "no artifact".
+  type BrowserArtifacts = NonNullable<SessionDeps["browserArtifacts"]>;
+  const browserArtifacts: BrowserArtifacts = {
+    resolve: async (id, projectId) => await svc<BrowserArtifacts>("browser.artifacts")?.resolve(id, projectId) ?? null,
+    commit: async (ids, projectId) => { await svc<BrowserArtifacts>("browser.artifacts")?.commit?.(ids, projectId); },
+  };
+
+  const sessions = createSessionService({
+    store,
+    redactToolInput: (toolName, input) => {
+      const descriptor = capabilityContributions.list().map((item) => item.descriptor).find((item) =>
+        item.kind === "tool" && (item.name === toolName || toolName.endsWith(`__${item.name}`) || toolName.endsWith(`_${item.name}`)));
+      return descriptor?.kind === "tool" ? redactToolInput(input, descriptor.inputSchema) : input;
+    },
+    projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
+    harnesses: {
+      staticFeatures: (harnessId) =>
+        harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
+      displayName: (harnessId) =>
+        harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.descriptor.name,
+    },
+    admission: admissionBarrier,
+    isShuttingDown,
+    failedStartupCleanupAllowed,
+    outputCache,
+    modelCatalogStale: (signal) => { runtimeCatalog.modelsStale(signal); },
+    // Polyth-owned compaction summarizes with the session's own model, as a
+    // harness compaction would; the owning account's small model (else
+    // POLYTH_SMALL_MODEL) is the fallback (or goes first, when the session's
+    // model is out of quota).
+    compactionSummary: async ({ projection, runtime: sessionRuntime, model, systemPrompt, prompt, maxOutputTokens, smallModelFirst }) => {
+      const project = await projects.get(projection.projectId);
+      const userId = await sessionAccountId(projection, "compaction small model");
+      return summarizeSessionFirst({
+        ...(smallModelFirst ? { smallModelFirst: true } : {}),
+        ...(sessionRuntime ? { sessionRuntime } : {}),
+        sessionRoute: { ...(model ? { model } : {}), ...(projection.resolvedHarnessId ? { harnessId: projection.resolvedHarnessId } : {}) },
+        fallbackRoute: smallModelExecutionRoute(resolveSmallModel(userId), projection),
+        projectRuntime: (harnessId) => runtimes.forProject(projection.projectId, project?.path, harnessId),
+        run: async (rt, routeModel, requireDirect) => {
+          const budget = await smallModels.inputBudget(rt, routeModel, maxOutputTokens);
+          const { text } = await smallModels.complete(rt, {
+            cwd: projection.worktreePath ?? project?.path ?? process.cwd(),
+            systemPrompt,
+            prompt: prompt(budget),
+            ...(routeModel ? { model: routeModel } : {}),
+            maxOutputTokens,
+            timeoutMs: 180_000,
+            purpose: "compaction",
+            ...(requireDirect ? { requireDirect } : {}),
+          });
+          return text;
+        },
+      });
+    },
+    permissions: guardedPermissions(requireSvc<SessionDeps["permissions"]>("permissions"), (projectId) => projects.spaceOfProject(projectId)),
+    guardedSpace: spaceHasGuardedMember,
+    permissionScopeCheck: () => svc<NonNullable<ReturnType<NonNullable<SessionDeps["permissionScopeCheck"]>>>>("permissions.scope-check"),
+    instructionProvisioned: async (sessionId, harnessId) => {
+      if (!capabilityController) return false;
+      const proj = await store.projection(sessionId);
+      if (!proj) return false;
+      const project = await projects.get(proj.projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      return capabilityController.instructionState({
+        space,
+        spaceId: space.spaceId,
+        projectId: proj.projectId,
+        cwd: proj.worktreePath ?? project?.path ?? process.cwd(),
+        sessionId,
+        remote: Boolean(project?.remote),
+      }, harnessId);
+    },
+    cleanupSessionResources: async ({ projection, releaseExecution }) => {
+      if (projection.isolation?.kind !== "git-worktree" && !projection.workspace?.repositories.some((row) => row.isolation)) return;
+      const isolation = svc<{
+        cleanupForSessionDelete(
+          session: typeof projection,
+          release: (cwd: string) => Promise<void>,
+        ): Promise<void>;
+      }>("isolation");
+      if (!isolation) {
+        throw Object.assign(new Error("git isolation cleanup is unavailable"), {
+          code: "unsupported",
+        });
+      }
+      await isolation.cleanupForSessionDelete(projection, releaseExecution);
+    },
+    updateIsolatedWorkspace: async (sessionId, selection) => {
+      const isolation = svc<{ updateIsolatedWorkspace: NonNullable<SessionDeps["updateIsolatedWorkspace"]> }>("isolation");
+      if (!isolation) throw Object.assign(new Error("git isolation membership service is unavailable"), { code: "unsupported" });
+      return isolation.updateIsolatedWorkspace(sessionId, selection);
+    },
+    onSessionReleased: async ({ sessionId, projectId, cwd }) => {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      // Session occupancy ended. Physical-runtime targets stay until eviction.
+      capabilityController?.release({
+        spaceId: space.spaceId,
+        space,
+        projectId,
+        cwd,
+        sessionId,
+        remote: Boolean(project?.remote),
+      });
+    },
+    onHarnessTargetReleased: async ({ sessionId, projectId, cwd, harnessId }) => {
+      const project = await projects.get(projectId);
+      const space = spaceGateway.resolveInternal(project?.spaceId);
+      // Session released this harness's execution occupancy. Physical OpenCode
+      // overlays remain while sibling sessions still occupy the runtime.
+      capabilityController?.release({
+        spaceId: space.spaceId,
+        space,
+        projectId,
+        cwd,
+        sessionId,
+        remote: Boolean(project?.remote),
+      }, harnessId);
+    },
+    ...(gitService ? { worktrees: gitService.worktrees } : {}),
+    ...(terminalService ? { shell: terminalService } : {}),
+    // Legacy JSON is supplied only for one-way migration. New explicit
+    // choices live with the canonical session projection.
+    ...(autoAcceptStore ? { autoAccept: autoAcceptStore } : {}),
+    ...(approvalDefaults ? { approvalDefaults } : {}),
+    notify: {
+      attention: pushNotifier.attention,
+      personMessage: (input) => {
+        void deliverPersonMessage(input).catch((error) => {
+          console.error("[polyth] person message delivery failed", error);
+        });
+      },
+      permissionWaiting: (sessionId, requestId) => permissionWaiting.publish(sessionId, requestId),
+      turnStopped(sessionId, reason) {
+        pushNotifier.turnStopped(sessionId, reason);
+        publishTurnStopped(sessionId, reason);
+        void sessionWatches.kick(sessionId).catch((error) => {
+          console.error("[polyth] session watch kick failed", error);
+        });
+        void goalService()?.onSessionStopped(sessionId).catch((error) => {
+          console.error("[polyth] goal dependency settlement failed", error);
+        });
+      },
+      pauseEnded(sessionId, outcome) {
+        // Its watchers hear a Stop as the end; wakes held for it go out.
+        void sessionWatches.kick(sessionId)
+          .then(() => sessionWatches.kickTarget(sessionId))
+          .catch((error) => {
+            console.error("[polyth] session watch kick failed", error);
+          });
+        if (outcome === "stopped") {
+          void goalService()?.onSessionStopped(sessionId).catch((error) => {
+            console.error("[polyth] goal dependency settlement failed", error);
+          });
+        }
+      },
+    },
+    ...(attachmentGuard ? { attachments: attachmentGuard } : {}),
+    ...(memoryService ? { memory: memoryService } : {}),
+    workspaceInstructions: requiredWorkspaceInstructions,
+    purposeContext,
+    workspaceInstructionsEnabled: async () => {
+      try {
+        return (await behavior.workspaceInstructionsPolicy()).enabled;
+      } catch {
+        // A missing or unreadable setting must not turn an opt-in feature on.
+        return false;
+      }
+    },
+    // The hint points at agent.spawn, so it follows the subagent-routing policy.
+    contextPressureEnabled: async () => {
+      try {
+        return (await behavior.subagentPolicy()).enabled;
+      } catch {
+        return false;
+      }
+    },
+    browserArtifacts,
+    ...(commandService ? {
+      expand: async (projectId: string, text: string, actorUserId?: string) => {
+        const project = await projects.get(projectId);
+        const r = await commandService.expand(
+          project?.path ?? process.cwd(),
+          text,
+          project ? {
+            space: spaceGateway.resolveInternal(project.spaceId),
+            projectId,
+            ...(actorUserId ? { actorUserId } : {}),
+          } : undefined,
+        );
+        return {
+          text: r.text, raw: r.raw,
+          ...(r.agent ? { agent: r.agent } : {}),
+          ...(parseModel(r.model) ? { model: parseModel(r.model)! } : {}),
+        };
+      },
+    } : {}),
+    titleGenerator: {
+      policy: async (sessionId) =>
+        await services.get(SERVER_SESSION_TITLE_GENERATOR)?.policy(sessionId),
+      generate: async (input) =>
+        await services.get(SERVER_SESSION_TITLE_GENERATOR)?.generate(input),
+    },
+    hooks: {
+      beforeTurn: async (sessionId, events) => {
+        const compactionSeq = unrestoredCompactionSeq(events);
+        if (compactionSeq === null) return null;
+        const goal = await ensureGoalState(sessionId);
+        const objective = goal?.status === "active" ? goal.objective : undefined;
+        const pinned = activePinnedMessages(events);
+        if (!objective && pinned.length === 0) return null;
+        return {
+          recoveryContext: compactionRecoveryText({ compactionSeq, objective, pinned }),
+          compactionSeq,
+          goalRestored: objective !== undefined,
+          pinnedSourceSeqs: pinned.map((item) => item.sourceEventSeq),
+        };
+      },
+      runtimeEpochContext: async (sessionId, events) => {
+        const goal = await ensureGoalState(sessionId);
+        const objective = goal?.status === "active" ? goal.objective : undefined;
+        return {
+          ...(objective ? { objective } : {}),
+          pinned: activePinnedMessages(events),
+        };
+      },
+      onTurnCompleted: (sessionId, text) => {
+        void (async () => {
+          const goals = goalService();
+          const state = await ensureGoalState(sessionId);
+          if (state?.status === "active") {
+            await goals?.onTurnCompleted(sessionId, text);
+            if (goals?.get(sessionId)?.status === "completed") {
+              await trackWorkflow()?.completeForSession(sessionId);
+            }
+          }
+          // An idle child with its own active goal is still doing delegated
+          // work until its auditor has decided or admitted a continuation.
+          await goals?.onSessionStopped(sessionId);
+        })().catch((err: unknown) => console.error("[polyth] goal/track completion failed", err));
+        void publishTurnCompleted(sessionId, text);
+        const isolation = svc<{ onTurnCompleted(sessionId: string, events: readonly import("@polyth/contracts").SessionEvent[]): Promise<unknown> }>("isolation");
+        if (isolation) {
+          void store.events(sessionId)
+            .then((events) => isolation.onTurnCompleted(sessionId, events))
+            .catch((err: unknown) => console.error("[polyth] isolation turn completion failed", err));
+        }
+      },
+      onUsage: (sessionId, tokens) => goalService()?.recordUsage(sessionId, { ...tokens, cacheRead: 0, cacheWrite: 0 }),
+      onSessionTitleChanged: async (sessionId, title) => {
+        await temporaryWorktreeBranches?.renameForSessionTitle(sessionId, title);
+      },
+    },
+  });
+  requestAgentToolPermission = sessions.requestAgentToolPermission.bind(sessions);
+  resolveAgentToolSession = sessions.resolveAgentToolSession.bind(sessions);
+  sessionsImpl = sessions;
+  // A chat that stops being private drops its owner's personal MCP servers
+  // from a live runtime (§14.6) through the safe idle-release path.
+  personalMcpReprovision = createPersonalMcpReprovisioner({
+    personalMcpLoaded: (spaceId, sessionId) => capabilityController?.personalMcpLoaded(spaceId, sessionId) ?? false,
+    forgetPersonalMcp: (spaceId, sessionId) => capabilityController?.forgetPersonalMcp(spaceId, sessionId),
+    releaseIfIdle: (sessionId) => sessions.releaseRuntimeIfIdle?.(sessionId) ?? Promise.resolve({ released: false }),
+  });
+  // Operator "restart runtime" for one harness. Shared workspace runtimes go
+  // through the pending-config barrier (release proof, generation fence,
+  // session reconcile); per-session runtimes restart each live lease through
+  // the session restart transaction.
+  provideService("harness.runtime.restart", async (
+    space: import("@polyth/contracts").SpaceContext,
+    harnessId: string,
+  ): Promise<{ restarted: number; failed: number }> => {
+    const provider = harnesses.get(harnessId);
+    if (!provider) throw Object.assign(new Error("harness not found"), { code: "not-found" });
+    if (provider.runtimeLifetime === "workspace") {
+      // ponytail: restarts every shared runtime, not only this Space's; scope by pool key if hosted deployments need it.
+      if (space.deployment !== "local-trusted") {
+        throw Object.assign(new Error("shared runtime restart is local-only"), { code: "forbidden" });
+      }
+      return { restarted: (await pendingOpenCode.applyAndRestart({ force: true })).restarted, failed: 0 };
+    }
+    const results = await Promise.allSettled(
+      harnessPool.liveSessionIds(space.spaceId, harnessId).map((id) => sessions.restartRuntime!(id)),
+    );
+    const failed = results.filter((result) => result.status === "rejected");
+    for (const result of failed) console.warn("[polyth] harness runtime restart failed", (result as PromiseRejectedResult).reason);
+    return { restarted: results.length - failed.length, failed: failed.length };
+  });
+  reconcileRuntimeForConfigRestart = (sessionId, runtime, expected) =>
+    sessions.reconcileForRuntimeRestart(sessionId, runtime, expected);
+  canEvictRuntime = (runtime, inspectionRuntime, expected, liveStreamSessionIds) =>
+    sessions.canEvictRuntime(
+      runtime,
+      inspectionRuntime,
+      expected,
+      liveStreamSessionIds,
+    );
+  root.provide(CAP.sessions, sessions);
+
+  // Shared utility-model helpers used by explicit note/task actions.
+  // Prompt improvement, next action and idle recap belong to the optional recap package.
+  const assistTranscript = async (sessionId: string): Promise<string> => {
+    const msgs = deriveMessages(await store.events(sessionId));
+    const lines: string[] = [];
+    for (const m of msgs.slice(-40)) {
+      if (m.role === "tool") continue;
+      const text = m.parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text).join("\n").trim();
+      if (text) lines.push(`${m.role === "user" ? "User" : "Assistant"}: ${text}`);
+    }
+    return lines.join("\n\n").slice(-16_000);
+  };
+  const assistComplete = async (
+    sessionId: string,
+    prompt: string,
+    maxOutputTokens = 1_024,
+    userId?: string,
+  ): Promise<string> => {
+    const proj = await store.projection(sessionId);
+    const project = proj ? await projects.get(proj.projectId) : null;
+    // Prefer the requester's configured small model, then the session's own
+    // known-good model. Direct provider transport is tried first with a session fallback.
+    const route = smallModelExecutionRoute(resolveSmallModel(userId), proj);
+    const rt = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, route.harnessId);
+    const { text } = await smallModels.complete(rt, {
+      cwd: project?.path ?? process.cwd(),
+      prompt,
+      ...(route.model ? { model: route.model } : {}),
+      maxOutputTokens,
+      timeoutMs: 90_000,
+      purpose: "assist",
+    });
+    return text;
+  };
+  // --- spec-driven track orchestration lives in the knowledge package, which
+  // publishes its workflow under the generic `tracks.workflow` key. The
+  // goal-completion hook above resolves it lazily.
+
+  // --- Access control: OFF unless a password is configured. When on,
+  // every /api + /ws answer requires the polyth_auth session cookie; login is
+  // rate-limited per client IP; sessions persist in data/auth.json so devices
+  // stay remembered across restarts.
+  const auth = createAuthService({
+    file: `${dataDir}/auth.json`,
+    envPassword: process.env.POLYTH_UI_PASSWORD,
+    localhostOptional: localhostAuthOptional,
+    cookieName: `polyth_auth_p${port}`,
+  });
+  uiAuthentication = auth;
+  notificationAccountExists = (userId) => userId === "usr_owner" || auth.hasCredential(userId);
+  attachLivePairedResolver = (resolver) => auth.attachPairedDeviceResolver(resolver);
+  for (const resolver of queuedPairedResolvers) auth.attachPairedDeviceResolver(resolver);
+
+  const registerPackageRoute = (
+    id: string,
+    handler: RouteHandler,
+    hooks: { onEnable?: () => void | Promise<void>; onDisable?: () => void | Promise<void> } = {},
+  ): void => {
+    let route: Disposable | null = null;
+    packageLifecycle.register(id, {
+      async onEnable() {
+        await hooks.onEnable?.();
+        route = routeRegistry.add(id, handler);
+      },
+      async onDisable() {
+        await route?.dispose();
+        route = null;
+        try {
+          await hooks.onDisable?.();
+        } catch (error) {
+          route = routeRegistry.add(id, handler);
+          throw error;
+        }
+      },
+    });
+  };
+  const settingsRoute = settingsRoutes({
+    behavior, mcp,
+    clientSettings,
+    broadcastClientSettings: (userId, state) => broadcast.clientSettingsChanged?.(userId, state),
+    saveRole: async (name, role) => {
+      await configApplier.applyAgent(name, role);
+      const current = (await runtimeCatalog.agents()).find((agent) =>
+        agent.name === name && (!agent.harnessId || agent.harnessId === "opencode"));
+      const saved = {
+        harnessId: "opencode",
+        name,
+        ...(current?.description ? { description: current.description } : {}),
+        mode: role.mode,
+        ...(role.prompt ? { prompt: role.prompt } : {}),
+        ...(role.model ? { model: role.model } : {}),
+      };
+      runtimeCatalog.patchAgent(saved);
+      return saved;
+    },
+    systemInfo: (local) => ({
+      version: "0.1.0",
+      applicationUrl: `http://${opts.hostname ?? "127.0.0.1"}:${port}`,
+      tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
+      dataDirLabel: local ? dataDir : "Polyth data directory",
+      capabilities: allCapabilities(),
+    }),
+  });
+
+  sessionsRef = sessions;
+  // One startup owner resumes durable work; persisted GETs remain read-only.
+  setImmediate(() => { void sessions.recoverPendingWork().catch((error) => console.error("[polyth] session recovery failed", error)); });
+
+  // Pristine sessions (never prompted, no draft/queue/child) are disposable
+  // garbage left by abandoned or failed startups. Reclaim the accumulated ones
+  // at boot and keep sweeping so a long-lived server never grows a sidebar of
+  // empty `unknown` rows.
+  let pristineSweepFlight: Promise<void> | undefined;
+  const runPristineSweep = (): Promise<void> => {
+    if (isShuttingDown()) return Promise.resolve();
+    pristineSweepFlight ??= (async () => {
+      try {
+        for (const space of spaceGateway.store.allSpaces()) {
+          if (isShuttingDown()) return;
+          try {
+            const result = await sweepPristineSessions({
+              sessions: spaceServices(spaceGateway.resolveInternal(space.id)).sessions,
+              allowDelete: failedStartupCleanupAllowed,
+            });
+            if (result.deleted.length > 0) {
+              console.log(`[polyth] pristine session sweep removed ${result.deleted.length} empty session(s) in space ${space.id}`);
+            }
+            for (const failure of result.failed) {
+              console.warn(`[polyth] pristine session sweep kept ${failure.id} (${failure.code})`);
+            }
+          } catch (error) {
+            console.warn(`[polyth] pristine session sweep failed for space ${space.id}`, error);
+          }
+        }
+      } catch (error) {
+        // Garbage collection must never fail boot or shutdown.
+        console.warn("[polyth] pristine session sweep failed", error);
+      }
+    })().finally(() => {
+      pristineSweepFlight = undefined;
+    });
+    return pristineSweepFlight;
+  };
+  await runPristineSweep();
+  const pristineSweepTimer = setInterval(() => {
+    void runPristineSweep();
+  }, PRISTINE_SESSION_SWEEP_INTERVAL_MS);
+  pristineSweepTimer.unref();
+
+  // Server-internal packages (no packages/<dir> counterpart) stay hand-wired.
+  registerPackageRoute("projects", projectRoutes(
+    spaceServices,
+    undefined,
+    (spaceId, projectId, settings) => broadcast.projectPresentationChanged?.(spaceId, projectId, settings),
+  ));
+  registerPackageRoute("mcp", async (request) =>
+    request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
+
+  const staticCoreRoutes: RouteHandler[] = [
+    async (request) => agentTools.route(request),
+    authRoutes(auth, {
+      onAccountRemoved: async (userId) => {
+        // Purge all durable delivery ownership before removing the credential;
+        // recreating the same stable account id must never adopt stale routes.
+        await notifications.removeAccount(userId);
+        push.removeAccount(userId);
+        await nativePush.removeAccount(userId);
+        // The person's connected accounts, secrets and enablement go with them.
+        people.removePerson(userId);
+      },
+    }),
+    spaceRoutes({
+      store: spaceGateway.store,
+      resolver: spaceGateway.resolver,
+      audit: spaceGateway.audit,
+      setActiveSpaceCookie: (rc, spaceId) => rc.res.setHeader(
+        "set-cookie",
+        spaceCookieHeader({
+          name: spaceGateway.cookieName,
+          spaceId,
+          secure: rc.ingress.kind === "public-http" ? rc.ingress.secure : true,
+        }),
+      ),
+    }),
+    opencodePendingRoutes(pendingOpenCode),
+    packageRoutes(packageRegistry, createPackageResidue({
+      // A person's own package data and secrets outlive a removed package too.
+      roots: packageDataRoots,
+      installedIds: () => {
+        const ids = new Set<string>([
+          ...packageRegistry.list().map((pkg) => pkg.id),
+          ...discoveredPackageManifests.map((pkg) => pkg.id),
+          ...(bundledServerPackages ?? []).map((pkg) => pkg.id),
+          ...(svc<PluginRegistry>("plugins.managed")?.list().map((pkg) => pkg.id) ?? []),
+        ]);
+        // A managed install's home outlives a disabled plugins package; its
+        // data is never residue while the install exists.
+        try {
+          for (const entry of readdirSync(join(dataDir, "plugins"), { withFileTypes: true })) {
+            if (entry.isDirectory()) ids.add(entry.name);
+          }
+        } catch { /* no managed installs */ }
+        return ids;
+      },
+    })),
+    contextRoutes(spaceServices),
+    orgRoutes({ spaces: spaceServices, store }),
+    assistRoutes({
+      projection: (sessionId) => store.projection(sessionId),
+      distill: async (space, sessionId) => {
+        const transcript = await assistTranscript(sessionId);
+        if (!transcript.trim()) {
+          throw Object.assign(new Error("nothing to distill — the session has no messages"), { code: "invalid-input" });
+        }
+        return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript), 1_024, space.userId));
+      },
+      taskBrief: async (space, sessionId: string) => {
+        const messages = deriveMessages(await store.events(sessionId));
+        const latest = [...messages].reverse().find((message) => message.role === "user");
+        const prompt = latest?.parts
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text).join("\n").trim();
+        if (!prompt) throw Object.assign(new Error("nothing to summarize — the session has no user prompt"), { code: "invalid-input" });
+        const proj = await store.projection(sessionId);
+        const project = proj ? await projects.get(proj.projectId) : null;
+        const route = smallModelExecutionRoute(resolveSmallModel(space.userId), proj);
+        const runtime = await runtimes.forProject(proj?.projectId ?? "__default__", project?.path, route.harnessId);
+        const { text: brief } = await smallModels.complete(runtime, {
+          cwd: project?.path ?? process.cwd(),
+          ...(route.model ? { model: route.model } : {}),
+          maxOutputTokens: 128,
+          timeoutMs: 90_000,
+          prompt: [
+            "Summarize this user task in at most 20 words. Return only the summary, no label or punctuation flourish.",
+            "<prompt>", prompt.slice(0, 12_000), "</prompt>",
+          ].join("\n"),
+        });
+        return brief.trim().split(/\s+/).slice(0, 20).join(" ");
+      },
+    }),
+    sessionRetentionRoutes(spaceServices),
+    promptHistoryRoutes({ spaces: spaceServices, store }),
+    sharingRoutes(createSessionSharingService({
+      projection: (sessionId) => store.projection(sessionId),
+      accessChanged: (projections, formerReaders) => broadcast.sessionAccessChanged?.(projections, formerReaders),
+      hasPersonalMcpServers: (userId) => mcp.hasPersonalServers(userId),
+      leftPrivate: (spaceId, chats) => personalMcpReprovision?.leftPrivate(spaceId, chats),
+    })),
+    agentSessionRoutes({
+      spaces: spaceServices,
+      store,
+      capabilities: () => allCapabilities(),
+      goals: () => svc<AgentGoalService>("goals"),
+      version: "0.1.0",
+      onSessionCreated: async (sessionId, space, parentSessionId) => {
+        if (parentSessionId) await notifications.inheritSessionRecipient(parentSessionId, sessionId, space);
+        else await notifications.registerSessionRecipient(sessionId, space);
+      },
+      onSessionsImported: async (sessionIds, space) => {
+        for (const sessionId of sessionIds) await notifications.registerSessionRecipient(sessionId, space);
+      },
+      onSessionForked: async (parentSessionId, sessionId, space) => {
+        // A fork belongs to whoever forked it: someone forking another
+        // person's shared chat gets its notifications, not the source's owner.
+        if (!await notifications.inheritSessionRecipient(parentSessionId, sessionId, space)) {
+          await notifications.registerSessionRecipient(sessionId, space);
+        }
+      },
+    }),
+    queueRoutes(spaceServices),
+    runtimeEpochRoutes(spaceServices),
+    runtimeDiagnosticsRoutes(runtimeDiagnostics),
+    pushRoutes(push),
+    nativePushRoutes(nativePush),
+    notificationRoutes(notifications),
+    browseRoutes(),
+    iconifyRoutes(),
+    releasesRoutes(),
+    async (request) => {
+      if (request.path.startsWith("/api/mcp/") || request.path.startsWith("/api/plugins")) return false;
+      return settingsRoute(request);
+    },
+  ];
+  const routes: RouteHandler[] = [...staticCoreRoutes, routeRegistry.handler];
+
+  const allCapabilities = () => [...SERVER_CAPABILITY_IDS];
+
+  const httpHandler = createHttpHandler({
+    harnessAccess,
+    spaces: spaceGateway, runtimes, routes, visibility, auth, catalog: runtimeCatalog, eventWaiters,
+    capabilities: allCapabilities,
+    webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
+    packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
+    version: "0.1.0",
+    remotePolicies: () => routeRegistry.policies(),
+    listenerId: "public",
+    admission: httpAdmission,
+    notificationRecipients: {
+      created: async (sessionId, account) => { await notifications.registerSessionRecipient(sessionId, account); },
+      forked: async (parentSessionId, sessionId, account) => {
+        if (!await notifications.inheritSessionRecipient(parentSessionId, sessionId, account)) {
+          await notifications.registerSessionRecipient(sessionId, account);
+        }
+      },
+    },
+  });
+  httpHandlerRef = httpHandler;
+  const publicProxies = createProxyTrust();
+  const server = createPublicHttpServer(httpHandler, "public", publicProxies);
+  publicServerForSurface = server;
+  const controlSocketPath = process.env.POLYTH_CONTROL_SOCKET
+    ?? (process.platform === "win32"
+      ? `\\\\.\\pipe\\polyth-control-${createHash("sha256").update(dataDir).digest("hex").slice(0, 12)}`
+      : join(dataDir, "control.sock"));
+  if (process.platform !== "win32") rmSync(controlSocketPath, { force: true });
+  const controlServer = createInternalControlServer(httpHandler);
+  live = createWsGateway(
+    sessions,
+    svc<BrowserForWs>("browser"),
+    svc<DictationForWs>("dictation"),
+    spaceGateway,
+  );
+  // WebSocket upgrades bypass the request handler, so they repeat the
+  // listener's one trusted-proxy transport decision instead of inheriting it.
+  const publicIngress = (req: import("node:http").IncomingMessage) => {
+    const proxied = publicProxies.secure(req);
+    return publicHttpIngress(req, { listenerId: "public", secure: proxied, proxied });
+  };
+  // Command-line tokens are HTTP-only (long-poll replaces live sockets), so a
+  // bearer credential never holds a WebSocket open past its revocation.
+  const wsAuthorize = (req: import("node:http").IncomingMessage) => {
+    const resolution = auth.resolve(authRequestLike(req), publicIngress(req));
+    return resolution.authenticated && resolution.principal.kind !== "access-token";
+  };
+  const wsIdentity = (req: import("node:http").IncomingMessage) =>
+    auth.resolve(authRequestLike(req), publicIngress(req));
+  httpServerContext = {
+    server,
+    listenerId: "public",
+    dispatch: httpHandler,
+    resolve: (request, ingress) => auth.resolve(request, ingress),
+    authorize: wsAuthorize,
+    identity: wsIdentity,
+    refreshPrincipal: (principal) => principal.kind === "paired-device" ? null : principal,
+    pairedSockets,
+  };
+  attachHttpChannels(httpServerContext);
+  await packageLifecycle.startEnabled(packageRegistry);
+  try {
+    await refreshSafeBehavior();
+  } catch (err) {
+    console.warn("[polyth] initial capability reconcile skipped", err);
+  }
+  // User mutations from this point stage until the unified apply/restart
+  // action. Boot reconciliation above wrote immediately so a no-op MCP apply
+  // cannot enqueue a spurious pending restart.
+  configApplier.enableStaging();
+  // Providers register in package lifecycle hooks; warm only after discovery.
+  void runtimeCatalog.models().catch(() => {});
+
+  await new Promise<void>((res) => opts.hostname
+    ? server.listen(port, opts.hostname, res)
+    : server.listen(port, res));
+  const publicAddress = server.address();
+  const publicListeningPort = publicAddress && typeof publicAddress !== "string"
+    ? publicAddress.port
+    : port;
+  await new Promise<void>((res, reject) => {
+    controlServer.once("error", reject);
+    controlServer.listen(controlSocketPath, () => {
+      controlServer.off("error", reject);
+      res();
+    });
+  });
+  if (process.platform !== "win32") chmodSync(controlSocketPath, 0o600);
+  console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${publicListeningPort}  data=${dataDir}`);
+  console.log(`[polyth] agent control on ${controlSocketPath}`);
+  const stopStallWatch = watchEventLoopStalls();
+  void sessionWatches.recover().catch((error) => {
+    console.error("[polyth] session watch recovery failed", error);
+  });
+
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = (): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+    beginShutdown();
+    // Long-poll readers return their (empty) page now instead of holding the
+    // HTTP drain open for their full wait.
+    eventWaiters.close();
+    warmPolicySubscription?.dispose();
+    warmPolicy.dispose();
+    clearInterval(pristineSweepTimer);
+    // Revoke Browser's self-origin exception before the listener can release
+    // its port to another local process. The service also checks
+    // `server.listening`, covering callers that close the returned server
+    // outside the normal shutdown path.
+    publicServerForSurface = null;
+    // Fence new turn admission first, then let every accepted runtime turn
+    // finish before disposing its OpenCode process. This keeps watcher-driven
+    // source reloads from truncating unrelated agent sessions.
+    shutdownPromise = admissionBarrier.drain(async () => {
+      // Ingress owners first, then HTTP drain, then package/store disposal.
+      // Destroying a TCP socket is not handler completion: admission tracks
+      // request JS and fences leftovers before services go away.
+      live?.close();
+      await runtimeStorageMaintenance.dispose();
+      await packageLifecycle.stopIngress();
+      httpAdmission.stop();
+      await Promise.all([
+        drainAndCloseServer(controlServer, { timeoutMs: HTTP_DRAIN_MS }),
+        drainAndCloseServer(server, {
+          timeoutMs: HTTP_DRAIN_MS,
+          untilIdle: (ms) => httpAdmission.waitIdle(ms),
+        }),
+      ]);
+      httpAdmission.fence();
+      // Leave the control socket path for the next boot to remove. An older
+      // graceful shutdown can finish after a replacement server has already
+      // claimed this path; unlinking here would silently disable the new
+      // control socket.
+      for (const descriptor of packageRegistry.list().toReversed()) {
+        await packageLifecycle.disable(descriptor.id).catch((error: unknown) => {
+          console.error(`[polyth] package "${descriptor.id}" failed to disable during shutdown`, error);
+        });
+      }
+      // Package services hold OS resources even while their routes are disabled
+      // (a disabled package's onDisable never ran), so shutdown closes them
+      // through the registry. Every call is idempotent.
+      svc<{ stop(): void }>("agents")?.stop();
+      svc<{ stop(): void }>("usage")?.stop();
+      svc<{ close(): void }>("knowledge")?.close();
+      await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
+      await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
+      await pristineSweepFlight;
+      await sessionWatches.close();
+      await sessions.flushPendingStreams().catch((error) => console.error("[polyth] stream flush failed", error));
+      sessions.dispose();
+      personalMcpReprovision?.dispose();
+      const physicalErrors = await openCodeRuntimes.disposeAll({ force: true }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      const harnessErrors = await harnessPool.dispose().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      if (physicalErrors) {
+        console.error("[polyth] runtime physical disposal failed during shutdown", physicalErrors);
+      }
+      if (harnessErrors) {
+        console.error("[polyth] harness runtime disposal failed during shutdown", harnessErrors);
+      }
+      capabilityController?.dispose();
+      await svc<SshTransportService>("ssh")?.disconnectAll().catch(() => {});
+      await root.dispose();
+      await store.close();
+      await writerLease.release();
+      stopStallWatch();
+    });
+    return shutdownPromise;
+  };
+  process.on("SIGINT", () => void shutdown().then(() => process.exit(0)));
+  process.on("SIGTERM", () => void shutdown().then(() => process.exit(0)));
+  runtimeStorageMaintenance.start();
+  return { server, sessions, shutdown };
+  } catch (error) {
+    await writerLease.release();
+    throw error;
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  void boot();
+}

@@ -1,0 +1,10 @@
+# TLS front for compose.proxy.yml. Caddy obtains a public certificate for
+# POLYTH_DOMAIN automatically. Set POLYTH_TLS="tls internal" for a LAN/test
+# host without public DNS (browsers will ask you to trust Caddy's local CA).
+{$POLYTH_DOMAIN} {
+	{$POLYTH_TLS}
+	encode zstd gzip
+	# Caddy forwards the original Host and sets X-Forwarded-Proto=https;
+	# Polyth honours them only from POLYTH_TRUSTED_PROXIES.
+	reverse_proxy {$POLYTH_UPSTREAM}
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@polyth/recap",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Session Assist",
+      "description": "Key callouts after each reply (action items, risks, failed checks, decisions, manual steps), prompt improvement, magic next prompt, and idle session recap.",
+      "core": false,
+      "enabled": false,
+      "maturity": "beta",
+      "settingsGroup": "Workspace",
+      "icon": "recap",
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {
+        "recommended": false
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

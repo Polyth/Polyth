@@ -1,0 +1,1337 @@
+/* Custom actions (package `custom-action`). Every rule hangs off a package
+ * root: `.custom-actions` (window, Settings, panel), `.ca-bar` (toolbars) or a
+ * `ca-*` overlay root (editor, run sheet, icon picker). The host owns window
+ * chrome, scrolling and overlay geometry; layout follows the container. */
+
+@property --ca-sweep {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* ---- Tints ------------------------------------------------------------- */
+
+:is(.ca-glyph, .ca-icon-picker, .ca-swatch) { --ca-tint: var(--accent); }
+:is(.ca-glyph, .ca-icon-picker, .ca-swatch)[data-color="blue"] { --ca-tint: var(--blue); }
+:is(.ca-glyph, .ca-icon-picker, .ca-swatch)[data-color="green"] { --ca-tint: var(--green); }
+:is(.ca-glyph, .ca-icon-picker, .ca-swatch)[data-color="amber"] { --ca-tint: var(--amber); }
+:is(.ca-glyph, .ca-icon-picker, .ca-swatch)[data-color="red"] { --ca-tint: var(--red); }
+:is(.ca-glyph, .ca-icon-picker, .ca-swatch)[data-color="purple"] { --ca-tint: var(--purple); }
+:is(.ca-glyph, .ca-icon-picker, .ca-swatch)[data-color="neutral"] { --ca-tint: var(--text-dim); }
+
+/* ---- Glyph: the action's identity tile ---------------------------------- */
+
+.ca-glyph {
+  --ca-glyph-size: 36px;
+  --ca-glyph-radius: var(--radius-card);
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  inline-size: var(--ca-glyph-size);
+  block-size: var(--ca-glyph-size);
+  border-radius: var(--ca-glyph-radius);
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--ca-tint) 30%, var(--elevated)),
+      color-mix(in srgb, var(--ca-tint) 13%, var(--elevated)));
+  color: var(--ca-tint);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ca-tint) 26%, transparent),
+    var(--inset-hi);
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease);
+}
+.ca-glyph[data-size="sm"] { --ca-glyph-size: 28px; --ca-glyph-radius: var(--radius-control); }
+.ca-glyph[data-size="lg"] { --ca-glyph-size: 52px; --ca-glyph-radius: var(--radius-sheet); }
+.ca-glyph[data-size="xl"] { --ca-glyph-size: 72px; --ca-glyph-radius: calc(var(--radius-sheet) * 1.35); }
+.ca-glyph[data-size="xl"] .ui-icon {
+  inline-size: calc(var(--icon-xl) * 1.4);
+  block-size: calc(var(--icon-xl) * 1.4);
+}
+.ca-glyph[data-color="neutral"] {
+  background: linear-gradient(160deg, var(--raised), var(--elevated));
+  color: var(--text-dim);
+  box-shadow: inset 0 0 0 1px var(--border-soft), var(--inset-hi);
+}
+
+/* A toolbar glyph is just the tinted mark; the button paints the hover. */
+.ca-glyph[data-size="bare"] {
+  --ca-glyph-size: auto;
+  inline-size: auto;
+  block-size: auto;
+  background: none;
+  box-shadow: none;
+  border-radius: var(--radius-round);
+}
+.ca-glyph[data-size="bare"][data-color="neutral"] { color: currentColor; }
+
+/* Running: a sweep travels around the tile. */
+.ca-glyph-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: calc(var(--ca-glyph-radius) + 3px);
+  padding: 2px;
+  background: conic-gradient(from var(--ca-sweep),
+    transparent 0deg,
+    color-mix(in srgb, var(--ca-tint) 40%, transparent) 70deg,
+    var(--ca-tint) 150deg,
+    transparent 160deg);
+  -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black 0 0) content-box exclude, linear-gradient(black 0 0);
+  animation: ca-sweep 1.15s linear infinite;
+  pointer-events: none;
+}
+.ca-glyph[data-size="bare"] .ca-glyph-ring { inset: -6px; border-radius: var(--radius-round); }
+.ca-glyph:is([data-state="running"], [data-state="chat"], [data-state="starting"]) {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ca-tint) 40%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--ca-tint) 10%, transparent),
+    var(--inset-hi);
+}
+.ca-glyph[data-size="bare"]:is([data-state="running"], [data-state="chat"], [data-state="starting"]) { box-shadow: none; }
+
+/* Outcome marks: drawn, not icons, so they stay crisp at any size. */
+.ca-glyph-badge {
+  position: absolute;
+  inset-inline-end: -5px;
+  inset-block-end: -5px;
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--panel);
+  animation: ca-pop var(--motion-normal) var(--motion-ease) both;
+  pointer-events: none;
+}
+.ca-glyph-badge[data-tone="success"] { background: var(--green); }
+.ca-glyph-badge[data-tone="danger"] { background: var(--red); }
+.ca-glyph-badge[data-tone="success"]::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 6px;
+  inset-block-start: 3.5px;
+  inline-size: 4px;
+  block-size: 8px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.ca-glyph-badge[data-tone="danger"]::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 8px;
+  inset-block-start: 4px;
+  inline-size: 2px;
+  block-size: 6px;
+  border-radius: var(--radius-round);
+  background: var(--red-ink);
+  box-shadow: 0 8px 0 0 var(--red-ink);
+}
+.ca-glyph[data-size="bare"] .ca-glyph-badge {
+  inset-inline-end: -5px;
+  inset-block-start: -4px;
+  inset-block-end: auto;
+  inline-size: 9px;
+  block-size: 9px;
+}
+.ca-glyph[data-size="bare"] .ca-glyph-badge::after { display: none; }
+.ca-glyph[data-size="sm"] .ca-glyph-badge { inline-size: 12px; block-size: 12px; inset-inline-end: -3px; inset-block-end: -3px; }
+.ca-glyph[data-size="sm"] .ca-glyph-badge::after { display: none; }
+
+@keyframes ca-sweep { to { --ca-sweep: 360deg; } }
+@keyframes ca-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes ca-rise {
+  from { transform: translateY(6px) scale(0.98); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes ca-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ca-caret { 50% { opacity: 0; } }
+
+/* ---- Window / Settings / panel root ------------------------------------ */
+
+.custom-actions {
+  container: custom-actions / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  inline-size: 100%;
+  max-inline-size: 64rem;
+  min-inline-size: 0;
+  margin-inline: auto;
+  padding: var(--space-3) var(--space-4) var(--space-6);
+}
+.custom-actions[data-variant="settings"] { padding: 0; gap: var(--space-4); max-inline-size: none; }
+
+.custom-actions .ca-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+.custom-actions .ca-toolbar-spacer { flex: 1; }
+.custom-actions .ca-toolbar > .ui-btn { flex: none; }
+.custom-actions .ca-project-picker { min-inline-size: 0; max-inline-size: 100%; }
+@media (pointer: coarse) {
+  .custom-actions .ca-project-picker { min-block-size: 44px; }
+}
+
+.custom-actions .ca-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-inline-size: 0;
+  animation: ca-fade var(--motion-surface) var(--motion-ease) both;
+}
+.custom-actions .ca-section-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: var(--font-meta-lh);
+}
+.custom-actions .ca-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+.custom-actions .ca-section-heading > span:not([class]) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.custom-actions .ca-section-heading :is(.project-glyph, svg) { flex: none; color: var(--muted); opacity: 0.8; }
+.custom-actions .ca-section-count {
+  flex: none;
+  min-inline-size: 1.5em;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ---- Launcher grid and tiles -------------------------------------------- */
+
+.custom-actions .ca-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  grid-auto-rows: 1fr;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+.custom-actions .ca-cell > .ca-item { block-size: 100%; }
+.custom-actions .ca-cell {
+  position: relative;
+  min-inline-size: 0;
+  animation: ca-rise var(--motion-surface) var(--motion-ease) both;
+  animation-delay: calc(var(--ca-i, 0) * 22ms);
+}
+.custom-actions .ca-cell[data-dragging] { opacity: 0.35; }
+.custom-actions .ca-skeleton { block-size: 5.5rem; border-radius: var(--radius-card); }
+
+.ca-item { position: relative; min-inline-size: 0; }
+
+.ca-press {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ca-press[aria-disabled="true"] { cursor: default; }
+.ca-press:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* A shortcut tile: one fixed-height card per action, glyph over name. The
+ * tint comes from the glyph; run state shows as a hairline and the status
+ * line, never as a different size. */
+.ca-item[data-variant="tile"] .ca-press {
+  --ca-tile-edge: var(--hair);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: max(6rem, var(--hit-min));
+  padding: var(--space-2) var(--space-3) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  box-shadow: inset 0 0 0 1px var(--ca-tile-edge);
+  text-align: start;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+.ca-item[data-variant="tile"] .ca-glyph { --ca-glyph-size: 36px; }
+.ca-item[data-variant="tile"][data-state="running"] .ca-press,
+.ca-item[data-variant="tile"][data-state="chat"] .ca-press,
+.ca-item[data-variant="tile"][data-state="starting"] .ca-press { --ca-tile-edge: color-mix(in srgb, var(--accent) 45%, transparent); }
+.ca-item[data-variant="tile"]:is([data-state="done"], [data-state="opened"]) .ca-press { --ca-tile-edge: color-mix(in srgb, var(--green) 50%, transparent); }
+.ca-item[data-variant="tile"][data-state="failed"] .ca-press { --ca-tile-edge: color-mix(in srgb, var(--red) 55%, transparent); }
+@media (hover: hover) {
+  .ca-item[data-variant="tile"] .ca-press:not([aria-disabled="true"]):hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.ca-item[data-variant="tile"] .ca-press:not([aria-disabled="true"]):active:where(:not(:disabled)) { transform: scale(0.97); background: var(--surface-overlay-hover); }
+.ca-item[data-variant="tile"] .ca-press[aria-disabled="true"] .ca-glyph { filter: saturate(0.4); opacity: 0.6; }
+.ca-item[data-variant="tile"] .ca-item-text { justify-items: start; margin-block-start: auto; }
+.ca-item[data-variant="tile"] .ca-item-name { -webkit-line-clamp: 2; }
+
+/* The trailing "New action" tile: same footprint, dashed, no tint. */
+.custom-actions .ca-add-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: max(6rem, var(--hit-min));
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--hair-strong);
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+.custom-actions .ca-add-label { font-size: var(--font-meta); font-weight: 600; line-height: var(--font-meta-lh); }
+.custom-actions .ca-add-mark { display: grid; place-items: center; inline-size: 36px; block-size: 36px; }
+@media (hover: hover) {
+  .custom-actions .ca-add-tile:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.custom-actions .ca-add-tile:active:where(:not(:disabled)) { transform: scale(0.97); }
+.custom-actions .ca-add-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.ca-item-text {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+.ca-item-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  max-inline-size: 100%;
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+.ca-item-meta {
+  overflow: hidden;
+  max-inline-size: 100%;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--motion-normal) var(--motion-ease);
+}
+.ca-item-meta[data-live] { color: var(--text-dim); }
+.ca-item[data-state="failed"] .ca-item-meta { color: var(--red); }
+.ca-item:is([data-state="done"], [data-state="opened"]) .ca-item-meta { color: var(--green-on-wash); }
+
+/* The ⋯ menu sits on the glyph's corner: revealed by a mouse or the keyboard,
+ * always shown while rearranging. Touch opens the same menu with a long press. */
+.ca-item .ca-more {
+  position: absolute;
+  inset-block-start: var(--space-1);
+  inset-inline-end: var(--space-1);
+  /* The primitive's transparent ::after carries the touch target. */
+  min-inline-size: 0;
+  min-block-size: 0;
+  border-radius: var(--radius-round);
+  color: var(--text-dim);
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-normal) var(--motion-ease);
+}
+@media (hover: none) {
+  /* No hover on touch: keep the menu visible but quiet (long press also opens it). */
+  .ca-item[data-variant="tile"] .ca-more { opacity: 0.7; transform: none; pointer-events: auto; }
+}
+.ca-item:has(:focus-visible) .ca-more,
+.ca-item .ca-more[aria-expanded="true"],
+.ca-item[data-editing] .ca-more { opacity: 1; transform: none; pointer-events: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .ca-item:hover .ca-more { opacity: 1; transform: none; pointer-events: auto; }
+  .ca-item .ca-more:hover:where(:not(:disabled)) { color: var(--text); }
+}
+
+/* Rearranging: a press edits, so the glyph reads as editable. */
+.ca-item[data-editing] .ca-glyph {
+  outline: 1.5px dashed var(--hair-strong);
+  outline-offset: 4px;
+}
+.custom-actions .ca-edit-hint {
+  margin: calc(-1 * var(--space-2)) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  animation: ca-fade var(--motion-normal) var(--motion-ease) both;
+}
+
+/* Drag to reorder: a slim accent bar marks where the tile will land. */
+.ca-item[data-drop]::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset-block: 14%;
+  inline-size: 3px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  animation: ca-fade var(--motion-fast) var(--motion-ease) both;
+}
+.ca-item[data-drop="before"]::before { inset-inline-start: -3px; }
+.ca-item[data-drop="after"]::before { inset-inline-end: -3px; }
+
+/* ---- Settings rows -------------------------------------------------------- */
+
+.custom-actions .ca-rows { display: grid; gap: 2px; min-inline-size: 0; }
+.ca-item[data-variant="row"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-radius: var(--radius-card);
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .ca-item[data-variant="row"]:hover { background: var(--surface-overlay-hover); }
+}
+.ca-item[data-variant="row"] .ca-press {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "glyph text";
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: 2px;
+  min-block-size: max(3.5rem, var(--hit-min));
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  text-align: start;
+}
+.ca-item[data-variant="row"] .ca-glyph { grid-area: glyph; }
+.ca-item[data-variant="row"] .ca-item-text {
+  grid-area: text;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--space-3);
+  row-gap: 2px;
+  justify-items: start;
+}
+.ca-item[data-variant="row"] .ca-item-name { -webkit-line-clamp: 1; font-size: var(--font-label); }
+.ca-item[data-variant="row"] .ca-item-meta { justify-self: end; }
+.ca-item[data-variant="row"] .ca-item-detail {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  max-inline-size: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ca-item[data-variant="row"] .ca-row-command {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+}
+.ca-item[data-variant="row"] .ca-more {
+  position: static;
+  margin-inline-end: var(--space-3);
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.ca-item[data-variant="row"][data-drop="before"]::before,
+.ca-item[data-variant="row"][data-drop="after"]::before {
+  inset-inline: var(--space-3);
+  inset-block: auto;
+  inline-size: auto;
+  block-size: 2px;
+}
+.ca-item[data-variant="row"][data-drop="before"]::before { inset-block-start: -1px; }
+.ca-item[data-variant="row"][data-drop="after"]::before { inset-block-end: -1px; }
+
+/* ---- Empty state and starters --------------------------------------------- */
+
+.custom-actions .ca-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-2) var(--space-4);
+  text-align: center;
+  animation: ca-rise var(--motion-surface) var(--motion-ease) both;
+}
+.custom-actions .ca-empty-mark { margin-block-end: var(--space-1); }
+.custom-actions .ca-empty-mark .ca-glyph {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ca-tint) 30%, transparent),
+    0 18px 40px -22px color-mix(in srgb, var(--ca-tint) 70%, transparent),
+    var(--inset-hi);
+}
+.custom-actions .ca-empty-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.custom-actions .ca-empty-body {
+  max-inline-size: 34rem;
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-body);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.custom-actions .ca-empty-or {
+  margin: var(--space-3) 0 0;
+  color: var(--faint);
+  font-size: var(--font-meta);
+}
+.custom-actions .ca-templates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  inline-size: 100%;
+  max-inline-size: 40rem;
+}
+.custom-actions .ca-template {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+  min-block-size: max(3.5rem, var(--hit-min));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .custom-actions .ca-template:hover:where(:not(:disabled)) {
+    border-color: var(--accent-line);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+  }
+}
+.custom-actions .ca-template:active:where(:not(:disabled)) { transform: scale(0.985); }
+.custom-actions .ca-template:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.custom-actions .ca-template-copy { display: grid; gap: 2px; min-inline-size: 0; }
+.custom-actions .ca-template-name { color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.custom-actions .ca-template-command {
+  padding: 0;
+  border: 0;
+  background: none;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Recent runs ----------------------------------------------------------------- */
+
+.custom-actions .ca-recent { display: flex; flex-direction: column; min-inline-size: 0; border-block-start: 1px solid var(--hair); padding-block-start: var(--space-1); }
+.custom-actions .ca-recent-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  min-block-size: max(2.75rem, var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 650;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) { .custom-actions .ca-recent-head:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); } }
+.custom-actions .ca-recent-head:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.custom-actions .ca-recent-title { flex: none; }
+.custom-actions .ca-recent-latest {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  justify-content: flex-end;
+  min-inline-size: 0;
+  color: var(--faint);
+  font-weight: 500;
+}
+.custom-actions .ca-recent-latest-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.custom-actions .ca-recent-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: var(--radius-round); background: var(--faint); }
+.custom-actions .ca-recent-latest[data-status="running"] .ca-recent-dot { background: var(--accent); }
+.custom-actions .ca-recent-latest[data-status="succeeded"] .ca-recent-dot { background: var(--green); }
+.custom-actions .ca-recent-latest:is([data-status="failed"], [data-status="error"]) .ca-recent-dot { background: var(--red); }
+.custom-actions .ca-recent-latest[data-status="timed-out"] .ca-recent-dot { background: var(--amber); }
+.custom-actions .ca-recent-chevron { flex: none; transition: transform var(--motion-normal) var(--motion-ease); }
+.custom-actions .ca-recent[data-open] .ca-recent-chevron { transform: rotate(180deg); }
+.custom-actions .ca-recent-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-normal) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
+.custom-actions .ca-recent[data-open] .ca-recent-body { grid-template-rows: 1fr; opacity: 1; }
+.custom-actions .ca-recent-inner { min-block-size: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .custom-actions .ca-recent-body,
+  .custom-actions .ca-recent-chevron { transition: none; }
+}
+
+.custom-actions .ca-runs { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.custom-actions .ca-run-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  inline-size: 100%;
+  min-block-size: max(2.75rem, var(--hit-min));
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .custom-actions .ca-run-row:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.custom-actions .ca-run-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.custom-actions .ca-run-row-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.custom-actions .ca-run-row-status { font-size: var(--font-meta); font-weight: 600; color: var(--muted); white-space: nowrap; }
+.custom-actions .ca-run-row-status[data-status="running"] { color: var(--accent); }
+.custom-actions .ca-run-row-status[data-status="succeeded"] { color: var(--green-on-wash); }
+.custom-actions .ca-run-row-status:is([data-status="failed"], [data-status="error"]) { color: var(--red); }
+.custom-actions .ca-run-row-status[data-status="timed-out"] { color: var(--amber-on-wash); }
+.custom-actions .ca-run-row-time {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.custom-actions .ca-context-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+}
+
+@container custom-actions (max-width: 30rem) {
+  .custom-actions:not([data-variant="settings"]) { padding-inline: var(--space-3); gap: var(--space-4); }
+  .custom-actions .ca-grid { grid-template-columns: repeat(auto-fill, minmax(6.25rem, 1fr)); gap: var(--space-2); }
+  .custom-actions .ca-templates { grid-template-columns: minmax(0, 1fr); }
+  .custom-actions .ca-run-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .custom-actions .ca-run-row-time { display: none; }
+  .custom-actions .ca-toolbar .ui-btn .ui-btn-label { white-space: nowrap; }
+}
+
+/* ---- Toolbar bar (session header, composer, top rail, status bar) ---------- */
+
+.ca-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-inline-size: 0;
+}
+.ca-item[data-variant="icon"] { display: inline-flex; }
+.ca-item[data-variant="icon"] .ca-press,
+.ca-bar .ca-bar-more {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-inline-size: max(var(--control-h-sm), var(--hit-min));
+  block-size: max(var(--control-h-sm), var(--hit-min));
+  padding-inline: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .ca-item[data-variant="icon"] .ca-press:not([aria-disabled="true"]):hover:where(:not(:disabled)),
+  .ca-bar .ca-bar-more:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.ca-item[data-variant="icon"] .ca-press:not([aria-disabled="true"]):active:where(:not(:disabled)) { transform: scale(0.94); }
+.ca-item[data-variant="icon"] .ca-press[aria-disabled="true"] { opacity: 0.55; }
+.ca-bar .ca-bar-more:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* The menu anchors to the icon but has no visible trigger of its own. */
+.ca-item[data-variant="icon"] .ca-more {
+  position: absolute;
+  inset: 0;
+  inline-size: auto;
+  block-size: auto;
+  opacity: 0;
+  transform: none;
+  pointer-events: none;
+}
+.ca-bar[data-labels] .ca-item[data-variant="icon"] .ca-press { padding-inline: var(--space-2); }
+.ca-bar .ca-bar-label {
+  overflow: hidden;
+  max-inline-size: 10rem;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ca-bar-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  block-size: var(--control-h-sm);
+  padding-inline: var(--space-2);
+  border: 1px dashed var(--hair-strong);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* ---- Panel widget (Canvas, phone Workspace, idle screen) -------------------- */
+
+.custom-actions.ca-panel {
+  container: ca-panel / inline-size;
+  display: block;
+  block-size: 100%;
+  max-inline-size: none;
+  padding: var(--space-2);
+  overflow: auto;
+}
+.custom-actions.ca-panel .ca-grid { grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr)); }
+.custom-actions .ca-panel-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+}
+.custom-actions .ca-panel-empty p { margin: 0; }
+
+/* ---- Editor ------------------------------------------------------------------ */
+
+.ca-editor {
+  container: ca-editor / inline-size;
+  /* A flex column, not a grid: the folded chat options cancel their own gap
+   * with a negative margin, which grid tracks would clamp. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-inline-size: 0;
+  padding-block: var(--space-1) var(--space-2);
+}
+.ca-editor .ca-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-4);
+}
+.ca-editor .ca-identity-glyph {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius-sheet) * 1.35);
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ca-editor .ca-identity-glyph:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+@media (hover: hover) {
+  .ca-editor .ca-identity-glyph:hover:where(:not(:disabled)) .ca-glyph { transform: scale(1.04) rotate(-2deg); }
+}
+.ca-editor .ca-identity-glyph:active:where(:not(:disabled)) .ca-glyph { transform: scale(0.96); }
+.ca-editor .ca-identity-edit {
+  position: absolute;
+  inset-inline-end: -6px;
+  inset-block-end: -6px;
+  display: grid;
+  place-items: center;
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: 50%;
+  background: var(--elevated);
+  color: var(--text-dim);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--border-soft);
+}
+.ca-editor .ca-field { display: grid; gap: var(--space-2); min-inline-size: 0; }
+.ca-editor .ca-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+:is(.ca-editor, .ca-widget-settings) .ca-field-label {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+:is(.ca-editor, .ca-widget-settings) :is(.ca-field-hint, .ca-field-error) {
+  margin: 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.ca-editor .ca-field-hint { color: var(--muted); }
+:is(.ca-editor, .ca-widget-settings) .ca-field-error { color: var(--red); animation: ca-fade var(--motion-fast) var(--motion-ease) both; }
+.ca-editor .ca-field-hint code { font-family: var(--mono); font-size: 0.95em; color: var(--text-dim); }
+
+.ca-editor .ca-command { position: relative; }
+.ca-editor .ca-command-prompt {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: var(--control-pad-x-sm);
+  inset-block-start: calc(var(--space-2) + 1px);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--font-input);
+  font-weight: 600;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.ca-editor :is(.ca-command-input, .ca-prompt-input) { resize: none; }
+.ca-editor .ca-command .ca-command-input {
+  padding-inline-start: calc(var(--control-pad-x-sm) + 1.6ch);
+  background: color-mix(in srgb, var(--sunken) 70%, var(--input-bg));
+  font-family: var(--mono);
+  tab-size: 2;
+}
+
+.ca-editor .ca-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.ca-editor .ca-mode {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--input-bg);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-normal) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .ca-editor .ca-mode:hover:where(:not(:disabled)) { border-color: var(--hair-strong); }
+}
+.ca-editor .ca-mode:active:where(:not(:disabled)) { transform: scale(0.985); }
+.ca-editor .ca-mode:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ca-editor .ca-mode[aria-checked="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.ca-editor .ca-mode-icon {
+  display: grid;
+  place-items: center;
+  inline-size: 32px;
+  block-size: 32px;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  transition: background-color var(--motion-normal) var(--motion-ease), color var(--motion-normal) var(--motion-ease);
+}
+.ca-editor .ca-mode[aria-checked="true"] .ca-mode-icon { background: var(--accent); color: var(--accent-ink); }
+.ca-editor .ca-mode-copy { display: grid; gap: 2px; min-inline-size: 0; }
+.ca-editor .ca-mode-title { color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.ca-editor .ca-mode-body { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+/* Chat options grow out from under the mode cards. */
+.ca-editor .ca-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-block-start: calc(-1 * var(--space-5));
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-surface) var(--motion-ease),
+    margin var(--motion-surface) var(--motion-ease),
+    opacity var(--motion-normal) var(--motion-ease);
+}
+.ca-editor .ca-reveal[data-open] {
+  grid-template-rows: 1fr;
+  margin-block-start: calc(-1 * var(--space-2));
+  opacity: 1;
+}
+.ca-editor .ca-reveal-inner { min-block-size: 0; overflow: hidden; }
+.ca-editor .ca-reveal:not([data-open]) .ca-reveal-inner { visibility: hidden; transition: visibility 0s linear var(--motion-surface); }
+.ca-editor .ca-chat-options {
+  display: grid;
+  gap: var(--space-4);
+  margin-block-start: var(--space-1);
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+.ca-editor .ca-chat-blocked {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+}
+.ca-editor .ca-chat-target { display: flex; min-inline-size: 0; }
+
+.ca-editor .ca-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-inline-size: 100%;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  justify-self: start;
+}
+.ca-editor .ca-seg-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  min-block-size: max(30px, var(--hit-min));
+  padding-inline: var(--control-pad-x-sm);
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-label);
+  font-weight: 520;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .ca-editor .ca-seg-option:not(:disabled):hover { color: var(--text); }
+}
+.ca-editor .ca-seg-option:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ca-editor .ca-seg-option[aria-checked="true"] {
+  background: var(--elevated);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--border-soft);
+}
+.ca-editor .ca-seg-option:disabled { opacity: 0.5; cursor: default; }
+.ca-editor .ca-seg-text { overflow: hidden; max-inline-size: 16rem; text-overflow: ellipsis; white-space: nowrap; }
+
+.ca-editor .ca-editor-failure {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--red-wash);
+  color: var(--red);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  animation: ca-fade var(--motion-fast) var(--motion-ease) both;
+}
+.ca-editor-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+}
+.ca-editor-foot .ca-editor-foot-spacer { flex: 1; }
+.ca-editor-foot .ca-editor-delete { color: var(--red); }
+
+@container ca-editor (max-width: 32rem) {
+  .ca-editor .ca-modes { grid-template-columns: minmax(0, 1fr); }
+  .ca-editor .ca-mode { flex-direction: row; align-items: center; }
+  .ca-editor .ca-identity { gap: var(--space-3); }
+  .ca-editor .ca-seg { display: flex; inline-size: 100%; }
+  .ca-editor .ca-seg-option { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ---- Icon and colour picker ---------------------------------------------------------- */
+
+.ca-icon-picker {
+  display: grid;
+  gap: var(--space-3);
+  inline-size: min(22.5rem, 86vw);
+  padding: var(--space-3);
+}
+.ca-icon-picker .ca-swatches {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-inline: var(--space-1);
+}
+/* `button.` outranks the core button hover and press skin: a swatch is its
+   color in every state, and only scales under the pointer. */
+button.ca-swatch {
+  position: relative;
+  inline-size: 26px;
+  block-size: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ca-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.ca-swatch::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ca-tint);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-normal) var(--motion-ease);
+}
+.ca-swatch::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((26px - var(--hit-min)) / 2));
+}
+.ca-swatch[aria-checked="true"]::before { opacity: 1; transform: none; }
+@media (hover: hover) { .ca-swatch:hover:where(:not(:disabled)) { transform: scale(1.08); } }
+.ca-swatch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 6px; }
+.ca-icon-picker .ca-icon-search { margin: 0; }
+.ca-icon-picker .ca-icon-groups {
+  display: grid;
+  gap: var(--space-3);
+  max-block-size: min(19rem, calc(var(--visual-vh, 100vh) * 0.42));
+  margin-inline: calc(-1 * var(--space-1));
+  padding-inline: var(--space-1);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.ca-icon-picker .ca-icon-group { display: grid; gap: var(--space-1); }
+.ca-icon-picker .ca-icon-group-title {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+.ca-icon-picker .ca-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 2px;
+}
+.ca-icon-picker .ca-icon-choice {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-block-size: max(36px, var(--hit-min));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .ca-icon-picker .ca-icon-choice:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.ca-icon-picker .ca-icon-choice:active:where(:not(:disabled)) { transform: scale(0.9); }
+.ca-icon-picker .ca-icon-choice:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.ca-icon-picker .ca-icon-choice[aria-checked="true"] {
+  background: color-mix(in srgb, var(--ca-tint) 18%, transparent);
+  color: var(--ca-tint);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ca-tint) 60%, transparent);
+}
+.ca-icon-picker .ca-icon-empty { margin: 0; padding: var(--space-3); color: var(--muted); font-size: var(--font-meta); text-align: center; }
+
+/* ---- Run sheet ---------------------------------------------------------------------- */
+
+.ca-run {
+  display: grid;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+.ca-run[data-presentation="popover"] { inline-size: min(36rem, 88vw); padding: var(--space-3); }
+.ca-run[data-presentation="dialog"] { inline-size: 100%; }
+.ca-run-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ca-run-heading { display: grid; gap: 1px; min-inline-size: 0; }
+.ca-run-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ca-run-command {
+  padding: 0;
+  border: 0;
+  background: none;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:is(.ca-run, .ca-result-meta) .ca-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--space-2) 3px 7px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+  animation: ca-fade var(--motion-normal) var(--motion-ease) both;
+}
+:is(.ca-run, .ca-result-meta) .ca-pill .ui-spinner { inline-size: 12px; block-size: 12px; }
+:is(.ca-run, .ca-result-meta) .ca-pill[data-tone="running"] { background: var(--accent-wash); color: var(--accent); }
+:is(.ca-run, .ca-result-meta) .ca-pill[data-tone="success"] { background: var(--green-wash); color: var(--green-on-wash); }
+:is(.ca-run, .ca-result-meta) .ca-pill[data-tone="warning"] { background: var(--amber-wash); color: var(--amber-on-wash); }
+:is(.ca-run, .ca-result-meta) .ca-pill[data-tone="danger"] { background: var(--red-wash); color: var(--red); }
+:is(.ca-run, .ca-result-meta) .ca-pill-dot { inline-size: 6px; block-size: 6px; border-radius: 50%; background: currentColor; }
+:is(.ca-run, .ca-result-meta) .ca-pill-time { font-variant-numeric: tabular-nums; font-weight: 500; opacity: 0.8; }
+
+.ca-run .ca-term {
+  min-block-size: 8rem;
+  max-block-size: calc(var(--visual-vh, 100vh) * 0.46);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--term-bg);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+  color: var(--term-fg);
+  font-family: var(--mono);
+  font-size: var(--terminal-font-size);
+  line-height: var(--font-technical-lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 8;
+}
+.ca-run[data-presentation="popover"] .ca-term { max-block-size: min(22rem, calc(var(--visual-vh, 100vh) * 0.45)); }
+.ca-run[data-presentation="sheet"] .ca-term { min-block-size: calc(var(--visual-vh, 100vh) * 0.4); max-block-size: calc(var(--visual-vh, 100vh) * 0.56); }
+.ca-run .ca-term:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ca-run .ca-term-empty { color: var(--term-a8); font-style: italic; }
+.ca-run .ca-term-caret {
+  display: inline-block;
+  inline-size: 0.55em;
+  block-size: 1.1em;
+  margin-inline-start: 1px;
+  vertical-align: text-bottom;
+  background: var(--term-cursor);
+  animation: ca-caret 1.05s steps(1, end) infinite;
+}
+.ca-term .ca-b { font-weight: 650; }
+.ca-term .ca-dim { opacity: 0.65; }
+.ca-term .ca-i { font-style: italic; }
+.ca-term .ca-u { text-decoration: underline; }
+.ca-term .ca-inv { background: var(--term-fg); color: var(--term-bg); }
+.ca-term .ca-fg-0 { color: var(--term-a0); }
+.ca-term .ca-fg-1 { color: var(--term-a1); }
+.ca-term .ca-fg-2 { color: var(--term-a2); }
+.ca-term .ca-fg-3 { color: var(--term-a3); }
+.ca-term .ca-fg-4 { color: var(--term-a4); }
+.ca-term .ca-fg-5 { color: var(--term-a5); }
+.ca-term .ca-fg-6 { color: var(--term-a6); }
+.ca-term .ca-fg-7 { color: var(--term-a7); }
+.ca-term .ca-fg-8 { color: var(--term-a8); }
+.ca-term .ca-fg-9 { color: var(--term-a9); }
+.ca-term .ca-fg-10 { color: var(--term-a10); }
+.ca-term .ca-fg-11 { color: var(--term-a11); }
+.ca-term .ca-fg-12 { color: var(--term-a12); }
+.ca-term .ca-fg-13 { color: var(--term-a13); }
+.ca-term .ca-fg-14 { color: var(--term-a14); }
+.ca-term .ca-fg-15 { color: var(--term-a15); }
+.ca-term .ca-bg-0 { background: var(--term-a0); }
+.ca-term .ca-bg-1 { background: var(--term-a1); }
+.ca-term .ca-bg-2 { background: var(--term-a2); }
+.ca-term .ca-bg-3 { background: var(--term-a3); }
+.ca-term .ca-bg-4 { background: var(--term-a4); }
+.ca-term .ca-bg-5 { background: var(--term-a5); }
+.ca-term .ca-bg-6 { background: var(--term-a6); }
+.ca-term .ca-bg-7 { background: var(--term-a7); }
+.ca-term .ca-bg-8 { background: var(--term-a8); }
+.ca-term .ca-bg-9 { background: var(--term-a9); }
+.ca-term .ca-bg-10 { background: var(--term-a10); }
+.ca-term .ca-bg-11 { background: var(--term-a11); }
+.ca-term .ca-bg-12 { background: var(--term-a12); }
+.ca-term .ca-bg-13 { background: var(--term-a13); }
+.ca-term .ca-bg-14 { background: var(--term-a14); }
+.ca-term .ca-bg-15 { background: var(--term-a15); }
+
+.ca-run .ca-run-note,
+.ca-run .ca-run-gone {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.ca-run .ca-run-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--red-wash);
+  color: var(--red);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+.ca-run .ca-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ca-run .ca-run-actions-spacer { flex: 1; }
+.ca-run .ca-copy.is-copied { color: var(--green); }
+.ca-run .ca-copy.is-copied .ui-icon { animation: ca-pop var(--motion-normal) var(--motion-ease) both; }
+
+/* ---- Widget settings ------------------------------------------------------------- */
+
+.ca-widget-settings { display: grid; gap: var(--space-4); min-inline-size: 0; }
+.ca-widget-settings .ca-widget-setting { display: grid; gap: var(--space-2); }
+.ca-widget-settings .ca-check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+  font-size: var(--font-label);
+}
+.ca-widget-settings .ca-check-list { display: grid; gap: var(--space-1); padding-inline-start: var(--space-2); }
+.ca-widget-settings > .ui-btn { justify-self: start; }
+.ca-widget-settings .ca-legacy {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.ca-widget-settings .ca-legacy p { margin: 0; }
+.ca-widget-settings .ca-legacy code {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  overflow-wrap: anywhere;
+}
+.ca-widget-settings .ca-legacy .ui-btn { justify-self: start; }
+
+/* ---- Rail mark: an action as a launcher on any host rail ---------------- */
+/* Monochrome like every package mark; the host owns the button and sizes the
+ * SVG. A dot inside the SVG reports the run: busy (pulsing accent), done
+ * (green), failed (red); its ring in the page colour parts it from the glyph. */
+
+.ca-rail-mark { overflow: visible; }
+.ca-rail-mark-badge {
+  stroke: var(--bg);
+  stroke-width: 2.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ca-pop var(--motion-normal) var(--motion-ease) both;
+}
+.ca-rail-mark-badge[data-tone="busy"] {
+  fill: var(--accent);
+  animation: ca-rail-pulse 1.2s ease-in-out infinite;
+}
+.ca-rail-mark-badge[data-tone="success"] { fill: var(--green); }
+.ca-rail-mark-badge[data-tone="danger"] { fill: var(--red); }
+
+@keyframes ca-rail-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+/* ---- Result notifications: a press from a rail or toolbar --------------- */
+/* Drawn by the host's notification stack (ResultCards.tsx → host.notifications);
+ * the card, motion, lifetime hairline and output excerpt are the host's. This
+ * styles only the package's own status line inside the notification body. */
+
+.ca-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-block-start: 2px;
+}
+.ca-result-meta .ca-result-error {
+  flex-basis: 100%;
+  color: var(--red);
+  overflow-wrap: anywhere;
+}

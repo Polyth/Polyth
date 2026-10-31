@@ -1,0 +1,594 @@
+/* Phone Workspace edit mode (WorkspaceEditor.tsx + workspaceArrange.ts).
+ * The arrangement is drawn as it will look: app tiles flow four to a line,
+ * widgets and layout elements are full-width rows. Every item carries its own
+ * controls (corner minus, size pill, grip) so managing never needs a separate
+ * selection mode. Motion is FLIP/Web Animations in workspaceArrange.ts; these
+ * rules only paint states. Shell-owned: package widget internals never render
+ * in here. z-index values are local to the sheet's own stacking context. */
+
+/* ---- header -------------------------------------------------------------
+   Edit mode keeps the Workspace header row (Back · Edit switch,
+   workspacePanelPremium.css), so turning the switch never moves the page. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* Room under the last row for the floating Undo control. */
+  .workspace-panel-sheet.is-editing .sheet-body {
+    padding:
+      0
+      max(var(--screen-gutter), var(--safe-right))
+      max(calc(var(--tap) + var(--space-6)), calc(var(--safe-bottom) + var(--tap) + var(--space-4)))
+      max(var(--screen-gutter), var(--safe-left));
+  }
+}
+
+/* ---- the Add card -------------------------------------------------------- */
+.workspace-panel-sheet .workspace-editor-add {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: calc(var(--control-h-lg) + var(--space-4));
+  margin: var(--space-1) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-surface);
+  color: var(--text);
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--accent) 18%, var(--surface-activity)),
+      color-mix(in srgb, var(--accent) 5%, var(--surface-activity)));
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  text-align: start;
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .workspace-panel-sheet .workspace-editor-add:hover:where(:not(:disabled)) { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+}
+.workspace-panel-sheet .workspace-editor-add:active:where(:not(:disabled)) { transform: scale(.985); }
+
+.workspace-editor-add-icon {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--radius-round);
+  color: var(--accent-ink);
+  background: var(--accent);
+  box-shadow: 0 8px 18px -10px var(--accent);
+}
+
+.workspace-editor-add-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-editor-add-copy strong {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-editor-add-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-panel-sheet .workspace-editor-add-chevron {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  color: var(--accent);
+}
+
+.workspace-editor-hint {
+  margin: 0 var(--space-1) var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- empty states (editor and the plain Workspace) ------------------------ */
+.workspace-editor-empty,
+.workspace-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4) var(--space-4);
+  color: var(--muted);
+  text-align: center;
+}
+
+.workspace-panel-empty { padding-top: var(--space-6); }
+
+.workspace-editor-empty-icon,
+.workspace-panel-empty-icon {
+  display: grid;
+  place-items: center;
+  width: calc(var(--tap) + var(--space-3));
+  height: calc(var(--tap) + var(--space-3));
+  margin-bottom: var(--space-1);
+  border-radius: var(--radius-round);
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.workspace-editor-empty strong,
+.workspace-panel-empty strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.workspace-editor-empty p,
+.workspace-panel-empty p {
+  max-width: 32ch;
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- the arrangement ----------------------------------------------------- */
+.workspace-panel-sheet .workspace-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-2);
+  margin: 0;
+  /* The corner minus overhangs each item: keep it inside the scroller. */
+  padding: var(--space-2) var(--space-1) 0;
+  list-style: none;
+}
+
+.workspace-panel-sheet .workspace-editor-item {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-surface);
+  color: var(--text-dim);
+  background: var(--surface-activity);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  /* Vertical swipes still scroll; a long press lifts (workspaceArrange.ts). */
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
+}
+
+.workspace-panel-sheet .workspace-editor-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* App tiles: the launcher as it looks on the Workspace. */
+.workspace-panel-sheet .workspace-editor-item--launcher {
+  display: flex;
+  min-height: calc((2 * var(--control-h)) + var(--space-3));
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-1) var(--space-2);
+  text-align: center;
+}
+
+.workspace-editor-tile-icon {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
+.workspace-panel-sheet .workspace-editor-tile-icon svg {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  stroke-width: 1.75;
+}
+
+.workspace-editor-tile-label {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+/* Widget rows: mark, name and purpose, size, grip. */
+.workspace-panel-sheet .workspace-editor-item--widget {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: calc(var(--icon-xl) + var(--space-3)) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--control-h-lg) + var(--space-4));
+  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3);
+}
+
+.workspace-editor-row-icon {
+  display: grid;
+  place-items: center;
+  width: calc(var(--icon-xl) + var(--space-3));
+  height: calc(var(--icon-xl) + var(--space-3));
+  border-radius: var(--radius-card);
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.workspace-panel-sheet .workspace-editor-row-icon svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.workspace-editor-row-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workspace-editor-row-copy strong,
+.workspace-editor-row-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-editor-row-copy strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 640;
+  line-height: 1.3;
+}
+
+.workspace-editor-row-copy small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* Layout elements: quiet dashed rows, edited in place. */
+.workspace-panel-sheet :is(.workspace-editor-item--header, .workspace-editor-item--divider, .workspace-editor-item--labeled-divider) {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--tap) + var(--space-2));
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-style: dashed;
+  border-color: var(--hair-strong);
+  background: color-mix(in srgb, var(--surface-overlay) 55%, transparent);
+  box-shadow: none;
+}
+
+.workspace-panel-sheet .workspace-editor-label {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  /* 16px on touch: smaller and iOS zooms the page on focus. */
+  font-size: var(--font-input);
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.workspace-panel-sheet .workspace-editor-label--heading {
+  font-size: max(var(--font-heading), var(--font-input));
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.workspace-panel-sheet .workspace-editor-label::placeholder {
+  color: var(--faint);
+}
+
+.workspace-panel-sheet .workspace-editor-label:focus {
+  border-color: var(--accent-line);
+  background: var(--input-bg);
+  outline: none;
+}
+
+.workspace-editor-rule {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--faint);
+  font-size: var(--font-meta);
+}
+
+.workspace-editor-rule > i {
+  height: 1px;
+  flex: 1;
+  background: var(--hair-strong);
+}
+
+.workspace-panel-sheet .workspace-editor-rule > .workspace-editor-label {
+  width: min(60%, 16rem);
+  flex: none;
+  text-align: center;
+}
+
+/* ---- per-item controls --------------------------------------------------- */
+.workspace-panel-sheet .workspace-editor-remove {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: calc(-1 * var(--space-2));
+  inset-inline-start: calc(-1 * var(--space-2));
+  display: grid;
+  place-items: center;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  padding: 0;
+  border: 2px solid var(--material-glass-strong);
+  border-radius: var(--radius-round);
+  color: var(--red-ink);
+  background: var(--red);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+/* A 24px mark with a full touch target around it. */
+.workspace-panel-sheet .workspace-editor-remove::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--icon-xl) - var(--tap)) / 2);
+}
+
+.workspace-panel-sheet .workspace-editor-remove:active:where(:not(:disabled)) { transform: scale(.88); }
+.workspace-panel-sheet .workspace-editor-remove .ui-icon { stroke-width: 3; }
+
+.workspace-panel-sheet .workspace-editor-grip {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  width: var(--tap);
+  min-height: var(--tap);
+  margin-block: calc(-1 * var(--space-1));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--faint);
+  background: transparent;
+  /* The grip picks up at once: the finger never scrolls the page from here. */
+  touch-action: none;
+  cursor: grab;
+}
+
+@media (hover: hover) {
+  .workspace-panel-sheet .workspace-editor-grip:hover:where(:not(:disabled)) { color: var(--text-dim); }
+}
+
+.workspace-panel-sheet .workspace-editor-size {
+  position: relative;
+  min-width: calc(var(--control-h) + var(--space-5));
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-round);
+  color: var(--text-dim);
+  background: var(--surface-overlay);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-panel-sheet .workspace-editor-size::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
+}
+
+.workspace-panel-sheet .workspace-editor-size:active:where(:not(:disabled)) { background: var(--surface-overlay-strong); }
+
+.workspace-editor-size > span {
+  display: inline-block;
+  animation: workspace-editor-size-in var(--motion-normal) var(--motion-ease) both;
+}
+
+@keyframes workspace-editor-size-in {
+  from { opacity: 0; transform: translateY(35%); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- drag states ---------------------------------------------------------- */
+/* The lifted item's own slot: a quiet outline that travels as a hole. */
+.workspace-panel-sheet .workspace-editor-item.is-hole {
+  border: 2px dashed var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-shadow: none;
+}
+
+.workspace-panel-sheet .workspace-editor-item.is-hole > * { visibility: hidden; }
+.workspace-panel-sheet .workspace-editor-item[data-leaving] { pointer-events: none; }
+
+/* While a drag is on, every item keeps its own layer, so the neighbours'
+   glides are pure compositing: nothing is promoted and repainted per move. */
+.workspace-panel-sheet .workspace-editor-grid[data-arranging] .workspace-editor-item {
+  will-change: transform;
+}
+
+/* Back from the Add page: what just arrived glows once. */
+@keyframes workspace-editor-fresh {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow-sm); }
+  35% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent), var(--shadow-sm); }
+  100% { box-shadow: 0 0 0 0 transparent, var(--shadow-sm); }
+}
+
+.workspace-panel-sheet .workspace-editor-item.is-fresh {
+  border-color: var(--accent-line);
+  animation: workspace-editor-fresh calc(var(--motion-surface) * 6) var(--motion-ease) both;
+}
+
+/* The lifted copy (workspaceArrange.ts), drawn inside the sheet over the list. */
+/* One transform per frame (position, plus a tile's lean) on the copy itself;
+   the lift itself (scale and shadow) changes only when it is picked up or set down. */
+.workspace-arrange-ghost {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  will-change: transform;
+  contain: layout style;
+}
+
+.workspace-arrange-ghost-body {
+  width: 100%;
+  height: 100%;
+  transition: transform var(--motion-normal) cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+
+.workspace-arrange-ghost-body.is-lifted {
+  transform: scale(1.045);
+}
+
+.workspace-panel-sheet .workspace-arrange-ghost-body > .workspace-editor-item {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  transition: box-shadow var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
+}
+
+.workspace-panel-sheet .workspace-arrange-ghost-body.is-lifted > .workspace-editor-item {
+  border-color: var(--accent-line);
+  background: var(--material-glass-chrome);
+  box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-md);
+}
+
+.workspace-arrange-ghost .workspace-editor-remove { opacity: 0; }
+
+/* Scoped to the sheet: restyling the whole document (the chat behind it)
+   at the moment of lift would cost a visible hitch. */
+.workspace-panel-sheet[data-arrange-dragging="true"],
+.workspace-panel-sheet[data-arrange-dragging="true"] * {
+  cursor: grabbing !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* ---- footer and Undo ----------------------------------------------------- */
+.workspace-editor-footer {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-5) 0 var(--space-2);
+}
+
+.workspace-panel-sheet .workspace-editor-undo {
+  position: absolute;
+  z-index: 6;
+  bottom: max(var(--space-4), calc(var(--safe-bottom) + var(--space-2)));
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-round);
+  color: var(--text);
+  background: var(--material-glass-chrome);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  font-size: var(--font-label);
+  font-weight: 620;
+  transform: translateX(-50%);
+  animation: workspace-editor-undo-in var(--motion-surface) var(--motion-ease) both;
+  cursor: pointer;
+}
+
+.workspace-panel-sheet .workspace-editor-undo::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--control-h) - var(--tap)) / 2) 0;
+}
+
+.workspace-panel-sheet .workspace-editor-undo:active:where(:not(:disabled)) { background: var(--raised); }
+
+@keyframes workspace-editor-undo-in {
+  from { opacity: 0; transform: translate(-50%, 40%) scale(.96); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* Narrow phones: three tiles to a line; a widget row gives its name the whole
+   width and puts the size pill on a second line in place of the purpose. */
+@container workspace-panel (max-width: 340px) {
+  .workspace-panel-sheet .workspace-editor-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workspace-panel-sheet .workspace-editor-item--widget {
+    grid-template-columns: calc(var(--icon-xl) + var(--space-3)) minmax(0, 1fr) auto;
+    row-gap: var(--space-1);
+  }
+
+  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-row-icon { grid-row: 1 / span 2; }
+  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-row-copy { grid-column: 2; grid-row: 1; }
+  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-grip { grid-column: 3; grid-row: 1 / span 2; }
+
+  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-size {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+    min-width: 0;
+    padding: 0 var(--space-2);
+  }
+
+  .workspace-panel-sheet .workspace-editor-item--widget:has(> .workspace-editor-size) .workspace-editor-row-copy small {
+    display: none;
+  }
+}
+
+/* Landscape and large phones: more tiles to a line, as the Workspace shows them. */
+@container workspace-panel (min-width: 560px) {
+  .workspace-panel-sheet .workspace-editor-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-panel-sheet .workspace-editor-item,
+  .workspace-panel-sheet .workspace-editor-add,
+  .workspace-arrange-ghost-body,
+  .workspace-panel-sheet .workspace-arrange-ghost-body > .workspace-editor-item {
+    transition: none;
+  }
+}
+
+/* ---- switching modes ------------------------------------------------------
+   Turning Edit on or off replaces the page's content in place; the content
+   that arrives settles in instead of popping (backwards fill: nothing is
+   held once it has arrived, so drags and FLIP glides stay authoritative). */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .workspace-panel-sheet.is-mode-switched > .sheet-body > :is(.workspace-editor, .workspace-panel-items, .workspace-panel-empty) {
+    animation: workspace-mode-in var(--motion-normal) var(--motion-ease) backwards;
+  }
+}
+
+@keyframes workspace-mode-in {
+  from { opacity: 0; transform: translate3d(0, var(--space-2), 0); }
+  to { opacity: 1; transform: none; }
+}

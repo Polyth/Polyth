@@ -1,0 +1,36 @@
+{
+  "version": "2.0.16",
+  "repository": "anomalyco/opencode",
+  "targets": {
+    "linux-x64": {
+      "package": "@opencode/cli-linux-x64",
+      "tarball": "https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.0.16.tgz",
+      "integrity": "sha512-BVmvVddA7c4VhSXgTiGtZB9pU+xTyFgsd56KkvQoYMydqy8xfzPGu9BRwQVCG/RTxGhRAwda/MYEWarddscIUg=="
+    },
+    "linux-arm64": {
+      "package": "@opencode/cli-linux-arm64",
+      "tarball": "https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.0.16.tgz",
+      "integrity": "sha512-BThpExec9wEIhC4U9iRY/jWecM8bVOVuYw2YTYYZ/qNn2r/RljDG2flngDmCZFM1cC6miu2kqOgPkVnVeqaapQ=="
+    },
+    "darwin-x64": {
+      "package": "@opencode/cli-darwin-x64",
+      "tarball": "https://registry.npmjs.org/@opencode/cli-darwin-x64/-/cli-darwin-x64-2.0.16.tgz",
+      "integrity": "sha512-CdVCiYfFAOVXdt+DP0vrUqpDxJHzs/vGX8PNxfSPeJuw3lNmn/5JxeQC7dkasSm7FQFphNdU/2rkys38rGU6pA=="
+    },
+    "darwin-arm64": {
+      "package": "@opencode/cli-darwin-arm64",
+      "tarball": "https://registry.npmjs.org/@opencode/cli-darwin-arm64/-/cli-darwin-arm64-2.0.16.tgz",
+      "integrity": "sha512-WlzjaxNb/QY/nJk93AbFNmlxpb5YDdy/2/6FPLbd10QbrkYtfz1TmI6Y0sM3BASDOLG/yJ+0oBfj9OZ5fZ5rfA=="
+    },
+    "win32-x64": {
+      "package": "@opencode/cli-windows-x64",
+      "tarball": "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-2.0.16.tgz",
+      "integrity": "sha512-0Nia1Zq9dz/AUNhpXIcHG1rbIFH/17DH/l6NajfYEnv0clZ505BtqbsTZ0YpHoR0h+TpYQ6tkaGyrulS/FRwIQ=="
+    },
+    "win32-arm64": {
+      "package": "@opencode/cli-windows-arm64",
+      "tarball": "https://registry.npmjs.org/@opencode/cli-windows-arm64/-/cli-windows-arm64-2.0.16.tgz",
+      "integrity": "sha512-zZqQ/yxkGuoVSRup4LXhOEN/4KhSSv4qS+sqsDdTpsD/4oMw7OkYIV+rQ4vdPeqGPmBK2OeevmBUndEUusBHmA=="
+    }
+  }
+}

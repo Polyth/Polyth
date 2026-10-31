@@ -1,0 +1,107 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "../widgets/ModelsPage.tsx");
+const source = () => readFileSync(root, "utf8");
+const entry = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../widgets/index.tsx"), "utf8");
+
+test("Providers page no longer has Connected/All, chips, or global model search", () => {
+  const page = source();
+  assert.equal(page.includes('tr("sidebar.connected")'), false);
+  assert.equal(page.includes("providerFilter"), false);
+  assert.equal(page.includes("provider-chips"), false);
+  assert.equal(page.includes("settings.modelspage.searchModels"), false);
+  assert.equal(page.includes("noProvidersToAdd"), false);
+  assert.equal(page.includes("type Scope"), false);
+});
+
+test("Add provider stays actionable and Custom provider is always reachable", () => {
+  const page = source();
+  assert.match(page, /customProvider/);
+  assert.equal(page.includes("disabled={providerOptionsLoaded"), false);
+  assert.match(page, /searchPlaceholder/);
+  assert.match(page, /allBuiltinsAdded/);
+  assert.match(page, /catalogueFailed/);
+  assert.match(page, /providerSettings/);
+  assert.equal(page.includes("provider-custom-tools"), false);
+  assert.equal(page.includes("__retry__"), false);
+  assert.equal(page.includes("__empty__"), false);
+});
+
+test("model filtering is local to a provider card", () => {
+  const page = source();
+  assert.match(page, /filterProviderModels\(p\.models, query\)/);
+  assert.match(page, /filterProviderModels/);
+});
+
+test("header rows are real name/value fields, not a free-form textarea", () => {
+  const dialog = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../widgets/CustomProviderDialog.tsx"), "utf8");
+  assert.match(dialog, /custom-provider-header-row/);
+  assert.equal(dialog.includes("Textarea"), false);
+  assert.equal(dialog.includes("parseHeaderLines"), false);
+  assert.match(dialog, /headerPatch/);
+  assert.match(dialog, /configuredOutside/);
+  assert.match(dialog, /rediscoverNeedsKey/);
+  assert.match(dialog, /removeCustomProviderModel/);
+  assert.match(dialog, /configuredModels/);
+});
+
+test("empty catalog is a compact no-providers state, not a backend-down card", () => {
+  const page = source();
+  assert.match(page, /noProvidersYet/);
+  assert.match(page, /noProvidersHint/);
+  assert.match(page, /<Notice heading/);
+  assert.equal(page.includes("noModelsAvailable"), false);
+  assert.equal(page.includes("checkThatTheBackendIsRunningAnd"), false);
+  assert.equal(page.includes("EmptyState"), false);
+});
+
+test("organization login is secondary to the provider list", () => {
+  const page = source();
+  const list = page.indexOf('className="provider-list"');
+  const org = page.indexOf("provider-org-login-wrap");
+  assert.ok(list >= 0 && org >= 0);
+  assert.ok(org > list);
+});
+
+test("enable toggle is not labeled as connection", () => {
+  const page = source();
+  assert.equal(page.includes("notConnected"), false);
+  assert.match(page, /statusLabel\(p\.status\)/);
+  // The provider switch still derives a status overlay from catalog facts; the
+  // account-scoped optimistic path lives in toggleProvider and must not turn the
+  // switch into a connection indicator.
+  assert.match(page, /overlayStatus\(provider, enabled\)/);
+  assert.match(page, /deriveProviderStatus/);
+  assert.equal(page.includes("statusError"), false);
+  assert.equal(page.includes("runtimeError"), false);
+  assert.equal(page.includes("models.map((model) => ({ ...model, enabled: on }))"), false);
+});
+
+test("initial provider catalog load does not invalidate its harness settings parent", () => {
+  const page = source();
+  assert.match(page, /void refreshCatalog\(\{ invalidateRuntime: false \}\)/);
+  assert.match(page, /if \(invalidateRuntime\) invalidateRuntimeCatalogs\(\)/);
+});
+
+test("catalog invalidation does not rewarm every runtime", () => {
+  const widgets = entry();
+  assert.match(widgets, /host\.store\.subscribe\(warmCatalogs\)/);
+  assert.doesNotMatch(widgets, /subscribeRuntimeCatalogs/);
+  assert.match(widgets, /runtimeCatalogRefreshDelay\(projectId\)/);
+  assert.match(widgets, /window\.setTimeout/);
+  assert.doesNotMatch(widgets, /window\.setInterval\(\(\) => \{[\s\S]*resetRuntimeCatalogMemory/);
+  assert.match(widgets, /invalidateRuntimeCatalogs\(\)/);
+});
+
+test("ordinary window focus does not force harness discovery", () => {
+  // Only a return from a pending sign-in forces a fresh probe on focus.
+  const signIn = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../harness-runtime/widgets/HarnessSignIn.tsx"),
+    "utf8",
+  );
+  assert.match(signIn, /if \(!active\) return;[\s\S]*window\.addEventListener\("focus", focus\)/);
+});

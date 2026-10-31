@@ -1,0 +1,32 @@
+/* Phone Workspace shell polish + natural widget content height. The sheet
+ * scrolls; individual widgets must not crop themselves into tiny nested
+ * scroll areas. Inner package presentation stays package-owned. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* Workspace is already identified by the Layers launcher; repeating a large
+     title costs useful mobile space. The dialog keeps its accessible label. */
+  .workspace-panel-sheet .sheet-title {
+    display: none;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--widget,
+  .workspace-panel-sheet .workspace-panel-widget-body {
+    overflow: visible;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--compact .workspace-panel-widget-body,
+  .workspace-panel-sheet .workspace-panel-item--standard .workspace-panel-widget-body,
+  .workspace-panel-sheet .workspace-panel-item--wide .workspace-panel-widget-body,
+  .workspace-panel-sheet .workspace-panel-item--large .workspace-panel-widget-body {
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* Canvas widgets may size-contain their root (`container: name / size`) to
+     fit a fixed card. Here the body is content-height, so size containment
+     pins the root to its intrinsic fallback (or 0) and the content spills over
+     the next item. Keep the container name; contain only the inline size. */
+  .workspace-panel-sheet .workspace-panel-widget-body > * {
+    container-type: inline-size;
+  }
+}

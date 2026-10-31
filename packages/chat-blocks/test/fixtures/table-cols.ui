@@ -1,0 +1,3 @@
+table Builds · cols=Branch,Status,Minutes
+- main | passed | 12
+- feat/x | failed | 3

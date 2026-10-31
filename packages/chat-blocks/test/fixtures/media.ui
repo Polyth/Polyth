@@ -1,0 +1,4 @@
+media Screens · pick=many
+- https://cdn.example/1.png | Home | https://example.com/1
+- _out/shot.png | Settings | id=s2
+- not-an-image | Broken

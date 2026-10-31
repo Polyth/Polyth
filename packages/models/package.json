@@ -1,0 +1,46 @@
+{
+  "name": "@polyth/models",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./model-picker": "./widgets/ModelPicker.tsx",
+    "./model-picker-state": "./widgets/modelPickerState.ts",
+    "./model-presentation": "./widgets/modelPresentation.ts",
+    "./provider-logo": "./widgets/ProviderLogo.tsx",
+    "./harness-color": "./widgets/harnessColor.ts",
+    "./web-prefs": "./widgets/modelPrefs.ts",
+    "./model-visibility-prefs": "./widgets/modelVisibilityPrefs.ts",
+    "./auth": "./src/auth/index.ts",
+    "./auth/well-known": "./src/auth/wellKnown.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./runtime-catalog": "./widgets/runtimeCatalog.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Models",
+      "description": "Harness-qualified model selection, presentation, and favorites.",
+      "core": true,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "database",
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

@@ -1,0 +1,22 @@
+/* Web Search settings compose the shared settings primitives (Section, Row,
+   Seg, SaveBar); only package-specific details live here. */
+.pkg-web-search-settings__warning {
+  color: var(--amber);
+}
+
+.pkg-web-search-settings__link-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pkg-web-search-settings__privacy {
+  margin-top: calc(var(--space-6) * var(--density-scale, 1));
+}
+
+.pkg-web-search-settings > .ui-notice[role="alert"] {
+  margin-top: var(--space-3);
+}
+
+.pkg-web-search-settings__privacy strong {
+  font-weight: 600;
+}

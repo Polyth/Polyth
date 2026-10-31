@@ -1,0 +1,59 @@
+.coach-proposal-card {
+  display: grid;
+  gap: var(--space-2);
+  margin-inline: var(--conversation-inset);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--material-glass-medium);
+  box-shadow: var(--inset-hi);
+  color: var(--text);
+}
+
+.coach-proposal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.coach-proposal-kind,
+.coach-proposal-status,
+.coach-proposal-loading {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.coach-proposal-status.is-accepted { color: var(--green-on-wash); }
+.coach-proposal-status.is-rejected,
+.coach-proposal-status.is-expired { color: var(--faint); }
+
+.coach-proposal-title {
+  font-size: var(--font-body);
+  line-height: 1.45;
+}
+
+.coach-proposal-detail,
+.coach-proposal-error {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.coach-proposal-error { color: var(--red); }
+
+.coach-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-block-start: var(--space-1);
+}
+
+@container (max-width: 360px) {
+  .coach-proposal-card {
+    padding-inline: var(--space-3);
+  }
+}

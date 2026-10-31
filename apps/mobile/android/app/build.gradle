@@ -1,0 +1,146 @@
+apply plugin: 'com.android.application'
+
+def mobilePackageJson = new groovy.json.JsonSlurper().parse(file('../../package.json'))
+def defaultVersionName = mobilePackageJson.version.toString()
+def parsedVersion = (defaultVersionName =~ /^(\d+)\.(\d+)\.(\d+)$/)
+if (!parsedVersion.matches()) {
+    throw new GradleException(
+        "Polyth Android release version must use stable X.Y.Z semver: ${defaultVersionName}"
+    )
+}
+
+def major = parsedVersion[0][1].toInteger()
+def minor = parsedVersion[0][2].toInteger()
+def patch = parsedVersion[0][3].toInteger()
+
+if (minor > 999 || patch > 999) {
+    throw new GradleException(
+        "Polyth Android versionCode mapping requires minor and patch <= 999: ${defaultVersionName}"
+    )
+}
+
+def defaultVersionCode = major * 1000000 + minor * 1000 + patch + 1
+if (defaultVersionCode < 1 || defaultVersionCode > 2100000000) {
+    throw new GradleException(
+        "Computed Android versionCode ${defaultVersionCode} is invalid for ${defaultVersionName}"
+    )
+}
+
+def polythVersionName = project.hasProperty('polythVersionName')
+    ? project.polythVersionName.toString()
+    : defaultVersionName
+def polythVersionCode = project.hasProperty('polythVersionCode')
+    ? project.polythVersionCode.toString().toInteger()
+    : defaultVersionCode
+def polythPushRelayOrigin = project.hasProperty('polythPushRelayOrigin')
+    ? project.polythPushRelayOrigin.toString()
+    : ''
+def googleServicesFile = file('google-services.json')
+def polythFirebaseConfigured = googleServicesFile.isFile() && googleServicesFile.length() > 0
+
+def polythRustBuild = tasks.register('buildPolythLinkRust', Exec) {
+    commandLine 'bash', file('../../scripts/build-polyth-link-android.sh').absolutePath
+}
+
+android {
+    namespace = "com.polyth.mobile"
+    compileSdk = rootProject.ext.compileSdkVersion
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+    defaultConfig {
+        applicationId "com.polyth.mobile"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode polythVersionCode
+        versionName polythVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17'
+            }
+        }
+        aaptOptions {
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+        buildConfigField 'String', 'POLYTH_PUSH_RELAY_ORIGIN', '"' + polythPushRelayOrigin.replace('"', '\\"') + '"'
+        buildConfigField 'boolean', 'POLYTH_FCM_CONFIGURED', polythFirebaseConfigured.toString()
+    }
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv('ANDROID_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation 'com.google.android.gms:play-services-code-scanner:16.1.0'
+    // ModuleInstall API for the scanner UI module; same version Firebase already resolves.
+    implementation 'com.google.android.gms:play-services-base:18.9.0'
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+    // FCM is intentionally present even without google-services.json so the
+    // app builds and reports an explicit unavailable state rather than a false
+    // enabled state. The build-config guard prevents registration in that case.
+    implementation platform('com.google.firebase:firebase-bom:34.18.0')
+    implementation 'com.google.firebase:firebase-messaging'
+}
+
+apply from: 'capacitor.build.gradle'
+
+tasks.matching { task ->
+    task.name.startsWith('configureCMake') ||
+        (task.name.startsWith('merge') && task.name.endsWith('JniLibFolders'))
+}.configureEach {
+    dependsOn polythRustBuild
+}
+
+try {
+    def servicesJSON = googleServicesFile
+    if (servicesJSON.isFile() && servicesJSON.length() > 0) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

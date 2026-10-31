@@ -1,0 +1,20 @@
+{
+  "name": "@polyth/session",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/root.ts",
+    "./web-api": "./src/webApiAccountScoped.ts",
+    "./idempotent-mutation": "./src/idempotentMutation.ts",
+    "./next-action": "./src/nextAction.ts",
+    "./queue-pause": "./src/queuePause.ts",
+    "./output-cache": "./src/outputCache.ts",
+    "./conversation": "./src/conversationText.ts",
+    "./worktree-names": "./src/worktreeNames.ts",
+    "./create-operation": "./src/createOperation.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/code-hosting": "0.1.0"
+  }
+}

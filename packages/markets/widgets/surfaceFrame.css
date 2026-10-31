@@ -1,0 +1,52 @@
+/* Markets owns section composition; the host owns the window and controls. */
+.markets-surface-frame {
+  container-type: inline-size;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--module-content-gap, var(--space-3));
+}
+
+.markets-surface-nav {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+  /* Scroll ownership, the edge-fade affordance, inline padding, touch
+     containment and hidden scrollbar come from the core .ui-scroll-tabs
+     primitive. Only block padding stays local. */
+  padding-block: var(--space-2);
+}
+
+/* No local button colors, radii, fonts, hover rules or focus suppression.
+   The selected quiet action and remaining ghost actions are host Buttons. */
+.markets-surface-nav > .ui-btn { flex: none; }
+
+.markets-surface-frame-body {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Older Markets surface styles were authored while --focus-ring still looked
+   like a shadow role. It is a color token. This package-owned final surface
+   seam restores the same visible focus contract as core without restyling the
+   host navigation buttons above. */
+.markets-surface-frame-body :is(button, input, select, textarea, a[href]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--focus-wash);
+}
+
+/* These section views already live inside a host-padded page. Their root
+   must not create another viewport or a second set of exterior gutters. */
+.markets-surface-frame-body > :is(div, section, main):not(.empty-state):not([role="alert"]):not([class^="ui-"]):not([class*=" ui-"]) {
+  min-width: 0;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+}

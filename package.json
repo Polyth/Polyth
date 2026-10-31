@@ -1,0 +1,83 @@
+{
+  "name": "polyth",
+  "version": "1.2.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "!packages/backend-deepseek",
+    "!packages/backend-grok",
+    "!packages/backend-omp",
+    "!packages/backend-pi",
+    "apps/*"
+  ],
+  "overrides": {
+    "js-yaml": "4.3.2",
+    "mermaid": {
+      "katex": "$katex"
+    },
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  },
+  "scripts": {
+    "check:node": "node scripts/check-node.mjs",
+    "preinstall": "node scripts/check-node.mjs",
+    "build:supervisor": "node packages/harness-runtime/build-supervisor.mjs",
+    "prebuild": "node scripts/check-node.mjs",
+    "prebuild:web": "npm run build:supervisor",
+    "i18n:generate": "node --experimental-strip-types apps/web/generateI18n.ts",
+    "build:web": "npm run i18n:generate && node --experimental-strip-types apps/web/buildPackages.ts && node --experimental-strip-types apps/web/build.ts",
+    "build:desktop": "npm run build:web && npm --workspace @polyth/desktop run build",
+    "desktop:stage-chromium": "npm --workspace @polyth/desktop run stage:chromium",
+    "build": "npm run build:web",
+    "prestart": "node scripts/check-node.mjs && npm run build:supervisor",
+    "start": "node --experimental-strip-types packages/server/src/index.ts",
+    "predev": "node scripts/check-node.mjs",
+    "dev": "npm run build:web && node --experimental-strip-types packages/server/src/index.ts",
+    "prewatch": "node scripts/check-node.mjs && npm run build:supervisor",
+    "watch": "node --experimental-strip-types scripts/supervisor.ts",
+    "watch:public": "HOST=0.0.0.0 PORT=4400 npm run watch",
+    "polyth:restart": "node --experimental-strip-types scripts/restart-polyth.ts",
+    "migration:legacy": "node --experimental-strip-types scripts/legacy-migration.ts",
+    "setup:claim": "node --experimental-strip-types scripts/setup-claim.ts",
+    "auth:break-glass": "node --experimental-strip-types scripts/break-glass-password.ts",
+    "version:bump": "node scripts/bump-version.mjs",
+    "build:link": "cargo build -p polyth-link-host -p polyth-link-client -p polyth-link-relay",
+    "desktop:download-opencode": "npm --workspace @polyth/desktop run download:opencode",
+    "desktop:dev": "npm run build:desktop && npm run desktop:download-opencode && npm --workspace @polyth/desktop start",
+    "desktop:dist:linux": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:linux",
+    "desktop:dist:mac": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:mac",
+    "desktop:dist:win": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:win",
+    "build:mobile": "npm run build:web && npm --workspace @polyth/mobile run sync",
+    "mobile:sync": "npm run build:web && npm --workspace @polyth/mobile run sync",
+    "mobile:open:android": "npm --workspace @polyth/mobile run open:android",
+    "mobile:open:ios": "npm --workspace @polyth/mobile run open:ios",
+    "mobile:build:android": "npm run build:web && npm --workspace @polyth/mobile run sync && npm --workspace @polyth/mobile run build:android",
+    "pretest": "node scripts/check-node.mjs && npm run build:supervisor",
+    "test": "node scripts/run-tests.mjs packages/*/test/*.test.ts apps/*/test/*.test.ts scripts/test/*.test.ts",
+    "agent:beta": "node --experimental-strip-types scripts/agent-beta.ts",
+    "polyth": "node packages/cli/bin/polyth.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^21.0.4",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "katex": "^0.19.1",
+    "lucide-react": "^1.61.0",
+    "mermaid": "^11.17.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "ws": "^8.22.0"
+  }
+}

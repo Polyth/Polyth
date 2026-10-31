@@ -1,0 +1,25 @@
+{
+  "name": "@polyth/share-chat",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Shared Chat",
+      "description": "Lets agents read public shared chat links (ChatGPT) as a clean, paged transcript in one call.",
+      "core": false,
+      "enabled": true,
+      "icon": "link",
+      "hasSettings": false,
+      "category": "research"
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/outbound": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  }
+}

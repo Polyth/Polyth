@@ -1,0 +1,1334 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { JsonObject, SessionProjection } from "@polyth/contracts";
+import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
+import { api, errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
+import { fmtMs } from "../format.ts";
+import {
+  executionPresentation,
+  executionPathParts,
+  isImagePath,
+  normalizedInputEntries,
+  outputLineCount,
+  readFragment,
+  type ExecutionKind,
+} from "../execution.ts";
+import { effectiveToolCall, nativeTodoItems, type McpIcon } from "../toolCallView.ts";
+import { applyUnifiedDiff, visibleDiffRows, type DiffApplyDirection, type FileDiff } from "../diff.ts";
+import { highlight, highlightLines, langOf } from "../highlight.ts";
+import { getLocale, tr, type TranslationKey } from "../i18n/index.ts";
+import { Icon } from "../icons.tsx";
+import { openSession } from "../init.ts";
+import { getState, openEditorFile, setUiError, useStore } from "../store.ts";
+import { useTimelineProjectId, useTimelineSessionId } from "../timelineSession.ts";
+import type { SubagentState, ToolMsg } from "../reduce.ts";
+import AttachmentPreview from "./AttachmentPreview.tsx";
+import CopyButton from "./CopyButton.tsx";
+import { McpCallDetail, TodoChecklist } from "./ToolCallDetail.tsx";
+import { ExecutionIcon } from "./ExecutionIcon.tsx";
+
+export { ExecutionIcon };
+import ResourceLink from "./ResourceLink.tsx";
+import Dialog from "./a11y/Dialog.tsx";
+import { Button, ExpandIcon, Icon as ActionIcon, IconButton, MoreIcon, RedoIcon, StopIcon, Textarea, UndoIcon } from "./ui/index.ts";
+import { isImeComposing } from "./input/editorCore.ts";
+
+type DisplayStatus = "pending" | "running" | "done" | "error" | "cancelled";
+/** Matches the --motion-normal token so unmount waits for the CSS collapse. */
+export const EXECUTION_COLLAPSE_MS = 180;
+
+/** True when streamed text must not be animated: accessibility settings and
+ *  the desktop low-resource mode both get the raw target directly. */
+function motionSmoothOff(): boolean {
+  if (typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true") return true;
+  if (typeof document !== "undefined" && document.documentElement.dataset.reduceAnimations === "true") return true;
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Print-out effect for execution output: types the newest target text out
+ *  from the current shown position (empty on first arrival), re-rated to a
+ *  fixed ~300ms catch-up so live streaming reads as one continuous type-out
+ *  while one-shot results print in. Shrinking targets (rewind) and reduced
+ *  motion snap immediately. */
+function usePrintText(target: string, animate = true): string {
+  const initial = animate && !motionSmoothOff() ? "" : target;
+  const [shown, setShown] = useState(initial);
+  const shownRef = useRef(initial);
+  const raf = useRef(0);
+  useEffect(() => {
+    cancelAnimationFrame(raf.current);
+    const targetLen = target.length;
+    const shownLen = shownRef.current.length;
+    if (!animate || targetLen < shownLen || motionSmoothOff()) {
+      shownRef.current = target;
+      setShown(target);
+      return;
+    }
+    if (shownLen >= targetLen) return;
+    const rate = Math.max(4, Math.ceil((targetLen - shownLen) / 18));
+    const step = () => {
+      if (motionSmoothOff()) {
+        shownRef.current = target;
+        setShown(target);
+        return;
+      }
+      const behind = targetLen - shownRef.current.length;
+      if (behind <= 0) return;
+      const take = Math.min(behind, rate);
+      shownRef.current = target.slice(0, shownRef.current.length + take);
+      setShown(shownRef.current);
+      if (shownRef.current.length < targetLen) raf.current = requestAnimationFrame(step);
+    };
+    raf.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf.current);
+  }, [target, animate]);
+  return target.length < shown.length ? target : shown;
+}
+
+export function useCollapsePresence(open: boolean): boolean {
+  const [present, setPresent] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    if (!present) return;
+    const timer = window.setTimeout(() => setPresent(false), EXECUTION_COLLAPSE_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, present]);
+  return present;
+}
+
+/** The reducer settles tools left open by a finished turn with fixed English
+ *  reasons (the status logic above matches them); show them in the active
+ *  language. Real tool errors pass through as reported. */
+const SETTLED_REASON_KEYS: Readonly<Record<string, TranslationKey>> = {
+  Interrupted: "execution.settledInterrupted",
+  Stopped: "execution.settledStopped",
+  "Turn ended before tool completed": "execution.settledTurnEnded",
+};
+
+function displayError(error: string | undefined): string | undefined {
+  if (error === undefined) return undefined;
+  const key = SETTLED_REASON_KEYS[error];
+  return key ? tr(key) : error;
+}
+
+function displayStatus(message: ToolMsg, childStatus?: string): DisplayStatus {
+  if (childStatus && /^(?:queued|pending)$/i.test(childStatus)) return "pending";
+  if (childStatus && /^(?:running|active|working)$/i.test(childStatus)) return "running";
+  if (childStatus && /^(?:done|completed|success|succeeded)$/i.test(childStatus)) return "done";
+  if (childStatus && /^(?:failed|error)$/i.test(childStatus)) return "error";
+  if (message.status === "error" && /cancel(?:led|ed)|aborted|stopped|interrupted/i.test(message.error ?? "")) return "cancelled";
+  return message.status;
+}
+
+const STATUS_LABEL: Record<DisplayStatus, TranslationKey> = {
+  pending: "execution.statusPending",
+  running: "execution.statusRunning",
+  error: "execution.statusFailed",
+  cancelled: "execution.statusCancelled",
+  done: "execution.statusSucceeded",
+};
+
+/** "1 line" / "5 lines" in the active language. */
+const pluralKey = (count: number, one: TranslationKey, other: TranslationKey): TranslationKey =>
+  new Intl.PluralRules(getLocale()).select(count) === "one" ? one : other;
+
+function StatusMark({ message, childStatus }: { message: ToolMsg; childStatus?: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  const status = displayStatus(message, childStatus);
+  useEffect(() => {
+    if (status !== "pending" && status !== "running") return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [status]);
+  const elapsed = fmtMs(Math.max(0, (message.finishTime ?? now) - message.time));
+  const label = tr(STATUS_LABEL[status]);
+  return (
+    <span className={`execution-status ${status}`} aria-label={tr("execution.statusIn", { status: label, elapsed })}>
+      <span className="execution-duration">{elapsed}</span>
+      <span className="execution-status-icon" aria-hidden="true">
+        {status === "pending" ? "○" : status === "running" ? <span className="ui-spinner ui-spinner--sm" /> : status === "done" ? "✓" : status === "error" ? "×" : "—"}
+      </span>
+    </span>
+  );
+}
+
+function DetailHeading({ label, copy, copyLabel }: { label: string; copy?: string; copyLabel?: string }) {
+  return (
+    <div className="execution-detail-heading">
+      <span>{label}</span>
+      {copy !== undefined && <CopyButton text={copy} label={copyLabel ?? label} />}
+    </div>
+  );
+}
+
+function CommandTerminal({ command, output, error, status, cwd, exitCode, animate, onOpenFull, onOpenRaw }: {
+  command: string;
+  output?: string;
+  error?: string;
+  status: DisplayStatus;
+  cwd?: string;
+  exitCode?: string;
+  animate: boolean;
+  onOpenFull: (text: string) => void;
+  onOpenRaw: () => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const result = [output, error !== output ? error : undefined].filter((value) => value !== undefined && value !== "").join("\n");
+  const printed = usePrintText(result, animate);
+  const lines = outputLineCount(result);
+  const long = lines > 12 || result.length > 1600;
+  const shown = showAll ? printed : printed.split(/\r?\n/).slice(0, 12).join("\n").slice(0, 1600);
+  const active = status === "pending" || status === "running";
+  const failedExit = exitCode !== undefined && exitCode !== "0";
+  return (
+    <section className="execution-terminal" aria-label={tr("execution.terminal")}>
+      <div className="execution-terminal-command" title={cwd}>
+        <pre className="execution-command" tabIndex={0} aria-label={tr("timeline.command")}>
+          <code dangerouslySetInnerHTML={{ __html: highlight(command, "sh") }} />
+        </pre>
+        <div className="execution-terminal-actions">
+          <IconButton icon={MoreIcon} size="sm" label={tr("execution.viewDetails")} onClick={onOpenRaw} />
+          <CopyButton text={command} label={tr("execution.copyCommand")} />
+        </div>
+      </div>
+      {result !== "" ? (
+        <div className="execution-terminal-result" aria-busy={active || undefined}>
+          <pre className={`execution-output${showAll ? " expanded" : ""}`} tabIndex={0} aria-label={error ? tr("execution.outputAndError") : tr("timeline.output")}>{shown}</pre>
+          <div className="execution-terminal-actions">
+            <CopyButton text={result} label={tr("execution.copyOutput")} />
+          </div>
+        </div>
+      ) : !active && <span className="execution-terminal-empty sr-only">{tr("execution.noOutput")}</span>}
+      {(long || failedExit) && (
+        <footer className="execution-terminal-footer">
+          {long && <Button variant="ghost" size="sm" aria-expanded={showAll} onClick={() => setShowAll((value) => !value)}>
+            {showAll ? tr("execution.collapseOutput") : lines > 12 ? tr("execution.showAllLines", { count: lines }) : tr("execution.showFullOutput")}
+          </Button>}
+          {long && <IconButton icon={ExpandIcon} size="sm" label={tr("execution.openFullOutput")} onClick={() => onOpenFull(result)} />}
+          {failedExit && <span className="execution-terminal-exit">{tr("execution.exitCode", { code: exitCode })}</span>}
+        </footer>
+      )}
+    </section>
+  );
+}
+
+/** The file the action worked on, presented as the file itself: name first,
+ *  location second, one click into the editor. */
+function FileTarget({ path, parts, onOpen, resource }: {
+  path: string;
+  parts?: { filename: string; directory: string };
+  onOpen: () => void;
+  resource?: { projectId: string; sessionId: string | null; repositoryId?: string; resolve?: boolean };
+}) {
+  const content = <>
+    <span className="execution-file-open-icon" aria-hidden="true"><Icon.fileEdit /></span>
+    <span className="execution-file-open-name">
+      <strong>{parts?.filename ?? path}</strong>
+      {parts?.directory && <span>{parts.directory}</span>}
+    </span>
+    <span className="execution-file-open-hint">{tr("execution.openInEditor")}</span>
+    <span className="execution-file-open-chevron" aria-hidden="true"><Icon.chevronRight /></span>
+  </>;
+  return (
+    <section className="execution-detail-section execution-file-summary" aria-label={tr("execution.file")}>
+      {resource ? <ResourceLink resource={{ scheme: "file", locator: path, projectId: resource.projectId, sessionId: resource.sessionId, ...(resource.repositoryId ? { repositoryId: resource.repositoryId } : {}) }} resolve={resource.resolve ?? true} mode="qualified">
+        <span className="execution-file-open">{content}</span>
+      </ResourceLink> : <button type="button" className="execution-file-open" onClick={onOpen} title={path}>{content}</button>}
+      <CopyButton text={path} label={tr("execution.copyFilePath")} />
+    </section>
+  );
+}
+
+/** An image the agent looked at is shown as the image, not as a path plus a
+ *  base64 blob. Clicking it opens the same full-screen viewer attachments use. */
+function ImageDetail({ path, name }: { path: string; name: string }) {
+  const projectId = useTimelineProjectId();
+  const sessionId = useTimelineSessionId();
+  const [open, setOpen] = useState(false);
+  const url = projectId ? api.filesRawUrl(projectId, path, sessionId ?? undefined) : undefined;
+  if (!url) return null;
+  return (
+    <section className="execution-detail-section execution-image" aria-label={tr("execution.image")}>
+      <button type="button" className="execution-image-open" onClick={() => setOpen(true)} title={path}>
+        <img src={url} alt={name} loading="lazy" />
+        <span className="execution-image-caption">
+          <span className="execution-image-icon" aria-hidden="true"><Icon.image /></span>
+          <strong>{name}</strong>
+          <span>{tr("execution.viewImage")}</span>
+        </span>
+      </button>
+      {open && (
+        <AttachmentPreview
+          attachments={[{ id: path, name, mime: "image/*", size: 0, kind: "image", path, url }]}
+          start={0}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </section>
+  );
+}
+
+const FRAGMENT_PREVIEW_LINES = 14;
+
+/** Read output rendered as what it is — source, with a real gutter and the
+ *  file's own syntax colour. */
+function CodeFragment({ text, path, onOpenFull }: {
+  text: string;
+  path?: string;
+  onOpenFull: () => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const { code, startLine } = useMemo(() => readFragment(text), [text]);
+  const lines = useMemo(() => highlightLines(code, langOf(path ?? "")), [code, path]);
+  const shown = showAll ? lines : lines.slice(0, FRAGMENT_PREVIEW_LINES);
+  return (
+    <section className="execution-detail-section">
+      <DetailHeading label={tr("execution.contents")} copy={code} copyLabel={tr("execution.copyContents")} />
+      <div
+        className={`execution-code${showAll ? " expanded" : ""}`}
+        tabIndex={0}
+        role="group"
+        aria-label={path ? tr("execution.contentsOf", { path }) : tr("execution.contentsOfFile")}
+      >
+        {shown.map((line, index) => (
+          <div key={startLine + index} className="execution-code-line">
+            <span className="execution-code-ln" aria-hidden="true">{startLine + index}</span>
+            <span dangerouslySetInnerHTML={{ __html: line || " " }} />
+          </div>
+        ))}
+      </div>
+      {lines.length > FRAGMENT_PREVIEW_LINES && (
+        <div className="execution-output-actions">
+          <button type="button" onClick={() => setShowAll((value) => !value)}>
+            {showAll ? tr("timeline.collapse") : tr("execution.showAllLines", { count: lines.length })}
+          </button>
+          <button type="button" onClick={onOpenFull}>{tr("execution.openFullOutput")}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function hasLineChanges(stats?: { add: number; del: number }): stats is { add: number; del: number } {
+  return stats !== undefined && (stats.add > 0 || stats.del > 0);
+}
+
+export function DiffStat({ add, del }: { add: number; del: number }) {
+  const label = tr("execution.diffStatPair", {
+    added: tr(pluralKey(add, "execution.linesAddedOne", "execution.linesAddedOther"), { count: add }),
+    removed: tr(pluralKey(del, "execution.linesRemovedOne", "execution.linesRemovedOther"), { count: del }),
+  });
+  return (
+    <span className="execution-diff-stat" aria-label={label}>
+      {add > 0 && <span className="positive">+{add}</span>}
+      {del > 0 && <span className="negative">−{del}</span>}
+    </span>
+  );
+}
+
+function diffLineClass(kind: string): string {
+  if (kind === "add") return "diff-add";
+  if (kind === "del") return "diff-del";
+  if (kind === "hunk") return "diff-hunk";
+  return "";
+}
+
+function DiffLines({ diff, path, limit }: { diff: string; path: string; limit?: number }) {
+  const rows = visibleDiffRows(diff);
+  const shown = limit === undefined ? rows : rows.slice(0, limit);
+  const lang = langOf(path);
+  return (
+    <div className="git-diff" role="table" aria-label={tr("execution.changesIn", { path })}>
+      {shown.map((row, index) => {
+        const shownLn = row.kind === "del" ? row.oldLine : row.newLine;
+        const lineLabel = row.kind === "del" && row.oldLine !== undefined
+          ? tr("execution.removedLine", { line: row.oldLine })
+          : row.newLine !== undefined ? tr("execution.line", { line: row.newLine }) : tr("execution.diffMetadata");
+        return (
+          <div key={`${index}:${row.text}`} className={`git-diff-line ${diffLineClass(row.kind)}`} role="row" aria-label={lineLabel}>
+            <span className="git-diff-ln" aria-hidden="true">{shownLn ?? ""}</span>
+            <span dangerouslySetInnerHTML={{ __html: highlight(row.text, lang) }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function applyFailureMessage(reason: string, direction: DiffApplyDirection): string {
+  if (reason === "already-reverted") return tr("execution.alreadyReverted");
+  if (reason === "already-applied") return tr("execution.alreadyApplied");
+  if (reason === "empty") return tr("execution.emptyChange");
+  return direction === "reverse"
+    ? tr("execution.cannotRevert")
+    : tr("execution.cannotRedo");
+}
+
+async function applyFileDiffOnDisk(file: FileDiff, direction: DiffApplyDirection): Promise<void> {
+  const projectId = getState().activeProjectId;
+  const sessionId = getState().activeSessionId ?? undefined;
+  if (!projectId) throw new Error(tr("execution.noActiveProject"));
+  let current: string | null = null;
+  let revision: string | undefined;
+  try {
+    const read = await api.filesRead(projectId, file.path, sessionId);
+    if (read.tooLarge || read.truncated) {
+      throw new Error(direction === "reverse"
+        ? tr("execution.tooLargeToRevert")
+        : tr("execution.tooLargeToRedo"));
+    }
+    current = read.content;
+    revision = read.revision;
+  } catch (error) {
+    const missing = httpStatusOf(error) === 404
+      || errorCodeOf(error) === "not-found"
+      || /ENOENT|no such file/i.test(error instanceof Error ? error.message : "");
+    if (!missing) throw error;
+  }
+  const result = applyUnifiedDiff(current, file.diff, direction);
+  if (!result.ok) throw new Error(applyFailureMessage(result.reason, direction));
+  if (result.action === "delete") {
+    await api.filesDelete(projectId, file.path, sessionId);
+    return;
+  }
+  await api.filesWrite(projectId, file.path, result.content, revision, sessionId);
+}
+
+function FileDiffActions({
+  file,
+  long,
+  reverted,
+  onReverted,
+  onOpenFile,
+  onOpenFull,
+  resource,
+}: {
+  file: FileDiff;
+  long: boolean;
+  reverted: boolean;
+  onReverted: (next: boolean) => void;
+  onOpenFile: (path: string) => void;
+  onOpenFull: () => void;
+  resource?: { projectId: string; sessionId: string | null; repositoryId?: string; resolve?: boolean };
+}) {
+  const [busy, setBusy] = useState(false);
+  const direction: DiffApplyDirection = reverted ? "forward" : "reverse";
+  const apply = () => {
+    if (busy) return;
+    setBusy(true);
+    void applyFileDiffOnDisk(file, direction)
+      .then(() => onReverted(direction === "reverse"))
+      .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setBusy(false));
+  };
+  const label = busy
+    ? (reverted ? tr("execution.redoing") : tr("execution.reverting"))
+    : reverted ? tr("execution.redo") : tr("execution.revertChanges");
+  return (
+    <div className="execution-file-actions">
+      <button type="button" onClick={apply} disabled={busy} aria-busy={busy || undefined}>
+        <ActionIcon icon={reverted ? RedoIcon : UndoIcon} size="sm" />
+        {label}
+      </button>
+      <div className="execution-file-actions-end">
+        {file.status !== "deleted" && (resource && safeRelativeFilePath(file.path) ? (
+          <ResourceLink
+            resource={{ scheme: "file", locator: file.path, ...(resource.repositoryId ? { repositoryId: resource.repositoryId } : {}) , projectId: resource.projectId, sessionId: resource.sessionId }}
+            resolve={resource.resolve ?? true}
+            mode="compact"
+          >{tr("execution.openInFiles")}</ResourceLink>
+        ) : <button type="button" onClick={() => onOpenFile(file.path)}>{tr("execution.openInFiles")}</button>)}
+        {long && <button type="button" onClick={onOpenFull}>{tr("execution.viewFullDiff")}</button>}
+        <CopyButton text={file.diff} label={tr("execution.copyDiff")} />
+      </div>
+    </div>
+  );
+}
+
+function FileDiffBody({
+  file,
+  labeled,
+  defaultOpen,
+  reverted,
+  onReverted,
+  onOpenFile,
+  onOpenFull,
+  resource,
+}: {
+  file: FileDiff;
+  labeled: boolean;
+  defaultOpen: boolean;
+  reverted: boolean;
+  onReverted: (next: boolean) => void;
+  onOpenFile: (path: string) => void;
+  onOpenFull: () => void;
+  resource?: { projectId: string; sessionId: string | null; repositoryId?: string; resolve?: boolean };
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const rows = visibleDiffRows(file.diff);
+  const long = rows.length > 120;
+  const showDiff = !labeled || open;
+  return (
+    <article className="execution-file-change">
+      {labeled && (
+        <button
+          type="button"
+          className="execution-file-toggle"
+          aria-expanded={open}
+          aria-label={tr(open ? "execution.collapseWithStats" : "execution.expandWithStats", {
+            title: file.path,
+            add: file.stats.add,
+            del: file.stats.del,
+          })}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="execution-file-path" title={file.path}>
+            {file.previousPath && <span className="muted">{file.previousPath} → </span>}
+            {file.path}
+          </span>
+          {hasLineChanges(file.stats) ? <DiffStat add={file.stats.add} del={file.stats.del} /> : null}
+          <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+        </button>
+      )}
+      {showDiff && (rows.length === 0
+        ? <p className="muted">{tr("execution.noTextualChanges")}</p>
+        : <DiffLines diff={file.diff} path={file.path} limit={long ? 120 : undefined} />)}
+      {showDiff && (
+        <FileDiffActions
+          file={file}
+          long={long}
+          reverted={reverted}
+          onReverted={onReverted}
+          onOpenFile={onOpenFile}
+          onOpenFull={onOpenFull}
+          resource={resource}
+        />
+      )}
+    </article>
+  );
+}
+
+function FileChangesView({
+  files,
+  revertedPaths,
+  onReverted,
+  onOpenFile,
+  onOpenFull,
+  resource,
+}: {
+  files: readonly FileDiff[];
+  revertedPaths: ReadonlySet<string>;
+  onReverted: (path: string, next: boolean) => void;
+  onOpenFile: (path: string) => void;
+  onOpenFull: (file: FileDiff) => void;
+  resource?: { projectId: string; sessionId: string | null; repositoryId?: string; resolve?: boolean };
+}) {
+  const labeled = files.length > 1;
+  const expandByDefault = files.length <= 4;
+  return (
+    <section className="execution-detail-section execution-file-changes" aria-label={tr("execution.fileChanges")}>
+      {files.map((file, index) => (
+        <FileDiffBody
+          key={`${file.path}:${index}`}
+          file={file}
+          labeled={labeled}
+          defaultOpen={expandByDefault}
+          reverted={revertedPaths.has(file.path)}
+          onReverted={(next) => onReverted(file.path, next)}
+          onOpenFile={onOpenFile}
+          onOpenFull={() => onOpenFull(file)}
+          resource={resource}
+        />
+      ))}
+    </section>
+  );
+}
+
+function OutputPreview({ text, error = false, animate = false, onOpenFull }: {
+  text: string;
+  error?: boolean;
+  animate?: boolean;
+  onOpenFull: () => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const printed = usePrintText(text, animate);
+  const lines = outputLineCount(text);
+  const long = lines > 12 || text.length > 1600;
+  const shown = showAll ? printed : printed.split(/\r?\n/).slice(0, 12).join("\n");
+  return (
+    <section className={`execution-detail-section execution-result${error ? " error" : ""}`}>
+      <DetailHeading
+        label={error ? tr("common.error") : tr("timeline.output")}
+        copy={text}
+        copyLabel={error ? tr("execution.copyError") : tr("execution.copyOutput")}
+      />
+      <pre className={showAll ? "execution-output expanded" : "execution-output"} tabIndex={0}>{shown || tr("execution.noOutput")}</pre>
+      {long && (
+        <div className="execution-output-actions">
+          <button type="button" onClick={() => setShowAll((value) => !value)}>
+            {showAll ? tr("execution.collapseOutput") : tr("execution.showAllLines", { count: lines })}
+          </button>
+          <button type="button" onClick={onOpenFull}>{tr("execution.openFullOutput")}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SearchResults({ text, onOpenFull }: { text: string; onOpenFull: () => void }) {
+  const results = text.split(/\r?\n/).filter(Boolean).slice(0, 8).map((line) => {
+    const match = line.match(/^(.+?):(\d+)(?::(.*))?$/);
+    return match
+      ? { raw: line, path: match[1]!, line: Number(match[2]), context: match[3]?.trim() ?? "" }
+      : { raw: line };
+  });
+  return (
+    <section className="execution-detail-section execution-search-results">
+      <DetailHeading label={tr("execution.results")} copy={text} copyLabel={tr("execution.copyResults")} />
+      <div className="execution-search-list">
+        {results.map((result, index) => (
+          result.path ? (
+            <button
+              type="button"
+              key={`${index}:${result.raw}`}
+              onClick={() => openEditorFile(result.path ?? null, { path: result.path!, startLine: result.line })}
+            >
+              <span><code>{result.path}</code><small>:{result.line}</small></span>
+              {result.context && <span>{result.context}</span>}
+            </button>
+          ) : <div key={`${index}:${result.raw}`}><code>{result.raw}</code></div>
+        ))}
+      </div>
+      {outputLineCount(text) > results.length && (
+        <div className="execution-output-actions">
+          <button type="button" onClick={onOpenFull}>{tr("execution.openAllResults", { count: outputLineCount(text) })}</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+type Subagent = SubagentState["agents"][number];
+
+function canonicalChildId(message: ToolMsg): string | undefined {
+  for (const key of ["childSessionId", "child_session_id", "sessionId", "sessionID"]) {
+    const value = message.metadata?.[key];
+    if (typeof value === "string" && value) return value;
+  }
+  if (effectiveToolCall(message.tool, message.input).input.action !== "agent.spawn" || !message.output) return undefined;
+  try {
+    const parsed = JSON.parse(message.output) as { session?: { id?: unknown } };
+    return typeof parsed.session?.id === "string" && parsed.session.id ? parsed.session.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function canonicalChildLabel(message: ToolMsg): string {
+  const parameters = effectiveToolCall(message.tool, message.input).input.parameters;
+  if (parameters && typeof parameters === "object" && !Array.isArray(parameters)) {
+    const title = (parameters as Record<string, unknown>).title;
+    if (typeof title === "string" && title.trim()) return title.trim();
+  }
+  const title = message.metadata?.childTitle;
+  return typeof title === "string" && title.trim() ? title.trim() : tr("execution.delegatedTask");
+}
+
+type SubagentEvent = { seq: number; type: string; data: Record<string, unknown> };
+type TrailEntry = { seq: number; role: "you" | "agent" | "tool"; text: string };
+
+const TRAIL_ROLE = { you: "execution.trailYou", agent: "timeline.agent", tool: "execution.trailTool" } as const satisfies Record<TrailEntry["role"], TranslationKey>;
+
+/** Humanise a raw tool id ("read", "mcp__github__get_pull_request") into a
+ *  short activity label. */
+function toolLabel(tool: string): string {
+  const mcp = tool.match(/^mcp__(.+?)__(.+)$/);
+  const words = (mcp ? `${mcp[1]} ${mcp[2]}` : tool).replace(/[_-]+/g, " ").trim();
+  return words ? words.replace(/\b\w/g, (char) => char.toUpperCase()) : tr("execution.trailTool");
+}
+
+/** Fold the raw child event stream into a short readable trail: one row per
+ *  message or tool call, streaming chunks merged back into their message,
+ *  empty reasoning-only turns dropped, newest last. */
+function activityTrail(events: readonly SubagentEvent[]): TrailEntry[] {
+  type Row = TrailEntry & { partId?: string; callId?: string };
+  const rows: Row[] = [];
+  const str = (value: unknown) => (typeof value === "string" ? value : "");
+  for (const { seq, type, data } of events) {
+    if (type === "user/message") {
+      const text = str(data.text).trim();
+      if (text) rows.push({ seq, role: "you", text });
+    } else if (type === "assistant/chunk" || type === "assistant/message") {
+      const partId = str(data.partId) || undefined;
+      const delta = str(data.text);
+      const prior = partId ? rows.find((row) => row.partId === partId) : undefined;
+      if (prior) {
+        prior.text = type === "assistant/message" ? (delta.trim() || prior.text) : (prior.text + delta).trimStart();
+        prior.seq = seq;
+      } else {
+        rows.push({ seq, role: "agent", text: delta.trimStart(), partId });
+      }
+    } else if (type === "tool/call") {
+      const callId = str(data.callId) || undefined;
+      const prior = callId ? rows.find((row) => row.callId === callId) : undefined;
+      if (prior) prior.seq = seq;
+      else rows.push({ seq, role: "tool", text: toolLabel(str(data.tool)), callId });
+    }
+  }
+  return rows
+    .filter((row) => row.text.trim())
+    .map(({ seq, role, text }) => ({ seq, role, text: text.replace(/\s+/g, " ").trim() }))
+    .slice(-6);
+}
+
+function SubagentWork({ sessionId, status }: { sessionId: string; status: string }) {
+  const [events, setEvents] = useState<SubagentEvent[]>([]);
+  const [steering, setSteering] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const running = /^(?:running|active|working)$/i.test(status);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void api.getEvents(sessionId).then((next) => {
+        if (alive) setEvents(next as SubagentEvent[]);
+      }).catch(() => {});
+    };
+    load();
+    const timer = running ? setInterval(load, 1_500) : undefined;
+    return () => { alive = false; if (timer) clearInterval(timer); };
+  }, [sessionId, running]);
+
+  const trail = useMemo(() => activityTrail(events), [events]);
+  const steer = () => {
+    const text = steering.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setError("");
+    void api.sendMessage(sessionId, { text, delivery: "steer" })
+      .then(() => setSteering(""))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setSending(false));
+  };
+  return (
+    <div className="execution-subagent-work" aria-label={tr("execution.subagentWork")}>
+      <ol className="execution-subagent-trail">
+        {trail.length === 0
+          ? <li className="execution-subagent-trail-empty">{tr("execution.waitingForSubagent")}</li>
+          : trail.map((entry) => (
+            <li key={entry.seq} data-role={entry.role}>
+              <span className="execution-subagent-trail-role">{tr(TRAIL_ROLE[entry.role])}</span>
+              <span className="execution-subagent-trail-text">{entry.text}</span>
+            </li>
+          ))}
+      </ol>
+      <form className="execution-subagent-steer" onSubmit={(event) => { event.preventDefault(); steer(); }}>
+        <Textarea
+          value={steering}
+          onChange={(event) => setSteering(event.target.value)}
+          placeholder={tr("execution.steerPlaceholder")}
+          aria-label={tr("execution.steerSubagent")}
+          autoGrow
+          minRows={1}
+          maxRows={4}
+          onKeyDown={(event) => { if (isImeComposing(event)) return; if ((event.metaKey || event.ctrlKey) && event.key === "Enter") steer(); }}
+        />
+        <Button type="submit" size="sm" variant="primary" busy={sending} disabled={!steering.trim()}>{tr("execution.steer")}</Button>
+      </form>
+      {error && <p className="execution-subagent-error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+function childSessionStatus(
+  subagentStatus: string,
+  childSession: SessionProjection | undefined,
+): string {
+  if (/^(?:done|completed|success|succeeded|failed|error|cancelled|canceled|stopped|aborted)$/i.test(subagentStatus)) {
+    return subagentStatus;
+  }
+  if (childSession) {
+    if (childSession.status === "failed") return "failed";
+    if (childSession.status === "finished" || childSession.status === "idle" || childSession.status === "archived") return "completed";
+    if (childSession.status === "working" || childSession.status === "waiting" || childSession.status === "reconciling") return "running";
+    if (childSession.status === "epoch-pending" || childSession.status === "unknown") return "pending";
+  }
+  return subagentStatus;
+}
+
+const SUBAGENT_STATUS_LABEL = {
+  completed: "timeline.completed",
+  failed: "execution.statusFailed",
+  pending: "execution.statusPending",
+  running: "execution.statusRunning",
+} as const satisfies Record<string, TranslationKey>;
+
+function SubagentDetail({ subagent }: { subagent: Subagent }) {
+  const sessions = useStore((state) => state.sessions);
+  const activeSessionId = useTimelineSessionId();
+  const models = useStore((state) => state.models);
+  // The runtime snapshot can briefly expose OpenCode's backend id before the
+  // server publishes the canonical Polyth projection. Match both ids so the
+  // action does not become a permanently disabled "Syncing" button.
+  const childSession = sessions.find((session) =>
+    session.id === subagent.sessionId || session.backendSessionId === subagent.sessionId,
+  );
+  const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const parentSession = childSession?.parentId
+    ? sessions.find((session) => session.id === childSession.parentId) ?? activeSession
+    : activeSession;
+  const model = childSession?.model ?? parentSession?.model;
+  const harnessId = childSession?.resolvedHarnessId ?? parentSession?.resolvedHarnessId;
+  const modelLabel = model ? resolveModelPresentation(model, models, harnessId).name : tr("composer.auto");
+  const inheritedModel = childSession?.model === undefined;
+  const parentLabel = parentSession?.title ?? tr("execution.currentSession");
+  const openChild = () => {
+    void openSession(childSession?.id ?? subagent.sessionId).catch((error) =>
+      setUiError(error instanceof Error ? error.message : String(error)));
+  };
+  const effectiveSubagentStatus = childSessionStatus(subagent.status, childSession);
+  const status = /^(?:done|completed|success|succeeded|stopped|aborted|cancelled|canceled)$/i.test(effectiveSubagentStatus)
+    ? "completed"
+    : /^(?:failed|error)$/i.test(effectiveSubagentStatus)
+      ? "failed"
+      : /^(?:queued|pending)$/i.test(effectiveSubagentStatus)
+        ? "pending"
+        : "running";
+  const statusLabel = tr(SUBAGENT_STATUS_LABEL[status]);
+  return (
+    <section className="execution-detail-section execution-subagent-detail" aria-label={tr("execution.childAgent", { name: subagent.label })}>
+      <span className="execution-subagent-branch" aria-hidden="true"><Icon.hierarchy /></span>
+      <div>
+        <strong>{subagent.label}</strong>
+        <span className={`execution-subagent-state ${status}`}>{statusLabel}</span>
+        {subagent.currentTask && <p>{subagent.currentTask}</p>}
+        <dl className="execution-subagent-meta">
+          <div><dt>{tr("execution.model")}</dt><dd>{inheritedModel ? tr("execution.modelInherited", { model: modelLabel }) : modelLabel}</dd></div>
+          <div><dt>{tr("execution.parent")}</dt><dd>{parentLabel}</dd></div>
+        </dl>
+        {childSession && (
+          <details className="execution-subagent-disclosure" open={status === "running"}>
+            <summary>{tr("execution.liveActivity")} <span>· {tr("execution.steerAgent")}</span></summary>
+            <SubagentWork sessionId={childSession.id} status={effectiveSubagentStatus} />
+          </details>
+        )}
+      </div>
+      <button type="button" onClick={openChild}>
+        {tr("execution.openChildSession")} <Icon.external />
+      </button>
+    </section>
+  );
+}
+
+interface TimelineScrollAnchor {
+  element: HTMLElement;
+  scrollTop: number;
+}
+
+function FullOutputViewer({ title, text, mode = "text", scrollAnchor, restoreTarget, onClose }: {
+  title: string;
+  text: string;
+  mode?: "text" | "diff";
+  scrollAnchor?: TimelineScrollAnchor;
+  restoreTarget?: HTMLElement;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [wrap, setWrap] = useState(true);
+  const filtered = useMemo(() => {
+    if (!query.trim()) return text;
+    const needle = query.toLowerCase();
+    return text.split(/\r?\n/).filter((line) => line.toLowerCase().includes(needle)).join("\n");
+  }, [query, text]);
+  const viewer = (
+    <Dialog
+      title={title}
+      onClose={onClose}
+      size="full"
+      initialFocus='input[type="search"]'
+      className="execution-viewer"
+      backdropClassName="execution-viewer-backdrop"
+      resolveRestoreFocus={() => null}
+      onAfterRestoreFocus={() => {
+        if (restoreTarget?.isConnected) restoreTarget.focus({ preventScroll: true });
+        if (!scrollAnchor) return;
+        const restore = () => {
+          if (scrollAnchor.element.isConnected) scrollAnchor.element.scrollTop = scrollAnchor.scrollTop;
+        };
+        requestAnimationFrame(() => {
+          restore();
+          requestAnimationFrame(restore);
+        });
+      }}
+    >
+      <header>
+        <strong>{title}</strong>
+        <span>{tr(pluralKey(outputLineCount(text), "execution.linesOne", "execution.linesOther"), { count: outputLineCount(text) })}</span>
+        <CopyButton text={text} label={tr("execution.copyFullOutput")} />
+        <button type="button" className="execution-viewer-close" onClick={onClose} aria-label={tr("execution.closeTitle", { title })}><Icon.close /></button>
+      </header>
+      <div className="execution-viewer-tools">
+        <label><Icon.search /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tr("execution.searchOutput")} /></label>
+        <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>{wrap ? tr("execution.wrapOn") : tr("execution.wrapOff")}</button>
+      </div>
+      {mode === "diff"
+        ? <div className={wrap ? "execution-viewer-diff wrap" : "execution-viewer-diff"}><DiffLines diff={filtered} path={title} /></div>
+        : <pre className={wrap ? "wrap" : ""}>{filtered || tr("execution.noMatchingLines")}</pre>}
+    </Dialog>
+  );
+  return createPortal(viewer, document.body);
+}
+
+/** The inline Stop of one running command: offered only while the runtime
+ *  still reports that exact call as running in this session. Shared by the
+ *  action row and the activity block's live line. */
+export function useExecutionStop(message: ToolMsg | undefined, sessionIdProp: string | null | undefined, running: boolean): {
+  canStop: boolean;
+  stopping: boolean;
+  stop: (event?: { detail?: number }) => void;
+  armPointer: () => void;
+} {
+  const activeSessionId = useTimelineSessionId();
+  const sessionId = sessionIdProp ?? activeSessionId;
+  const toolActive = useStore((state) => {
+    if (!running || !message) return false;
+    const events = sessionId ? state.events[sessionId] : undefined;
+    for (let index = (events?.length ?? 0) - 1; index >= 0; index -= 1) {
+      const event = events![index]!;
+      if (event.type === "turn/stopped" || event.type === "turn/started") return false;
+      const callId = (event.data as { callId?: unknown }).callId;
+      if (callId !== message.callId) continue;
+      if (event.type === "tool/result" || event.type === "tool/error") return false;
+      if (event.type === "tool/started" || (event.type === "tool/call" && event.data.status === "running")) return true;
+    }
+    return false;
+  });
+  const [stopping, setStopping] = useState(false);
+  const canStop = !!sessionId && toolActive && running;
+  const stopPointerAt = useRef(0);
+  useEffect(() => {
+    if (!canStop) setStopping(false);
+  }, [canStop]);
+  const stop = (event?: { detail?: number }) => {
+    if (!sessionId || !canStop || stopping) return;
+    // A Send→Stop remount can deliver click without pointerdown on this
+    // control. Keyboard and programmatic clicks use detail 0 and still work.
+    if ((event?.detail ?? 0) !== 0 && Date.now() - stopPointerAt.current > 1000) return;
+    setStopping(true);
+    void api.abort(sessionId, "execution")
+      .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setStopping(false));
+  };
+  return { canStop, stopping, stop, armPointer: () => { stopPointerAt.current = Date.now(); } };
+}
+
+/** What an action's folded line says: its glyph, a name (the file for file
+ *  work) and a quiet preview. Shared by the action row and the activity
+ *  block's live line, so the line reads exactly like the step it becomes. */
+export interface ExecutionSummary {
+  kind: ExecutionKind;
+  image: boolean;
+  mcp?: McpIcon;
+  title: string;
+  preview: string;
+  path?: string;
+}
+
+export function useExecutionSummary(message: ToolMsg | undefined, sessionIdProp?: string | null): ExecutionSummary | null {
+  const activeSessionId = useTimelineSessionId();
+  const sessionId = sessionIdProp ?? activeSessionId;
+  const projectRoot = useStore((state) => {
+    const projectId = sessionId ? state.sessions.find((candidate) => candidate.id === sessionId)?.projectId : undefined;
+    return projectId ? state.projectRegistry.projects.find((project) => project.id === projectId)?.path ?? null : null;
+  });
+  const sessions = useStore((state) => state.sessions);
+  const presentation = useMemo(() => message ? executionPresentation(message, {
+    sessionTitle: (id) => sessions.find((session) => session.id === id || session.backendSessionId === id)?.title,
+  }) : null, [message, message?.rev, sessions]);
+  const pathParts = useMemo(
+    () => presentation?.path ? executionPathParts(presentation.path, projectRoot) : undefined,
+    [presentation?.path, projectRoot],
+  );
+  if (!presentation) return null;
+  return {
+    kind: presentation.kind,
+    image: isImagePath(presentation.path) && !presentation.files?.length,
+    ...(presentation.mcp?.icon ? { mcp: presentation.mcp.icon } : {}),
+    title: pathParts?.filename ?? presentation.label,
+    preview: pathParts ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ") : presentation.preview,
+    ...(presentation.path ? { path: presentation.path } : {}),
+  };
+}
+
+function presentationKindIsSubagent(message: ToolMsg): boolean {
+  return executionPresentation(message).kind === "subagent";
+}
+
+function metadataValue(metadata: JsonObject | undefined, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = metadata?.[key];
+    if (typeof value === "string" || typeof value === "number") return String(value);
+  }
+  return undefined;
+}
+
+const PATH_DETAIL_KEYS = new Set(["filepath", "file path", "path", "file", "target"]);
+
+function safeRelativeFilePath(value: string): boolean {
+  return value.length > 0
+    && !value.startsWith("/")
+    && !value.includes("\\")
+    && !value.includes("\0")
+    && !value.split("/").includes("..")
+    && !/^[a-z][a-z\d+.-]*:\/\//i.test(value);
+}
+
+function isPathDetailKey(key: string): boolean {
+  return PATH_DETAIL_KEYS.has(key.replace(/_/g, " ").toLowerCase());
+}
+
+function isTrivialFileEditOutput(output: string | undefined, hasDiff: boolean): boolean {
+  if (!hasDiff) return false;
+  const text = (output ?? "").trim();
+  if (text === "") return true;
+  if (/success\.?\s*(?:updated|modified)\s+the following files?:/i.test(text.replace(/^>\s*/gm, ""))) return true;
+  if (/[\r\n]/.test(text) || text.length > 48) return false;
+  return !/error|fail|denied/i.test(text);
+}
+
+export function ExecutionRow({
+  message,
+  subagent,
+  entering = false,
+  leaving = false,
+  sessionId: sessionIdProp,
+}: {
+  message: ToolMsg;
+  subagent?: Subagent;
+  /** Only the newest visible execution gets entrance and print-out motion. */
+  entering?: boolean;
+  /** Model-driven rewind exit; keeps the row mounted until the cut settles. */
+  leaving?: boolean;
+  /** Owning timeline session; required when a retained row outlives navigation. */
+  sessionId?: string | null;
+}) {
+  const sessions = useStore((state) => state.sessions);
+  const childId = presentationKindIsSubagent(message) ? canonicalChildId(message) : undefined;
+  const child = childId ? sessions.find((session) => session.id === childId || session.backendSessionId === childId) : undefined;
+  const canonicalSubagent: Subagent | undefined = childId ? {
+    sessionId: childId,
+    label: child?.title ?? canonicalChildLabel(message),
+    status: child?.status ?? (message.status === "error" ? "failed" : "pending"),
+  } : undefined;
+  const effectiveSubagent = subagent ?? canonicalSubagent;
+  const status = displayStatus(message, effectiveSubagent?.status);
+  const activeSessionId = useTimelineSessionId();
+  const sessionId = sessionIdProp ?? activeSessionId;
+  const { canStop, stopping, stop, armPointer } = useExecutionStop(message, sessionId, status === "running");
+  const currentSession = useStore((state) => {
+    const id = sessionId;
+    return id ? state.sessions.find((candidate) => candidate.id === id) ?? null : null;
+  });
+  const projectId = currentSession?.projectId ?? null;
+  const projectRoot = useStore((state) => {
+    return projectId ? state.projectRegistry.projects.find((project) => project.id === projectId)?.path ?? null : null;
+  });
+  const [open, setOpen] = useState(false);
+  const [revertedPaths, setRevertedPaths] = useState<ReadonlySet<string>>(() => new Set());
+  const detailsPresent = useCollapsePresence(open);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const pointerScrollAnchor = useRef<(TimelineScrollAnchor & { capturedAt: number }) | null>(null);
+  const [viewer, setViewer] = useState<{
+    title: string;
+    text: string;
+    mode?: "text" | "diff";
+    scrollAnchor?: TimelineScrollAnchor;
+    restoreTarget?: HTMLElement;
+  } | null>(null);
+  const presentation = useMemo(() => executionPresentation(message, {
+    sessionTitle: (id) => sessions.find((session) => session.id === id || session.backendSessionId === id)?.title,
+  }), [message, message.rev, sessions]);
+  const canonicalRepositoryId = (() => {
+    const value = message.metadata?.repositoryId ?? message.input.repositoryId;
+    return typeof value === "string" && value.trim() && presentation.path && safeRelativeFilePath(presentation.path) ? value : undefined;
+  })();
+  const canonicalFileResource = projectId && currentSession
+    && presentation.path && safeRelativeFilePath(presentation.path)
+    ? {
+      projectId,
+      sessionId: currentSession.id,
+      ...(canonicalRepositoryId ? { repositoryId: canonicalRepositoryId } : {}),
+      resolve: canonicalRepositoryId === undefined,
+    }
+    : undefined;
+  useEffect(() => {
+    if (message.status !== "done" || !projectId || !currentSession || typeof window === "undefined") return;
+    const paths = new Set<string>([
+      ...(message.changedFiles ?? []),
+      ...(presentation.files?.map((file) => file.path) ?? []),
+      ...(presentation.path ? [presentation.path] : []),
+    ].filter((path): path is string => safeRelativeFilePath(path)));
+    if (paths.size === 0) return;
+    for (const path of paths) {
+      window.dispatchEvent(new CustomEvent("polyth:files-changed", {
+        detail: {
+          projectId,
+          sessionId: currentSession.id,
+          ...(canonicalRepositoryId ? { repositoryId: canonicalRepositoryId } : {}),
+          path,
+          source: "activity",
+        },
+      }));
+    }
+  }, [canonicalRepositoryId, currentSession, message, message.changedFiles, message.status, presentation.files, presentation.path, projectId]);
+  const pathParts = useMemo(
+    () => presentation.path ? executionPathParts(presentation.path, projectRoot) : undefined,
+    [presentation.path, projectRoot],
+  );
+  const todoItems = useMemo(() => nativeTodoItems(message.tool, message.input), [message, message.rev]);
+  const inputEntries = useMemo(() => {
+    const shown = Boolean(presentation.path) || Boolean(presentation.files?.length);
+    const label = presentation.label.toLowerCase();
+    return normalizedInputEntries(message.input).filter((entry) =>
+      !(shown && isPathDetailKey(entry.key))
+      && !(presentation.kind === "read" && /^(?:offset|limit)$/i.test(entry.key))
+      && !(/^(?:title|description)$/i.test(entry.key) && entry.value.toLowerCase() === label));
+  }, [message, message.rev, presentation.files, presentation.path, presentation.kind, presentation.label]);
+  const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
+  const raw = useMemo(() => JSON.stringify({
+    tool: message.tool,
+    input: message.input,
+    ...(message.output !== undefined ? { output: message.output } : {}),
+    ...(message.error !== undefined ? { error: message.error } : {}),
+    ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
+  }, null, 2), [message, message.rev]);
+  const exitCode = metadataValue(message.metadata, ["exit", "exitCode", "exit_code"]);
+  const cwd = metadataValue(message.metadata, ["cwd"])
+    ?? (typeof message.input.cwd === "string" ? message.input.cwd : undefined);
+  const stats = presentation.stats;
+  const elapsed = fmtMs(Math.max(0, (message.finishTime ?? Date.now()) - message.time));
+  const webUrl = typeof message.input.url === "string" ? message.input.url : undefined;
+  const summaryTitle = pathParts?.filename ?? presentation.label;
+  const image = isImagePath(presentation.path) && !presentation.files?.length;
+  const summaryPreview = pathParts
+    ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ")
+    : presentation.preview;
+  const typedPreview = usePrintText(summaryPreview, entering);
+  const hasOutput = Boolean(message.output?.trim());
+  const terminalCommand = presentation.kind !== "subagent" && !presentation.files?.length ? presentation.command : undefined;
+
+  const openFile = () => {
+    if (presentation.path) openEditorFile(presentation.path);
+  };
+  const openViewer = (title: string, text: string, mode: "text" | "diff" = "text") => {
+    const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
+    const pointerAnchor = pointerScrollAnchor.current;
+    pointerScrollAnchor.current = null;
+    const scrollAnchor = pointerAnchor && Date.now() - pointerAnchor.capturedAt < 1_000
+      ? { element: pointerAnchor.element, scrollTop: pointerAnchor.scrollTop }
+      : timeline
+        ? { element: timeline, scrollTop: timeline.scrollTop }
+        : undefined;
+    const restoreTarget = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : undefined;
+    setViewer({
+      title,
+      text,
+      mode,
+      ...(scrollAnchor ? { scrollAnchor } : {}),
+      ...(restoreTarget ? { restoreTarget } : {}),
+    });
+  };
+
+  return (
+    <>
+      <div className={`tool-card execution-row${entering ? " timeline-row-enter" : ""}${leaving ? " rewind-leaving" : ""}${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`}
+        ref={rowRef}
+        data-execution-kind={presentation.kind}
+        onPointerDownCapture={() => {
+          const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
+          pointerScrollAnchor.current = timeline
+            ? { element: timeline, scrollTop: timeline.scrollTop, capturedAt: Date.now() }
+            : null;
+        }}
+      >
+        <div className={`execution-summary-line${canStop ? " has-stop" : ""}`}>
+          <button
+            type="button"
+            className="tool-disclosure execution-summary"
+            aria-expanded={open}
+            aria-label={hasLineChanges(stats)
+              ? tr(open ? "execution.collapseSummaryWithStats" : "execution.expandSummaryWithStats", {
+                title: summaryTitle,
+                preview: summaryPreview,
+                add: stats.add,
+                del: stats.del,
+              })
+              : tr(open ? "execution.collapseSummary" : "execution.expandSummary", { title: summaryTitle, preview: summaryPreview })}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <span className="tool-icon execution-icon" aria-hidden="true"><ExecutionIcon kind={presentation.kind} image={image} mcp={presentation.mcp?.icon} /></span>
+            <span className="execution-main" title={presentation.path}>
+              <span className="tool-name">
+                {summaryTitle}
+              </span>
+              <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{typedPreview}</span>
+            </span>
+            <span className="execution-diff-stat-slot">{hasLineChanges(stats) ? <DiffStat add={stats.add} del={stats.del} /> : null}</span>
+            <StatusMark message={message} childStatus={effectiveSubagent?.status} />
+            <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
+          </button>
+          {canStop && (
+            <Button
+              className="execution-stop"
+              variant="danger"
+              size="sm"
+              iconStart={StopIcon}
+              busy={stopping}
+              onPointerDown={armPointer}
+              onClick={(event) => stop(event)}
+            >
+              {tr("common.stop")}
+            </Button>
+          )}
+        </div>
+        <div className="execution-expand-shell" aria-hidden={!open}>
+          <div className="execution-collapse-content">
+          {detailsPresent && (
+            <div className="tool-body execution-details">
+              {terminalCommand ? <CommandTerminal
+                command={terminalCommand}
+                output={message.output}
+                error={displayError(message.error)}
+                status={status}
+                cwd={cwd}
+                exitCode={exitCode}
+                animate={entering}
+                onOpenFull={(text) => openViewer(tr("execution.outputTitle", { label: presentation.label }), text)}
+                onOpenRaw={() => openViewer(tr("execution.rawResultTitle", { label: presentation.label }), raw)}
+              /> : <>
+                {effectiveSubagent && <SubagentDetail subagent={effectiveSubagent} />}
+                {presentation.path && !presentation.files?.length && (
+                  image
+                    ? <ImageDetail path={presentation.path} name={summaryTitle} />
+                    : <FileTarget path={presentation.path} parts={pathParts} onOpen={openFile} resource={canonicalFileResource} />
+                )}
+                {presentation.files && presentation.files.length > 0 && (
+                  <FileChangesView
+                    files={presentation.files}
+                    revertedPaths={revertedPaths}
+                    onReverted={(path, next) => {
+                      setRevertedPaths((prev) => {
+                        const nextSet = new Set(prev);
+                        if (next) nextSet.add(path);
+                        else nextSet.delete(path);
+                        return nextSet;
+                      });
+                    }}
+                    onOpenFile={(path) => openEditorFile(path)}
+                    onOpenFull={(file) => openViewer(`${presentation.label} ${file.path}`, file.diff, "diff")}
+                    resource={canonicalFileResource}
+                  />
+                )}
+                {presentation.mcp ? <McpCallDetail view={presentation.mcp} settled={status === "done"} />
+                  : todoItems && todoItems.length > 0 ? <TodoChecklist items={todoItems} />
+                  : presentation.kind !== "subagent" && inputEntries.length > 0 && (
+                  <section className="execution-detail-section execution-input">
+                    <DetailHeading label={tr("execution.details")} />
+                    <dl>
+                      {inputEntries.map(({ key, value }) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
+                    </dl>
+                  </section>
+                )}
+                {message.error !== undefined && (
+                  <OutputPreview text={displayError(message.error) ?? ""} error animate={entering} onOpenFull={() => openViewer(tr("execution.errorTitle", { label: presentation.label }), displayError(message.error) ?? "")} />
+                )}
+                {message.output !== undefined && hasOutput && !image && !presentation.mcp && !isTrivialFileEditOutput(message.output, Boolean(presentation.files?.length)) && (
+                  presentation.kind === "search"
+                    ? <SearchResults text={message.output} onOpenFull={() => openViewer(tr("execution.resultsTitle", { label: presentation.label }), message.output ?? "")} />
+                    : presentation.kind === "read"
+                      ? <CodeFragment text={message.output} path={presentation.path} onOpenFull={() => openViewer(tr("execution.outputTitle", { label: presentation.label }), message.output ?? "")} />
+                    : <OutputPreview text={message.output} animate={entering} onOpenFull={() => openViewer(tr("execution.outputTitle", { label: presentation.label }), message.output ?? "")} />
+                )}
+                {!presentation.files?.length && presentation.kind !== "subagent" && (
+                  <footer className="execution-metadata">
+                    {exitCode !== undefined && <span>{tr("execution.exitCode", { code: exitCode })}</span>}
+                    <span>{elapsed}</span>
+                    {cwd && <span>cwd {cwd}</span>}
+                    {webUrl && <a href={webUrl} target="_blank" rel="noreferrer">{tr("execution.openLink")} <Icon.external /></a>}
+                    <button type="button" onClick={() => openViewer(tr("execution.rawResultTitle", { label: presentation.label }), raw)}>{tr("execution.viewRawResult")}</button>
+                    {!presentation.command && inputJson !== "{}" && <CopyButton text={inputJson} label={tr("execution.copyToolInput")} />}
+                  </footer>
+                )}
+              </>}
+            </div>
+          )}
+          </div>
+        </div>
+      </div>
+      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} mode={viewer.mode} scrollAnchor={viewer.scrollAnchor} restoreTarget={viewer.restoreTarget} onClose={() => setViewer(null)} />}
+    </>
+  );
+}
+
+/** A command the person ran from the composer with `!`. It is their own turn,
+ *  so it stands in the timeline as an open terminal — command and output in
+ *  full view — instead of folding into an agent's activity block. */
+export function ComposerShellRow({ message, entering = false, leaving = false }: {
+  message: ToolMsg;
+  entering?: boolean;
+  leaving?: boolean;
+}) {
+  const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
+  const command = typeof message.input.command === "string"
+    ? message.input.command
+    : (message.title ?? "").replace(/^!/, "");
+  const exitCode = metadataValue(message.metadata, ["exit", "exitCode", "exit_code"]);
+  const failed = message.metadata?.failed === true || message.metadata?.rejected === true
+    || message.metadata?.timedOut === true || (exitCode !== undefined && exitCode !== "0");
+  const shown: ToolMsg = failed && message.status === "done" ? { ...message, status: "error" } : message;
+  const status = displayStatus(shown);
+  const label = tr("timeline.composerShell");
+  return (
+    <>
+      <article
+        className={`msg composer-shell${entering ? " timeline-row-enter" : ""}${leaving ? " rewind-leaving" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}`}
+        data-msg-id={message.id}
+        data-message-seq={message.eventSeq}
+        aria-label={label}
+      >
+        <header className="composer-shell-head">
+          <span className="composer-shell-icon" aria-hidden="true"><Icon.term /></span>
+          <span className="composer-shell-label">{label}</span>
+          <StatusMark message={shown} />
+        </header>
+        <CommandTerminal
+          command={command}
+          output={message.output}
+          error={displayError(message.error)}
+          status={status}
+          exitCode={exitCode}
+          animate={entering}
+          onOpenFull={(text) => setViewer({ title: tr("execution.outputTitle", { label }), text })}
+          onOpenRaw={() => setViewer({
+            title: tr("execution.rawResultTitle", { label }),
+            text: JSON.stringify({
+              command,
+              ...(message.output !== undefined ? { output: message.output } : {}),
+              ...(message.error !== undefined ? { error: message.error } : {}),
+              ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
+            }, null, 2),
+          })}
+        />
+      </article>
+      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} onClose={() => setViewer(null)} />}
+    </>
+  );
+}
+
+export default ExecutionRow;

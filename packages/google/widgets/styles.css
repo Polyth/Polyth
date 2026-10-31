@@ -1,0 +1,74 @@
+.google-settings { display: grid; gap: var(--space-4); min-width: 0; container-type: inline-size; }
+.google-settings-flow { display: grid; gap: var(--space-2); min-width: 0; }
+.google-settings-flow p { margin: 0; }
+.google-settings-paste { display: flex; gap: var(--space-2); align-items: center; min-width: 0; }
+.google-settings-paste > :first-child { flex: 1; min-width: 0; }
+.google-settings-muted { margin: 0; color: var(--muted); font-size: var(--font-meta); }
+.google-settings-muted code { overflow-wrap: anywhere; }
+.google-settings-link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--font-meta);
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .google-settings-link:where(:not(:disabled)):hover { text-decoration: underline; }
+}
+.google-settings-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+.google-account + .google-account,
+.google-settings .settings-row + .google-account { border-top: 1px solid var(--border); }
+.google-account-name { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+.google-account-name img { width: 1.5rem; height: 1.5rem; border-radius: 50%; flex: none; }
+.google-settings-client { min-width: 0; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.google-settings-client-form { display: grid; gap: var(--space-3); min-width: 0; }
+.google-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
+/* The one thing to do when the Google app is ready: sign in. */
+.google-signin { display: grid; justify-items: start; gap: var(--space-2); padding: var(--space-3) 0; }
+
+/* One-time setup: numbered steps, each with the Google Cloud page it needs. */
+.google-setup { display: grid; gap: var(--space-3); min-width: 0; padding: var(--space-2) 0; }
+.google-setup-head { display: grid; gap: var(--space-1); }
+.google-setup-steps { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.google-setup-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+.google-setup-step.is-final { background: var(--accent-wash); }
+.google-setup-number {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-round);
+  background: var(--elevated);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+.google-setup-text { min-width: 0; }
+.google-setup-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+@container (max-width: 480px) {
+  .google-settings-paste { flex-direction: column; align-items: stretch; }
+  .google-setup-step { grid-template-columns: auto minmax(0, 1fr); }
+  .google-setup-action,
+  .google-setup-file { grid-column: 2; justify-self: start; }
+}

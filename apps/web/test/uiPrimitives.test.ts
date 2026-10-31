@@ -1,0 +1,679 @@
+// P1-W2: design tokens + core UI primitives (components/ui/).
+import test from "node:test";
+import assert from "node:assert/strict";
+import { register } from "node:module";
+import { readdir, readFile } from "node:fs/promises";
+import { Window } from "happy-dom";
+
+const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
+
+const dom = new Window({ url: "http://127.0.0.1:4400/" });
+Object.assign(globalThis, {
+  window: dom as unknown as Window & typeof globalThis,
+  document: dom.document as unknown as Document,
+  localStorage: dom.localStorage,
+  HTMLElement: dom.HTMLElement,
+  Element: dom.Element,
+  Node: dom.Node,
+  Event: dom.Event,
+  MouseEvent: dom.MouseEvent,
+  KeyboardEvent: dom.KeyboardEvent,
+});
+Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
+Object.defineProperty(globalThis, "requestAnimationFrame", {
+  configurable: true,
+  value: (callback: FrameRequestCallback) => { callback(0); return 1; },
+});
+Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// Deterministic shell mode: responsiveShell caches these MediaQueryLists on
+// first use, so the mutable `matches` flags steer wide vs phone per test.
+const media = { compact: false, phone: false };
+const mediaQueryList = (key: "compact" | "phone") => ({
+  get matches() { return media[key]; },
+  media: key,
+  addEventListener: () => {},
+  removeEventListener: () => {},
+});
+Object.defineProperty(dom, "matchMedia", {
+  configurable: true,
+  value: (query: string) =>
+    mediaQueryList(query.includes("960") ? "compact" : "phone"),
+});
+
+register("./tsxHooks.mjs", import.meta.url);
+
+const { act, createElement, createRef, useState } = await import("react");
+const { createRoot } = await import("react-dom/client");
+const ui = await import("../src/components/ui/index.ts");
+const { useEscape } = await import("../src/useEscape.ts");
+
+const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
+
+async function mount(element: ReturnType<typeof createElement>) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => { root.render(element); });
+  return {
+    container,
+    unmount: async () => {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    },
+  };
+}
+
+test("Escape closes only the top-most transient overlay layer", async () => {
+  function Layers() {
+    const [outer, setOuter] = useState(true);
+    const [inner, setInner] = useState(true);
+    useEscape(outer, () => setOuter(false));
+    useEscape(inner, () => setInner(false));
+    return createElement("div", {
+      "data-outer": String(outer),
+      "data-inner": String(inner),
+    });
+  }
+
+  const view = await mount(createElement(Layers));
+  try {
+    const state = () => view.container.querySelector("div")!;
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    assert.equal(state().dataset.inner, "false");
+    assert.equal(state().dataset.outer, "true");
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    assert.equal(state().dataset.outer, "false");
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("token contract: calm radius scale, overlay/icon/z/density tokens exist once", async () => {
+  const [tokens, styles] = await Promise.all([read("../src/tokens.css"), read("../src/styles.css")]);
+
+  assert.match(tokens, /--radius-control:\s*calc\(8px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-card:\s*calc\(10px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-surface:\s*calc\(12px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-sheet:\s*calc\(16px \* var\(--corner-radius-scale\)\)/);
+  // Conversation chrome adds rounder roles on top of the base scale: compact
+  // activity rows, floating glass islands/docks, and the sheet-scale composer.
+  assert.match(tokens, /--radius-activity:\s*calc\(15px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-island:\s*calc\(23px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-dock:\s*calc\(23px \* var\(--corner-radius-scale\)\)/);
+  assert.match(tokens, /--radius-composer:\s*var\(--radius-sheet\)/);
+
+  for (const token of [
+    "--overlay-bg", "--overlay-border", "--overlay-shadow",
+    "--icon-sm: 16px", "--icon-md: 18px", "--icon-lg: 20px", "--icon-xl: 24px",
+    "--control-pad-x-sm", "--control-pad-x", "--control-gap",
+    "--hit-min: 0px", "--font-code",
+    "--z-shell", "--z-overlay", "--z-toast", "--z-popover", "--z-tooltip",
+  ]) {
+    assert.ok(tokens.includes(token), `${token} is declared in tokens.css`);
+  }
+
+  // The density seam raises the hit floor only under coarse pointers.
+  assert.match(styles, /@media \(pointer: coarse\)\s*\{\s*html:root \{ --hit-min: var\(--tap\); \}\s*\}/);
+  // Borderless appearance hides component boundaries, but not semantic
+  // activity indicators whose border is the only visible mark.
+  const hideBorders = styles.indexOf('body[data-hide-borders="true"] *,');
+  const spinnerOverride = styles.indexOf('body[data-hide-borders="true"] .ui-spinner {');
+  assert.ok(hideBorders >= 0 && spinnerOverride > hideBorders, "borderless spinner override follows the global border reset");
+  assert.match(styles.slice(spinnerOverride), /border-color:\s*var\(--accent-line\)\s*!important;\s*border-top-color:\s*var\(--accent\)\s*!important;/);
+  // Primitives are defined once — no wave-layered duplicates.
+  for (const selector of [".ui-btn {", ".ui-icon-btn {", ".ui-popover {", ".ui-menu-item {", ".ui-tabs {"]) {
+    const exactSelector = new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gm");
+    assert.equal([...styles.matchAll(exactSelector)].length, 1, `${selector} has a single definition`);
+  }
+  // IconButton extends its hit area without growing the visual box.
+  assert.match(styles, /\.ui-icon-btn::after\s*\{[^}]*width:\s*max\(100%, var\(--hit-min\)\)/s);
+  // That ::after box sizes to its containing block, so an icon button must
+  // stay positioned: a `position: static` override let a dialog's copy
+  // button grow a backdrop-sized hit box that swallowed every click in it.
+  const cssFiles = [
+    ...(await readdir(new URL("../src/", import.meta.url), { recursive: true })).map((file) => new URL(`../src/${file}`, import.meta.url)),
+    ...(await readdir(new URL("../../../packages/", import.meta.url), { recursive: true }))
+      .filter((file) => !file.includes("node_modules") && !file.includes("/dist/"))
+      .map((file) => new URL(`../../../packages/${file}`, import.meta.url)),
+  ].filter((file) => file.pathname.endsWith(".css"));
+  const unpositioned: string[] = [];
+  for (const file of cssFiles) {
+    const css = (await readFile(file, "utf8")).replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const targetsIconButton = selector!.split(",").some((part) => /\.(?:ui-icon-btn|copy-btn)(?:[.:[][^\s>+~]*)?\s*$/.test(part.trim()) && !/::/.test(part));
+      if (targetsIconButton && /(?:^|;)\s*position:\s*static/.test(body!)) unpositioned.push(`${file.pathname.split("/").slice(-3).join("/")}: ${selector!.trim()}`);
+    }
+  }
+  assert.deepEqual(unpositioned, [], "icon buttons keep a positioned box for their ::after hit area");
+  // A menu keeps one label column as soon as any row brings a leading glyph,
+  // mark or busy spinner (a package footer row can bring the only one); the
+  // theme styles re-bind only the column value.
+  assert.match(styles, /\.ui-menu \{ --menu-leading-column: calc\(/);
+  assert.match(styles, /\.ui-menu:has\([^{]*\)[^{]*\{[^}]*padding-inline-start:\s*var\(--menu-leading-column\)/s);
+});
+
+test("Button: variants, sizes, busy state", async () => {
+  let clicks = 0;
+  const view = await mount(createElement(ui.Button, {
+    variant: "primary",
+    size: "sm",
+    onClick: () => { clicks += 1; },
+  }, "Save"));
+  try {
+    const button = view.container.querySelector("button")!;
+    assert.equal(button.getAttribute("type"), "button");
+    assert.ok(button.className.includes("ui-btn--primary"));
+    assert.ok(button.className.includes("ui-btn--sm"));
+    await act(async () => { button.click(); });
+    assert.equal(clicks, 1);
+  } finally { await view.unmount(); }
+
+  const busy = await mount(createElement(ui.Button, { busy: true }, "Working"));
+  try {
+    const button = busy.container.querySelector("button")!;
+    assert.equal(button.getAttribute("aria-busy"), "true");
+    assert.ok(button.hasAttribute("disabled"));
+    assert.ok(busy.container.querySelector(".ui-spinner"), "busy buttons show a spinner");
+  } finally { await busy.unmount(); }
+});
+
+test("AgentStatusDock is a passive live status unless a details action exists", async () => {
+  const passive = await mount(createElement(ui.AgentStatusDock, {
+    icon: createElement("span", null, "A"),
+    model: "Agent",
+    status: "Spawning agent…",
+    label: "Spawning agent…",
+  }));
+  try {
+    const status = passive.container.querySelector<HTMLElement>(".agent-status-dock")!;
+    assert.equal(status.tagName, "DIV");
+    assert.equal(status.getAttribute("role"), "status");
+    assert.equal(status.getAttribute("aria-busy"), "true");
+    assert.ok(!status.classList.contains("ui-glass-dock"), "the status is a line of text, not glass");
+    assert.ok(!status.classList.contains("agent-status-dock--stacked"));
+    assert.equal(status.querySelector(".agent-status-dock-secondary"), null);
+    assert.equal(passive.container.querySelector("button"), null);
+  } finally { await passive.unmount(); }
+
+  let opened = 0;
+  const actionable = await mount(createElement(ui.AgentStatusDock, {
+    icon: createElement("span", null, "A"),
+    model: "Agent",
+    status: "Running tests",
+    label: "Open active run",
+    files: "1 file",
+    onClick: () => { opened += 1; },
+  }));
+  try {
+    const button = actionable.container.querySelector<HTMLButtonElement>("button.agent-status-dock")!;
+    await act(async () => { button.click(); });
+    assert.equal(opened, 1);
+    assert.ok(button.classList.contains("agent-status-dock--stacked"));
+    assert.equal(button.querySelector('[role="status"]')?.textContent, "Running tests");
+    assert.equal(button.querySelector(".agent-status-dock-secondary")?.textContent, "1 file");
+  } finally { await actionable.unmount(); }
+
+  const named = await mount(createElement(ui.AgentStatusDock, {
+    icon: createElement("span", null, "A"),
+    model: "Grok 4.6",
+    status: "Preparing reply…",
+    label: "Active run",
+    onClick: () => {},
+  }));
+  try {
+    const dock = named.container.querySelector(".agent-status-dock")!;
+    assert.ok(!dock.classList.contains("agent-status-dock--stacked"));
+    assert.equal(dock.querySelector(".agent-status-dock-secondary"), null);
+    assert.equal(dock.querySelector(".agent-status-dock-branch"), null);
+    assert.equal(dock.querySelector("strong")?.getAttribute("title"), "Grok 4.6");
+  } finally { await named.unmount(); }
+});
+
+test("IconButton: mandatory accessible name, pressed state, token-sized glyph", async () => {
+  const view = await mount(createElement(ui.IconButton, {
+    icon: ui.CloseIcon,
+    label: "Close panel",
+    pressed: true,
+  }));
+  try {
+    const button = view.container.querySelector("button")!;
+    assert.equal(button.getAttribute("aria-label"), "Close panel");
+    assert.equal(button.getAttribute("title"), "Close panel");
+    assert.equal(button.getAttribute("aria-pressed"), "true");
+    const icon = view.container.querySelector("svg.ui-icon")!;
+    assert.ok(icon.getAttribute("class")!.includes("ui-icon--md"));
+    assert.equal(icon.getAttribute("aria-hidden"), "true");
+  } finally { await view.unmount(); }
+});
+
+test("Switch and Checkbox toggle through accessible semantics", async () => {
+  function Harness() {
+    const [on, setOn] = useState(false);
+    const [checked, setChecked] = useState(false);
+    return createElement("div", null,
+      createElement(ui.Switch, { checked: on, onChange: setOn, label: "Notifications" }),
+      createElement(ui.Checkbox, { checked, onChange: setChecked, label: "Include archived" }),
+    );
+  }
+  const view = await mount(createElement(Harness));
+  try {
+    const switchButton = view.container.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    assert.equal(switchButton.getAttribute("aria-checked"), "false");
+    assert.ok(switchButton.className.includes("switch"), "Switch reuses the canonical .switch visual");
+    await act(async () => { switchButton.click(); });
+    assert.equal(switchButton.getAttribute("aria-checked"), "true");
+
+    const checkbox = view.container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    assert.equal(checkbox.checked, false);
+    await act(async () => { checkbox.click(); });
+    assert.equal(checkbox.checked, true);
+  } finally { await view.unmount(); }
+});
+
+test("Tabs: roving tabindex and arrow-key activation", async () => {
+  function Harness() {
+    const [value, setValue] = useState("one");
+    return createElement(ui.Tabs, {
+      tabs: [{ id: "one", label: "One" }, { id: "two", label: "Two" }, { id: "three", label: "Three" }],
+      value,
+      onChange: setValue,
+      label: "Views",
+      idBase: "t",
+    });
+  }
+  const view = await mount(createElement(Harness));
+  try {
+    const tablist = view.container.querySelector<HTMLElement>('[role="tablist"]')!;
+    assert.equal(tablist.getAttribute("aria-label"), "Views");
+    const selected = () => view.container.querySelector<HTMLElement>('[aria-selected="true"]')!;
+    assert.equal(selected().textContent, "One");
+    assert.equal(selected().tabIndex, 0);
+    await act(async () => {
+      selected().dispatchEvent(new KeyboardEventCtor("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    assert.equal(selected().textContent, "Two");
+    assert.equal(selected().getAttribute("aria-controls"), "t-panel-two");
+    await act(async () => {
+      selected().dispatchEvent(new KeyboardEventCtor("keydown", { key: "End", bubbles: true, cancelable: true }));
+    });
+    assert.equal(selected().textContent, "Three");
+  } finally { await view.unmount(); }
+});
+
+test("Menu (desktop): opens a role=menu popover, selects, and dismisses on Escape", async () => {
+  media.compact = false;
+  media.phone = false;
+  let picked = "";
+  const view = await mount(createElement(ui.Menu, {
+    label: "Session actions",
+    entries: [
+      { id: "rename", label: "Rename", onSelect: () => { picked = "rename"; } },
+      "separator",
+      { id: "delete", label: "Delete", danger: true, onSelect: () => { picked = "delete"; } },
+    ],
+    children: (trigger: object) =>
+      createElement("button", { ...trigger, className: "menu-trigger" }, "Actions"),
+  }));
+  try {
+    const trigger = view.container.querySelector<HTMLButtonElement>(".menu-trigger")!;
+    assert.equal(trigger.getAttribute("aria-haspopup"), "menu");
+    await act(async () => { trigger.click(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    assert.equal(menu.getAttribute("aria-label"), "Session actions");
+    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    assert.deepEqual(items.map((item) => item.textContent), ["Rename", "Delete"]);
+    assert.ok(items[1]!.className.includes("ui-menu-item--danger"));
+
+    await act(async () => { items[0]!.click(); });
+    assert.equal(picked, "rename");
+    assert.equal(document.body.querySelector('[role="menu"]'), null, "selection closes the menu");
+
+    await act(async () => { trigger.click(); });
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    assert.equal(document.body.querySelector('[role="menu"]'), null, "Escape closes the menu");
+  } finally { await view.unmount(); }
+});
+
+test("Menu: a nested phone action menu can stay an anchored popover", async () => {
+  media.compact = true;
+  media.phone = true;
+  let picked = "";
+  const view = await mount(createElement(ui.Menu, {
+    label: "Session actions",
+    phonePresentation: "popover",
+    entries: [{ id: "copy", label: "Copy session ID", onSelect: () => { picked = "copy"; } }],
+    children: (trigger: object) =>
+      createElement("button", { ...trigger, className: "menu-trigger" }, "Actions"),
+  }));
+  try {
+    const trigger = view.container.querySelector<HTMLButtonElement>(".menu-trigger")!;
+    assert.equal(trigger.getAttribute("aria-haspopup"), "menu");
+    await act(async () => { trigger.click(); });
+
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]');
+    assert.ok(menu, "the nested action stays a compact menu");
+    assert.equal(document.body.querySelector(".sheet-backdrop"), null);
+    await act(async () => { menu!.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click(); });
+    assert.equal(picked, "copy");
+    assert.equal(document.body.querySelector('[role="menu"]'), null);
+  } finally {
+    await view.unmount();
+    media.compact = false;
+    media.phone = false;
+  }
+});
+
+test("Menu selection semantics: radio/checkbox roles, headings, swatches, stay-open checkboxes", async () => {
+  media.compact = false;
+  media.phone = false;
+  let sort = "recent";
+  let filtered = false;
+  function Host() {
+    const [, rerender] = useState(0);
+    return createElement(ui.Menu, {
+      label: "List options",
+      entries: [
+        { heading: "Sort" },
+        { id: "recent", label: "Recent", kind: "radio", checked: sort === "recent", onSelect: () => { sort = "recent"; rerender((n: number) => n + 1); } },
+        { id: "name", label: "Name", kind: "radio", checked: sort === "name", onSelect: () => { sort = "name"; rerender((n: number) => n + 1); } },
+        "separator",
+        { id: "attention", label: "Needs attention", kind: "checkbox", checked: filtered, swatch: "#e4bb62", onSelect: () => { filtered = !filtered; rerender((n: number) => n + 1); } },
+      ],
+      footer: createElement("div", { className: "menu-extra" }, "extras"),
+      children: (trigger: object) =>
+        createElement("button", { ...trigger, className: "menu-trigger" }, "Options"),
+    });
+  }
+  const view = await mount(createElement(Host));
+  try {
+    const trigger = view.container.querySelector<HTMLButtonElement>(".menu-trigger")!;
+    await act(async () => { trigger.click(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+
+    // Headings are non-interactive; radios and checkboxes carry aria-checked.
+    assert.equal(menu.querySelector(".ui-menu-heading")?.textContent, "Sort");
+    const radios = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    assert.deepEqual(radios.map((r) => r.getAttribute("aria-checked")), ["true", "false"]);
+    assert.ok(radios[0]!.querySelector(".ui-menu-item-check svg"), "checked radio renders the leading check");
+    const checkbox = menu.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!;
+    assert.equal(checkbox.getAttribute("aria-checked"), "false");
+    assert.ok(checkbox.querySelector(".ui-menu-item-swatch"), "label-style entries render their swatch");
+    assert.ok(menu.querySelector(".menu-extra"), "footer content renders after the entries");
+
+    // Checkbox selection toggles without closing; radio selection closes.
+    await act(async () => { checkbox.click(); });
+    assert.ok(document.body.querySelector('[role="menu"]'), "checkbox toggles keep the menu open");
+    assert.equal(filtered, true);
+    assert.equal(
+      document.body.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!.getAttribute("aria-checked"),
+      "true",
+    );
+    await act(async () => {
+      document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1]!.click();
+    });
+    assert.equal(sort, "name");
+    assert.equal(document.body.querySelector('[role="menu"]'), null, "radio selection closes the menu");
+  } finally { await view.unmount(); }
+});
+
+test("Menu switch entries: trailing track, no reserved check column, stay open", async () => {
+  media.compact = false;
+  media.phone = false;
+  let on = false;
+  function Host() {
+    const [, rerender] = useState(0);
+    return createElement(ui.Menu, {
+      label: "Account",
+      entries: [
+        { id: "edit", label: "Edit mode", kind: "switch", checked: on, onSelect: () => { on = !on; rerender((n: number) => n + 1); } },
+        "separator",
+        { id: "about", label: "About", onSelect: () => {} },
+      ],
+      children: (trigger: object) =>
+        createElement("button", { ...trigger, className: "menu-trigger" }, "Account"),
+    });
+  }
+  const view = await mount(createElement(Host));
+  try {
+    await act(async () => { view.container.querySelector<HTMLButtonElement>(".menu-trigger")!.click(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    assert.equal(menu.querySelector(".ui-menu-item-check"), null, "switch rows do not reserve the leading check column");
+    const row = menu.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!;
+    assert.equal(row.getAttribute("aria-checked"), "false");
+    const track = row.lastElementChild as HTMLElement;
+    assert.ok(track.classList.contains("ui-menu-item-switch"), "the switch track trails the label");
+    assert.equal(track.getAttribute("aria-hidden"), "true");
+    assert.equal(track.getAttribute("data-checked"), "false");
+
+    await act(async () => { row.click(); });
+    assert.equal(on, true);
+    assert.ok(document.body.querySelector('[role="menu"]'), "switch toggles keep the menu open");
+    const toggled = document.body.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!;
+    assert.equal(toggled.getAttribute("aria-checked"), "true");
+    assert.equal(toggled.querySelector(".ui-menu-item-switch")!.getAttribute("data-checked"), "true");
+    assert.equal(toggled.classList.contains("ui-menu-item--checked"), false);
+  } finally { await view.unmount(); }
+});
+
+test("Menu controlled open: external state opens it and focus returns to returnFocusRef", async () => {
+  media.compact = false;
+  media.phone = false;
+  const returnRef = createRef<HTMLButtonElement>();
+  function Host() {
+    const [open, setOpen] = useState(false);
+    return createElement("div", null,
+      createElement("button", {
+        ref: returnRef,
+        className: "row-btn",
+        onContextMenu: (event: MouseEvent) => { event.preventDefault(); setOpen(true); },
+      }, "Row"),
+      createElement(ui.Menu, {
+        label: "Row actions",
+        open,
+        onOpenChange: setOpen,
+        returnFocusRef: returnRef,
+        entries: [{ id: "one", label: "One", onSelect: () => {} }],
+        children: (trigger: object) =>
+          createElement("button", { ...trigger, className: "menu-trigger" }, "More"),
+      }),
+    );
+  }
+  const view = await mount(createElement(Host));
+  try {
+    const row = view.container.querySelector<HTMLButtonElement>(".row-btn")!;
+    await act(async () => {
+      row.dispatchEvent(new (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    assert.ok(document.body.querySelector('[role="menu"]'), "controlled open renders the menu");
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    assert.equal(document.body.querySelector('[role="menu"]'), null);
+    assert.equal(document.activeElement, row, "dismissal focuses the provided return target");
+  } finally { await view.unmount(); }
+});
+
+test("ResponsiveOverlay: desktop dialog vs anchored popover vs phone sheet and compact popover", async () => {
+  media.compact = false;
+  media.phone = false;
+
+  // Desktop without an anchor → modal dialog on the a11y engine.
+  const dialog = await mount(createElement(ui.ResponsiveOverlay, {
+    open: true,
+    onClose: () => {},
+    title: "Configure",
+    children: createElement("p", null, "content"),
+  }));
+  try {
+    const surface = document.body.querySelector('[role="dialog"]')!;
+    assert.equal(surface.getAttribute("aria-label"), "Configure");
+    assert.ok(document.body.querySelector(".ui-dialog-head h2")?.textContent?.includes("Configure"));
+  } finally { await dialog.unmount(); }
+
+  // Desktop with an anchor → popover.
+  const anchorRef = createRef<HTMLElement>();
+  const anchorHost = await mount(createElement("button", { ref: anchorRef }, "anchor"));
+  const popover = await mount(createElement(ui.ResponsiveOverlay, {
+    open: true,
+    onClose: () => {},
+    title: "Filter",
+    anchorRef,
+    children: createElement("p", null, "popover content"),
+  }));
+  try {
+    const surface = document.body.querySelector<HTMLElement>(".ui-popover")!;
+    assert.equal(surface.getAttribute("aria-label"), "Filter");
+    assert.equal(surface.getAttribute("role"), "dialog");
+  } finally {
+    await popover.unmount();
+    await anchorHost.unmount();
+  }
+
+  // Phone without an anchor → the canonical bottom sheet.
+  media.phone = true;
+  const sheet = await mount(createElement(ui.ResponsiveOverlay, {
+    open: true,
+    onClose: () => {},
+    title: "Filter",
+    children: createElement("p", null, "sheet content"),
+  }));
+  try {
+    const backdrop = document.body.querySelector(".sheet-backdrop");
+    assert.ok(backdrop, "phone mode without an anchor renders the shared Sheet");
+    assert.equal(backdrop!.querySelector(".sheet-title")?.textContent, "Filter");
+  } finally {
+    await sheet.unmount();
+  }
+
+  // Phone with an anchor → compact popover beside the trigger.
+  const phoneAnchorRef = createRef<HTMLElement>();
+  const phoneAnchorHost = await mount(createElement("button", { ref: phoneAnchorRef }, "anchor"));
+  const phonePopover = await mount(createElement(ui.ResponsiveOverlay, {
+    open: true,
+    onClose: () => {},
+    title: "Filter",
+    anchorRef: phoneAnchorRef,
+    children: createElement("p", null, "phone popover content"),
+  }));
+  try {
+    const surface = document.body.querySelector<HTMLElement>(".ui-popover")!;
+    assert.equal(surface.getAttribute("aria-label"), "Filter");
+    assert.equal(document.body.querySelector(".sheet-backdrop"), null, "anchored phone pickers skip the sheet");
+  } finally {
+    await phonePopover.unmount();
+    await phoneAnchorHost.unmount();
+    media.phone = false;
+  }
+});
+
+test("compact popover swallows the opening gesture's ghost click", async () => {
+  media.phone = true;
+  let selected = 0;
+  const phoneAnchorRef = createRef<HTMLElement>();
+  const phoneAnchorHost = await mount(createElement("button", { ref: phoneAnchorRef }, "anchor"));
+  const phonePopover = await mount(createElement(ui.ResponsiveOverlay, {
+    open: true,
+    onClose: () => {},
+    title: "Harness",
+    anchorRef: phoneAnchorRef,
+    children: createElement("button", {
+      type: "button",
+      className: "harness-tab",
+      onClick: () => { selected += 1; },
+    }, "cursor"),
+  }));
+  try {
+    const tab = document.body.querySelector<HTMLButtonElement>(".harness-tab")!;
+    await act(async () => {
+      tab.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+    });
+    assert.equal(selected, 0, "a click with no press inside the compact popover is swallowed");
+    await act(async () => {
+      tab.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      tab.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+    });
+    assert.equal(selected, 1, "a real press inside the compact popover still selects");
+  } finally {
+    await phonePopover.unmount();
+    await phoneAnchorHost.unmount();
+    media.phone = false;
+  }
+});
+
+test("Badge, Separator, Spinner, Progress, Skeleton, VisuallyHidden semantics", async () => {
+  const view = await mount(createElement("div", null,
+    createElement(ui.Badge, { tone: "success", dot: true, children: "Healthy" }),
+    createElement(ui.Separator, {}),
+    createElement(ui.Spinner, { label: "Loading sessions" }),
+    createElement(ui.Progress, { value: 0.4, label: "Import progress" }),
+    createElement(ui.Skeleton, { shape: "block", height: 60 }),
+    createElement(ui.VisuallyHidden, null, "hidden context"),
+  ));
+  try {
+    assert.ok(view.container.querySelector(".ui-badge--success .ui-badge-dot"));
+    assert.equal(view.container.querySelector(".ui-separator")!.getAttribute("role"), "separator");
+    const spinner = view.container.querySelector('[role="status"]')!;
+    assert.equal(spinner.getAttribute("aria-label"), "Loading sessions");
+    const progress = view.container.querySelector('[role="progressbar"]')!;
+    assert.equal(progress.getAttribute("aria-valuenow"), "40");
+    assert.equal(view.container.querySelector(".ui-skeleton")!.getAttribute("aria-hidden"), "true");
+    assert.equal(view.container.querySelector(".sr-only")!.textContent, "hidden context");
+  } finally { await view.unmount(); }
+});
+
+// A menu's entries must be spaced by exactly one rhythm. A divider used to
+// carry its own vertical margin on top of the row spacing, so the gap around
+// it was wider than between two plain rows (measured 0,0,0,4,4 before; 4
+// everywhere after). A flex column with one `gap` is what makes that true by
+// construction: flex never collapses margins, so a divider must contribute
+// none. Real Chromium measurement lives in the commit that fixed it.
+test("menu entries share one even gap, and a divider adds none of its own", async () => {
+  const styles = await read("../src/styles.css");
+
+  const menu = /\.ui-menu\s*\{([^}]*)\}/.exec(styles)?.[1] ?? "";
+  assert.match(menu, /display:\s*flex/, ".ui-menu is a flex column, so one `gap` spaces every child");
+  assert.match(menu, /flex-direction:\s*column/);
+  assert.match(menu, /--menu-row-gap:\s*var\(--space-1\)/, "the rhythm is one shared token");
+  assert.match(menu, /gap:\s*var\(--menu-row-gap\)/);
+  assert.match(styles, /\.ui-menu > \*\s*\{\s*flex-shrink:\s*0;\s*\}/, "a capped menu scrolls instead of squeezing rows and dividers");
+
+  // The divider keeps only its horizontal bleed; flex would add any vertical
+  // margin on top of the gap and make the space around it uneven.
+  const divider = /\.ui-menu \.ui-separator--horizontal\s*\{([^}]*)\}/.exec(styles)?.[1] ?? "";
+  assert.match(divider, /margin:\s*0\s+calc\(-1 \* var\(--space-1\)\)/, "no vertical margin, horizontal bleed preserved");
+
+  // The phone sheet draws the same list: same token, same rhythm. Its layout
+  // rule is declared separately from the rhythm rule, so read both.
+  const sheetRules = [...styles.matchAll(/\.ui-menu-sheet-list\s*\{([^}]*)\}/g)].map((match) => match[1]!);
+  const sheet = sheetRules.join("\n");
+  assert.match(sheet, /display:\s*flex/);
+  assert.match(sheet, /flex-direction:\s*column/);
+  assert.match(sheet, /--menu-row-gap:\s*var\(--space-1\)/);
+  assert.match(sheet, /gap:\s*var\(--menu-row-gap\)/);
+  // The sheet's divider needs its own rule only because the base
+  // `.ui-separator--horizontal` margin would otherwise win there; it must
+  // zero the vertical margin just like the desktop menu does.
+  const sheetDivider = /\.ui-menu-sheet-list \.ui-separator--horizontal\s*\{([^}]*)\}/.exec(styles)?.[1] ?? "";
+  assert.match(sheetDivider, /margin:\s*0\s*;/, "the sheet divider adds no vertical space");
+
+  // Both lists must agree, or the two surfaces space the same menu differently.
+  const gaps = [...styles.matchAll(/--menu-row-gap:\s*([^;]+);/g)].map((match) => match[1]!.trim());
+  assert.deepEqual([...new Set(gaps)], ["var(--space-1)"], "one rhythm across both menus");
+});

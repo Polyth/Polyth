@@ -1,0 +1,39 @@
+{
+  "name": "@polyth/handoff",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./web": "./widgets/lib/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Handoff",
+      "description": "Build context bundles and import chat results into Polyth sessions.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "handoff",
+      "hasSettings": false,
+      "category": "operations",
+      "projectAffinity": {
+        "directions": [
+          "engineering",
+          "operations"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

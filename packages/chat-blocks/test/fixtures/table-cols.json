@@ -1,0 +1,41 @@
+{
+  "view": "table",
+  "title": "Builds",
+  "options": {
+    "cols": "Branch,Status,Minutes"
+  },
+  "pick": "none",
+  "columns": [
+    "Branch",
+    "Status",
+    "Minutes"
+  ],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "main",
+      "cells": [
+        "main",
+        "passed",
+        "12"
+      ]
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "feat/x",
+      "cells": [
+        "feat/x",
+        "failed",
+        "3"
+      ]
+    }
+  ],
+  "actions": [],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

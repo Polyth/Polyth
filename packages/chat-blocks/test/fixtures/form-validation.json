@@ -1,0 +1,162 @@
+{
+  "view": "form",
+  "title": "Sign up",
+  "options": {},
+  "pick": "none",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "Email",
+      "cells": [
+        "email",
+        "Email *",
+        "email"
+      ],
+      "field": {
+        "name": "email",
+        "label": "Email",
+        "type": "email",
+        "value": "",
+        "options": [],
+        "required": true
+      }
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "Website",
+      "cells": [
+        "site",
+        "Website",
+        "url"
+      ],
+      "field": {
+        "name": "site",
+        "label": "Website",
+        "type": "url",
+        "value": "",
+        "options": [],
+        "required": false
+      }
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "Age",
+      "cells": [
+        "age",
+        "Age",
+        "number",
+        "30",
+        "18..120"
+      ],
+      "field": {
+        "name": "age",
+        "label": "Age",
+        "type": "number",
+        "value": "30",
+        "options": [],
+        "required": false,
+        "min": "18",
+        "max": "120"
+      }
+    },
+    {
+      "index": 3,
+      "selected": false,
+      "title": "Start",
+      "cells": [
+        "start",
+        "Start",
+        "date",
+        "",
+        "2026-01-01.."
+      ],
+      "field": {
+        "name": "start",
+        "label": "Start",
+        "type": "date",
+        "value": "",
+        "options": [],
+        "required": false,
+        "min": "2026-01-01"
+      }
+    },
+    {
+      "index": 4,
+      "selected": false,
+      "title": "Invite code",
+      "cells": [
+        "code",
+        "Invite code",
+        "text",
+        "",
+        "/[A-Z]{3}-\\d+/"
+      ],
+      "field": {
+        "name": "code",
+        "label": "Invite code",
+        "type": "text",
+        "value": "",
+        "options": [],
+        "required": false,
+        "pattern": "[A-Z]{3}-\\d+"
+      }
+    },
+    {
+      "index": 5,
+      "selected": false,
+      "title": "Size",
+      "cells": [
+        "size",
+        "Size",
+        "",
+        "M",
+        "S/M/L"
+      ],
+      "field": {
+        "name": "size",
+        "label": "Size",
+        "type": "select",
+        "value": "M",
+        "options": [
+          "S",
+          "M",
+          "L"
+        ],
+        "required": false
+      }
+    },
+    {
+      "index": 6,
+      "selected": false,
+      "title": "Newsletter",
+      "cells": [
+        "news",
+        "Newsletter",
+        "toggle",
+        "true"
+      ],
+      "field": {
+        "name": "news",
+        "label": "Newsletter",
+        "type": "toggle",
+        "value": "true",
+        "options": [],
+        "required": false
+      }
+    }
+  ],
+  "actions": [
+    {
+      "label": "Create account"
+    }
+  ],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

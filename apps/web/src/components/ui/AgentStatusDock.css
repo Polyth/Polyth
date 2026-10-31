@@ -1,0 +1,178 @@
+/* Agent status: one quiet line, not a card. Mark, model, action; the edited
+   files tally and the elapsed time sit at the end. It has no plate, border,
+   shadow or glass; what says "live" is light moving through the action's
+   words and the accent dot on the mark. The look is chosen in Chat settings
+   (body[data-composer-status-style]): `line` is this base, `tab` sets it in
+   a faint tab on the composer's top edge, `capsule` hugs it in a centred
+   outlined pill. The chat frame in styles.css owns the width. */
+.agent-status-dock {
+  --agent-status-row: max(32px, var(--hit-min));
+  position: relative;
+  min-width: 0;
+  min-height: var(--agent-status-row);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+}
+.agent-status-dock:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.agent-status-dock--status { cursor: default; }
+
+.agent-status-dock-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+.agent-status-dock-icon > i {
+  position: absolute;
+  inset-inline-end: -2px;
+  inset-block-end: -1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: status-pulse 1.8s ease-in-out infinite;
+}
+
+/* One row: the action outranks everything. The model name gives way first;
+   on a narrow line the files tally steps aside (the details still have it). */
+.agent-status-dock-content {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.agent-status-dock-primary {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  line-height: 1.2;
+}
+.agent-status-dock-primary strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-status-dock-state {
+  flex: 1 1 auto;
+  min-width: 6ch;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Light travelling through the action's words while the agent works. */
+.agent-status-dock-state {
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 38%, var(--text) 50%, var(--muted) 62%, var(--muted) 100%);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: agent-status-shimmer 2.6s linear infinite;
+}
+@keyframes agent-status-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+.agent-status-dock-secondary {
+  order: 2;
+  flex: none;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.agent-status-dock-diff { display: inline-flex; align-items: baseline; gap: var(--space-2); white-space: nowrap; }
+.agent-status-dock-diff .positive { color: color-mix(in srgb, var(--green) 80%, var(--muted)); }
+.agent-status-dock-diff .negative { color: color-mix(in srgb, var(--red) 80%, var(--muted)); }
+.agent-status-dock-time {
+  align-self: center;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The dock's tight line box (1.2) is shorter than a font's ink (about 1.21em
+   for the UI face, more for some fallback faces), and these labels clip for
+   their ellipsis, so tails of g, p and y were cut. Padding grows the clip box
+   by the missing ink; the equal negative margin keeps the row height. */
+.agent-status-dock-primary strong,
+.agent-status-dock-state,
+.agent-status-dock .agent-status-dock-secondary {
+  padding-block: 0.12em;
+  margin-block: -0.12em;
+}
+
+/* While a new agent spawns, the status is short and fixed: it keeps its
+   words and the model name takes the rest of the line. */
+.agent-status-dock--status .agent-status-dock-primary { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.agent-status-dock--status .agent-status-dock-primary strong { flex: 0 1 auto; max-width: 100%; }
+.agent-status-dock--status .agent-status-dock-state { flex: 0 0 auto; min-width: 0; white-space: nowrap; }
+
+@media (hover: hover) {
+  .agent-status-dock:not(.agent-status-dock--status):hover:where(:not(:disabled)) .agent-status-dock-primary strong { color: var(--text); }
+}
+@media (max-width: 600px) {
+  .agent-status-dock .agent-status-dock-secondary { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-status-dock-state { animation: none; background: none; color: var(--text-dim); }
+}
+html[data-reduce-animations="true"] .agent-status-dock-state,
+body[data-desktop-low-resource="true"] .agent-status-dock-state { animation: none; background: none; color: var(--text-dim); }
+/* Idle: the agent ended its own turn (its subagents still work). The same
+   line holds still: no dot on the mark, no light through the words. */
+.agent-status-dock--idle .agent-status-dock-state { animation: none; background: none; color: var(--muted); }
+
+/* Tab: the same line in a faint tab growing out of the composer's top edge,
+   inset from its rounded corners. It abuts the composer and never tucks
+   under it: the composer's glass would show it through. */
+body[data-composer-status-style="tab"] .agent-status-dock {
+  width: calc(min(var(--chat-measure), 100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset))) - 2 * var(--composer-status-tab-inset, var(--space-4)));
+  margin-inline: auto;
+  padding-inline: var(--space-3);
+  border-radius: calc(var(--radius-card) + 4px) calc(var(--radius-card) + 4px) 0 0;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Capsule: a centred pill that hugs its words, outlined in accent while the
+   agent works. The outline is a shadow so Borderless keeps it. */
+body[data-composer-status-style="capsule"] .agent-status-dock {
+  width: fit-content;
+  max-width: min(var(--chat-measure), calc(100% - 2 * var(--conversation-chrome-inset)));
+  min-height: max(30px, var(--hit-min));
+  margin-inline: auto;
+  margin-block-end: var(--space-2);
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-round);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+body[data-composer-status-style="capsule"] .agent-status-dock-content,
+body[data-composer-status-style="capsule"] .agent-status-dock-primary { flex: 0 1 auto; }

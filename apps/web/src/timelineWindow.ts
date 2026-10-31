@@ -1,0 +1,40 @@
+// Timeline windowing: long sessions render only the last
+// TIMELINE_WINDOW rows. The window is always a suffix — appends stay visible —
+// and "Show earlier" grows it by chunks, while a jump to a hidden prompt grows
+// it exactly far enough. Each append to a full window unmounts its oldest row:
+// that moves the transcript from above, which the Timeline's reader anchor
+// absorbs (foldLayoutShift), never a blank held below the tail. Pure math,
+// presentation-only: the event log and the render model never change. Polyth
+// folds tool runs into Worked groups, so the row count this window sees is
+// already far below the raw event count.
+export const TIMELINE_WINDOW = 150;
+export const TIMELINE_CHUNK = 150;
+export const LOW_RESOURCE_TIMELINE_WINDOW = 75;
+
+/** Low-resource desktop mode keeps fewer Markdown/tool subtrees mounted while
+ * preserving the same suffix-window and reveal controls. */
+export function initialTimelineWindow(lowResource = false): number {
+  return lowResource ? LOW_RESOURCE_TIMELINE_WINDOW : TIMELINE_WINDOW;
+}
+
+/** Index of the first rendered row when the last `limit` of `total` rows show. */
+export function windowStart(total: number, limit: number): number {
+  return Math.max(0, total - Math.max(0, limit));
+}
+
+/** How many rows the window hides. */
+export function hiddenCount(total: number, limit: number): number {
+  return windowStart(total, limit);
+}
+
+/** Grow the window by one chunk, never past "everything". */
+export function grownLimit(total: number, limit: number, chunk = TIMELINE_CHUNK): number {
+  return Math.min(total, limit + chunk);
+}
+
+/** Smallest limit that makes row `index` visible; the current limit when it
+ *  already is (or when the index is out of range). */
+export function limitToInclude(total: number, limit: number, index: number): number {
+  if (index < 0 || index >= total) return limit;
+  return index >= windowStart(total, limit) ? limit : total - index;
+}

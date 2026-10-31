@@ -1,0 +1,5 @@
+list Open incidents · pick=one
+- INC-7 | api latency | p95 2.4 s | critical | tone=danger | id=inc-7
+- INC-9 | queue backlog | 12k | warning | tone=warning | id=inc-9
+- INC-11 | cert renewal | 6 d | tone=info
+> Take it

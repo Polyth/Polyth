@@ -1,0 +1,48 @@
+/* Pull request stacks (Branches tab) and per-repository isolation rows. */
+.git-stack-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--panel);
+}
+.git-stack-panel-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.git-stack-panel-head strong { color: var(--text); font-size: var(--font-label); font-weight: 650; }
+.git-stack-panel-head > span:not(.header-spacer) {
+  display: inline-grid;
+  place-items: center;
+  min-width: calc(var(--icon-sm) + 4px);
+  height: calc(var(--icon-sm) + 2px);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+.git-stack-panel-head .ui-btn { margin-inline-start: auto; }
+.git-stack-card,
+.git-stack-card-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.git-stack-card { flex-wrap: wrap; padding-block: var(--space-2); border-top: 1px solid var(--hair); }
+.git-stack-card-head { width: 100%; flex-wrap: wrap; }
+.git-stack-card-head strong { font-family: var(--mono); }
+.git-stack-create, .git-stack-entry-form, .git-stack-entry-actions, .git-stack-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.git-stack-create .ui-input { min-width: 140px; flex: 1 1 140px; }
+.git-stack-entry-form { width: 100%; }
+.git-stack-entry-form .ui-input { min-width: 120px; flex: 1 1 120px; }
+.git-stack-entry-editor { display: grid; gap: var(--space-2); flex: 1 1 100%; }
+.git-stack-entries { flex: 1 1 100%; display: grid; gap: var(--space-1); padding-inline-start: var(--space-3); border-inline-start: 2px solid var(--hair); font-size: var(--font-meta); }
+.git-stack-preview {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  font-size: var(--font-meta);
+}
+
+.isolation-repository-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--hair); }
+.isolation-repository-row > div:first-child { display: grid; gap: 2px; min-width: 0; }
+.isolation-repository-actions { display: flex; gap: var(--space-1); flex: none; }

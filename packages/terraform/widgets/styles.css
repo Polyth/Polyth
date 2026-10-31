@@ -1,0 +1,27 @@
+.pkg-terraform { display: grid; gap: var(--space-4); color: var(--text); container-type: inline-size; min-width: 0; }
+.pkg-terraform__controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.pkg-terraform__context { padding-block: var(--space-3); }
+.pkg-terraform__eyebrow, .pkg-terraform__hint { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-terraform h2 { margin: var(--space-1) 0; font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.015em; }
+.pkg-terraform h3 { margin: 0; font-size: var(--font-label); font-weight: 600; }
+.pkg-terraform p { margin: 0; line-height: 1.5; }
+.pkg-terraform__context p { color: var(--muted); font-size: var(--font-meta); }
+.pkg-terraform__workflow { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.pkg-terraform__notice { color: var(--text-dim); border-inline-start: 2px solid var(--amber); padding-inline-start: var(--space-3); font-size: var(--font-meta); }
+.pkg-terraform__error { color: var(--red); overflow-wrap: anywhere; }
+.pkg-terraform ul { margin: 0; padding: 0; list-style: none; }
+.pkg-terraform__files { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.pkg-terraform code { font: var(--font-code)/1.5 var(--mono); overflow-wrap: anywhere; }
+.pkg-terraform__review { display: grid; gap: var(--space-3); border-block-start: 1px solid var(--border-soft); padding-block-start: var(--space-4); }
+.pkg-terraform__review-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.pkg-terraform__counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); margin: var(--space-2) 0; }
+.pkg-terraform__count dt { font-size: var(--font-meta); color: var(--muted); }
+.pkg-terraform__count dd { font-size: var(--font-heading); font-weight: 600; margin: var(--space-1) 0 0; }
+.pkg-terraform__count--create dd, .pkg-terraform__action--create { color: var(--green-on-wash); }
+.pkg-terraform__count--update dd, .pkg-terraform__action--update, .pkg-terraform__action--read { color: var(--blue); }
+.pkg-terraform__count--replace dd, .pkg-terraform__action--replace, .pkg-terraform__action--forget { color: var(--amber-on-wash); }
+.pkg-terraform__count--delete dd, .pkg-terraform__action--delete { color: var(--red); }
+.pkg-terraform__changes li { display: flex; align-items: baseline; gap: var(--space-3); padding-block: var(--space-2); border-block-start: 1px solid var(--border-soft); }
+.pkg-terraform__changes code { min-width: 0; }
+.pkg-terraform__action { font-size: var(--font-meta); min-inline-size: 7ch; }
+@container (max-width: 440px) { .pkg-terraform__counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pkg-terraform__controls { align-items: flex-start; } .pkg-terraform__changes li { gap: var(--space-2); } }

@@ -1,0 +1,20 @@
+/* Tab panels compose the shared settings Section/Row primitives; this file only
+   styles OpenCode-owned content inside them (role list, status dot). */
+.pkg-opencode-sections { display: block; min-width: 0; color: var(--text); font-family: var(--ui-font-family); }
+.pkg-opencode-role small { color: var(--muted); font-size: var(--font-meta); }
+.pkg-opencode-role-list { display: grid; margin-block-start: var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-card); overflow: hidden; }
+.pkg-opencode-role { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-1) var(--space-4); padding: var(--space-3) var(--space-4); }
+.pkg-opencode-role + .pkg-opencode-role { border-block-start: 1px solid var(--border-soft); }
+.pkg-opencode-role > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-1) var(--space-3); min-width: 0; }
+.pkg-opencode-role strong { font-weight: 600; }
+.pkg-opencode-role p { grid-column: 1; margin: 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-opencode-role .ui-btn { grid-column: 2; grid-row: 1 / span 2; }
+.pkg-opencode-role-form { display: grid; gap: var(--space-4); }
+.pkg-opencode-role-form > label,
+.pkg-opencode-role-form > .pkg-opencode-model-field { display: grid; gap: var(--space-2); }
+.pkg-opencode-status { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pkg-opencode-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+.pkg-opencode-status[data-state="running"]::before { background: var(--green); }
+.pkg-opencode-status[data-state="unavailable"]::before { background: var(--amber); }
+.pkg-opencode-pending-list { margin: var(--space-3) 0 0; padding-inline-start: var(--space-5); color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-opencode-warm > .settings-section:first-child { margin-top: calc(var(--space-6) * var(--density-scale, 1)); }

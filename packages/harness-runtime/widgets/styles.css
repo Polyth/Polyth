@@ -1,0 +1,577 @@
+.pkg-harnesses { color: var(--text); font-family: var(--ui-font-family); }
+.pkg-harnesses.pkg-harnesses-picker-tabs { display: grid; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-picker-tabs-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-picker-tabs-head .pkg-harnesses-tablist { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; overflow: visible; }
+.pkg-harnesses-tablist .ui-tab { display: inline-flex; align-items: center; justify-content: center; flex: 1 1 0; min-width: max(var(--control-h-sm), var(--hit-min)); padding-inline: var(--space-1); }
+.pkg-harnesses-tablist .ui-tab > span { display: inline-flex; }
+
+.pkg-harnesses small { color: var(--muted); font-size: var(--font-meta); font-weight: 400; }
+
+.pkg-harnesses-transition { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses-transition > span { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pkg-harnesses-transition-status {
+  container: harnesses-transition / inline-size;
+  width: min(var(--chat-measure), calc(100% - (2 * var(--gutter))));
+  margin-inline: auto;
+}
+.pkg-harnesses-transition-status:empty { display: none; }
+.pkg-harnesses-transition-status .ui-notice { border-inline-start-width: 3px; }
+.pkg-harnesses-transition-status .ui-notice-actions { flex-wrap: wrap; row-gap: var(--space-1); }
+@container harnesses-transition (max-width: 420px) {
+  .pkg-harnesses-transition-status .ui-notice-actions { margin-left: 0; width: 100%; }
+}
+@media (max-width: 640px) {
+  .pkg-harnesses-transition-status .ui-notice-actions { margin-left: 0; width: 100%; }
+}
+.pkg-harnesses-setup-link { color: var(--accent); text-decoration: none; min-height: max(var(--control-h-sm), var(--hit-min)); display: inline-flex; align-items: center; }
+.pkg-harnesses-setup-link:hover { text-decoration: underline; }
+.pkg-harnesses-picker-state { margin: 0; color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses-picker-retry { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: var(--hit-min); }
+
+/* ── Settings → Harnesses ───────────────────────────────────────────────
+   Borderless-first: hierarchy comes from surfaces, type and spacing, so the
+   page reads the same with interface borders hidden (the default). */
+.pkg-harnesses.pkg-harnesses-settings { container: harnesses / inline-size; display: grid; gap: var(--space-4); min-width: 0; }
+.pkg-harnesses-settings :is(header h2, header p, h3, p) { margin: 0; }
+.pkg-harnesses-settings h3:not(.settings-section-title) { font-size: var(--font-label); font-weight: 600; }
+/* Shared Sections own their own top margin; inside these grids the gap already spaces them. */
+.pkg-harnesses-settings > .settings-section, .pkg-harnesses-disclosure-body > .settings-section { margin-top: 0; }
+.pkg-harnesses-settings .settings-section-body:has(> .pkg-harnesses-list) { display: grid; gap: var(--space-3); padding-block-start: var(--space-3); }
+.pkg-harnesses-settings header { display: grid; gap: var(--space-1); }
+.pkg-harnesses-settings header p, .pkg-harnesses-help { color: var(--muted); }
+.pkg-harnesses-help { margin: 0; max-width: 72ch; font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+/* A provider logo sits on a quiet tile so mixed logo shapes read as one set. */
+.pkg-harnesses-logo-tile { flex: none; display: grid; place-items: center; inline-size: calc(var(--control-h-sm) + var(--space-1)); block-size: calc(var(--control-h-sm) + var(--space-1)); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--elevated); box-shadow: var(--inset-hi); color: var(--text-dim); }
+.pkg-harnesses-logo-tile--lg { inline-size: var(--control-h-lg); block-size: var(--control-h-lg); border-radius: var(--radius-card); }
+/* A Space-chosen harness color tints the mark and its tile; a turned-off row's grayscale still wins. */
+.pkg-harnesses-logo-tile[data-tinted] { color: var(--pkg-harness-color); border-color: color-mix(in srgb, var(--pkg-harness-color) 45%, var(--border-soft)); background: color-mix(in srgb, var(--pkg-harness-color) 12%, var(--elevated)); }
+.pkg-harnesses-tab-mark[data-tinted] .provider-logo, .pkg-harnesses-logo-tile[data-tinted] .provider-logo { color: var(--pkg-harness-color); }
+.pkg-harnesses-logo-tile[data-empty] { color: var(--faint); border-style: dashed; box-shadow: none; background: transparent; }
+
+/* Status hero: what new conversations use, how the set is doing, Check again. */
+/* The copy keeps a readable width; the status chips wrap instead of
+   squeezing it when there are many (installing, updates, …). */
+.pkg-harnesses-default { display: grid; grid-template-columns: auto minmax(min(13rem, 100%), 1fr) minmax(0, max-content); align-items: center; gap: var(--space-3) var(--space-4); padding: var(--space-4); border: 1px solid var(--border-soft); border-radius: var(--radius-surface); background: linear-gradient(135deg, var(--surface-overlay), transparent 60%), var(--panel); box-shadow: var(--shadow-sm); }
+.pkg-harnesses-default-copy { display: grid; gap: 2px; min-width: 0; margin: 0; }
+.pkg-harnesses-default-copy > small { color: var(--muted); font-size: var(--font-meta); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.pkg-harnesses-default-copy > strong { font-size: var(--font-heading); font-weight: 650; letter-spacing: -.015em; line-height: 1.25; overflow-wrap: anywhere; }
+.pkg-harnesses-default-copy > span { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-default-side { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: var(--space-2) var(--space-3); min-width: 0; }
+.pkg-harnesses-summary { display: flex; flex-wrap: wrap; justify-content: end; gap: var(--space-1) var(--space-2); margin: 0; padding: 0; list-style: none; }
+.pkg-harnesses-summary > li { display: inline-flex; align-items: center; gap: var(--space-1); min-block-size: 24px; padding-inline: var(--space-2); border-radius: var(--radius-round); background: var(--surface-overlay); color: var(--muted); font-size: var(--font-meta); white-space: nowrap; }
+.pkg-harnesses-summary > li > b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.pkg-harnesses-summary > li[data-tone="success"] { background: var(--green-wash); color: var(--green-on-wash); }
+.pkg-harnesses-summary > li[data-tone="warning"] { background: var(--amber-wash); color: var(--amber-on-wash); }
+.pkg-harnesses-summary > li[data-tone="accent"] { background: var(--accent-wash); color: var(--accent); }
+.pkg-harnesses-summary > li:is([data-tone="success"], [data-tone="warning"], [data-tone="accent"]) > b { color: inherit; }
+.pkg-harnesses-summary > li[data-busy] { color: var(--text-dim); }
+
+.pkg-harnesses-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.pkg-harnesses-settings-actions > .ui-btn:first-child { margin-inline-start: calc(-1 * var(--space-2)); }
+
+/* Harness list. One calm card; rows separate by rhythm (and a hairline when
+   borders are shown). */
+/* Rows share the list's columns (subgrid), so switches, buttons and hover
+   arrows line up whether or not a row has an action. */
+.pkg-harnesses-list { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; column-gap: var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel); overflow: hidden; }
+.pkg-harnesses-row { position: relative; display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; row-gap: var(--space-2); padding: var(--space-2) var(--space-3); cursor: pointer; transition: background-color var(--motion-fast) var(--motion-ease); }
+.pkg-harnesses-row + .pkg-harnesses-row { border-block-start: 1px solid var(--border-soft); }
+.pkg-harnesses-row:hover { background: var(--surface-overlay); }
+.pkg-harnesses-row.dragging { outline: 1px dashed var(--control-border); outline-offset: -1px; background: var(--surface-overlay-strong); }
+/* A harness that needs a step carries a thin signal edge, never color alone. */
+.pkg-harnesses-row[data-enabled="true"]:is([data-tone="warning"], [data-tone="danger"])::before { content: ""; position: absolute; inset-block: var(--space-3); inset-inline-start: 0; inline-size: 2px; border-radius: var(--radius-round); background: var(--amber); }
+.pkg-harnesses-row[data-enabled="true"][data-tone="danger"]::before { background: var(--red); }
+.pkg-harnesses-row-main { display: flex; align-items: center; gap: var(--space-3); min-width: 0; min-height: var(--tap); padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.pkg-harnesses-row-copy { display: grid; gap: 2px; min-width: 0; }
+.pkg-harnesses-row-main strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.pkg-harnesses-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); min-width: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-row-meta > span + span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
+.pkg-harnesses-row[data-enabled="false"] :is(.pkg-harnesses-row-main strong, .pkg-harnesses-logo-tile) { color: var(--muted); opacity: .7; }
+.pkg-harnesses-row[data-enabled="false"] .pkg-harnesses-logo-tile { filter: grayscale(1); }
+.pkg-harnesses-row-main:focus-visible, .pkg-harnesses-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+.pkg-harnesses-row-side { display: flex; align-items: center; justify-content: end; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-row-side a { text-decoration: none; }
+.pkg-harnesses-drag { display: grid; place-items: center; inline-size: var(--space-5); block-size: var(--tap); margin-inline-start: calc(-1 * var(--space-1)); color: var(--faint); cursor: grab; border-radius: var(--radius-control); }
+.pkg-harnesses-drag:hover { color: var(--text-dim); background: var(--surface-overlay); }
+.pkg-harnesses-drag:active { cursor: grabbing; }
+.pkg-harnesses-drag[data-locked] { visibility: hidden; }
+.pkg-harnesses-route { color: var(--muted); white-space: nowrap; }
+.pkg-harnesses-route[data-route="auto"] { color: var(--text-dim); }
+.pkg-harnesses-row-toggle { display: flex; align-items: center; justify-content: end; min-height: var(--tap); }
+.pkg-harnesses-row-chevron { display: grid; place-items: center; color: var(--faint); }
+.pkg-harnesses-row:hover .pkg-harnesses-row-chevron { color: var(--text-dim); }
+.pkg-harnesses-reorder { display: flex; }
+@media (hover: hover) and (pointer: fine) {
+  .pkg-harnesses-reorder { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+  .pkg-harnesses-row:is(:hover, :has(:focus-visible), :has([aria-expanded="true"])) .pkg-harnesses-reorder { opacity: 1; }
+  /* Arrows appear on hover and drag works, so no separate reorder mode. */
+  .pkg-harnesses-reorder-toggle { display: none; }
+}
+/* Touch has no hover and no HTML drag: arrows live in an explicit Reorder
+   mode, which swaps them in for the switch so a tap can't flip one. */
+@media (hover: none), (pointer: coarse) {
+  .pkg-harnesses-drag { display: none; }
+  .pkg-harnesses-list:not([data-reordering]) .pkg-harnesses-reorder { display: none; }
+  .pkg-harnesses-list[data-reordering] :is(.pkg-harnesses-row-toggle, .pkg-harnesses-row-side, .pkg-harnesses-row-chevron) { display: none; }
+  .pkg-harnesses-list[data-reordering] .pkg-harnesses-row { cursor: default; }
+}
+
+/* Status: a dot (or the check's spinner) pairs color with the label. */
+.pkg-harnesses-status { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--font-meta); white-space: nowrap; }
+.pkg-harnesses-status::before { content: ""; flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--faint); }
+.pkg-harnesses-status[data-checking]::before { content: none; }
+.pkg-harnesses-status[data-checking] { color: var(--text-dim); }
+.pkg-harnesses-status[data-state="ready"] { color: var(--text-dim); }
+.pkg-harnesses-status[data-state="ready"]::before { background: var(--green); }
+.pkg-harnesses-status:is([data-state="auth-required"], [data-state="degraded"], [data-state="setup-required"], [data-state="partially-configured"]) { color: var(--amber-on-wash); }
+.pkg-harnesses-status:is([data-state="auth-required"], [data-state="degraded"], [data-state="setup-required"], [data-state="partially-configured"])::before { background: var(--amber); }
+.pkg-harnesses-status:is([data-state="offline"], [data-state="incompatible"])::before { background: var(--red); }
+.pkg-harnesses-version { display: inline-flex; align-items: baseline; gap: var(--space-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pkg-harnesses-version-next { display: inline-flex; gap: var(--space-1); color: var(--accent); font-weight: 550; }
+.pkg-harnesses-update-target { display: none; }
+
+.pkg-harnesses-chip { color: inherit; background: transparent; border: 0; border-radius: var(--radius-control); font: inherit; padding: 0; cursor: help; text-align: start; overflow-wrap: anywhere; max-width: 100%; text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
+@media (hover: hover) {
+  .pkg-harnesses-chip:hover:where(:not(:disabled)) { color: var(--text); text-decoration-color: currentColor; }
+}
+.pkg-harnesses-command-review { display: grid; gap: var(--space-3); }
+.pkg-harnesses-command-review pre, .pkg-harnesses-update-output, .pkg-harnesses-update-log pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--space-3); border-radius: var(--radius-control); background: var(--sunken); font: var(--font-technical) var(--mono); }
+.pkg-harnesses-update-output, .pkg-harnesses-update-log pre { max-height: 16rem; overflow: auto; overscroll-behavior: contain; }
+.pkg-harnesses-update-log { margin-block-start: var(--space-2); }
+.pkg-harnesses-update-log > summary { cursor: pointer; color: var(--text-dim); font-weight: 550; }
+.pkg-harnesses-update-log[open] > summary { margin-block-end: var(--space-2); }
+
+/* Detail. */
+.pkg-harnesses.pkg-harnesses-detail { min-width: 0; min-height: 0; }
+/* Hero: identity, live state and who it is signed in as, with the one next
+   step (install / sign in / update) beside it. */
+.pkg-harnesses-settings .pkg-harnesses-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3) var(--space-4); padding: var(--space-4); border: 1px solid var(--border-soft); border-radius: var(--radius-surface); background: linear-gradient(135deg, var(--surface-overlay), transparent 55%), var(--panel); box-shadow: var(--shadow-sm); }
+.pkg-harnesses-hero[data-tone="warning"] { border-color: color-mix(in srgb, var(--amber) 35%, var(--border-soft)); }
+.pkg-harnesses-hero[data-tone="danger"] { border-color: color-mix(in srgb, var(--red) 35%, var(--border-soft)); }
+.pkg-harnesses-hero-text { display: grid; gap: var(--space-1); min-width: 0; }
+.pkg-harnesses-hero h2 { margin: 0; overflow-wrap: anywhere; font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.015em; }
+.pkg-harnesses-hero-default { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-hero-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-hero-meta > span + span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
+.pkg-harnesses-hero-account { display: inline-flex; align-items: center; gap: var(--space-1); justify-self: start; max-width: 100%; min-width: 0; margin: var(--space-1) 0 0; padding: 2px var(--space-2); border-radius: var(--radius-round); background: var(--surface-overlay); color: var(--text-dim); font-size: var(--font-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkg-harnesses-hero-account > svg { flex: none; }
+.pkg-harnesses-hero-account > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pkg-harnesses-hero-account-plan { flex: none; }
+.pkg-harnesses-hero-account-plan::before { content: "·"; margin-inline: var(--space-1); color: var(--faint); }
+.pkg-harnesses-hero-account[data-signed-in="false"] { background: var(--amber-wash); color: var(--amber-on-wash); }
+.pkg-harnesses-hero-message { margin: 0; max-width: 68ch; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-hero-actions, .pkg-harnesses-hero-primary, .pkg-harnesses-hero-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: var(--space-2); }
+.pkg-harnesses-hero-actions a { text-decoration: none; }
+
+/* Section tabs scroll sideways on narrow panes; an edge fades only where
+   more tabs are hidden. */
+.pkg-harnesses-tabstrip { min-width: 0; }
+.pkg-harnesses-settings .pkg-harnesses-tabs { max-width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.pkg-harnesses-settings .pkg-harnesses-tabs::-webkit-scrollbar { display: none; }
+.pkg-harnesses-tabs .ui-tab { flex: none; }
+.pkg-harnesses-tabstrip[data-overflow-end="true"] .pkg-harnesses-tabs { -webkit-mask-image: linear-gradient(to right, black calc(100% - 40px), transparent); mask-image: linear-gradient(to right, black calc(100% - 40px), transparent); }
+.pkg-harnesses-tabstrip[data-overflow-start="true"] .pkg-harnesses-tabs { -webkit-mask-image: linear-gradient(to left, black calc(100% - 40px), transparent); mask-image: linear-gradient(to left, black calc(100% - 40px), transparent); }
+.pkg-harnesses-tabstrip[data-overflow-start="true"][data-overflow-end="true"] .pkg-harnesses-tabs { -webkit-mask-image: linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent); mask-image: linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent); }
+.pkg-harnesses-tabpanel { padding-block-start: var(--space-2); min-width: 0; }
+.pkg-harnesses-tabpanel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; border-radius: var(--radius-control); }
+.pkg-harnesses-overview { display: grid; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-overview > .settings-section { margin-top: var(--space-4); }
+.pkg-harnesses-overview > .settings-section:first-child { margin-top: 0; }
+.pkg-harnesses-overview > details { margin-top: var(--space-3); }
+.pkg-harnesses-configuration { display: grid; gap: var(--space-3); padding-block-start: var(--space-3); }
+.pkg-harnesses-overview dl, .pkg-harnesses-switch-marker dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); align-items: center; gap: var(--space-2) var(--space-4); margin: 0; }
+.pkg-harnesses-overview dl { padding-block-start: var(--space-1); }
+.pkg-harnesses-overview dt, .pkg-harnesses-switch-marker dt { color: var(--muted); }
+.pkg-harnesses-overview dd, .pkg-harnesses-switch-marker dd { margin: 0; overflow-wrap: anywhere; }
+/* Fact lists: label and value on one line; the value's dot says supported. */
+.pkg-harnesses-facts { display: grid; padding-block-start: var(--space-1); }
+.pkg-harnesses-fact { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: baseline; gap: var(--space-4); padding-block: var(--space-2); border-block-end: 1px solid var(--hair); }
+.pkg-harnesses-fact:last-child { border-block-end: 0; }
+.pkg-harnesses-fact > span { min-width: 0; overflow-wrap: anywhere; }
+.pkg-harnesses-fact > span:first-child { color: var(--text-dim); }
+.pkg-harnesses-fact-value { display: grid; gap: 2px; justify-items: end; text-align: end; }
+.pkg-harnesses-fact-value > :first-child { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pkg-harnesses-fact-value > :first-child::before { content: ""; flex: none; inline-size: 6px; block-size: 6px; border-radius: 50%; background: var(--green); }
+.pkg-harnesses-fact[data-support="no"] .pkg-harnesses-fact-value > :first-child { color: var(--muted); }
+.pkg-harnesses-fact[data-support="no"] .pkg-harnesses-fact-value > :first-child::before { background: transparent; box-shadow: inset 0 0 0 1px var(--faint); }
+.pkg-harnesses-fact[data-support="unknown"] .pkg-harnesses-fact-value > :first-child::before { background: var(--faint); }
+.pkg-harnesses-fact-value small { color: var(--muted); }
+.pkg-harnesses-disclosure { border-radius: var(--radius-card); background: var(--panel); }
+.pkg-harnesses-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: max(var(--control-h), var(--hit-min)); padding-inline: var(--space-4); border-radius: var(--radius-card); cursor: pointer; font-weight: 600; font-size: var(--font-label); list-style: none; transition: background-color var(--motion-fast) var(--motion-ease); }
+.pkg-harnesses-disclosure > summary:hover { background: var(--surface-overlay); }
+.pkg-harnesses-disclosure > summary::-webkit-details-marker { display: none; }
+.pkg-harnesses-disclosure > summary::after { content: "›"; color: var(--faint); font-weight: 400; transition: transform var(--motion-fast) var(--motion-ease); }
+.pkg-harnesses-disclosure[open] > summary::after { transform: rotate(90deg); }
+.pkg-harnesses-disclosure > summary > small { margin-inline-start: auto; }
+.pkg-harnesses-disclosure > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pkg-harnesses-disclosure-body { display: grid; gap: var(--space-5); padding: var(--space-2) var(--space-4) var(--space-4); }
+.pkg-harnesses-diagnostics .pkg-harnesses-disclosure-body { color: var(--muted); font-size: var(--font-meta); }
+/* A harness's own control reads like a settings row: label, one-sentence
+   description and when it applies on the left, the control on the right. */
+.pkg-harnesses-configuration { gap: 0; }
+.pkg-harnesses-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-4); padding-block: var(--space-3); }
+.pkg-harnesses-control + .pkg-harnesses-control { border-block-start: 1px solid var(--hair); }
+.pkg-harnesses-control-copy { display: grid; gap: 2px; min-width: 0; }
+.pkg-harnesses-control-copy > strong { color: var(--text); font-size: var(--font-label); font-weight: 500; line-height: 1.35; }
+.pkg-harnesses-control-copy > span { max-width: 62ch; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-control-copy > small { color: var(--faint); font-size: var(--font-meta); }
+.pkg-harnesses-control-value { display: flex; justify-content: end; min-width: 0; }
+.pkg-harnesses-control > .ui-notice { grid-column: 1 / -1; }
+
+.pkg-harnesses-switch-marker { min-width: 0; color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses-switch-marker summary { min-width: 0; min-height: max(var(--control-h-sm), var(--hit-min)); display: flex; align-items: center; gap: var(--space-2); cursor: pointer; list-style: none; }
+.pkg-harnesses-switch-marker summary::before, .pkg-harnesses-switch-marker summary::after { content: ""; flex: 1 1 0; min-width: var(--space-3); border-block-start: 1px solid var(--border-soft); }
+.pkg-harnesses-switch-marker summary::marker { content: ""; }
+.pkg-harnesses-switch-marker summary::-webkit-details-marker { display: none; }
+.pkg-harnesses-switch-marker summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+.pkg-harnesses-switch-marker-label { min-width: 0; max-width: 100%; flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); padding-inline: var(--space-2); text-align: center; }
+.pkg-harnesses-switch-marker-leg { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: var(--space-1); }
+.pkg-harnesses-switch-marker-name { min-width: 0; color: var(--text-dim); font-weight: 600; overflow-wrap: anywhere; }
+.pkg-harnesses-switch-marker-arrow { flex: none; color: var(--faint); }
+.pkg-harnesses-switch-marker[open] dl { width: min(520px, 100%); min-width: 0; margin: var(--space-3) auto 0; padding: var(--space-3); border-radius: var(--radius-card); background: var(--sunken); }
+@media (prefers-reduced-motion: no-preference) {
+  /* Reserve the final row immediately, then paint the divider in place. This
+     cannot move the prompt below it or guess a component height. */
+  .pkg-harnesses-switch-marker > summary { animation: pkg-harnesses-switch-marker-in var(--motion-normal) var(--motion-ease) both; }
+}
+@keyframes pkg-harnesses-switch-marker-in {
+  from { opacity: 0; transform: translate3d(0, 3px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* Native context compaction is a durable timeline fact, not assistant prose.
+   Give it a real message surface so it remains visible after the gauge resets. */
+.pkg-harnesses-compaction-marker {
+  display: grid; min-width: 0;
+  width: min(100%, var(--chat-measure)); margin-inline: auto;
+  border: 1px solid var(--border-soft);
+  border-inline-start: 3px solid var(--accent-line);
+  border-radius: var(--radius-card);
+  background: var(--panel); color: var(--text-dim);
+}
+/* The whole header is the disclosure control; the body mounts only while open. */
+.pkg-harnesses-compaction-toggle {
+  display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; width: 100%;
+  min-height: var(--hit-min); margin: 0; padding: var(--space-3) var(--space-4);
+  border: 0; border-radius: inherit; background: none; color: inherit;
+  font: inherit; text-align: start; cursor: pointer;
+}
+@media (hover: hover) {
+  .pkg-harnesses-compaction-toggle:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.pkg-harnesses-compaction-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.pkg-harnesses-compaction-marker[data-open] > .pkg-harnesses-compaction-toggle { border-end-start-radius: 0; border-end-end-radius: 0; }
+.pkg-harnesses-compaction-icon {
+  flex: none; display: grid; place-items: center;
+  inline-size: var(--icon-md); block-size: var(--icon-md); margin-block-start: 1px;
+  color: var(--accent);
+}
+.pkg-harnesses-compaction-copy { display: grid; gap: var(--space-1); min-width: 0; flex: 1 1 auto; }
+.pkg-harnesses-compaction-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-1) var(--space-3); min-width: 0; }
+.pkg-harnesses-compaction-heading strong { min-width: 0; color: var(--text); font-size: var(--font-label); font-weight: 600; overflow-wrap: anywhere; }
+.pkg-harnesses-compaction-heading time { flex: 0 0 auto; margin-inline-start: auto; color: var(--muted); font-size: var(--font-meta); white-space: nowrap; }
+.pkg-harnesses-compaction-description { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.pkg-harnesses-compaction-chevron {
+  flex: none; display: grid; place-items: center;
+  inline-size: var(--icon-md); block-size: var(--icon-md); margin-block-start: 1px;
+  color: var(--muted); transition: transform var(--motion-fast) var(--motion-ease);
+}
+.pkg-harnesses-compaction-chevron:dir(rtl) { transform: scaleX(-1); }
+.pkg-harnesses-compaction-toggle[aria-expanded="true"] .pkg-harnesses-compaction-chevron { transform: rotate(90deg); }
+.pkg-harnesses-compaction-body {
+  display: grid; gap: var(--space-3); min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-block-start: 1px solid var(--border-soft);
+}
+.pkg-harnesses-compaction-section { display: grid; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-compaction-section h4 { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); font-weight: 600; }
+.pkg-harnesses-compaction-summary { max-height: 24rem; overflow: auto; overscroll-behavior: contain; min-width: 0; color: var(--text); font-size: var(--font-label); }
+/* Native summaries open with their own headings; keep them at card scale. */
+.pkg-harnesses-compaction-summary :is(h1, h2, h3, h4, h5, h6) { margin-block: var(--space-2) var(--space-1); font-size: var(--font-label); line-height: var(--font-meta-lh); }
+.pkg-harnesses-compaction-summary > :first-child, .pkg-harnesses-compaction-summary > * > :first-child { margin-block-start: 0; }
+.pkg-harnesses-compaction-note { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-compaction-recent { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; list-style: none; }
+.pkg-harnesses-compaction-recent li { display: grid; gap: 2px; min-width: 0; }
+.pkg-harnesses-compaction-role { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); font-weight: 600; }
+.pkg-harnesses-compaction-excerpt {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  color: var(--text-dim); font-size: var(--font-label); line-height: var(--font-meta-lh); overflow-wrap: anywhere; white-space: pre-line;
+}
+/* The request until its marker lands: same card, not interactive. */
+.pkg-harnesses-compaction-progress > .pkg-harnesses-compaction-toggle { cursor: default; }
+@media (hover: hover) {
+  .pkg-harnesses-compaction-progress > .pkg-harnesses-compaction-toggle:hover:where(:not(:disabled)) { background: none; }
+}
+.pkg-harnesses-compaction-progress[data-state="failed"] { border-inline-start-color: var(--danger); }
+.pkg-harnesses-compaction-progress[data-state="failed"] .pkg-harnesses-compaction-icon { color: var(--danger); }
+.pkg-harnesses-compaction-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
+@media (prefers-reduced-motion: reduce) { .pkg-harnesses-compaction-chevron { transition: none; } }
+
+/* Narrow panes (phones, docked Settings): rows become two lines and the
+   hero's actions move under its text. */
+@container harnesses (max-width: 560px) {
+  .pkg-harnesses-default { grid-template-columns: auto minmax(0, 1fr); padding: var(--space-3) var(--space-4); }
+  .pkg-harnesses-default-side { grid-column: 1 / -1; justify-content: space-between; }
+  .pkg-harnesses-summary { justify-content: start; }
+  .pkg-harnesses-list { grid-template-columns: minmax(0, 1fr); }
+  .pkg-harnesses-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1) var(--space-2); padding: var(--space-3) var(--space-2) var(--space-3) var(--space-3); }
+  .pkg-harnesses-row-side:empty { display: none; }
+  /* The update target rides in the button; the meta keeps the version. */
+  .pkg-harnesses-row .pkg-harnesses-version-next { display: none; }
+  .pkg-harnesses-update-target { display: inline; }
+  .pkg-harnesses-drag, .pkg-harnesses-row-chevron { display: none; }
+  .pkg-harnesses-row-main { grid-column: 1; grid-row: 1; align-items: flex-start; }
+  .pkg-harnesses-row-main > .pkg-harnesses-logo-tile { margin-block-start: 2px; }
+  .pkg-harnesses-row-toggle, .pkg-harnesses-reorder { grid-column: 2; grid-row: 1; align-self: start; justify-self: end; }
+  /* A narrow row has no free column for hover arrows, so every pointer gets
+     the explicit Reorder mode: arrows replace the switch while it is on. */
+  .pkg-harnesses-settings .pkg-harnesses-reorder-toggle { display: inline-flex; }
+  .pkg-harnesses-list:not([data-reordering]) .pkg-harnesses-reorder { display: none; }
+  .pkg-harnesses-list[data-reordering] .pkg-harnesses-reorder { opacity: 1; }
+  .pkg-harnesses-list[data-reordering] :is(.pkg-harnesses-row-toggle, .pkg-harnesses-row-side, .pkg-harnesses-row-chevron) { display: none; }
+  .pkg-harnesses-list[data-reordering] .pkg-harnesses-row { cursor: default; }
+  .pkg-harnesses-row-side { grid-column: 1 / -1; grid-row: 2; justify-content: start; padding-inline-start: calc(var(--control-h-sm) + var(--space-1) + var(--space-3)); }
+  /* Status on its own line; route and version share the next one. */
+  .pkg-harnesses-row-meta > .pkg-harnesses-status { flex-basis: 100%; }
+  .pkg-harnesses-row-meta > .pkg-harnesses-status + span::before { content: none; }
+  .pkg-harnesses-settings .pkg-harnesses-hero { grid-template-columns: auto minmax(0, 1fr) auto; padding: var(--space-3) var(--space-4); }
+  .pkg-harnesses-hero > .pkg-harnesses-logo-tile { align-self: start; }
+  /* The next step spans the card under the title; small tools keep the
+     top corner, a re-sign-in shrinks to its key. */
+  .pkg-harnesses-hero-actions { display: contents; }
+  .pkg-harnesses-hero-tools { grid-column: 3; grid-row: 1; align-self: start; flex-wrap: nowrap; gap: var(--space-1); margin-block-start: calc(-1 * var(--space-1)); margin-inline-end: calc(-1 * var(--space-2)); }
+  .pkg-harnesses-hero-primary { grid-column: 1 / -1; justify-content: stretch; }
+  .pkg-harnesses-hero-primary > :is(.ui-btn, a) { flex: 1 1 auto; }
+  .pkg-harnesses-hero-tools > .ui-btn { padding-inline: var(--space-2); }
+  .pkg-harnesses-hero-tools > .ui-btn > .ui-btn-label,
+  .pkg-harnesses-accounts-actions > .ui-btn--ghost > .ui-btn-label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .pkg-harnesses-accounts-actions > .ui-btn--ghost { padding-inline: var(--space-2); }
+  /* An account's status gets its own line, so a wrapped email never starts with "·". */
+  .pkg-harnesses-accounts-name > small > .pkg-harnesses-status { flex-basis: 100%; }
+  .pkg-harnesses-accounts-name > small > .pkg-harnesses-status + span::before { content: none; }
+  /* Status gets its own line; the update target is in the hero's button and
+     the protocol name stays in Diagnostics, so nothing wraps mid-list. */
+  .pkg-harnesses-hero-meta > .pkg-harnesses-status { flex-basis: 100%; }
+  .pkg-harnesses-hero-meta > .pkg-harnesses-status + span::before { content: none; }
+  .pkg-harnesses-hero-meta > .pkg-harnesses-version + span { display: none; }
+  .pkg-harnesses-hero .pkg-harnesses-version-next { display: none; }
+  .pkg-harnesses-overview dl { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-1) var(--space-3); }
+  /* A switch keeps its row; wider controls drop under their copy. */
+  .pkg-harnesses-control:not(:has(.ui-switch, .switch)) { grid-template-columns: minmax(0, 1fr); }
+  .pkg-harnesses-control:not(:has(.ui-switch, .switch)) > .pkg-harnesses-control-value { justify-content: start; }
+  .pkg-harnesses-hero-account-plan { display: none; }
+  .pkg-harnesses-disclosure > summary, .pkg-harnesses-disclosure-body { padding-inline: var(--space-3); }
+}
+
+
+/* Settings → Harnesses → harness → Accounts. */
+.pkg-harnesses-accounts { display: grid; gap: var(--space-3); min-width: 0; }
+.pkg-harnesses-accounts > .settings-section { margin-top: 0; }
+.pkg-harnesses-accounts .settings-section-body { display: grid; gap: var(--space-3); padding-block-start: var(--space-3); }
+.pkg-harnesses-accounts-help { margin: 0; max-width: 72ch; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-accounts-list { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel); overflow: hidden; }
+.pkg-harnesses-accounts-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-width: 0; padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); }
+.pkg-harnesses-accounts-row + .pkg-harnesses-accounts-row { border-block-start: 1px solid var(--border-soft); }
+.pkg-harnesses-accounts-name { display: grid; flex: 1 1 14rem; gap: 2px; min-width: 0; }
+.pkg-harnesses-accounts-name > small { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); min-width: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-accounts-name > small > span + span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
+.pkg-harnesses-accounts-name > small > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.pkg-harnesses-accounts-title { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-accounts-title > strong { font-weight: 600; overflow-wrap: anywhere; }
+.pkg-harnesses-accounts-name > small.pkg-harnesses-accounts-access { display: block; white-space: normal; }
+.pkg-harnesses-accounts-actions { display: flex; align-items: center; gap: var(--space-1); margin-inline-start: auto; }
+.pkg-harnesses-accounts-rename { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pkg-harnesses-accounts-rename > :first-child { flex: 1 1 12rem; min-width: 0; }
+/* A listed account the caller can't run chats on: present, but quiet. */
+.pkg-harnesses-accounts-row[data-usable="false"] .pkg-harnesses-accounts-title { color: var(--muted); }
+/* Your / Shared / Other people's accounts. */
+.pkg-harnesses-accounts-group { display: grid; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-accounts-group + :is(.pkg-harnesses-accounts-group, .pkg-harnesses-accounts-add) { margin-block-start: var(--space-2); }
+.pkg-harnesses-accounts-group-head { display: grid; gap: var(--space-1); }
+.pkg-harnesses-accounts-group-head h4 { margin: 0; font-size: var(--font-label); font-weight: 600; }
+.pkg-harnesses-accounts-empty { margin: 0; padding: var(--space-2) var(--space-3); border: 1px dashed var(--border); border-radius: var(--radius-card); color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses-accounts-add { display: grid; gap: var(--space-2); container: pkg-harnesses-accounts-add / inline-size; }
+.pkg-harnesses-accounts-add-fields { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pkg-harnesses-accounts-add-fields > :first-child { flex: 1 1 12rem; min-width: 0; max-width: 28rem; }
+.pkg-harnesses-accounts-add-fields .seg { flex: 0 0 auto; }
+@container pkg-harnesses-accounts-add (max-width: 520px) {
+  .pkg-harnesses-accounts-add .pkg-harnesses-accounts-add-fields > :first-child { flex-basis: 100%; max-width: none; }
+}
+/* Access editor (shared accounts). */
+.pkg-harnesses-access { display: grid; gap: var(--space-4); min-width: 0; }
+.pkg-harnesses-access-field { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+.pkg-harnesses-access-field .seg { justify-content: flex-start; width: fit-content; max-width: 100%; }
+.pkg-harnesses-access-field .settings-check-group { justify-content: start; }
+.pkg-harnesses-access-field legend { margin-block-end: var(--space-2); padding: 0; font-size: var(--font-label); font-weight: 600; }
+.pkg-harnesses-access-dialog .pkg-harnesses-accounts-help { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+/* Settings → Harnesses → harness → Runtime. */
+.pkg-harnesses-runtime { display: grid; min-width: 0; }
+.pkg-harnesses-runtime > .settings-section { margin-top: 0; }
+.pkg-harnesses-runtime > .settings-section + .settings-section { margin-top: var(--space-5); }
+.pkg-harnesses-runtime .set-row-hint code { font-family: var(--mono); font-size: inherit; }
+.pkg-harnesses-runtime .settings-section-body > :is(.ui-notice, .pkg-harnesses-update-log) { margin-block-start: var(--space-2); }
+.pkg-harnesses-confirm { display: inline-flex; flex-wrap: wrap; justify-content: end; gap: var(--space-2); }
+
+/* Settings → Harnesses → harness → Plugins. */
+.pkg-harnesses-plugins { display: grid; gap: var(--space-3); min-width: 0; }
+.pkg-harnesses-plugins-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.pkg-harnesses-plugins-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2) var(--space-3); min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-card); }
+.pkg-harnesses-plugins-row[data-enabled="false"] .pkg-harnesses-plugins-name { color: var(--muted); }
+.pkg-harnesses-plugins-main { display: grid; flex: 1 1 16rem; gap: var(--space-1); min-width: 0; }
+.pkg-harnesses-plugins-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+.pkg-harnesses-plugins-name small, .pkg-harnesses-plugins-meta, .pkg-harnesses-plugins-note { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-plugins-meta { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+.pkg-harnesses-plugins-meta > span + span::before { content: "·"; margin-inline-end: var(--space-2); }
+.pkg-harnesses-plugins-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.pkg-harnesses-plugins-chip { display: inline-flex; }
+.pkg-harnesses-plugins-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+.pkg-harnesses-plugins-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pkg-harnesses-plugins-install { display: grid; gap: var(--space-3); min-width: 0; }
+.pkg-harnesses-plugins-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.pkg-harnesses-plugins-confirm > p { flex: 1 1 100%; margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.pkg-harnesses-plugins-details { margin: var(--space-1) 0 0; padding-inline-start: var(--space-4); overflow-wrap: anywhere; }
+.pkg-harnesses-plugins-json { font-family: var(--mono); }
+.pkg-harnesses-plugins-preview { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.pkg-harnesses-plugins-preview > li { display: grid; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-card); overflow-wrap: anywhere; }
+.pkg-harnesses-plugins-submit { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+
+/* Guided install / sign-in / sign-in again. */
+.pkg-harnesses-signin { display: grid; gap: var(--space-4); min-width: 0; }
+.pkg-harnesses-signin-lead { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; color: var(--text-dim); line-height: var(--font-meta-lh); }
+.pkg-harnesses-signin-lead > svg { flex: none; margin-block-start: 2px; color: var(--accent); }
+.pkg-harnesses-signin-steps { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; counter-reset: none; }
+.pkg-harnesses-signin-steps > li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: var(--space-3); }
+.pkg-harnesses-signin-steps > li > span { display: grid; place-items: center; inline-size: 1.5rem; block-size: 1.5rem; border-radius: 50%; background: var(--surface-overlay-strong); color: var(--text-dim); font-size: var(--font-meta); font-weight: 650; font-variant-numeric: tabular-nums; }
+.pkg-harnesses-signin-steps > li > p { margin: 0; color: var(--text); line-height: var(--font-meta-lh); }
+.pkg-harnesses-signin-command { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--sunken); }
+.pkg-harnesses-signin-command > code { flex: 1 1 auto; min-width: 0; max-block-size: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--font-technical) var(--mono); color: var(--text); }
+/* Keep the primitive's position: relative — its ::after hit box would
+   otherwise size to the dialog backdrop and swallow every click in it. */
+.pkg-harnesses-signin-command .copy-btn { opacity: 1; }
+.pkg-harnesses-signin-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: var(--space-2); }
+.pkg-harnesses-signin-actions > a { margin-inline-end: auto; text-decoration: none; }
+
+/* Settings → Harnesses → harness → Skills. */
+.pkg-harnesses-skills { display: grid; gap: var(--space-3); min-width: 0; }
+.pkg-harnesses-skill-group { display: grid; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-skill-group > h4 { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.pkg-harnesses-skill-group > h4 > small { color: var(--faint); font-variant-numeric: tabular-nums; }
+.pkg-harnesses-skill-list { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel); overflow: hidden; }
+.pkg-harnesses-skill { display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: var(--space-2) var(--space-3); transition: background-color var(--motion-fast) var(--motion-ease); }
+.pkg-harnesses-skill + .pkg-harnesses-skill { border-block-start: 1px solid var(--border-soft); }
+.pkg-harnesses-skill:hover { background: var(--surface-overlay); }
+.pkg-harnesses-skill-text { display: grid; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.pkg-harnesses-skill-name { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.pkg-harnesses-skill-name > code { font: var(--font-technical) var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.pkg-harnesses-skill-text > small { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.pkg-harnesses-skill[data-enabled="false"] .pkg-harnesses-skill-name > code { color: var(--muted); }
+
+.pkg-harnesses-colors { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+/* A swatch is its color in every state: scoped to its group, it outranks the
+   core button hover skin, which would paint it the panel fill. */
+.pkg-harnesses-colors > .pkg-harnesses-color { position: relative; display: grid; place-items: center; inline-size: var(--control-h-sm); block-size: var(--control-h-sm); padding: 0; border: 1px solid var(--border-soft); border-radius: 50%; background: var(--pkg-harness-swatch); cursor: pointer; }
+.pkg-harnesses-colors > .pkg-harnesses-color--none { background: linear-gradient(135deg, transparent calc(50% - 1px), var(--muted) calc(50% - 1px), var(--muted) calc(50% + 1px), transparent calc(50% + 1px)), var(--elevated); }
+.pkg-harnesses-colors > .pkg-harnesses-color--custom { overflow: hidden; background: conic-gradient(from 90deg, #f05b5b, #f2b84b, #65bd5b, #43b7b0, #4b7fe8, #7c54e8, #d75cbe, #f05b5b); }
+.pkg-harnesses-color--custom input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+.pkg-harnesses-color:is([aria-pressed="true"], [data-selected]) { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--accent-wash); }
+.pkg-harnesses-color:is(:disabled, [data-disabled]) { opacity: .5; cursor: not-allowed; }
+.pkg-harnesses-color:focus-visible, .pkg-harnesses-color--custom:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Settings → Harnesses → Install. One calm column for people who have never
+   opened a terminal: who and where up top, reassurance or honest progress in
+   the middle, the step after it, and everything technical behind one
+   disclosure. */
+.pkg-harnesses-install { container: pkg-harnesses-install / inline-size; display: grid; gap: var(--space-4); min-width: 0; }
+.pkg-harnesses-install-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--space-4); }
+.pkg-harnesses-install-hero > .ui-icon-btn { margin-block-start: calc(-1 * var(--space-1)); margin-inline-end: calc(-1 * var(--space-2)); }
+.pkg-harnesses-install-mark { position: relative; display: inline-grid; }
+.pkg-harnesses-install-badge { position: absolute; inset-block-end: calc(-1 * var(--space-1)); inset-inline-end: calc(-1 * var(--space-1)); display: grid; place-items: center; inline-size: calc(var(--icon-sm) + var(--space-2)); block-size: calc(var(--icon-sm) + var(--space-2)); border: 1px solid var(--border-soft); border-radius: 50%; background: var(--elevated); color: var(--accent-text); animation: pkg-harnesses-install-pop var(--motion-normal) var(--motion-ease); }
+.pkg-harnesses-install-mark[data-mark="success"] .pkg-harnesses-install-badge { color: var(--green); }
+.pkg-harnesses-install-mark[data-mark="error"] .pkg-harnesses-install-badge { color: var(--red); }
+.pkg-harnesses-install-mark[data-mark="stopped"] .pkg-harnesses-install-badge { color: var(--muted); }
+.pkg-harnesses-install-heading { display: grid; gap: var(--space-1); min-width: 0; padding-block-start: var(--space-1); }
+.pkg-harnesses-install-heading > h2 { margin: 0; color: var(--text); font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pkg-harnesses-install-heading > p { margin: 0; max-width: 60ch; color: var(--text-dim); line-height: 1.5; }
+.pkg-harnesses-install-heading > p:empty { display: none; }
+
+/* What a careful person asks before saying yes. */
+.pkg-harnesses-install-facts { display: grid; margin: 0; padding: var(--space-1) var(--space-4); list-style: none; border-radius: var(--radius-card); background: var(--surface-overlay); }
+.pkg-harnesses-install-facts > li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-3); padding-block: var(--space-3); }
+.pkg-harnesses-install-facts > li + li { border-block-start: 1px solid var(--hair); }
+.pkg-harnesses-install-facts > li > svg { margin-block-start: 1px; color: var(--accent-text); }
+.pkg-harnesses-install-facts > li > span { display: grid; gap: 2px; min-width: 0; }
+.pkg-harnesses-install-facts strong { color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.pkg-harnesses-install-facts small { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+
+/* Three honest stages; the active one says what the installer is doing. */
+.pkg-harnesses-install-steps { display: grid; gap: var(--space-1); margin: 0; padding: var(--space-2) var(--space-4); list-style: none; border-radius: var(--radius-card); background: var(--surface-overlay); }
+.pkg-harnesses-install-steps > li { display: grid; grid-template-columns: var(--icon-md) minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: var(--control-h); }
+.pkg-harnesses-install-step-mark { display: grid; place-items: center; inline-size: var(--icon-md); block-size: var(--icon-md); color: var(--faint); }
+.pkg-harnesses-install-steps > li[data-state="pending"] .pkg-harnesses-install-step-mark::before { content: ""; inline-size: calc(var(--icon-sm) - var(--space-1)); block-size: calc(var(--icon-sm) - var(--space-1)); border: 1.5px solid currentColor; border-radius: 50%; }
+.pkg-harnesses-install-steps > li[data-state="active"] .pkg-harnesses-install-step-mark { color: var(--accent-text); }
+.pkg-harnesses-install-steps > li[data-state="done"] .pkg-harnesses-install-step-mark { color: var(--green); }
+.pkg-harnesses-install-steps > li[data-state="failed"] .pkg-harnesses-install-step-mark { color: var(--red); }
+.pkg-harnesses-install-steps > li:is([data-state="done"], [data-state="failed"]) .pkg-harnesses-install-step-mark > svg { animation: pkg-harnesses-install-pop var(--motion-normal) var(--motion-ease); }
+.pkg-harnesses-install-step-copy { display: grid; gap: 1px; min-width: 0; }
+.pkg-harnesses-install-step-label { color: var(--muted); font-size: var(--font-label); transition: color var(--motion-normal) var(--motion-ease); }
+.pkg-harnesses-install-steps > li[data-state="active"] .pkg-harnesses-install-step-label { color: var(--text); font-weight: 600; }
+.pkg-harnesses-install-steps > li:is([data-state="done"], [data-state="failed"]) .pkg-harnesses-install-step-label { color: var(--text-dim); }
+.pkg-harnesses-install-activity { overflow: hidden; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); text-overflow: ellipsis; white-space: nowrap; }
+.pkg-harnesses-install-elapsed { color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+
+/* After it ends: what went wrong in plain words, or what to do next. */
+.pkg-harnesses-install-help { display: grid; gap: var(--space-2); }
+.pkg-harnesses-install-help > p { margin: 0; max-width: 62ch; color: var(--text-dim); line-height: 1.5; }
+.pkg-harnesses-install-help > blockquote { max-block-size: 8rem; margin: 0; padding: var(--space-2) var(--space-3); overflow: auto; border-inline-start: 2px solid var(--red); border-radius: var(--radius-control); background: var(--sunken); color: var(--text-dim); font: var(--font-technical) var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pkg-harnesses-install-next { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-card); background: var(--surface-overlay); color: var(--text-dim); }
+.pkg-harnesses-install-next > svg { margin-block-start: 1px; }
+.pkg-harnesses-install-next > p { display: grid; gap: 2px; margin: 0; line-height: var(--font-meta-lh); }
+.pkg-harnesses-install-next strong { color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.pkg-harnesses-install-next span { font-size: var(--font-meta); }
+.pkg-harnesses-install-next[data-next="checking"] { align-items: center; }
+.pkg-harnesses-install-next[data-next="sign-in"] { background: var(--accent-wash); }
+.pkg-harnesses-install-next[data-next="sign-in"] > svg { color: var(--accent-text); }
+.pkg-harnesses-install-next[data-next="ready"] { background: var(--green-wash); }
+.pkg-harnesses-install-next[data-next="ready"] > svg { color: var(--green); }
+.pkg-harnesses-install-next[data-next="setup"] > svg { color: var(--amber); }
+
+/* Technical details: the exact machine, command, hosts and live output. */
+.pkg-harnesses-install-details { border-block-start: 1px solid var(--hair); }
+.pkg-harnesses-install-details > summary { display: inline-flex; align-items: center; gap: var(--space-2); min-height: max(var(--control-h-sm), var(--hit-min)); margin-block-start: var(--space-2); color: var(--text-dim); font-size: var(--font-label); font-weight: 500; cursor: pointer; list-style: none; transition: color var(--motion-fast) var(--motion-ease); }
+.pkg-harnesses-install-details > summary::-webkit-details-marker { display: none; }
+.pkg-harnesses-install-details > summary::after { content: "›"; color: var(--faint); transition: transform var(--motion-fast) var(--motion-ease); }
+.pkg-harnesses-install-details[open] > summary::after { transform: rotate(90deg); }
+.pkg-harnesses-install-details > summary:focus-visible { border-radius: var(--radius-control); outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (hover: hover) { .pkg-harnesses-install-details > summary:hover { color: var(--text); } }
+/* `<details>` lays its content out in a shadow slot; the body owns the rhythm. */
+.pkg-harnesses-install-details-body { display: grid; gap: var(--space-4); padding-block: var(--space-2) var(--space-1); }
+.pkg-harnesses-install-facts-list { display: grid; gap: var(--space-2); margin: 0; }
+.pkg-harnesses-install-facts-list > div { display: grid; grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr); align-items: baseline; gap: var(--space-3); }
+.pkg-harnesses-install-facts-list dt { color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses-install-facts-list dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-2); margin: 0; color: var(--text); font-size: var(--font-label); }
+.pkg-harnesses-install-facts-list dd > small { color: var(--muted); font-size: var(--font-meta); }
+.pkg-harnesses-install-sources > code { padding: 1px var(--space-2); border-radius: var(--radius-round); background: var(--surface-overlay); color: var(--text-dim); font-family: var(--mono); font-size: var(--font-meta); }
+.pkg-harnesses-install-block { display: grid; gap: var(--space-1); min-width: 0; }
+.pkg-harnesses-install-block-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-2); color: var(--muted); font-size: var(--font-meta); font-weight: 600; }
+.pkg-harnesses-install-block-label > small { color: var(--faint); font-weight: 400; }
+.pkg-harnesses-install-log { position: relative; min-width: 0; }
+.pkg-harnesses-install-log > pre { max-block-size: 14rem; margin: 0; padding: var(--space-3); padding-inline-end: calc(var(--space-3) + var(--control-h-sm)); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--sunken); color: var(--text-dim); font: var(--font-technical) var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pkg-harnesses-install-log[data-kind="command"] > pre { color: var(--text); }
+.pkg-harnesses-install-log > pre:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pkg-harnesses-install-log > .copy-btn { position: absolute; inset-block-start: var(--space-1); inset-inline-end: var(--space-1); opacity: 1; }
+.pkg-harnesses-install-terminal { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+.pkg-harnesses-install-terminal > p { flex: 1 1 18rem; margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-install-actions { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.pkg-harnesses-install-actions > .pkg-harnesses-install-guide { margin-inline-end: auto; text-decoration: none; }
+@container pkg-harnesses-install (max-width: 420px) {
+  .pkg-harnesses-install-hero { gap: var(--space-3); }
+  .pkg-harnesses-install-facts, .pkg-harnesses-install-steps, .pkg-harnesses-install-next { padding-inline: var(--space-3); }
+  .pkg-harnesses-install-facts-list > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
+@keyframes pkg-harnesses-install-pop { from { opacity: 0; transform: scale(.6); } }
+
+/* A row whose install is under way, or ended badly. */
+.pkg-harnesses-status[data-state="installing"] { color: var(--accent-text); }
+.pkg-harnesses-status[data-state="install-failed"] { color: var(--text-dim); }
+.pkg-harnesses-status[data-state="install-failed"]::before { background: var(--red); }

@@ -1,0 +1,31 @@
+{
+  "manifestVersion": 1,
+  "id": "com-example-api",
+  "version": "1.0.0",
+  "engines": { "polyth": ">=0.1.0" },
+  "display": {
+    "name": "Example API",
+    "description": "Calls a public HTTPS API through the host broker. Credentials stay on the host."
+  },
+  "runtime": {
+    "kind": "sandboxed",
+    "ui": { "entry": "src/index.ts" }
+  },
+  "contributes": {
+    "surfaces": [{ "id": "main", "title": "Example API" }]
+  },
+  "capabilities": [
+    "ui.render",
+    "ui.toast",
+    "auth.connection",
+    { "name": "network.fetch", "origins": ["https://jsonplaceholder.typicode.com"] }
+  ],
+  "connections": [
+    {
+      "id": "demo",
+      "label": "Demo token",
+      "kind": "token",
+      "origins": ["https://jsonplaceholder.typicode.com"]
+    }
+  ]
+}

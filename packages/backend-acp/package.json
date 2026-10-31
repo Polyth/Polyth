@@ -1,0 +1,30 @@
+{
+  "name": "@polyth/backend-acp",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./executable-discovery": "./src/executableDiscovery.ts",
+    "./profile": "./src/profile.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/todos": "0.1.0"
+  },
+  "devDependencies": {
+    "@polyth/backend-antigravity": "0.1.0",
+    "@polyth/backend-claude": "0.1.0",
+    "@polyth/backend-codex": "0.1.0",
+    "@polyth/backend-commandcode": "0.1.0"
+  },
+  "peerDependencies": {
+    "@polyth/backend-pi": "0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@polyth/backend-pi": {
+      "optional": true
+    }
+  }
+}

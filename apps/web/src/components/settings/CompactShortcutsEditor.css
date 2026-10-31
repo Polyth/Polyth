@@ -1,0 +1,85 @@
+/* Tablet header shortcut editor (Settings > Appearance). Scoped under
+   .compact-shortcuts-*; reads canonical tokens only. */
+.compact-shortcuts {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.compact-shortcuts-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compact-shortcuts-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: transparent;
+}
+
+.compact-shortcuts-item[data-pinned="true"] {
+  border-color: var(--accent-line);
+  background: var(--surface-overlay-hover);
+}
+
+.compact-shortcuts-glyph {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 32px;
+  block-size: 32px;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text-dim);
+}
+
+.compact-shortcuts-item[data-pinned="true"] .compact-shortcuts-glyph {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.compact-shortcuts-glyph svg {
+  inline-size: var(--icon-md);
+  block-size: var(--icon-md);
+}
+
+.compact-shortcuts-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-shortcuts-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.compact-shortcuts-heading {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.compact-shortcuts-empty {
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--hair);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}

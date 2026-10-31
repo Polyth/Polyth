@@ -1,0 +1,248 @@
+/* By the way card (packages/btw). Quiet Glass, the composer's column and
+   corner, directly above it. Every rule is scoped under .btw-card. The width
+   follows the conversation frame the composer uses on every layout, phones
+   (safe areas included) too, so no viewport query is needed. */
+.btw-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: min(
+    var(--chat-measure),
+    calc(100% - var(--conversation-frame-inline-start, var(--gutter)) - var(--conversation-frame-inline-end, var(--gutter)))
+  );
+  margin-block: 0 var(--space-2);
+  margin-inline-start: var(--conversation-frame-inline-start, auto);
+  margin-inline-end: var(--conversation-frame-inline-end, auto);
+  overflow: hidden;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-composer);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  color: var(--text);
+  font-family: var(--ui-font-family);
+  transform-origin: 50% 100%;
+  animation: btw-card-in var(--motion-surface) var(--motion-ease) both;
+}
+.btw-card[data-state="leaving"] {
+  pointer-events: none;
+  animation: btw-card-out var(--motion-normal) var(--motion-window-exit-ease, var(--motion-ease)) both;
+}
+@keyframes btw-card-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes btw-card-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.985); }
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .btw-card {
+    background: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent) 0%,
+      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-edge), transparent) 100%);
+    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  }
+}
+
+.btw-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+  padding: var(--space-1) var(--space-1) 0 var(--space-4);
+}
+.btw-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--accent-text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+.btw-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: auto;
+  color: var(--muted);
+}
+
+.btw-card-scroll {
+  min-height: 0;
+  max-height: min(40vh, calc(var(--visual-vh, 100vh) * 0.4));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1) var(--space-4) var(--space-3);
+}
+
+/* Earlier follow-ups: one quiet line each, expanding in place. */
+.btw-earlier {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 var(--space-2);
+  padding: 0 0 var(--space-1);
+  border-bottom: 1px solid var(--surface-divider);
+  list-style: none;
+}
+.btw-earlier-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: max(28px, var(--hit-min));
+  padding: 0 var(--space-2);
+  margin-inline: calc(-1 * var(--space-2));
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  text-align: start;
+  cursor: pointer;
+  box-sizing: content-box;
+}
+@media (hover: hover) {
+  .btw-earlier-row:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+    color: var(--text-dim);
+  }
+}
+.btw-earlier-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.btw-earlier-question {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btw-earlier-chevron {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--faint);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.btw-earlier-chevron svg { width: 14px; height: 14px; }
+.btw-earlier-item[data-open] .btw-earlier-chevron { transform: rotate(180deg); }
+.btw-earlier-answer {
+  padding: var(--space-1) 0 var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  line-height: 1.5;
+  animation: btw-answer-in var(--motion-normal) var(--motion-ease) both;
+}
+
+.btw-question {
+  display: -webkit-box;
+  margin: 0 0 var(--space-2);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.btw-current { min-width: 0; }
+.btw-answer,
+.btw-earlier-answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--prose-gap, 0.6em);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.btw-answer {
+  color: var(--text);
+  font-size: var(--font-response, var(--font-body));
+  line-height: var(--font-response-lh, 1.55);
+  animation: btw-answer-in var(--motion-normal) var(--motion-ease) both;
+}
+.btw-answer > :is(.md-para, .md-code-block, .md-table-scroll, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, hr, pre),
+.btw-earlier-answer > :is(.md-para, .md-code-block, .md-table-scroll, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, hr, pre) {
+  margin-block: 0;
+}
+.btw-answer :is(ul, ol),
+.btw-earlier-answer :is(ul, ol) { padding-inline-start: 1.25em; }
+@keyframes btw-answer-in {
+  from { opacity: 0; transform: translate3d(0, 4px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Thinking: a gentle shimmer over three skeleton lines. */
+.btw-thinking {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.btw-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.btw-skeleton > span {
+  display: block;
+  height: 9px;
+  border-radius: var(--radius-round);
+  background: linear-gradient(90deg,
+    var(--surface-overlay) 0%,
+    var(--surface-overlay-strong) 45%,
+    var(--surface-overlay) 90%);
+  background-size: 220% 100%;
+  animation: btw-shimmer 1.6s ease-in-out infinite;
+}
+.btw-skeleton > span:nth-of-type(1) { width: 92%; }
+.btw-skeleton > span:nth-of-type(2) { width: 74%; animation-delay: 0.12s; }
+.btw-skeleton > span:nth-of-type(3) { width: 48%; animation-delay: 0.24s; }
+@keyframes btw-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -100% 0; }
+}
+.btw-thinking-label {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.btw-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  line-height: 1.45;
+}
+.btw-error-text { flex: 1 1 16ch; min-width: 0; }
+.btw-muted { margin: 0; color: var(--muted); }
+
+.btw-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2) var(--space-1) var(--space-4);
+  border-top: 1px solid var(--surface-divider);
+}
+.btw-card-note {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btw-card-foot .btw-follow-up { flex: none; }

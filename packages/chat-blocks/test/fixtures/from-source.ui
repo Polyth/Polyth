@@ -1,0 +1,2 @@
+cards Hotels · from=_out/hotels.jsonl · map=title:name,value:price
+> Book = Book: {sel}

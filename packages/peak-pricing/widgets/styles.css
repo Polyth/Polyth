@@ -1,0 +1,419 @@
+/* Peak-pricing indicator: one quiet chip on the composer configuration row.
+   The colours come from the canonical signal tokens, so every theme keeps the
+   same meaning; the arc is the progress through the current phase. */
+.peak-pricing {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+}
+
+/* The chip is the host's `.config-chip` (30px, 12px/550, canonical hover and
+   open states, the 44px touch box on phones). Only what the price chip needs
+   on top of it lives here: the ring's optical start inset and its 6px rhythm. */
+.peak-pricing-chip.config-chip {
+  gap: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  padding-inline: 6px 8px;
+  cursor: pointer;
+}
+
+.peak-pricing-chip.config-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- glyph: dot + phase-progress arc ------------------------------------- */
+.peak-pricing-glyph {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.peak-pricing-glyph svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.peak-pricing-ring-track {
+  fill: none;
+  stroke: var(--hair-strong);
+  stroke-width: 1.4;
+}
+
+.peak-pricing-ring-value {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  /* The arc only ever grows; a short eased update keeps it calm without
+     animating the countdown itself. */
+  transition: stroke-dasharray var(--motion-fast) linear;
+}
+
+.peak-pricing-dot {
+  position: relative;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Off-peak: the quieter, positive state. Peak: the alert state, but a muted
+   red so the chip never competes with Send or a real error. */
+.peak-pricing-chip[data-phase="off-peak"] :is(.peak-pricing-glyph, .peak-pricing-state) {
+  color: var(--green);
+}
+
+.peak-pricing-chip[data-phase="peak"] :is(.peak-pricing-glyph, .peak-pricing-state) {
+  color: var(--red);
+}
+
+.peak-pricing-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.peak-pricing-state {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.peak-pricing-remaining {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- dot only ------------------------------------------------------------ */
+/* No words and no chip chrome: an 8px phase dot inside its arc, its ring 2px
+   after the model chip whatever the row's own gap (measured into
+   --peak-pricing-row-gap). The 24×30 hit box reaches at most 2px into that
+   chip's trailing padding, so the ring stays outside its hover surface. */
+.peak-pricing:not([data-surface="statusbar"])[data-display="dot"] {
+  margin-inline-start: calc(2px - var(--peak-pricing-row-gap, 2px) - 4px);
+}
+
+.peak-pricing-chip:not(.sb)[data-display="dot"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  cursor: pointer;
+}
+
+.peak-pricing-chip[data-display="dot"] .peak-pricing-glyph {
+  width: 16px;
+  height: 16px;
+}
+
+.peak-pricing-chip[data-display="dot"] .peak-pricing-dot {
+  width: 8px;
+  height: 8px;
+}
+
+/* Hover/open: a phase-tinted halo inside the ring's own 16px, painted
+   behind it — no size change, so nothing beside it moves. */
+.peak-pricing-chip:not(.sb)[data-display="dot"] .peak-pricing-glyph::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .peak-pricing-chip:not(.sb)[data-display="dot"]:hover .peak-pricing-glyph::before {
+    opacity: 0.16;
+  }
+}
+
+.peak-pricing-chip:not(.sb)[data-display="dot"][aria-expanded="true"] .peak-pricing-glyph::before {
+  opacity: 0.16;
+}
+
+.peak-pricing-chip[data-display="dot"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Touch: a 44px target. It grows toward the inline end so the dot keeps its
+   2px gap and nothing reaches over the model chip. */
+@media (pointer: coarse) {
+  .peak-pricing-chip:not(.sb)[data-display="dot"] {
+    width: var(--tap);
+    min-height: var(--tap);
+    justify-content: flex-start;
+    padding-inline-start: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peak-pricing-ring-value,
+  .peak-pricing-chip:not(.sb)[data-display="dot"] .peak-pricing-glyph::before {
+    transition: none;
+  }
+}
+
+/* A narrow composer (docked chat or phone) keeps the state word and the glyph,
+   and drops the countdown before anything can paint over a neighbouring chip.
+   The words never truncate; the tap card still has the exact time. */
+@container composer-widget (max-width: 560px) {
+  .peak-pricing-remaining {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .peak-pricing-chip.config-chip {
+    min-height: var(--tap);
+    padding-inline: 6px;
+  }
+}
+
+/* ---- status-bar segment --------------------------------------------------- */
+/* In the status bar the chip is one of the bar's own segments (the host `.sb`
+   primitive: chip height, hover chip, focus ring, touch box), so the dot-only
+   halo and hit box above stay composer-only (`:not(.sb)`). It keeps the ring
+   and the phase colour on the glyph and the state word; dot-only drops the
+   words but stays a bar segment. The bar decides what fits, so the
+   countdown is never hidden by the composer's container query here. */
+.peak-pricing-chip.sb {
+  gap: 6px;
+}
+
+.peak-pricing-chip.sb[data-display="dot"] {
+  padding-inline: 6px;
+}
+
+.peak-pricing-chip.sb .peak-pricing-state {
+  font-weight: 600;
+}
+
+/* ---- tooltip content ----------------------------------------------------- */
+/* The click card and the hover tip share the same anchor; once the card is
+   open the tip must not paint underneath it. */
+.ui-tooltip.peak-pricing-tip-hidden {
+  display: none;
+}
+
+.peak-pricing-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 168px;
+  /* The bubble's own cap gives way to the viewport's while it is placed, so
+     the long provider note keeps the tooltip's 280px measure here. */
+  max-width: 260px;
+  text-align: start;
+}
+
+.peak-pricing-tip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.peak-pricing-tip-state {
+  font-weight: 650;
+  color: var(--text);
+}
+
+.peak-pricing-tip-state[data-phase="off-peak"] {
+  color: var(--green);
+}
+
+.peak-pricing-tip-state[data-phase="peak"] {
+  color: var(--red);
+}
+
+.peak-pricing-tip-remaining,
+.peak-pricing-tip-line {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.peak-pricing-tip-note {
+  color: var(--faint);
+}
+
+/* ---- details card -------------------------------------------------------- */
+.peak-pricing-pop {
+  width: min(320px, calc(100vw - 2 * var(--screen-gutter)));
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.peak-pricing-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  text-align: start;
+}
+
+.peak-pricing-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.peak-pricing-card-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.peak-pricing-card-dot[data-phase="off-peak"] {
+  background: var(--green);
+  color: var(--green);
+}
+
+.peak-pricing-card-dot[data-phase="peak"] {
+  background: var(--red);
+  color: var(--red);
+}
+
+.peak-pricing-card-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.peak-pricing-card-titles strong {
+  font-size: var(--font-label);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.peak-pricing-card-titles span {
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+
+.peak-pricing-card-countdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+}
+
+.peak-pricing-card-clock {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.peak-pricing-card-until {
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+
+.peak-pricing-card-note {
+  margin: 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--text-dim);
+}
+
+.peak-pricing-card-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.peak-pricing-card-facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.peak-pricing-card-facts dt {
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--muted);
+}
+
+.peak-pricing-card-facts dd {
+  margin: 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--text-dim);
+}
+
+.peak-pricing-card-facts a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.peak-pricing-card-facts a:hover {
+  text-decoration: underline;
+}
+
+/* ---- settings page --------------------------------------------------------- */
+/* The package settings page rhythm (Usage, Custom titles, Todos). */
+.peak-pricing-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.peak-pricing-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+
+.peak-pricing-preview-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* The stand-in model name sits at the composer's resting chip, never hovered. */
+.peak-pricing-preview-model.config-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.peak-pricing-preview[data-enabled="false"] .peak-pricing {
+  visibility: hidden;
+}
+
+.peak-pricing-settings-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--muted);
+}

@@ -1,0 +1,5 @@
+steps Release
+- done | Build | 4 min
+- doing | Deploy | canary 10%
+- fail | Smoke tests
+- Announce

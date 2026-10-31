@@ -1,0 +1,169 @@
+{
+  "name": "@polyth/desktop",
+  "version": "1.2.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "description": "Polyth desktop application",
+  "author": "Max",
+  "desktopName": "polyth.desktop",
+  "main": "dist/bootstrap.cjs",
+  "scripts": {
+    "build": "node scripts/prepare-icon.mjs && node --experimental-strip-types build.ts",
+    "stage:chromium": "node stage-chromium.mjs",
+    "download:opencode": "node download-opencode.mjs",
+    "start": "electron .",
+    "dist": "npm run build && npm run stage:chromium && electron-builder --publish never",
+    "dist:linux": "npm run build && npm run stage:chromium && electron-builder --linux AppImage --publish never",
+    "dist:mac": "npm run build && npm run stage:chromium && electron-builder --mac dmg zip --publish never",
+    "dist:win": "npm run build && npm run stage:chromium && electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11",
+    "esbuild": "0.28.2",
+    "node-pty": "^1.1.0",
+    "playwright-core": "1.62.1",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0",
+    "sharp": "0.35.5"
+  },
+  "build": {
+    "appId": "com.polyth.desktop",
+    "productName": "Polyth",
+    "asar": true,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "build/icon.png",
+      "build/icon-win.png",
+      "opencode.json",
+      "package.json",
+      "!**/node_modules/playwright-core/.local-browsers/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../packages/server/src/agentToolsMcp.mjs",
+        "to": "server/agentToolsMcp.mjs"
+      },
+      {
+        "from": "../web/dist",
+        "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/chromium/${platform}-${arch}",
+        "to": "chromium/${platform}-${arch}",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../../packages",
+        "to": "packages",
+        "filter": [
+          "*/dist/web/**/*"
+        ]
+      },
+      {
+        "from": "resources/opencode/${platform}-${arch}",
+        "to": "opencode/${platform}-${arch}",
+        "filter": [
+          "**/opencode",
+          "**/opencode.exe"
+        ]
+      },
+      {
+        "from": "resources/cli",
+        "to": "cli",
+        "filter": [
+          "polyth.cjs"
+        ]
+      },
+      {
+        "from": "resources/polyth-link",
+        "to": "polyth-link",
+        "filter": [
+          "polyth-link-host",
+          "polyth-link-host.exe",
+          "polyth-link-client",
+          "polyth-link-client.exe"
+        ]
+      },
+      {
+        "from": "resources/runtime-supervisor",
+        "to": "runtime-supervisor",
+        "filter": [
+          "linux-*/polyth-supervisor",
+          "win32/polyth-job.exe"
+        ]
+      },
+      {
+        "from": "resources/notices/THIRD_PARTY_NOTICES.txt",
+        "to": "THIRD_PARTY_NOTICES.txt"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "build/icon-win.png",
+        "to": "icon-win.png"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "executableName": "polyth",
+      "icon": "build/icon.png",
+      "syncDesktopName": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true,
+      "icon": "build/icon.png",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Polyth uses the microphone only when you start dictation."
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon-win.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Polyth"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Polyth",
+      "repo": "Polyth",
+      "releaseType": "release"
+    }
+  }
+}

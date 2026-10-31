@@ -1,0 +1,25 @@
+{
+  "name": "@polyth/judgment-local",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/engine.ts" },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Judgment backend: Local models",
+      "description": "Runs TinyDecide-format decision models on this server for Judgment.",
+      "core": false,
+      "enabled": true,
+      "hasSettings": false,
+      "settingsGroup": "Engineering",
+      "icon": "circle-check",
+      "category": "system",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/judgment": "0.1.0",
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0"
+  }
+}

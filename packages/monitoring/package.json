@@ -1,0 +1,32 @@
+{
+  "name": "@polyth/monitoring",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contracts": "./src/contracts.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Monitoring",
+      "description": "Host resources, service health, log tails and scoped access for system administrators.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "activity",
+      "hasSettings": true,
+      "category": "engineering",
+      "projectAffinity": { "directions": ["operations", "engineering"] }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/ssh": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": { "react": "^19.0.0" }
+}

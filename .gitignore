@@ -1,0 +1,122 @@
+node_modules
+/playground/
+/target
+apps/web/dist
+packages/*/dist
+packages/harness-runtime/native/bin
+apps/desktop/dist
+apps/desktop/release
+apps/desktop/build/icon.png
+apps/desktop/build/icon-win.png
+apps/desktop/resources/opencode/*/opencode
+apps/desktop/resources/opencode/*/opencode.exe
+apps/desktop/resources/opencode/*/provenance.json
+apps/desktop/resources/runtime-supervisor/*/polyth-supervisor
+apps/desktop/resources/runtime-supervisor/win32/polyth-job.exe
+/apps/desktop/resources/polyth-link/polyth-link-*
+/apps/desktop/resources/cli/
+/apps/desktop/resources/notices/
+apps/mobile/ios/App/CapApp-SPM/PolythLinkCore.xcframework
+apps/mobile/android/app/src/main/jniLibs
+*.db
+*.db-wal
+*.db-shm
+data/
+artifacts/
+# Temporary agent workspaces: plans, audits, handoffs, reports, evidence and throwaway outputs
+/.scratch/
+logs/
+# Local Docker deployment state (deploy/docker/.env.example is the template)
+/deploy/docker/.env
+/deploy/docker/workspace/
+/.claude/settings.json
+/.claude/worktrees/
+/.commandcode/
+*.runtime.json
+*.wire.ndjson
+*.sse.ndjson
+*.websocket.ndjson
+_inbox/
+# Project-local Polyth data: commands, snippets, playground artifacts, screenshots
+/.polyth/
+# Creative Studio deliverables when the studio runs on this checkout
+/final/
+/report.md
+/report-*.md
+*.polyth-tmp.*
+/scripts/backup.sh
+# Data-dir runtime state that has historically been written at the repo root
+# when POLYTH_DATA_DIR was unset or pointed at cwd. Canonical location is ./data.
+/mcp.json
+/mcp-secrets.json
+/packages.json
+/model-visibility.json
+/quotas.json
+/forbidden-config.json
+/.polyth-writer.lock
+# Signing and provisioning material (never commit values)
+*.jks
+*.keystore
+*.p12
+*.cer
+*.mobileprovision
+*.p8
+*.pem
+*.key
+id_rsa*
+id_ecdsa*
+id_ed25519*
+google-play-service-account.json
+play-console-service-account.json
+*service-account*.json
+# Per-developer Firebase app configuration (the build works without them)
+google-services.json
+GoogleService-Info.plist
+
+# Local environment files; templates such as deploy/docker/.env.example stay tracked
+.env
+.env.*
+!.env.example
+.npmrc
+.netrc
+
+# External builder and release script outputs (scripts/ci/remote-build.mjs)
+/remote-build-output/
+/.remote-build-tmp/
+
+# Tool caches, coverage and logs
+coverage/
+*.tsbuildinfo
+*.log
+npm-debug.log*
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Build-time staged controlled browser binaries
+/apps/desktop/resources/chromium/
+
+# Native branding outputs are generated from apps/mobile/resources/*.svg.
+# Keep only the source-of-truth artwork in Git; npm run assets recreates these.
+/apps/mobile/icons/
+/apps/mobile/android/app/src/main/res/mipmap-*/ic_launcher*
+/apps/mobile/android/app/src/main/res/drawable*/splash.png
+/apps/mobile/android/app/src/main/res/drawable*/polyth_launch_*.png
+/apps/mobile/android/app/src/main/res/drawable/ic_launcher_background.xml
+/apps/mobile/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
+/apps/mobile/android/app/src/main/res/values/ic_launcher_background.xml
+/apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset/*.png
+/apps/mobile/ios/App/App/Assets.xcassets/Splash.imageset/*.png
+
+# Transient local/recovery artifacts
+**/__pycache__/
+*.py[cod]
+/recovery-adopt-*/
+/recovery-adopt-resources/
+/docs/**/phase-*-evidence/
+/docs/**/*-handoff.md

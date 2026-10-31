@@ -1,0 +1,28 @@
+{
+  "view": "table",
+  "title": "Secrets",
+  "options": {
+    "from": "../secret.json"
+  },
+  "pick": "none",
+  "columns": [
+    "a",
+    "b"
+  ],
+  "columnImages": [],
+  "series": [],
+  "items": [],
+  "actions": [],
+  "notes": [],
+  "invalid": [
+    "from=../secret.json"
+  ],
+  "problems": [
+    {
+      "code": "bad-source",
+      "line": 1,
+      "text": "from=../secret.json",
+      "hint": "from= takes a project-relative path (no leading /, ~, \\ or ..) to a .json, .jsonl, .ndjson, .csv or .tsv file."
+    }
+  ]
+}

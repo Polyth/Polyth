@@ -1,0 +1,9 @@
+[
+  "config.test.ts",
+  "configPreservation.test.ts",
+  "providerAuthFlow.test.ts",
+  "providerAuthSession.test.ts",
+  "providerAuthWellKnown.test.ts",
+  "provisioner.test.ts",
+  "smallModel.test.ts"
+]

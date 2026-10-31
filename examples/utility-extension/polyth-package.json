@@ -1,0 +1,25 @@
+{
+  "manifestVersion": 2,
+  "id": "example-utility",
+  "version": "1.0.0",
+  "engines": { "polyth": ">=0.1.0" },
+  "display": {
+    "name": "Utility extension",
+    "description": "Demonstrates native settings, package storage, and optional bounded utility-model generation."
+  },
+  "runtime": {
+    "kind": "sandboxed",
+    "ui": { "entry": "src/index.ts" }
+  },
+  "contributes": {
+    "settingsSections": [
+      { "id": "notes", "title": "Utility notes", "description": "A native settings form backed by package storage." }
+    ]
+  },
+  "capabilities": [
+    "ui.render",
+    "ui.toast",
+    "storage.package",
+    { "name": "model.generate", "required": false, "modelClasses": ["utility"], "maxOutputTokens": 256 }
+  ]
+}

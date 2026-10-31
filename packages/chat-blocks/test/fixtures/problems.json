@@ -1,0 +1,60 @@
+{
+  "view": "cards",
+  "title": "Shops",
+  "options": {
+    "zoom": "2",
+    "pick": "sometimes"
+  },
+  "pick": "none",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "Good shop",
+      "cells": [
+        "Good shop",
+        "open"
+      ],
+      "subtitle": "open"
+    }
+  ],
+  "actions": [
+    {
+      "label": "Visit"
+    }
+  ],
+  "notes": [],
+  "invalid": [
+    ">",
+    "- |"
+  ],
+  "problems": [
+    {
+      "code": "unknown-option",
+      "line": 1,
+      "text": "zoom=2",
+      "hint": "cards options: pick, sort, ratio, from, map, send."
+    },
+    {
+      "code": "bad-option",
+      "line": 1,
+      "text": "pick=sometimes",
+      "hint": "pick=one or pick=many."
+    },
+    {
+      "code": "bad-row",
+      "line": 2,
+      "text": "- |",
+      "hint": "A cards row is - image | title | subtitle | value | badge | link (a title or an image is required)."
+    },
+    {
+      "code": "bad-button",
+      "line": 4,
+      "text": ">",
+      "hint": "A button is > Label or > Label = message; {sel} in the message is replaced by the selected titles."
+    }
+  ]
+}

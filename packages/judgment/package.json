@@ -1,0 +1,36 @@
+{
+  "name": "@polyth/judgment",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts",
+    "./server": "./src/server.ts",
+    "./settings": "./src/settings.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Judgment",
+      "description": "Bounded semantic evidence with independent models and application-owned policy.",
+      "core": false,
+      "enabled": true,
+      "hasSettings": true,
+      "settingsGroup": "Engineering",
+      "icon": "circle-check",
+      "category": "system",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/web": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": { "react": "^19.0.0" }
+}

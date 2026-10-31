@@ -1,0 +1,283 @@
+/* Surface motion — how transient surfaces leave, and the phone Settings layer.
+ * (docs/dev/ui.md "Surface motion".)
+ *
+ * Exit ghosts. Menus, popovers, sheets, dialogs and Settings are unmounted by
+ * their owners the moment they close. exitGhost.ts leaves an inert copy of the
+ * last frame in place, marked [data-exit-ghost="<kind>"], and removes it when
+ * the exit below has run. A ghost replays nothing of its own (every inner
+ * animation and transition is off) and is never interactive; only the rules
+ * here move it. Reduced motion and low-resource mode never create one.
+ *
+ * Timing comes from the tokens: --motion-fast for anchored popovers,
+ * --motion-surface for things that rise and sink in place, and --motion-stack
+ * on the stack curve for anything that travels to or from a screen edge (the
+ * same grammar as stackNavigation.css). A swipe or drag that lets go hands
+ * its position (--settings-from, --sheet-from) and the rest of its travel time
+ * (--settings-settle, --sheet-settle) to the exit, so it leaves at the finger's
+ * speed instead of starting over.
+ */
+
+/* ---- exit ghosts: shared ----------------------------------------------------- */
+[data-exit-ghost] {
+  pointer-events: none !important;
+  transition: none !important;
+}
+
+[data-exit-ghost] *,
+[data-exit-ghost] *::before,
+[data-exit-ghost] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* ---- popovers and anchored menus ------------------------------------------- */
+.ui-popover[data-exit-ghost="popover"] {
+  animation: ui-pop-out var(--motion-fast) var(--motion-ease) both !important;
+}
+.ui-popover[data-exit-ghost="popover"][data-side="up"] { animation-name: ui-pop-out-up !important; }
+.ui-popover[data-exit-ghost="popover"][data-side="right"] { animation-name: ui-pop-out-right !important; }
+.ui-popover[data-exit-ghost="popover"][data-side="left"] { animation-name: ui-pop-out-left !important; }
+
+@keyframes ui-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-2px); } }
+@keyframes ui-pop-out-up { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(2px); } }
+@keyframes ui-pop-out-right { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-2px); } }
+@keyframes ui-pop-out-left { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(2px); } }
+
+/* ---- sheets ------------------------------------------------------------------
+   A bottom sheet goes back down past the bottom edge (from wherever a drag let
+   go), a top sheet back up; centered sheets on wider screens sink in place. */
+.sheet-backdrop[data-exit-ghost="sheet"] {
+  animation: sheet-backdrop-out var(--motion-surface) var(--motion-ease) both !important;
+}
+.sheet-backdrop[data-exit-ghost="sheet"] > .sheet {
+  animation: sheet-slide-out var(--sheet-settle, var(--motion-stack)) var(--motion-stack-ease) both !important;
+}
+.sheet-backdrop[data-exit-ghost="sheet"] > .sheet.sheet-origin-top {
+  animation: sheet-lift var(--motion-surface) var(--motion-ease) both !important;
+}
+.sheet-backdrop[data-exit-ghost="sheet"] > .sheet.sheet-origin-top[data-drag-dismissed] {
+  animation: sheet-lift-out var(--sheet-settle, var(--motion-stack)) var(--motion-stack-ease) both !important;
+}
+@media (min-width: 481px) and (min-height: 481px), (min-width: 481px) and (pointer: fine) {
+  .sheet-backdrop[data-exit-ghost="sheet"] > .sheet:not(.sheet-origin-top) {
+    animation: sheet-sink var(--motion-surface) var(--motion-ease) both !important;
+  }
+}
+
+/* ---- dialogs -----------------------------------------------------------------
+   A dialog rises into place on wide screens and sinks back out. Phone-width
+   shells present dialogs as bottom sheets, so there they rise from the bottom
+   edge and go back down it, like every other sheet. */
+.dialog-backdrop {
+  animation: fade var(--motion-normal) var(--motion-ease);
+}
+.dialog-panel {
+  animation: rise var(--motion-surface) var(--motion-ease) backwards;
+}
+.dialog-backdrop[data-exit-ghost="dialog"] {
+  animation: sheet-backdrop-out var(--motion-surface) var(--motion-ease) both !important;
+}
+.dialog-backdrop[data-exit-ghost="dialog"] > .dialog-panel {
+  animation: rise-out var(--motion-surface) var(--motion-ease) both !important;
+}
+@media (max-width: 700px) {
+  .dialog-panel {
+    animation: sheet-slide-in var(--motion-stack) var(--motion-stack-ease) backwards;
+  }
+  .dialog-backdrop[data-exit-ghost="dialog"] > .dialog-panel {
+    animation: sheet-slide-out var(--motion-stack) var(--motion-stack-ease) both !important;
+  }
+}
+
+@keyframes rise-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(10px) scale(0.985); }
+}
+
+/* ---- Settings ----------------------------------------------------------------
+   Wide screens: the Settings modal rises into place and sinks back out. */
+.scrim.settings-scrim[data-exit-ghost="settings"] {
+  animation: sheet-backdrop-out var(--motion-surface) var(--motion-ease) both !important;
+}
+.scrim.settings-scrim[data-exit-ghost="settings"] > .settings-shell {
+  animation: rise-out var(--motion-surface) var(--motion-ease) both !important;
+}
+
+/* Phone Settings is a full-screen layer of the stack grammar
+   (SettingsView.tsx, settingsPresentation.ts). It arrives from the edge it was
+   opened toward — the inline start when it takes the Navigator's place, the
+   inline end otherwise — and leaves back toward that same edge, from wherever
+   a swipe let go of it. Its own Back is a stack inside it: a page is pushed
+   over the list from the inline end and popped back off it. */
+@media (max-width: 700px) {
+  /* Nothing shows around a full-screen layer; Chat beneath is revealed
+     undimmed as Settings travels away, like it is under the Navigator. */
+  .scrim.settings-scrim {
+    background: transparent;
+    animation: none;
+  }
+
+  .scrim.settings-scrim > .settings-shell {
+    animation: stack-in var(--motion-stack) var(--motion-stack-ease) backwards;
+    /* The leading edge casts onto what it travels over; at rest the layer
+       fills the screen and the shadow falls outside it. */
+    box-shadow: var(--shadow-stack-edge);
+  }
+  .scrim.settings-scrim > .settings-shell[data-origin="start"] {
+    animation-name: settings-in-start;
+    box-shadow: var(--shadow-drawer-edge);
+  }
+  /* Once a finger has moved the layer, the long-finished entrance must never
+     come back: a re-applied animation would replay it and outrank the inline
+     transform of the next drag. */
+  .scrim.settings-scrim > .settings-shell[data-dragged] {
+    animation: none;
+  }
+  /* The layer takes focus as a landmark; its ring would only show as a line
+     riding the moving edge. Controls inside keep their own rings. */
+  .scrim.settings-scrim > .settings-shell:focus-visible {
+    outline: none;
+  }
+
+  .scrim.settings-scrim[data-exit-ghost="settings"] {
+    animation: none !important;
+  }
+  .scrim.settings-scrim[data-exit-ghost="settings"] > .settings-shell {
+    animation: settings-out-end var(--settings-settle, var(--motion-stack)) var(--motion-stack-ease) both !important;
+  }
+  .scrim.settings-scrim[data-exit-ghost="settings"] > .settings-shell[data-origin="start"] {
+    animation-name: settings-out-start !important;
+  }
+
+  /* ---- stages: list ⇄ page ----
+     Both stages are on screen while a page slides, so the page must be
+     opaque: a look that clears the stage fills gives it its own
+     (shellLooks.css). */
+  .settings-shell > .settings-pane {
+    box-shadow: var(--shadow-stack-edge);
+  }
+  .settings-shell[data-stage-motion="push"] > .settings-pane {
+    animation: stack-in var(--motion-stack) var(--motion-stack-ease) backwards;
+  }
+  .settings-shell[data-stage-motion="push"] > .settings-nav {
+    animation: stack-cover var(--motion-stack) var(--motion-stack-ease) both;
+  }
+  /* The page leaving stays on screen (it is display: none at rest on the list)
+     until its exit has run; a Back swipe hands it --stack-from and the settle. */
+  .settings-shell[data-stage-motion="pop"] > .settings-pane {
+    display: flex;
+    pointer-events: none;
+    animation: stack-out var(--motion-stack) var(--motion-stack-ease) both;
+    animation-duration: var(--stack-out-settle, var(--motion-stack));
+  }
+  /* `backwards`: the list is dragged next, and a forwards fill would outrank it. */
+  .settings-shell[data-stage-motion="pop"] > .settings-nav {
+    animation: stack-uncover var(--motion-stack) var(--motion-stack-ease) backwards;
+    animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+  }
+
+  /* The covered list dims as it retreats (a veil composited with opacity
+     only); while it settles back, the veil also swallows taps so a second tap
+     on Back cannot reach the row under it. */
+  .settings-shell > .settings-nav::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    background: rgb(9 8 7 / var(--stack-dim, 0.18));
+    opacity: 0;
+    pointer-events: none;
+  }
+  .settings-shell[data-stage-motion="push"] > .settings-nav::after {
+    animation: stack-dim-in var(--motion-stack) var(--motion-stack-ease) both;
+  }
+  .settings-shell[data-stage-motion="pop"] > .settings-nav::after {
+    animation: stack-dim-out var(--motion-stack) var(--motion-stack-ease) both;
+    animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+  }
+
+  /* While a finger pulls a page away, the list peeks in behind it, positioned
+     by the gesture (edgeSwipeBack.ts) instead of the retreat animation. */
+  .settings-shell > .settings-nav[data-peek] {
+    visibility: visible !important;
+    transform: translate3d(var(--stack-peek-x, 0px), 0, 0) !important;
+    animation: none !important;
+  }
+  .settings-shell > .settings-nav[data-peek]::after {
+    opacity: var(--stack-peek-dim, 1) !important;
+    animation: none !important;
+  }
+
+  /* The push is a page's arrival; its content does not fade in again under it. */
+  .settings-shell .settings-page-stage {
+    animation: none;
+  }
+}
+
+/* Signed physical offsets: --stack-dir mirrors the edge in RTL. */
+@keyframes settings-in-start {
+  from { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
+  to { transform: none; }
+}
+@keyframes settings-out-start {
+  from { transform: translate3d(var(--settings-from, 0px), 0, 0); }
+  to { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
+}
+@keyframes settings-out-end {
+  from { transform: translate3d(var(--settings-from, 0px), 0, 0); }
+  to { transform: translate3d(calc(var(--stack-dir, 1) * 100%), 0, 0); }
+}
+
+/* ---- tours ---------------------------------------------------------------- */
+.shell-intro[data-exit-ghost="tour"],
+.scrim.package-tour-scrim[data-exit-ghost="tour"] {
+  animation: sheet-backdrop-out var(--motion-surface) var(--motion-ease) both !important;
+}
+.shell-intro[data-exit-ghost="tour"] .shell-intro-card,
+.scrim.package-tour-scrim[data-exit-ghost="tour"] > .package-tour {
+  animation: rise-out var(--motion-surface) var(--motion-ease) both !important;
+}
+
+/* ---- media viewer (AttachmentPreview.tsx) ------------------------------------
+   Paging follows the finger: the item that leaves carries on off the edge
+   from where the finger let go (a "page" ghost) while the next one rides in
+   from the other edge in the same time. A pull-down lifts the dim and the
+   chrome with the finger, and a release dismisses from there. */
+.attachment-preview-dialog[data-media-dragging] :is(.attachment-preview-bar, .attachment-preview-nav, .attachment-preview-strip) {
+  opacity: max(0, calc(1 - var(--preview-drag, 0) * 4));
+}
+.attachment-preview-slide[data-swiped][data-direction="next"] {
+  animation: attachment-page-in-next var(--page-settle, var(--motion-stack)) var(--motion-stack-ease) backwards;
+}
+.attachment-preview-slide[data-swiped][data-direction="prev"] {
+  animation: attachment-page-in-prev var(--page-settle, var(--motion-stack)) var(--motion-stack-ease) backwards;
+}
+.attachment-preview-slide[data-exit-ghost="page"] {
+  animation: attachment-page-out var(--page-settle, var(--motion-stack)) var(--motion-stack-ease) both !important;
+}
+.dialog-backdrop.attachment-preview-backdrop[data-exit-ghost="dialog"] > .attachment-preview-dialog {
+  animation: sheet-backdrop-out var(--motion-surface) var(--motion-ease) both !important;
+}
+.dialog-backdrop.attachment-preview-backdrop[data-exit-ghost="dialog"] .attachment-preview-slide {
+  animation: attachment-preview-zoom-out var(--motion-surface) var(--motion-ease) both !important;
+}
+.dialog-backdrop.attachment-preview-backdrop[data-exit-ghost="dialog"] .attachment-preview-slide[data-drag-dismissed] {
+  animation: sheet-slide-out var(--sheet-settle, var(--motion-stack)) var(--motion-stack-ease) both !important;
+}
+
+@keyframes attachment-page-in-next {
+  from { transform: translate3d(calc(var(--stack-dir, 1) * 100%), 0, 0); }
+  to { transform: none; }
+}
+@keyframes attachment-page-in-prev {
+  from { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
+  to { transform: none; }
+}
+@keyframes attachment-page-out {
+  from { transform: translate3d(var(--page-from, 0px), 0, 0); }
+  to { transform: translate3d(var(--page-to, -100%), 0, 0); }
+}
+@keyframes attachment-preview-zoom-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.96); }
+}

@@ -1,0 +1,21 @@
+export const EDITOR_PACKAGE_ID = "editor";
+export type {
+  EditorCompletionItem,
+  EditorCompletionKind,
+  EditorCompletions,
+  EditorDefinition,
+  EditorDiagnostic,
+  EditorDiagnosticSeverity,
+  EditorHover,
+  EditorLanguageCapability,
+  EditorLanguageRequest,
+  EditorLanguageResponse,
+  EditorLocation,
+  EditorPosition,
+  EditorRange,
+  EditorReference,
+  EditorRenameApplyRequest,
+  EditorRenameApplyResponse,
+  EditorRenamePreview,
+  EditorRenameTarget,
+} from "./languageTypes.ts";

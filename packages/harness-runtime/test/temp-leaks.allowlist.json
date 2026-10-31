@@ -1,0 +1,7 @@
+[
+  "accounts.test.ts",
+  "harnessUpdate.test.ts",
+  "harnessUpdates.test.ts",
+  "personHarnessDefault.test.ts",
+  "systemPrompts.test.ts"
+]

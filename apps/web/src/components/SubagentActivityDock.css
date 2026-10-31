@@ -1,0 +1,380 @@
+/* Subagents hanging from the agent's status line (SubagentActivityDock.tsx).
+   One island holds the agent's own line (the AgentStatusDock primitive, live
+   or idle) and the branch: a row per active subagent on a thread dropped from
+   that line's mark like the activity block's. In the Standard look the island is
+   text on the canvas; the other looks give it their in-flow card
+   (shellLooks.css) and the line inside drops its own. The thread is an inset
+   shadow or background (never a border), so Borderless keeps it; it takes the
+   accent while subagents work, amber while one waits for a person and a
+   quiet neutral when only paused ones are left. The island shares the chat
+   frame's width with the status line. */
+.subagent-island {
+  --branch-ink: var(--session-blue, var(--accent));
+  --branch-thread: color-mix(in srgb, var(--accent) 50%, var(--borderless-edge));
+  /* The thread runs under the centre of the agent line's mark... */
+  --branch-x: calc(var(--space-1) + var(--icon-md) / 2 - .5px);
+  /* ...and branch rows start where the line's words do. */
+  --branch-inset: calc(var(--space-1) + var(--icon-md) + var(--space-2));
+  --branch-elbow: calc(var(--branch-inset) - var(--branch-x) - var(--space-1));
+  /* The thread starts just under the mark, which sits centred in the line's
+     row (the AgentStatusDock row: taller on touch screens). */
+  --branch-line-row: max(32px, var(--hit-min));
+  --branch-rise: calc(var(--branch-line-row) / 2 - var(--icon-md) / 2 - 2px);
+  container: subagent-island / inline-size;
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  width: min(
+    var(--chat-measure),
+    calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)))
+  );
+  margin-inline-start: var(--conversation-frame-inline-start, auto);
+  margin-inline-end: var(--conversation-frame-inline-end, auto);
+}
+.subagent-island[data-tone="waiting"] {
+  --branch-ink: var(--amber);
+  --branch-thread: color-mix(in srgb, var(--amber) 62%, var(--borderless-edge));
+}
+.subagent-island[data-tone="paused"] {
+  --branch-ink: var(--muted);
+  --branch-thread: color-mix(in srgb, var(--muted) 45%, var(--borderless-edge));
+}
+
+/* The agent's line inside the island: the chat frame and any look's plate
+   belong to the island now. */
+.subagent-island-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.subagent-island .subagent-island-line > .agent-status-dock {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  min-height: var(--branch-line-row);
+  margin: 0;
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-control);
+  background: transparent;
+  box-shadow: none;
+}
+/* The line takes the island's width whatever the status style (a capsule's
+   own line hugs its words). */
+.subagent-island .subagent-island-line :is(.agent-status-dock-content, .agent-status-dock-primary) { flex: 1 1 auto; }
+
+.subagent-branch-mark {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--amber);
+}
+/* The marks mirror the child's own navigator mark: a running ring, a blue
+   reply question, an amber approval shield; a paused run is that ring at rest
+   with a pause sign (PausedMark). A change of state swaps the mark in place:
+   the new one grows in while the colour eases over. */
+.subagent-branch-mark { transition: color var(--motion-normal) var(--motion-ease); }
+.subagent-branch-mark[data-state="working"],
+.subagent-branch-question { color: var(--session-blue, var(--accent)); }
+.subagent-branch-mark[data-state="paused"] { color: var(--text-dim); }
+.subagent-branch-glyph {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.subagent-branch-question,
+.subagent-branch-question svg { display: block; width: 100%; height: 100%; }
+
+/* A row's title, then what it does: the action gives way first, the run time
+   and model never. */
+.subagent-branch-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-branch-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.subagent-branch-detail > * + *::before { content: "·"; margin-inline-end: var(--space-2); }
+.subagent-branch-detail > :is(.subagent-branch-meta, .subagent-branch-model) { flex: none; font-variant-numeric: tabular-nums; }
+.subagent-branch-detail > :is(.subagent-branch-action, .subagent-branch-ask) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subagent-branch-ask { color: var(--amber); }
+/* The tight line box clips descenders under the ellipsis (see AgentStatusDock.css). */
+.subagent-branch-title,
+.subagent-branch-detail > * {
+  padding-block: 0.12em;
+  margin-block: -0.12em;
+}
+
+.subagent-branch-actions {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.subagent-branch-go {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+/* Media controls: Pause, Continue and Stop as solid glyphs (the composer's
+   Stop is one too), a size under the outline icons so a filled shape keeps
+   their weight. */
+.subagent-branch-actions > .ui-icon-btn svg { width: 13px; height: 13px; fill: currentColor; }
+.subagent-branch-actions > .ui-icon-btn.subagent-branch-stop svg { width: 12px; height: 12px; }
+.subagent-branch-actions > .ui-icon-btn.subagent-branch-continue svg { width: 14px; height: 14px; }
+/* Continue is the paused row's way on: the accent, quietly. */
+.subagent-branch-actions > .ui-icon-btn.subagent-branch-continue {
+  color: var(--accent-text);
+  background: var(--accent-wash);
+}
+@media (hover: hover) {
+  .subagent-branch-actions > .ui-icon-btn.subagent-branch-continue:hover:where(:not(:disabled)) {
+    color: var(--accent-text);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .subagent-branch-actions > .ui-icon-btn.subagent-branch-stop:hover:where(:not(:disabled)) {
+    color: var(--red);
+    background: var(--red-wash);
+  }
+}
+/* On touch, two glyph buttons side by side keep their 44px targets apart. */
+.subagent-branch-actions > .ui-icon-btn + .ui-icon-btn {
+  margin-inline-start: max(0px, calc(var(--hit-min) - 24px - var(--space-1)));
+}
+.subagent-branch-go svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.subagent-branch-go svg:dir(rtl) { transform: scaleX(-1); }
+
+/* ---- The list: a row per active subagent on the thread ---- */
+.subagent-branch-list {
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  list-style: none;
+}
+/* An item is a one-track grid over a clipping cell, so a row can unfold in
+   or fold away by its height (grid-template-rows 0fr ⇄ 1fr) with the thread
+   following it. */
+.subagent-branch-item {
+  position: relative;
+  display: grid;
+  /* minmax(0, …): the track never grows to a long title's width. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 1fr;
+}
+.subagent-branch-cell { min-width: 0; min-height: 0; overflow: clip; }
+.subagent-branch-item::before,
+.subagent-branch-item::after {
+  transition: background-color var(--motion-normal) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease);
+}
+.subagent-branch-item::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--branch-x);
+  inset-block: 0;
+  width: 1px;
+  background: var(--branch-thread);
+  pointer-events: none;
+}
+.subagent-branch-item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--branch-x);
+  inset-block-start: 50%;
+  width: var(--branch-elbow);
+  height: 1px;
+  background: var(--branch-thread);
+  pointer-events: none;
+}
+.subagent-branch-item:last-child::before {
+  inset-block-end: auto;
+  width: var(--branch-elbow);
+  height: 50%;
+  border-end-start-radius: 6px;
+  background: none;
+  box-shadow: inset 1px -1px 0 var(--branch-thread);
+}
+.subagent-branch-item:last-child:dir(rtl)::before { box-shadow: inset -1px -1px 0 var(--branch-thread); }
+/* The thread leaves the agent's mark: the first row's runs up to it. */
+.subagent-branch-item:first-child::before { inset-block-start: calc(-1 * var(--branch-rise)); }
+.subagent-branch-item:first-child:last-child::before { height: calc(50% + var(--branch-rise)); }
+
+.subagent-branch-row {
+  position: relative;
+  min-width: 0;
+  min-height: max(40px, var(--hit-min));
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline: calc(var(--branch-inset) - var(--space-2)) var(--space-1);
+  padding-inline: var(--space-2) 0;
+  border-radius: var(--radius-control);
+}
+.subagent-branch-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.subagent-branch-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.subagent-branch-open:focus-visible { outline: 0; }
+.subagent-branch-open:focus-visible::after { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.subagent-branch-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.subagent-branch-copy > .subagent-branch-title {
+  color: var(--text);
+  font-size: var(--font-tool-label);
+  font-weight: 500;
+  line-height: var(--font-tool-label-lh);
+}
+.subagent-branch-copy > .subagent-branch-detail {
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+/* Pause and Stop show on the row under the pointer (or holding focus); touch
+   screens keep them in view. A paused row keeps its controls in view. */
+.subagent-branch-actions--hover { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+.subagent-branch-row:focus-within .subagent-branch-actions--hover { opacity: 1; }
+@media (hover: hover) {
+  /* The shell's generic button hover plate stays off these text controls:
+     the row band (or the words) is their hover. */
+  .subagent-branch-open:hover:where(:not(:disabled)),
+  .subagent-branch-show-all:hover:where(:not(:disabled)) { background: none; }
+  .subagent-branch-row:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+  .subagent-branch-row:hover .subagent-branch-actions--hover { opacity: 1; }
+}
+@media (hover: none) {
+  .subagent-branch-actions--hover { opacity: 1; }
+}
+.subagent-branch-item--more::after { display: none; }
+.subagent-branch-show-all {
+  /* The item is a grid cell: the words start under the titles. */
+  justify-self: start;
+  min-height: max(32px, var(--hit-min));
+  margin-inline-start: calc(var(--branch-inset) - var(--space-2));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.subagent-branch-show-all:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+@media (hover: hover) {
+  .subagent-branch-show-all:hover:where(:not(:disabled)) { color: var(--text); }
+}
+
+@container subagent-island (max-width: 520px) {
+  /* A phone row is the way into its chat by itself, and a running row keeps
+     its action and time over the model. */
+  .subagent-branch-go { display: none; }
+  .subagent-branch-item[data-state="working"] .subagent-branch-detail > .subagent-branch-model { display: none; }
+  /* A waiting row gives its decision a line of its own. */
+  .subagent-branch-row[data-ask] { flex-wrap: wrap; }
+  /* Its thread still reaches the mark on the first line. */
+  .subagent-branch-item[data-ask]:not(:last-child)::after { inset-block-start: calc(max(40px, var(--hit-min)) / 2); }
+  .subagent-branch-item[data-ask]:last-child::before { height: calc(max(40px, var(--hit-min)) / 2); }
+  .subagent-branch-item[data-ask]:first-child:last-child::before { height: calc(max(40px, var(--hit-min)) / 2 + var(--branch-rise)); }
+  .subagent-branch-row > .subagent-branch-actions--ask {
+    flex-basis: 100%;
+    padding-inline-start: calc(var(--icon-sm) + var(--space-3));
+    padding-block-end: var(--space-1);
+  }
+}
+
+/* ---- Composer status styles (Chat settings) ---- */
+/* Tab: the island is the faint tab growing out of the composer's top edge. */
+body[data-composer-status-style="tab"] .subagent-island {
+  width: calc(min(var(--chat-measure), 100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset))) - 2 * var(--composer-status-tab-inset, var(--space-4)));
+  margin-inline: auto;
+  padding-inline: var(--space-2);
+  border-radius: calc(var(--radius-card) + 4px) calc(var(--radius-card) + 4px) 0 0;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 35%, transparent);
+}
+/* Capsule: two lines no longer hug as a pill; the outline rounds the card. */
+body[data-composer-status-style="capsule"] .subagent-island {
+  margin-block-end: var(--space-2);
+  padding-inline: var(--space-2);
+  border-radius: calc(var(--radius-card) + 6px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+/* ---- Motion (after the list's first paint; reduced motion drops it all) ---- */
+/* A subagent that arrives rises into its place (composited); one that ends
+   folds away from the height it had (useLeavingRows) while it fades. */
+.subagent-branch-list[data-settled] > .subagent-branch-item:not([data-leaving], .subagent-branch-item--more) {
+  animation: subagent-branch-row-in var(--motion-surface) var(--motion-ease);
+}
+.subagent-branch-item[data-leaving] {
+  height: var(--branch-leave-height);
+  pointer-events: none;
+  animation:
+    subagent-branch-row-fold var(--motion-surface) var(--motion-ease) forwards,
+    subagent-branch-row-fade var(--motion-normal) var(--motion-ease) forwards;
+}
+@keyframes subagent-branch-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+@keyframes subagent-branch-row-fold { to { height: 0; } }
+@keyframes subagent-branch-row-fade { to { opacity: 0; } }
+/* Pausing or continuing swaps the mark and the controls in place. */
+.subagent-branch-list[data-settled] > :not([data-leaving]) .subagent-branch-glyph {
+  animation: subagent-branch-glyph-in var(--motion-normal) var(--motion-ease);
+}
+.subagent-branch-list[data-settled] > :not([data-leaving]) .subagent-branch-actions {
+  animation: subagent-branch-actions-in var(--motion-normal) var(--motion-ease);
+}
+@keyframes subagent-branch-glyph-in {
+  from { opacity: 0; transform: scale(.5); }
+}
+@keyframes subagent-branch-actions-in {
+  from { opacity: 0; transform: scale(.9); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-branch-go svg,
+  .subagent-branch-actions--hover { transition: none; }
+}
+html[data-reduce-animations="true"] :is(.subagent-branch-go svg, .subagent-branch-actions--hover),
+body[data-desktop-low-resource="true"] :is(.subagent-branch-go svg, .subagent-branch-actions--hover) { transition: none; }

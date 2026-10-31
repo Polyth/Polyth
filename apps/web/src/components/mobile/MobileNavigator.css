@@ -1,0 +1,1760 @@
+/* Phone Navigator: the existing conversation remains mounted underneath one
+ * continuous navigation material. Hierarchy comes from type, rhythm and
+ * luminance rather than nested cards, so no row is a box inside a box.
+ *
+ * Type sizes are roles from the canonical scale (never fixed pixels), so the
+ * navigator tracks the interface-size setting like the desktop sidebar does.
+ * Interactive controls keep the phone tap floor; only the space around them
+ * gets denser. */
+
+.mobile-nav-backdrop,
+.mobile-navigator {
+  position: fixed;
+  inset: 0;
+}
+
+.mobile-nav-backdrop {
+  z-index: 109;
+  background: transparent;
+  pointer-events: none;
+}
+
+.mobile-navigator {
+  /* Hierarchy is size and weight together: a project name (the user's
+     subheading size, 650) stays a step above its chats (the activity-title
+     role, 500), as on the desktop navigator. */
+  --nav-project-size: var(--subheader-font-size, 16px);
+  --nav-session-size: var(--font-activity-title);
+  --nav-session-lh: var(--font-activity-title-lh);
+  --nav-meta-size: var(--font-meta);
+  /* Ink for what repeats on every row (⋮, identity marks): present and
+     tappable, but quieter than the titles it sits beside, and still at
+     least 3:1 against the glass (Midnight is the tightest dark theme).
+     Light themes need a firmer mix for the same contrast. */
+  --nav-quiet-ink: color-mix(in srgb, var(--muted) 68%, transparent);
+  --nav-quiet-mark: .68;
+  --nav-tree-indent: var(--space-3);
+  /* One grid for every row, toolbar included. Most rows leave the leading
+     column empty and every row ends in ⋮, so each pixel of the start and
+     end columns reads as empty margin; both are kept to what the marks
+     need.
+     - Rows and the toolbar reach --nav-edge (room for the current row's
+       rounded wash). Controls on the end edge keep their whole 44px box but
+       put their glyph on --nav-axis, 24px from the screen: a target may run
+       to the edge, the ink keeps a margin. Close, project ⋯ and session ⋯
+       share that column. The thumb aims at the glyph, and a phone's rounded
+       edge and case lip make the last few points hard to press, so the
+       column sits a little further in than the start side's marks (close's
+       ink lands on the platform's 16pt margin).
+     - Project marks start on the --nav-gutter content edge. A session's
+       state mark is centred in the same leading column, and the select
+       tool's glyph sits on that column's centre too: 20px from the screen,
+       never further in than the end column.
+     - Names, titles, pagination and the empty text share one start edge:
+       gutter + an icon-xl mark + one --space-2 step, 40px in. */
+  --nav-edge: 6px;
+  --nav-axis: 24px;
+  /* The press circle of the end column's small controls (New chat and every
+     ⋮), centred on the axis and a fixed size wherever the axis sits; the
+     inset is the room left between it and the row's end. */
+  --nav-dots-wash: calc(var(--icon-md) + var(--space-3) - 2px);
+  --nav-dots-inset: calc(var(--nav-axis) - var(--nav-edge) - var(--nav-dots-wash) / 2);
+  --nav-gutter: var(--space-2);
+  --nav-lead-col: var(--icon-xl);
+  --nav-row-inset: calc(var(--nav-gutter) - var(--nav-edge));
+  --nav-lead-gap: var(--space-2);
+  --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
+  /* A row's trailing marks (and a title with none) pair with its ⋮: they end
+     12px clear of the dots' inner ink, which sits about 1px past the axis,
+     so the body runs this far into the ⋮ control's 44px box. */
+  --nav-mark-end: calc(var(--nav-axis) + var(--space-3) + 1px);
+  --nav-mark-tuck: calc(var(--nav-edge) + var(--tap) - var(--nav-mark-end));
+  /* The toolbar's tools are the bar's primary controls: each keeps a full
+     tap-floor box, so neighbouring glyphs sit one tap step apart and a press
+     never lands on the tool beside it. */
+  --nav-tool-step: var(--tap);
+  /* Default keeps the phone tap floor. A denser list is the user's explicit
+     Interface density choice, never a silently shrunk touch target. */
+  --nav-row-session: var(--tap);
+  /* Size of a session's state mark (or unread dot), centred in the leading
+     column and reserved even when empty. */
+  --nav-status-slot: var(--icon-md);
+  --nav-status-pill: calc(var(--icon-sm) + 6px);
+
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: var(--visual-vh, 100dvh);
+  max-width: none;
+  overflow: hidden;
+  color: var(--text);
+  /* Opaque fallback; shared sheet material in styles.css owns translucency. */
+  background: var(--material-glass-strong);
+  border: 0;
+  box-shadow: none;
+  isolation: isolate;
+}
+
+html[data-appearance="light"] .mobile-navigator {
+  --nav-quiet-ink: color-mix(in srgb, var(--muted) 80%, transparent);
+  --nav-quiet-mark: .8;
+}
+
+/* Taps open and close the way a swipe does: the whole drawer travels in from
+   and back off the inline-start edge on the stack curve. A short fade on
+   --motion-ease was over within a few frames and read as no animation. */
+.mobile-navigator:not(.is-closing) {
+  animation: mobile-navigator-in var(--motion-surface) var(--motion-stack-ease) both;
+}
+
+.mobile-navigator.is-closing {
+  pointer-events: none;
+  animation: mobile-navigator-out var(--motion-surface) var(--motion-stack-ease) both;
+}
+
+.mobile-nav-backdrop:not(.is-closing) {
+  animation: mobile-nav-backdrop-in var(--motion-surface) var(--motion-ease) both;
+}
+
+.mobile-nav-backdrop.is-closing {
+  animation: mobile-nav-backdrop-out var(--motion-surface) var(--motion-ease) both;
+}
+
+/* --stack-dir mirrors both for RTL. */
+@keyframes mobile-navigator-in {
+  from { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
+  /* `none`, not a zero translate: the open drawer must not become a
+     containing block for its fixed-position menus. */
+  to { transform: none; }
+}
+
+@keyframes mobile-navigator-out {
+  from { transform: none; }
+  to { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
+}
+
+@keyframes mobile-nav-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes mobile-nav-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.mobile-navigator:not(.is-closing) > .mobile-nav-toolbar {
+  animation: mobile-nav-toolbar-in var(--motion-normal) var(--motion-ease) 36ms both;
+}
+
+.mobile-navigator:not(.is-closing) > .mobile-nav-scroll {
+  animation: mobile-nav-scroll-in var(--motion-surface) var(--motion-ease) 68ms both;
+}
+
+/* ---- swipe ----------------------------------------------------------------
+   A swipe from Chat mounts the drawer as a peek: inert, resting off-screen on
+   the inline-start side, moved by the finger through an inline transform
+   (PhoneShellSwipes.tsx). A swipe on the open drawer drags it the same way
+   (data-swiping). On release the finger's position is handed to a plain
+   two-stop travel — --nav-swipe-from to rest, or to off-screen — paced by the
+   rest of the distance (--nav-swipe-settle) on the stack curve, so the drawer
+   leaves the finger at the finger's speed. Taps keep the entrance/exit above.
+   Reduced motion and low-resource mode remove the animation globally, and
+   the drawer simply lands where it is going. The `:is(html, …)` prefix lets
+   these outrank the RTL animation-name rules. */
+:is(html, html[dir="rtl"]) .mobile-navigator.is-peeking {
+  pointer-events: none;
+  animation: none;
+  transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0);
+}
+
+.mobile-nav-backdrop.is-peeking {
+  animation: none;
+}
+
+/* The trailing edge casts the stack's shadow onto Chat while it travels; at
+   rest the drawer fills the screen and the shadow falls outside it. */
+.mobile-navigator:is(.is-peeking, [data-swiping], [data-swipe-handoff]) {
+  box-shadow: var(--shadow-drawer-edge);
+}
+
+.mobile-navigator:is(.is-peeking, [data-swiping]) {
+  will-change: transform;
+}
+
+/* The drawer takes focus as a landmark when it opens. Filling the screen,
+   its ring falls outside the viewport at rest and would only show as a stray
+   line riding the trailing edge while a swipe moves it; its controls keep
+   their own rings. */
+.mobile-navigator:focus-visible {
+  outline: none;
+}
+
+/* The content is already there while it is dragged; it never re-enters. */
+.mobile-navigator:is(.is-peeking, [data-swiping], [data-swipe-handoff]) > :is(.mobile-nav-toolbar, .mobile-nav-scroll) {
+  animation: none;
+}
+
+:is(html, html[dir="rtl"]) .mobile-navigator[data-swipe-handoff="open"]:not(.is-closing, .is-peeking) {
+  animation: mobile-navigator-swipe-in var(--nav-swipe-settle, var(--motion-surface)) var(--motion-stack-ease) both;
+}
+
+:is(html, html[dir="rtl"]) .mobile-navigator.is-closing[data-swipe-handoff="close"] {
+  animation: mobile-navigator-swipe-out var(--nav-swipe-settle, var(--motion-surface)) var(--motion-stack-ease) both;
+}
+
+/* A drag of the open drawer must be able to move it. The entrance animation
+   (and a swipe-open hand-off) fills forwards with `transform: none`, and an
+   animation outranks an inline style, so without this the drawer ignores the
+   finger and only the release animates. A drag that springs home leaves
+   data-swipe-handoff="rest" so the entrance does not replay when data-swiping
+   goes; it is inert once the drawer starts closing. */
+:is(html, html[dir="rtl"]) .mobile-navigator:is([data-swiping], [data-swipe-handoff="rest"]):not(.is-closing, .is-peeking) {
+  animation: none;
+}
+
+/* Settings opened from the Navigator takes its place, arriving over it from
+   the same inline-start side (settingsPresentation.ts). The drawer does not
+   race it back off-screen: like any layer a push covers, it retreats by the
+   stack parallax toward the other side, dims, and stops painting once covered.
+   Same duration and curve as the arriving layer, so the pair moves as one. */
+:is(html, html[dir="rtl"]) .mobile-navigator.is-closing[data-drawer-exit="covered"] {
+  animation: mobile-navigator-covered var(--motion-stack) var(--motion-stack-ease) both;
+}
+
+.mobile-navigator.is-closing[data-drawer-exit="covered"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgb(9 8 7 / var(--stack-dim, 0.18));
+  pointer-events: none;
+  animation: stack-dim-in var(--motion-stack) var(--motion-stack-ease) both;
+}
+
+@keyframes mobile-navigator-covered {
+  from { transform: none; visibility: visible; }
+  to {
+    transform: translate3d(calc(var(--stack-dir, 1) * var(--stack-parallax, 28%)), 0, 0);
+    visibility: hidden;
+  }
+}
+
+/* --nav-swipe-from is a signed physical offset, so one pair serves RTL too. */
+@keyframes mobile-navigator-swipe-in {
+  from { transform: translate3d(var(--nav-swipe-from, 0px), 0, 0); }
+  /* `none`, not a zero translate: the open drawer must not become a
+     containing block for its fixed-position menus. */
+  to { transform: none; }
+}
+
+@keyframes mobile-navigator-swipe-out {
+  from { transform: translate3d(var(--nav-swipe-from, 0px), 0, 0); }
+  to { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
+}
+
+@keyframes mobile-nav-toolbar-in {
+  from { opacity: 0; transform: translate3d(calc(var(--space-3) * -1), 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes mobile-nav-scroll-in {
+  from { opacity: 0; transform: translate3d(0, var(--space-2), 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Zero specificity: a control's own one-class rule (the subagent count pill,
+   the swipe action, a lane) must keep its type role instead of silently
+   inheriting the row's size and weight. */
+:where(.mobile-navigator) :where(button, input) {
+  font: inherit;
+}
+
+/* ---- material ----------------------------------------------------------
+ * The full-screen navigator shares the mobile Workspace's sheet material.
+ * Its toolbar stays part of that same surface so switching between the two
+ * destinations does not change the page material underneath the controls. */
+.mobile-nav-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  /* Two faces in one cell: the title row, and the search field that grows
+     over it instead of pushing it aside. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: calc(var(--control-h-lg) + var(--safe-top));
+  /* The bar's end tool reaches the screen edge (its glyph sits on the edge
+     column). */
+  padding:
+    calc(var(--space-1) + var(--safe-top))
+    var(--safe-right)
+    var(--space-2)
+    var(--safe-left);
+  background: transparent;
+}
+
+.mobile-nav-toolbar::after {
+  content: "";
+  position: absolute;
+  inset: auto max(var(--nav-gutter), var(--safe-right)) 0 max(var(--nav-gutter), var(--safe-left));
+  height: 1px;
+  background: var(--material-glass-border);
+  opacity: .4;
+  pointer-events: none;
+}
+
+.mobile-nav-toolbar > :is(.mobile-nav-toolbar-row, .mobile-nav-search-bar) {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: var(--tap);
+}
+
+/* ---- search morph --------------------------------------------------------
+   The field grows out of the search tool. Opening, the pill starts as a glass
+   circle on the tool's glyph (the size of its press wash) and stretches to
+   the bar's width on the stack curve — the same clock the keyboard rides in
+   on — while the title row drifts back and fades under it; Back and the
+   field's own contents arrive once the pill has most of its width, so no
+   half-clipped placeholder or icon ever shows. Closing plays it backwards,
+   quicker: the contents go first, the pill shrinks into the tool and the
+   title row returns over its last stretch. Each state carries the transition
+   that leads INTO it. Only transform, opacity and clip-path move. */
+.mobile-nav-toolbar {
+  --nav-search-open: var(--motion-stack);
+  --nav-search-close: var(--motion-surface);
+  --nav-search-ease: var(--motion-stack-ease);
+  /* The tool glyph's centre from the bar's end edge: close's half-step box,
+     two tool steps and half of the search tool's own. */
+  --nav-search-axis: calc(var(--nav-axis) + 3 * var(--nav-tool-step));
+  --nav-search-seed: calc(var(--icon-lg) + var(--space-3));
+}
+
+.mobile-nav-toolbar-row {
+  transition:
+    opacity var(--nav-search-close) var(--motion-ease) calc(var(--nav-search-close) / 3),
+    transform var(--nav-search-close) var(--nav-search-ease);
+}
+
+.mobile-nav-toolbar.is-searching > .mobile-nav-toolbar-row {
+  opacity: 0;
+  transform: translate3d(calc(var(--stack-dir, 1) * var(--space-4) * -1), 0, 0);
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--nav-search-open) var(--nav-search-ease);
+}
+
+.mobile-nav-toolbar:not(.is-searching) > .mobile-nav-search-bar {
+  pointer-events: none;
+}
+
+/* The pill: a circle on the tool, then the whole field. Its end edge sits
+   --nav-gutter in from the bar's end. Open, the clip reaches a few pixels
+   past the pill so its rim and shadow are never cut. */
+.mobile-nav-search-bar > .mobile-nav-search {
+  --nav-search-end: calc(var(--nav-search-axis) - var(--nav-gutter) - var(--nav-search-seed) / 2);
+  --nav-search-start: calc(100% - var(--nav-search-end) - var(--nav-search-seed));
+  --nav-search-block: calc((var(--tap) - var(--nav-search-seed)) / 2);
+  clip-path: inset(calc(var(--space-2) * -1) round var(--radius-round));
+  transition:
+    clip-path var(--nav-search-open) var(--nav-search-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+
+.mobile-nav-toolbar:not(.is-searching) > .mobile-nav-search-bar > .mobile-nav-search {
+  opacity: 0;
+  clip-path: inset(var(--nav-search-block) var(--nav-search-end) var(--nav-search-block) var(--nav-search-start) round var(--radius-round));
+  transition:
+    clip-path var(--nav-search-close) var(--nav-search-ease),
+    opacity var(--motion-fast) var(--motion-ease) calc(var(--nav-search-close) - var(--motion-fast));
+}
+
+html[dir="rtl"] .mobile-nav-toolbar:not(.is-searching) > .mobile-nav-search-bar > .mobile-nav-search {
+  clip-path: inset(var(--nav-search-block) var(--nav-search-start) var(--nav-search-block) var(--nav-search-end) round var(--radius-round));
+}
+
+/* Back and the field's contents follow the pill in and lead it out. */
+.mobile-nav-search-bar > .mobile-nav-search-back,
+.mobile-nav-search > :is(svg, input, .mobile-nav-search-clear, .mobile-nav-filter) {
+  transition:
+    opacity var(--motion-normal) var(--motion-ease) calc(var(--nav-search-open) * .35),
+    transform var(--nav-search-open) var(--nav-search-ease) calc(var(--nav-search-open) * .15);
+}
+
+.mobile-nav-toolbar:not(.is-searching) > .mobile-nav-search-bar > .mobile-nav-search-back,
+.mobile-nav-toolbar:not(.is-searching) .mobile-nav-search > :is(svg, input, .mobile-nav-search-clear, .mobile-nav-filter) {
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--nav-search-close) var(--nav-search-ease);
+}
+
+/* Back slides in toward its place from the side the pill grew from. */
+.mobile-nav-toolbar:not(.is-searching) > .mobile-nav-search-bar > .mobile-nav-search-back {
+  transform: translate3d(calc(var(--stack-dir, 1) * var(--space-3)), 0, 0) scale(.86);
+}
+
+/* The title starts on the content edge, where the project marks do, and
+   stands a step above a project name: the same size, a firmer weight. */
+.mobile-nav-place {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 1 auto;
+  min-width: 0;
+  height: var(--tap);
+  margin: 0;
+  padding-block: 0;
+  padding-inline: var(--nav-gutter) var(--space-2);
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  font-size: var(--nav-project-size);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -.02em;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-nav-place-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-nav-place > svg {
+  flex: 0 0 auto;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: var(--muted);
+  stroke-width: 2;
+}
+
+button.mobile-nav-place:active:where(:not(:disabled)) {
+  background-color: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+/* ---- trailing clusters ---------------------------------------------------
+ * A project's New chat and ⋮ step the way a chat row's marks step toward its
+ * ⋮: about one --space-3 of air between neighbouring glyphs. The toolbar's
+ * tools step by the full tap floor (--nav-tool-step) instead. Close and ⋮
+ * keep their glyph on the --nav-axis edge column. A target is the full bar
+ * or row height and the room between its neighbours' glyphs; a project
+ * action is narrower than the tap floor but never below the 24px of WCAG
+ * 2.2 AA. The press wash is a circle round the glyph. */
+.mobile-nav-tools {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 100%;
+  margin-inline-start: auto;
+}
+
+.mobile-nav-tools > .mobile-nav-tool {
+  --nav-wash: calc(var(--icon-lg) + var(--space-3));
+  --nav-wash-end: calc((var(--nav-tool-step) - var(--nav-wash)) / 2);
+  width: var(--nav-tool-step);
+  height: 100%;
+  border-radius: 0;
+  isolation: isolate;
+}
+
+/* Close: the glyph on the axis and the target out to the screen edge, half
+   a step wide on the inner side, so its glyph is one step from Settings'. */
+.mobile-nav-tools > .mobile-nav-tool:last-child {
+  --nav-wash-end: calc(var(--nav-axis) - var(--nav-wash) / 2);
+  width: calc(var(--nav-axis) + var(--nav-tool-step) / 2);
+  padding-inline-end: calc(var(--nav-axis) - var(--icon-lg) / 2);
+  place-items: center end;
+}
+
+.mobile-nav-tools > .mobile-nav-tool::before,
+.mobile-nav-project-action::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block: 0;
+  inset-inline: auto var(--nav-wash-end);
+  width: var(--nav-wash);
+  height: var(--nav-wash);
+  margin-block: auto;
+  border-radius: var(--radius-round);
+  pointer-events: none;
+}
+
+.mobile-nav-tools > .mobile-nav-tool:active:where(:not(:disabled))::before,
+.mobile-nav-project-action:active:where(:not(:disabled))::before {
+  background-color: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+/* The field is the tools' height, so the whole bar shares one centre line
+   and one outline height. */
+.mobile-nav-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--tap);
+  padding-block: 0;
+  padding-inline: var(--space-3) 0;
+  border-radius: var(--radius-round);
+  /* Same cut-glass edge shared controls use, without a second stacked blur. */
+  border: 1px solid var(--material-glass-border);
+  background: linear-gradient(145deg,
+    color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent),
+    color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-edge), transparent));
+  box-shadow: var(--material-glass-highlight);
+  margin-inline-end: var(--space-1);
+}
+
+/* The field's own edges sit on the content edge, not on the controls' edge. */
+.mobile-nav-search:first-child {
+  margin-inline-start: var(--nav-gutter);
+}
+
+.mobile-nav-search:last-child {
+  margin-inline-end: var(--nav-gutter);
+}
+
+body[data-glass="off"] .mobile-nav-search,
+body[data-desktop-low-resource="true"] .mobile-nav-search {
+  background: var(--material-glass);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.mobile-nav-search > svg {
+  flex: 0 0 auto;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--muted);
+  stroke-width: 1.8;
+}
+
+.mobile-nav-search input {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  /* The trailing filter/clear control brings its own air. */
+  padding-block: 0;
+  padding-inline: var(--space-2) 0;
+  overflow: hidden;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 16px minimum: anything smaller makes iOS zoom the page on focus. */
+  font-size: max(16px, var(--font-body));
+  line-height: 1.3;
+}
+
+.mobile-nav-search input::placeholder {
+  color: color-mix(in srgb, var(--muted) 86%, transparent);
+}
+
+.mobile-nav-search-clear,
+.mobile-nav-filter,
+.mobile-nav-tool,
+.mobile-nav-project-action,
+.mobile-nav-more,
+.mobile-nav-isolated-add {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-nav-search-clear,
+.mobile-nav-filter,
+.mobile-nav-tool {
+  position: relative;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--radius-round);
+}
+
+.mobile-nav-search-clear svg,
+.mobile-nav-filter svg,
+.mobile-nav-tool svg,
+.mobile-nav-tool .ui-icon {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  stroke-width: 1.8;
+}
+
+/* Edge controls: the visible control is a circle (--nav-wash) centred on
+   the edge column (the leading column's centre on the start side, --nav-axis
+   from the row's edge on the end side), so press and active washes sit
+   round their glyph and never touch the screen edge. Margins keep the 44px
+   slot in the layout and a transparent ::after keeps the 44px target,
+   running from the circle out to the edge. */
+.mobile-nav-search-back {
+  /* Room for an icon-lg glyph, and still clear of the screen edge. */
+  --nav-wash: calc(var(--control-h-sm) - var(--space-1));
+  --nav-slop-start: calc(var(--nav-gutter) + (var(--nav-lead-col) - var(--nav-wash)) / 2);
+  --nav-slop-end: calc(var(--tap) - var(--nav-wash) - var(--nav-slop-start));
+  --nav-slop-block: calc((var(--tap) - var(--nav-wash)) / 2);
+  position: relative;
+  width: var(--nav-wash);
+  height: var(--nav-wash);
+  margin-block: var(--nav-slop-block);
+  margin-inline: var(--nav-slop-start) var(--nav-slop-end);
+  border-radius: var(--radius-round);
+}
+
+/* A row's ⋮ circle is a project ⋮'s, centred on the axis; the slop on both
+   sides keeps the 44px target out to the row's end. The row height is its
+   target's height. */
+.mobile-nav-more {
+  --nav-wash: var(--nav-dots-wash);
+  --nav-slop-end: var(--nav-dots-inset);
+  --nav-slop-start: calc(var(--tap) - var(--nav-wash) - var(--nav-slop-end));
+  --nav-slop-block: calc((var(--nav-row-session) - var(--nav-wash)) / 2);
+}
+
+.mobile-nav-search-back::after,
+.mobile-navigator .mobile-nav-more::after {
+  content: "";
+  position: absolute;
+  inset-block: calc(var(--nav-slop-block) * -1);
+  inset-inline: calc(var(--nav-slop-start) * -1) calc(var(--nav-slop-end) * -1);
+}
+
+.mobile-nav-filter-dot {
+  position: absolute;
+  top: 9px;
+  inset-inline-end: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+}
+
+/* On the search tool the dot marks the glyph's empty top-end corner. */
+.mobile-nav-search-toggle .mobile-nav-filter-dot {
+  top: calc((100% - var(--icon-lg)) / 2 - 1px);
+  inset-inline-end: calc((var(--nav-tool-step) - var(--icon-lg)) / 2 - 1px);
+}
+
+.mobile-nav-search-back:active:where(:not(:disabled)),
+.mobile-nav-filter:active:where(:not(:disabled)),
+.mobile-nav-search-clear:active:where(:not(:disabled)),
+.mobile-nav-more:active:where(:not(:disabled)),
+.mobile-nav-isolated-add:active {
+  /* The colour alone: the shorthand would reset an edge control's
+     content-box clip. */
+  background-color: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.mobile-navigator :is(button, input):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* A text field matches :focus-visible on every focus, tap included, so the
+   ring drew a square box inside the rounded pill. The caret marks the field;
+   the pill itself only firms its edge while it is being typed in. */
+.mobile-navigator .mobile-nav-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* A bar tool's target is a tall slot but its visible control is the wash
+   circle, so its keyboard ring is that circle, not a box round the slot. */
+.mobile-navigator .mobile-nav-tools > .mobile-nav-tool:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.mobile-nav-tools > .mobile-nav-tool:focus-visible::before {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+
+.mobile-nav-search:focus-within {
+  border-color: color-mix(in srgb, var(--text) 14%, var(--material-glass-border));
+}
+
+/* ---- list --------------------------------------------------------------- */
+
+.mobile-nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding:
+    var(--space-2)
+    max(var(--nav-edge), var(--safe-right))
+    calc(var(--space-4) + var(--safe-bottom))
+    max(var(--nav-edge), var(--safe-left));
+  scrollbar-width: none;
+}
+
+.mobile-nav-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-nav-empty {
+  padding: var(--space-6) var(--space-4);
+  color: var(--muted);
+  font-size: var(--font-body);
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* Adding a project closes the list as a quiet row of the project grid: a
+   dashed tile in the mark column, the label on the name edge. */
+.mobile-nav-add-project {
+  display: flex;
+  align-items: center;
+  gap: var(--nav-lead-gap);
+  width: 100%;
+  min-height: var(--tap);
+  margin: var(--space-1) 0 0;
+  padding-block: 2px;
+  padding-inline: var(--nav-row-inset) 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  text-align: start;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-nav-add-project:active:where(:not(:disabled)) {
+  background-color: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.mobile-nav-add-project-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--nav-lead-col);
+  height: var(--nav-lead-col);
+  border: 1px dashed color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: calc(var(--radius-control) * .75);
+}
+
+.mobile-nav-add-project-mark .ui-icon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.mobile-nav-add-project-label {
+  font-size: var(--nav-session-size);
+  font-weight: 500;
+  line-height: var(--nav-session-lh);
+}
+
+.mobile-nav-project {
+  position: relative;
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  border-radius: var(--radius-card);
+  background: transparent;
+}
+
+.mobile-nav-project.is-current {
+  background: transparent;
+}
+
+/* 48px line (tap floor + 2px each side): a 32px mark keeps 16px of air to
+   the next one, the same step at every density. */
+.mobile-nav-project-head {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding-block: 2px;
+  padding-inline: var(--nav-row-inset) 0;
+  border-radius: var(--radius-control);
+}
+
+/* A still press lifts the row (workspaceArrange.ts), so the press itself must
+   never start a text selection, the system callout or an image drag. */
+.mobile-nav-project.is-reorderable > .mobile-nav-project-head {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.mobile-nav-project.is-reorderable > .mobile-nav-project-head img {
+  -webkit-user-drag: none;
+}
+
+/* Project identity reuses the shared mark (custom icon, colour, emoji). A
+   project that has not chosen a colour stays quiet instead of painting the
+   whole list accent; an explicit project colour still wins (inline style). */
+.mobile-navigator .project-glyph {
+  flex: 0 0 auto;
+  width: var(--nav-lead-col);
+  height: var(--nav-lead-col);
+  margin: 0;
+  /* The control radius scaled to the tile, the same corner proportion an
+     app icon has. */
+  border-radius: calc(var(--radius-control) * .75);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: var(--text-dim);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.mobile-navigator .project-glyph > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.mobile-navigator .project-glyph-mask {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+/* A picture is the mark itself, like an app icon: it fills the tile
+   instead of sitting as a thumbnail inside a grey frame. A hairline keeps a
+   transparent picture's edge. No clipping on the tile: the remote badge
+   hangs over its corner. */
+.mobile-navigator .project-glyph:has(> img) {
+  background: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.mobile-navigator .project-glyph > img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+/* Remote marker: a badge on the mark's trailing-bottom corner, cut out of
+   the mark by a ring of the list's own surface, instead of riding the
+   leading-top corner against the screen edge. */
+.mobile-navigator .project-glyph .project-remote-marker {
+  inset-block: auto -3px;
+  inset-inline: auto -3px;
+  width: 14px;
+  height: 14px;
+  background: var(--surface-1);
+  box-shadow: 0 0 0 1.5px var(--bg), 0 1px 2px rgb(0 0 0 / .18);
+}
+
+/* While a project is up every project keeps its own layer, so the
+   neighbours' glides are pure compositing. */
+.mobile-nav-scroll[data-arranging] > .mobile-nav-project {
+  will-change: transform;
+}
+
+/* The held project's slot: a quiet well the size of its row (its chats fold
+   while it is up) that travels through the list under the lifted copy. */
+.mobile-nav-project.is-arrange-held {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.mobile-nav-project.is-arrange-held > .mobile-nav-project-head {
+  visibility: hidden;
+}
+
+.mobile-nav-project.is-arrange-held > .mobile-nav-project-body {
+  display: none;
+}
+
+/* The lifted copy of the row, drawn in the drawer above the list. A full-width
+   row rises less than a Workspace tile. */
+.mobile-navigator .workspace-arrange-ghost-body.is-lifted {
+  transform: scale(1.02);
+}
+
+.mobile-navigator .workspace-arrange-ghost-body > .mobile-nav-project-head {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-card);
+  transition: background-color var(--motion-normal) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease);
+}
+
+.mobile-navigator .workspace-arrange-ghost-body.is-lifted > .mobile-nav-project-head {
+  background: var(--material-glass-chrome);
+  box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-md);
+}
+
+/* Scoped to the list: restyling the whole drawer at lift would hitch. */
+.mobile-navigator[data-arrange-dragging="true"] .mobile-nav-scroll,
+.mobile-navigator[data-arrange-dragging="true"] .mobile-nav-scroll * {
+  cursor: grabbing !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-navigator .workspace-arrange-ghost-body > .mobile-nav-project-head {
+    transition: none;
+  }
+}
+
+.mobile-nav-project-main {
+  /* One centred line: the name takes what is left and truncates; the status
+     pills keep their own width beside it, expanded or not. */
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--tap);
+  padding-block: 0;
+  /* Half the cluster gap; New chat's box brings the other half. */
+  padding-inline: var(--nav-lead-gap) calc(var(--space-3) / 2);
+  text-align: start;
+  color: inherit;
+  background: transparent;
+  border: 0;
+}
+
+/* The name gives up width first, but never below a readable stub. */
+.mobile-nav-project-name {
+  display: block;
+  flex: 1 1000 auto;
+  min-width: min(5em, 100%);
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--nav-project-size);
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -.02em;
+  /* Names carry dir="auto"; a short name in the other script direction
+     still sits on the row's own start edge. */
+  text-align: -webkit-match-parent;
+  text-align: match-parent;
+}
+
+.mobile-nav-project-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control-h);
+  /* Text stays on the name edge while renaming. */
+  margin-inline: calc(var(--nav-lead-gap) - var(--space-2)) var(--space-1);
+  padding: 0 var(--space-2);
+  color: var(--text);
+  background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent);
+  border: 0;
+  border-radius: var(--radius-control);
+  outline: 0;
+  font-size: max(16px, var(--nav-project-size));
+  font-weight: 600;
+}
+
+.mobile-nav-project-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  /* Out to the screen edge, so ⋮ sits on the --nav-axis column. */
+  margin-inline-end: calc(var(--nav-edge) * -1);
+}
+
+/* New chat's glyph ends where a chat row's marks end (--nav-mark-end), one
+   --space-3 clear of the dots, and the name or status pills stop one
+   --space-3 before it (the main button's end padding plus this box's start
+   padding): the same rhythm as a chat row's marks (see the trailing
+   clusters). The row's height is the target's height. */
+.mobile-nav-project-action {
+  --nav-new-chat-end: calc(var(--nav-mark-end) - var(--nav-axis) - var(--icon-md) / 2);
+  --nav-wash: var(--nav-dots-wash);
+  --nav-wash-end: calc(var(--nav-new-chat-end) + (var(--icon-md) - var(--nav-wash)) / 2);
+  position: relative;
+  width: calc(var(--space-3) / 2 + var(--icon-md) + var(--nav-new-chat-end));
+  height: var(--tap);
+  padding-block: 0;
+  padding-inline: calc(var(--space-3) / 2) var(--nav-new-chat-end);
+  border-radius: 0;
+  isolation: isolate;
+}
+
+/* ⋮: the glyph on the axis, the target out to the screen edge. */
+.mobile-navigator .mobile-nav-project-action[aria-haspopup] {
+  --nav-wash-end: calc(var(--nav-axis) - var(--nav-wash) / 2);
+  width: calc(var(--nav-axis) + var(--icon-md) / 2);
+  padding: 0;
+  place-items: center start;
+}
+
+.mobile-nav-project-action svg,
+.mobile-nav-project-action .ui-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+/* Live work stays visible on the project line without stealing title space.
+   Finished means unread completed activity: once the result is viewed the
+   check disappears rather than leaving a permanent historical counter.
+   When a narrow phone cannot fit every pill, the ones that do not fit wrap
+   onto a clipped second line: they leave whole, in priority order, instead
+   of being cut or running into New chat. The group's label keeps them all. */
+.mobile-nav-project-statuses {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: var(--nav-status-pill);
+  overflow: hidden;
+  gap: var(--space-1);
+}
+
+/* The glyph side carries its own air, so the count side gets 1px more for
+   an optically centred pill. */
+.mobile-nav-project-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--space-1) / 2);
+  min-width: 20px;
+  height: var(--nav-status-pill);
+  padding-block: 0;
+  padding-inline: 6px 7px;
+  border-radius: var(--radius-round);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.mobile-nav-project-status.is-running {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.mobile-nav-project-status.is-waiting {
+  color: var(--amber-on-wash);
+  background: var(--amber-wash);
+}
+
+.mobile-nav-project-status.is-complete {
+  color: var(--green-on-wash);
+  background: var(--green-wash);
+}
+
+.mobile-nav-project-status.is-failed {
+  color: var(--red);
+  background: var(--red-wash);
+}
+
+/* Paused on a provider limit until the automatic resend: calm amber, never
+   the failure red. */
+.mobile-nav-project-status.is-limited {
+  color: var(--amber-on-wash);
+  background: color-mix(in srgb, var(--amber-wash) 60%, transparent);
+}
+
+.mobile-nav-project-status .mobile-nav-state-icon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.mobile-nav-project-status.is-running .mobile-nav-state-icon {
+  animation: mobile-nav-project-status-spin .85s linear infinite;
+}
+
+@keyframes mobile-nav-project-status-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* An open project closes with a little more air than a row step, so its
+   last line never reads as part of the next project. */
+.mobile-nav-project-body {
+  padding: 0 0 var(--space-2);
+  animation: mobile-nav-section-in var(--motion-normal) var(--motion-ease) both;
+}
+
+/* An expanded project with nothing to list says so, aligned with the session
+   titles, instead of opening onto an empty gap. */
+.mobile-nav-project-empty {
+  display: flex;
+  align-items: center;
+  min-height: var(--nav-row-session);
+  margin: 0;
+  padding-block: 0;
+  padding-inline: var(--nav-title-start) var(--nav-row-inset);
+  color: var(--muted);
+  font-size: var(--nav-meta-size);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- chat lanes ----------------------------------------------------------
+ * Shown only while a purpose lane (Playground, Monitoring…) narrows the list.
+ * The header's lane switch is hidden on a phone; this is the way back. */
+.mobile-nav-lanes {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin:
+    var(--space-2)
+    max(var(--nav-gutter), var(--safe-right))
+    var(--space-1)
+    max(var(--nav-gutter), var(--safe-left));
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+}
+
+.mobile-nav-lane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  font-size: var(--font-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-nav-lane:active:where(:not(:disabled)) { background: color-mix(in srgb, var(--text) 7%, transparent); }
+
+.mobile-nav-lane.is-active {
+  color: var(--text);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight);
+}
+
+@keyframes mobile-nav-section-in {
+  from { opacity: 0; transform: translate3d(0, calc(var(--space-2) * -1), 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- session rows ------------------------------------------------------- */
+
+.mobile-nav-session-swipe {
+  position: relative;
+  min-height: var(--nav-row-session);
+  padding-inline-start: calc(min(var(--mobile-nav-tree-depth, 0), 3) * var(--nav-tree-indent));
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  touch-action: pan-y;
+}
+
+.mobile-nav-session-underlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+/* Not just aria-hidden: without this the "Pin to top" label paints through
+ * the row's transparent background at rest, showing on every row. */
+.mobile-nav-session-underlay[aria-hidden="true"] {
+  visibility: hidden;
+}
+
+.mobile-nav-swipe-action {
+  width: 82px;
+  padding: 0 var(--space-2);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent);
+  border: 0;
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+.mobile-nav-session-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: var(--nav-row-session);
+  border-radius: var(--radius-control);
+  background: transparent;
+  transition: transform 150ms cubic-bezier(.2,.75,.2,1), background-color var(--motion-fast) var(--motion-ease);
+}
+
+/* A finger moving the row moves it 1:1 (a transform transition would trail
+   it); the transition only settles the row when the finger lets go. Only a
+   row that moves holds its own compositing layer. */
+.mobile-nav-session-swipe.is-dragging > .mobile-nav-session-row {
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+
+.mobile-nav-session-swipe:is(.is-swiped, .is-dragging) > .mobile-nav-session-row {
+  will-change: transform;
+}
+
+.mobile-nav-session-row.is-active {
+  background: var(--material-glass);
+}
+
+/* Pinned rows carry no tint: their group's caption already says it, and a
+   tint read as a second current row. A failed row keeps a faint warm wash,
+   quieter than the current row; its red mark carries the state. */
+.mobile-nav-session-row.is-failed:not(.is-active) {
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+
+/* Subagent disclosure: a pill right after the title text, never at the row
+   edge, so it reads as part of the title it belongs to. Metadata caliber: a
+   quiet count, not a second title. */
+.mobile-nav-subagent-toggle {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0;
+  height: calc(var(--icon-sm) + 2px);
+  margin-inline-start: 2px;
+  padding-block: 0;
+  padding-inline: 2px var(--space-2);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 0;
+  border-radius: var(--radius-round);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Transparent tap extension to the full row height. */
+.mobile-nav-subagent-toggle::after {
+  content: "";
+  position: absolute;
+  inset-inline: calc(var(--space-1) * -1);
+  top: 50%;
+  height: var(--nav-row-session);
+  transform: translateY(-50%);
+}
+
+.mobile-nav-subagent-toggle:active:where(:not(:disabled)) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+}
+
+.mobile-nav-subagent-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.mobile-nav-subagent-toggle svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.4;
+  opacity: .8;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+/* Live disclosure, as on desktop (styles.css owns the state dot): accent
+   while subagents work, amber while one waits for a person, folded or open. */
+.mobile-nav-subagent-toggle[data-activity="working"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.mobile-nav-subagent-toggle[data-activity="waiting"] {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+}
+
+.mobile-nav-subagent-toggle[data-activity]:active:where(:not(:disabled)) {
+  background: color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.mobile-nav-subagent-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+[dir="rtl"] .mobile-nav-subagent-toggle:not([aria-expanded="true"]) svg { transform: scaleX(-1); }
+
+.mobile-nav-subagent-children {
+  position: relative;
+}
+
+/* A subagent steps down one ink level from the chat it belongs to, so an
+   open tree reads as detail rather than more chats. */
+.mobile-nav-subagent-children .mobile-nav-session-row:not(.is-active, .is-unread) .mobile-nav-session-title {
+  color: var(--muted);
+}
+
+.mobile-nav-subagent-children::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  inset-inline-start: var(--mobile-nav-tree-line-left, calc(var(--nav-tree-indent) / 2));
+  width: 1px;
+  background: var(--border-soft);
+  pointer-events: none;
+}
+
+/* Empty full-row tap surface under the painted body. */
+.mobile-nav-session-main {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  min-height: var(--nav-row-session);
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Three fixed columns: state mark | title (+ disclosure) | meta. Paints only;
+   taps fall through to the open button except on its own real controls. */
+.mobile-nav-session-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: var(--nav-lead-col) minmax(0, 1fr) max-content;
+  align-items: center;
+  /* No column gap: an empty meta column would still keep one, and a row
+     without marks would end its title a whole gap short of the ⋮. The
+     heading and the marks carry their own lead-in instead. */
+  column-gap: 0;
+  min-width: 0;
+  min-height: var(--nav-row-session);
+  /* No end padding: the ⋮ after the body tucks over its last
+     --nav-mark-tuck, so the trailing marks (lock, branch, running clock)
+     sit beside the menu they belong with, and a title without marks ends
+     on that same edge. */
+  padding-inline: var(--nav-row-inset) 0;
+  pointer-events: none;
+}
+
+/* Centred under the project mark. */
+.mobile-nav-session-lead {
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  inline-size: var(--nav-status-slot);
+  block-size: var(--nav-status-slot);
+}
+
+/* Multi-select: the status slot becomes the check mark. */
+.mobile-nav-select-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 70%, transparent);
+  border-radius: var(--radius-round);
+  color: var(--accent-ink);
+}
+.mobile-nav-select-mark.is-selected {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.mobile-nav-select-mark .ui-icon { width: 12px; height: 12px; stroke-width: 2.6; }
+.mobile-nav-session-row.is-selected { background: var(--accent-wash); }
+.mobile-nav-select-toggle.is-active { color: var(--accent); }
+.mobile-nav-select-toggle.is-active::before { background-color: var(--accent-wash); }
+.mobile-navigator .session-bulk-actions { padding: 2px var(--space-3) var(--space-2); }
+.mobile-navigator .session-bulk-actions :is(.ui-btn, .ui-icon-btn) { min-height: var(--tap); }
+.mobile-navigator .session-bulk-actions .ui-icon-btn { min-width: var(--tap); }
+
+.mobile-nav-session-lead .ui-spinner {
+  width: 14px;
+  height: 14px;
+}
+
+.mobile-nav-session-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-inline-start: var(--nav-lead-gap);
+}
+
+/* A row with no marks: the title runs to the marks' edge, but the subagent
+   pill is a real control and stays clear of the ⋮ control's tucked edge. */
+.mobile-nav-session-body:not(:has(.mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags:not(:empty))) .mobile-nav-subagent-toggle {
+  margin-inline-end: var(--nav-mark-tuck);
+}
+
+/* Identity marks: package badges, then the pin, at the trailing edge. */
+.mobile-nav-session-flags {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+.mobile-nav-session-flags:empty { display: none; }
+
+/* Package badges arrive with their own sizes; one box each keeps every mark
+   on the same centre line and step. The navigator prefix outranks badge
+   CSS that packages load later. */
+.mobile-navigator .mobile-nav-session-flags > * {
+  display: inline-grid;
+  flex: 0 0 var(--icon-sm);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  place-items: center;
+}
+
+/* Identity marks (isolation, merge, sharing) are secondary metadata that
+   repeats down the list; they step back behind the titles. The pin is a
+   choice the person made and keeps its accent. */
+.mobile-navigator .mobile-nav-session-flags > :not(.mobile-nav-pin-icon) {
+  opacity: var(--nav-quiet-mark);
+}
+
+.mobile-nav-pin-icon {
+  display: inline-grid;
+  flex: 0 0 var(--icon-sm);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  place-items: center;
+}
+
+.mobile-nav-pin-icon { color: var(--accent); }
+/* Someone else can open this chat: quiet beside the accent pin. */
+.mobile-nav-shared-icon {
+  display: inline-grid;
+  flex: 0 0 var(--icon-sm);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  place-items: center;
+  color: var(--muted);
+}
+
+/* Someone mentioned the reader: an accent mark beside the quiet share mark. */
+.mobile-nav-mention-badge {
+  display: inline-grid;
+  flex: 0 0 var(--icon-sm);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  place-items: center;
+  color: var(--session-blue, var(--accent));
+}
+
+/* Host marks (pin, sharing) take the package badges' glyph size and weight,
+   so every identity mark in the group reads at one optical size. */
+.mobile-nav-session-flags .ui-icon {
+  width: calc(var(--icon-sm) - 3px);
+  height: calc(var(--icon-sm) - 3px);
+  stroke-width: 2;
+}
+
+/* Inside the Pinned group the caption already says it; the pin glyph would
+   say it a third time. */
+.mobile-navigator .mobile-nav-pinned .mobile-nav-pin-icon {
+  display: none;
+}
+
+.mobile-nav-session-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--nav-session-size);
+  font-weight: 500;
+  line-height: var(--nav-session-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -.01em;
+  text-align: -webkit-match-parent;
+  text-align: match-parent;
+}
+
+.mobile-nav-session-row.is-active .mobile-nav-session-title,
+.mobile-nav-session-row.is-unread .mobile-nav-session-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Each present mark brings its own lead-in, so an empty group costs no
+   width. */
+.mobile-nav-session-trailing {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+}
+
+.mobile-nav-session-trailing > :is(.mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags) {
+  margin-inline-start: var(--space-2);
+}
+
+.mobile-nav-session-trailing:empty { display: none; }
+
+.mobile-nav-duration {
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.mobile-nav-pinned {
+  margin-bottom: var(--space-1);
+}
+
+.mobile-nav-date-group {
+  min-width: 0;
+}
+
+/* A date is a quiet centred caption, not a rule across the list: two short
+   hairlines fade in toward the label from either side, so the eye lands on
+   the label and the list keeps its full width of calm. */
+.mobile-nav-date-divider {
+  --date-rule: var(--border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  color: var(--faint);
+  font-size: max(10px, calc(var(--font-meta) * .9));
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mobile-nav-date-divider::before,
+.mobile-nav-date-divider::after {
+  content: "";
+  height: 1px;
+  flex: 0 1 calc(var(--space-6) * 1.5);
+  background: linear-gradient(to right, transparent, var(--date-rule));
+}
+
+.mobile-nav-date-divider::after {
+  background: linear-gradient(to left, transparent, var(--date-rule));
+}
+
+.mobile-nav-date-divider > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* One caption voice in the list (dates, Pinned, the Agents header): the
+   Pinned caption is faint like the others and only its glyph keeps the
+   accent. */
+.mobile-nav-date-divider.is-pinned {
+  padding-top: var(--space-1);
+}
+
+.mobile-nav-date-divider.is-pinned svg {
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
+}
+
+.mobile-nav-session-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 20px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.mobile-nav-state-icon {
+  color: currentColor;
+}
+
+.mobile-nav-session-state.is-running {
+  font-weight: 400;
+}
+
+.mobile-nav-running-ring {
+  width: 14px;
+  height: 14px;
+  border: 1.8px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-top-color: var(--accent);
+  border-radius: var(--radius-round);
+  animation: mobile-nav-spin .9s linear infinite;
+}
+
+/* The ring is an activity signal, not an outline: borderless (the default
+   look, styles.css) must not erase it. */
+body[data-hide-borders="true"] .mobile-nav-running-ring {
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent) !important;
+  border-top-color: var(--accent) !important;
+}
+
+@keyframes mobile-nav-spin {
+  to { transform: rotate(360deg); }
+}
+
+.mobile-nav-session-state.is-attention {
+  color: var(--amber);
+}
+
+.mobile-nav-session-state.is-failed {
+  color: var(--red);
+  font-weight: 700;
+}
+
+.mobile-nav-session-state.is-limited {
+  color: var(--amber);
+}
+
+.mobile-nav-unread-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: currentColor;
+  color: var(--accent);
+}
+
+/* Row-height follower: a 44px control here would hold the whole row open and
+   silently cancel a denser interface setting. */
+.mobile-nav-more {
+  position: relative;
+  z-index: 1;
+  width: var(--nav-wash);
+  height: var(--nav-wash);
+  /* A 44px target, the row's height, glyph on the trailing column (see the
+     edge controls); its leading edge overlaps the body's empty end so the
+     marks close up to the dots. */
+  margin-inline: calc(var(--nav-slop-start) - var(--nav-mark-tuck)) var(--nav-slop-end);
+  border-radius: var(--radius-round);
+}
+
+/* Every row's ⋮ (and a project's) stays a real, full-size control, in the
+   quiet ink: a column of full-strength dots competed with the titles. The
+   current row's menu is one step firmer. */
+.mobile-navigator .mobile-nav-more,
+.mobile-navigator .mobile-nav-project-action[aria-haspopup] {
+  color: var(--nav-quiet-ink);
+}
+
+.mobile-navigator .mobile-nav-session-row.is-active .mobile-nav-more {
+  color: var(--muted);
+}
+
+.mobile-nav-more svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.mobile-navigator .mobile-nav-inline-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control-h);
+  /* Text stays on the title edge while renaming; the end clears the part
+     of the row the ⋮ control tucks over. */
+  margin-inline-start: calc(var(--nav-title-start) - var(--space-2));
+  margin-inline-end: var(--nav-mark-tuck);
+  padding: 0 var(--space-2);
+  color: var(--text);
+  background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent);
+  border: 0;
+  border-radius: var(--radius-control);
+  outline: 0;
+  font-size: max(16px, var(--nav-session-size));
+  line-height: var(--nav-session-lh);
+}
+
+.mobile-nav-inline-rename:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Pagination is a quiet text link starting on the session-title edge, not a
+   control tray: it continues the list instead of interrupting it. The visual
+   line is compact; a transparent extension keeps the phone tap floor. */
+.mobile-nav-pagination:empty { display: none; }
+.mobile-nav-pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  margin: 2px 0 0;
+  padding-inline-start: var(--nav-title-start);
+}
+.mobile-navigator .mobile-nav-more-sessions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  height: var(--control-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  transition: color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-nav-more-sessions::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--control-h-sm) - var(--tap)) / 2) calc(var(--space-2) * -1);
+}
+.mobile-nav-more-sessions svg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.2;
+  opacity: .75;
+}
+/* The load-more link at the end of the project list has no pagination row. */
+.mobile-nav-scroll > .mobile-nav-more-sessions {
+  margin: var(--space-1) 0 var(--space-2);
+  margin-inline-start: var(--nav-title-start);
+}
+@media (hover: hover) {
+  .mobile-nav-more-sessions:hover:not(:disabled) { color: var(--text); }
+}
+.mobile-nav-more-sessions:active:not(:disabled) { opacity: .6; }
+.mobile-nav-more-sessions:disabled { opacity: .5; }
+.mobile-nav-more-sessions:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Interface density: the same preference the desktop navigator honours. */
+:is(html, body)[data-density="balanced"] .mobile-navigator { --nav-row-session: 38px; }
+:is(html, body)[data-density="compact"] .mobile-navigator { --nav-row-session: 34px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav-running-ring,
+  .mobile-nav-project-status.is-running .mobile-nav-state-icon { animation: none; }
+  .mobile-nav-session-row { transition: none; }
+}
+
+/* Small phones (iPhone SE/mini class) give the titles back 2px at the start
+   and 4px at the end. */
+@media (max-width: 360px) {
+  .mobile-navigator { --nav-edge: 4px; --nav-gutter: 6px; --nav-axis: 20px; }
+}

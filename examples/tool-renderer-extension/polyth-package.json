@@ -1,0 +1,33 @@
+{
+  "manifestVersion": 2,
+  "id": "example-tool-renderer",
+  "version": "1.0.0",
+  "engines": { "polyth": ">=0.1.0" },
+  "display": {
+    "name": "Tool renderer",
+    "description": "Demonstrates zero-runtime declarative tool presentation and a bounded dynamic renderer."
+  },
+  "runtime": {
+    "kind": "sandboxed",
+    "ui": { "entry": "src/index.ts" }
+  },
+  "contributes": {
+    "toolRenderers": [
+      {
+        "id": "deployment-table",
+        "matcher": { "tools": ["deploy.status"] },
+        "presentation": {
+          "title": "Deployment status",
+          "subtitle": "{{tool}} · {{callId}}",
+          "output": "table"
+        }
+      },
+      {
+        "id": "build-detail",
+        "matcher": { "prefix": "build." },
+        "presentation": { "title": "Build detail", "output": "json" },
+        "dynamic": true
+      }
+    ]
+  }
+}

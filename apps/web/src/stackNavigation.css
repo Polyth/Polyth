@@ -1,0 +1,224 @@
+/* Phone layer stack — Chat → Workspace → package window.
+ *
+ * ONE motion grammar for every full-screen phone layer, so a layer that arrives
+ * and the layer that retreats beneath it always agree on time, curve and
+ * distance (see docs/dev/ui.md "Phone layer stack"):
+ *
+ *   push     the new layer travels in from the inline-end edge (stack-in) while
+ *            the layer under it retreats by --stack-parallax and dims
+ *            (stack-cover / stack-dim-in)
+ *   pop      the top layer travels back out (stack-out) while the layer under it
+ *            settles from its retreat (stack-uncover / stack-dim-out)
+ *   dismiss  every layer leaves with the same stack-out, so the stack goes as one
+ *
+ * Direction follows --stack-dir (1, or -1 in RTL); duration and curve are the
+ * --motion-stack tokens, which motionPresence.ts reads to time the unmount.
+ * Reduced-motion and low-resource modes are handled by the global
+ * `animation: none !important` rules, and release the unmount immediately.
+ *
+ * `--stack-from` lets an interactive gesture hand its release position to the
+ * exit so the layer carries on from where the finger left it. A released swipe
+ * also shortens the motion to the rest of its travel (`--stack-out-settle`,
+ * `--stack-uncover-settle`, `--stack-in-settle`), so a flick is never slowed
+ * down and the two layers still finish together; a tap keeps --motion-stack.
+ * Those duration overrides are separate longhand rules: the shorthands below
+ * stay the one statement of the grammar.
+ */
+
+@keyframes stack-in {
+  from { transform: translate3d(calc(var(--stack-dir, 1) * 100%), 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
+/* A Workspace pulled in by a swipe from Chat carries on from the finger
+   (PhoneShellSwipes.tsx publishes --stack-enter-from, unsigned like --stack-from). */
+@keyframes stack-swipe-in {
+  from { transform: translate3d(calc(var(--stack-dir, 1) * var(--stack-enter-from, 100%)), 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes stack-out {
+  from { transform: translate3d(calc(var(--stack-dir, 1) * var(--stack-from, 0%)), 0, 0); }
+  to { transform: translate3d(calc(var(--stack-dir, 1) * 100%), 0, 0); }
+}
+
+/* The covered layer retreats and then stops painting: it is invisible beneath
+   an opaque package window, and `visibility` flips only at the end of the
+   animation (a discrete step), so it stays visible for the whole retreat. */
+@keyframes stack-cover {
+  from { transform: translate3d(0, 0, 0); visibility: visible; }
+  to {
+    transform: translate3d(calc(var(--stack-dir, 1) * var(--stack-parallax, 28%) * -1), 0, 0);
+    visibility: hidden;
+  }
+}
+
+@keyframes stack-uncover {
+  from {
+    transform: translate3d(var(--stack-uncover-from, calc(var(--stack-dir, 1) * var(--stack-parallax, 28%) * -1)), 0, 0);
+    visibility: visible;
+  }
+  to { transform: translate3d(0, 0, 0); visibility: visible; }
+}
+
+@keyframes stack-dim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* While a layer settles back into the foreground its veil also swallows taps:
+   the package that just left was at the same spot, and a second tap on its Back
+   control must not land on whatever the Workspace shows there (Edit). The
+   veil only stops catching input in the last instant, so the layer is fully
+   interactive the moment it has arrived. `pointer-events` animates discretely. */
+@keyframes stack-dim-out {
+  from { opacity: var(--stack-dim-from, 1); pointer-events: auto; }
+  99.9% { pointer-events: auto; }
+  to { opacity: 0; pointer-events: none; }
+}
+
+/* ---- package windows (workspace panes and contextual panels) ---------------
+   Every compact shell shows a package window as a full-screen layer. The
+   selectors carry the `html` prefix and `.railbar >` parent so they outrank the
+   desktop window-motion rules, including their RTL variants, without
+   `!important`: those rules still own the wide shell's promoted/dynamic panes. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  :is(html, html[dir="rtl"]) .railbar > :is(.rail-workspace.rail-fullscreen, .panel-sheet):not(.rail-exiting) {
+    animation: stack-in var(--motion-stack) var(--motion-stack-ease) backwards;
+  }
+
+  :is(html, html[dir="rtl"]) .railbar > :is(.rail-fullscreen, .panel-sheet).rail-exiting {
+    animation: stack-out var(--motion-stack) var(--motion-stack-ease) both;
+  }
+
+  :is(html, html[dir="rtl"]) .railbar > :is(.rail-fullscreen, .panel-sheet).rail-exiting {
+    animation-duration: var(--stack-out-settle, var(--motion-stack));
+  }
+
+  /* The leading edge casts a soft shadow onto whatever it travels over. At rest
+     the layer fills the screen, so the shadow falls outside the viewport. */
+  :is(html, html[dir="rtl"]) .railbar > :is(.rail-fullscreen, .panel-sheet) {
+    box-shadow: var(--shadow-stack-edge);
+  }
+}
+
+/* ---- the Workspace layer ---------------------------------------------------
+   Phone only (the Workspace layer is a phone-shell concept). The sheet's own
+   rise/sink motion is replaced by the stack grammar through [data-stack], which
+   MobileWorkspaceLayer derives; ordinary sheets never carry it. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* Above the session header and floats, below every package window. */
+  body .sheet-backdrop[data-stack] {
+    z-index: var(--z-stack-workspace);
+  }
+
+  /* A covered layer is inert (see Sheet) but its backdrop keeps catching input:
+     taps in the strip it still shows while a package slides over it are
+     swallowed instead of reaching the session header beneath. */
+
+  body .sheet-backdrop[data-stack] > .workspace-panel-sheet.sheet {
+    transition: none;
+  }
+
+  body .sheet-backdrop[data-stack="enter"] > .workspace-panel-sheet.sheet {
+    animation: stack-in var(--motion-stack) var(--motion-stack-ease) backwards;
+  }
+
+  body .sheet-backdrop[data-stack="covered"] > .workspace-panel-sheet.sheet {
+    animation: stack-cover var(--motion-stack) var(--motion-stack-ease) both;
+  }
+
+  /* `backwards`, not `both`: the end of the settle is the sheet's own rest
+     state, and a finished animation that fills forwards would outrank the
+     inline transform of the next Back swipe, leaving the layer deaf to the
+     finger until it remounts. */
+  body .sheet-backdrop[data-stack="revealed"] > .workspace-panel-sheet.sheet {
+    animation: stack-uncover var(--motion-stack) var(--motion-stack-ease) backwards;
+  }
+
+  /* Leaving mirrors arriving, whichever phase it leaves from: a covered layer
+     jumps to the origin first, unseen beneath the package that leaves with it. */
+  body .sheet-backdrop[data-stack].is-closing > .workspace-panel-sheet.sheet.is-closing {
+    animation: stack-out var(--motion-stack) var(--motion-stack-ease) both;
+  }
+
+  body .sheet-backdrop[data-stack].is-closing > .workspace-panel-sheet.sheet.is-closing {
+    animation-duration: var(--stack-out-settle, var(--motion-stack));
+  }
+
+  /* The leading edge casts the same soft shadow as a package window's; at
+     rest the layer fills the screen and it falls outside the viewport. */
+  body .sheet-backdrop[data-stack] > .workspace-panel-sheet.sheet {
+    box-shadow: var(--shadow-stack-edge);
+  }
+
+  /* The layer itself takes focus as a landmark when it opens. Filling the
+     screen, its ring falls outside the viewport at rest, and would only show
+     as a stray line riding the leading edge while a swipe moves the layer.
+     Everything focusable inside keeps its ring. */
+  body .sheet-backdrop[data-stack] > .workspace-panel-sheet.sheet:focus-visible {
+    outline: none;
+  }
+
+  /* Pulled in by a swipe from Chat (PhoneShellSwipes.tsx): mounted inert,
+     resting off-screen at the inline-end edge, and positioned by the finger
+     through an inline transform until the release. */
+  body .sheet-backdrop[data-stack][data-swipe-peek] {
+    pointer-events: none;
+  }
+
+  body .sheet-backdrop[data-stack][data-swipe-peek] > .workspace-panel-sheet.sheet {
+    animation: none;
+    transform: translate3d(calc(var(--stack-dir, 1) * 100%), 0, 0);
+  }
+
+  /* Released past the commit point: the arrival carries on from the finger. */
+  body .sheet-backdrop[data-stack="enter"]:not([data-swipe-peek]) > .workspace-panel-sheet.sheet[data-swipe-handoff="enter"] {
+    animation: stack-swipe-in var(--stack-in-settle, var(--motion-stack)) var(--motion-stack-ease) backwards;
+  }
+
+  /* The retreat dims the layer: a veil over the sheet itself, composited with
+     opacity only, so it never touches the glass behind the sheet. */
+  body .sheet-backdrop[data-stack] > .workspace-panel-sheet.sheet::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: rgb(9 8 7 / var(--stack-dim, 0.18));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  body .sheet-backdrop[data-stack="covered"] > .workspace-panel-sheet.sheet::after {
+    animation: stack-dim-in var(--motion-stack) var(--motion-stack-ease) both;
+  }
+
+  /* While a finger pulls the package away, the covered Workspace peeks in
+     behind it: shown, and positioned by the gesture (edgeSwipeBack.ts) through
+     two custom properties instead of the retreat animation. */
+  body .sheet-backdrop[data-stack="covered"][data-peek] > .workspace-panel-sheet.sheet {
+    animation: none !important;
+    visibility: visible !important;
+    transform: translate3d(var(--stack-peek-x, 0px), 0, 0) !important;
+  }
+
+  body .sheet-backdrop[data-stack="covered"][data-peek] > .workspace-panel-sheet.sheet::after {
+    animation: none !important;
+    opacity: var(--stack-peek-dim, 1) !important;
+  }
+
+  body .sheet-backdrop[data-stack="revealed"] > .workspace-panel-sheet.sheet::after {
+    animation: stack-dim-out var(--motion-stack) var(--motion-stack-ease) both;
+  }
+
+  body .sheet-backdrop[data-stack="revealed"] > .workspace-panel-sheet.sheet,
+  body .sheet-backdrop[data-stack="revealed"] > .workspace-panel-sheet.sheet::after {
+    animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+  }
+}
+
+/* A claimed drag is direct manipulation: nothing under the finger selects.
+   swipeSurface.ts refuses `selectstart` while it holds the claim. No rule
+   keys on html[data-stack-swiping]: `user-select` is inherited, and setting
+   it on <html> restyled every element of the app (~240 ms on a long chat,
+   1× CPU in Chromium) at the moment the swipe began. */

@@ -1,0 +1,460 @@
+.pkg-ssh {
+  container: ssh-surface / inline-size;
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* Back link row of the server and form views; the ghost button's padding is
+   pulled into the gutter so its glyph lines up with the content edge. */
+.pkg-ssh .ssh-nav {
+  display: flex;
+  align-items: center;
+}
+
+.pkg-ssh .ssh-nav > .ui-btn:first-child {
+  margin-inline-start: calc(-1 * var(--space-2));
+}
+
+.pkg-ssh .ssh-target {
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  overflow-wrap: anywhere;
+}
+
+/* ---- status dot (state is always also spelled out in text) ---- */
+.pkg-ssh .ssh-dot {
+  flex: none;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.pkg-ssh .ssh-dot[data-tone="ok"] { background: var(--green); }
+.pkg-ssh .ssh-dot[data-tone="err"] { background: var(--red); }
+
+/* ---- server list + harness list share one quiet bordered list ---- */
+.pkg-ssh .ssh-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.pkg-ssh .ssh-list > li + li {
+  border-block-start: 1px solid var(--border-soft);
+}
+
+.pkg-ssh .ssh-row-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  inline-size: 100%;
+  min-height: max(56px, var(--hit-min));
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .pkg-ssh .ssh-row-main:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay);
+  }
+}
+
+.pkg-ssh .ssh-row-main:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.pkg-ssh .ssh-row-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pkg-ssh .ssh-row-copy strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pkg-ssh .ssh-row-copy small {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.pkg-ssh .ssh-row-copy small > span + span::before {
+  content: "·";
+  margin-inline-end: var(--space-2);
+  color: var(--faint);
+}
+
+.pkg-ssh .ssh-row-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.pkg-ssh .ssh-row-state[data-tone="ok"] { color: var(--text-dim); }
+.pkg-ssh .ssh-row-state[data-tone="err"] { color: var(--red); }
+
+.pkg-ssh .ssh-row-chevron {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+
+@media (hover: hover) {
+  .pkg-ssh .ssh-row-main:hover:where(:not(:disabled)) .ssh-row-chevron {
+    color: var(--text-dim);
+  }
+}
+
+/* ---- server header ---- */
+.pkg-ssh .ssh-server-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon title state"
+    "icon actions actions";
+  align-items: center;
+  gap: var(--space-3) var(--space-3);
+}
+
+.pkg-ssh .ssh-server-icon {
+  grid-area: icon;
+  align-self: start;
+  display: grid;
+  place-items: center;
+  inline-size: 44px;
+  block-size: 44px;
+  border-radius: var(--radius-card);
+  background: var(--sunken);
+  border: 1px solid var(--hair);
+  color: var(--text-dim);
+}
+
+.pkg-ssh .ssh-server-title {
+  grid-area: title;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pkg-ssh .ssh-server-title h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.pkg-ssh .ssh-server-title .ssh-target {
+  margin: 0;
+  color: var(--muted);
+}
+
+.pkg-ssh .ssh-state {
+  grid-area: state;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.pkg-ssh .ssh-state[data-tone="err"] { color: var(--red); }
+.pkg-ssh .ssh-state[data-tone="muted"] { color: var(--muted); }
+
+.pkg-ssh .ssh-state-meta {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pkg-ssh .ssh-state-meta::before {
+  content: "·";
+  margin-inline-end: var(--space-2);
+  color: var(--faint);
+}
+
+.pkg-ssh .ssh-server-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pkg-ssh .ssh-tab-panel {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* ---- harness rows ---- */
+.pkg-ssh .ssh-harness-list {
+  margin-block-start: var(--space-3);
+}
+
+.pkg-ssh .ssh-harness {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+}
+
+.pkg-ssh .ssh-harness-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pkg-ssh .ssh-harness-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pkg-ssh .ssh-harness-action:empty {
+  display: none;
+}
+
+.pkg-ssh .ssh-harness-config {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding-block-start: var(--space-2);
+  border-block-start: 1px dashed var(--hair);
+}
+
+.pkg-ssh .ssh-harness-config-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-ssh .ssh-harness-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  overflow-wrap: anywhere;
+}
+
+.pkg-ssh .ssh-footnote {
+  margin: var(--space-3) 0 0;
+  max-width: 65ch;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- install review dialog ---- */
+.pkg-ssh.ssh-review {
+  gap: var(--space-3);
+}
+
+.pkg-ssh.ssh-review p {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.pkg-ssh .ssh-command {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-block-size: 40vh;
+  overflow: auto;
+}
+
+.pkg-ssh .ssh-port-input {
+  max-width: 7rem;
+}
+
+/* Add/edit server form: labelled fields in a two-column grid that folds to
+   one column on narrow panels. */
+.pkg-ssh .ssh-form {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding-block-start: var(--space-2);
+}
+
+.pkg-ssh .ssh-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-4) var(--space-3);
+  min-width: 0;
+}
+
+/* The grid gap spaces the fields; drop the stacked-form sibling margin. */
+.pkg-ssh .ssh-form-grid > .settings-field + .settings-field {
+  margin-top: 0;
+}
+
+.pkg-ssh .ssh-form-wide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.pkg-ssh .ssh-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+@container ssh-surface (max-width: 520px) {
+  .pkg-ssh .ssh-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The state moves under the name and the chevron spans both lines. */
+  .pkg-ssh .ssh-row-main {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: var(--space-1);
+  }
+
+  .pkg-ssh .ssh-row-main > .ssh-row-state {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .pkg-ssh .ssh-row-main > .ssh-row-chevron {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+
+  .pkg-ssh .ssh-server-head {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "icon title"
+      "state state"
+      "actions actions";
+  }
+
+  .pkg-ssh .ssh-server-actions > .ui-btn {
+    flex: 1 1 auto;
+  }
+
+  .pkg-ssh .ssh-harness-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .pkg-ssh .ssh-harness-main > .ssh-row-state {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .pkg-ssh .ssh-harness-action {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .pkg-ssh .ssh-harness-config .seg {
+    flex: 1 1 100%;
+  }
+
+  .pkg-ssh .ssh-harness-config .seg button {
+    flex: 1 1 0;
+  }
+}
+
+/* ---- ownership (Spaces §14.6) ---- */
+.pkg-ssh .ssh-form-owner {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.pkg-ssh .ssh-form-owner .seg {
+  justify-content: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.pkg-ssh .ssh-managed-note,
+.pkg-ssh .ssh-quiet-note {
+  margin-block: var(--space-2) 0;
+}
+
+/* Access and key dialogs: the dialog body is the .pkg-ssh root. */
+.pkg-ssh.ssh-access,
+.pkg-ssh.ssh-key-form {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.pkg-ssh.ssh-access .ssh-footnote,
+.pkg-ssh.ssh-key-form .ssh-footnote {
+  margin: 0;
+}
+
+.pkg-ssh .ssh-access-field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.pkg-ssh .ssh-access-field .settings-check-group {
+  justify-content: start;
+}
+
+.pkg-ssh .ssh-access-field legend {
+  padding: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+/* The key is masked like a password field while it is in the form. */
+.pkg-ssh .ssh-key-input {
+  width: 100%;
+  font-family: var(--mono);
+  -webkit-text-security: disc;
+}
+
+.pkg-ssh .ssh-key-file {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pkg-ssh .ssh-key-file .ssh-key-file-input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}

@@ -1,0 +1,153 @@
+/* Rewind marker — one quiet cut line in the transcript. The timeline owns the
+   surrounding rhythm; this component adds no second banner or decorative box. */
+.rewind-marker {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.rewind-marker-rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.rewind-marker-rule::before,
+.rewind-marker-rule::after {
+  content: "";
+  flex: 1 1 0;
+  min-width: var(--space-3);
+  border-block-start: 1px solid var(--border-soft);
+}
+
+.rewind-marker-controls,
+.rewind-marker-confirm {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+
+.rewind-marker-peek {
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+
+button.rewind-marker-peek {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  button.rewind-marker-peek:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+
+button.rewind-marker-peek:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.rewind-marker-icon,
+.rewind-marker-peek > .ui-spinner {
+  flex: none;
+  color: var(--muted);
+}
+
+.rewind-marker-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rewind-marker-chevron {
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--motion-normal) var(--motion-ease);
+}
+
+.rewind-marker[data-peek="open"] .rewind-marker-chevron {
+  transform: rotate(180deg);
+}
+
+.rewind-marker-restore.ui-btn,
+.rewind-marker-confirm .ui-btn--ghost {
+  color: var(--text-dim);
+}
+
+.rewind-marker-question {
+  padding-inline: var(--space-1);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* Explicit peek only. The grid track performs one height transition and the
+   rows remain dimmed/inert-looking instead of pretending to be live history. */
+.rewind-marker-peek-body {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.rewind-marker-peek-body[hidden] {
+  display: none;
+}
+
+.rewind-marker-peek-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--conversation-message-gap);
+  padding-block-start: var(--space-3);
+  opacity: 0.55;
+  filter: grayscale(0.35);
+}
+
+.rewind-marker[data-peek="closing"] .rewind-marker-peek-body {
+  grid-template-rows: 0fr;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rewind-marker[data-peek="open"] .rewind-marker-peek-body {
+    animation: rewind-peek-open var(--motion-normal) var(--motion-ease) both;
+  }
+
+  .rewind-marker[data-peek="closing"] .rewind-marker-peek-body {
+    transition: grid-template-rows var(--motion-normal) var(--motion-ease);
+  }
+
+  .rewind-marker[data-peek="closing"] .rewind-marker-peek-inner {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+
+  .rewind-marker-confirm {
+    animation: rewind-confirm-in var(--motion-fast) var(--motion-ease) both;
+  }
+}
+
+@keyframes rewind-peek-open {
+  from { grid-template-rows: 0fr; }
+  to { grid-template-rows: 1fr; }
+}
+
+@keyframes rewind-confirm-in {
+  from { opacity: 0; transform: translate3d(0, 3px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@polyth/mobile",
+  "version": "1.2.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "description": "Polyth Capacitor client for an existing Polyth runtime",
+  "exports": {
+    ".": "./src/index.ts",
+    "./connection": "./src/ConnectionScreen.tsx",
+    "./launch": "./src/launch.ts",
+    "./native": "./src/nativeBridge.ts",
+    "./runtime": "./src/runtime.ts"
+  },
+  "scripts": {
+    "sync": "npm run assets && cap sync && node scripts/configure-ios-polyth-link.mjs && node scripts/bundle-package-assets.mjs",
+    "copy": "npm run assets && cap copy && node scripts/bundle-package-assets.mjs",
+    "native:ios": "bash scripts/build-polyth-link-ios.sh",
+    "open:android": "npm run assets && cap open android",
+    "open:ios": "npm run assets && npm run native:ios && cap open ios",
+    "build:android": "npm run assets && cap build android",
+    "build:ios": "npm run assets && npm run native:ios && cap build ios",
+    "assets": "node scripts/generate-assets.mjs"
+  },
+  "dependencies": {
+    "@capacitor-community/safe-area": "^8.0.1",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/browser": "^8.0.5",
+    "@capacitor/clipboard": "^8.0.0",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/haptics": "^8.0.0",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/keyboard": "^8.0.6",
+    "@capacitor/local-notifications": "^8.0.0",
+    "@capacitor/preferences": "^8.0.0",
+    "@capacitor/share": "^8.0.3",
+    "@capacitor/splash-screen": "^8.0.0",
+    "@capawesome/capacitor-file-picker": "^8.1.1",
+    "@polyth/pairing-qr": "0.1.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "sharp": "0.35.5"
+  }
+}

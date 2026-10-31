@@ -1,0 +1,44 @@
+{
+  "name": "@polyth/multirun",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rubric": "./src/rubric.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./prompt-seed": "./widgets/multirunSeed.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Multirun",
+      "description": "Run prompts across multiple models.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "layers",
+      "hasSettings": false,
+      "category": "engineering",
+      "projectAffinity": {
+        "directions": [
+          "engineering",
+          "research"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/judgment": "0.1.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

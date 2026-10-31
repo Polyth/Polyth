@@ -1,0 +1,46 @@
+.dialog-backdrop.conversation-find-backdrop { align-items: flex-start; }
+.conversation-find-dialog.dialog-panel { gap: 0; }
+.conversation-find {
+  container: conversation-find / inline-size;
+  padding: var(--space-3);
+  color: var(--text);
+  font-size: var(--font-meta);
+  min-width: 0;
+}
+.conversation-find .conversation-find-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.conversation-find .conversation-find-input { flex: 1; min-width: 0; }
+.conversation-find .conversation-find-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  min-height: var(--tap);
+}
+.conversation-find .conversation-find-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 4lh;
+  overflow-y: auto;
+  line-height: var(--font-meta-lh);
+  padding-block: var(--space-1);
+}
+.conversation-find .conversation-find-role { color: var(--muted); font-weight: 600; }
+.conversation-find mark {
+  background: var(--amber-wash);
+  color: var(--amber-on-wash);
+  border-radius: var(--radius-control);
+  outline: 1px solid var(--amber);
+}
+@container conversation-find (max-width: 380px) {
+  .conversation-find .conversation-find-controls { gap: 0; }
+}
+@media (pointer: coarse) {
+  .conversation-find .conversation-find-controls button {
+    min-inline-size: var(--tap);
+    min-block-size: var(--tap);
+  }
+}

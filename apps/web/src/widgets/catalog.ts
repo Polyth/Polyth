@@ -1,0 +1,335 @@
+import { useSyncExternalStore, type ReactNode } from "react";
+import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
+import { isUiSlot, type JsonObject, type PanelItemSize, type UiSlot, type WidgetKind } from "@polyth/contracts";
+import type { ProjectAffinity } from "@polyth/contracts/project-composition";
+import {
+  ensureWidgets,
+  widgetSlotFromZone,
+  type WidgetAudience,
+  type WidgetScope,
+  type WidgetSize,
+  type WidgetZone,
+} from "./widgetLayout.ts";
+import { tr } from "../i18n/index.ts";
+import { assertOwnerCanReplace } from "../packages/ownership.ts";
+import { isProjectContributionRelevant, subscribeProjectRelevance } from "../packages/projectRelevance.ts";
+
+export interface WidgetRenderContext extends Record<string, unknown> {
+  projectId: string | null;
+  sessionId: string | null;
+  editing: boolean;
+  instanceId: string;
+  config: Readonly<JsonObject>;
+  updateConfig: (config: JsonObject) => void;
+  /** The size chosen for this instance in Workspace panel chrome; absent elsewhere. */
+  panelSize?: PanelItemSize;
+  /** Only on the new-chat screen (`session.empty.widgets`): the model its
+   *  composer would start the chat on, when one is known. */
+  composerModel?: { harnessId: string; providerID: string; modelID: string };
+}
+
+export interface WidgetSettingsContext extends WidgetRenderContext {
+  /** Catalog definition id; use instanceId for per-instance identity. */
+  widgetId: string;
+}
+
+/** Bounded context an availability predicate decides on. */
+export interface WidgetAvailabilityContext {
+  projectId: string | null;
+  sessionId: string | null;
+  config: Readonly<JsonObject>;
+  /** Only on the new-chat screen (`session.empty.widgets`): the model its
+   *  composer would start the chat on, when one is known. */
+  composerModel?: { harnessId: string; providerID: string; modelID: string };
+}
+
+export interface WidgetDef {
+  id: string;
+  pluginId: string;
+  /** Host-bound owner package. Missing means a host/core contribution. */
+  ownerPackageId?: string;
+  projectAffinity?: ProjectAffinity;
+  pluginName?: string;
+  title: string;
+  description: string;
+  kind?: WidgetKind;
+  defaultSlot?: UiSlot;
+  supportedSlots?: readonly UiSlot[];
+  defaultVisible?: boolean;
+  /** Package-required controls may be moved between supported slots but not hidden. */
+  requiredVisible?: boolean;
+  /** Acts on the agent's turn; left out where the composer writes only to
+   *  people (`context.agentless`). */
+  agentOnly?: boolean;
+  order?: number;
+  category?: string;
+  capabilities?: readonly string[];
+  zone?: WidgetZone;
+  supportedZones?: readonly WidgetZone[];
+  /** Preferred size used when the widget is first added to a canvas. This is
+   * deliberately separate from minSize so users can shrink it afterward. */
+  recommendedSize?: WidgetSize;
+  defaultSize?: WidgetSize;
+  minSize?: WidgetSize;
+  maxSize?: WidgetSize;
+  audience?: WidgetAudience;
+  showIn?: readonly WidgetAudience[];
+  scope?: WidgetScope;
+  resizable?: boolean;
+  duplicatable?: boolean;
+  floating?: boolean;
+  recommended?: boolean;
+  panelSizes?: readonly PanelItemSize[];
+  panelDefaultSize?: PanelItemSize;
+  panelTitle?: string;
+  settingsSchema?: Readonly<Record<string, unknown>>;
+  /** Whether the widget has anything to show in this context (for example a
+   *  session widget with no active session). Hosts that own the widget chrome
+   *  omit the whole instance while this is false — outside edit mode, where the
+   *  user must still be able to move or remove it. */
+  isAvailable?: (context: WidgetAvailabilityContext) => boolean;
+  render: (context: WidgetRenderContext) => ReactNode;
+  settingsRender?: (context: WidgetSettingsContext) => ReactNode;
+}
+
+/** Default-open availability: a widget without a predicate always renders. */
+export function widgetIsAvailable(widget: WidgetDef, context: WidgetAvailabilityContext): boolean {
+  return widget.isAvailable?.(context) ?? true;
+}
+
+const registry = new Map<string, WidgetDef>();
+let version = 0;
+const listeners = new Set<() => void>();
+
+function bump(): void {
+  version++;
+  for (const listener of [...listeners]) listener();
+}
+
+subscribeProjectRelevance(bump);
+
+export function registerWidget(def: WidgetDef): () => void {
+  const existing = registry.get(def.id);
+  if (existing) {
+    assertOwnerCanReplace({
+      registry: "widget",
+      id: def.id,
+      existingOwner: existing.ownerPackageId,
+      nextOwner: def.ownerPackageId,
+    });
+  }
+  registry.set(def.id, def);
+  bump();
+  return () => {
+    if (registry.get(def.id) === def) {
+      registry.delete(def.id);
+      bump();
+    }
+  };
+}
+
+export type PluginWidgetDef = Omit<WidgetDef, "pluginId" | "pluginName">;
+
+/** Client-side plugin declaration. `widgets` is optional by design: most
+ * plugins can stay capability-only, while one plugin may own many widgets. */
+export interface WidgetPlugin {
+  id: string;
+  name: string;
+  widgets?: readonly PluginWidgetDef[];
+  ownerPackageId?: string;
+  projectAffinity?: ProjectAffinity;
+}
+
+export function defineWidgetPlugin<T extends WidgetPlugin>(plugin: T): T {
+  return plugin;
+}
+
+export function registerWidgetPlugin(plugin: WidgetPlugin): () => void {
+  const ids = new Set<string>();
+  const definitions = (plugin.widgets ?? []).map((widget): WidgetDef => {
+    if (ids.has(widget.id)) throw new Error(tr("widgets.catalog.pluginValueDeclaresDuplicateWidgetValue", { id: plugin.id, id2: widget.id }));
+    ids.add(widget.id);
+    const existing = registry.get(widget.id);
+    if (existing) {
+      assertOwnerCanReplace({
+        registry: "widget",
+        id: widget.id,
+        existingOwner: existing.ownerPackageId,
+        nextOwner: plugin.ownerPackageId ?? widget.ownerPackageId,
+      });
+    }
+    const defaultSlot = widget.defaultSlot ?? widgetSlotFromZone(widget.zone ?? "main");
+    const supportedSlots = widget.supportedSlots
+      ?? widget.supportedZones?.map(widgetSlotFromZone)
+      ?? [defaultSlot];
+    if (!supportedSlots.includes(defaultSlot)) {
+      throw new Error(tr("widgets.catalog.pluginValueWidgetValueDoesNotSupport", { id: plugin.id, id2: widget.id, defaultSlot: defaultSlot }));
+    }
+    return {
+      ...widget,
+      pluginId: plugin.id,
+      pluginName: plugin.name,
+      ...(plugin.ownerPackageId || widget.ownerPackageId
+        ? { ownerPackageId: widget.ownerPackageId ?? plugin.ownerPackageId }
+        : {}),
+      ...((widget.projectAffinity ?? plugin.projectAffinity)
+        ? { projectAffinity: widget.projectAffinity ?? plugin.projectAffinity }
+        : {}),
+      kind: widget.kind ?? "widget",
+      defaultSlot,
+      supportedSlots,
+    };
+  });
+  const unregister = definitions.map(registerWidget);
+  ensureWidgets(definitions.filter((definition) =>
+    isProjectContributionRelevant(definition.ownerPackageId, definition.projectAffinity)));
+  return () => {
+    for (let index = unregister.length - 1; index >= 0; index--) unregister[index]!();
+  };
+}
+
+function slotWidgets(): WidgetDef[] {
+  const settings = new Map(listSlots("widget.settings").map((item) => [
+    typeof item.meta?.widgetId === "string" ? item.meta.widgetId : item.id,
+    item,
+  ]));
+  return listSlots("widget.catalog").map((item): WidgetDef => {
+    const meta = item.meta ?? {};
+    const zone = meta.zone;
+    const audience = meta.audience;
+    const defaultSlot = meta.defaultSlot;
+    const supportedSlots = Array.isArray(meta.supportedSlots)
+      ? meta.supportedSlots.filter((value): value is UiSlot => typeof value === "string" && isUiSlot(value))
+      : undefined;
+    const setting = settings.get(item.id);
+    const zones = Array.isArray(meta.supportedZones)
+      ? meta.supportedZones.filter(isWidgetZone)
+      : undefined;
+    const size = (value: unknown): WidgetSize | undefined => {
+      if (!value || typeof value !== "object") return undefined;
+      const candidate = value as { w?: unknown; h?: unknown };
+      return typeof candidate.w === "number" && typeof candidate.h === "number"
+        ? { w: candidate.w, h: candidate.h }
+        : undefined;
+    };
+    return {
+      id: item.id,
+      pluginId: typeof meta.pluginId === "string" ? meta.pluginId : item.id.split(".")[0] ?? "plugin",
+      ...(typeof meta.ownerPackageId === "string" ? { ownerPackageId: meta.ownerPackageId } : {}),
+      ...(item.projectAffinity ? { projectAffinity: item.projectAffinity } : {}),
+      ...(typeof meta.pluginName === "string" ? { pluginName: meta.pluginName } : {}),
+      title: typeof meta.title === "string" ? meta.title : item.id.replace(/[._-]+/g, " "),
+      description: typeof meta.description === "string" ? meta.description : tr("widgets.catalog.pluginProvidedWorkspaceWidget"),
+      ...(meta.kind === "widget" || meta.kind === "mini-widget" ? { kind: meta.kind } : {}),
+      ...(typeof defaultSlot === "string" && isUiSlot(defaultSlot) ? { defaultSlot } : {}),
+      ...(supportedSlots && supportedSlots.length > 0 ? { supportedSlots } : {}),
+      ...(typeof meta.defaultVisible === "boolean" ? { defaultVisible: meta.defaultVisible } : {}),
+      ...(typeof meta.requiredVisible === "boolean" ? { requiredVisible: meta.requiredVisible } : {}),
+      ...(meta.agentOnly === true ? { agentOnly: true } : {}),
+      ...(typeof meta.order === "number" ? { order: meta.order } : {}),
+      ...(typeof meta.category === "string" ? { category: meta.category } : {}),
+      ...(Array.isArray(meta.capabilities)
+        ? { capabilities: meta.capabilities.filter((value): value is string => typeof value === "string") }
+        : {}),
+      ...(isWidgetZone(zone) ? { zone } : {}),
+      ...(zones && zones.length > 0 ? { supportedZones: zones } : {}),
+      ...(audience === "simple" || audience === "standard" || audience === "power" ? { audience } : {}),
+      ...(size(meta.recommendedSize) ? { recommendedSize: size(meta.recommendedSize)! } : {}),
+      ...(size(meta.defaultSize) ? { defaultSize: size(meta.defaultSize)! } : {}),
+      ...(size(meta.minSize) ? { minSize: size(meta.minSize)! } : {}),
+      ...(size(meta.maxSize) ? { maxSize: size(meta.maxSize)! } : {}),
+      ...(Array.isArray(meta.showIn)
+        ? { showIn: meta.showIn.filter((value): value is WidgetAudience =>
+            value === "simple" || value === "standard" || value === "power") }
+        : {}),
+      ...(meta.scope === "global" || meta.scope === "workspace" || meta.scope === "plugin"
+        ? { scope: meta.scope }
+        : {}),
+      ...(typeof meta.resizable === "boolean" ? { resizable: meta.resizable } : {}),
+      ...(typeof meta.duplicatable === "boolean" ? { duplicatable: meta.duplicatable } : {}),
+      ...(typeof meta.floating === "boolean" ? { floating: meta.floating } : {}),
+      ...(typeof meta.recommended === "boolean" ? { recommended: meta.recommended } : {}),
+      ...(Array.isArray(meta.panelSizes)
+        ? { panelSizes: meta.panelSizes.filter((value): value is PanelItemSize => value === "compact" || value === "standard" || value === "wide" || value === "large") }
+        : {}),
+      ...(meta.panelDefaultSize === "compact" || meta.panelDefaultSize === "standard" || meta.panelDefaultSize === "wide" || meta.panelDefaultSize === "large"
+        ? { panelDefaultSize: meta.panelDefaultSize }
+        : {}),
+      ...(typeof meta.panelTitle === "string" ? { panelTitle: meta.panelTitle } : {}),
+      ...(meta.settingsSchema && typeof meta.settingsSchema === "object"
+        ? { settingsSchema: meta.settingsSchema as Readonly<Record<string, unknown>> }
+        : {}),
+      render: (context) => item.render(context),
+      ...(setting ? { settingsRender: (context: WidgetSettingsContext) => setting.render(context) } : {}),
+    };
+  });
+}
+
+function isWidgetZone(value: unknown): value is WidgetZone {
+  return value === "header" || value === "left" || value === "main"
+    || value === "right" || value === "bottom" || value === "floating";
+}
+
+// The merged catalog is cached per (registry, slot) version so render-time
+// consumers get a stable array reference and stable WidgetDef identities —
+// no rebuild, re-sort, or new render closures on unrelated re-renders.
+let cachedVersion = "";
+let cachedList: WidgetDef[] | null = null;
+let cachedById = new Map<string, WidgetDef>();
+
+export function listWidgets(): WidgetDef[] {
+  const key = catalogVersion();
+  if (cachedList === null || cachedVersion !== key) {
+    const all = new Map<string, WidgetDef>(registry);
+    for (const widget of slotWidgets()) all.set(widget.id, widget);
+    const visible = [...all.values()].filter((widget) =>
+      isProjectContributionRelevant(widget.ownerPackageId, widget.projectAffinity));
+    cachedList = visible.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+    cachedById = new Map(visible.map((widget) => [widget.id, widget]));
+    cachedVersion = key;
+  }
+  return cachedList;
+}
+
+/** O(1) lookup against the same cache as listWidgets(). */
+export function getWidget(id: string): WidgetDef | undefined {
+  listWidgets();
+  return cachedById.get(id);
+}
+
+function catalogVersion(): string {
+  return `${version}:${slotVersion()}`;
+}
+
+export function useWidgetCatalog(): WidgetDef[] {
+  useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      const offSlots = subscribeSlots(listener);
+      return () => {
+        listeners.delete(listener);
+        offSlots();
+      };
+    },
+    catalogVersion,
+  );
+  return listWidgets();
+}
+
+export interface PolythWidgetsApi {
+  registerWidget: typeof registerWidget;
+  registerPlugin: typeof registerWidgetPlugin;
+  listWidgets: typeof listWidgets;
+}
+
+declare global {
+  interface Window {
+    __polythWidgets?: PolythWidgetsApi;
+  }
+}
+
+export function exposeWidgets(): void {
+  if (typeof window !== "undefined") {
+    window.__polythWidgets = { registerWidget, registerPlugin: registerWidgetPlugin, listWidgets };
+  }
+}

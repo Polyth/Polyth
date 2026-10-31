@@ -1,0 +1,89 @@
+/* Chat load — opening an existing chat (host-owned, packet C) ----------------
+   One reveal for the transcript surface and a calm placeholder that only
+   appears after the delay, then cross-fades out under the content. Position is
+   never animated: the surface is already at its resting place in the frame it
+   lands in; only opacity and a <=8px drift move. Every rule here is scoped to
+   the attributes the session surface sets, so DOM fixtures without them keep
+   their existing computed styles. */
+
+.focus-conversation[data-session-reveal="entering"] > .timeline-wrap {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0);
+}
+
+.focus-conversation[data-session-reveal="idle"] > .timeline-wrap {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--session-reveal-ms, 260ms) var(--motion-ease),
+    transform var(--session-reveal-ms, 260ms) var(--motion-ease);
+}
+
+/* The placeholder covers the transcript area only: the composer dock below it
+   stays mounted and in place. It never takes pointer events or focus. */
+.session-load-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.session-load-layer[data-state="idle"] {
+  display: none;
+}
+
+.session-load-layer[data-state="leaving"] {
+  opacity: 0;
+  transition: opacity var(--session-load-fade-ms, 200ms) var(--motion-ease);
+}
+
+.session-load-layer .stage {
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-5);
+  pointer-events: none;
+}
+
+.session-load-skeleton {
+  width: min(var(--chat-measure), calc(100% - 2 * var(--gutter)));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-load-skeleton > span {
+  height: 12px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-hover, var(--sunken));
+  animation: session-load-pulse 1.6s ease-in-out infinite;
+}
+
+.session-load-skeleton > span:nth-child(1) { width: 58%; }
+.session-load-skeleton > span:nth-child(2) { width: 86%; }
+.session-load-skeleton > span:nth-child(3) { width: 72%; }
+
+@keyframes session-load-pulse {
+  0%, 100% { opacity: .35; }
+  50% { opacity: .7; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-conversation[data-session-reveal="idle"] > .timeline-wrap { transition: none; }
+  .session-load-layer[data-state="leaving"] { transition: none; }
+  .session-load-skeleton > span { animation: none; opacity: .5; }
+}
+
+html[data-reduce-animations="true"] .focus-conversation[data-session-reveal="idle"] > .timeline-wrap,
+html[data-reduce-animations="true"] .session-load-layer[data-state="leaving"],
+body[data-desktop-low-resource="true"] .focus-conversation[data-session-reveal="idle"] > .timeline-wrap,
+body[data-desktop-low-resource="true"] .session-load-layer[data-state="leaving"] {
+  transition: none;
+}
+
+html[data-reduce-animations="true"] .session-load-skeleton > span,
+body[data-desktop-low-resource="true"] .session-load-skeleton > span {
+  animation: none;
+  opacity: .5;
+}

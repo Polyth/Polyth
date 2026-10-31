@@ -1,0 +1,6 @@
+---
+description: polyth-native scoped guidance
+globs: "apps/mobile/**,apps/desktop/**,crates/**"
+alwaysApply: false
+---
+Use mobile, desktop or link guidance. Shared web behavior, native bridge implementation, build inclusion and real-device evidence are separate. Never declare native readiness from interfaces, mocks, sync or unsigned compilation alone.

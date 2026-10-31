@@ -1,0 +1,12 @@
+[
+  "agentToolSettings.test.ts",
+  "artifacts.test.ts",
+  "browser.test.ts",
+  "browserAgentAutoApproveRoutes.test.ts",
+  "browserOwnership.test.ts",
+  "browserRoutes.test.ts",
+  "chatTabGuard.test.ts",
+  "profileLifecycle.test.ts",
+  "profileRegistry.test.ts",
+  "vaultFillPolicy.test.ts"
+]

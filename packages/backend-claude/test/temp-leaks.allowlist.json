@@ -1,0 +1,5 @@
+[
+  "hostCapabilityProvisioning.blockers.test.ts",
+  "hostCapabilityProvisioning.overlay.test.ts",
+  "modelControls.test.ts"
+]

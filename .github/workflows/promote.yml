@@ -1,0 +1,136 @@
+name: Promote devel to master
+run-name: Promote ${{ inputs.ref }} to master${{ !inputs.push && ' (dry run)' || '' }}
+
+# master is the release line: devel minus the unfinished previews
+# (`maturity: "in-progress"`), rebuilt by scripts/ci/promote-master.mjs. The
+# promotion commit has the previous master and the promoted devel commit as
+# parents, so master's history stays truthful and a push is a fast-forward.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: devel branch or commit to promote
+        type: string
+        required: true
+        default: devel
+      push:
+        description: Push the verified promotion to master (off = verify only)
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-master
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Build, verify and push master
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          # The final step pushes master with the workflow token.
+          persist-credentials: true
+
+      # actions/checkout only takes branches, tags and full SHAs; git resolves
+      # an abbreviated SHA too, and refuses an ambiguous one.
+      - name: Check out the commit to promote
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse --verify --quiet "origin/$REF^{commit}" || git rev-parse --verify "$REF^{commit}")"
+          git checkout -q --detach "$commit"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - id: refs
+        name: Resolve commits
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin master
+          echo "devel=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "master=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse master changes devel does not carry
+        env:
+          MASTER: ${{ steps.refs.outputs.master }}
+          DEVEL: ${{ steps.refs.outputs.devel }}
+        run: node scripts/ci/promote-master.mjs check-drift "$MASTER" "$DEVEL"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the master tree
+        run: |
+          set -euo pipefail
+          node scripts/ci/promote-master.mjs plan
+          node scripts/ci/promote-master.mjs apply
+
+      - id: commit
+        name: Commit the promotion
+        env:
+          MASTER: ${{ steps.refs.outputs.master }}
+          DEVEL: ${{ steps.refs.outputs.devel }}
+        run: |
+          set -euo pipefail
+          # The repository's configured identity (see AGENTS.md).
+          git config user.name "Max"
+          git config user.email "max@polyth.app"
+          git add -A
+          tree="$(git write-tree)"
+          if [ "$tree" = "$(git rev-parse "$MASTER^{tree}")" ]; then
+            echo "master already matches devel ${DEVEL:0:12}; nothing to promote."
+            echo "commit=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          message="$(printf 'chore(release): promote devel %s to master\n\nPromoted-from: %s\n' "${DEVEL:0:12}" "$DEVEL")"
+          # The first promotion after cutting both branches from one commit has a single parent.
+          if [ "$MASTER" = "$DEVEL" ]; then
+            commit="$(git commit-tree "$tree" -p "$MASTER" -m "$message")"
+          else
+            commit="$(git commit-tree "$tree" -p "$MASTER" -p "$DEVEL" -m "$message")"
+          fi
+          git checkout -q --detach "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      # The pruned lockfile and the regenerated wiring are proven here, on the
+      # exact tree that will become master, before anything is pushed.
+      - name: Reinstall from the promoted lockfile
+        if: steps.commit.outputs.commit != ''
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify the promoted tree
+        if: steps.commit.outputs.commit != ''
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types apps/web/generateI18n.ts --check
+          node --experimental-strip-types --test scripts/test/packageRemovability.test.ts
+          node scripts/agent-kit.mjs check
+          npm run build:web
+          node scripts/ci/release-quality.mjs
+
+      - name: Push master
+        if: steps.commit.outputs.commit != '' && inputs.push
+        env:
+          COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # The commit's first parent is the master this run read, so the push
+          # is a fast-forward; a master that moved meanwhile is refused.
+          git push origin "$COMMIT:refs/heads/master" || {
+            echo "Could not push master: it moved during the run, or branch protection requires a pull request." >&2
+            exit 1
+          }
+          echo "Promoted devel ${{ steps.refs.outputs.devel }} as master $COMMIT" >> "$GITHUB_STEP_SUMMARY"

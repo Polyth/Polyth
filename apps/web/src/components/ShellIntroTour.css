@@ -1,0 +1,278 @@
+/* First-open interface tour (ShellIntroTour.tsx).
+ * Every animated property has its final value as the base style, so the
+ * global reduced-motion / low-resource rules (animation: none) leave a
+ * complete, static frame. Motion runs once per step; nothing loops. */
+.shell-intro {
+  /* Deeper than the modal scrim (light themes use a soft 40% wash): the
+   * spotlight only reads when the rest of the shell clearly recedes. */
+  --shell-intro-scrim: color-mix(in srgb, var(--scrim) 70%, rgb(0 0 0 / 0.7));
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  pointer-events: auto;
+}
+
+.shell-intro-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--shell-intro-scrim);
+  animation: fade var(--motion-surface) var(--motion-ease);
+}
+
+/* The spotlight is a hole in the scrim: its spread shadow paints the scrim
+ * everywhere else, so the real control shows through untouched. */
+.shell-intro-spotlight {
+  position: fixed;
+  border-radius: var(--radius-surface);
+  box-shadow:
+    0 0 0 2px rgba(var(--accent-rgb), 0.9),
+    0 0 0 6px rgba(var(--accent-rgb), 0.22),
+    0 0 0 200vmax var(--shell-intro-scrim);
+  pointer-events: none;
+  transition:
+    left var(--motion-surface) var(--motion-ease),
+    top var(--motion-surface) var(--motion-ease),
+    width var(--motion-surface) var(--motion-ease),
+    height var(--motion-surface) var(--motion-ease);
+}
+
+.shell-intro-ping {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55);
+  animation: shell-intro-ping 900ms var(--motion-ease) 240ms 1 both;
+}
+
+@keyframes shell-intro-ping {
+  from { opacity: 1; box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
+  to { opacity: 0; box-shadow: 0 0 0 16px rgba(var(--accent-rgb), 0); }
+}
+
+.shell-intro-arrow {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.shell-intro-arrow-line,
+.shell-intro-arrow-head {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.shell-intro-arrow-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: shell-intro-draw 420ms var(--motion-ease) 1 both;
+}
+
+.shell-intro-arrow-head {
+  animation: fade var(--motion-fast) var(--motion-ease) 380ms 1 both;
+}
+
+@keyframes shell-intro-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+.shell-intro-card {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: min(372px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--material-glass-strong);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+  color: var(--text);
+  outline: none;
+  transition:
+    left var(--motion-surface) var(--motion-ease),
+    top var(--motion-surface) var(--motion-ease);
+  animation: rise var(--motion-surface) var(--motion-ease);
+}
+
+/* The first frame renders before measurement; keep it unseen (but focusable)
+ * so the card never flashes at the centre before jumping beside its target. */
+.shell-intro:not([data-measured]) .shell-intro-card {
+  opacity: 0;
+  transition: none;
+}
+
+/* The language picker heads the card on every step, above the art and the
+ * text, so it never covers either. */
+.shell-intro-card > .shell-intro-language {
+  flex: none;
+  align-self: flex-end;
+  max-width: calc(100% - 24px);
+  margin: 12px 12px 0;
+}
+.shell-intro-card > .shell-intro-language + .shell-intro-media { margin-top: 12px; border-top: 1px solid var(--hair); }
+.shell-intro-card > .shell-intro-language + .shell-intro-body { padding-top: 6px; }
+
+.shell-intro-media {
+  position: relative;
+  flex: none;
+  height: 132px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--hair);
+  background:
+    radial-gradient(130% 150% at 88% -30%, rgba(var(--accent-rgb), 0.22), transparent 58%),
+    linear-gradient(168deg, color-mix(in srgb, var(--panel) 70%, var(--bg)), var(--sunken));
+}
+
+.shell-intro-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* Art tints mix from --text: hairline tokens vanish on light glass. */
+.shell-intro-art .art-frame { fill: color-mix(in srgb, var(--bg) 70%, transparent); stroke: color-mix(in srgb, var(--text) 18%, transparent); stroke-width: 1.5; }
+.shell-intro-art .art-rail { fill: color-mix(in srgb, var(--text) 7%, transparent); stroke: color-mix(in srgb, var(--text) 22%, transparent); stroke-width: 1; }
+.shell-intro-art .art-rail.art-accent { fill: rgba(var(--accent-rgb), 0.18); stroke: rgba(var(--accent-rgb), 0.75); stroke-width: 1.5; }
+.shell-intro-art .art-dot { fill: rgba(var(--accent-rgb), 0.7); }
+.shell-intro-art .art-plus { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.shell-intro-art .art-bubble { fill: color-mix(in srgb, var(--text) 16%, transparent); }
+.shell-intro-art .art-bubble-own { fill: rgba(var(--accent-rgb), 0.35); }
+.shell-intro-art .art-tile { fill: color-mix(in srgb, var(--text) 30%, transparent); }
+.shell-intro-art .art-tile.art-slot { fill: none; stroke: color-mix(in srgb, var(--text) 35%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
+.shell-intro-art .art-tile.art-accent { fill: var(--accent); }
+.shell-intro-art .art-trail { fill: none; stroke: rgba(var(--accent-rgb), 0.55); stroke-width: 1.5; stroke-dasharray: 4 5; }
+.shell-intro-art .art-cursor { fill: var(--text); stroke: var(--bg); stroke-width: 1; }
+
+/* One pass: the tile lifts out of the top rail and lands in the right rail.
+ * The base transform is the landed position. */
+.shell-intro-art--drag .art-moving {
+  transform: translate(160px, 58px);
+  animation: shell-intro-drag 1500ms var(--motion-ease) 300ms 1 both;
+}
+
+@keyframes shell-intro-drag {
+  0% { transform: translate(0, 0); }
+  18% { transform: translate(0, -4px); }
+  100% { transform: translate(160px, 58px); }
+}
+
+.shell-intro-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px 20px 4px;
+  overflow-y: auto;
+  animation: fade var(--motion-normal) ease-out;
+}
+
+.shell-intro-kicker {
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shell-intro-card h2 {
+  margin: 0;
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.shell-intro-copy {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.55;
+}
+
+/* The count keeps its case: an uppercased Cyrillic "з" reads as the digit 3. */
+.shell-intro-count {
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.shell-intro-cta { margin-top: 4px; }
+
+/* A quiet line under a step's button: what happens after it. */
+.shell-intro-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+
+.shell-intro-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px 14px;
+}
+
+.shell-intro-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-end: auto;
+}
+
+/* Scoped under the tour: global button rules (phone chrome) otherwise clear
+ * the dot's fill. */
+.shell-intro .shell-intro-dot {
+  width: 7px;
+  height: 7px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-round);
+  /* --hair-strong is a hairline tint, too faint for a 7px mark on glass. */
+  background: color-mix(in srgb, var(--text) 26%, transparent);
+  transition: width var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .shell-intro .shell-intro-dot:hover:where(:not(:disabled)) { background: var(--muted); }
+}
+.shell-intro .shell-intro-dot.active { width: 20px; background: var(--accent); }
+
+.shell-intro-actions { display: flex; gap: 8px; flex: none; }
+
+.shell-intro-skip-link {
+  align-self: center;
+  margin: -6px 0 12px;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 550;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: transparent;
+}
+
+@media (hover: hover) {
+  .shell-intro-skip-link:hover:where(:not(:disabled)) {
+    color: var(--text-dim);
+    background: transparent;
+    text-decoration-color: currentColor;
+  }
+}
+
+@media (max-width: 480px) {
+  .shell-intro-media { height: 112px; }
+  .shell-intro-body { padding: 16px 16px 2px; }
+  .shell-intro-foot { padding: 12px 16px max(12px, var(--safe-bottom)); }
+}

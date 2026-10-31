@@ -1,0 +1,37 @@
+{
+  "name": "@polyth/custom-action",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Custom actions",
+      "description": "One-tap buttons for your own commands: run quietly, open in Terminal, or hand the result to a new chat.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "zap",
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/terminal": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

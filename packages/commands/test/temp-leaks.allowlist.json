@@ -1,0 +1,6 @@
+[
+  "commands-crud.test.ts",
+  "managedSkills.test.ts",
+  "personalCommands.test.ts",
+  "skills.test.ts"
+]

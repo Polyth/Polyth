@@ -1,0 +1,272 @@
+/* Curated high-performance self-hosted variable web fonts */
+
+/* --- UI Sans-serif --- */
+
+/* Inter */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/inter-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/inter-italic.woff2") format("woff2");
+}
+
+/* Geist */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/geist-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/geist-italic.woff2") format("woff2");
+}
+
+/* Plus Jakarta Sans */
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/assets/fonts/plus-jakarta-sans-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: italic;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/assets/fonts/plus-jakarta-sans-italic.woff2") format("woff2");
+}
+
+/* Figtree */
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("/assets/fonts/figtree-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Figtree";
+  font-style: italic;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("/assets/fonts/figtree-italic.woff2") format("woff2");
+}
+
+/* Outfit */
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/outfit-normal.woff2") format("woff2");
+}
+
+/* DM Sans */
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url("/assets/fonts/dm-sans-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "DM Sans";
+  font-style: italic;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url("/assets/fonts/dm-sans-italic.woff2") format("woff2");
+}
+
+/* Manrope */
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("/assets/fonts/manrope-normal.woff2") format("woff2");
+}
+
+/* Atkinson Hyperlegible */
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/atkinson-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/atkinson-italic.woff2") format("woff2");
+}
+
+/* Montserrat */
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/montserrat-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/montserrat-italic.woff2") format("woff2");
+}
+
+/* Roboto */
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/roboto-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Roboto";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/roboto-italic.woff2") format("woff2");
+}
+
+/* Open Sans */
+@font-face {
+  font-family: "Open Sans";
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url("/assets/fonts/open-sans-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Open Sans";
+  font-style: italic;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url("/assets/fonts/open-sans-italic.woff2") format("woff2");
+}
+
+/* Noto Sans */
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/noto-sans-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/noto-sans-italic.woff2") format("woff2");
+}
+
+/* --- Editorial / Reading Serif --- */
+
+/* Source Serif 4 */
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/assets/fonts/source-serif-4-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: italic;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url("/assets/fonts/source-serif-4-italic.woff2") format("woff2");
+}
+
+/* --- Programmer Monospace --- */
+
+/* JetBrains Mono */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/assets/fonts/jetbrains-mono-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: italic;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/assets/fonts/jetbrains-mono-italic.woff2") format("woff2");
+}
+
+/* Fira Code */
+@font-face {
+  font-family: "Fira Code";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("/assets/fonts/fira-code-normal.woff2") format("woff2");
+}
+
+/* Geist Mono */
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/geist-mono-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/assets/fonts/geist-mono-italic.woff2") format("woff2");
+}
+
+/* Cascadia Code */
+@font-face {
+  font-family: "Cascadia Code";
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+  src: url("/assets/fonts/cascadia-code-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Cascadia Code";
+  font-style: italic;
+  font-weight: 200 700;
+  font-display: swap;
+  src: url("/assets/fonts/cascadia-code-italic.woff2") format("woff2");
+}

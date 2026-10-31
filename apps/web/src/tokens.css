@@ -1,0 +1,475 @@
+/* Polyth canonical web token contract.
+   Keep this file to one :root custom-property block. Theme values are
+   runtime-overridden by theme.ts; these values are the Default palette
+   fallback. */
+:root {
+  /* surfaces */
+  --bg: #0f1115;
+  --panel: #14171d;
+  --elevated: #1a1e26;
+  --raised: #222732;
+  --sunken: #0a0c10;
+  --input-bg: #12151b;
+  --app-background-image: none;
+
+  /* lines */
+  --border: #2c3240;
+  --border-soft: #232837;
+  --borderless-edge: color-mix(in srgb, var(--text) 12%, transparent);
+  /* The theme's contour: the one edge every glass surface and shell control
+     draws (rails, header controls, session title, composer, menus, popovers,
+     dialogs, the sessions peek). A style recipe replaces it with its own
+     stroke. Resolved here on the root, so Hide interface borders (which clears
+     --border-soft on body) cannot thin it: contours are not borders. */
+  --contour: color-mix(in srgb, var(--border-soft) 88%, var(--text) 12%);
+  /* Inks for the chat's plateless chrome (activity blocks, the agent status
+     and edited files above the composer). They equal --text-dim, --muted,
+     --faint, --green and --red until a wallpaper fights the appearance;
+     styles.css then moves them by these shares toward an anchor a step past
+     --text (see "Wallpaper wash"). The diff hues keep a small share always:
+     a theme tunes them as fills, and Solar's red was 4.3:1 as small text. */
+  --chat-wash-anchor: var(--text);
+  --chat-wash-dim: 0%;
+  --chat-wash-quiet: 0%;
+  --chat-wash-faint: 0%;
+  --chat-wash-hue: 12%;
+  --chat-ink-dim: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-dim), var(--text-dim));
+  --chat-ink-muted: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-quiet), var(--muted));
+  --chat-ink-faint: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-faint), var(--faint));
+  --chat-ink-green: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-hue), var(--green));
+  --chat-ink-red: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-hue), var(--red));
+  /* Accent as small text (a text action), from the text-safe accent. */
+  --chat-wash-accent: 0%;
+  --chat-ink-accent: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-accent), var(--accent-text));
+  --control-border: var(--border);
+  --surface-divider: var(--border-soft);
+  --hair: rgba(232, 234, 240, 0.055);
+  --hair-strong: rgba(232, 234, 240, 0.09);
+  /* --hair pre-composited over the chrome glass base: one edge shared by
+     surfaces with different (or transparent) fills stays one colour. */
+  --hair-solid: color-mix(in srgb, #e8eaf0 5.5%, color-mix(in srgb, #1a1e26 88%, #14171d));
+
+  /* ink */
+  --text: #e8eaf0;
+  --text-dim: #c2c7d4;
+  --muted: #8f96a8;
+  --faint: #8990a1;
+
+  /* Disabled controls: one neutral, already-gray state for every button.
+     Derived from the theme's own ink so each palette stays in tone; the ink
+     is visibly unavailable yet still identifiable (about 3:1). */
+  --control-disabled-bg: color-mix(in srgb, var(--text) 7%, transparent);
+  --control-disabled-border: color-mix(in srgb, var(--text) 10%, transparent);
+  --control-disabled-ink: color-mix(in srgb, var(--faint) 78%, transparent);
+
+  /* accent + signals */
+  --accent: #7aa2f7;
+  --accent-ink: #0a0f1a;
+  --accent-hi: #8fb3ff;
+  --accent-text: #7aa2f7;
+  --accent-wash: rgba(122, 162, 247, 0.13);
+  --accent-line: rgba(122, 162, 247, 0.32);
+  --focus-wash: rgba(122, 162, 247, 0.1);
+  --accent-rgb: 122, 162, 247;
+  --green: #9ece6a;
+  --amber: #e0af68;
+  --green-on-wash: #9ece6a;
+  --amber-on-wash: #e0af68;
+  --amber-rgb: 224, 175, 104;
+  --red: #f7768e;
+  --red-ink: #101216;
+  --blue: #7dcfff;
+  --purple: #bb9af7;
+  --surface-overlay: rgba(232, 234, 240, 0.022);
+  --surface-overlay-hover: rgba(232, 234, 240, 0.045);
+  --surface-overlay-strong: rgba(232, 234, 240, 0.09);
+  --green-wash: rgba(158, 206, 106, 0.18);
+  --amber-wash: rgba(224, 175, 104, 0.18);
+  --red-wash: rgba(247, 118, 142, 0.18);
+  --blue-wash: rgba(125, 207, 255, 0.18);
+  --purple-wash: rgba(187, 154, 247, 0.18);
+
+  /* Quiet Glass overlay material. Base surfaces are deliberately opaque;
+     capable clients opt into translucency and blur in core styles. */
+  --material-glass: color-mix(in srgb, var(--elevated) 88%, var(--panel));
+  --material-glass-strong: color-mix(in srgb, var(--elevated) 96%, var(--panel));
+  --material-glass-medium: color-mix(in srgb, var(--elevated) 82%, var(--panel));
+  --material-glass-chrome: color-mix(in srgb, var(--elevated) 92%, var(--panel));
+  --material-glass-border: var(--contour);
+  --material-glass-highlight: var(--inset-hi);
+  --material-glass-shadow: var(--shadow-lg);
+  --material-glass-blur: 20px;
+  --material-glass-fill: 52%;
+  --material-glass-edge: 28%;
+  --material-glass-control-fill: 18%;
+  --material-glass-control-edge: 8%;
+  /* Keep dark text-bearing glass readable over a bright wallpaper while
+     leaving a visible gap between Matte and Clear. Light themes lower the
+     tint further in styles.css so the workspace can show through white glass. */
+  --material-glass-readable-fill: calc(50% + var(--material-glass-fill) * 0.58);
+  --material-glass-readable-edge: calc(53% + var(--material-glass-edge) * 0.6);
+  --material-glass-readable-control-fill: calc(43% + var(--material-glass-control-fill) * 0.9);
+  --material-glass-readable-control-edge: calc(40% + var(--material-glass-control-edge));
+  /* Phone navigation destinations reveal the blurred conversation while their
+     nested controls and selected rows retain the readable profile above. */
+  --material-glass-mobile-chrome-fill: calc(38% + var(--material-glass-fill) * 0.55);
+  --material-glass-mobile-chrome-edge: calc(30% + var(--material-glass-edge) * 0.55);
+  --material-glass-saturation: 118%;
+  /* Top image layer of live overlay glass (popovers, menus, tooltips). A
+     theme style may set a grain here; opaque fallbacks never paint it. */
+  --material-glass-texture: none;
+  /* The modal layer softens the workspace around the active glass surface. */
+  --modal-backdrop-scrim-share: 48%;
+  --surface-activity: color-mix(in srgb, var(--elevated) 54%, var(--bg));
+
+  /* Deprecated overlay aliases. Do not use for new glass surfaces. */
+  --overlay-bg: var(--elevated);
+  --overlay-border: var(--border);
+  --overlay-shadow: var(--shadow-md);
+
+  /* spacing + control geometry */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --density-scale: 1;
+  --gutter: var(--space-5);
+  --screen-gutter: var(--space-4);
+  /* One reading measure shared by the chat timeline, composer, and inline
+     conversation widgets. */
+  --chat-measure: 768px;
+  --conversation-inset: calc(16px * var(--density-scale));
+  --conversation-chrome-inset: calc(12px * var(--density-scale));
+  --conversation-related-gap: calc(6px * var(--density-scale));
+  --conversation-row-gap: calc(8px * var(--density-scale));
+  --conversation-group-gap: calc(16px * var(--density-scale));
+  --conversation-message-gap: calc(24px * var(--density-scale));
+  /* `--prose-gap` is declared with the type roles below, because it is derived
+     from the response size and must follow the surface that renders it. */
+  --tap: 44px;
+  --control-h-sm: 32px;
+  --control-h: 40px;
+  --control-h-lg: 48px;
+  --control-pad-x-sm: 10px;
+  --control-pad-x: 14px;
+  --control-gap: var(--space-2);
+  --mobile-island-height: calc(46px * var(--density-scale));
+  /* Shell clearance follows menu text even inside the chat text surface. */
+  --mobile-session-header-height: max(var(--tap), var(--mobile-island-height), calc(var(--font-session-title-compact-lh) * 2 + var(--space-1) * 2));
+  --activity-row-height: calc(48px * var(--density-scale));
+  --agent-dock-height: calc(68px * var(--density-scale));
+  --composer-height: calc(56px * var(--density-scale));
+  --composer-action-size: calc(42px * var(--density-scale));
+  /* `--composer-max-input-height` is declared with the type roles below: it is
+     a font-derived ceiling, so it has to read the surface's own type size. */
+  /* Host-owned package-window seam. Packages consume these values and never
+     redefine them; themes may provide a controlled system-wide override. */
+  --package-window-header-h: 42px;
+  --package-window-resize-hit: 5px;
+  /* Density seam: 0px on fine pointers; core styles raise it to --tap on
+     coarse pointers so hit areas grow without enlarging control visuals. */
+  --hit-min: 0px;
+
+  /* icon size scale (UI action glyphs) */
+  --icon-sm: 16px;
+  --icon-md: 18px;
+  --icon-lg: 20px;
+  /* The left project rail and right launcher strip carry nothing but their
+     glyphs in a snug tile, so they sit half a step above --icon-lg. */
+  --icon-rail: 22px;
+  --icon-xl: 24px;
+
+  /* Rail scale preferences (percent / 100). The Runtime UI-preference store
+     overrides these on <body>; rail geometry and its icons derive from them. */
+  --rail-scale-left: 1;
+  --rail-scale-right: 1;
+  --rail-scale-top: 1;
+
+  /* One scalable radius vocabulary: controls → cards → surfaces → sheets. */
+  --corner-radius-scale: 1;
+  --radius-control: calc(8px * var(--corner-radius-scale));
+  --radius-card: calc(10px * var(--corner-radius-scale));
+  --radius-surface: calc(12px * var(--corner-radius-scale));
+  --radius-sheet: calc(16px * var(--corner-radius-scale));
+  --radius-activity: calc(15px * var(--corner-radius-scale));
+  --radius-island: calc(23px * var(--corner-radius-scale));
+  --radius-dock: calc(23px * var(--corner-radius-scale));
+  --radius-composer: var(--radius-sheet);
+  --radius-bubble: calc(18px * var(--corner-radius-scale));
+  /* Fully rounded. A pill stays a pill at every corner-radius setting. */
+  --radius-round: 999px;
+
+  /* Deprecated radius aliases. Do not use in new CSS. */
+  --radius: var(--radius-control);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-card);
+  --radius-lg: var(--radius-card);
+  --radius-xl: var(--radius-surface);
+
+  /* typography */
+  --ui-font-size: 15px;
+  --ui-font-scale: 1;
+  /* Conversation text size. Independent of the menu text size above, so a
+     transcript can be enlarged without growing every label around it. */
+  --chat-font-size: 15px;
+  --chat-font-scale: 1;
+  /* Effective multiplier of the current text surface: the menu scale on the
+     shell canvas, the chat scale inside a conversation surface. Every type
+     role below multiplies by this, so a surface re-binds one variable instead
+     of one role at a time. */
+  --text-scale: var(--ui-font-scale, 1);
+  --header-font-size: 24px;
+  --subheader-font-size: 16px;
+  --terminal-font-size: 14px;
+  /* Header size drives the content headings: the title is the setting itself,
+     a section heading sits one clear step below it (0.75×, floored at the
+     label size). uiPrefs.ts republishes both on body when the setting moves. */
+  --font-title: 24px;
+  --font-title-lh: 1.18;
+  --font-heading: 18px;
+  --font-code: var(--editor-font-size, 14px);
+  --editor-font-size: 14px;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --ui-font-family: "Open Sans", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* visual viewport + safe-area layout */
+  --visual-vh: 100dvh;
+  --visual-frame-top: 0px;
+  --visual-frame-height: 100dvh;
+  --visual-frame-bottom: 100dvh;
+  --visual-bottom: 100dvh;
+  --keyboard-inset: 0px;
+  --visual-offset: 0px;
+  /* Lower edge shared by the app chain and every full-height fixed layer
+     (Settings, the phone navigator, module and panel layers). It is the
+     measured frame's bottom; mobileViewport.ts publishes it with the
+     accessory band below added while the keyboard is open on WebKit. */
+  --layer-frame-bottom: var(--visual-frame-bottom, 100dvh);
+  /* WebKit's text-input accessory (the floating form assistant above the
+     on-screen keyboard) sits inside the keyboard frame iOS reports, but the
+     page only ever sees that frame as its own visual-viewport inset: the
+     measured band ends above the space the accessory occupies, and a phone
+     composer floated that band's height above the keyboard. This is the
+     accessory's own measured height (48px on the iOS 26 floating assistant),
+     added to the measured frame while the keyboard is open on WebKit only —
+     engines that resize the layout viewport with the keyboard already end the
+     frame at the keyboard, and so does the native app, where
+     mobileViewport.ts never adds it. Re-measure it on a new iOS keyboard design; see
+     docs/dev/mobile-viewport.md. */
+  --keyboard-accessory-band: 48px;
+  /* Capacitor's native safe-area bridge publishes --safe-area-inset-* on
+     Android WebViews where env() can incorrectly remain zero. Browsers and
+     iOS continue through the standards-based fallback. */
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+  /* A side inset of 72px or more is iPhone Duo's status column, which holds
+     the launcher strip (sideSafeStrip.ts); chrome beside it clears one more
+     step so it never meets the column's edge. A notch's narrower inset keeps
+     its exact value. */
+  --safe-right-clear: calc(var(--safe-right) + clamp(0px, (var(--safe-right) - 71px) * 1000, var(--space-2)));
+  --safe-left-clear: calc(var(--safe-left) + clamp(0px, (var(--safe-left) - 71px) * 1000, var(--space-2)));
+
+  /* Deprecated semantic aliases. Do not use in new CSS. */
+  --surface-0: var(--bg);
+  --surface-1: var(--panel);
+  --surface-raised: var(--elevated);
+  --surface: var(--panel);
+  --fg: var(--text);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+  --danger: var(--red);
+  --warning: var(--amber);
+  --success: var(--green);
+  --info: var(--blue);
+  --border-subtle: var(--border-soft);
+
+  /* layering scale (new overlay CSS uses these; legacy values migrate later) */
+  --z-shell: 100;
+  /* Phone layer stack: the session header and floats sit at --z-shell + 2.
+     The Workspace covers them; a package window covers the Workspace. */
+  --z-stack-workspace: calc(var(--z-shell) + 3);
+  --z-stack-package: calc(var(--z-shell) + 4);
+  --z-overlay: 220;
+  --z-toast: 230;
+  --z-popover: 360;
+  --z-tooltip: 370;
+
+  /* focus, elevation, and motion */
+  --focus-ring: var(--accent);
+  --scrim: rgba(9, 8, 7, 0.62);
+  --scrim-media: rgba(6, 6, 8, 0.92);
+  --shadow-sm: 0 4px 14px -10px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 14px 36px -22px rgba(0, 0, 0, 0.66);
+  --shadow-lg: 0 40px 90px -24px rgba(0, 0, 0, 0.72), 0 8px 28px -12px rgba(0, 0, 0, 0.6);
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+  --motion-surface: 240ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+  /* The iOS software keyboard's own slide (UIKit reports 0.25 s on its
+     keyboard curve): the fallback for whatever rides the keyboard — the
+     composer dock and its transcript (keyboardRide.ts), the composer morph —
+     until the native shell reports the real curve (keyboardMotion.ts). */
+  --motion-keyboard: 250ms;
+  --motion-keyboard-ease: cubic-bezier(0.38, 0.7, 0.125, 1);
+
+  /* Phone layer stack (Chat → Workspace → package window). One travel time
+     and curve for every full-screen push, pop and dismissal so the layer that
+     arrives and the layer that retreats always agree. The covered layer
+     retreats by a fraction of the travel (parallax) and dims; --stack-dir
+     mirrors the travel for RTL. */
+  --motion-stack: 300ms;
+  --motion-stack-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --stack-parallax: 28%;
+  --stack-dim: 0.18;
+  --stack-dir: 1;
+  /* The leading edge of a layer travelling over another one. */
+  --shadow-stack-edge: calc(var(--stack-dir) * -14px) 0 32px -12px rgba(0, 0, 0, 0.38);
+  /* The same edge on a drawer that travels in from the inline START side
+     (the phone Navigator while a swipe moves it). */
+  --shadow-drawer-edge: calc(var(--stack-dir) * 14px) 0 32px -12px rgba(0, 0, 0, 0.38);
+
+  /* Desktop package windows (ContextRail.tsx) come out of their launcher rail
+     and go back into it. The arrival glides --motion-window-travel out of the
+     rail on a long ease-out that settles without a visible landing; the
+     departure is quicker and accelerates back in. One clock for the window,
+     its content, the launcher seam and the rail host, so no part lags. A
+     floating window moves on transform and opacity only: the compositor keeps
+     it at full frame rate while the package mounts. --stack-dir mirrors the
+     travel for RTL. */
+  --motion-window: 340ms;
+  --motion-window-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-window-exit: 220ms;
+  --motion-window-exit-ease: cubic-bezier(0.4, 0, 1, 1);
+  --motion-window-travel: 96px;
+
+  /* chat + syntax roles */
+  --bubble-user-bg: #212939;
+  --bubble-user-line: #364565;
+  /* People's chat bubbles: someone else's on a quiet fill; one's own take the accent. */
+  --bubble-person-bg: color-mix(in srgb, var(--text) 8%, var(--elevated));
+  --syntax-kw: var(--purple);
+  --syntax-str: var(--green);
+  --syntax-cmt: var(--faint);
+  --syntax-num: var(--amber);
+  --syntax-punc: var(--muted);
+
+  /* Terminal palette; theme.ts overrides these with the active theme. */
+  --term-bg: #0a0c10;
+  --term-fg: #e8eaf0;
+  --term-cursor: #7aa2f7;
+  --term-sel: rgba(122, 162, 247, 0.34);
+  --term-find: rgba(224, 175, 104, 0.4);
+  --term-find-cur: rgba(122, 162, 247, 0.55);
+  --term-link: #7dcfff;
+  --term-a0: #515358;
+  --term-a1: #f7768e;
+  --term-a2: #9ece6a;
+  --term-a3: #e0af68;
+  --term-a4: #7dcfff;
+  --term-a5: #bb9af7;
+  --term-a6: #8ecfb5;
+  --term-a7: #c2c7d4;
+  --term-a8: #797b80;
+  --term-a9: #faa1b2;
+  --term-a10: #b4d98d;
+  --term-a11: #e8c38e;
+  --term-a12: #abe0ff;
+  --term-a13: #d8c5fa;
+  --term-a14: #aeddca;
+  --term-a15: #f6f7f9;
+}
+
+/* The phone layer stack arrives from, and returns to, the inline-end edge.
+   Keyed on `dir` wherever it is set, not only on <html>: a mirrored shell
+   flips its frames' `dir` (shellDirection.ts) and every transform that
+   multiplies by --stack-dir mirrors with them. */
+[dir="rtl"] { --stack-dir: -1; }
+[dir="ltr"] { --stack-dir: 1; }
+
+/* ---- type surfaces ---------------------------------------------------------
+   The menu text size and the chat text size are two settings, so type has two
+   surfaces. A custom property resolves its own `var()` references where it is
+   *declared*, not where it is read, so a role declared only on `:root` would
+   keep the menu caliber everywhere. Every size role is therefore declared
+   once, on a selector list that also names each conversation surface: the
+   surface re-binds `--text-scale` and the roles re-resolve there. One
+   vocabulary, one switch.
+
+   A conversation surface is a surface that shows a transcript: the focus
+   conversation and the chat widget. Shell chrome around it (rails, settings,
+   pickers, docks) stays on the menu scale. The agent activity block inside a
+   conversation, the above-composer status dock (and the subagent island it
+   heads) and prompt-history overlays return to the menu scale. */
+:root,
+.focus-conversation,
+.widget-conversation,
+.activity-group,
+.agent-status-dock,
+.subagent-island,
+.prompt-nav-panel {
+  --font-input: calc(15px * var(--text-scale, 1));
+  --font-body: calc(15px * var(--text-scale, 1));
+  --font-label: calc(15px * var(--text-scale, 1));
+  /* Chrome title of every window, dialog and sheet header bar: label caliber,
+     so a title bar reads as chrome and never competes with the content's own
+     heading. Pair it with weight 650 and an inline --font-meta subtitle. */
+  --font-window-title: calc(15px * var(--text-scale, 1));
+  --font-meta: max(11px, calc(15px * var(--text-scale, 1) * .8));
+  --font-meta-lh: 1.4;
+  /* Conversation text. 14.7px is the default *screen* caliber (0.98 of the
+     surface text size). The heading is one step above the body and the line
+     box is derived from it, so the roles can never drift apart.
+     Thinking/reasoning prose shares this role, so a thought and its answer
+     never change caliber. */
+  --font-response: calc(14.7px * var(--text-scale, 1));
+  --font-response-lh: calc(var(--font-response) * 1.5);
+  --font-response-heading: calc(var(--font-response) + 1px);
+  --font-response-heading-lh: calc(var(--font-response-heading) * 1.35);
+  --font-session-title: calc(15px * var(--text-scale, 1));
+  --font-session-title-lh: calc(20px * var(--text-scale, 1));
+  --font-session-title-compact: calc(13.25px * var(--text-scale, 1));
+  --font-session-title-compact-lh: calc(18px * var(--text-scale, 1));
+  --font-activity-title: calc(15.5px * var(--text-scale, 1));
+  --font-activity-title-lh: calc(21px * var(--text-scale, 1));
+  --font-tool-label: calc(14px * var(--text-scale, 1));
+  --font-tool-label-lh: calc(18px * var(--text-scale, 1));
+  --font-technical: calc(13.25px * var(--text-scale, 1));
+  --font-technical-lh: calc(18px * var(--text-scale, 1));
+  --font-response-meta: calc(12.25px * var(--text-scale, 1));
+  --font-response-meta-lh: calc(16px * var(--text-scale, 1));
+  /* Geometry derived from those roles belongs to the same surface: prose
+     rhythm and the composer's growth ceiling must follow the chat text, not
+     the menu text it is measured against. */
+  --prose-gap: calc(var(--font-response) * 0.62 * var(--density-scale));
+  --composer-max-input-height: calc((max(var(--font-input), var(--font-response)) * 7.25) + (var(--space-1) * 2));
+}
+
+/* A conversation reads at the chat text size; every other surface reads at the
+   menu text size. The agent activity block and the above-composer status dock
+   (with its subagent island) return to the menu text size. */
+.focus-conversation,
+.widget-conversation {
+  --text-scale: var(--chat-font-scale, 1);
+}
+
+.activity-group,
+.agent-status-dock,
+.subagent-island,
+.prompt-nav-panel {
+  --text-scale: var(--ui-font-scale, 1);
+}
+
+/* Keep editable controls inside a conversation at the browser's mobile
+   no-zoom floor, exactly as the shell canvas does. */
+@media (pointer: coarse) {
+  .focus-conversation,
+  .widget-conversation,
+  .activity-group {
+    --font-input: max(16px, calc(15px * var(--text-scale, 1)));
+  }
+}

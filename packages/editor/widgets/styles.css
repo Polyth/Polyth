@@ -1,0 +1,63 @@
+.editor-code {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.editor-code .cm-editor {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  max-width: 100%;
+}
+@media (max-width: 480px), (pointer: coarse) {
+  .cm-textfield {
+    font-size: max(16px, var(--font-input, 1em));
+  }
+}
+
+/* Borderless appearance (body[data-hide-borders="true"]) makes every border
+   transparent with `* { border-color: transparent !important }`. CodeMirror
+   conveys several states through a border only, so keep those signals inside
+   the editor without reintroducing decorative outlines. Each selector carries
+   one more class/type token than the two-token global rule above and wins on
+   specificity, so the exception does not depend on stylesheet order. */
+
+/* The caret and drop cursor are a 2px border-left; transparent means no
+   visible caret at the edit position. Covers primary and secondary cursors. */
+body[data-hide-borders="true"] .cm-editor .cm-cursor,
+body[data-hide-borders="true"] .cm-editor .cm-dropCursor {
+  border-left-color: var(--text) !important;
+}
+
+/* Matching brackets, search matches and fold placeholders use borders for
+   their outline; swap the invisible border for a background/outline wash so
+   they stay legible. */
+body[data-hide-borders="true"] .cm-editor .cm-matchingBracket {
+  background-color: var(--surface-overlay-strong) !important;
+}
+body[data-hide-borders="true"] .cm-editor .cm-nonmatchingBracket {
+  background-color: var(--red-wash, var(--surface-overlay-strong)) !important;
+}
+body[data-hide-borders="true"] .cm-editor .cm-searchMatch {
+  background-color: var(--accent-wash) !important;
+  outline: 1px solid var(--accent-line) !important;
+}
+body[data-hide-borders="true"] .cm-editor .cm-searchMatch.cm-searchMatch-selected {
+  background-color: var(--surface-overlay-strong) !important;
+  outline-color: var(--accent) !important;
+}
+body[data-hide-borders="true"] .cm-editor .cm-foldPlaceholder {
+  background-color: var(--surface-overlay-strong) !important;
+  outline: 1px solid var(--hair-strong, transparent) !important;
+}
+
+/* Tooltips and the completion popup are floating surfaces with a border in
+   the default theme; in borderless mode their border is the only edge, so
+   replace it with the shared overlay shadow and keep the panel fill. */
+body[data-hide-borders="true"] .cm-editor .cm-tooltip {
+  box-shadow: var(--shadow-md) !important;
+}

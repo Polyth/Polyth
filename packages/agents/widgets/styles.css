@@ -1,0 +1,2139 @@
+/* Agents (package `schedule`). Every rule stays under `.agents-page` (the
+ * agents' page, shown in place of Chat) or `.agent-nav` (agents in the
+ * navigator). The page owns its whole canvas: header, scroll and dock. Layout
+ * follows the page's container, never the viewport. */
+
+.agents-page {
+  /* Explanations and secondary lines: one quiet step under the label, never
+     at metadata size. Metadata (times, counts) keeps --font-meta. */
+  --agents-hint: calc(var(--font-body) * .9);
+  container: agents-page / inline-size;
+  --agents-column: min(var(--chat-measure), calc(100% - 2 * var(--conversation-inset)));
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* One reading column, the width of a chat. */
+.agents-page .agents-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: var(--agents-column);
+  min-width: 0;
+  margin-inline: auto;
+  padding-block: var(--space-4) var(--space-6);
+}
+
+.agents-page .agents-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.agents-page .agents-loading {
+  display: grid;
+  gap: var(--space-3);
+  width: var(--agents-column);
+  margin: var(--space-6) auto;
+}
+
+/* The top of a simple page (home, a new agent). */
+.agents-page .agents-bar {
+  flex: none;
+  padding-block-start: max(var(--space-4), var(--safe-top, 0px));
+}
+.agents-page .agents-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: var(--agents-column);
+  min-height: var(--control-h);
+  margin-inline: auto;
+}
+.agents-page .agents-bar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agents-bar-actions { display: flex; flex: none; align-items: center; gap: var(--space-1); }
+.agents-page .agents-nav-button { flex: none; margin-inline-start: calc(var(--space-2) * -1); }
+
+.agents-page .agents-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+}
+/* Explanations never end on a lone word. */
+.agents-page :is(.agents-hint, .agent-field-hint, .agent-prose, .agent-memory-hint, .agents-welcome-body, .agent-feed-empty, .agent-editor-note) {
+  text-wrap: pretty;
+}
+
+/* ---- Glyph -------------------------------------------------------------- */
+
+.agents-page .agent-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text-dim);
+}
+.agents-page .agent-glyph[data-size="lg"] { width: 44px; height: 44px; border-radius: var(--radius-card); }
+.agents-page .agent-glyph[data-size="sm"] { width: 28px; height: 28px; }
+.agents-page .agent-glyph[data-color="blue"] { background: var(--blue-wash); color: var(--blue); }
+.agents-page .agent-glyph[data-color="green"] { background: var(--green-wash); color: var(--green); }
+.agents-page .agent-glyph[data-color="amber"] { background: var(--amber-wash); color: var(--amber); }
+.agents-page .agent-glyph[data-color="purple"] { background: var(--purple-wash); color: var(--purple); }
+.agents-page .agent-glyph[data-color="red"] { background: var(--red-wash); color: var(--red); }
+
+/* ---- Card --------------------------------------------------------------- */
+
+/* State: a dot plus words; colour never carries the meaning alone. */
+
+/* ---- Start: describe the job, or begin from a template ----------------------- */
+
+.agents-page .agents-start { display: flex; flex-direction: column; min-width: 0; }
+.agents-page .agents-start-body { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; }
+/* The question leads the page, as the hero does on a new chat; the bar
+   above only says where you are. */
+.agents-page .agents-start-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-title);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: var(--font-title-lh);
+}
+.agents-page .agents-start-lead { margin: 0; color: var(--text-dim); font-size: var(--font-body); }
+/* The description: written on the composer's material. */
+.agents-page .agents-start-body .agents-start-input {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-composer);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  color: var(--text);
+  font-family: inherit;
+  font-size: max(var(--font-response), var(--font-input));
+  line-height: var(--font-response-lh);
+  resize: none;
+}
+.agents-page .agents-start-body .agents-start-input:focus,
+.agents-page .agents-start-body .agents-start-input:focus-visible {
+  border-color: var(--accent-line);
+  outline: 0;
+  box-shadow: var(--material-glass-highlight), var(--shadow-md), 0 0 0 3px var(--focus-wash);
+}
+/* Examples: sentences to borrow, not buttons that shout. */
+.agents-page .agents-examples { display: grid; gap: 0; margin-inline: calc(var(--space-2) * -1); }
+/* Ideas to start from: one tap puts the words in the box. */
+.agents-page .agents-example {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--agents-hint);
+  text-align: start;
+  cursor: pointer;
+}
+.agents-page .agents-example > .ui-icon { flex: none; color: var(--faint); transition: color var(--motion-fast) var(--motion-ease); }
+@media (hover: hover) {
+  .agents-page .agents-example:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+  .agents-page .agents-example:hover:where(:not(:disabled)) > .ui-icon { color: var(--amber); }
+}
+.agents-page .agents-example:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.agents-page .agents-start-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.agents-page .agents-start-actions { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin-inline-start: auto; }
+
+/* ---- Settings: one page of open sections --------------------------------- */
+/* Nothing folds: each section is a heading, a sentence on what it decides and
+   its fields, read top to bottom like a form on paper. Labels read at the
+   label caliber; explanations one quiet step below, never at metadata size. */
+
+.agents-page .agent-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+  min-width: 0;
+}
+.agents-page .agent-form-column { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+
+.agents-page .agent-form { display: flex; flex-direction: column; min-width: 0; margin: 0; padding: 0; border: 0; }
+.agents-page .agent-file { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.agents-page .agent-file-text { width: 100%; font: var(--font-code)/1.6 var(--mono); }
+.agents-page .agent-file-error { margin: 0; color: var(--red); font-size: var(--font-meta); }
+.agents-page .agent-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block: var(--space-5);
+  border-top: 1px solid var(--surface-divider);
+}
+.agents-page .agent-section:first-child { padding-block-start: var(--space-3); border-top: 0; }
+.agents-page .agent-section-header { display: flex; flex-direction: column; gap: var(--space-1); }
+.agents-page .agent-section-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+}
+.agents-page .agent-section-lead {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.agents-page .agent-section-body { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+
+.agents-page .agent-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.agents-page .agent-field-label { margin: 0; color: var(--text); font-size: var(--font-label); font-weight: 550; }
+.agents-page .agent-field-hint,
+.agents-page .agent-prose {
+  margin: 0;
+  max-width: 65ch;
+  color: var(--muted);
+  font-size: var(--agents-hint, var(--font-meta));
+  line-height: 1.45;
+}
+.agents-page .agent-prose { color: var(--text-dim); }
+.agents-page .agent-field-row { display: flex; flex-wrap: wrap; gap: var(--space-4); min-width: 0; }
+.agents-page .agent-field-row > * { flex: 1 1 14rem; }
+.agents-page .agent-model { display: flex; min-width: 0; }
+.agents-page .agent-backups > span:has(> button) { align-self: flex-start; }
+.agents-page .agent-backup-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.agents-page .agent-backup { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.agents-page .agent-backup-rank {
+  flex: none;
+  min-width: 1.5em;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.agents-page .agent-backup-picker { flex: 1 1 auto; }
+.agents-page .agent-backup-actions { display: inline-flex; flex: none; gap: 2px; }
+.agents-page .agent-charter { width: 100%; font-family: inherit; line-height: 1.55; }
+
+.agents-page .agent-look { display: flex; flex-direction: column; gap: var(--space-2); }
+.agents-page .agent-icon-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.agents-page .agent-icon-choice,
+.agents-page .agent-color-choice {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+  min-width: var(--hit-min);
+  min-height: var(--hit-min);
+}
+.agents-page .agent-icon-choice[aria-pressed="true"] { border-color: var(--accent-line); background: var(--surface-overlay); }
+.agents-page :is(.agent-icon-choice, .agent-color-choice):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.agents-page .agent-color-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/* 26px swatch; on touch the transparent padding (not the swatch) grows to the 44px target. */
+.agents-page .agent-color-choice {
+  box-sizing: content-box;
+  width: 26px;
+  height: 26px;
+  min-width: 0;
+  min-height: 0;
+  padding: calc(max(0px, var(--hit-min) - 26px) / 2);
+  border: 0;
+  border-radius: 50%;
+  background: var(--faint);
+  background-clip: content-box;
+}
+.agents-page .agent-color-choice[data-color="blue"] { background: var(--blue); }
+.agents-page .agent-color-choice[data-color="green"] { background: var(--green); }
+.agents-page .agent-color-choice[data-color="amber"] { background: var(--amber); }
+.agents-page .agent-color-choice[data-color="purple"] { background: var(--purple); }
+.agents-page .agent-color-choice[data-color="red"] { background: var(--red); }
+.agents-page .agent-color-choice[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--bg); outline: 2px solid var(--accent-line); outline-offset: calc(-1 * max(0px, var(--hit-min) - 26px) / 2 + 2px); }
+
+/* Wakes: one row each, a hairline between; a row's fields sit under its title. */
+.agents-page .agent-wakes { display: flex; flex-direction: column; min-width: 0; }
+.agents-page .agent-wake { display: flex; flex-direction: column; gap: var(--space-2); padding-block: var(--space-4); }
+.agents-page .agent-wake:first-child { padding-block-start: 0; }
+.agents-page .agent-wake + .agent-wake { border-top: 1px solid var(--surface-divider); }
+.agents-page .agent-wake-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+}
+.agents-page .agent-wake-title { min-width: 0; color: var(--text); font-size: var(--font-label); font-weight: 550; }
+.agents-page .agent-wake-note { margin: 0; color: var(--muted); font-size: var(--agents-hint, var(--font-meta)); font-weight: 400; line-height: 1.45; }
+.agents-page .agent-wake-title > .agent-wake-note { margin-inline-start: var(--space-2); }
+.agents-page .agent-wake-body { display: flex; flex-direction: column; gap: var(--space-4); padding-block-start: var(--space-1); }
+.agents-page .agent-wake-body:empty { display: none; }
+.agents-page .agent-wake-legacy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--text); }
+
+.agents-page .agent-range { display: flex; align-items: center; gap: var(--space-3); max-width: 24rem; }
+.agents-page .agent-range input { flex: 1; min-height: var(--hit-min); accent-color: var(--accent); }
+.agents-page .agent-range output { min-width: 3ch; color: var(--text); font-size: var(--font-label); font-variant-numeric: tabular-nums; }
+.agents-page .agent-budget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-3); }
+.agents-page .agent-budget-grid .ui-input { font-variant-numeric: tabular-nums; }
+
+/* Settings: one quiet line on when changes apply, the advanced switch and,
+   with it, the file view. */
+.agents-page .agent-editor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-height: var(--control-h);
+}
+.agents-page .agent-editor-note {
+  flex: 1 1 14rem;
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--agents-hint, var(--font-meta));
+  line-height: 1.45;
+}
+.agents-page .agent-editor-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-inline-start: auto; }
+.agents-page .agent-advanced-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 500;
+}
+/* Simple settings end on what more there is. */
+.agents-page .agent-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: var(--space-5) var(--space-2);
+  border-top: 1px solid var(--surface-divider);
+}
+.agents-page .agent-more-copy { display: flex; flex: 1 1 16rem; flex-direction: column; gap: var(--space-1); min-width: 0; margin: 0; color: var(--text); font-size: var(--font-label); font-weight: 550; }
+.agents-page .agent-more-copy .agent-field-hint { font-weight: 400; }
+.agents-page .agent-upcoming {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-3);
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.agents-page .agent-upcoming > span { color: var(--muted); font-weight: 600; }
+.agents-page .agent-dry-run > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  color: var(--text-dim);
+  font-size: var(--agents-hint);
+  font-weight: 600;
+  cursor: pointer;
+}
+.agents-page .agent-dry-run > summary > span { color: var(--faint); font-weight: 450; font-variant-numeric: tabular-nums; }
+.agents-page .agent-dry-run > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: var(--radius-control); }
+.agents-page .agent-dry-run pre {
+  max-height: 18rem;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text-dim);
+  font: var(--font-meta)/1.55 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Saving: a dock at the foot of the page, only while there is something to save. */
+.agents-page .agent-footer {
+  position: sticky;
+  z-index: 2;
+  inset-block-end: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-block-start: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+}
+.agents-page .agent-footer:empty { display: none; }
+.agents-page .agent-footer-reason { margin-inline-end: auto; color: var(--muted); font-size: var(--agents-hint); }
+
+/* ---- Schedule fields (shared by the wake section) ------------------------ */
+
+.agents-page .planner-when { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.agents-page .planner-when-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.agents-page .ui-input:is(.planner-date-input, .planner-time-input) {
+  width: auto;
+  min-width: 6.5rem;
+  padding-inline: var(--control-pad-x-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.agents-page .ui-input.planner-date-input { min-width: 9.5rem; }
+.agents-page .ui-input::-webkit-calendar-picker-indicator { margin-inline-start: var(--space-1); opacity: 0.55; cursor: pointer; }
+.agents-page .planner-weekdays {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+}
+.agents-page .planner-weekday {
+  min-width: 2.6rem;
+  min-height: max(28px, var(--hit-min));
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .agents-page .planner-weekday:hover:not(:disabled) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.agents-page .planner-weekday[aria-pressed="true"] { background: var(--accent-wash); color: var(--accent); }
+.agents-page .planner-day-field { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-dim); font-size: var(--agents-hint); font-weight: 500; }
+.agents-page .ui-input.planner-day-input { width: 5rem; font-variant-numeric: tabular-nums; }
+.agents-page .planner-hint { margin: 0; color: var(--muted); font-size: var(--agents-hint); }
+
+/* ---- Event wakes -------------------------------------------------------- */
+
+.agents-page .agent-wake-preview {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--agents-hint);
+  font-variant-numeric: tabular-nums;
+}
+.agents-page .agent-field-hint.is-warning { color: var(--amber-on-wash); }
+.agents-page .agent-dry-run-events > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  color: var(--text-dim);
+  font-size: var(--agents-hint);
+  font-weight: 600;
+  cursor: pointer;
+}
+.agents-page .agent-dry-run-events > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: var(--radius-control); }
+.agents-page .agent-dry-run-events ul { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-1) 0 0; padding: 0; list-style: none; }
+.agents-page .agent-dry-run-events li { display: flex; gap: var(--space-2); min-width: 0; font-size: var(--agents-hint); }
+.agents-page .agent-dry-run-mark { flex: none; width: 1.2em; color: var(--faint); font-weight: 700; text-align: center; }
+.agents-page .agent-dry-run-events li[data-matched] .agent-dry-run-mark { color: var(--green); }
+.agents-page .agent-dry-run-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.agents-page .agent-dry-run-why { color: var(--muted); font-variant-numeric: tabular-nums; }
+.agents-page .agent-choice-group { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: 0; padding: 0; border: 0; }
+.agents-page .agent-choice-group > legend { width: 100%; margin-bottom: var(--space-1); padding: 0; }
+.agents-page .agent-filter-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) minmax(7rem, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+.agents-page .agent-pace { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.agents-page .agent-pace-item { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--agents-hint); }
+.agents-page .agent-event-log { display: flex; flex-direction: column; gap: var(--space-1); }
+.agents-page .agent-event-log h4 { margin: 0; }
+.agents-page .agent-event-log ol {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.agents-page .agent-event-log li { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.agents-page .agent-event-log time { color: var(--faint); }
+.agents-page .agent-event-log li:not([data-outcome="fired"]) span { color: var(--amber-on-wash); }
+
+.agents-page .agent-hook { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.agents-page .agent-hook-url {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 2px 2px 2px var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+}
+.agents-page .agent-hook-url code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font: var(--font-code)/1.5 var(--mono);
+  user-select: all;
+}
+.agents-page .agent-hook-example code { white-space: pre-wrap; user-select: text; color: var(--text-dim); }
+
+.agents-page .agent-script-text { width: 100%; font: var(--font-code)/1.55 var(--mono); }
+.agents-page .agent-script-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.agents-page .agent-script-outcome { min-width: 0; color: var(--text-dim); font-size: var(--agents-hint); overflow-wrap: anywhere; }
+
+/* ---- Context and cache ---------------------------------------------------- */
+
+.agents-page .agent-context { display: flex; flex-direction: column; gap: var(--space-4); padding-top: var(--space-2); }
+.agents-page .agent-context-block { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.agents-page .agent-context-block + .agent-context-block { padding-top: var(--space-4); border-top: 1px solid var(--surface-divider); }
+/* Row titles under the section's label, not headings of their own. */
+.agents-page .agent-context-block h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-body);
+  font-weight: 550;
+}
+.agents-page .agent-context-block h3 > span { color: var(--muted); font-size: var(--font-meta); font-weight: 500; font-variant-numeric: tabular-nums; }
+.agents-page .agent-context-note { margin: 0; color: var(--text-dim); font-size: var(--agents-hint); }
+.agents-page .agent-meter {
+  position: relative;
+  height: 8px;
+  overflow: visible;
+  border-radius: var(--radius-round);
+  background: var(--sunken);
+}
+.agents-page .agent-meter-fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: inline-size var(--motion-normal) var(--motion-ease);
+}
+.agents-page .agent-meter-mark {
+  position: absolute;
+  inset-block: -3px;
+  inline-size: 2px;
+  border-radius: var(--radius-round);
+  background: var(--text-dim);
+}
+.agents-page .agent-context-line { margin: 0; color: var(--text-dim); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+.agents-page .agent-context-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.agents-page .agent-layers,
+.agents-page .agent-cache-bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  background: var(--sunken);
+}
+.agents-page .agent-layers > span,
+.agents-page .agent-cache-bar > span { flex-basis: 0; min-width: 0; }
+.agents-page [data-layer="charter"] { --swatch: var(--purple); }
+.agents-page [data-layer="journal"] { --swatch: var(--blue); }
+.agents-page [data-layer="wake"] { --swatch: var(--green); }
+.agents-page [data-part="read"] { --swatch: var(--green); }
+.agents-page [data-part="write"] { --swatch: var(--amber); }
+.agents-page [data-part="input"] { --swatch: var(--faint); }
+.agents-page :is(.agent-layers, .agent-cache-bar) > span { background: var(--swatch); }
+.agents-page .agent-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.agents-page .agent-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.agents-page .agent-legend li::before { content: ""; width: 8px; height: 8px; border-radius: var(--radius-round); background: var(--swatch); }
+.agents-page .agent-legend b { color: var(--text); font-weight: 600; }
+.agents-page .agent-cache-runs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.agents-page .agent-cache-runs li {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr) 3.5ch;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.agents-page .agent-cache-runs b { color: var(--text); font-weight: 600; text-align: end; }
+
+/* ---- Overview ----------------------------------------------------------- */
+
+/* Status: a dot plus words; colour never carries the meaning alone. */
+
+@keyframes agents-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Templates: rows like the home's, a glyph and two lines each. */
+.agents-page .agents-templates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: 2px var(--space-2);
+  margin-inline: calc(var(--space-3) * -1);
+}
+.agents-page .agents-template {
+  display: grid;
+  grid-template-columns: var(--icon-lg) minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .agents-page .agents-template:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.agents-page .agents-template:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.agents-page .agents-template-glyph { display: grid; place-items: center; height: 1.4em; color: var(--muted); }
+.agents-page .agents-template-glyph[data-color="blue"] { color: color-mix(in srgb, var(--blue) 78%, var(--text-dim)); }
+.agents-page .agents-template-glyph[data-color="green"] { color: color-mix(in srgb, var(--green) 78%, var(--text-dim)); }
+.agents-page .agents-template-glyph[data-color="amber"] { color: color-mix(in srgb, var(--amber) 72%, var(--text-dim)); }
+.agents-page .agents-template-glyph[data-color="purple"] { color: color-mix(in srgb, var(--purple) 78%, var(--text-dim)); }
+.agents-page .agents-template-glyph[data-color="red"] { color: color-mix(in srgb, var(--red) 72%, var(--text-dim)); }
+.agents-page .agents-template-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.agents-page .agents-template-copy strong { color: var(--text); font-size: var(--font-label); font-weight: 550; }
+.agents-page .agents-template-copy span { color: var(--muted); font-size: var(--agents-hint); line-height: var(--font-meta-lh); }
+.agents-page .agents-start-templates { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-5); }
+
+.agents-page .agents-new { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+
+/* ---- Agent page --------------------------------------------------------- */
+
+/* ---- Notebook ----------------------------------------------------------- */
+
+.agents-page .agent-feedback-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.agents-page .agent-feedback-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--hair);
+  font-size: var(--agents-hint);
+}
+.agents-page .agent-feedback-list li[data-verdict="up"] > .ui-icon { color: var(--green); }
+.agents-page .agent-feedback-list li[data-verdict="down"] > .ui-icon { color: var(--amber); }
+.agents-page .agent-feedback-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--text-dim); }
+.agents-page .agent-feedback-what strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+.agents-page .agent-feedback-when { color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Context and cost, folded under the settings. */
+
+.agents-page .agent-wake-title { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---- Narrow containers (phone) ------------------------------------------ */
+
+@container agents-page (max-width: 520px) {
+  .agents-page .agents-start-body { margin-top: var(--space-2); }
+  .agents-page .agents-start-title { font-size: var(--font-heading); }
+  .agents-page .agents-start-actions { width: 100%; }
+  .agents-page .agents-start-actions > .ui-btn { flex: 1; }
+  .agents-page .agent-section { padding-block: var(--space-4); }
+  .agents-page .agent-editor-tools { width: 100%; justify-content: space-between; margin-inline-start: 0; }
+  .agents-page .planner-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 100%; }
+  .agents-page .planner-weekday { min-width: 0; }
+  .agents-page .agent-footer > .ui-btn { flex: 1 1 auto; }
+  .agents-page .agent-footer-reason { flex-basis: 100%; }
+  .agents-page .agent-filter-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .agents-page .agent-filter-row > .ui-input { grid-column: 1 / 3; grid-row: 2; }
+}
+
+/* ---- Navigator: a project's agents, above its pinned chats ------------------- */
+/* Rendered inside the host's session list. An agent row is a peer of a chat
+ * row: the same geometry, hover and current-row highlight, the same state
+ * marks, the same menu. Nothing is highlighted at rest. */
+
+.agent-nav {
+  --agent-nav-indent: var(--nav-indent-session, 2px);
+  --agent-nav-lead: var(--session-lead-size, 15px);
+  --agent-nav-gap: var(--session-lead-gap, 6px);
+  --agent-nav-row: var(--nav-row-session, 34px);
+  --agent-nav-pill: var(--session-pill-inset, 6px);
+  --agent-nav-menu: var(--session-menu-size, 28px);
+  --agent-nav-size: var(--nav-session-size, var(--font-label));
+  /* A state mark or glyph, centred in the leading column. */
+  --agent-nav-mark: var(--agent-nav-lead);
+  /* Touch floor under a row; the phone navigator sets its own row height. */
+  --agent-nav-hit: var(--hit-min);
+  position: relative;
+  z-index: 1;
+  margin-block-end: calc(var(--space-2) * var(--density-scale, 1));
+}
+/* Phone navigator: the chat rows' grid (MobileNavigator.css). The chevron and
+   every agent's mark sit in the leading column centred under the project
+   mark, the label and names start on the session-title edge, ⋮ shares the
+   chat rows' trailing column, and a row is a chat row's height at every
+   density, so the group reads as part of the list, not a box beside it. */
+.agent-nav[data-surface="phone"] {
+  --agent-nav-indent: var(--nav-row-inset, var(--space-2));
+  --agent-nav-lead: var(--nav-lead-col, 32px);
+  --agent-nav-gap: var(--nav-lead-gap, var(--space-3));
+  --agent-nav-row: var(--nav-row-session, var(--tap));
+  --agent-nav-mark: var(--nav-status-slot, 18px);
+  --agent-nav-hit: 0px;
+  --agent-nav-pill: 0px;
+  --agent-nav-menu: var(--tap);
+  /* ⋮ draws the chat rows' press circle, inset from the row's end so its
+     glyph lands on the navigator's end axis. */
+  --agent-nav-wash: var(--nav-dots-wash, 28px);
+  --agent-nav-inset: var(--nav-dots-inset, 0px);
+  margin-block-end: 0;
+}
+/* Open, the group is a section of its own: one rhythm step before the
+   project's chats keeps them from reading as more agents. Folded, the
+   header is just one more line of the list. */
+.agent-nav[data-surface="phone"]:not([data-collapsed]) {
+  margin-block-end: var(--space-2);
+}
+
+/* Group header: folds the agents away. Quiet: it labels, it does not compete
+   with the rows. */
+.agent-nav .agent-nav-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: max(calc(var(--agent-nav-row) - 4px), var(--agent-nav-hit));
+}
+.agent-nav[data-surface="phone"] .agent-nav-head { min-height: var(--agent-nav-row); }
+.agent-nav .agent-nav-toggle {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: var(--agent-nav-lead) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--agent-nav-gap);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: max(calc(var(--agent-nav-row) - 4px), var(--agent-nav-hit));
+  padding-block: 0;
+  padding-inline: var(--agent-nav-indent) 4px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-align: start;
+  cursor: pointer;
+}
+.agent-nav .agent-nav-toggle::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block: 2px;
+  inset-inline: calc(var(--agent-nav-indent) - var(--agent-nav-pill)) 0;
+  border-radius: var(--radius-control);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.agent-nav .agent-nav-chevron {
+  justify-self: center;
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+  transform: rotate(90deg);
+  transition: transform var(--motion-normal) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.agent-nav .agent-nav-toggle[aria-expanded="false"] .agent-nav-chevron { transform: none; }
+.agent-nav .agent-nav-toggle[aria-expanded="false"]:dir(rtl) .agent-nav-chevron { transform: scaleX(-1); }
+.agent-nav .agent-nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-nav .agent-nav-count {
+  color: var(--faint);
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+}
+/* Folded, the header still says who waits, who works and who has news. */
+.agent-nav .agent-nav-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--agent-nav-mark);
+}
+.agent-nav .agent-nav-summary > .agent-nav-mark {
+  width: calc(var(--agent-nav-mark) * .86);
+  height: calc(var(--agent-nav-mark) * .86);
+}
+/* Phone: the header is a caption in the navigator's own caption style (its
+   date dividers): small caps rhythm on the title edge, a small chevron in
+   the leading column, and a folded summary whose marks share one size. */
+.agent-nav[data-surface="phone"] .agent-nav-toggle {
+  color: var(--faint);
+  font-size: max(10px, calc(var(--font-meta) * .9));
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.agent-nav[data-surface="phone"] .agent-nav-chevron {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.2;
+}
+.agent-nav[data-surface="phone"] .agent-nav-summary { gap: var(--space-1); }
+.agent-nav[data-surface="phone"] .agent-nav-summary > .agent-nav-mark {
+  width: calc(var(--icon-sm) - 2px);
+  height: calc(var(--icon-sm) - 2px);
+  font-size: calc(var(--font-meta) * .75);
+}
+.agent-nav .agent-nav-head-actions {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.agent-nav .agent-nav-head-action {
+  display: grid;
+  place-items: center;
+  width: var(--agent-nav-menu);
+  height: var(--agent-nav-menu);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.agent-nav .agent-nav-head-action[aria-expanded="true"] { color: var(--text); background: var(--panel); }
+@media (hover: hover) {
+  .agent-nav .agent-nav-head-action:hover:where(:not(:disabled)) { color: var(--text); background: var(--panel); }
+}
+.agent-nav .agent-nav-head-action:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+@media (hover: hover) and (pointer: fine) {
+  .agent-nav .agent-nav-head:hover .agent-nav-toggle::before { background: color-mix(in srgb, var(--session-blue, var(--accent)) 6%, transparent); opacity: 1; }
+  .agent-nav .agent-nav-head:hover .agent-nav-toggle,
+  .agent-nav .agent-nav-head:hover .agent-nav-chevron { color: var(--text-dim); }
+  .agent-nav .agent-nav-head:is(:hover, .menu-open) .agent-nav-head-actions,
+  .agent-nav .agent-nav-head:has(:focus-visible, [aria-expanded="true"]) .agent-nav-head-actions { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none), (pointer: coarse) {
+  .agent-nav .agent-nav-head-actions { opacity: 1; pointer-events: auto; }
+}
+.agent-nav .agent-nav-toggle:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+
+/* One agent. */
+.agent-nav .agent-nav-row {
+  position: relative;
+  min-height: var(--agent-nav-row);
+}
+.agent-nav .agent-nav-btn {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: var(--agent-nav-lead) minmax(0, 1fr) max-content;
+  align-items: center;
+  column-gap: var(--agent-nav-gap);
+  width: 100%;
+  min-height: max(var(--agent-nav-row), var(--agent-nav-hit));
+  padding-block: 0;
+  padding-inline: var(--agent-nav-indent) 4px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--agent-nav-size);
+  line-height: 1.32;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.agent-nav .agent-nav-btn::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block: 2px;
+  inset-inline: calc(var(--agent-nav-indent) - var(--agent-nav-pill)) 0;
+  border-radius: var(--radius-control);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .agent-nav .agent-nav-row:hover .agent-nav-btn::before {
+    background: color-mix(in srgb, var(--session-blue, var(--accent)) 6%, transparent);
+    opacity: 1;
+  }
+}
+/* The current row: its page is the one in place of Chat. */
+.agent-nav .agent-nav-row.active .agent-nav-btn::before {
+  inset-block: 0;
+  inset-inline-end: -2px;
+  background: var(--material-glass);
+  opacity: 1;
+}
+.agent-nav .agent-nav-btn:active:where(:not(:disabled))::before { background: color-mix(in srgb, var(--session-blue, var(--accent)) 9%, transparent); opacity: 1; }
+.agent-nav .agent-nav-btn:focus-visible { outline: 0; }
+.agent-nav .agent-nav-btn:focus-visible::before { opacity: 1; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+
+.agent-nav .agent-nav-lead {
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: var(--agent-nav-mark);
+  height: var(--agent-nav-mark);
+  color: var(--muted);
+}
+.agent-nav .agent-nav-glyph { display: grid; place-items: center; width: 100%; height: 100%; }
+.agent-nav .agent-nav-glyph .ui-icon { width: 100%; height: 100%; }
+/* Identity tints are softened toward the ink, so a state mark always wins. */
+.agent-nav .agent-nav-glyph[data-color="blue"] { color: color-mix(in srgb, var(--blue) 72%, var(--muted)); }
+.agent-nav .agent-nav-glyph[data-color="green"] { color: color-mix(in srgb, var(--green) 72%, var(--muted)); }
+.agent-nav .agent-nav-glyph[data-color="amber"] { color: color-mix(in srgb, var(--amber) 66%, var(--muted)); }
+.agent-nav .agent-nav-glyph[data-color="purple"] { color: color-mix(in srgb, var(--purple) 72%, var(--muted)); }
+.agent-nav .agent-nav-glyph[data-color="red"] { color: color-mix(in srgb, var(--red) 66%, var(--muted)); }
+
+/* State marks: the same as a chat row's. */
+.agent-nav .agent-nav-mark { display: grid; place-items: center; width: 100%; height: 100%; }
+.agent-nav .agent-nav-mark .ui-icon { width: 100%; height: 100%; }
+.agent-nav .agent-nav-mark[data-mark="attention"] { color: var(--amber); }
+.agent-nav .agent-nav-mark[data-mark="stopped"] {
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 30%, transparent);
+  color: var(--red);
+  font-size: calc(var(--agent-nav-size) * .62);
+  font-weight: 800;
+  line-height: 1;
+}
+.agent-nav .agent-nav-spinner { width: 12px; height: 12px; }
+.agent-nav .agent-nav-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--session-blue, var(--accent));
+}
+.agent-nav .agent-nav-dot[data-tone="alert"] { background: var(--amber); }
+
+.agent-nav .agent-nav-title {
+  min-width: 0;
+  overflow: hidden;
+  letter-spacing: -0.012em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The name carries dir="auto"; a short name in the other script
+     direction still sits on the row's own start edge. */
+  text-align: -webkit-match-parent;
+  text-align: match-parent;
+}
+.agent-nav .agent-nav-row:is(.active, .unread) .agent-nav-title { color: var(--text); }
+.agent-nav .agent-nav-row.unread .agent-nav-title { font-weight: 600; }
+.agent-nav .agent-nav-row[data-paused] :is(.agent-nav-title, .agent-nav-glyph),
+.agent-nav .agent-nav-row[data-phase="draft"] :is(.agent-nav-title, .agent-nav-glyph) { color: var(--muted); }
+.agent-nav .agent-nav-row.active[data-phase] .agent-nav-title { color: var(--text); }
+
+.agent-nav .agent-nav-meta {
+  color: var(--muted);
+  font-size: calc(var(--agent-nav-size) * .86);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.agent-nav .agent-nav-row[data-phase="working"] .agent-nav-meta {
+  color: var(--session-blue, var(--accent));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ⋯: the same trigger and slot as a chat row's. */
+.agent-nav .agent-nav-more {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  inset-inline-end: 2px;
+  display: grid;
+  place-items: center;
+  width: var(--agent-nav-menu);
+  min-width: var(--agent-nav-menu);
+  height: var(--agent-nav-menu);
+  padding: 0;
+  translate: 0 -50%;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+}
+.agent-nav .agent-nav-more .ui-icon { width: 16px; height: 16px; }
+.agent-nav .agent-nav-more[aria-expanded="true"] { color: var(--text); background: var(--panel); }
+@media (hover: hover) {
+  .agent-nav .agent-nav-more:hover:where(:not(:disabled)) { color: var(--text); background: var(--panel); }
+}
+.agent-nav .agent-nav-more:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+@media (hover: hover) and (pointer: fine) {
+  .agent-nav .agent-nav-row:is(:hover, .menu-open) .agent-nav-more,
+  .agent-nav .agent-nav-row:has(:focus-visible) .agent-nav-more { opacity: 1; pointer-events: auto; }
+  .agent-nav .agent-nav-row:is(:hover, .menu-open) .agent-nav-meta,
+  .agent-nav .agent-nav-row:has(:focus-visible) .agent-nav-meta { visibility: hidden; }
+}
+/* Touch: the open row offers its menu; every row opens it with a long press. */
+@media (hover: none), (pointer: coarse) {
+  .agent-nav .agent-nav-row:is(.active, .menu-open) .agent-nav-more { opacity: 1; pointer-events: auto; }
+  .agent-nav .agent-nav-row:is(.active, .menu-open) .agent-nav-meta { visibility: hidden; }
+}
+/* Phone navigator: like its chat rows, every row shows ⋮ in its own slot on
+   the row's end, and the trailing measure ends where a chat row's marks do:
+   tucked --nav-mark-tuck inside the ⋮ control, beside the dots. */
+.agent-nav[data-surface="phone"] .agent-nav-btn {
+  padding-inline-end: calc(var(--agent-nav-menu) - var(--nav-mark-tuck, var(--space-2)));
+}
+.agent-nav[data-surface="phone"] .agent-nav-more { inset-inline-end: var(--agent-nav-inset); opacity: 1; pointer-events: auto; }
+.agent-nav[data-surface="phone"] .agent-nav-head-actions { inset-inline-end: var(--agent-nav-inset); }
+/* Like a chat row: no column gap (an empty meta column would keep one), so
+   a name with no meta runs to the marks' edge. The gap after the lead is a
+   track of its own (the name carries dir="auto", so its own logical
+   padding would flip with a name in the other script); the meta brings its
+   own lead-in. */
+.agent-nav[data-surface="phone"] .agent-nav-btn {
+  grid-template-columns: var(--agent-nav-lead) var(--agent-nav-gap) minmax(0, 1fr) max-content;
+  column-gap: 0;
+}
+.agent-nav[data-surface="phone"] .agent-nav-lead { grid-column: 1; }
+.agent-nav[data-surface="phone"] .agent-nav-title { grid-column: 3; }
+.agent-nav[data-surface="phone"] .agent-nav-meta { grid-column: 4; margin-inline-start: var(--space-2); }
+/* The navigator's edge column, like a chat row's ⋮: the visible control is
+   a circle centred on --nav-axis, and a transparent ::after keeps the 44px
+   target running from inside the circle out to the row's end. */
+.agent-nav[data-surface="phone"] :is(.agent-nav-more, .agent-nav-head-action) {
+  width: var(--agent-nav-wash);
+  min-width: var(--agent-nav-wash);
+  height: var(--agent-nav-wash);
+  border-radius: var(--radius-round);
+}
+.agent-nav[data-surface="phone"] .agent-nav-head-action { position: relative; }
+.agent-nav[data-surface="phone"] :is(.agent-nav-more, .agent-nav-head-action)::after {
+  content: "";
+  position: absolute;
+  inset-block: calc((var(--agent-nav-wash) - var(--agent-nav-menu)) / 2);
+  inset-inline: calc(var(--agent-nav-wash) + var(--agent-nav-inset) - var(--agent-nav-menu)) calc(var(--agent-nav-inset) * -1);
+}
+/* The navigator's quiet ink for what repeats on every row; the current
+   row's menu is one step firmer, as on a chat row. */
+.agent-nav[data-surface="phone"] :is(.agent-nav-more, .agent-nav-head-action) {
+  color: var(--nav-quiet-ink, var(--muted));
+}
+.agent-nav[data-surface="phone"] .agent-nav-row.active .agent-nav-more { color: var(--muted); }
+.agent-nav[data-surface="phone"] :is(.agent-nav-more, .agent-nav-head-action) .ui-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+/* The chat rows' ⋮ is three solid 2-unit dots; a stroked Lucide ellipsis
+   reads a size heavier beside it. Fill the dots instead of stroking them. */
+.agent-nav[data-surface="phone"] :is(.agent-nav-more, .agent-nav-head-action) .ui-icon circle {
+  fill: currentColor;
+  stroke: none;
+}
+.agent-nav[data-surface="phone"] .agent-nav-btn { line-height: var(--nav-session-lh, 1.32); }
+.agent-nav[data-surface="phone"] .agent-nav-meta { font-size: var(--font-meta); }
+/* A next wake or a paused state is quiet; a running clock keeps its accent. */
+.agent-nav[data-surface="phone"] .agent-nav-row:not([data-phase="working"]) .agent-nav-meta { color: var(--faint); }
+.agent-nav[data-surface="phone"] .agent-nav-row .agent-nav-meta { visibility: visible; }
+
+.agent-nav .agent-nav-rename {
+  box-sizing: border-box;
+  width: calc(100% - var(--agent-nav-indent) - var(--agent-nav-lead) - var(--agent-nav-gap) + 7px - 8px);
+  min-height: calc(var(--agent-nav-row) - 8px);
+  margin-block: 4px;
+  margin-inline: calc(var(--agent-nav-indent) + var(--agent-nav-lead) + var(--agent-nav-gap) - 7px) 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--accent);
+  border-radius: calc(var(--radius-control) - 2px);
+  background: var(--sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--agent-nav-size);
+}
+.agent-nav .agent-nav-rename:focus { outline: 0; box-shadow: 0 0 0 3px var(--focus-wash); }
+
+/* The talk placeholder stays one line; the hint under it says the rest. */
+
+/* ==== The agent's page, in place of Chat =============================== */
+
+.agents-page .agent-screen {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Header: who it is and what it does now; then its three views. */
+.agents-page .agent-head {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  padding-block-start: max(var(--space-4), var(--safe-top, 0px));
+}
+.agents-page .agent-head-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: var(--agents-column);
+  min-width: 0;
+  margin-inline: auto;
+}
+.agents-page .agent-head-glyph { display: grid; flex: none; place-items: center; }
+.agents-page .agent-head-glyph .agent-mark { --mark: 32px; --mark-ring: 2px; }
+.agents-page .agent-head-glyph .agent-mark .ui-icon { width: var(--icon-md); height: var(--icon-md); }
+.agents-page :is(.agent-head-glyph, .agents-home-glyph)[data-color="blue"] { color: color-mix(in srgb, var(--blue) 78%, var(--text-dim)); }
+.agents-page :is(.agent-head-glyph, .agents-home-glyph)[data-color="green"] { color: color-mix(in srgb, var(--green) 78%, var(--text-dim)); }
+.agents-page :is(.agent-head-glyph, .agents-home-glyph)[data-color="amber"] { color: color-mix(in srgb, var(--amber) 72%, var(--text-dim)); }
+.agents-page :is(.agent-head-glyph, .agents-home-glyph)[data-color="purple"] { color: color-mix(in srgb, var(--purple) 78%, var(--text-dim)); }
+.agents-page :is(.agent-head-glyph, .agents-home-glyph)[data-color="red"] { color: color-mix(in srgb, var(--red) 72%, var(--text-dim)); }
+.agents-page .agent-head-titles {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+.agents-page .agent-head-name {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agent-head-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-head-status > span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agent-head-status > i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.agents-page .agent-head-status[data-tone="attention"] { color: var(--amber); }
+.agents-page .agent-head-status[data-tone="danger"] { color: var(--red); }
+.agents-page .agent-head-status[data-tone="working"] { color: var(--accent); }
+.agents-page .agent-head-tag {
+  flex: none;
+  color: var(--faint);
+}
+.agents-page .agent-head-tag::before { content: "·"; margin-inline-end: var(--space-2); }
+.agents-page .agent-head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+/* Stop is a small filled square, as in the composer. */
+.agents-page .agent-stop .ui-icon { width: 12px; height: 12px; fill: currentColor; }
+.agents-page .agent-head-tabs {
+  width: var(--agents-column);
+  margin: var(--space-3) auto 0;
+}
+.agents-page .agent-head-tabs .ui-tabs { width: max-content; max-width: 100%; }
+.agents-page .agent-tab-dirty { display: inline-flex; align-items: center; gap: var(--space-1); }
+.agents-page .agent-tab-dirty > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.agents-page .agent-notices {
+  width: var(--agents-column);
+  margin: var(--space-3) auto 0;
+}
+
+/* ---- Conversation --------------------------------------------------------- */
+
+.agents-page .agent-conversation {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.agents-page .agent-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  /* The newest lines meet the dock under a soft edge, as in a chat. */
+  mask-image: linear-gradient(to bottom, transparent 0, black var(--space-4), black calc(100% - var(--space-4)), transparent 100%);
+}
+.agents-page .agent-feed-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--conversation-message-gap);
+  width: var(--agents-column);
+  min-height: 100%;
+  margin-inline: auto;
+  padding-block: var(--space-5);
+}
+.agents-page .agent-feed-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-meta);
+}
+.agents-page .agent-feed-empty {
+  display: grid;
+  gap: var(--space-2);
+  max-inline-size: 46ch;
+  margin: auto;
+  color: var(--muted);
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+}
+.agents-page .agent-feed-empty p { margin: 0; }
+.agents-page .agent-feed-empty .agent-feed-empty-title {
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+.agents-page .agent-day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--conversation-message-gap);
+}
+.agents-page .agent-day-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* A day's label belongs to the day: closer to its first line. */
+  margin: 0 0 calc(var(--space-1) - var(--conversation-message-gap) / 2);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1;
+}
+.agents-page .agent-day-label::before,
+.agents-page .agent-day-label::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--hair);
+}
+.agents-page .agent-new {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block: calc(var(--space-2) * -1);
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1;
+}
+.agents-page .agent-new::before {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--accent-line);
+}
+
+/* ---- Conversations: one spine per session ---------------------------------
+
+   Each session the agent talked in is a conversation with a spine down its
+   start edge in the agent's colour. A conversation that begins here opens
+   with a filled cap and says why it began; one that comes back after another
+   came between opens with a hollow cap; one that simply goes on past a day
+   label has no cap at all. The agent speaks from the spine (a node per
+   report, its glyph while it works); the person answers from the other side. */
+.agents-page :is(.agent-conversation, .agent-mark) { --agent-tint: var(--muted); }
+.agents-page :is(.agent-conversation, .agent-mark)[data-color="blue"] { --agent-tint: var(--blue); }
+.agents-page :is(.agent-conversation, .agent-mark)[data-color="green"] { --agent-tint: var(--green); }
+.agents-page :is(.agent-conversation, .agent-mark)[data-color="amber"] { --agent-tint: var(--amber); }
+.agents-page :is(.agent-conversation, .agent-mark)[data-color="purple"] { --agent-tint: var(--purple); }
+.agents-page :is(.agent-conversation, .agent-mark)[data-color="red"] { --agent-tint: var(--red); }
+.agents-page .agent-conversation {
+  --spine-gutter: 36px;
+  --spine-x: 14px;
+  /* Strong enough to read as a line on light palettes, still quiet. */
+  --spine-ink: color-mix(in srgb, var(--agent-tint) 44%, transparent);
+}
+.agents-page .agent-thread {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-inline-start: var(--spine-gutter);
+}
+/* The spine is drawn piece by piece, each piece from its item down to the
+   next, so it can stop exactly where the run at work shows its glyph.
+   `:where` keeps this base below the per-piece rules after it (`:is` would
+   take its heaviest argument's weight and overrule the head's own ends,
+   doubling the translucent line where two pieces overlap). */
+.agents-page .agent-thread[data-session] :where(.agent-thread-head, .agent-thread-items > .agent-turn)::after {
+  content: "";
+  position: absolute;
+  inset-block: 0 calc(var(--conversation-message-gap) * -1);
+  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - 1px);
+  width: 2px;
+  background: var(--spine-ink);
+}
+.agents-page .agent-thread[data-session] .agent-thread-head::after {
+  inset-block: calc(var(--font-meta) * var(--font-meta-lh) / 2) calc(var(--space-2) * -1);
+}
+/* A hollow cap sits on the spine's end rather than over its line. */
+.agents-page .agent-thread[data-session] .agent-thread-head:is([data-opening="resume"], [data-opening="upcoming"])::after {
+  inset-block-start: calc(var(--font-meta) * var(--font-meta-lh) / 2 + 5px);
+}
+.agents-page .agent-thread[data-session] .agent-thread-items > .agent-turn:last-child::after { inset-block-end: var(--space-1); }
+.agents-page .agent-thread[data-session] .agent-thread-items > .agent-live::after { content: none; }
+/* Going on from the day before: the spine comes in from above. */
+.agents-page .agent-thread[data-session][data-opening="continued"] .agent-thread-items > .agent-turn:first-child::after {
+  inset-block-start: calc(var(--space-5) * -1);
+  mask-image: linear-gradient(to bottom, transparent, black var(--space-5));
+}
+.agents-page .agent-thread-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--conversation-message-gap);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agents-page .agent-turn { position: relative; min-width: 0; }
+
+.agents-page .agent-thread-head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-width: 0;
+  min-height: calc(var(--font-meta) * var(--font-meta-lh));
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-thread-title { color: var(--text-dim); font-weight: 600; }
+.agents-page .agent-thread-detail { min-width: 0; font-variant-numeric: tabular-nums; }
+.agents-page .agent-thread-title + .agent-thread-detail::before { content: "·"; margin-inline-end: var(--space-2); }
+.agents-page .agent-thread-open { margin-block: calc(var(--space-1) * -1); margin-inline-start: auto; }
+.agents-page .agent-spine-cap {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--font-meta) * var(--font-meta-lh) / 2 - 5px);
+  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--agent-tint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-tint) 16%, transparent);
+}
+.agents-page .agent-thread-head:is([data-opening="resume"], [data-opening="upcoming"]) .agent-spine-cap {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--agent-tint) 62%, transparent);
+}
+.agents-page .agent-thread-head[data-opening="upcoming"] .agent-spine-cap { opacity: .7; }
+/* Actions on a conversation's head: shown on hover or focus with a mouse,
+   always on touch. */
+@media (hover: hover) and (pointer: fine) {
+  .agents-page .agent-thread-open { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+  .agents-page .agent-thread:hover .agent-thread-open,
+  .agents-page .agent-thread-head:focus-within .agent-thread-open { opacity: 1; }
+}
+
+/* A report's node on the spine, level with its first line. */
+.agents-page .agent-spine-node {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--font-meta) * var(--font-meta-lh) / 2 - 3px);
+  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--agent-tint) 70%, var(--muted));
+}
+.agents-page .agent-report[data-signal="alert"] .agent-spine-node { background: var(--amber); }
+.agents-page .agent-report[data-signal="failed"] .agent-spine-node { background: var(--red); }
+.agents-page .agent-thread .agent-new { margin-block: calc(var(--space-2) * -1); }
+
+/* ---- The agent's mark: its glyph on a round tile; an arc while it works ---- */
+.agents-page .agent-mark,
+.agent-nav .agent-mark,
+.agent-chip .agent-mark {
+  --mark: 28px;
+  --mark-ring: 2px;
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--mark);
+  height: var(--mark);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--agent-tint, var(--muted)) 14%, transparent);
+  color: var(--agent-tint, var(--muted));
+}
+.agents-page .agent-mark[data-size="sm"],
+.agent-nav .agent-mark[data-size="sm"],
+.agent-chip .agent-mark[data-size="sm"] { --mark: 18px; --mark-ring: 1.5px; }
+.agents-page .agent-mark[data-size="sm"] .ui-icon,
+.agent-nav .agent-mark[data-size="sm"] .ui-icon,
+.agent-chip .agent-mark[data-size="sm"] .ui-icon { width: 12px; height: 12px; }
+/* The arc: a conic sweep masked to a thin ring, turning while the agent
+   works (activity semantics, like a spinner). Reduced motion and the
+   low-resource mode stop it; the still arc keeps saying "at work". */
+.agents-page .agent-mark[data-working]::before,
+.agent-nav .agent-mark[data-working]::before,
+.agent-chip .agent-mark[data-working]::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--mark-ring) * -1.5);
+  border-radius: 50%;
+  background: conic-gradient(from 0turn, transparent 0 40%, color-mix(in srgb, var(--agent-tint, var(--accent)) 92%, transparent) 100%);
+  mask-image: radial-gradient(farthest-side, transparent calc(100% - var(--mark-ring)), black calc(100% - var(--mark-ring)));
+  animation: agent-orbit 1.3s linear infinite;
+}
+@keyframes agent-orbit { to { transform: rotate(1turn); } }
+.agent-nav .agent-mark { --agent-tint: var(--session-blue, var(--accent)); }
+.agent-nav .agent-mark[data-color="blue"],
+.agent-chip .agent-mark[data-color="blue"] { --agent-tint: var(--blue); }
+.agent-nav .agent-mark[data-color="green"],
+.agent-chip .agent-mark[data-color="green"] { --agent-tint: var(--green); }
+.agent-nav .agent-mark[data-color="amber"],
+.agent-chip .agent-mark[data-color="amber"] { --agent-tint: var(--amber); }
+.agent-nav .agent-mark[data-color="purple"],
+.agent-chip .agent-mark[data-color="purple"] { --agent-tint: var(--purple); }
+.agent-nav .agent-mark[data-color="red"],
+.agent-chip .agent-mark[data-color="red"] { --agent-tint: var(--red); }
+/* In a row the mark fits the leading column a chat row's state uses; the
+   arc rides just outside it. */
+.agent-nav .agent-nav-lead .agent-mark { --mark: var(--agent-nav-mark); --mark-ring: 1.5px; }
+.agent-nav .agent-nav-lead .agent-mark[data-working]::before { inset: -1.5px; }
+.agent-nav .agent-nav-lead .agent-mark .ui-icon { width: calc(var(--agent-nav-mark) * .7); height: calc(var(--agent-nav-mark) * .7); }
+
+/* ---- The run at work, at the end of its conversation ------------------------ */
+.agents-page .agent-live {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 28px;
+}
+.agents-page .agent-live-mark {
+  --live-mark: 28px;
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - var(--live-mark) / 2);
+}
+.agents-page .agent-live-mark .agent-mark { --mark: var(--live-mark); }
+.agents-page .agent-live-body { display: grid; gap: 2px; min-width: 0; padding-block-start: 1px; }
+.agents-page .agent-live-line {
+  min-width: 0;
+  min-height: var(--font-response-lh);
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+}
+.agents-page .agent-live-step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+.agents-page .agent-live-step strong { flex: none; max-width: 60%; overflow: hidden; font-weight: 600; text-overflow: ellipsis; }
+.agents-page .agent-live-glyph { display: inline-grid; flex: none; place-items: center; align-self: center; color: var(--muted); }
+.agents-page .agent-live-glyph svg { width: 15px; height: 15px; }
+.agents-page .agent-live-preview { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
+.agents-page .agent-live-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-live-state { color: color-mix(in srgb, var(--agent-tint) 80%, var(--text-dim)); font-weight: 600; }
+.agents-page .agent-live-steps::before { content: "·"; margin-inline-end: var(--space-2); }
+.agents-page .agent-conversation[data-color="neutral"] .agent-live-state { color: var(--accent-text); }
+.agents-page .agent-live-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--hair-strong);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .agents-page .agent-live-open:hover:where(:not(:disabled)) { color: var(--text); }
+}
+.agents-page .agent-live-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: calc(2px * var(--corner-radius-scale)); }
+/* After the rules above: a container query adds no specificity. */
+@container agents-page (max-width: 520px) {
+  /* A narrower spine on a phone, so the words keep their width. */
+  .agents-page .agent-conversation { --spine-gutter: 30px; --spine-x: 12px; }
+  .agents-page .agent-live-mark { --live-mark: 22px; }
+}
+
+/* A report: the agent speaking. Prose like an answer in Chat. */
+.agents-page .agent-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.agents-page .agent-report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-report-meta time { font-variant-numeric: tabular-nums; }
+.agents-page .agent-report-meta > * + *::before {
+  content: "·";
+  margin-inline-end: var(--space-2);
+  color: var(--faint);
+}
+.agents-page .agent-report-signal { font-weight: 600; }
+.agents-page .agent-report-signal[data-signal="alert"] { color: var(--amber); }
+.agents-page .agent-report-signal[data-signal="failed"] { color: var(--red); }
+.agents-page .agent-report-headline {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-response);
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  line-height: var(--font-response-lh);
+}
+.agents-page .agent-report[data-signal="failed"] .agent-report-headline { color: var(--red); }
+.agents-page .agent-report-events {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-report-wake-note {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.agents-page .agent-report-body { margin-block-start: var(--space-1); }
+.agents-page .agent-report-body[data-folded] {
+  max-height: 14lh;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 70%, transparent);
+}
+.agents-page .agent-report-more {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--agents-hint);
+  font-weight: 600;
+  cursor: pointer;
+}
+/* What went wrong, as the system said it: a quiet detail under plain words. */
+.agents-page .agent-report-error {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+  white-space: pre-wrap;
+}
+.agents-page .agent-report-notes {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-report-notes li { display: flex; align-items: flex-start; gap: var(--space-2); }
+.agents-page .agent-report-notes .ui-icon { flex: none; margin-block-start: 1px; color: var(--faint); }
+/* Actions under a report: shown on hover or focus with a mouse, always on touch. */
+.agents-page .agent-report-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: calc(var(--space-1) * -1);
+}
+.agents-page .agent-report-heard {
+  padding-inline: var(--space-2);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.agents-page .agent-report-facts { color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) {
+  .agents-page .agent-report-foot { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+  .agents-page .agent-report:hover .agent-report-foot,
+  .agents-page .agent-report:has(:focus-visible, [aria-expanded="true"]) .agent-report-foot,
+  .agents-page .agent-report-foot:has([aria-pressed="true"]) { opacity: 1; }
+}
+.agents-page .agent-report-note {
+  display: flex;
+  flex: 1 0 100%;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+.agents-page .agent-report-note .ui-input { flex: 1 1 auto; }
+
+/* The person's words, as in Chat, from the other side of the spine. */
+.agents-page .agent-you { gap: var(--space-1); }
+.agents-page .agent-you .bubble { white-space: pre-wrap; }
+.agents-page .agent-you[data-pending] .bubble { opacity: .72; }
+.agents-page .agent-you[data-pending="queued"] .bubble { border-style: dashed; }
+.agents-page .agent-you-files { display: flex; justify-content: flex-end; max-inline-size: 100%; }
+.agents-page .agent-you-meta {
+  padding-inline: var(--space-1);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Quiet checks: one line, open on request. */
+.agents-page .agent-quiet { display: grid; justify-items: start; gap: var(--space-1); }
+.agents-page .agent-quiet-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin-inline-start: calc(var(--space-2) * -1);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--agents-hint);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .agents-page .agent-quiet-toggle:hover:where(:not(:disabled)) { color: var(--text-dim); background: var(--surface-overlay-hover); }
+}
+.agents-page .agent-quiet-toggle time { color: var(--faint); font-variant-numeric: tabular-nums; }
+.agents-page .agent-quiet-chevron { color: var(--faint); transition: transform var(--motion-normal) var(--motion-ease); }
+.agents-page .agent-quiet-toggle[aria-expanded="true"] .agent-quiet-chevron { transform: rotate(90deg); }
+.agents-page .agent-quiet-toggle[aria-expanded="false"]:dir(rtl) .agent-quiet-chevron { transform: scaleX(-1); }
+.agents-page .agent-quiet-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0 0 0 calc(var(--icon-sm) + var(--space-2));
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-quiet-list li { display: flex; gap: var(--space-3); min-width: 0; }
+.agents-page .agent-quiet-list time { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* ---- Dock: what is happening now, what waits, and your message ------------ */
+
+.agents-page .agent-dock {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  padding-block: var(--space-2) max(var(--space-4), var(--safe-bottom, 0px));
+}
+.agents-page .agent-dock-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: var(--agents-column);
+  margin-inline: auto;
+}
+
+/* A request: the same card a chat shows for a permission. */
+.agents-page .agent-request {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+}
+.agents-page .agent-request-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.agents-page .agent-request-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--icon-md) + var(--space-1));
+  height: calc(var(--icon-md) + var(--space-1));
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent-hi);
+}
+.agents-page .agent-request-heading {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  min-width: 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-request-title { color: var(--text); font-weight: 600; }
+.agents-page .agent-request-when { min-width: 0; color: var(--muted); }
+.agents-page .agent-request-open { flex: none; margin-inline-end: calc(var(--space-1) * -1); }
+.agents-page .agent-request-command {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  line-height: 1.55;
+}
+.agents-page .agent-request-command > span { flex: none; color: var(--faint); user-select: none; }
+.agents-page .agent-request .agent-request-command > code {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: var(--mono);
+  font-size: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.agents-page .agent-request-question {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+}
+.agents-page .agent-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* The message box: Chat's composer material — the editor over one quiet
+   row of controls (files, where the message goes, Stop, Send). */
+.agents-page .agent-composer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-composer);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  transition: border-color var(--motion-normal) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease);
+}
+/* Borderless appearance keeps the composer's soft edge, as in Chat. */
+.agents-page:is(body[data-hide-borders="true"] *) .agent-composer { border-color: var(--borderless-edge) !important; }
+.agents-page .agent-composer:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md), 0 0 0 3px var(--focus-wash);
+}
+.agents-page .agent-composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) 0;
+}
+.agents-page .agent-composer-uploading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.agents-page .agent-composer .agent-composer-input {
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-size: max(var(--font-response), var(--font-input));
+  line-height: var(--font-response-lh);
+  resize: none;
+}
+.agents-page .agent-composer .agent-composer-input:focus,
+.agents-page .agent-composer .agent-composer-input:focus-visible { outline: 0; box-shadow: none; }
+.agents-page .agent-composer .agent-composer-input::placeholder {
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agent-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+}
+.agents-page .agent-composer-attach { flex: none; color: var(--muted); }
+.agents-page .agent-thread-chip { flex: 0 1 auto; max-width: min(100%, 22rem); }
+/* A touch box like its neighbours' on a coarse pointer. */
+@media (pointer: coarse) {
+  .agents-page .agent-thread-chip { min-block-size: max(var(--control-h-sm), var(--hit-min)); }
+}
+.agents-page .agent-thread-chip[data-target="continue"] .config-chip-icon { color: color-mix(in srgb, var(--agent-tint, var(--accent)) 80%, var(--muted)); }
+.agents-page .agent-composer-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+}
+/* Stop: a filled square in a quiet round well, beside Send. */
+.agents-page .agent-composer .agent-composer-stop {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-dim);
+}
+.agents-page .agent-composer .agent-composer-stop svg { width: 13px; height: 13px; }
+.agents-page .agent-composer .agent-composer-stop svg :is(rect, path) { fill: currentColor; }
+@media (hover: hover) {
+  .agents-page .agent-composer .agent-composer-stop:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+}
+.agents-page .agent-composer .agent-composer-send {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--composer-green, var(--accent));
+  color: var(--accent-ink);
+  box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green, var(--accent)) 80%, transparent);
+}
+@media (hover: hover) {
+  .agents-page .agent-composer .agent-composer-send:hover:not(:disabled) { background: var(--accent-hi); }
+}
+.agents-page .agent-composer .agent-composer-send:disabled {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  box-shadow: none;
+  color: var(--faint);
+}
+
+/* Files dragged over the conversation: one calm sheet says where they go. */
+.agents-page .agent-conversation { position: relative; }
+.agents-page .agent-drop {
+  position: absolute;
+  inset: var(--space-3);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent-line);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* ---- Home: what waits, then every agent by project ------------------------ */
+
+.agents-page .agents-section { display: grid; gap: var(--space-2); }
+.agents-page .agents-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agents-section-title > span { color: var(--faint); font-weight: 450; font-variant-numeric: tabular-nums; }
+.agents-page .agents-home-list {
+  display: grid;
+  gap: 2px;
+  margin: 0 calc(var(--space-3) * -1);
+  padding: 0;
+  list-style: none;
+}
+.agents-page .agents-home-row-main,
+.agents-page .agents-home-request {
+  display: grid;
+  grid-template-columns: var(--icon-lg) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-3);
+  width: 100%;
+  min-height: max(52px, var(--hit-min));
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+}
+.agents-page .agents-home-row-main { cursor: pointer; }
+@media (hover: hover) {
+  .agents-page .agents-home-row-main:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.agents-page .agents-home-row-main:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.agents-page .agents-home-glyph,
+.agents-page .agents-home-request-icon {
+  display: grid;
+  place-items: center;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  color: var(--muted);
+}
+.agents-page .agents-home-request-icon { color: var(--amber); }
+.agents-page .agents-home-request-icon .ui-icon { width: var(--icon-md); height: var(--icon-md); }
+.agents-page .agents-home-copy { display: grid; gap: 1px; min-width: 0; }
+.agents-page .agents-home-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agents-home-row[data-unread] .agents-home-name { font-weight: 650; }
+.agents-page .agents-home-line,
+.agents-page .agents-home-command {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agents-home-command {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+}
+.agents-page .agents-home-state {
+  max-inline-size: 32ch;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--agents-hint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agents-home-state:is([data-phase="needs-you"], [data-phase="review"]) { color: var(--amber); }
+.agents-page .agents-home-state[data-phase="stopped"] { color: var(--red); }
+.agents-page .agents-home-state[data-phase="working"] { color: var(--accent); }
+.agents-page .agents-home-request-actions { display: flex; gap: var(--space-2); }
+.agents-page .agents-home-foot { display: flex; padding-block-start: var(--space-2); }
+.agents-page .agents-welcome { display: grid; gap: var(--space-3); padding-block: var(--space-5); }
+.agents-page .agents-welcome-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-title);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.agents-page .agents-welcome-body { max-inline-size: 60ch; margin: 0; color: var(--text-dim); font-size: var(--font-body); line-height: 1.55; }
+.agents-page .agents-welcome-actions { display: flex; gap: var(--space-2); padding-block: var(--space-2) var(--space-4); }
+
+/* ---- Narrow page (phone) ---------------------------------------------------- */
+
+@container agents-page (max-width: 560px) {
+  .agents-page .agent-head-inner { gap: var(--space-2); }
+  .agents-page .agent-head-glyph { display: none; }
+  .agents-page .agent-head-name { font-size: calc(var(--font-heading) - 1px); }
+  .agents-page .agent-head-tabs .ui-tabs { width: 100%; }
+  .agents-page .agent-head-tabs .ui-tab { flex: 1 1 0; justify-content: center; }
+  .agents-page .agents-home-state { display: none; }
+  .agents-page .agents-home-request { grid-template-columns: var(--icon-lg) minmax(0, 1fr); }
+  .agents-page .agents-home-request-actions { grid-column: 2; }
+  .agents-page .agent-request-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+}
+
+/* ---- Memory: what the agent keeps between conversations ------------------- */
+
+.agents-page .agent-memory { display: flex; flex-direction: column; gap: var(--space-3); }
+.agents-page .agent-memory-hint {
+  max-inline-size: 64ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--agents-hint);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-memory-updated { color: var(--faint); }
+.agents-page .agent-memory-updated::before { content: "·"; margin-inline: var(--space-2); }
+/* A page to write on, in the conversation's material. */
+.agents-page .agent-memory .agent-memory-text {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-card);
+  background: var(--material-glass-medium);
+  box-shadow: var(--material-glass-highlight);
+  color: var(--text);
+  font-family: inherit;
+  font-size: max(var(--font-response), var(--font-input));
+  line-height: var(--font-response-lh);
+  resize: none;
+}
+.agents-page .agent-memory .agent-memory-text:focus,
+.agents-page .agent-memory .agent-memory-text:focus-visible {
+  border-color: var(--accent-line);
+  outline: 0;
+  box-shadow: var(--material-glass-highlight), 0 0 0 3px var(--focus-wash);
+}
+.agents-page .agent-memory-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+}
+.agents-page .agent-memory-count {
+  margin-inline-end: auto;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.agents-page .agent-memory-feedback,
+.agents-page .agent-memory-context { margin-block-start: var(--space-4); }
+
+/* ---- An agent's session in Chat names its agent in the header -------------- */
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-inline-size: min(22rem, 40vw);
+  min-block-size: max(var(--control-h-sm), var(--hit-min));
+  padding-block: 0;
+  padding-inline: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 550;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .agent-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.agent-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.agent-chip .agent-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-chip .agent-chip-chevron { flex: none; color: var(--faint); }
+.agent-chip .agent-chip-chevron:dir(rtl) { transform: scaleX(-1); }
+.agents-page .agent-feed-empty .agent-mark { --mark: 36px; justify-self: center; margin-block-end: var(--space-1); }
+.agents-page .agents-home-glyph .agent-mark { --mark: var(--icon-lg); }

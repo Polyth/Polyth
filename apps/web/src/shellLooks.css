@@ -1,0 +1,2296 @@
+/* ==================== Interface styles (Settings -> Appearance) ==================
+   Whole-shell looks chosen with `shellLook` in uiPrefs.ts and published as
+   body[data-shell-look]. `standard` is today's shell and matches nothing here;
+   every other look restyles the header, navigator, rails, conversation,
+   composer, in-flow cards (agent question, isolated-changes card, edited
+   files, agent status) and floating surfaces (toasts, menus, tooltips,
+   dialogs, Settings) as one layer on top of the base styles.
+
+   Contract:
+   - The shared block flattens the base glass and owns a transparency ladder
+     keyed on the real Wallpaper (html[data-background]) and Transparency
+     (body[data-glass]) settings, so every look follows both.
+   - Look-scoped tokens are named --look-*. Their defaults sit in :where() at
+     zero specificity so each look can override them.
+   - The base glass is painted with !important (see "Top rail surface" in
+     docs/dev/styles.md), so these overrides are !important too. Borderless
+     mode clears every border with !important; lines a look draws on purpose
+     restate their colour here.
+   - Desktop margins are logical so a mirrored shell mirrors the looks.
+   See "Interface styles" in docs/dev/styles.md. */
+
+/* Shared base for every concept.
+   1. Drops the current glass so a concept starts from a flat shell.
+   2. A transparency ladder driven by the real settings — wallpaper
+      (html[data-background]) and Transparency (body[data-glass]):
+        --look-veil       how much a concept's canvas covers the wallpaper
+        --look-veil-soft  the same for concepts whose canvas is a backdrop
+        --look-a          opacity of raised surfaces (panels, islands, sheets)
+        --look-float-a    opacity of floating surfaces (menus, dialogs, toasts)
+        --look-overlay-a  opacity of a layer that covers the conversation
+                          (phone navigator, Settings, dialogs): text sits under
+                          it, not only the wallpaper, so it never thins below
+                          92%
+        --look-blur       backdrop blur for translucent surfaces
+   3. One vocabulary for floating surfaces and in-flow cards that each
+      concept fills in (--look-float*, --look-card*, --look-scrim). */
+
+:where(body[data-shell-look]:not([data-shell-look="standard"])) {
+  --look-veil: 100%;
+  --look-veil-soft: 100%;
+  --look-a: 100%;
+  --look-float-a: 100%;
+  --look-overlay-a: 100%;
+  --look-blur: none;
+  --look-float-blur: none;
+  /* Corner rounding reaches every look: its radii are drawn at the default
+     rounding (9, scale 1.8) and follow the slider from square to the last,
+     rounder notch, as the platform styles' own radii do. Pills stay pills.
+     (Declared after --look-veil: shellLooks.test.ts pins the block's first
+     token as the veil ladder's entry point.) */
+  --look-round: calc(var(--corner-radius-scale) / 1.8);
+  --look-line: color-mix(in srgb, var(--text) 13%, transparent);
+  /* Quiet text uses the theme's own contrast-checked inks, never an alpha of
+     --text: an alpha mix loses contrast over every lighter backdrop. */
+  --look-ink-quiet: var(--muted);
+  --look-ink-dim: var(--text-dim);
+  /* One selection language per look, shared by every "you are here" in the
+     shell: session rows, project rail, top-rail tabs, mode switch, filter. */
+  --look-hover: color-mix(in srgb, var(--text) 5%, transparent);
+  --look-select: color-mix(in srgb, var(--text) 8%, transparent);
+  --look-select-edge: none;
+  --look-select-ink: var(--text);
+  --look-select-weight: 600;
+  --look-select-radius: calc(8px * var(--look-round));
+  --look-segment: var(--look-select);
+  --look-segment-edge: var(--look-select-edge);
+  /* Top-rail control surfaces (mode switch, tool strip, title, actions). */
+  --look-control: transparent;
+  --look-control-edge: none;
+  --look-control-blur: none;
+  --look-control-radius: calc(10px * var(--look-round));
+  /* The rule between regions where a look flattened a slab (1a): the status
+     bar's top, a kept top-rail slab's foot, pane, code-block and dialog
+     dividers. Islands and sheets part regions without lines; the looks built
+     on rules (Paper, Line, Editorial) set it to their line. */
+  --look-rule: transparent;
+  /* Text fields and selects (1f): a fill, an inset ring and an underline, each
+     a look's choice, in the field corner. --look-focus-ring is the keyboard
+     ring a look keeps on fields and menu rows. */
+  --look-field: var(--look-hover);
+  --look-field-edge: 0 0 0 transparent;
+  --look-field-rule: transparent;
+  --look-field-radius: var(--look-control-radius);
+  /* A text area grows past one line, so a pill field corner would round it
+     into an oval: it keeps the field corner up to a card's. */
+  --look-area-radius: min(var(--look-field-radius), calc(12px * var(--look-round)));
+  --look-focus-ring: color-mix(in srgb, var(--accent) 35%, transparent);
+  /* Composer outline while typing, per side; transparent keeps the look's
+     own composer instead of the base accent ring. */
+  --look-focus-top: transparent;
+  --look-focus-bottom: transparent;
+  --look-focus-side: transparent;
+  --look-float: var(--elevated);
+  /* The same material with no transparency, for a layer that slides over
+     another layer of its own surface (the phone Settings page). */
+  --look-overlay-solid: var(--look-float);
+  --look-float-edge: color-mix(in srgb, var(--text) 10%, transparent);
+  --look-float-shadow: 0 12px 32px -16px rgba(0, 0, 0, 0.35);
+  --look-float-radius: calc(14px * var(--look-round));
+  --look-card: transparent;
+  --look-card-edge: var(--look-line);
+  --look-card-radius: calc(12px * var(--look-round));
+  --look-card-shadow: none;
+  --look-option: transparent;
+  --look-option-edge: var(--look-line);
+  --look-scrim: color-mix(in srgb, var(--bg) 55%, transparent);
+  --look-scrim-blur: none;
+  /* The launcher rail once it holds a floating window (1d): one material for
+     the window and the strip. The window covers the conversation, so its
+     fill takes the overlay floor. --look-rail-island is 1 where the rail
+     column is a card of its own (an island, floating columns) rather than a
+     column that runs into the window's edges. */
+  --look-rail: color-mix(in srgb, var(--look-float) var(--look-overlay-a), transparent);
+  --look-rail-blur: var(--look-float-blur);
+  --look-rail-edge: var(--look-line);
+  --look-rail-seam: var(--look-line);
+  --look-rail-shadow: none;
+  --look-rail-radius: 0px;
+  --look-rail-island: 0;
+  /* A docked window (1e) is part of the rail column, so it takes the idle
+     rail's own material: by default none (it sits on the canvas, as the
+     idle rail does), with the rail's start edge where the look draws one. */
+  --look-dock: transparent;
+  --look-dock-blur: none;
+  --look-dock-shadow: none;
+  --look-dock-edge: transparent;
+}
+
+/* 1. Flatten. The base glass and every slab a platform style paints at class
+   strength: the status bar, the top rail when its surface keeps a slab, the
+   plate Liquid Glass, Fluent and macOS give a quiet icon button, a code
+   block's header band and Fluent's dialog footer band. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.sidebar, .railbar, .view-switcher-pill, .desktop-session-status-trigger, .composer-card, .msg.user .bubble, .md-code-block, .sidebar-search, .sidebar-project-rail-item.active, .project-card, .activity-group > .ui-run-summary, .ui-glass-island, .mobile-nav-search, .header-actions-rail .ui-icon-btn, .statusbar, .app > .header:not([data-top-rail-surface="floating"]), .ui-icon-btn--quiet:not(:disabled), .md-code-block-header, .ui-dialog-foot) {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .activity-group {
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .activity-group::before {
+  display: none !important;
+}
+
+/* 1a. Rules a look draws where it flattened a slab (--look-rule): the status
+   bar's top edge, the foot of a kept top-rail slab, and the dividers under a
+   package pane's head, a code block's header and a dialog's head and over
+   its footer. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .statusbar {
+  border-block-start: 1px solid var(--look-rule) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.app > .header:not([data-top-rail-surface="floating"]), .rail-head, .md-code-block-header, .ui-dialog-head) {
+  border-block-end-color: var(--look-rule) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .ui-dialog-foot {
+  border-block-start-color: var(--look-rule) !important;
+}
+
+/* 1b. Navigator, rails and top rail speak the look's selection language.
+   Pinned rows are marked by their section and pin, not by a second pill. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row .session-btn::before {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: var(--look-select-radius) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row:not(.active):hover .session-btn::before {
+  background: var(--look-hover) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.active .session-btn::before {
+  background: var(--look-select) !important;
+  box-shadow: var(--look-select-edge) !important;
+}
+
+/* The look's plate is the only selection mark: the accent bars and pills the
+   base and Fluent draw beside a current row go. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.active .session-btn::after,
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-nav-item.active::before {
+  content: none !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row .session-title-text {
+  color: var(--look-ink-dim);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .project-path {
+  color: var(--look-ink-quiet);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.active .session-title-text {
+  color: var(--look-select-ink);
+  font-weight: var(--look-select-weight);
+}
+
+/* Pinning is a place, not a state: the pinned section and its pins stay in
+   quiet ink so accent is left for what is live (a running session's timer). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-pinned-divider, .session-pin-icon) {
+  color: var(--look-ink-quiet);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-pinned-divider::before,
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-pinned-divider::after {
+  background: var(--look-line);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.sidebar-project-rail-item.active, .view-icon.active, .rail-icon.active, .sidebar-filter .ui-icon-btn.active, .sidebar-list-options.active, .ui-menu-item--checked, .settings-nav-item.active, .model-picker-row.current) {
+  background: var(--look-select) !important;
+  box-shadow: var(--look-select-edge) !important;
+  border-radius: var(--look-select-radius) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-switcher-pill .view-icon.active, .mobile-shortcut-track > .mobile-shortcut.active) {
+  background: var(--look-segment) !important;
+  box-shadow: var(--look-segment-edge) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-icon.active, .rail-icon.active, .sidebar-filter .ui-icon-btn.active, .settings-nav-item.active, .mobile-shortcut-track > .mobile-shortcut.active) {
+  color: var(--look-select-ink) !important;
+}
+
+/* A current row in a list carries the look's selection weight as well, as
+   the active session does: where the look's plate is clear (Paper,
+   Editorial) the weight is the mark. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.settings-nav-item.active, .model-picker-row.current strong) {
+  font-weight: var(--look-select-weight) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-icon:not(.active), .header-actions-rail .capability-launcher, .header .ui-icon-btn, .rail-icon:not(.active)) {
+  color: var(--look-ink-dim) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch, .view-switcher-pill, .header-control, .header .ui-icon-btn, .header-actions-rail .capability-launcher, .desktop-session-status-trigger, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *), .seg:not(:is(.module-view, .rail-body, .panel-sheet) *), .mobile-shortcut-track) {
+  background: var(--look-control) !important;
+  backdrop-filter: var(--look-control-blur) !important;
+  box-shadow: var(--look-control-edge) !important;
+  border-color: transparent !important;
+}
+
+/* Icon buttons inside a strip are not controls of their own. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-switcher-pill, .header-actions-rail, .mobile-shortcut-track) :is(.ui-icon-btn:not(.active), .capability-launcher) {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Every host segmented control speaks the mode switch's language: Settings'
+   tabs and segmented options and the package pane's head tabs. A package's
+   own tabs inside its window or page keep the package's grammar. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch button, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *) > .ui-tab, .seg:not(:is(.module-view, .rail-body, .panel-sheet) *) > button, .rail-tabs .tab) {
+  color: var(--look-ink-dim) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-weight: 500 !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch button.active, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *) > .ui-tab--selected, .seg:not(:is(.module-view, .rail-body, .panel-sheet) *) > button:is(.active, .on), .rail-tabs .tab.active) {
+  color: var(--look-select-ink) !important;
+  background: var(--look-segment) !important;
+  box-shadow: var(--look-segment-edge) !important;
+  font-weight: var(--look-select-weight) !important;
+}
+
+@media (hover: hover) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-icon, .workspace-mode-switch button, .rail-icon, .sidebar-project-rail-item, .header .ui-icon-btn, .header-actions-rail .capability-launcher, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *) > .ui-tab, .seg:not(:is(.module-view, .rail-body, .panel-sheet) *) > button, .rail-tabs .tab, .ui-menu-item, .add-menu-item, .statusbar-cluster, .statusbar button, .ui-btn--quiet, .ui-icon-btn--quiet, .ui-btn--ghost, .settings-nav-item, .starter-chip, .hero-customize-trigger, .composer-suggestion):not(.active, .on, .ui-tab--selected, .ui-menu-item--checked, .ui-menu-item--danger):hover:where(:not(:disabled)) {
+    background: var(--look-hover) !important;
+    color: var(--text) !important;
+  }
+}
+
+/* Keyboard focus on a menu row is its hover plus the look's focus ring (the
+   macOS styles drop the outline there and drew an accent plate instead). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .ui-menu-item:focus-visible {
+  background: var(--look-hover) !important;
+  color: var(--text) !important;
+  box-shadow: inset 0 0 0 2px var(--look-focus-ring) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.ui-btn--quiet, .ui-icon-btn--quiet, .ui-btn--ghost):active:where(:not(:disabled)) {
+  background: var(--look-select) !important;
+}
+
+/* A trigger whose menu is open, and the keyboard's row in the model picker,
+   read as hovered. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-menu-trigger[aria-expanded="true"], .model-picker-row.active:not(.current)) {
+  background: var(--look-hover) !important;
+}
+
+/* A destructive menu row keeps its red through hover and focus. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .ui-menu-item--danger:focus-visible {
+  color: var(--red) !important;
+}
+
+@media (hover: hover) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .ui-menu-item--danger:hover:where(:not(:disabled)) {
+    background: var(--look-hover) !important;
+    color: var(--red) !important;
+  }
+}
+
+/* 1c. Composer pieces that are not the card itself. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-card:focus-within {
+  border-top-color: var(--look-focus-top) !important;
+  border-bottom-color: var(--look-focus-bottom) !important;
+  border-inline-color: var(--look-focus-side) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail .composer-send-split {
+  background: transparent !important;
+  box-shadow: none !important;
+  gap: 2px;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail .composer-send-split > .send {
+  border-radius: 999px !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-send-options {
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--look-ink-dim) !important;
+}
+
+/* Option chips: queued prompts, attachments, the New-session shortcuts and
+   their customize trigger, the harness's prompt suggestion and the add
+   menu's tiles are one quiet chip, not the base's elevated or glass pill. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.queue-chip:not(.drag-over), .attachment-pill, .starter-chip, .hero-customize-trigger, .composer-suggestion, .add-menu-tile) {
+  background: var(--look-option) !important;
+  backdrop-filter: none !important;
+  border: 1px solid var(--look-option-edge) !important;
+  box-shadow: none !important;
+}
+
+/* Push buttons. The default (quiet) button is the look's option and a
+   destructive one its red wash, without the platform style's plate or the
+   base glass elevation; a disabled button keeps the base's one neutral look.
+   :where() keeps a look that draws its own in charge (Line's hairline,
+   Editorial's underline); each look draws the accent one. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.ui-btn--quiet:not(:disabled)) {
+  background: var(--look-option) !important;
+  backdrop-filter: none !important;
+  border-color: var(--look-option-edge) !important;
+  box-shadow: none !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.ui-btn--danger:not(:disabled)) {
+  background: var(--red-wash) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Inline code in an answer is a quiet tint, not the base grey pill. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.msg .bubble, .timeline-viewport) :not(pre) > code {
+  background: var(--look-hover) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .queue-chip {
+  border-radius: var(--look-card-radius) !important;
+}
+
+/* The suggested prompt is the same pending writing stack as a queued prompt:
+   its text takes the look's quiet ink, and the use target hovers and presses
+   in the look's hover, not the base overlay. Focus stays visible through the
+   base outline, so its ink returns to the normal text colour with hover. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-text {
+  color: var(--look-ink-dim) !important;
+}
+
+@media (hover: hover) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-use:hover:where(:not(:disabled)) {
+    background: var(--look-hover) !important;
+  }
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-use:is(:active, :focus-visible):where(:not(:disabled)) {
+  background: var(--look-hover) !important;
+}
+
+@media (hover: hover) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-use:hover:where(:not(:disabled)) .composer-suggestion-text {
+    color: var(--text) !important;
+  }
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-use:is(:active, :focus-visible):where(:not(:disabled)) .composer-suggestion-text {
+  color: var(--text) !important;
+}
+
+/* 1d. The launcher rail and its windows.
+   Idle, a look shapes the launcher host itself (an island, a hairline
+   column, a capsule). Once the host holds a window it is only geometry, as
+   in the base shell: the whole column, with no fill, edge, shadow or filter
+   of its own. A floating window then extends the rail: it spans the column
+   (styles.css), and the window and the strip share one material — fill,
+   outer edge and shadow — parted by a seam, the window's free corners in the
+   look's radius. Where the column is a card of its own (--look-rail-island)
+   the strip closes the frame on the far side and the foot rounds. Each
+   shadow is clipped on the seam side so neither falls across the other;
+   --stack-dir puts that side right in a mirrored shell. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is(.railbar-open, [data-rail-motion="exiting"]) {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding-block: 0 !important;
+  align-self: stretch !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > :is(.rail-dynamic, .plugin-strip) {
+  background: var(--look-rail) !important;
+  backdrop-filter: var(--look-rail-blur) !important;
+  box-shadow: var(--look-rail-shadow) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > .rail.rail-dynamic {
+  border: 1px solid var(--look-rail-edge) !important;
+  border-inline-end-width: 0 !important;
+  border-radius: 0 !important;
+  border-start-start-radius: var(--look-rail-radius) !important;
+  border-end-start-radius: calc(max(var(--look-rail-island), var(--package-window-foot, 0)) * var(--look-rail-radius)) !important;
+  clip-path: inset(-4rem calc((var(--stack-dir, 1) - 1) * 2rem) -4rem calc((-1 - var(--stack-dir, 1)) * 2rem)) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > .plugin-strip {
+  border-block: 1px solid var(--look-rail-edge) !important;
+  border-inline-start: 1px solid var(--look-rail-seam) !important;
+  border-inline-end: calc(var(--look-rail-island) * 1px) solid var(--look-rail-edge) !important;
+  border-radius: 0 !important;
+  border-start-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
+  border-end-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
+  clip-path: inset(-4rem calc((-1 - var(--stack-dir, 1)) * 2rem) -4rem calc((var(--stack-dir, 1) - 1) * 2rem)) !important;
+}
+
+/* Full-height layouts own the column (shellLayout.css): flush columns run
+   into the window's edges, floating ones are cards in the column radius. */
+body[data-shell-look]:not([data-shell-look="standard"])[data-shell-floating="false"]:not(#\#) {
+  --look-rail-island: 0;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"])[data-shell-floating="true"]:not(#\#) {
+  --look-rail-island: 1;
+  --look-rail-radius: var(--look-column-radius, var(--radius-surface));
+}
+
+/* A look whose idle strip is a short island (Air, Obsidian) grows it into
+   the column as a window opens, and shrinks it back as the window leaves —
+   the window rides along, as the tablet band's cluster does (styles.css).
+   The full-height layouts keep that strip full height already. */
+@container app-shell (min-width: 1401px) {
+  body[data-shell-look]:not([data-shell-look="standard"]):is([data-shell-look="air"],[data-shell-look="obsidian"]):not([data-shell-layout="columns"],[data-shell-layout="bare"]):not(#\#) .railbar.railbar-dynamic.railbar-open[data-rail-motion="open"] {
+    animation: look-rail-grow var(--motion-window) var(--motion-window-ease) backwards;
+  }
+  body[data-shell-look]:not([data-shell-look="standard"]):is([data-shell-look="air"],[data-shell-look="obsidian"]):not([data-shell-layout="columns"],[data-shell-layout="bare"]):not(#\#) .railbar.railbar-dynamic[data-rail-motion="exiting"] {
+    animation: look-rail-shrink var(--motion-window-exit) var(--motion-window-exit-ease) both;
+  }
+}
+
+@keyframes look-rail-grow {
+  from { max-height: var(--rail-cluster-block-size, 100%); }
+  to { max-height: 100%; }
+}
+
+@keyframes look-rail-shrink {
+  from { max-height: 100%; }
+  to { max-height: var(--rail-cluster-block-size, 100%); }
+}
+
+/* 1e. Docked windows.
+   A pinned window docks in flow beside the conversation as part of the rail
+   column. It and the strip take the rail's idle material (--look-dock*) and
+   are parted by the seam; the idle rail's start edge runs down the window's
+   start. Where the column is a card of its own (--look-rail-island: an
+   island look, floating columns) the edge closes the frame on every side and
+   the corners round; a flush column runs square into the header and the
+   window's edge. The host stays the bare geometry 1d leaves it. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > :is(.rail, .plugin-strip) {
+  background: var(--look-dock) !important;
+  backdrop-filter: var(--look-dock-blur) !important;
+  box-shadow: var(--look-dock-shadow) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .rail {
+  border: 0 solid var(--look-dock-edge) !important;
+  border-block-width: calc(var(--look-rail-island) * 1px) !important;
+  border-inline-start-width: 1px !important;
+  border-radius: 0 !important;
+  border-start-start-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
+  border-end-start-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
+  clip-path: inset(-4rem calc((var(--stack-dir, 1) - 1) * 2rem) -4rem calc((-1 - var(--stack-dir, 1)) * 2rem)) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .plugin-strip {
+  border: 0 solid var(--look-dock-edge) !important;
+  border-block-width: calc(var(--look-rail-island) * 1px) !important;
+  border-inline-end-width: calc(var(--look-rail-island) * 1px) !important;
+  border-inline-start: 1px solid var(--look-rail-seam) !important;
+  border-radius: 0 !important;
+  border-start-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
+  border-end-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
+  clip-path: inset(-4rem calc((-1 - var(--stack-dir, 1)) * 2rem) -4rem calc((var(--stack-dir, 1) - 1) * 2rem)) !important;
+}
+
+/* 1f. Fields. Every text field and select is the look's field: the
+   navigator's search, a picker's filter well, inputs, text areas, selects and
+   the Settings theme picker. Fill, ring and underline are --look-field*,
+   drawn as inset shadows so a field keeps its box; focus adds a soft accent
+   ring. A field well (.ui-field-well, the navigator search, a picker filter)
+   is the field, so the input inside it stays bare, as it does in the command
+   palette and lock screen, which draw their own. A field frame
+   (.ui-field-frame, a package composer) is not a field: it draws its own
+   card, and its input stays bare. Text areas, and a well around one, keep
+   --look-area-radius. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.sidebar-search, .picker-search, .ui-field-well, .ui-input, .ui-textarea, .sel select, .theme-picker-current):not(:is(.sidebar-search, .picker-search, .ui-field-well, .palette-field, .lock-field, .ui-field-frame) *) {
+  background: var(--look-field) !important;
+  border-color: transparent !important;
+  box-shadow: inset 0 -1px 0 var(--look-field-rule), var(--look-field-edge) !important;
+  border-radius: var(--look-field-radius) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(textarea.ui-textarea, .ui-field-well:has(.ui-textarea)):not(:is(.sidebar-search, .picker-search, .ui-field-well, .palette-field, .lock-field, .ui-field-frame) *) {
+  border-radius: var(--look-area-radius) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.sidebar-search:focus-within, .picker-search:focus-within, .ui-field-well:focus-within, .ui-input:focus, .ui-textarea:focus, .sel select:focus, .theme-picker-current:focus-visible):not(:is(.sidebar-search, .picker-search, .ui-field-well, .palette-field, .lock-field, .ui-field-frame) *) {
+  box-shadow: inset 0 -1px 0 var(--look-field-rule), var(--look-field-edge), 0 0 0 2px var(--look-focus-ring) !important;
+}
+
+/* Phone Settings search: the card shell is the field, its input stays bare. */
+@media (max-width: 700px) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-nav-search-shell .ui-input.settings-nav-search {
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* An invalid field keeps its red edge, as the base draws it. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .ui-input--invalid:not(:is(.sidebar-search, .picker-search, .ui-field-well, .palette-field, .lock-field, .ui-field-frame) *) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 55%, transparent) !important;
+}
+
+/* 1g. Corners. Each shell control takes one of the look's radius roles, so
+   its corners follow the look (and Corner rounding, through --look-round)
+   under every platform style, whose own radii are drawn at class strength:
+   --look-select-radius for rows, plates and segments, --look-control-radius
+   for controls and chips. Fields take --look-field-radius (1f), cards and
+   floating surfaces theirs in 3a and 3b. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-btn, .session-menu-trigger, .hero-recent-row, .reasoning-toggle, .ui-menu-item, .add-menu-item, .settings-nav-item, .model-picker-row, .ui-icon-btn, .composer-add-trigger, .view-icon, .rail-icon, .sidebar-project-rail-item, .header-actions-rail .capability-launcher, .workspace-mode-switch button, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *) > .ui-tab, .seg:not(:is(.module-view, .rail-body, .panel-sheet) *) > button, .rail-tabs .tab, .timeline-viewport :not(pre) > code, .msg .bubble :not(pre) > code) {
+  border-radius: var(--look-select-radius) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch, .view-switcher-pill, .mobile-shortcut-track, .desktop-session-status-trigger, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *), .seg:not(:is(.module-view, .rail-body, .panel-sheet) *), .ui-btn, .config-chip, .starter-chip, .hero-customize-trigger, .composer-suggestion, .add-menu-tile) {
+  border-radius: var(--look-control-radius) !important;
+}
+
+/* 3a. Floating surfaces: toasts, menus, tooltips, dialogs, settings. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner, .workspace-customize-panel) {
+  background: color-mix(in srgb, var(--look-float) var(--look-float-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+  border: 1px solid var(--look-float-edge) !important;
+  box-shadow: var(--look-float-shadow) !important;
+  border-radius: var(--look-float-radius) !important;
+}
+
+/* The window layout's island (shellLayout.css) floats over the chat like a
+   menu does: one capsule in the look's float material, its controls sharing
+   it instead of carrying the look's control plates. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .app > .header > .shell-island {
+  background: color-mix(in srgb, var(--look-float) var(--look-float-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+  border: 1px solid var(--look-float-edge) !important;
+  box-shadow: var(--look-float-shadow) !important;
+  border-radius: 999px !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .app > .header > .shell-island :is(.view-switcher-pill, .header-control, .ui-icon-btn, .capability-launcher, .desktop-session-status-trigger) {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+/* Settings and dialogs cover the conversation, not a strip of it: like the
+   phone navigator they take the overlay floor, so text under them never
+   reads through (menus, tips and toasts keep the lighter float). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.dialog-panel, .modal.settings-shell) {
+  background: color-mix(in srgb, var(--look-float) var(--look-overlay-a), transparent) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.settings-shell .settings-pane, .settings-shell .settings-pane-head, .settings-shell .settings-nav, .question-actions) {
+  background: transparent !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.settings-shell .settings-nav) {
+  border-inline-end: 1px solid var(--look-line) !important;
+}
+
+/* Phone Settings stacks its page over the list in one cell, and both are on
+   screen while the page slides in or out (surfaceMotion.css). The page is a
+   layer of the stack grammar, so it paints the overlay material itself,
+   opaque, or the list reads through it for the whole slide. The theme
+   surface under it keeps it opaque where a look's material is not quite
+   (dark Air's islands are 93%). */
+@media (max-width: 700px) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .scrim.settings-scrim > .settings-shell > .settings-pane {
+    background: linear-gradient(var(--look-overlay-solid), var(--look-overlay-solid)), var(--bg) !important;
+  }
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.scrim.settings-scrim, .dialog-backdrop) {
+  background: var(--look-scrim) !important;
+  backdrop-filter: var(--look-scrim-blur) !important;
+}
+
+/* 3b. In-flow cards: agent question, isolated-changes card, edited files, agent status. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .pending-changes-bar, .agent-status-dock, .subagent-island, .empty-state--compact, .empty-state--panel) {
+  background: var(--look-card) !important;
+  backdrop-filter: var(--look-card-blur, none) !important;
+  border: 1px solid var(--look-card-edge) !important;
+  border-radius: var(--look-card-radius) !important;
+  box-shadow: var(--look-card-shadow) !important;
+}
+
+/* The agent's line with its subagents is one card: the island takes the
+   look's plate and the line inside it keeps none (no card in a card). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .subagent-island .agent-status-dock {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  border: 0 !important;
+  border-radius: var(--radius-control) !important;
+  box-shadow: none !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-option) {
+  background: var(--look-option) !important;
+  border: 1px solid var(--look-option-edge) !important;
+  box-shadow: none !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.project-direction-card, .project-composition-section) {
+  background: color-mix(in srgb, var(--text) 4%, transparent) !important;
+  box-shadow: none !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.project-direction-card.is-selected) {
+  background: var(--accent-wash) !important;
+}
+
+/* 2. Wallpaper: the concept paints the veil, so the root shows the raw image.
+   The ladder has two rungs per Transparency setting, chosen by the image's
+   measured tone (html[data-background-tone], backgrounds.ts):
+   - readable (default): the image's tone is the other appearance's, mixed, or
+     not known yet (a custom image before it is sampled). Every layer under
+     text is thick enough to keep quiet ink at 4.5:1 over the image's worst
+     part, so Transparency changes the blur, never readability;
+   - matched: the tone is the theme's own, so even the image's worst part is in
+     the quiet ink's range and the veils can stay thin. The paired presets
+     follow the theme to stay on this rung. */
+
+html:not([data-background="none"]):has(body[data-shell-look]:not([data-shell-look="standard"]):not(#\#)) {
+  background-image: var(--app-background-image) !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+
+html:not([data-background="none"]) body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) {
+  --look-veil: 90%;
+  --look-veil-soft: 88%;
+  --look-a: 92%;
+  --look-float-a: 96%;
+  --look-overlay-a: 96%;
+  --look-blur: blur(22px) saturate(1.25);
+  --look-float-blur: blur(26px) saturate(1.3);
+}
+
+html:not([data-background="none"]) body[data-shell-look]:not([data-shell-look="standard"])[data-glass="clear"]:not(#\#) {
+  --look-veil: 86%;
+  --look-veil-soft: 84%;
+  --look-a: 88%;
+  --look-float-a: 92%;
+  --look-overlay-a: 92%;
+  --look-blur: blur(14px) saturate(1.45);
+  --look-float-blur: blur(20px) saturate(1.45);
+}
+
+html:not([data-background="none"]) body[data-shell-look]:not([data-shell-look="standard"])[data-glass="off"]:not(#\#) {
+  --look-veil: 94%;
+  --look-veil-soft: 92%;
+  --look-a: 100%;
+  --look-float-a: 100%;
+  --look-overlay-a: 100%;
+  --look-blur: none;
+  --look-float-blur: none;
+}
+
+/* Matched rung. Its selectors out-specify every readable block, and its
+   clear/off blocks out-specify its own matte block. */
+
+html:is(.light[data-background-tone="light"], :not(.light)[data-background-tone="dark"]):not([data-background="none"]) body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) {
+  --look-veil: 74%;
+  --look-veil-soft: 46%;
+  --look-a: 84%;
+  --look-float-a: 90%;
+  --look-overlay-a: 94%;
+}
+
+html:is(.light[data-background-tone="light"], :not(.light)[data-background-tone="dark"]):not([data-background="none"]) body[data-shell-look]:not([data-shell-look="standard"])[data-glass="clear"]:not(#\#) {
+  --look-veil: 52%;
+  --look-veil-soft: 30%;
+  --look-a: 60%;
+  --look-float-a: 78%;
+  --look-overlay-a: 92%;
+}
+
+html:is(.light[data-background-tone="light"], :not(.light)[data-background-tone="dark"]):not([data-background="none"]) body[data-shell-look]:not([data-shell-look="standard"])[data-glass="off"]:not(#\#) {
+  --look-veil: 90%;
+  --look-veil-soft: 68%;
+  --look-a: 100%;
+  --look-float-a: 100%;
+  --look-overlay-a: 100%;
+}
+
+/* The wallpaper glass keeps its own blur on the navigator and right rail with
+   a stronger selector; reset it at double id strength, above every other look
+   rule. Concepts that want those two panels frosted say so through
+   --look-shell-blur.
+   An element with a backdrop filter bounds the backdrop of everything inside
+   it, so a filtered host would leave the glass it holds blurring nothing and
+   the conversation would show sharp through it. The panels that hold glass of
+   their own therefore never filter: the rail-collapsed navigator (its sessions
+   peek) and the launcher host once it holds a window (1d). For the same
+   reason a look frosts its canvas on a layer under the shell (--look-canvas-
+   blur, painted below .app's own veil), never on .app itself. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) :is(.sidebar, .railbar) {
+  backdrop-filter: var(--look-shell-blur, none) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) :is(.sidebar.sidebar--rail-collapsed, .railbar:is(.railbar-open, [data-rail-motion="exiting"])) {
+  backdrop-filter: none !important;
+}
+
+/* The rail-collapsed navigator frosts on the layer the base shell gives it,
+   in the look's blur and none of the base glass fill. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .sidebar.sidebar--rail-collapsed::before {
+  background: none !important;
+  backdrop-filter: var(--look-shell-blur, none) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .app::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  backdrop-filter: var(--look-canvas-blur, none);
+}
+
+/*
+   «Папір» — light. One flat sheet, no surfaces at all. Hierarchy from type,
+   spacing and ink only; the composer is a ruled line, not a box.
+   Over a wallpaper the sheet itself turns to frosted paper (--look-veil). */
+
+body[data-shell-look="paper"]:not(#\#) {
+  /* Fields (1f): the navigator's search sets the field for every input. */
+  --look-field: transparent;
+  --look-field-rule: var(--look-line);
+  --look-field-radius: 0px;
+  --look-line: color-mix(in srgb, var(--text) 14%, transparent);
+  --look-hover: color-mix(in srgb, var(--text) 4%, transparent);
+  --look-select: transparent;
+  --look-select-radius: calc(6px * var(--look-round));
+  /* Controls and the session title share the select corner, not the shared
+     10px, so the title and the pieces around it match. */
+  --look-control-radius: calc(6px * var(--look-round));
+  /* Regions are parted by the sheet's ruled line. */
+  --look-rule: var(--look-line);
+  --look-focus-top: color-mix(in srgb, var(--text) 34%, transparent);
+  --look-float: var(--bg);
+  --look-float-edge: var(--look-line);
+  --look-float-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.32);
+  --look-float-radius: calc(12px * var(--look-round));
+  --look-card: transparent;
+  --look-card-edge: transparent;
+  --look-card-radius: 0px;
+  --look-option-edge: transparent;
+  --look-scrim: color-mix(in srgb, var(--bg) 72%, transparent);
+  --look-rail-shadow: var(--look-float-shadow);
+  --look-rail-radius: var(--look-float-radius);
+  /* A floating full-height column (shellLayout.css) takes the sheet corner. */
+  --look-column-radius: var(--look-float-radius);
+}
+
+body[data-shell-look="paper"]:not(#\#) .app {
+  background: color-mix(in srgb, var(--bg) var(--look-veil), transparent) !important;
+  --look-canvas-blur: var(--look-blur);
+}
+
+/* Header: brand + plain title. */
+
+body[data-shell-look="paper"]:not(#\#) .desktop-session-status-copy {
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+body[data-shell-look="paper"]:not(#\#) .desktop-session-status-end {
+  color: var(--look-ink-quiet);
+}
+
+/* Navigator: text on the sheet. Active = ink + weight, nothing else. */
+
+body[data-shell-look="paper"]:not(#\#) .sidebar-project-rail-item {
+  position: relative;
+}
+
+body[data-shell-look="paper"]:not(#\#) .sidebar-project-rail-item .project-glyph {
+  filter: grayscale(1);
+  opacity: 0.72;
+}
+
+body[data-shell-look="paper"]:not(#\#) .sidebar-project-rail-item.active .project-glyph {
+  filter: none;
+  opacity: 1;
+}
+
+body[data-shell-look="paper"]:not(#\#) .sidebar-project-rail-item.active::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: -6px;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: calc(3px * var(--look-round));
+  background: var(--text);
+}
+
+body[data-shell-look="paper"]:not(#\#) :is(.sidebar-service-bar, .sidebar-project-rail-actions, .sidebar-rail-switch) .ui-icon-btn {
+  color: var(--look-ink-dim);
+}
+
+/* Conversation: the person's turn is a quoted passage, not a bubble. */
+
+body[data-shell-look="paper"]:not(#\#) .msg.user .bubble {
+  padding-block: 2px !important;
+  padding-inline: 16px 0 !important;
+  border-inline-start: 2px solid var(--look-line) !important;
+  border-radius: 0 !important;
+  color: var(--text-dim);
+}
+
+body[data-shell-look="paper"]:not(#\#) .md-code-block {
+  border: 1px solid var(--look-line) !important;
+  border-radius: var(--look-select-radius) !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .activity-group > .ui-run-summary {
+  padding-inline: 0 !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .activity-group .ui-run-summary-copy strong {
+  font-weight: 500;
+}
+
+body[data-shell-look="paper"]:not(#\#) .execution-status-icon {
+  display: none;
+}
+
+/* Agent question / isolated changes: a passage under a rule, options as plain rows. */
+
+body[data-shell-look="paper"]:not(#\#) :is(.question-card, .isolation-card) {
+  border-top: 1px solid var(--look-line) !important;
+  padding-inline: 0 !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .question-option {
+  border-radius: var(--look-select-radius) !important;
+}
+
+/* The ruled separator stays; every option keeps the same corner. */
+body[data-shell-look="paper"]:not(#\#) .question-option + .question-option {
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .question-actions {
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .isolation-card :is(.ui-btn--quiet) {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .ui-btn--primary {
+  background: var(--text) !important;
+  color: var(--bg) !important;
+  box-shadow: none !important;
+}
+
+/* Composer: a ruled writing line. */
+
+body[data-shell-look="paper"]:not(#\#) .composer-card {
+  border-radius: 0 !important;
+  border-color: transparent !important;
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .composer-config .config-chip {
+  color: var(--look-ink-quiet);
+}
+
+body[data-shell-look="paper"]:not(#\#) :is(.composer-rail .chip, .composer-rail .ui-icon-btn, .composer-extensions button) {
+  color: var(--look-ink-quiet);
+}
+
+/* The send button keeps the control corner in every state, idle included. */
+body[data-shell-look="paper"]:not(#\#) .send {
+  border-radius: var(--look-control-radius) !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .send:not(:disabled) {
+  background: var(--text) !important;
+  color: var(--bg) !important;
+  box-shadow: none !important;
+  transform: scale(0.82);
+}
+
+/* Phone. */
+
+body[data-shell-look="paper"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .mobile-nav-search {
+  border-bottom: 1px solid var(--look-line) !important;
+  border-radius: 0 !important;
+}
+
+body[data-shell-look="paper"]:not(#\#) .mobile-nav-session-title {
+  color: var(--look-ink-dim);
+}
+
+body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn {
+  color: var(--text-dim);
+}
+
+/*
+   «Лінія» — light. A Swiss grid: every region is drawn by one hairline, never
+   by a fill. Square-ish corners, mono figures, an accent bar for "here".
+   Over a wallpaper the grid stays, the fields between the lines go frosted. */
+
+body[data-shell-look="line"]:not(#\#) {
+  /* Fields (1f): the navigator's search sets the field for every input. */
+  --look-field: transparent;
+  --look-field-edge: inset 0 0 0 1px var(--look-line);
+  --look-field-radius: var(--look-r);
+  /* The corner of floating full-height columns (shellLayout.css). */
+  --look-column-radius: calc(6px * var(--look-round));
+  --look-line: color-mix(in srgb, var(--text) 13%, transparent);
+  --look-line-strong: color-mix(in srgb, var(--text) 22%, transparent);
+  /* A docked window keeps the rail's hairline down its start (1e). */
+  --look-dock-edge: var(--look-line);
+  --look-r: calc(6px * var(--look-round));
+  --look-hover: color-mix(in srgb, var(--text) 4%, transparent);
+  --look-select: transparent;
+  --look-select-edge: inset 0 0 0 1px var(--look-line-strong);
+  --look-select-radius: var(--look-r);
+  --look-control-edge: inset 0 0 0 1px var(--look-line);
+  --look-control-radius: var(--look-r);
+  /* Regions are parted by the grid's hairline. */
+  --look-rule: var(--look-line);
+  --look-focus-top: color-mix(in srgb, var(--text) 40%, transparent);
+  --look-focus-bottom: var(--look-focus-top);
+  --look-focus-side: var(--look-focus-top);
+  --look-float: var(--bg);
+  --look-float-edge: var(--look-line-strong);
+  --look-float-shadow: 0 8px 20px -14px rgba(0, 0, 0, 0.35);
+  --look-float-radius: calc(6px * var(--look-round));
+  --look-card: color-mix(in srgb, var(--bg) var(--look-a), transparent);
+  --look-card-edge: var(--look-line-strong);
+  --look-card-radius: calc(6px * var(--look-round));
+  --look-option-edge: transparent;
+  --look-scrim: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+body[data-shell-look="line"]:not(#\#) .app {
+  background: color-mix(in srgb, var(--bg) var(--look-veil), transparent) !important;
+  --look-canvas-blur: var(--look-blur);
+}
+
+body[data-shell-look="line"]:not(#\#) .header {
+  border-bottom: 1px solid var(--look-line) !important;
+}
+
+/* Navigator: a column bounded by hairlines. */
+
+body[data-shell-look="line"]:not(#\#) .sidebar {
+  border-radius: 0 !important;
+  border-inline-end: 1px solid var(--look-line) !important;
+  margin: 0 !important;
+  height: 100% !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .sidebar-project-rail {
+  border-inline-end: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) :is(.project-path, .activity-summary-counts, .execution-duration, .chat-response-duration, .msg-time, .settings-nav-search) {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  letter-spacing: 0;
+}
+
+body[data-shell-look="line"]:not(#\#) .railbar {
+  border-radius: 0 !important;
+  border-inline-start: 1px solid var(--look-line) !important;
+  margin: 0 !important;
+  height: 100% !important;
+}
+
+/* Line and Editorial keep the strip a full-height ruled column in the tablet
+   band too (height: 100%), where the base strip is a short cluster the status
+   bar runs past (StatusBar.css): there the bar ends one column gap before the
+   column, as in the wide shell, instead of crossing its rule. */
+@container app-shell (min-width: 961px) and (max-width: 1400px) {
+  body:is([data-shell-look="line"], [data-shell-look="editorial"]):not(#\#) .app-shell:not(:has(.railbar-open)):not(:has(> .railbar[data-rail-strip="none"])) .statusbar {
+    margin-inline-end: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-3) + var(--space-2));
+    padding-inline-end: var(--space-2);
+  }
+  body:is([data-shell-look="line"], [data-shell-look="editorial"]):not(#\#) .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(> .railbar[data-rail-strip="none"])) .statusbar {
+    margin-inline: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-3) + var(--space-2)) 0;
+    padding-inline: var(--space-2);
+  }
+}
+
+/* Floating full-height columns (shellLayout.css; App sets
+   data-shell-floating only in those layouts) are hairline cards: the frame
+   closes on every side instead of the one seam the flush grid draws. */
+body[data-shell-look="line"][data-shell-floating="true"]:not(#\#) :is(.sidebar, .railbar:not(.railbar-open)) {
+  border: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .desktop-session-status-copy {
+  font-weight: 550;
+}
+
+/* Conversation. */
+
+body[data-shell-look="line"]:not(#\#) .msg.user .bubble {
+  border: 1px solid var(--look-line) !important;
+  border-radius: var(--look-r) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .md-code-block {
+  border: 1px solid var(--look-line) !important;
+  border-radius: var(--look-r) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .activity-group > .ui-run-summary {
+  border-radius: 0 !important;
+  border-bottom: 1px solid var(--look-line-strong) !important;
+  padding-inline: 2px !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .activity-group:not(.open) > .ui-run-summary {
+  border-bottom-color: var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .activity-group .execution-row + .execution-row {
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .activity-group .ui-run-summary-copy strong {
+  font-weight: 550;
+}
+
+body[data-shell-look="line"]:not(#\#) .execution-status-icon {
+  display: none;
+}
+
+/* Question / isolation card: a ruled form. */
+
+body[data-shell-look="line"]:not(#\#) .question-option {
+  border-radius: 0 !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .question-option + .question-option {
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) :is(.question-actions, .isolation-card-actions) {
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .ui-btn--quiet {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--look-line-strong) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .ui-btn--primary {
+  box-shadow: none !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .settings-pane-head {
+  border-bottom: 1px solid var(--look-line) !important;
+}
+
+/* Composer: a form — config, field and actions in ruled bands. */
+
+body[data-shell-look="line"]:not(#\#) .composer-card {
+  border: 1px solid var(--look-line-strong) !important;
+  border-radius: var(--look-r) !important;
+  background: color-mix(in srgb, var(--bg) var(--look-a), transparent) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .composer-config-row {
+  border-bottom: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .composer-rail {
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .send {
+  border-radius: var(--look-r) !important;
+  box-shadow: none !important;
+}
+
+/* Phone. */
+
+body[data-shell-look="line"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-nav-search {
+  border: 1px solid var(--look-line) !important;
+  border-radius: var(--look-r) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-nav-session-row + .mobile-nav-session-row {
+  border-top: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="line"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
+  background: color-mix(in srgb, var(--bg) var(--look-a), transparent) !important;
+  border: 1px solid var(--look-line-strong) !important;
+  border-radius: var(--look-r) !important;
+}
+
+/*
+   «Повітря» — light. Soft islands floating on a pale field: no lines at all,
+   depth from large diffuse shadows and generous round shapes. Over a wallpaper
+   the field turns to frost (--look-veil): the conversation is written on it,
+   so it veils as densely as a canvas does; the islands frost on top
+   (--look-a, --look-blur). */
+
+body[data-shell-look="air"]:not(#\#) {
+  /* Fields (1f): every input takes Air's field (--look-field, below, the
+     composer's) in its pill. */
+  --look-field-radius: 999px;
+  /* The corner of floating full-height columns (shellLayout.css). */
+  --look-column-radius: calc(22px * var(--look-round));
+  --look-island-solid: var(--elevated);
+  --look-island: color-mix(in srgb, var(--look-island-solid) var(--look-a), transparent);
+  --look-shadow: 0 1px 2px color-mix(in srgb, var(--text) 6%, transparent),
+              0 12px 32px -12px color-mix(in srgb, var(--text) 16%, transparent);
+  --look-shadow-lift: 0 2px 4px color-mix(in srgb, var(--text) 6%, transparent),
+              0 24px 56px -20px color-mix(in srgb, var(--accent) 30%, transparent);
+  --look-field: color-mix(in srgb, var(--bg) 94%, var(--text) 3%);
+  --look-float: var(--look-island-solid);
+  --look-float-edge: transparent;
+  --look-float-shadow: 0 2px 6px color-mix(in srgb, var(--text) 8%, transparent), 0 30px 60px -20px color-mix(in srgb, var(--text) 26%, transparent);
+  --look-float-radius: calc(22px * var(--look-round));
+  --look-card: var(--look-island);
+  --look-card-blur: var(--look-blur);
+  --look-card-edge: transparent;
+  --look-card-radius: calc(22px * var(--look-round));
+  --look-card-shadow: var(--look-shadow);
+  --look-option: color-mix(in srgb, var(--text) 4%, transparent);
+  --look-option-edge: transparent;
+  --look-scrim: color-mix(in srgb, var(--text) 16%, transparent);
+  --look-scrim-blur: blur(8px);
+  --look-shell-blur: var(--look-blur);
+  --look-select: var(--accent-wash);
+  --look-select-radius: 999px;
+  --look-control: var(--look-island);
+  --look-control-edge: var(--look-shadow);
+  --look-control-blur: var(--look-blur);
+  --look-control-radius: 999px;
+  --look-rail-edge: transparent;
+  --look-rail-seam: color-mix(in srgb, var(--text) 6%, transparent);
+  --look-rail-shadow: var(--look-shadow);
+  --look-rail-radius: calc(22px * var(--look-round));
+  --look-rail-island: 1;
+  --look-dock: var(--look-island);
+  --look-dock-blur: var(--look-blur);
+  --look-dock-shadow: var(--look-shadow);
+}
+
+html:not(.light) body[data-shell-look="air"]:not(#\#) {
+  --look-island-solid: color-mix(in srgb, var(--elevated) 86%, var(--text) 7%);
+}
+
+body[data-shell-look="air"]:not(#\#) .app {
+  background:
+      radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
+      color-mix(in srgb, var(--look-field) var(--look-veil), transparent) !important;
+  --look-canvas-blur: var(--look-blur);
+}
+
+/* Islands. */
+
+body[data-shell-look="air"]:not(#\#) :is(.sidebar, .railbar) {
+  background: var(--look-island) !important;
+  box-shadow: var(--look-shadow) !important;
+  backdrop-filter: var(--look-blur) !important;
+  border-radius: calc(22px * var(--look-round)) !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .sidebar {
+  margin-block: 0 10px !important;
+  margin-inline: 10px 0 !important;
+  height: calc(100% - 10px) !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .railbar {
+  --rail-strip-gutter-start: calc(var(--space-3) / 2);
+  --rail-strip-gutter-end: calc(var(--space-3) / 2);
+  margin-block: 0 10px !important;
+  margin-inline: 0 10px !important;
+  height: auto !important;
+  align-self: flex-start;
+  padding-block: 6px;
+}
+
+body[data-shell-look="air"]:not(#\#) .desktop-session-status-trigger {
+  max-width: 520px;
+  margin-inline: auto;
+}
+
+body[data-shell-look="air"]:not(#\#) .desktop-session-status-copy {
+  font-weight: 550;
+}
+
+/* Navigator rows as soft pills. */
+
+/* Conversation. */
+
+body[data-shell-look="air"]:not(#\#) .msg.user .bubble {
+  background: var(--accent-wash) !important;
+  backdrop-filter: var(--look-blur) !important;
+  border-radius: calc(22px * var(--look-round)) !important;
+  border-end-end-radius: calc(6px * var(--look-round)) !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .md-code-block {
+  background: var(--look-island) !important;
+  box-shadow: var(--look-shadow) !important;
+  border-radius: calc(18px * var(--look-round)) !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .activity-group > .ui-run-summary {
+  width: auto !important;
+  display: inline-flex !important;
+  max-width: 100%;
+  background: var(--look-island) !important;
+  box-shadow: var(--look-shadow) !important;
+  border-radius: 999px !important;
+  padding-inline: 12px 14px !important;
+}
+
+/* The pill hugs its words in a live block too; its Stop sits right after it. */
+body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop {
+  grid-template-columns: minmax(0, max-content) auto;
+  justify-content: start;
+}
+body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop > .activity-live-stop { margin-inline-start: 8px; }
+
+body[data-shell-look="air"]:not(#\#) .activity-group.open {
+  background: var(--look-island) !important;
+  box-shadow: var(--look-shadow) !important;
+  border-radius: calc(22px * var(--look-round)) !important;
+  padding: 4px 6px 6px !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .activity-group.open > .ui-run-summary {
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .execution-status-icon {
+  display: none;
+}
+
+/* Rounder everything; pill buttons. */
+
+body[data-shell-look="air"]:not(#\#) .question-option {
+  border-radius: calc(16px * var(--look-round)) !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .ui-btn--primary:not(:disabled) {
+  box-shadow: 0 8px 18px -8px var(--accent) !important;
+}
+
+/* Composer: one floating island, rounder, lifted with a tinted shadow. */
+
+body[data-shell-look="air"]:not(#\#) .composer-card {
+  background: var(--look-island) !important;
+  box-shadow: var(--look-shadow-lift) !important;
+  backdrop-filter: var(--look-blur) !important;
+  border-radius: calc(28px * var(--look-round)) !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .send:not(:disabled) {
+  box-shadow: 0 8px 18px -8px var(--accent) !important;
+}
+
+/* Phone. */
+
+body[data-shell-look="air"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, var(--look-field) var(--look-overlay-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+}
+
+body[data-shell-look="air"]:not(#\#) .mobile-nav-search {
+  background: var(--look-island) !important;
+  box-shadow: var(--look-shadow) !important;
+  border-radius: 999px !important;
+}
+
+body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
+  background: var(--look-island) !important;
+  box-shadow: var(--look-shadow) !important;
+  border-radius: 999px !important;
+  backdrop-filter: var(--look-blur) !important;
+}
+
+/*
+   «Моноліт» — premium. Chrome sits on a deep backdrop; the work is one solid
+   sheet raised above it. Two planes only, no glass, no outlines; a short,
+   light shadow. Over a wallpaper the backdrop becomes the tinted image and
+   the sheet frosts (--look-a). */
+
+body[data-shell-look="monolith"]:not(#\#) {
+  /* Fields (1f): the navigator's search sets the field for every input. */
+  --look-field: color-mix(in srgb, var(--text) 6%, transparent);
+  --look-field-radius: calc(9px * var(--look-round));
+  --look-backdrop: color-mix(in srgb, var(--bg) 62%, black);
+  --look-sheet-solid: var(--bg);
+  --look-sheet: color-mix(in srgb, var(--look-sheet-solid) var(--look-a), transparent);
+  --look-edge: color-mix(in srgb, var(--text) 9%, transparent);
+  --look-sheet-shadow: 0 0 0 1px var(--look-edge), 0 6px 18px -10px rgba(0, 0, 0, 0.32), 0 1px 2px rgba(0, 0, 0, 0.14);
+  --look-float: var(--look-sheet-solid);
+  --look-float-edge: var(--look-edge);
+  --look-float-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.4);
+  --look-float-radius: calc(12px * var(--look-round));
+  --look-card: color-mix(in srgb, var(--text) 4%, transparent);
+  --look-card-edge: transparent;
+  --look-card-radius: calc(14px * var(--look-round));
+  --look-option: color-mix(in srgb, var(--text) 3%, transparent);
+  --look-option-edge: transparent;
+  --look-scrim: color-mix(in srgb, var(--look-backdrop) 55%, transparent);
+  --look-scrim-blur: blur(4px);
+  --look-select: color-mix(in srgb, var(--text) 9%, transparent);
+  --look-select-radius: calc(9px * var(--look-round));
+  --look-rail-edge: var(--look-edge);
+  --look-rail-seam: var(--look-edge);
+  --look-rail-shadow: var(--look-float-shadow);
+  --look-rail-radius: calc(14px * var(--look-round));
+  /* A floating column takes the rail's corner (stated, not var(--look-rail-radius):
+     Floating columns derive the rail radius from this one). */
+  --look-column-radius: calc(14px * var(--look-round));
+}
+
+html.light body[data-shell-look="monolith"]:not(#\#) {
+  --look-ink-quiet: var(--text-dim);
+  --look-backdrop: color-mix(in srgb, var(--bg) 90%, var(--text) 8%);
+  --look-sheet-solid: color-mix(in srgb, var(--bg) 70%, white);
+  --look-sheet-shadow: 0 0 0 1px var(--look-edge), 0 4px 14px -8px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --look-float-shadow: 0 10px 28px -16px rgba(0, 0, 0, 0.22);
+}
+
+body[data-shell-look="monolith"]:not(#\#) .app {
+  background: color-mix(in srgb, var(--look-backdrop) var(--look-veil-soft), transparent) !important;
+}
+
+/* In light mode the chrome's backdrop must stay light enough for the theme's
+   quiet inks, so it veils a wallpaper as densely as a canvas does. */
+html.light body[data-shell-look="monolith"]:not(#\#) .app {
+  background: color-mix(in srgb, var(--look-backdrop) var(--look-veil), transparent) !important;
+}
+
+/* The sheet. */
+
+body[data-shell-look="monolith"]:not(#\#) .workspace {
+  background: var(--look-sheet) !important;
+  backdrop-filter: var(--look-blur);
+  border-radius: calc(14px * var(--look-round));
+  margin-block: 0 var(--space-2);
+  /* The strip moves in with Floating columns (--shell-edge), so the sheet's
+     gap to it matches the sidebar's gap to the sheet. */
+  margin-inline: 0 calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-2) + var(--shell-edge, 0px));
+  box-shadow: var(--look-sheet-shadow) !important;
+  overflow: hidden;
+}
+
+/* The launcher column ends where the sheet does, so a window it opens is a
+   second raised plane on the sheet's foot line, its free corner rounded like
+   the sheet's. The full-height layouts restate the column's margins
+   (shellLayout.css). */
+body[data-shell-look="monolith"]:not(#\#) .railbar {
+  margin: 0 0 var(--space-2) !important;
+}
+
+body[data-shell-look="monolith"]:not([data-shell-layout="columns"]):not([data-shell-layout="bare"]):not(#\#) .railbar > .rail-dynamic {
+  --package-window-foot: 1;
+}
+
+/* The sheet already leaves the strip its lane, so the status bar inside it
+   spans the sheet instead of reserving the lane again (StatusBar.css). */
+body[data-shell-look="monolith"]:not(#\#) .statusbar {
+  margin-inline: 0 !important;
+}
+
+/* Mirrored, the strip sits at the workspace's inline start, so the sheet's
+   lane for it moves there, docked window included. */
+body[data-shell-look="monolith"]:not(#\#) .app[data-shell-mirror="true"] .app-shell > .workspace {
+  margin-inline: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-2) + var(--shell-edge, 0px)) 0;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .app[data-shell-mirror="true"] .app-shell:has(> .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .workspace {
+  margin-inline-start: 0;
+}
+
+/* A docked window (1e) takes the strip's lane in flow, so the sheet no
+   longer leaves the idle strip room: only the shell's column gap parts it
+   from the window. */
+body[data-shell-look="monolith"]:not(#\#) .app-shell:has(> .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .workspace {
+  margin-inline-end: 0;
+}
+
+/* Chrome on the backdrop. */
+
+body[data-shell-look="monolith"]:not(#\#) .desktop-session-status-copy {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .desktop-session-status-end {
+  color: var(--look-ink-quiet);
+}
+
+body[data-shell-look="monolith"]:not(#\#) .project-name {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* On the sheet. */
+
+body[data-shell-look="monolith"]:not(#\#) .msg.user .bubble {
+  background: color-mix(in srgb, var(--text) 6%, transparent) !important;
+  border-radius: calc(16px * var(--look-round)) !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .md-code-block {
+  background: color-mix(in srgb, var(--text) 4%, transparent) !important;
+  border-radius: calc(12px * var(--look-round)) !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .activity-group > .ui-run-summary {
+  padding-inline: 0 !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .activity-group .ui-run-summary-copy strong {
+  font-weight: 550;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .activity-group.open .activity-group-items {
+  position: relative;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .activity-group.open .activity-group-items::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 8px;
+  top: 0;
+  bottom: 10px;
+  width: 1px;
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+}
+
+body[data-shell-look="monolith"]:not(#\#) .activity-group .execution-summary {
+  padding-inline-start: 22px !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .execution-status-icon {
+  display: none;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .question-option {
+  border-radius: calc(10px * var(--look-round)) !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .ui-btn--primary {
+  box-shadow: none !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .settings-shell .settings-nav {
+  background: color-mix(in srgb, var(--look-backdrop) 40%, transparent) !important;
+  border-color: transparent !important;
+}
+
+/* Composer: a recessed well cut into the sheet. */
+
+body[data-shell-look="monolith"]:not(#\#) .composer-card {
+  background: color-mix(in srgb, var(--text) 5%, transparent) !important;
+  box-shadow: inset 0 0 0 1px var(--look-edge), inset 0 1px 2px rgba(0, 0, 0, 0.14) !important;
+  border-radius: calc(16px * var(--look-round)) !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .send:not(:disabled) {
+  box-shadow: none !important;
+}
+
+/* Phone. */
+
+body[data-shell-look="monolith"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, var(--look-backdrop) var(--look-overlay-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .mobile-nav-search {
+  background: color-mix(in srgb, var(--text) 7%, transparent) !important;
+  border-radius: calc(10px * var(--look-round)) !important;
+}
+
+body[data-shell-look="monolith"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
+  background: color-mix(in srgb, var(--look-backdrop) 70%, var(--text) 8%) !important;
+  border-radius: calc(14px * var(--look-round)) !important;
+}
+
+@media (max-width: 480px) {
+  body[data-shell-look="monolith"]:not(#\#) .app {
+    background: var(--look-sheet) !important;
+    --look-canvas-blur: var(--look-blur);
+  }
+  body[data-shell-look="monolith"]:not(#\#) .workspace {
+    margin: 0 !important;
+    border-radius: 0;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+}
+
+/*
+   «Реверсивний моноліт» — premium. The Monolith turned inside out: the chrome
+   (header, navigator, rails) is one raised, lit plane, and the conversation is
+   a recessed well cut into it. Raised things in the well (composer, the
+   person's message, cards) are made of the chrome plane; selection in the
+   chrome is carved down to the well's depth. Over a wallpaper the well
+   becomes a window onto the image. */
+
+body[data-shell-look="monolith-reverse"]:not(#\#) {
+  /* Fields (1f): the navigator's search sets the field for every input. */
+  --look-field: var(--look-well-solid);
+  --look-field-edge: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  --look-field-radius: calc(9px * var(--look-round));
+  --look-plane-solid: color-mix(in srgb, var(--bg) 84%, white);
+  --look-well-solid: color-mix(in srgb, var(--bg) 70%, black);
+  --look-plane: color-mix(in srgb, var(--look-plane-solid) var(--look-a), transparent);
+  --look-well: color-mix(in srgb, var(--look-well-solid) var(--look-veil), transparent);
+  --look-edge: color-mix(in srgb, var(--text) 8%, transparent);
+  --look-raise: 0 0 0 1px var(--look-edge), 0 4px 12px -8px rgba(0, 0, 0, 0.4);
+  --look-float: var(--look-plane-solid);
+  --look-float-edge: var(--look-edge);
+  --look-float-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.45);
+  --look-float-radius: calc(12px * var(--look-round));
+  --look-card: var(--look-plane);
+  --look-card-edge: transparent;
+  --look-card-radius: calc(14px * var(--look-round));
+  --look-card-shadow: var(--look-raise);
+  --look-option: var(--look-well);
+  --look-option-edge: transparent;
+  --look-scrim: color-mix(in srgb, var(--look-well-solid) 55%, transparent);
+  --look-scrim-blur: blur(4px);
+  /* Selection is carved to the well; strips are wells with raised segments. */
+  --look-carve: inset 0 1px 2px rgba(0, 0, 0, 0.22);
+  --look-select: var(--look-well-solid);
+  --look-select-edge: var(--look-carve);
+  --look-select-radius: calc(9px * var(--look-round));
+  --look-control: var(--look-well-solid);
+  --look-control-edge: var(--look-carve);
+  --look-segment: var(--look-plane-solid);
+  --look-segment-edge: var(--look-raise);
+  --look-rail-edge: var(--look-edge);
+  --look-rail-seam: var(--look-edge);
+  --look-rail-shadow: var(--look-float-shadow);
+  --look-rail-radius: calc(14px * var(--look-round));
+  /* A floating column takes the rail's corner (stated, not var(--look-rail-radius):
+     Floating columns derive the rail radius from this one). */
+  --look-column-radius: calc(14px * var(--look-round));
+}
+
+html.light body[data-shell-look="monolith-reverse"]:not(#\#) {
+  --look-plane-solid: color-mix(in srgb, var(--bg) 40%, white);
+  --look-well-solid: color-mix(in srgb, var(--bg) 88%, var(--text) 9%);
+  --look-raise: 0 0 0 1px var(--look-edge), 0 3px 10px -6px rgba(0, 0, 0, 0.14);
+  --look-float-shadow: 0 10px 28px -16px rgba(0, 0, 0, 0.22);
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .app {
+  background: var(--look-plane) !important;
+  --look-canvas-blur: var(--look-blur);
+}
+
+/* The well. */
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .workspace {
+  background: var(--look-well) !important;
+  border-radius: calc(14px * var(--look-round));
+  margin-block: 0 var(--space-2);
+  /* The strip moves in with Floating columns (--shell-edge), so the well's
+     gap to it matches the sidebar's gap to the well. */
+  margin-inline: 0 calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-2) + var(--shell-edge, 0px));
+  box-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 6px -2px rgba(0, 0, 0, 0.35) !important;
+  overflow: hidden;
+}
+
+html.light body[data-shell-look="monolith-reverse"]:not(#\#) .workspace {
+  box-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 5px -2px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* As in Monolith: the launcher column and its window end on the well's foot. */
+body[data-shell-look="monolith-reverse"]:not(#\#) .railbar {
+  margin: 0 0 var(--space-2) !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not([data-shell-layout="columns"]):not([data-shell-layout="bare"]):not(#\#) .railbar > .rail-dynamic {
+  --package-window-foot: 1;
+}
+
+/* The well already leaves the strip its lane, so the status bar inside it
+   spans the well instead of reserving the lane again (StatusBar.css). */
+body[data-shell-look="monolith-reverse"]:not(#\#) .statusbar {
+  margin-inline: 0 !important;
+}
+
+/* Mirrored, the strip sits at the workspace's inline start, so the well's
+   lane for it moves there, docked window included. */
+body[data-shell-look="monolith-reverse"]:not(#\#) .app[data-shell-mirror="true"] .app-shell > .workspace {
+  margin-inline: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-2) + var(--shell-edge, 0px)) 0;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .app[data-shell-mirror="true"] .app-shell:has(> .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .workspace {
+  margin-inline-start: 0;
+}
+
+/* A docked window (1e) takes the strip's lane in flow, so the sheet no
+   longer leaves the idle strip room: only the shell's column gap parts it
+   from the window. */
+body[data-shell-look="monolith-reverse"]:not(#\#) .app-shell:has(> .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .workspace {
+  margin-inline-end: 0;
+}
+
+/* Chrome plane: selection is carved to the well's depth. */
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .desktop-session-status-copy {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .project-name {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* In the well: raised pieces of the chrome plane. */
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .msg.user .bubble {
+  background: var(--look-plane) !important;
+  box-shadow: var(--look-raise) !important;
+  border-radius: calc(16px * var(--look-round)) !important;
+  backdrop-filter: var(--look-blur) !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .md-code-block {
+  background: color-mix(in srgb, var(--look-well-solid) 70%, black) !important;
+  border-radius: calc(12px * var(--look-round)) !important;
+}
+
+html.light body[data-shell-look="monolith-reverse"]:not(#\#) .md-code-block {
+  background: color-mix(in srgb, var(--look-plane-solid) 70%, transparent) !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group > .ui-run-summary {
+  padding-inline: 0 !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group .ui-run-summary-copy strong {
+  font-weight: 550;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group.open .activity-group-items {
+  position: relative;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group.open .activity-group-items::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 8px;
+  top: 0;
+  bottom: 10px;
+  width: 1px;
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group .execution-summary {
+  padding-inline-start: 22px !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .execution-status-icon {
+  display: none;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .question-option {
+  border-radius: calc(10px * var(--look-round)) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18) !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .ui-btn--primary {
+  box-shadow: none !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .settings-shell .settings-nav {
+  background: color-mix(in srgb, var(--look-well-solid) 50%, transparent) !important;
+  border-color: transparent !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .composer-card {
+  background: var(--look-plane) !important;
+  backdrop-filter: var(--look-blur) !important;
+  box-shadow: var(--look-raise), 0 1px 0 0 color-mix(in srgb, white 6%, transparent) inset !important;
+  border-radius: calc(18px * var(--look-round)) !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .send:not(:disabled) {
+  box-shadow: none !important;
+}
+
+/* Phone. */
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, var(--look-plane-solid) var(--look-overlay-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) .mobile-nav-search {
+  background: var(--look-well-solid) !important;
+  border-radius: calc(10px * var(--look-round)) !important;
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
+  background: var(--look-plane) !important;
+  box-shadow: var(--look-raise) !important;
+  border-radius: calc(14px * var(--look-round)) !important;
+}
+
+@media (max-width: 480px) {
+  body[data-shell-look="monolith-reverse"]:not(#\#) .app {
+    background: var(--look-well) !important;
+  }
+  body[data-shell-look="monolith-reverse"]:not(#\#) .workspace {
+    margin: 0 !important;
+    border-radius: 0;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+}
+
+/*
+   «Обсидіан» — premium. Polished dark glass with light-catching edges: each
+   surface gets a gradient rim that brightens toward the accent, the composer
+   carries the one glow. Light mode turns it into pearl. Over a wallpaper the
+   aurora gives way to the image; the glass follows the Transparency setting. */
+
+body[data-shell-look="obsidian"]:not(#\#) {
+  /* Fields (1f): the navigator's search sets the field for every input. */
+  --look-field: color-mix(in srgb, var(--text) 5%, transparent);
+  --look-field-edge: inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+  --look-field-radius: 999px;
+  /* The corner of floating full-height columns (shellLayout.css). */
+  --look-column-radius: calc(18px * var(--look-round));
+  --look-strip-radius: 999px;
+  --look-fill-a: calc(var(--look-a) * 0.86);
+  --look-fill: color-mix(in srgb, var(--panel) 74%, transparent);
+  --look-fill-strong: color-mix(in srgb, var(--panel) 88%, transparent);
+  --look-fill-overlay: color-mix(in srgb, var(--panel) var(--look-overlay-a), transparent);
+  --look-overlay-solid: var(--panel);
+  --look-rim: linear-gradient(160deg,
+      color-mix(in srgb, var(--text) 34%, transparent),
+      color-mix(in srgb, var(--text) 4%, transparent) 38%,
+      color-mix(in srgb, var(--text) 3%, transparent) 70%,
+      color-mix(in srgb, var(--accent) 34%, transparent));
+  --look-rim-accent: linear-gradient(135deg,
+      color-mix(in srgb, var(--accent-hi) 75%, transparent),
+      color-mix(in srgb, var(--text) 8%, transparent) 35%,
+      color-mix(in srgb, var(--text) 5%, transparent) 65%,
+      color-mix(in srgb, var(--purple) 55%, transparent));
+  --look-glass-blur: blur(24px) saturate(1.4);
+  --look-shell-blur: var(--look-glass-blur);
+  --look-glass-shadow: 0 1px 0 0 color-mix(in srgb, white 7%, transparent) inset, 0 18px 40px -24px rgba(0, 0, 0, 0.6);
+  --look-float-radius: calc(18px * var(--look-round));
+  --look-scrim: color-mix(in srgb, black 40%, transparent);
+  --look-scrim-blur: blur(10px) saturate(1.2);
+  --look-option: color-mix(in srgb, var(--text) 4%, transparent);
+  --look-option-edge: color-mix(in srgb, var(--text) 8%, transparent);
+  --look-select: color-mix(in srgb, var(--accent) 13%, transparent);
+  --look-select-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+  --look-select-radius: 999px;
+  --look-control-radius: 999px;
+  --look-rail: var(--look-fill-overlay);
+  --look-rail-blur: var(--look-glass-blur);
+  --look-rail-edge: color-mix(in srgb, var(--text) 12%, transparent);
+  --look-rail-seam: color-mix(in srgb, var(--text) 8%, transparent);
+  --look-rail-shadow: var(--look-glass-shadow);
+  --look-rail-radius: calc(18px * var(--look-round));
+  --look-rail-island: 1;
+  --look-dock: var(--look-fill);
+  --look-dock-blur: var(--look-glass-blur);
+  --look-dock-shadow: var(--look-glass-shadow);
+  --look-dock-edge: color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .app {
+  background:
+      radial-gradient(55% 55% at 80% -5%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%),
+      radial-gradient(45% 50% at 5% 105%, color-mix(in srgb, var(--purple) 22%, transparent), transparent 70%),
+      color-mix(in srgb, var(--bg) 72%, black) !important;
+}
+
+html.light body[data-shell-look="obsidian"]:not(#\#) .app {
+  background:
+      radial-gradient(60% 50% at 78% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+      radial-gradient(50% 45% at 10% 100%, color-mix(in srgb, var(--purple) 10%, transparent), transparent 70%),
+      color-mix(in srgb, var(--bg) 92%, var(--text) 4%) !important;
+}
+
+/* Wallpaper replaces the aurora; the veil follows Transparency. The
+   conversation is written straight on this canvas, so it veils as densely
+   as Paper's sheet does (--look-veil) and frosts what shows through. */
+
+html:not([data-background="none"]) body[data-shell-look="obsidian"]:not(#\#) .app {
+  background: color-mix(in srgb, color-mix(in srgb, var(--bg) 72%, black) var(--look-veil), transparent) !important;
+  --look-canvas-blur: var(--look-blur);
+}
+
+html.light:not([data-background="none"]) body[data-shell-look="obsidian"]:not(#\#) .app {
+  background: color-mix(in srgb, var(--bg) var(--look-veil), transparent) !important;
+}
+
+html:not([data-background="none"]) body[data-shell-look="obsidian"]:not(#\#) {
+  --look-fill: color-mix(in srgb, var(--panel) var(--look-a), transparent);
+  --look-fill-strong: color-mix(in srgb, var(--panel) var(--look-float-a), transparent);
+  --look-fill-overlay: color-mix(in srgb, var(--panel) var(--look-overlay-a), transparent);
+}
+
+html:not([data-background="none"]) body[data-shell-look="obsidian"][data-glass="off"]:not(#\#) {
+  --look-glass-blur: none;
+}
+
+/* Rimmed glass: shell surfaces, floating surfaces and in-flow cards share it. */
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card, .pending-changes-bar, .agent-status-dock, .subagent-island) {
+  border: 1px solid transparent !important;
+  background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
+  backdrop-filter: var(--look-glass-blur) !important;
+  box-shadow: var(--look-glass-shadow) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner) {
+  border: 1px solid transparent !important;
+  background: linear-gradient(var(--look-fill-strong), var(--look-fill-strong)) padding-box, var(--look-rim) border-box !important;
+  backdrop-filter: var(--look-glass-blur) !important;
+  box-shadow: var(--look-glass-shadow), 0 30px 70px -30px rgba(0, 0, 0, 0.6) !important;
+  border-radius: var(--look-float-radius) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.dialog-panel, .modal.settings-shell) {
+  background: linear-gradient(var(--look-fill-overlay), var(--look-fill-overlay)) padding-box, var(--look-rim) border-box !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card, .pending-changes-bar) {
+  border-radius: calc(18px * var(--look-round)) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .sidebar {
+  border-radius: calc(18px * var(--look-round)) !important;
+  margin-block: 0 10px !important;
+  margin-inline: 10px 0 !important;
+  height: calc(100% - 10px) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .railbar {
+  --rail-strip-gutter-start: calc(var(--space-3) / 2);
+  --rail-strip-gutter-end: calc(var(--space-3) / 2);
+  border-radius: 999px !important;
+  margin-block: 0 10px !important;
+  margin-inline: 0 10px !important;
+  height: auto !important;
+  align-self: flex-start;
+  padding-block: 8px;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .desktop-session-status-copy {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Selection: a soft accent wash with a quiet accent edge (--look-select*). */
+
+body[data-shell-look="obsidian"]:not(#\#) .settings-nav-item.active {
+  color: var(--text);
+  font-weight: 550;
+  box-shadow: var(--look-select-edge) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .msg.user .bubble {
+  border-radius: calc(18px * var(--look-round)) !important;
+  border-end-end-radius: calc(6px * var(--look-round)) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .md-code-block {
+  border-radius: calc(14px * var(--look-round)) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .question-option {
+  border-radius: calc(12px * var(--look-round)) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .question-option:has(input:checked) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent), 0 0 18px -8px var(--accent) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .activity-group > .ui-run-summary {
+  padding-inline: 0 !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .activity-group .ui-run-summary-mark {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--green) 60%, transparent));
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .activity-group.open .activity-group-items {
+  position: relative;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .activity-group.open .activity-group-items::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 8px;
+  top: 0;
+  bottom: 10px;
+  width: 1px;
+  background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 0%, transparent));
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .activity-group .execution-summary {
+  padding-inline-start: 22px !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .execution-status-icon {
+  display: none;
+}
+
+/* The glowing objects: composer and the primary action. */
+
+body[data-shell-look="obsidian"]:not(#\#) .composer-card {
+  border: 1px solid transparent !important;
+  background: linear-gradient(var(--look-fill-strong), var(--look-fill-strong)) padding-box, var(--look-rim-accent) border-box !important;
+  backdrop-filter: var(--look-glass-blur) !important;
+  border-radius: calc(24px * var(--look-round)) !important;
+  box-shadow: 0 1px 0 0 color-mix(in srgb, white 8%, transparent) inset,
+      0 30px 70px -30px color-mix(in srgb, var(--accent) 55%, transparent),
+      0 0 0 6px color-mix(in srgb, var(--accent) 5%, transparent) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.send:not(:disabled), .ui-btn--primary:not(:disabled)) {
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent)) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, white 18%, transparent) inset, 0 8px 22px -6px var(--accent) !important;
+}
+
+/* Phone. */
+
+body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, color-mix(in srgb, var(--bg) 70%, black) var(--look-overlay-a), transparent) !important;
+  backdrop-filter: var(--look-glass-blur) !important;
+}
+
+html.light body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions, .mobile-nav-search) {
+  border: 1px solid transparent !important;
+  border-radius: 999px !important;
+  background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
+  backdrop-filter: var(--look-glass-blur) !important;
+}
+
+/*
+   «Редакція» — premium. A well-set page: serif display type for titles and the
+   person's words, an index-like navigator in small caps, a letter-field
+   composer between two rules. Warm paper in light, warm ink at night. Over a
+   wallpaper the page becomes frosted vellum (--look-veil). */
+
+body[data-shell-look="editorial"]:not(#\#) {
+  /* Fields (1f): the navigator's search sets the field for every input. */
+  --look-field: transparent;
+  --look-field-rule: var(--look-line);
+  --look-field-radius: 0px;
+  /* The warm paper is lighter and tinted; the theme's muted ink falls short on it. */
+  --look-ink-quiet: var(--text-dim);
+  --look-serif: "Source Serif 4", Georgia, serif;
+  --look-paper-solid: color-mix(in srgb, color-mix(in srgb, var(--bg) 86%, var(--amber)) 82%, white);
+  --look-paper: color-mix(in srgb, var(--look-paper-solid) var(--look-veil), transparent);
+  --look-line: color-mix(in srgb, var(--text) 16%, transparent);
+  /* A docked window keeps the rail's hairline down its start (1e). */
+  --look-dock-edge: var(--look-line);
+  --look-hover: color-mix(in srgb, var(--text) 4%, transparent);
+  --look-select: transparent;
+  --look-select-radius: calc(3px * var(--look-round));
+  --look-control-radius: calc(3px * var(--look-round));
+  --look-focus-top: color-mix(in srgb, var(--text) 34%, transparent);
+  --look-focus-bottom: var(--look-focus-top);
+  --look-float: var(--look-paper-solid);
+  --look-float-edge: var(--look-line);
+  --look-float-shadow: 0 14px 34px -20px rgba(0, 0, 0, 0.28);
+  --look-float-radius: calc(4px * var(--look-round));
+  --look-card: transparent;
+  --look-card-edge: transparent;
+  --look-card-radius: 0px;
+  --look-option-edge: transparent;
+  --look-scrim: color-mix(in srgb, var(--look-paper-solid) 70%, transparent);
+  /* A floating column takes the paper's corner; regions are parted by rules. */
+  --look-column-radius: var(--look-float-radius);
+  --look-rule: var(--look-line);
+}
+
+html:not(.light) body[data-shell-look="editorial"]:not(#\#) {
+  --look-paper-solid: color-mix(in srgb, color-mix(in srgb, var(--bg) 93%, var(--amber)) 80%, black);
+  --look-float-shadow: 0 14px 34px -18px rgba(0, 0, 0, 0.6);
+}
+
+body[data-shell-look="editorial"]:not(#\#) .app {
+  background: var(--look-paper) !important;
+  --look-canvas-blur: var(--look-blur);
+}
+
+/* Header: the session title is the page title. */
+
+body[data-shell-look="editorial"]:not(#\#) .desktop-session-status-copy {
+  font-family: var(--look-serif);
+  font-size: 19px !important;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.35 !important;
+  overflow: visible !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .desktop-session-status-end {
+  color: var(--look-ink-quiet);
+}
+
+/* Navigator: an index. */
+
+body[data-shell-look="editorial"]:not(#\#) .sidebar {
+  border-inline-end: 1px solid var(--look-line) !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  height: 100% !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .project-name {
+  font-family: var(--look-serif);
+  font-size: 20px !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .project-path {
+  font-variant: all-small-caps;
+  letter-spacing: 0.08em;
+  font-size: 13px !important;
+}
+
+/* Selection is ink plus a fine accent rule under the words. */
+
+body[data-shell-look="editorial"]:not(#\#) :is(.session-row.active .session-title-text, .workspace-mode-switch button.active) {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 5px;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .sidebar-project-rail-item .project-glyph {
+  filter: grayscale(1) sepia(0.25);
+  opacity: 0.75;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .sidebar-project-rail-item.active .project-glyph {
+  filter: none;
+  opacity: 1;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .railbar {
+  border-inline-start: 1px solid var(--look-line) !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  height: 100% !important;
+}
+
+/* Floating full-height columns (shellLayout.css; App sets
+   data-shell-floating only in those layouts) are hairline cards: the frame
+   closes on every side instead of the one seam the flush grid draws. */
+body[data-shell-look="editorial"][data-shell-floating="true"]:not(#\#) :is(.sidebar, .railbar:not(.railbar-open)) {
+  border: 1px solid var(--look-line) !important;
+}
+
+/* Conversation: the person's words as a pull quote. */
+
+body[data-shell-look="editorial"]:not(#\#) .msg.user .bubble {
+  font-family: var(--look-serif);
+  font-size: 18px !important;
+  line-height: 1.5;
+  font-style: italic;
+  padding-block: 0 !important;
+  padding-inline: 20px 0 !important;
+  border-inline-start: 2px solid var(--accent) !important;
+  border-radius: 0 !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .msg.user .bubble code {
+  font-style: normal;
+  font-size: 15px;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .msg.assistant .bubble p.md-para > strong:first-child {
+  font-family: var(--look-serif);
+  font-size: 1.12em;
+  font-weight: 650;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .md-code-block {
+  background: color-mix(in srgb, var(--text) 4%, transparent) !important;
+  border-radius: calc(4px * var(--look-round)) !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .activity-group > .ui-run-summary {
+  padding-inline: 0 !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .activity-group .ui-run-summary-copy strong {
+  font-variant: all-small-caps;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: 1.08em;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .activity-group .execution-row + .execution-row {
+  border-top: 1px dotted var(--look-line) !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .execution-status-icon {
+  display: none;
+}
+
+/* Question / isolation / dialogs: set between rules, serif heads. */
+
+body[data-shell-look="editorial"]:not(#\#) :is(.question-card, .isolation-card) {
+  border-top: 1px solid var(--look-line) !important;
+  border-bottom: 1px solid var(--look-line) !important;
+  padding-inline: 0 !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) :is(.question-item-title, .isolation-card-title, .isolation-card h3, .ui-dialog-title, .dialog-panel h2, .settings-pane-head h2, .notify-title, .hero h2) {
+  font-family: var(--look-serif) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .question-eyebrow {
+  font-variant: all-small-caps;
+  letter-spacing: 0.08em;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .question-option {
+  border-radius: 0 !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .question-option + .question-option {
+  border-top: 1px dotted var(--look-line) !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .question-option-label {
+  font-family: var(--look-serif);
+  font-size: 16px;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .ui-btn--primary:not(:disabled) {
+  background: var(--text) !important;
+  color: var(--look-paper-solid) !important;
+  box-shadow: none !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .ui-btn--quiet {
+  background: transparent !important;
+  box-shadow: none !important;
+  text-decoration: underline;
+  text-decoration-color: var(--look-line);
+  text-underline-offset: 4px;
+}
+
+/* Composer: a letter field between two rules. */
+
+body[data-shell-look="editorial"]:not(#\#) .composer-card {
+  border-radius: 0 !important;
+  border-color: transparent !important;
+  border-top: 1px solid var(--look-line) !important;
+  border-bottom: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .composer-editor {
+  font-family: var(--look-serif) !important;
+  font-size: 17px !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .composer-editor::placeholder {
+  font-style: italic;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .composer-config .config-chip {
+  color: var(--look-ink-quiet);
+}
+
+/* The send button keeps the control corner in every state, idle included. */
+body[data-shell-look="editorial"]:not(#\#) .send {
+  border-radius: var(--look-control-radius) !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .send:not(:disabled) {
+  background: var(--text) !important;
+  color: var(--look-paper-solid) !important;
+  box-shadow: none !important;
+}
+
+/* Phone. */
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-navigator {
+  background: color-mix(in srgb, var(--look-paper-solid) var(--look-overlay-a), transparent) !important;
+  backdrop-filter: var(--look-float-blur) !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-search {
+  border-bottom: 1px solid var(--look-line) !important;
+  border-radius: 0 !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-navigator .project-name,
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-project-name {
+  font-family: var(--look-serif);
+  font-size: 20px !important;
+  font-weight: 600;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-session-title {
+  color: var(--look-ink-dim);
+}
+
+body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn {
+  color: var(--text-dim);
+}

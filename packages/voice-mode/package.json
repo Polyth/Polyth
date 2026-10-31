@@ -1,0 +1,34 @@
+{
+  "name": "@polyth/voice-mode",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Voice mode",
+      "description": "Hands-free spoken conversation: talk, pause, and hear the agent reply.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "voice-mode",
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/dictation": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

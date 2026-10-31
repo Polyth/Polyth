@@ -1,0 +1,240 @@
+/* Mobile has its own presentation preference; desktop zone rules stay local. */
+.composer-mobile.composer-mobile-grid .composer-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  gap: 0;
+}
+
+.composer-mobile.composer-mobile-grid .composer-config-row {
+  display: flex;
+  order: 0;
+  padding-block: 0;
+  padding-inline-end: var(--space-1);
+}
+
+.composer-mobile.composer-mobile-grid .composer-input {
+  order: 1;
+  flex: 0 0 auto;
+}
+
+.composer-mobile.composer-mobile-grid .composer-card textarea {
+  height: auto;
+  min-height: var(--control-h-sm);
+  max-height: min(var(--composer-max-input-height), 18dvh);
+  padding: var(--space-1) var(--space-4) var(--space-2);
+  line-height: var(--font-response-lh);
+}
+
+.composer-mobile .mobile-composer-edit {
+  position: relative;
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  margin-inline-start: auto;
+  color: var(--muted);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mobile-composer-edit > .ui-icon {
+  opacity: .08;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.mobile-composer-edit:is([aria-pressed="true"], [data-holding], :focus-visible) > .ui-icon {
+  opacity: 1;
+}
+
+.mobile-composer-edit::after {
+  content: "";
+  position: absolute;
+  inset: var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  opacity: 0;
+  transform: scale(.6);
+  pointer-events: none;
+}
+
+.mobile-composer-edit[data-holding]::after {
+  opacity: 1;
+  transform: scale(1);
+  transition: transform var(--mobile-composer-hold) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
+
+.composer-mobile.composer-mobile-grid .mobile-composer-rail {
+  --mobile-rail-gap: var(--space-1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
+  gap: var(--mobile-rail-gap);
+  order: 2;
+  padding: 0 var(--space-3) var(--space-2);
+  isolation: isolate;
+}
+
+.mobile-composer-launchers {
+  min-width: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: calc((100% - (var(--mobile-rail-lanes) - 1) * var(--mobile-rail-gap)) / var(--mobile-rail-lanes));
+  gap: var(--mobile-rail-gap);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+}
+
+.mobile-composer-launchers::-webkit-scrollbar { display: none; }
+
+.mobile-composer-cell {
+  position: relative;
+  min-width: 0;
+  min-height: var(--tap);
+  border-radius: var(--radius-control);
+  scroll-snap-align: start;
+}
+
+/* A launcher registered after the rail painted (a package's
+   button arriving after boot) settles in instead of popping into the row. */
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-composer-cell[data-arrived] > .mobile-composer-launcher {
+    animation: mobile-composer-arrive var(--motion-surface) var(--motion-ease) both;
+  }
+}
+
+@keyframes mobile-composer-arrive {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+}
+
+.mobile-composer-launcher {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  height: 100%;
+}
+
+.composer-mobile-grid .mobile-composer-launcher > .placed-mini-widget { display: contents; }
+.composer-mobile-grid .mobile-composer-launcher :is(.ui-icon-btn, .header-action, .mic-btn, .composer-add-trigger) {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  flex: none;
+}
+
+/* The desktop Add glyph aligns with the editor; every phone cell is centered. */
+.composer-mobile-grid .mobile-composer-launcher .composer-add-trigger {
+  justify-content: center;
+}
+
+.mobile-composer-primary { min-width: var(--tap); }
+
+.mobile-composer-rail[data-editing] .mobile-composer-launchers {
+  grid-auto-flow: row;
+  grid-auto-columns: auto;
+  grid-template-columns: repeat(var(--mobile-rail-lanes), minmax(0, 1fr));
+  max-height: min(40dvh, calc(3 * var(--tap) + 2 * var(--mobile-rail-gap)));
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-snap-type: none;
+  overscroll-behavior-block: contain;
+}
+
+.mobile-composer-cell-edit {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border: 1px dashed var(--control-border);
+  border-radius: inherit;
+  background: var(--surface-overlay);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+  animation: mobile-composer-edit-enter var(--motion-normal) var(--motion-ease);
+}
+
+.mobile-composer-cell[data-launcher-id] .mobile-composer-cell-edit { border-style: solid; background: transparent; }
+.mobile-composer-cell[data-drop] .mobile-composer-cell-edit { border-color: var(--accent-line); background: var(--accent-wash); }
+.mobile-composer-cell[data-dragging] { z-index: var(--z-shell); pointer-events: none; }
+/* --material-glass-control-fill is a share, not a colour: the lifted cell is
+   a light tint of the theme's glass, so the launcher under it stays legible. */
+.mobile-composer-cell[data-dragging] .mobile-composer-cell-edit {
+  background: color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent);
+  box-shadow: var(--shadow-sm);
+}
+.mobile-composer-rail[data-editing] .mobile-composer-primary { opacity: .45; }
+
+/* Resting (no focus, draft, shell mode or rail editing) is one row:
+   Add · context pie · placeholder · first launcher · Send. The rail dissolves into the card
+   row; other launchers stay mounted but hidden, so a control in use (an
+   active dictation) survives the switch to the engaged surface. */
+.composer-mobile.composer-mobile-grid.composer-collapsed .composer-card {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--composer-height);
+  padding: 0 var(--space-2);
+}
+
+.composer-mobile.composer-mobile-grid.composer-collapsed :is(.composer-config-row, .mobile-composer-editor-bar) { display: none; }
+.composer-mobile.composer-mobile-grid.composer-collapsed :is(.mobile-composer-rail, .mobile-composer-launchers) { display: contents; }
+.composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-cell:not([data-resting]) { display: none; }
+.composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-cell { flex: none; width: var(--tap); }
+.composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-cell[data-resting="add"] { order: 1; }
+.composer-mobile.composer-mobile-grid.composer-collapsed .composer-input { order: 2; flex: 1 1 auto; width: auto; min-width: 0; }
+.composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-cell[data-resting="quick"] { order: 3; }
+.composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-primary { order: 4; flex: none; }
+
+/* The context pie is the one item of the model line the resting row keeps.
+   The line dissolves into the row; the pie shares the input's order and
+   precedes it in the DOM, so it lands right after Add. Its own inline margin
+   absorbs the row gap so it reads as attached to Add, not to the text. */
+.composer-mobile.composer-mobile-grid.composer-collapsed .composer-card > .composer-config-row { display: contents; }
+.composer-mobile.composer-mobile-grid.composer-collapsed .composer-card > .composer-config-row > :not(.composer-context-pie) { display: none; }
+.composer-mobile.composer-mobile-grid.composer-collapsed .composer-card > .composer-config-row > .composer-context-pie {
+  order: 2;
+  width: calc(var(--tap) * .75);
+  min-height: var(--tap);
+  margin-inline-start: calc(var(--space-1) * -1);
+}
+
+.composer-mobile.composer-mobile-grid.composer-collapsed .composer-card textarea {
+  height: var(--tap);
+  min-height: var(--tap);
+  max-height: var(--tap);
+  padding: 0 var(--space-1);
+  line-height: var(--tap);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mobile-composer-editor-bar {
+  display: flex;
+  order: 3;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.mobile-composer-editor-bar .ui-btn { flex: none; }
+
+@keyframes mobile-composer-edit-enter {
+  from { opacity: 0; transform: scale(.96); }
+  to { opacity: 1; transform: none; }
+}

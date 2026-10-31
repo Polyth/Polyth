@@ -1,0 +1,448 @@
+// Reusable searchable listbox replacing native <select>s: compact chip
+// trigger, type-to-filter popover, ↑↓ Enter Esc keyboard nav, grouped options
+// with a checkmark on the current one. Pass `values` for multi-select.
+import {
+  Fragment, useEffect, useId, useMemo, useRef, useState,
+  type KeyboardEvent, type ReactNode,
+} from "react";
+import { filterPickerItems, type PickerItem } from "../picker.ts";
+import { useShellMode } from "../responsiveShell.ts";
+import { dismissKeyboard, focusUnlessKeyboardHeld, getViewportMetrics } from "../mobileViewport.ts";
+import { tapFeedback } from "../haptics.ts";
+import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import { tr } from "../i18n/index.ts";
+import { Icon } from "../icons.tsx";
+import Button from "./ui/Button.tsx";
+import Checkbox from "./ui/Checkbox.tsx";
+import Popover from "./ui/Popover.tsx";
+import type { AnchoredAlign } from "./ui/useAnchoredPosition.ts";
+import { isImeComposing } from "./input/editorCore.ts";
+
+const MAX_SHOWN = 200;
+
+export interface PickerProps {
+  label: string;
+  items: PickerItem[];
+  value?: string;
+  /** Multi-select mode: toggles stay open, chip shows a count. */
+  values?: readonly string[];
+  onPick: (id: string) => void;
+  /** Called when the picker is opened, before its options are shown. */
+  onOpen?: () => void;
+  placeholder?: string;
+  /** Placeholder for the open list's filter field. Defaults to a "Filter {label}" string. */
+  searchPlaceholder?: string;
+  direction?: "up" | "down";
+  disabled?: boolean;
+  /** Trailing per-row action (e.g. create/edit profile). Never also picks the
+   *  row. Label and accessible name are item-specific. */
+  trailingAction?: {
+    labelFor: (id: string) => string;
+    nameFor: (id: string) => string;
+    onAction: (id: string) => void;
+  };
+  /** Named list-footer action (e.g. `Create profile…`). A disabledReason is
+   *  visible text, with an optional operable secondary route. Actions close
+   *  the picker by default; set stayOpen for refresh/retry actions. */
+  footerAction?: {
+    label: string;
+    run: () => void;
+    stayOpen?: boolean;
+    disabledReason?: string;
+    secondaryLabel?: string;
+    secondaryRun?: () => void;
+  };
+  /** Set false to hide the filter input (short lists that don't need it). */
+  searchable?: boolean;
+  /** Which trigger edge the desktop popover lines up with; "end" keeps a
+   *  trigger at a container's trailing edge from opening past it. */
+  align?: AnchoredAlign;
+  /** Persistent checkbox pinned at the top of the open list — a mode switch
+   *  that reshapes what picking a row means (e.g. "create a new worktree from
+   *  the branch I select"). Toggling it never closes the list. */
+  popoverToggle?: {
+    label: string;
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+    hint?: string;
+  };
+  /** Extra class on the root (responsive layout hooks, e.g. picker-profile). */
+  className?: string;
+  /** Extra class on the portalled popover (when its surface needs scoped geometry). */
+  popoverClassName?: string;
+  /** Accessible trigger name; keeps the full label when text is condensed. */
+  ariaLabel?: string;
+  /** Icon rendered in place of the uppercase label key (compact triggers). */
+  triggerIcon?: ReactNode;
+  /** Trigger text override (e.g. a multi-select summary that names its picks
+   *  instead of "N selected"). Keep `ariaLabel` meaningful when it is styled. */
+  displayValue?: ReactNode;
+  /** Leading visual for a row (e.g. a project's own glyph). Decorative. */
+  itemIcon?: (item: PickerItem) => ReactNode;
+  /** Replaces the default "no matches" copy when the filtered list is empty. */
+  emptyMessage?: string;
+  /** Optional action shown under the empty message (e.g. Retry). */
+  emptyAction?: {
+    label: string;
+    run: () => void;
+  };
+  /** Rare opt-in: open as a bottom sheet on phones instead of the default
+   *  compact anchored popover near the trigger. */
+  mobileSheet?: boolean;
+}
+
+export default function Picker({
+  label = "",
+  items,
+  value,
+  values,
+  onPick,
+  onOpen,
+  placeholder = tr("picker.default"),
+  searchPlaceholder,
+  direction: _direction = "down",
+  disabled,
+  trailingAction,
+  footerAction,
+  className,
+  popoverClassName,
+  ariaLabel,
+  triggerIcon,
+  displayValue,
+  itemIcon,
+  mobileSheet,
+  searchable = true,
+  align = "start",
+  popoverToggle,
+  emptyMessage,
+  emptyAction,
+}: PickerProps) {
+  const multi = values !== undefined;
+  const phone = useShellMode() === "phone";
+  const asSheet = phone && mobileSheet === true;
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [active, setActive] = useState(0);
+  // Touch screens have no hover, so the default first-row highlight would
+  // read as a selection. It shows once the row means something: a filter
+  // is typed (Return picks it) or the keyboard has moved it.
+  const [keyNav, setKeyNav] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openRequestRef = useRef(0);
+  const pickerId = useId();
+  const listId = `${pickerId}-listbox`;
+
+  useEffect(() => () => {
+    openRequestRef.current += 1;
+  }, []);
+
+  const close = () => {
+    openRequestRef.current += 1;
+    setOpen(false);
+    if (!asSheet) focusUnlessKeyboardHeld(triggerRef.current);
+  };
+  // §22: never raise a mobile picker under an open keyboard. Waiting for the
+  // visual viewport to settle also keeps the anchored popover from opening at
+  // the keyboard-shifted position. A picker opened from the composer is the
+  // exception: the composer holds the keyboard and dismissKeyboard() yields.
+  const toggleOpen = () => {
+    if (open) {
+      close();
+      return;
+    }
+    setQ("");
+    onOpen?.();
+    const request = ++openRequestRef.current;
+    const reveal = () => {
+      if (request === openRequestRef.current) setOpen(true);
+    };
+    if (!phone) {
+      reveal();
+      return;
+    }
+    const viewport = getViewportMetrics();
+    const keyboardWasOpen = viewport.covering || viewport.keyboardInset > 0;
+    const dismissal = dismissKeyboard();
+    if (keyboardWasOpen) void dismissal.then(reveal);
+    else reveal();
+  };
+  const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
+
+  const hits = useMemo(() => filterPickerItems(items, q), [items, q]);
+  const shown = hits.slice(0, MAX_SHOWN);
+
+  useEffect(() => {
+    setActive(0);
+  }, [q, open]);
+  useEffect(() => {
+    if (!open) setKeyNav(false);
+  }, [open]);
+  useEffect(() => {
+    listRef.current
+      ?.querySelector('[data-active="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [active, shown.length]);
+
+  const isCurrent = (id: string) => (multi ? values.includes(id) : id === value);
+  const pick = (id: string) => {
+    if (phone) tapFeedback();
+    onPick(id);
+    if (!multi) close();
+  };
+
+  const onKey = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") setKeyNav(true);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((n) => Math.min(n + 1, Math.max(shown.length - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((n) => Math.max(n - 1, 0));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(Math.max(shown.length - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const it = shown[active];
+      if (it) pick(it.id);
+    }
+  };
+
+  const current = multi ? undefined : items.find((i) => i.id === value);
+  const chipText = displayValue !== undefined
+    ? displayValue
+    : multi
+      ? values.length > 0
+        ? `${values.length} selected`
+        : placeholder
+      : current?.label ?? placeholder;
+
+  return (
+    <span className={`picker${className ? ` ${className}` : ""}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="chip picker-chip"
+        title={ariaLabel ?? label}
+        aria-label={ariaLabel}
+        aria-haspopup={asSheet ? "dialog" : "listbox"}
+        aria-expanded={open}
+        aria-controls={open && !asSheet ? listId : undefined}
+        disabled={disabled}
+        {...triggerHandlers}
+      >
+        {triggerIcon
+          ? <span className="picker-trigger-icon" aria-hidden="true">{triggerIcon}</span>
+          : <span className="chip-k">{label}</span>}
+        <span className="picker-chip-text">{chipText}</span>
+        <span className="picker-caret" aria-hidden="true"><Icon.chevronDown /></span>
+      </button>
+      {open && asSheet && (
+        <Sheet
+          title={label}
+          className="picker-sheet"
+          onClose={close}
+          {...(items.length > 8 ? {
+            search: {
+              value: q,
+              onChange: setQ,
+              placeholder: searchPlaceholder ?? tr("picker.searchValue", { value: label.toLowerCase() }),
+              ariaLabel: tr("picker.filterValue2", { label }),
+            },
+          } : {})}
+        >
+          {popoverToggle && (
+            <Checkbox
+              className="picker-toggle"
+              checked={popoverToggle.checked}
+              onChange={popoverToggle.onChange}
+              label={popoverToggle.label}
+              {...(popoverToggle.hint ? { description: popoverToggle.hint } : {})}
+            />
+          )}
+          <div role="listbox" aria-label={label} aria-multiselectable={multi || undefined}>
+            {shown.map((it) => (
+              <SheetRow
+                key={it.id || "(default)"}
+                title={it.label}
+                {...(itemIcon ? { icon: itemIcon(it) } : {})}
+                {...(it.detail ? { meta: it.detail } : {})}
+                selected={isCurrent(it.id)}
+                onClick={() => pick(it.id)}
+              />
+            ))}
+            {shown.length === 0 && (
+              <p className="sheet-empty">
+                {emptyMessage ?? tr("picker.noMatches")}
+                {emptyAction && (
+                  <button type="button" className="sheet-foot-action" onClick={() => { emptyAction.run(); }}>
+                    {emptyAction.label}
+                  </button>
+                )}
+              </p>
+            )}
+          </div>
+          {footerAction && (
+            <button
+              type="button"
+              className="sheet-foot-action"
+              aria-disabled={footerAction.disabledReason ? true : undefined}
+              onClick={() => {
+                if (footerAction.disabledReason) return;
+                if (!footerAction.stayOpen) close();
+                footerAction.run();
+              }}
+            >{footerAction.label}</button>
+          )}
+        </Sheet>
+      )}
+      {open && !asSheet && (
+        <Popover
+          open
+          onClose={close}
+          anchorRef={triggerRef}
+          align={align}
+          side={_direction === "up" ? "up" : "down"}
+          compact={phone}
+          stableAnchor={phone}
+          ariaLabel={label}
+          className={`picker-pop${popoverClassName ? ` ${popoverClassName}` : ""}`}
+          restoreFocusRef={triggerRef}
+          {...(!searchable && !phone ? { initialFocus: ".picker-list" } : {})}
+        >
+            {popoverToggle && (
+              <Checkbox
+                className="picker-toggle"
+                checked={popoverToggle.checked}
+                onChange={popoverToggle.onChange}
+                label={popoverToggle.label}
+                {...(popoverToggle.hint ? { description: popoverToggle.hint } : {})}
+              />
+            )}
+            {searchable && (
+            <div className="picker-search">
+            <span className="picker-search-icon" aria-hidden="true"><Icon.search /></span>
+            <input
+              type="text"
+              autoFocus={!phone}
+              value={q}
+              placeholder={searchPlaceholder ?? tr("picker.filterValue", { value: label.toLowerCase() })}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (isImeComposing(e)) return; onKey(e); }}
+              role="combobox"
+              aria-label={tr("picker.filterValue2", { label: label })}
+              aria-autocomplete="list"
+              aria-expanded="true"
+              aria-controls={listId}
+              aria-activedescendant={shown[active] ? `${pickerId}-option-${active}` : undefined}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              enterKeyHint="go"
+            />
+            </div>
+            )}
+            <div
+              id={listId}
+              className="picker-list"
+              role="listbox"
+              tabIndex={searchable ? -1 : 0}
+              aria-label={label}
+              aria-multiselectable={multi || undefined}
+              data-show-active={keyNav || q.trim() ? "true" : undefined}
+              aria-activedescendant={!searchable && shown[active] ? `${pickerId}-option-${active}` : undefined}
+              ref={listRef}
+              onKeyDown={!searchable ? onKey : undefined}
+            >
+              {shown.map((it, n) => (
+                <Fragment key={it.id || "(default)"}>
+                  {it.group !== "" && (n === 0 || shown[n - 1]!.group !== it.group) && (
+                    <div className="picker-group" role="presentation">{it.group}</div>
+                  )}
+                  <div
+                    id={`${pickerId}-option-${n}`}
+                    role="option"
+                    tabIndex={-1}
+                    aria-selected={isCurrent(it.id)}
+                    data-active={n === active ? "true" : undefined}
+                    className={`picker-item${n === active ? " active" : ""}${isCurrent(it.id) ? " current" : ""}`}
+                    onClick={() => pick(it.id)}
+                    onMouseEnter={() => setActive(n)}
+                  >
+                    <span className="picker-check" aria-hidden="true">{isCurrent(it.id) && <Icon.check />}</span>
+                    {itemIcon && <span className="picker-item-icon" aria-hidden="true">{itemIcon(it)}</span>}
+                    <span className="palette-label">{it.label}</span>
+                    {it.detail && <span className="palette-meta">{it.detail}</span>}
+                    {trailingAction && it.id && (
+                      <button
+                        type="button"
+                        className="picker-trail"
+                        aria-label={trailingAction.nameFor(it.id)}
+                        title={trailingAction.nameFor(it.id)}
+                        onClick={(e) => { e.stopPropagation(); trailingAction.onAction(it.id); close(); }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        {trailingAction.labelFor(it.id)}
+                      </button>
+                    )}
+                  </div>
+                </Fragment>
+              ))}
+              {shown.length === 0 && (
+                <div className="palette-empty">
+                  {emptyMessage ?? tr("picker.noMatches")}
+                  {emptyAction && (
+                    <button
+                      type="button"
+                      className="picker-footer-action"
+                      onClick={() => { emptyAction.run(); }}
+                    >
+                      {emptyAction.label}
+                    </button>
+                  )}
+                </div>
+              )}
+              {hits.length > MAX_SHOWN && (
+                <div className="picker-more">{hits.length - MAX_SHOWN} {tr("picker.moreRefineTheFilter")}</div>
+              )}
+            </div>
+            {footerAction && (
+              <div className="picker-footer">
+                <button
+                  type="button"
+                  className="picker-footer-action"
+                  aria-disabled={footerAction.disabledReason ? true : undefined}
+                  onClick={() => {
+                    if (footerAction.disabledReason) return;
+                    if (!footerAction.stayOpen) close();
+                    footerAction.run();
+                  }}
+                >
+                  {footerAction.label}
+                </button>
+                {footerAction.disabledReason && (
+                  <div className="picker-footer-reason">
+                    <span>{footerAction.disabledReason}</span>
+                    {footerAction.secondaryLabel && footerAction.secondaryRun && (
+                      <Button
+                        size="sm"
+                        onClick={() => { close(); footerAction.secondaryRun!(); }}
+                      >
+                        {footerAction.secondaryLabel}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+        </Popover>
+      )}
+    </span>
+  );
+}

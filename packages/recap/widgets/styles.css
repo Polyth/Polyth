@@ -1,0 +1,432 @@
+/* Package-owned idle recap: one quiet caption at the transcript tail, on the
+   prose text edge, inside the one timeline scroll root. Type alone carries
+   it (no glyph, no label, no plate). Its suggested next prompt is not drawn
+   here; it rides on the composer's suggestion chip. */
+.assist-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block: var(--space-2) 0;
+  min-width: 0;
+}
+/* Capped at a caption measure; the dismiss flows inline after the last word,
+   held to it by the no-wrap tail. */
+.assist-recap {
+  max-inline-size: min(100%, 72ch);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.assist-recap-tail {
+  white-space: nowrap;
+}
+/* Centred on its line without making the line taller. */
+.assist-recap .assist-dismiss {
+  display: inline-flex;
+  vertical-align: middle;
+  color: var(--faint);
+  inline-size: max(var(--control-h-sm), var(--hit-min));
+  block-size: max(var(--control-h-sm), var(--hit-min));
+  margin-block: calc((var(--font-meta) * var(--font-meta-lh) - max(var(--control-h-sm), var(--hit-min))) / 2);
+  margin-inline-start: var(--space-1);
+}
+/* A pointer reveals the dismiss on approach; touch keeps it visible. */
+@media (hover: hover) and (pointer: fine) {
+  .assist-recap .assist-dismiss {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .assist-recap:hover .assist-dismiss,
+  .assist-recap .assist-dismiss:focus-visible {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .recap-strip { animation: recap-strip-in var(--motion-surface) var(--motion-ease) both; }
+}
+@keyframes recap-strip-in { from { opacity: 0; transform: translate3d(0, 4px, 0); } to { opacity: 1; transform: none; } }
+
+.recap-prompt-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.recap-settings {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.recap-settings-head {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.recap-settings-head h2,
+.recap-settings-head p {
+  margin: 0;
+}
+
+.recap-settings-head p,
+.recap-setting-row span {
+  color: var(--muted);
+}
+
+.recap-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+}
+
+.recap-setting-row > div:first-child {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.recap-setting-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: min(10rem, 42vw);
+}
+
+.recap-setting-control input {
+  min-width: 0;
+  width: 100%;
+}
+
+/* A choice names its option in full ("Polyth first"). */
+.recap-setting-choice {
+  flex: none;
+  width: auto;
+  max-width: min(14rem, 48vw);
+}
+
+/* Key callouts: a light checklist card at the transcript tail, in the
+   conversation's own material. Every row has one shape: a ring, the quoted
+   sentence, a quiet kind tag. The ring ticks the row off; the next step
+   (Reply, Ask to fix) takes the tag's place under a pointer and sits beside it
+   on touch. Only a decision or a failed check carries colour, as a dot beside
+   its name. Lays out by its own width (it can sit in narrow placements). */
+.callout-strip {
+  container: callout-strip / inline-size;
+  --callout-lh: calc(var(--font-label) * 1.45);
+  --callout-meta-lh: calc(var(--font-meta) * var(--font-meta-lh));
+  --callout-col: var(--icon-md);
+  --callout-gap: var(--space-3);
+  --callout-text-start: calc(var(--callout-col) + var(--callout-gap));
+  --callout-dot: calc(var(--space-1) * 1.5);
+  gap: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--material-glass-medium) var(--material-glass-readable-fill), transparent);
+  /* The theme's contour, which *Hide interface borders* keeps, and the card
+     lift: the edge holds on a plain canvas as well as on a wallpaper. */
+  box-shadow: var(--material-glass-highlight), inset 0 0 0 1px var(--contour), var(--shadow-sm);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .callout-strip {
+    animation: callout-strip-in var(--motion-surface) var(--motion-ease) both;
+  }
+}
+@keyframes callout-strip-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+.callout-strip[data-collapsed] { padding-block: var(--space-2); }
+.callout-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+}
+/* Title, count and the fold's chevron read as one heading. */
+.callout-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+}
+.callout-title {
+  min-width: 0;
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: var(--callout-lh);
+}
+.callout-total {
+  color: var(--faint);
+  font-size: var(--font-label);
+  line-height: var(--callout-lh);
+  font-variant-numeric: tabular-nums;
+}
+.callout-chevron {
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .callout-toggle:hover:where(:not(:disabled)) .callout-chevron { color: var(--text-dim); }
+}
+.callout-toggle[aria-expanded="false"] .callout-chevron { transform: rotate(-90deg); }
+.callout-toggle[aria-expanded="false"] .callout-chevron:dir(rtl) { transform: rotate(90deg); }
+/* Folded, the heading still says what is waiting, in the rows' own tags. */
+.callout-tally {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.callout-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--callout-dot);
+  white-space: nowrap;
+}
+.callout-count-n { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+/* The dismiss glyph ends on the rows' end edge, not its button's. */
+.callout-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+  margin-inline-end: calc((24px - var(--icon-sm)) / -2);
+}
+.callout-head-actions .callout-ask { color: var(--muted); }
+.callout-head-actions .callout-dismiss-all { color: var(--faint); }
+/* Rows reach into the card's padding so the hover wash has room around the
+   ring and the tag; their content stays on the card's edges. */
+.callout-list {
+  display: grid;
+  margin: var(--space-1) calc(var(--space-2) * -1) 0;
+  padding: 0;
+  list-style: none;
+}
+.callout {
+  display: grid;
+  grid-template-columns: var(--callout-col) minmax(0, 1fr) auto;
+  grid-template-areas: "check text trail";
+  column-gap: var(--callout-gap);
+  align-items: start;
+  min-width: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .callout:hover { background: var(--surface-overlay-hover); }
+}
+.callout-strip :is(.callout-decision, .callout-count.callout-decision) { --callout-tone: var(--accent); }
+.callout-strip :is(.callout-failed-check, .callout-count.callout-failed-check) { --callout-tone: var(--red); }
+/* The ring: the theme's own check box, round, on the first line. Its hit
+   area grows to a touch target without moving the row. */
+.callout-check {
+  grid-area: check;
+  position: relative;
+  justify-self: center;
+  align-items: center;
+  gap: 0;
+  min-height: 0;
+  block-size: var(--callout-lh);
+}
+.callout-check::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  inline-size: max(100%, var(--hit-min));
+  block-size: max(100%, var(--hit-min));
+  translate: -50% -50%;
+}
+.callout-strip .callout-check .ui-checkbox-box {
+  inline-size: var(--icon-sm);
+  block-size: var(--icon-sm);
+  margin: 0;
+  border-width: 0;
+  border-radius: 50%;
+  background: transparent;
+  /* Its own stroke: borderless appearance pins the box's border colour. */
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text) 30%, transparent);
+  transition: box-shadow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+}
+.callout-strip .callout .callout-check input:checked + .ui-checkbox-box { box-shadow: none; }
+@media (hover: hover) {
+  .callout-strip .callout-check:hover .ui-checkbox-box {
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text) 50%, transparent);
+  }
+  .callout-strip .callout .callout-check:hover input:checked + .ui-checkbox-box { box-shadow: none; }
+}
+.callout-strip .callout-check .ui-checkbox-box svg {
+  inline-size: calc(var(--icon-sm) * 0.62);
+  block-size: calc(var(--icon-sm) * 0.62);
+  stroke-width: 3;
+}
+/* The whole sentence opens its message. */
+.callout-text {
+  grid-area: text;
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-label);
+  line-height: var(--callout-lh);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.callout-strip .callout-text:is(:hover, :active):where(:not(:disabled)) { background: transparent; }
+.callout-from-model {
+  display: inline-flex;
+  margin-inline-start: var(--space-1);
+  color: var(--accent-text);
+  vertical-align: -0.15em;
+}
+.callout-from-model svg { inline-size: 0.9em; block-size: 0.9em; }
+.callout-quote { quotes: none; }
+/* Inline code keeps the sentence's size and sits on a wash, not a tile. */
+.callout-quote code {
+  padding: 0 0.3em;
+  border: 0;
+  border-radius: calc(var(--radius-control) / 2);
+  background: var(--surface-overlay-strong);
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+/* The tag and the next step share one cell on the first line. */
+.callout-trail {
+  grid-area: trail;
+  display: grid;
+  justify-items: end;
+  align-items: center;
+  min-block-size: var(--callout-lh);
+}
+.callout-trail > * { grid-area: 1 / 1; }
+.callout-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--callout-dot);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+:is(.callout[data-urgent] .callout-kind, .callout-count[data-urgent])::before {
+  content: "";
+  flex: none;
+  inline-size: var(--callout-dot);
+  block-size: var(--callout-dot);
+  border-radius: 50%;
+  background: var(--callout-tone);
+}
+/* Its label ends on the tags' edge; a taller control does not grow the row. */
+.callout-act {
+  margin-block: calc((var(--callout-lh) - max(var(--control-h-sm), var(--hit-min))) / 2);
+  margin-inline-end: calc(var(--control-pad-x-sm) * -1);
+  color: var(--text-dim);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .callout-act { opacity: 0; }
+  .callout:is(:hover, :focus-within) .callout-act { opacity: 1; }
+  .callout[data-next]:is(:hover, :focus-within) .callout-kind { opacity: 0; }
+}
+/* Touch has no hover: the tag and the next step sit side by side. */
+@media (hover: none) {
+  .callout-trail { display: flex; align-items: center; gap: var(--space-2); }
+}
+.callout[data-done] .callout-text { color: var(--muted); }
+.callout[data-done] .callout-quote {
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+.callout[data-done] .callout-kind::before { background: var(--faint); }
+/* "Show more" and the status line start on the sentences' edge. */
+.callout-more {
+  align-self: flex-start;
+  margin-inline-start: calc(var(--callout-text-start) - var(--control-pad-x-sm));
+  color: var(--text-dim);
+}
+.callout-status {
+  margin: var(--space-1) 0 0;
+  padding-inline-start: var(--callout-text-start);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.callout-status:empty { display: none; }
+.callout-status-failed { color: var(--red); }
+/* Narrow: the tag and the next step move under the sentence, both shown.
+   The card's own padding cannot be set from its container query (a container
+   does not match itself), so the rows take the tighter rhythm instead. */
+@container callout-strip (max-width: 480px) {
+  .callout {
+    grid-template-columns: var(--callout-col) minmax(0, 1fr);
+    grid-template-areas: "check text" ". trail";
+    row-gap: 2px;
+    padding: var(--space-2) var(--space-1);
+  }
+  .callout-trail {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-block-size: 0;
+  }
+  .callout-strip .callout-act {
+    opacity: 1;
+    margin-block: calc((var(--callout-meta-lh) - max(var(--control-h-sm), var(--hit-min))) / 2);
+    margin-inline: calc(var(--control-pad-x-sm) * -1) 0;
+  }
+  .callout-strip .callout[data-next] .callout-kind { opacity: 1; }
+  .callout-kind:not(.sr-only) + .callout-act { margin-inline-start: 0; }
+  .callout-head-actions .callout-ask { padding-inline: var(--space-1); }
+  .callout-head-actions .callout-ask .ui-btn-label {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Settings page: separators between groups, consistent spacing. */
+.recap-settings > .recap-settings-head:not(:first-child) {
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--contour);
+}
+.recap-setting-hint {
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* Narrow settings: a select or numeric field takes its own line under the
+   label instead of squeezing the description into a column. A switch stays
+   beside its label, where it is small enough to fit. */
+@media (max-width: 560px) {
+  .recap-setting-row-control {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-2) var(--space-4);
+  }
+  .recap-setting-row-control > div:first-child { flex: 1 1 100%; }
+  .recap-setting-row-control .recap-setting-control { width: 100%; }
+  .recap-setting-row-control .recap-setting-choice { width: auto; max-width: 100%; }
+}

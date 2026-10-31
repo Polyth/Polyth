@@ -1,0 +1,638 @@
+/* Shared catalog picker chrome for the Canvas widget library and zone pickers.
+ * Rows stay compact and information-dense; package grouping and search are
+ * deliberately host-owned because the libraries consume the same registries.
+ * The phone Workspace has its own full-page Add page (workspaceGallery.css). */
+
+.catalog-picker {
+  min-width: 0;
+  color: var(--text);
+}
+
+/* Small zone libraries are action strips, not catalogs. Do not spend a
+ * category header, search field, and filter row on one to four choices. */
+.catalog-picker-compact {
+  padding: var(--space-1);
+}
+.catalog-picker-compact .catalog-picker-controls,
+.catalog-picker-compact .catalog-picker-group-head {
+  display: none;
+}
+.catalog-picker-compact .catalog-picker-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-1);
+  padding: 0;
+}
+.catalog-picker-compact .catalog-picker-group,
+.catalog-picker-compact .catalog-picker-group-list {
+  display: contents;
+}
+.catalog-picker-compact[data-compact-count="1"] .catalog-picker-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+.catalog-picker-compact[data-compact-count="2"] .catalog-picker-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.catalog-picker-compact[data-compact-count="3"] .catalog-picker-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.catalog-picker-compact .catalog-picker-item {
+  position: relative;
+  min-height: max(76px, var(--hit-min));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  text-align: center;
+}
+.catalog-picker-compact .catalog-picker-item-icon {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+.catalog-picker-compact .catalog-picker-item-copy {
+  width: 100%;
+  align-items: center;
+  gap: 0;
+}
+.catalog-picker-compact .catalog-picker-item-title-row {
+  width: 100%;
+  justify-content: center;
+  gap: var(--space-1);
+}
+.catalog-picker-compact .catalog-picker-item-title-row strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.catalog-picker-compact .catalog-picker-item-copy > small,
+.catalog-picker-compact .catalog-picker-item-meta,
+.catalog-picker-compact .catalog-picker-item-tags,
+.catalog-picker-compact .catalog-picker-item-status {
+  display: none;
+}
+.catalog-picker-compact .catalog-picker-item-action {
+  position: absolute;
+  inset-block-start: var(--space-1);
+  inset-inline-end: var(--space-1);
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+.widget-choice-menu.catalog-picker-menu:has(.catalog-picker[data-compact-count="1"]) {
+  width: min(220px, calc(100vw - 2 * var(--screen-gutter)));
+}
+.widget-choice-menu.catalog-picker-menu:has(.catalog-picker[data-compact-count="2"]) {
+  width: min(300px, calc(100vw - 2 * var(--screen-gutter)));
+}
+.widget-choice-menu.catalog-picker-menu:has(.catalog-picker[data-compact-count="3"]),
+.widget-choice-menu.catalog-picker-menu:has(.catalog-picker[data-compact-count="4"]) {
+  width: min(430px, calc(100vw - 2 * var(--screen-gutter)));
+}
+@media (min-width: 761px) {
+  .widget-menu-single.catalog-picker:has(.catalog-picker[data-compact-count="1"]) {
+    top: auto;
+    bottom: var(--space-3);
+    width: min(220px, calc(100% - 2 * var(--space-3)));
+    height: auto;
+    max-height: none;
+  }
+  .widget-menu-single.catalog-picker:has(.catalog-picker[data-compact-count="2"]) {
+    top: auto;
+    bottom: var(--space-3);
+    width: min(300px, calc(100% - 2 * var(--space-3)));
+    height: auto;
+    max-height: none;
+  }
+  .widget-menu-single.catalog-picker:has(.catalog-picker[data-compact-count="3"]),
+  .widget-menu-single.catalog-picker:has(.catalog-picker[data-compact-count="4"]) {
+    top: auto;
+    bottom: var(--space-3);
+    width: min(410px, calc(100% - 2 * var(--space-3)));
+    height: auto;
+    max-height: none;
+  }
+}
+@media (max-width: 760px) {
+  .catalog-picker-compact .catalog-picker-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .catalog-picker-compact[data-compact-count="1"] .catalog-picker-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Menu keeps positioning/dismissal; the catalog owns its bounded scroll body. */
+.widget-choice-menu.catalog-picker-menu {
+  width: min(430px, calc(100vw - 2 * var(--screen-gutter)));
+  max-height: min(620px, calc(100dvh - 2 * var(--space-5)));
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.widget-choice-menu.catalog-picker-menu .catalog-picker-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.widget-choice-menu.catalog-picker-menu .catalog-picker-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.ui-menu-sheet-custom .sheet-body {
+  overflow: hidden;
+  padding: 0;
+}
+.ui-menu-sheet-custom .ui-menu-sheet-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 0;
+}
+.ui-menu-sheet-custom .ui-menu-sheet-list > .catalog-picker {
+  min-height: 0;
+  height: 100%;
+}
+
+.catalog-picker-head {
+  min-width: 0;
+  border-bottom: 1px solid var(--surface-divider);
+  background: var(--elevated);
+  background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-fill), transparent);
+}
+
+.catalog-picker-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.catalog-picker-heading strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 680;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-picker-heading small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-picker-controls {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, .72fr);
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--surface-divider);
+  background: var(--material-glass);
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .catalog-picker-controls {
+    background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .45));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * .45));
+  }
+}
+
+.catalog-picker-search {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.catalog-picker-search > svg {
+  position: absolute;
+  inset-inline-start: var(--space-2);
+  z-index: 1;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.catalog-picker-search .ui-input {
+  min-width: 0;
+  padding-inline-start: calc(var(--space-2) + var(--icon-lg));
+}
+
+.catalog-picker-filter {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.catalog-picker-filter > span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: .04em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.catalog-picker-filter .picker,
+.catalog-picker-filter .picker-chip {
+  width: 100%;
+  max-width: 100%;
+}
+
+.catalog-picker-list {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2);
+}
+
+.catalog-picker-group {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.catalog-picker-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--control-h-sm);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--hair);
+  background: var(--panel);
+  background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 700;
+  letter-spacing: .06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.catalog-picker-group-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-picker-group-head small {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.catalog-picker-group-list {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.catalog-picker-item {
+  min-width: 0;
+  min-height: max(58px, var(--hit-min));
+  display: grid;
+  grid-template-columns: var(--icon-xl) minmax(0, 1fr) var(--control-h-sm);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.catalog-picker-item.catalog-picker-item--no-icon {
+  grid-template-columns: minmax(0, 1fr) var(--control-h-sm);
+}
+
+.catalog-picker-item:focus-visible {
+  border-color: var(--accent-line);
+  background: var(--surface-overlay-hover);
+}
+@media (hover: hover) {
+  .catalog-picker-item:hover:not(:disabled) {
+    border-color: var(--accent-line);
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.catalog-picker-item:active:not(:disabled) {
+  transform: scale(.995);
+}
+
+.catalog-picker-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.catalog-picker-item.is-active {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--material-glass));
+}
+@media (hover: hover) {
+  .catalog-picker-item.is-active:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+    background: color-mix(in srgb, var(--accent) 21%, var(--material-glass));
+  }
+}
+
+.catalog-picker-item:disabled {
+  color: var(--faint);
+  cursor: default;
+  opacity: .72;
+}
+.catalog-picker-item--danger,
+.catalog-picker-item--danger:focus-visible { color: var(--red); }
+@media (hover: hover) {
+  .catalog-picker-item--danger:hover:not(:disabled) { color: var(--red); }
+}
+
+.catalog-picker-item-icon {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.catalog-picker-item-icon > svg,
+.catalog-picker-item-icon .widget-choice-glyph > svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.catalog-picker-item-icon .widget-choice-glyph {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.catalog-picker-item-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.catalog-picker-item-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.catalog-picker-item-title-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-picker-item-status {
+  flex: none;
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.catalog-picker-item-copy > small {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.catalog-picker-item-meta,
+.catalog-picker-item-tags {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: 1.25;
+}
+
+.catalog-picker-item-meta {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.catalog-picker-item-meta span,
+.catalog-picker-item-tags span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-picker-item-tags span {
+  max-width: 12ch;
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--muted);
+}
+
+.catalog-picker-item-action {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--radius-control);
+  color: var(--accent);
+}
+
+.catalog-picker-item.is-active .catalog-picker-item-action {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.catalog-picker-empty {
+  padding: var(--space-5) var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-label);
+  text-align: center;
+}
+
+/* The Canvas picker is a bounded work surface, not a full-page library. */
+.widget-menu-single > .catalog-picker-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.widget-menu-single > .catalog-picker-content .catalog-picker-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.widget-menu-single.catalog-picker {
+  top: 52px;
+  bottom: 12px;
+  width: min(410px, calc(100% - 24px));
+  max-height: min(620px, calc(100% - 64px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-color: var(--material-glass-border);
+  background: var(--material-glass);
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow);
+}
+
+.widget-menu-single .widget-add-head {
+  position: relative;
+  top: auto;
+  flex: none;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+}
+
+.widget-menu-single .widget-add-head button {
+  margin: 0;
+  margin-inline-start: auto;
+}
+
+.widget-menu-single .catalog-picker-controls {
+  position: relative;
+  flex: none;
+}
+
+.widget-menu-single .widget-menu-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.widget-menu-item-copy > .catalog-picker-item-copy {
+  width: 100%;
+}
+
+.widget-menu-single .widget-menu-item {
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.widget-menu-single .widget-menu-item.is-active {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow: none;
+}
+
+.widget-menu-single .catalog-picker-item {
+  min-height: max(62px, var(--hit-min));
+}
+
+body[data-glass="off"] :is(.catalog-picker-head, .catalog-picker-controls, .catalog-picker-group-head),
+body[data-desktop-low-resource="true"]:not([data-glass="off"]) :is(.catalog-picker-head, .catalog-picker-controls, .catalog-picker-group-head) {
+  background: var(--material-glass);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@media (max-width: 760px) {
+  .widget-menu-single.catalog-picker {
+    inset: auto 0 0;
+    top: auto;
+    bottom: 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(68dvh, 560px);
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    padding-bottom: max(var(--space-2), var(--safe-bottom));
+  }
+}
+
+@media (max-width: 380px), (max-height: 480px) and (pointer: coarse) {
+  .catalog-picker-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-picker-filter {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .catalog-picker-filter > span {
+    flex: none;
+  }
+
+  .catalog-picker-filter .picker {
+    min-width: 0;
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .catalog-picker-item {
+    transition: none;
+  }
+}

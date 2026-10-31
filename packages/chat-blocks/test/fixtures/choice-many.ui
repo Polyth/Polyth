@@ -1,0 +1,4 @@
+choice Which sources should I read? · pick=many
+- [x] Docs | the official guide
+- Issues | last 90 days | id=gh-issues
+- Blog posts

@@ -1,0 +1,33 @@
+{
+  "name": "@polyth/chat-blocks",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/parse.ts",
+    "./rule": "./src/rule.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Chat blocks",
+      "description": "Agents show options, products, tables, charts, comparisons, forms, plans and galleries as interactive blocks in chat, written as a few lines of text or a project data file.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "layout-grid",
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

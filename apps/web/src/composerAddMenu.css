@@ -1,0 +1,259 @@
+/* Composer Add menu: the shared Popover owns material, viewport bounds and
+   scrolling. Its content must shrink with it, including at larger text sizes. */
+.composer-add-pop.ui-popover {
+  width: min(368px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left) - var(--safe-right)));
+  padding: var(--space-2);
+  overscroll-behavior: contain;
+  scroll-padding-block: var(--space-2);
+}
+
+.composer-add-pop .add-menu.add-menu-v2 {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: none;
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+
+/* Attach sources: one row of equal tiles (camera, photos, files). The tile is
+   the only entry for each source, so the list below never repeats it. */
+.add-menu-v2 .add-menu-attach {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.add-menu-v2 .add-menu-tiles {
+  display: grid;
+  grid-template-columns: repeat(var(--add-menu-tiles, 3), minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.add-menu-v2 .add-menu-tile {
+  min-width: 0;
+  min-height: calc(var(--control-h) * 2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  color: var(--text);
+  box-shadow: none;
+  text-align: center;
+}
+
+.add-menu-v2 .add-menu-tile:focus-visible:not([aria-disabled="true"]) {
+  background: var(--surface-overlay-hover);
+}
+@media (hover: hover) {
+  .add-menu-v2 .add-menu-tile:hover:where(:not(:disabled)):not([aria-disabled="true"]) {
+    background: var(--surface-overlay-hover);
+  }
+}
+.add-menu-v2 .add-menu-tile:active:where(:not(:disabled)):not([aria-disabled="true"]) {
+  background: var(--surface-overlay-hover);
+}
+
+.add-menu-v2 .add-menu-tile[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
+.add-menu-v2 .add-menu-tile-icon {
+  width: calc(var(--icon-lg) * 1.2);
+  height: calc(var(--icon-lg) * 1.2);
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+}
+
+.add-menu-v2 .add-menu-tile[aria-disabled="true"] .add-menu-tile-icon {
+  color: var(--faint);
+}
+
+.add-menu-v2 .add-menu-tile-label {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+
+.add-menu-v2 .add-menu-attach-note {
+  margin: 0;
+  padding: 0 var(--space-1);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+}
+
+.add-menu-v2 :is(.add-menu-item-icon, .add-menu-more-icon, .add-menu-more-arrow) {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--muted);
+}
+
+.add-menu-v2 :is(.add-menu-tile-icon, .add-menu-item-icon, .add-menu-more-icon, .add-menu-more-arrow) svg {
+  width: 100%;
+  height: 100%;
+}
+
+.add-menu-v2 .add-menu-sections {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.add-menu-v2 .add-menu-group {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  border-top: 1px solid var(--border-soft);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.add-menu-v2 .add-menu-group:first-child {
+  margin-top: 0;
+}
+
+.add-menu-v2 .add-menu-item {
+  width: 100%;
+  min-width: 0;
+  min-height: max(var(--control-h), var(--hit-min));
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+  text-align: start;
+}
+
+.add-menu-v2 .add-menu-item:focus-visible:not([aria-disabled="true"]) {
+  background: var(--surface-overlay-hover);
+}
+@media (hover: hover) {
+  .add-menu-v2 .add-menu-item:hover:where(:not(:disabled)):not([aria-disabled="true"]) {
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.add-menu-v2 :is(.add-menu-item, .add-menu-tile):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.add-menu-v2 .add-menu-item[aria-disabled="true"] {
+  cursor: default;
+}
+
+.add-menu-v2 .add-menu-main {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+}
+
+.add-menu-v2 .add-menu-label {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 550;
+  line-height: 1.3;
+}
+
+.add-menu-v2 .add-menu-desc,
+.add-menu-v2 .add-menu-reason,
+.add-menu-v2 .add-menu-detail {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.add-menu-v2 .add-menu-reason {
+  color: var(--text-dim);
+  font-style: normal;
+}
+
+.add-menu-v2 .add-menu-item[aria-disabled="true"] .add-menu-label {
+  color: var(--muted);
+}
+
+.add-menu-v2 .add-menu-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  color: var(--faint);
+}
+
+.add-menu-v2 .add-menu-hint {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  line-height: 1;
+}
+
+/* The settings exit closes the list under its own hairline, with no header. */
+.add-menu-v2 .add-menu-more {
+  position: relative;
+  margin-top: var(--space-2);
+}
+.add-menu-v2 .add-menu-more::before {
+  content: "";
+  position: absolute;
+  inset: calc(-1 * var(--space-1)) 0 auto;
+  border-top: 1px solid var(--border-soft);
+}
+.add-menu-v2 .add-menu-more .add-menu-label {
+  color: var(--text-dim);
+}
+
+.add-menu-v2 .add-menu-more-arrow {
+  margin-inline-start: auto;
+}
+
+.composer-mobile .composer-add-trigger .composer-add-label {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .add-menu-v2 .add-menu-item {
+    min-height: var(--tap);
+  }
+}

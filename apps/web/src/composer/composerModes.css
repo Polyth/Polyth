@@ -1,0 +1,122 @@
+/* Composer modes (web-sdk `ComposerMode`, docs/dev/ui.md "Composer modes").
+   An active mode tints the composer card with a quiet accent wash and ring,
+   names itself in one chip at the start of the input area and turns Send into
+   a labelled pill. The tint is a pseudo-element under the card's content, so
+   every theme style keeps its own border and shadow recipe. */
+.composer-card.is-composer-mode {
+  position: relative;
+  isolation: isolate;
+}
+.composer-card.is-composer-mode::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.075), rgba(var(--accent-rgb), 0.02) 70%);
+  box-shadow: inset 0 0 0 1px var(--accent-line), 0 0 0 3px var(--accent-wash);
+  animation: composer-mode-tint-in var(--motion-normal) var(--motion-ease) both;
+}
+@keyframes composer-mode-tint-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.composer-mode-chip-row {
+  display: flex;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) 0;
+}
+.composer-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-inline-size: 100%;
+  min-block-size: 24px;
+  padding-inline: var(--space-2) 2px;
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent-text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1;
+  animation: composer-mode-chip-in var(--motion-normal) var(--motion-ease) both;
+}
+@keyframes composer-mode-chip-in {
+  from { opacity: 0; transform: translate3d(0, 3px, 0) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.composer-mode-chip-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+}
+.composer-mode-chip-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.composer-mode-chip-label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-mode-chip-leave {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: 20px;
+  block-size: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: none;
+  color: inherit;
+  opacity: 0.72;
+  cursor: pointer;
+  transition: opacity var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+/* A coarse pointer still gets a full target without growing the chip. */
+.composer-mode-chip-leave::after {
+  content: "";
+  position: absolute;
+  inset: calc((min(20px, var(--hit-min)) - var(--hit-min)) / 2);
+}
+.composer-mode-chip-leave .ui-icon,
+.composer-mode-chip-leave svg {
+  width: 14px;
+  height: 14px;
+}
+.composer-mode-chip-leave:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+@media (hover: hover) {
+  .composer-mode-chip-leave:hover:where(:not(:disabled)) {
+    opacity: 1;
+    background: rgba(var(--accent-rgb), 0.16);
+  }
+}
+
+/* The mode's Send names what it does ("Ask"), so it is a pill on wide
+   layouts; phones keep the disc and hide the label like every send. */
+.composer-simple:not(.composer-mobile) .composer-rail .send.composer-mode-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  max-inline-size: 180px;
+  padding-inline: 12px 15px;
+  border-radius: var(--radius-round);
+}
+.composer-mode-send .composer-action-label {
+  overflow: hidden;
+  font-size: var(--font-meta);
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

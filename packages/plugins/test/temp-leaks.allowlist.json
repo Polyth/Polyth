@@ -1,0 +1,16 @@
+[
+  "atomicWrite.test.ts",
+  "connectionRemovalLifecycle.test.ts",
+  "connectionRotation.test.ts",
+  "effectiveCapabilities.test.ts",
+  "grantRevocationRpc.test.ts",
+  "grantScopes.test.ts",
+  "managedPluginReview.test.ts",
+  "packageSdkHardening.test.ts",
+  "plugins.test.ts",
+  "serverEntry.test.ts",
+  "serverPackage.test.ts",
+  "session1Security.test.ts",
+  "trustedServerSpaceGate.test.ts",
+  "uiBundle.test.ts"
+]

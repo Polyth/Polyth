@@ -1,0 +1,213 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { formatList, tr } from "../src/i18n/index.ts";
+import { readWebStylesSync } from "./webStyles.ts";
+
+register("./tsxHooks.mjs", import.meta.url);
+
+const { summarizeUnifiedDiff } = await import("../../../packages/git/widgets/PendingChangesBar.tsx");
+const { reviewMessageTone, stripCursorMarkers } = await import("../../../packages/code-hosting/widgets/ChangeRequestView.tsx");
+const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
+const { modelModalities } = await import("@polyth/models/model-presentation");
+const { parseMarkdown } = await import("../src/markdown/parse.ts");
+const { renderBlocks } = await import("../src/markdown/render.tsx");
+const { createElement, Fragment } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+
+const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8");
+
+test("workspace diff totals count content without file headers", () => {
+  const diff = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -1,3 +1,4 @@",
+    " unchanged",
+    "-old",
+    "+new",
+    "+another",
+    "",
+  ].join("\n");
+  assert.deepEqual(summarizeUnifiedDiff(diff), { additions: 2, deletions: 1 });
+});
+
+test("pull request markdown hides HTML comments and the Cursor footer outside code fences", () => {
+  const cleaned = stripCursorMarkers([
+    "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->",
+    "## Summary",
+    "- keeps **GFM** content",
+    "<!-- ordinary internal note -->",
+    "CURSOR_REVIEW_MARKER",
+    '<div><a href="https://cursor.com/agents/bc-123?cursor_ref=pr_footer&cursor_cta=open_in_web">Open in Web</a></div>',
+    "```html",
+    "<!-- shown as a code example -->",
+    "```",
+    "<!-- CURSOR_AGENT_PR_BODY_END -->",
+  ].join("\n"));
+
+  assert.match(cleaned, /## Summary/);
+  assert.doesNotMatch(cleaned, /ordinary internal note|CURSOR_REVIEW_MARKER|cursor_ref=pr_footer|Open in Web/);
+  assert.match(cleaned, /<!-- shown as a code example -->/);
+
+  const html = renderToStaticMarkup(createElement(Fragment, null, ...renderBlocks(parseMarkdown(cleaned), "pr-body")));
+  assert.doesNotMatch(html, /ordinary internal note|CURSOR_REVIEW_MARKER|Open in Web/);
+  assert.match(html, /shown as a code example/);
+});
+
+test("blocked reviews use warning semantics instead of success styling", () => {
+  assert.equal(reviewMessageTone("Confirm the approval or change request before submitting."), "warning");
+  assert.equal(reviewMessageTone("Submit failed: unavailable"), "error");
+  assert.equal(reviewMessageTone("Review submitted (approve)."), "success");
+});
+
+test("GFM task-list items render as checked and unchecked controls", () => {
+  const blocks = parseMarkdown("- [x] shipped\n- [ ] follow up");
+  assert.equal(blocks[0]?.kind, "list");
+  if (blocks[0]?.kind !== "list") throw new Error("expected list");
+  assert.deepEqual(blocks[0].items.map((item) => item.checked), [true, false]);
+  const html = renderToStaticMarkup(createElement(Fragment, null, ...renderBlocks(blocks, "tasks")));
+  assert.match(html, /class="md-task-list"/);
+  assert.match(html, /type="checkbox"[^>]*checked=""/);
+  assert.match(html, /type="checkbox"[^>]*disabled=""/);
+  assert.doesNotMatch(html, /\[x\]|\[ \]/);
+});
+
+test("shell card copy combines the command and its result", () => {
+  assert.equal(
+    shellCardCopyText({ command: "npm test" }, "started\npid 42"),
+    "npm test\n\nstarted\npid 42",
+  );
+  assert.equal(shellCardCopyText({ argv: ["npm", "test"] }), '{\n  "argv": [\n    "npm",\n    "test"\n  ]\n}');
+});
+
+test("expanded reasoning follows only while its own reader stays at the tail", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  assert.match(timeline, /const reasoningAtBottom = useRef\(true\)/);
+  assert.match(timeline, /!open \|\| !active \|\| !reasoningAtBottom\.current/);
+  assert.match(
+    timeline,
+    /reasoningAtBottom\.current =\s*el\.scrollHeight - el\.scrollTop - el\.clientHeight < 16/,
+  );
+});
+
+test("model metadata reports deduplicated input and output modalities", () => {
+  assert.equal(modelModalities({
+    providerID: "test",
+    modelID: "vision",
+    name: "Vision",
+    capabilities: ["input:text", "input:image", "output:image", "toolcall"],
+  }), formatList([tr("modelpicker.text"), tr("modelpicker.image")]));
+});
+
+test("fresh mobile chat exposes project targets and attachments use the platform picker", () => {
+  const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  const contextBar = read("../src/components/mobile/SessionContextBar.tsx");
+  const composer = read("../src/components/Composer.tsx");
+  const actions = read("../../../packages/permissions/widgets/index.tsx");
+  const header = read("../src/components/Header.tsx");
+  const mobileHeader = read("../src/components/mobile/MobileSessionHeader.tsx");
+  const mobileNavigation = read("../src/components/mobile/MobileNavigationRail.tsx");
+  const css = readWebStylesSync();
+
+  // The compact context bar belongs to the shared composer,
+  // and appears only while its project/worktree target is still editable.
+  assert.doesNotMatch(surface, /<SessionContextBar/);
+  assert.match(composer, /\{!session && !creatingSession && !soloPersonal && heroChrome\.location && \(\s*<SessionContextBar \{\.\.\.contextBar\} showIsolation=\{heroChrome\.isolation\} \/>\s*\)\}/);
+  assert.match(contextBar, /<Picker/);
+  assert.doesNotMatch(contextBar, /<Sheet|context-trigger|useSheetTrigger/);
+  assert.match(contextBar, /popoverClassName="context-picker-pop"/);
+  assert.match(contextBar, /footerAction:/);
+  assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.projectCurrentValue"/);
+  assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.worktreeCurrentValue"/);
+  assert.match(contextBar, /LockIcon/);
+  assert.match(contextBar, /UnlockIcon/);
+  // The isolate caption sits beside the project/branch chips, so its icon and
+  // label reuse their type scale and ink instead of a bolder, dimmer treatment.
+  assert.match(css, /\.context-isolation-icon svg\s*\{[^}]*width:\s*17px;[^}]*height:\s*17px;/s);
+  assert.match(css, /\.context-isolation-label\s*\{[^}]*font-size:\s*var\(--font-meta\)[^}]*letter-spacing:\s*-0\.008em/s);
+  assert.match(css, /\.context-isolation-control\s*\{[^}]*color:\s*var\(--text-dim\)/s);
+  assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);
+  assert.match(composer, /newSessionTarget\.kind === "branch"/);
+  assert.doesNotMatch(composer, /Modalities:/);
+  // P2-W3A: the Add menu owns Upload on every layout; the composer wires it
+  // to native scoped picking or the browser's shared hidden file input.
+  assert.match(composer, /if \(!isNativeMobile\(\)\) \{[\s\S]*?\(source === "photos" \? photoInputRef : fileInputRef\)\.current\?\.click\(\)/);
+  assert.match(composer, /pickNativeFiles\(source\)\.then/);
+  assert.match(composer, /onUpload=\{\(\) => openAttachmentPicker\("files"\)\}/);
+  assert.match(actions, /composer-auto-approve/);
+  assert.match(css, /\.composer-mobile \.composer-workflow,/);
+  assert.match(css, /\.composer-mobile \.composer-workflow:active:where\(:not\(:disabled\)\),/);
+  assert.match(
+    css,
+    /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-auto-approve,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-goals,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
+  );
+  assert.match(css, /\.composer-mobile\.composer-collapsed \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
+  assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
+  assert.match(mobileHeader, /displaySessionTitle\(session\.title, session\.id, firstUserTextCached\(events\[session\.id\]\)(?: \?\? draftTitleSource\(session\))?\)/);
+  assert.match(mobileHeader, /buildIslandItems\(/);
+  assert.match(mobileHeader, /useTaskProgressTitle\(session\?\.id, overviewTasks\)/);
+  assert.match(mobileHeader, /tr\("timeline\.valueCompleteOfValue"/);
+  assert.doesNotMatch(mobileHeader, /label="Recent sessions"/);
+  assert.match(mobileHeader, /lastUserTextCached/);
+  assert.match(mobileHeader, /origin="top"/);
+  assert.match(mobileHeader, /tr\("mobile.island.tasks"\)/);
+  assert.match(css, /\.mobile-float-navigation, \.mobile-float-actions \{ display: inline-grid; grid-auto-flow: column;/);
+  assert.match(mobileHeader, /label=\{tr\("mobile\.island\.openNavigation"\)\} size="lg" variant="ghost"/);
+  assert.match(css, /\.mobile-float-navigation > \.ui-icon-btn,[\s\S]*?background: transparent !important;[\s\S]*?box-shadow: none;/);
+  assert.match(css, /\.mobile-island-now\s*\{/s);
+  assert.match(css, /\.sheet-origin-top\s*\{/s);
+  assert.match(css, /@keyframes sheet-drop/);
+  assert.match(header, /<MobileSessionHeader \/>/);
+  assert.doesNotMatch(header, /WorkspaceBottomNav/);
+  assert.match(mobileNavigation, /ui\.mobileShortcuts/);
+  assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
+});
+
+test("the phone session island combines recents, tasks, and requests", () => {
+  const mobileHeader = read("../src/components/mobile/MobileSessionHeader.tsx");
+  const sheet = read("../src/components/mobile/Sheet.tsx");
+  const css = readWebStylesSync();
+  assert.match(mobileHeader, /buildIslandItems\(/);
+  assert.match(mobileHeader, /origin="top"/);
+  assert.match(mobileHeader, /lastUserTextCached/);
+  assert.match(mobileHeader, /eventsHaveCodeChanges/);
+  assert.match(mobileHeader, /prefetchSessionTail/);
+  assert.doesNotMatch(mobileHeader, /ClockIcon|Recent sessions|SessionSwitcher|taskBrief/);
+  assert.doesNotMatch(mobileHeader, /count=\{tasks\.length\}|count=\{recent\.length\}/);
+  assert.match(sheet, /origin = "bottom"/);
+  assert.match(sheet, /sheet-origin-top/);
+  // The pill dropped the "SESSION ·" / "TASK ·" kind prefix; a live status
+  // glyph now carries the state instead.
+  assert.doesNotMatch(mobileHeader, /mobile-island-kind/);
+  assert.match(mobileHeader, /mobile-island-live/);
+  assert.match(css, /\.mobile-island-diff \.add/);
+  assert.match(css, /@keyframes island-task-pulse/);
+  assert.match(css, /@keyframes sheet-drop/);
+});
+
+test("source-control surfaces keep responsive and accessible audit contracts", () => {
+  const git = read("../../../packages/git/widgets/GitView.tsx");
+  const github = read("../../../packages/code-hosting/widgets/CodeHostingView.tsx");
+  const pullRequest = read("../../../packages/code-hosting/widgets/ChangeRequestView.tsx");
+  const pending = read("../../../packages/git/widgets/PendingChangesBar.tsx");
+  const css = readWebStylesSync();
+
+  assert.match(css, /container:\s*feature-panel\s*\/\s*inline-size/);
+  assert.match(css, /@container feature-panel \(max-width: 700px\)[\s\S]*\.git-master-detail/);
+  assert.match(css, /@container feature-panel \(max-width: 599px\)[\s\S]*\.gh-card-overflow/);
+  assert.match(git, /aria-pressed=\{prefs\.layout === "unified"\}/);
+  assert.doesNotMatch(git, /window\.confirm/);
+  assert.match(git, /tr\("gitview\.couldntLoadTheFileDiff"\)/);
+  assert.match(github, /aria-pressed=\{filter === item\.id\}/);
+  assert.match(pullRequest, /reviewBusy/);
+  assert.match(pullRequest, /<MarkdownDoc/);
+  assert.doesNotMatch(pending, /<details/);
+  assert.doesNotMatch(pending, /window\.confirm/);
+  assert.match(pending, /confirmAlert/);
+  assert.match(pending, /gitDiscard/);
+  assert.match(pending, /openChanges\(\)/);
+  assert.match(pending, /EDITED_FILES_PREVIEW/);
+});

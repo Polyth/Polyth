@@ -1,0 +1,50 @@
+/* Conversation progress placement -----------------------------------------
+ * Task state is not assistant prose. Keep the canonical plan out of message
+ * flow on every shell; mobile and desktop expose it through their session
+ * overview/title surfaces instead.
+ */
+.timeline .task-list {
+  display: none;
+}
+
+/* A finalized assistant message followed by more technical work is a progress
+ * update, not the turn's final answer. This applies equally to desktop and
+ * phone so Activity → progress → Activity reads as one continuing turn. Only
+ * its ink quiets: the next block arrives under it, and a size or leading
+ * change there would reflow every line the reader is looking at. */
+.timeline > .msg.assistant.progress-update > .bubble {
+  color: var(--text-dim);
+}
+
+.desktop-session-status-copy.task-progress {
+  font-weight: 650;
+}
+
+.desktop-session-status-copy.task-progress.completed,
+.desktop-session-status-copy.task-progress.all-complete {
+  color: var(--green-on-wash);
+}
+
+.desktop-session-status-copy.task-progress.failed {
+  color: var(--red);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .desktop-session-status-copy.task-progress {
+    animation: desktop-task-title-swap var(--motion-normal) var(--motion-ease) both;
+  }
+
+  @keyframes desktop-task-title-swap {
+    from {
+      opacity: .5;
+      transform: translate3d(0, 3px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+}
+
+/* A conversation header is a title, not a status trigger. */
+.desktop-session-status--conversation .desktop-session-status-trigger { cursor: default; }

@@ -1,0 +1,5 @@
+chart Visits · type=line · unit=k
+- Month | Online | Shop
+- Jan | 12 | 4
+- Feb | 15 | 5
+- Mar | 14 | x

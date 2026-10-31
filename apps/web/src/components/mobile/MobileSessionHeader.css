@@ -1,0 +1,903 @@
+/* Compact session overview remains a top-origin status surface for wide
+   callers; the phone-specific full-screen variant is defined below. */
+.sheet-backdrop-top:has(> .mobile-island-sheet) {
+  /* A translucent sheet over a dark scrim compounds into a flat gray panel.
+     This quick surface samples the workspace directly; the canonical sheet
+     material remains its readable opaque fallback when blur is unavailable. */
+  background: transparent;
+}
+.mobile-island-sheet.sheet-origin-top {
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  border-bottom: 1px solid var(--material-glass-border);
+  border-radius: 0 0 var(--radius-sheet) var(--radius-sheet);
+  box-shadow: var(--shadow-md);
+  transform-origin: top center;
+  animation-name: mobile-session-sheet-drop;
+  animation-duration: var(--motion-surface);
+  animation-timing-function: var(--motion-ease);
+}
+
+/* Details use the visible band; the body owns scrolling down to Recent. */
+.mobile-island-sheet--details.sheet-origin-top {
+  max-height: calc(var(--visual-vh, 100dvh) - var(--safe-bottom) - var(--space-2));
+}
+
+.mobile-island-sheet--details .sheet-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.mobile-island-sheet--details .sheet-head {
+  justify-content: flex-end;
+  padding: 0 var(--space-2);
+}
+
+.mobile-island-sheet.sheet-origin-top.is-closing {
+  animation-name: mobile-session-sheet-lift;
+  animation-duration: var(--motion-surface);
+  animation-timing-function: var(--motion-ease);
+}
+
+/* Dragged up past the commit point: carry on off the top edge from the finger
+   (sheetDrag.ts hands over --sheet-from and --sheet-settle). */
+.mobile-island-sheet.sheet-origin-top.is-closing[data-drag-dismissed] {
+  animation-name: sheet-lift-out;
+  animation-duration: var(--sheet-settle, var(--motion-stack));
+  animation-timing-function: var(--motion-stack-ease);
+}
+
+@keyframes mobile-session-sheet-drop {
+  from {
+    transform: translate3d(0, calc(var(--space-5) * -1), 0) scale(.994);
+    opacity: .68;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes mobile-session-sheet-lift {
+  from { transform: none; opacity: 1; }
+  to {
+    transform: translate3d(0, calc(var(--space-6) * -1), 0) scale(.988);
+    opacity: 0;
+  }
+}
+
+.mobile-session-selector-arrow {
+  transform-origin: center;
+  transition:
+    transform var(--motion-normal) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+
+.mobile-session-selector[aria-expanded="true"] .mobile-session-selector-arrow {
+  transform: rotate(180deg);
+}
+
+.sheet-head-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.mobile-island-sheet .sheet-head {
+  min-height: var(--tap);
+  padding: 0 var(--screen-gutter);
+}
+
+.mobile-island-sheet .sheet-close {
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+}
+
+@media (hover: hover) {
+  .mobile-island-sheet .sheet-close:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay);
+  }
+}
+
+.mobile-island-sheet .sheet-body {
+  padding: 0 0 var(--space-3);
+}
+
+.mobile-island-recent-scroll {
+  max-height: min(42dvh, calc(var(--visual-vh, 100dvh) / 2));
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+}
+
+.mobile-island-recent-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: var(--space-1);
+}
+
+.mobile-island-recent-day + .mobile-island-recent-day {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+}
+
+.mobile-island-recent-day-label {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: var(--font-meta-lh);
+}
+
+.mobile-island-recent-empty,
+.mobile-island-recent-end {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.mobile-island-recent-more {
+  display: grid;
+  margin-top: var(--space-2);
+}
+
+.mobile-island-load-more {
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--font-label);
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.mobile-island-load-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .mobile-island-load-more:hover:not(:disabled) {
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.mobile-island-load-more:disabled {
+  cursor: progress;
+  opacity: .65;
+}
+
+.mobile-island-sheet .mobile-island-now {
+  margin: 0 var(--screen-gutter);
+  padding: var(--space-1) 0 var(--space-3);
+}
+
+.mobile-island-session-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-1) 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+@media (hover: hover) {
+  .mobile-island-session-btn:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay);
+  }
+}
+
+.mobile-island-session-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mobile-island-session-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-session-title);
+  font-weight: 650;
+  line-height: var(--font-session-title-lh);
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-island-session-status {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.mobile-island-context-notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.mobile-island-sheet .mobile-island-live {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.mobile-island-sheet .mobile-island-live .mobile-nav-state-icon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.mobile-island-sheet .mobile-island-live.working {
+  color: var(--accent);
+}
+
+.mobile-island-sheet .mobile-island-live.working .mobile-nav-state-icon {
+  animation: mobile-nav-spin .9s linear infinite;
+}
+
+.mobile-island-sheet .mobile-island-live.approval,
+.mobile-island-sheet .mobile-island-live.needs-approval,
+.mobile-island-sheet .mobile-island-live.reply,
+.mobile-island-sheet .mobile-island-live.needs-reply {
+  color: var(--amber);
+}
+
+.mobile-island-sheet .mobile-island-live.failed {
+  color: var(--red);
+}
+
+.mobile-island-sheet .mobile-island-live.unread {
+  color: var(--green);
+}
+
+.mobile-island-sheet .mobile-island-live.reconciling {
+  color: var(--blue);
+}
+
+.mobile-island-sheet .mobile-island-live.epoch-pending {
+  color: var(--amber);
+}
+
+@keyframes mobile-nav-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-island-sheet .mobile-island-live.working .mobile-nav-state-icon {
+    animation: none;
+  }
+}
+
+.mobile-island-sheet .mobile-island-prompt {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.mobile-island-sheet .mobile-island-prompt-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+}
+
+.mobile-island-sheet .mobile-island-prompt p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.4;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.mobile-island-sheet .sheet-section {
+  margin: 0 var(--screen-gutter);
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.mobile-island-sheet .sheet-body > .sheet-section:first-child {
+  padding-top: var(--space-1);
+  border-top: 0;
+}
+
+.mobile-island-sheet .sheet-section + .sheet-section {
+  margin-top: var(--space-1);
+}
+
+.mobile-island-sheet .sheet-section-head {
+  position: static;
+  z-index: auto;
+  min-height: 0;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.mobile-island-sheet .mobile-task-list {
+  display: grid;
+  gap: 0;
+}
+
+.mobile-island-sheet .mobile-task-list li {
+  grid-template-columns: var(--space-5) minmax(0, 1fr);
+  min-height: var(--tap);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  color: var(--text-dim);
+}
+
+.mobile-island-sheet .mobile-task-list li.active {
+  margin: 0;
+  padding-inline: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.mobile-island-sheet .mobile-task-list li.active::before {
+  display: none;
+}
+
+.mobile-island-sheet .mobile-task-list li.done {
+  color: var(--muted);
+}
+
+.mobile-island-sheet .mobile-task-list li.done .mobile-task-text {
+  text-decoration: none;
+}
+
+.mobile-island-sheet .mobile-task-text {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.35;
+  text-overflow: clip;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.mobile-island-sheet .mobile-action-needed-list .mobile-island-dot {
+  justify-self: center;
+}
+
+.mobile-island-sheet .mobile-task-list li.request:has(> .mobile-task-action-btn) {
+  padding: 0;
+}
+
+.mobile-task-action-btn {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: var(--space-5) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-1) 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+@media (hover: hover) {
+  .mobile-task-action-btn:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay);
+  }
+}
+
+.mobile-island-sheet .sheet-row {
+  min-height: var(--tap);
+  gap: var(--space-2);
+  border: 0;
+  background: transparent;
+}
+
+.mobile-island-sheet .sheet-row-main {
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.mobile-island-sheet .sheet-row-icon {
+  width: var(--space-5);
+  min-width: var(--space-5);
+  justify-content: center;
+}
+
+.mobile-island-sheet .sheet-row-copy {
+  min-width: 0;
+  gap: 0;
+}
+
+.mobile-island-sheet .sheet-row-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-body);
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Long-press on a Recent row swaps it for this input, matching the rename
+   affordance MobileNavigator uses for the same gesture. */
+.mobile-island-rename-input {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-body);
+}
+
+.mobile-island-rename-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The phone title is the lightweight task-status surface. Full progress stays
+   one tap away in the overview sheet instead of being reinserted after every
+   intermediate assistant message. */
+.mobile-island-text.task-progress {
+  font-weight: 650;
+}
+.mobile-island-text.task-progress.completed,
+.mobile-island-text.task-progress.all-complete {
+  color: var(--green-on-wash);
+}
+.mobile-island-text.task-progress.failed {
+  color: var(--red);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-island-text.task-progress {
+    animation: mobile-task-title-swap var(--motion-normal) var(--motion-ease) both;
+  }
+
+  @keyframes mobile-task-title-swap {
+    from {
+      opacity: .5;
+      transform: translate3d(0, 3px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+}
+
+/* Other-session requests remain visible through their dot, copy and live
+   announcement while the title's touch region stays transparent. */
+.mobile-island-text.attention-needs-approval {
+  color: var(--amber);
+  font-weight: 650;
+}
+
+.mobile-island-text.attention-needs-reply {
+  color: var(--blue);
+  font-weight: 650;
+}
+
+/* Someone else's chat: their name, quiet, after the title. */
+.mobile-island-owner {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-island-text.attention-failed {
+  color: var(--red);
+  font-weight: 650;
+}
+
+
+/* Phone session overview: a full-screen, neutral workspace surface. The
+   top-sheet presentation remains available to compact desktop callers, while
+   the phone gets one scroll plane and one predictable status grid. */
+.mobile-island-current-session {
+  display: grid;
+  gap: var(--space-1);
+  padding-block: var(--space-3) var(--space-4);
+}
+
+.mobile-island-current-session > span {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.mobile-island-current-session > h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-session-title);
+  font-weight: 600;
+  line-height: var(--font-session-title-lh);
+  overflow-wrap: anywhere;
+}
+
+.sheet-backdrop-top:has(> .mobile-island-sheet--full-screen) {
+  padding: 0;
+  background: var(--bg);
+}
+
+.mobile-island-sheet--full-screen.sheet {
+  width: 100%;
+  max-width: none;
+  height: var(--visual-vh, 100dvh);
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation-name: mobile-session-overview-in;
+}
+
+.mobile-island-sheet--full-screen.sheet.is-closing {
+  animation-name: mobile-session-overview-out;
+}
+
+/* Keep the phone surface neutral even when the global low-resource material
+   fallback targets every other mobile sheet. */
+:root .mobile-island-sheet--full-screen.sheet.sheet {
+  background: var(--bg);
+}
+
+@keyframes mobile-session-overview-in {
+  from { opacity: .72; }
+  to { opacity: 1; }
+}
+
+@keyframes mobile-session-overview-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(.992); }
+}
+
+.mobile-island-sheet--full-screen .sheet-grabber {
+  display: none;
+}
+
+.mobile-island-sheet--full-screen .sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: calc(var(--safe-top) + var(--tap) + var(--space-3));
+  gap: var(--space-3);
+  padding: max(var(--space-2), var(--safe-top)) var(--screen-gutter) 0;
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg);
+}
+
+.mobile-island-sheet--full-screen .sheet-head-leading {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+}
+
+.mobile-island-sheet--full-screen .sheet-head-leading img {
+  display: block;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  object-fit: contain;
+}
+
+.mobile-island-sheet--full-screen .sheet-title {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  color: var(--text);
+  font-size: var(--font-window-title);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -.01em;
+  text-transform: capitalize;
+}
+
+.mobile-island-sheet--full-screen .sheet-close {
+  width: var(--tap);
+  height: var(--tap);
+  margin-inline-start: var(--space-1);
+}
+
+.mobile-island-sheet--full-screen .sheet-body {
+  padding: 0 var(--screen-gutter) calc(var(--safe-bottom) + var(--space-4));
+}
+
+.mobile-island-sheet--full-screen .sheet-section {
+  margin: 0;
+  padding: var(--space-5) 0 0;
+  border-top: 0;
+}
+
+.mobile-island-sheet--full-screen .sheet-body > .sheet-section:first-child {
+  padding-top: var(--space-5);
+  border-top: 0;
+}
+
+.mobile-island-sheet--full-screen .sheet-section + .sheet-section {
+  margin-top: var(--space-5);
+}
+
+.mobile-island-sheet--full-screen .sheet-section-head {
+  min-height: 0;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: .06em;
+}
+
+.mobile-island-session-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mobile-island-sheet--full-screen .mobile-island-session-entry {
+  min-width: 0;
+  border-radius: var(--radius-control);
+}
+
+.mobile-island-sheet--full-screen .mobile-island-session-entry.is-current {
+  background: var(--surface-overlay);
+}
+
+.mobile-island-sheet--full-screen .mobile-island-session-entry .sheet-row {
+  min-height: 52px;
+  gap: var(--space-3);
+}
+
+.mobile-island-sheet--full-screen .mobile-island-session-entry.has-meta .sheet-row {
+  min-height: 64px;
+}
+
+.mobile-island-sheet--full-screen .mobile-island-session-entry .sheet-row-main {
+  min-height: inherit;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-radius: 0;
+}
+
+.mobile-island-sheet--full-screen .mobile-island-session-entry .sheet-row-icon {
+  width: var(--icon-lg);
+  min-width: var(--icon-lg);
+  justify-content: center;
+}
+
+.mobile-island-sheet--full-screen .sheet-row-copy {
+  min-width: 0;
+  gap: 3px;
+}
+
+.mobile-island-sheet--full-screen .sheet-row-copy strong {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-session-title);
+  font-weight: 620;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.mobile-island-sheet--full-screen .sheet-row-copy small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-island-sheet--full-screen .mobile-island-session-entry.is-current .sheet-row-check {
+  display: none;
+}
+
+.mobile-island-row-time {
+  flex: none;
+  align-self: center;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+}
+
+.mobile-island-sheet--full-screen .mobile-island-live {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.mobile-island-sheet--full-screen .mobile-island-live .mobile-nav-state-icon {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.mobile-island-sheet--full-screen .mobile-island-recent-scroll.is-full-screen {
+  max-height: none;
+  overflow: visible;
+}
+
+.mobile-island-sheet--full-screen .mobile-island-recent-day + .mobile-island-recent-day {
+  margin-top: var(--space-3);
+  padding-top: 0;
+  border-top: 0;
+}
+
+.mobile-island-sheet--full-screen .mobile-island-recent-day-label {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  text-transform: capitalize;
+}
+
+.mobile-island-request-entry {
+  min-width: 0;
+}
+
+.mobile-island-request-button {
+  display: grid;
+  grid-template-columns: var(--icon-lg) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 52px;
+  padding: var(--space-1) 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.mobile-island-request-button.is-static {
+  cursor: default;
+}
+
+.mobile-island-request-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.mobile-island-request-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.mobile-island-request-icon.needs-approval,
+.mobile-island-request-icon.needs-reply {
+  color: var(--amber);
+}
+
+.mobile-island-request-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.mobile-island-request-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-session-title);
+  font-weight: 620;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-island-request-copy small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+@media (hover: hover) {
+  .mobile-island-request-button:not(.is-static):hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-island-sheet--full-screen.sheet {
+    animation: none;
+  }
+}
+
+/* Match the actual phone-shell seam from responsiveShell.ts, including a
+   landscape phone with a coarse pointer. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* Tasks already have a dedicated, persistent overview above the chat. The
+     old inline plan moved to whichever assistant message happened to be latest,
+     which made the checklist jump below progress prose. */
+  .timeline .task-list {
+    display: none;
+  }
+
+  /* A finalized assistant message followed by more technical activity is a
+     progress update, not the turn's final answer. Keep it readable but quieter
+     so Activity → progress → Activity scans as one continuing turn. Only its
+     ink changes: new leading would reflow the lines right above the block
+     that just arrived. */
+  .timeline > .msg.assistant.progress-update > .bubble {
+    color: var(--text-dim);
+  }
+}
+
+/* A conversation title is passive: there is no agent overview to open. */
+.mobile-session-selector[data-conversation] { cursor: default; }
+/* …and no agent status to show beside its title. */
+.mobile-session-selector[data-conversation] .session-header-status { display: none; }

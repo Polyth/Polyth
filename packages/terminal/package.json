@@ -1,0 +1,49 @@
+{
+  "name": "@polyth/terminal",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./project-tools": "./src/projectTools.ts",
+    "./tool-types": "./src/projectToolTypes.ts",
+    "./tool-ui": "./widgets/tools.tsx",
+    "./i18n": "./src/i18n/index.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Terminal",
+      "description": "Project-scoped terminal sessions.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "terminal",
+      "hasSettings": true,
+      "category": "engineering",
+      "projectAffinity": {
+        "directions": [
+          "engineering",
+          "operations"
+        ],
+        "recommended": true
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0",
+    "ws": "^8.22.0"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

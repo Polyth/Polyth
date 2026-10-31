@@ -1,0 +1,153 @@
+/* Chat launcher contribution. The workflow surface keeps its own styles in
+ * styles.css; these rules cover the compact anchored composer/message action. */
+.workflow-launch-overlay {
+  width: min(360px, calc(100vw - var(--space-4) * 2));
+  min-width: min(320px, calc(100vw - var(--space-4) * 2));
+  max-width: min(360px, calc(100vw - var(--space-4) * 2));
+  max-height: min(420px, calc(100dvh - var(--space-6)));
+}
+.ui-popover.workflow-launch-overlay {
+  width: min(360px, calc(100vw - var(--space-4) * 2));
+}
+
+.workflow-launch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.workflow-launch-panel .workflow-launch-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: min(32dvh, 260px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.workflow-launch-panel .workflow-launch-row {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 48px;
+  padding: var(--space-1) var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.workflow-launch-select {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.workflow-launch-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.workflow-launch-panel .workflow-launch-row:hover,
+.workflow-launch-panel .workflow-launch-row:focus-visible {
+  border-color: var(--hair-strong);
+  background: var(--surface-overlay);
+}
+
+.workflow-launch-panel .workflow-launch-row.selected {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+}
+
+.workflow-launch-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.workflow-launch-copy strong,
+.workflow-launch-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-launch-topology,
+.workflow-launch-meta {
+  color: var(--text-dim);
+}
+
+.workflow-launch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.workflow-launch-copy strong {
+  color: var(--text);
+  font-size: var(--font-label);
+}
+
+.workflow-launch-copy small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.workflow-launch-panel .workflow-launch-empty {
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px dashed var(--hair-strong);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+  text-align: center;
+}
+
+.workflow-launch-panel .workflow-launch-more {
+  width: 100%;
+  justify-content: center;
+  min-height: var(--control-h-sm);
+}
+
+.workflow-launch-panel .workflow-launch-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+@media (max-width: 560px) {
+  .workflow-launch-overlay {
+    min-width: 0;
+    max-width: none;
+  }
+
+  .workflow-launch-panel .workflow-launch-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--space-1);
+    padding-inline: 0;
+  }
+}
+
+/* (max-height: 560px), published by the host as a body token: a height
+   media query flips with every phone keyboard and re-lays the whole app. */
+:where(body[data-viewport-short~="560"]) .workflow-launch-panel .workflow-launch-list { max-height: 28dvh; }

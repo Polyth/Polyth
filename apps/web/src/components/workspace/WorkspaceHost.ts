@@ -1,0 +1,148 @@
+// EXTENSION-SEAMS slice 2: the workspace surface host. Selects exactly one
+// registered surface for the store's active view, applies plugin availability
+// with a deterministic fallback, applies the surface's project/session
+// requirement (rendering the standard empty state when it is absent), and
+// isolates the surface behind its own ViewErrorBoundary so one failing
+// contribution cannot collapse the header, sidebar, composer, rail, or
+// status bar.
+//
+// Deliberately createElement-based (a .ts file, not .tsx): Node's type
+// stripping cannot load JSX, and the DOM-free node:test suite must be able to
+// import this file to test gating, fallback, empty states, and failure
+// isolation through a real React root.
+import { createElement, useSyncExternalStore, type ReactNode } from "react";
+import { closeAllModules, useStore, workspaceProjectId } from "../../store.ts";
+import ViewErrorBoundary from "../ViewErrorBoundary.ts";
+import ModuleView from "../ui/ModuleView.ts";
+import ProjectEmptyState from "./ProjectEmptyState.ts";
+import {
+  listWorkspaceSurfaces,
+  resolveWorkspaceSurface,
+  subscribeWorkspaceSurfaces,
+  workspaceSurfaceGate,
+  workspaceSurfaceVersion,
+  type WorkspaceSurface,
+} from "../../workspace/surfaceRegistry.ts";
+import { tr } from "../../i18n/index.ts";
+import { getPage, pagesVersion, subscribePages } from "../../pages.ts";
+
+/** Re-render whenever any surface registers, replaces, or disposes. */
+export function useWorkspaceSurfaceVersion(): number {
+  return useSyncExternalStore(subscribeWorkspaceSurfaces, workspaceSurfaceVersion);
+}
+
+// A same-id replacement is a new descriptor object; giving each registration
+// its own instance id lets the boundary's resetKey change so a fixed
+// contribution visibly recovers instead of inheriting the old failure
+// (the EXT-SEAMS-V1 lesson, applied to surfaces).
+let nextInstanceId = 0;
+const instanceIds = new WeakMap<WorkspaceSurface, number>();
+function instanceIdOf(surface: WorkspaceSurface): number {
+  let id = instanceIds.get(surface);
+  if (id === undefined) {
+    id = ++nextInstanceId;
+    instanceIds.set(surface, id);
+  }
+  return id;
+}
+
+/** Boundary reset identity: surface registration + canonical ids. Exported for
+ *  DOM-free tests. */
+export function surfaceResetKey(
+  surface: WorkspaceSurface,
+  projectId: string | null,
+  sessionId: string | null,
+): string {
+  return `${surface.id}#${instanceIdOf(surface)}:${projectId ?? ""}:${sessionId ?? ""}`;
+}
+
+/** Standard session empty state for surfaces that require an open session. */
+function SessionEmptyState({ title }: { title: string }): ReactNode {
+  return createElement(
+    "div",
+    { className: "empty-state" },
+    createElement("span", { className: "empty-state-mark", "aria-hidden": true }, "○"),
+    createElement("h2", { className: "empty-state-title" }, tr("workspace.workspacehost.noSessionSelected")),
+    createElement(
+      "p",
+      { className: "empty-state-desc" },
+      tr("workspace.workspacehost.openSessionToUseValue", { title }),
+    ),
+  );
+}
+
+/** Nothing registered (or everything gated off) — an honest empty workspace. */
+function NoSurfaceEmptyState(): ReactNode {
+  return createElement(
+    "div",
+    { className: "empty-state" },
+    createElement("span", { className: "empty-state-mark", "aria-hidden": true }, "○"),
+    createElement("h2", { className: "empty-state-title" }, tr("workspace.workspacehost.nothingToShow")),
+    createElement("p", { className: "empty-state-desc" }, tr("workspace.workspacehost.noSurfaceEnabled")),
+  );
+}
+
+/** A package page in place of Chat (an agent opened from the navigator). The
+ *  page owns the whole canvas, its header included; the host isolates it. */
+function PageCanvas({ pageId, resource, projectId }: { pageId: string; resource: string | null; projectId: string | null }): ReactNode {
+  useSyncExternalStore(subscribePages, pagesVersion);
+  const page = getPage(pageId);
+  if (!page) return null;
+  return createElement(
+    "section",
+    { className: "page-canvas", "data-page-id": page.id, "aria-label": page.title },
+    createElement(
+      ViewErrorBoundary,
+      { inline: true, resetKey: `page:${page.id}:${resource ?? ""}:${projectId ?? ""}` },
+      createElement(page.component, { resource, projectId }),
+    ),
+  );
+}
+
+export default function WorkspaceHost(): ReactNode {
+  useWorkspaceSurfaceVersion();
+  useSyncExternalStore(subscribePages, pagesVersion);
+  const projectId = useStore(workspaceProjectId);
+  const sessionId = useStore((s) => s.activeSessionId);
+  const view = useStore((s) => s.activeView);
+  const registry = useStore((s) => s.projectRegistry);
+  const activePage = useStore((s) => s.activePage);
+
+  if (activePage && getPage(activePage.pageId)) {
+    return createElement(PageCanvas, { pageId: activePage.pageId, resource: activePage.resource, projectId });
+  }
+
+  const surface = resolveWorkspaceSurface(view, listWorkspaceSurfaces(), []);
+  if (!surface) return createElement(NoSurfaceEmptyState);
+
+  const gate = workspaceSurfaceGate(surface, { projectId, sessionId });
+  if (gate === "needs-project") return createElement(ProjectEmptyState, { registry });
+  if (gate === "needs-session") return createElement(SessionEmptyState, { title: surface.title });
+
+  // EXT-SEAMS-S2-V1: every surface receives the canonical ids as props — the
+  // specified identity contract, so contributions never reach into internal
+  // stores or invent their own workspace authority just to learn "where am I".
+  const body = createElement(
+    ViewErrorBoundary,
+    { inline: true, resetKey: surfaceResetKey(surface, projectId, sessionId) },
+    createElement(surface.component, { projectId, sessionId }),
+  );
+
+  // The session surface IS the workspace — it never gets the module frame.
+  // Every other surface renders inside the shared ModuleView: one header, one
+  // description line, one top-right close (closeAllModules), and — on phone —
+  // the slide-in overlay that fully covers the session. Feature packages no
+  // longer draw their own page header or "Back to chat" control.
+  if (surface.id === "session") return body;
+  return createElement(
+    ModuleView,
+    {
+      id: surface.id,
+      title: surface.title,
+      ...(surface.description ? { description: surface.description } : {}),
+      variant: "main" as const,
+      onClose: closeAllModules,
+    },
+    body,
+  );
+}

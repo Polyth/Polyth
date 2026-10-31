@@ -1,0 +1,37 @@
+{
+  "name": "@polyth/memory",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./memory-service": "./src/service.ts",
+    "./memory-tools": "./src/tools.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Memory",
+      "description": "Bounded, project-scoped reusable context with explicit harvesting and recall policy.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "brain",
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": { "recommended": true }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/judgment": "0.1.0",
+    "@polyth/knowledge": "0.1.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": { "react": "^19.0.0" }
+}

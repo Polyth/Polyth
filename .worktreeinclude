@@ -1,0 +1,3 @@
+# Ignored local files a new isolated checkout links from the checkout it
+# branched from (gitignore syntax). See docs/dev/workspace.md.
+packages/harness-runtime/native/bin/

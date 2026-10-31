@@ -1,0 +1,9 @@
+form Sign up
+- email | Email * | email
+- site | Website | url
+- age | Age | number | 30 | 18..120
+- start | Start | date | | 2026-01-01..
+- code | Invite code | text | | /[A-Z]{3}-\d+/
+- size | Size | | M | S/M/L
+- news | Newsletter | toggle | true
+> Create account

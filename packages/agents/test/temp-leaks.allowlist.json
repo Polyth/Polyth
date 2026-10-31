@@ -1,0 +1,5 @@
+[
+  "agentBackups.test.ts",
+  "cron.test.ts",
+  "schedule.test.ts"
+]

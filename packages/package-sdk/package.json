@@ -1,0 +1,25 @@
+{
+  "name": "@polyth/package-sdk",
+  "version": "1.2.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "browser": "./src/public.ts",
+      "default": "./src/index.ts"
+    },
+    "./browser": "./src/public.ts",
+    "./classify": "./src/classify.ts",
+    "./host": "./src/host.ts",
+    "./manifest": "./src/manifest.ts"
+  },
+  "bin": {
+    "polyth-package": "./src/cli.ts"
+  },
+  "dependencies": {
+    "semver": "^7.7.3"
+  },
+  "devDependencies": {
+    "@types/semver": "^7.7.0"
+  }
+}

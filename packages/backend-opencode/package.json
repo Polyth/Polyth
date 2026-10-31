@@ -1,0 +1,31 @@
+{
+  "name": "@polyth/backend-opencode",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plugin": "./src/plugin.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/outbound": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/todos": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "OpenCode harness",
+      "description": "Managed OpenCode HTTP and SSE runtime",
+      "core": true,
+      "enabled": true,
+      "icon": "terminal",
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
+    }
+  }
+}

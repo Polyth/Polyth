@@ -1,0 +1,57 @@
+{
+  "view": "compare",
+  "title": "Laptops",
+  "options": {
+    "pick": "one"
+  },
+  "pick": "one",
+  "columns": [
+    "Air 13",
+    "XPS 13"
+  ],
+  "columnImages": [
+    "https://cdn.example/air.jpg",
+    "https://cdn.example/xps.jpg"
+  ],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "Battery",
+      "cells": [
+        "18 h",
+        "12 h"
+      ],
+      "best": "max"
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "Weight",
+      "cells": [
+        "1.24 kg",
+        "1.19 kg"
+      ],
+      "best": "min"
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "Price",
+      "cells": [
+        "$999",
+        "$999"
+      ],
+      "best": "min"
+    }
+  ],
+  "actions": [
+    {
+      "label": "Buy"
+    }
+  ],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

@@ -1,0 +1,644 @@
+import type { InstalledPluginDto } from "@polyth/contracts";
+import type {
+  ContributionCompletion,
+  ContributionInvocation,
+  ContributionInvocationKind,
+  ContributionResult,
+  PackageJsonObject,
+  RemoteUiAction,
+  RemoteUiNode,
+} from "@polyth/package-sdk";
+import {
+  MAX_IN_FLIGHT,
+  PROTOCOL_CHANNEL,
+  PROTOCOL_VERSION,
+  createMethodRegistry,
+  REMOTE_UI_MAX_UPDATES_PER_SEC,
+  createRateLimiter,
+  eventEnvelope,
+  parseEnvelope,
+  responseError,
+  responseOk,
+  resolvePackageErrorCode,
+  sandboxHandshakeReady,
+  verifySandboxHello,
+  parseRemoteUiTree,
+  type HandshakeReady,
+  type HostMethodContext,
+} from "@polyth/package-sdk/host";
+import { api } from "@polyth/session/web-api";
+import { dismissNotification, notify } from "../../notify/store.ts";
+import { promptAlert } from "../../alerts.ts";
+import { tr } from "../../i18n/index.ts";
+import { requestComposerInsert, requestComposerReplace } from "../../composerInsert.ts";
+import { saveDraft } from "../../utils.ts";
+import { getState, openWorkspacePane, setRailPlugin } from "../../store.ts";
+import { loadSettings } from "../../settings.ts";
+import { registerComposerActionDeliverer, takePendingComposerAction, clearPackageComposerActions } from "./composerAction.ts";
+
+const CONTRIBUTION_SURFACE = "__contributions__";
+const USER_INTENT_WINDOW_MS = 10_000;
+
+export interface HostContributionInvocationRequest {
+  kind: ContributionInvocationKind;
+  contributionId: string;
+  sessionId?: string;
+  projectId?: string;
+  data?: PackageJsonObject;
+}
+
+export interface SandboxRuntime {
+  readonly instanceId: string;
+  readonly pluginId: string;
+  readonly surfaceId: string;
+  subscribe(listener: (tree: RemoteUiNode | null) => void): () => void;
+  sendAction(action: RemoteUiAction): void;
+  invokeContribution(request: HostContributionInvocationRequest): Promise<ContributionResult | undefined>;
+  dispose(): void;
+}
+
+interface PendingContribution {
+  invocation: ContributionInvocation;
+  resolve: (result: ContributionResult | undefined) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+interface LiveRuntime extends SandboxRuntime {
+  refs: number;
+  iframe: HTMLIFrameElement;
+  port: MessagePort | null;
+  tree: RemoteUiNode | null;
+  listeners: Set<(tree: RemoteUiNode | null) => void>;
+  disposed: boolean;
+  inFlight: number;
+  limiter: ReturnType<typeof createRateLimiter>;
+  renderLimiter: ReturnType<typeof createRateLimiter>;
+  onWindowMessage: (event: MessageEvent) => void;
+  unregisterDeliverer?: () => void;
+  ready: Promise<void>;
+  resolveReady: () => void;
+  rejectReady: (error: Error) => void;
+  readySettled: boolean;
+  pendingContributions: Map<string, PendingContribution>;
+  lastUserIntentAt: number;
+  toasts: SandboxToasts;
+}
+
+/** Notifications one runtime raised through `ui.toast` and still shows. */
+export interface SandboxToasts {
+  live: Set<string>;
+  count: number;
+}
+
+/** A sandbox may keep at most this many of its toasts on screen. */
+export const SANDBOX_TOASTS_LIVE = 3;
+const SANDBOX_TOAST_MAX_CHARS = 240;
+const SANDBOX_TOAST_KINDS = new Set(["info", "success", "error"]);
+
+/**
+ * `ui.toast` → a notification of the host stack: plain text only (no markup,
+ * no actions), an `info`/`success`/`error` kind, ids in the sandbox's own
+ * space, and at most a few on screen per runtime. The caller applies the
+ * render rate limit. Returns the notification id, or null when nothing shows.
+ */
+export function raiseSandboxToast(toasts: SandboxToasts, pluginId: string, payload: unknown): string | null {
+  const record = payload && typeof payload === "object" ? payload as { message?: unknown; kind?: unknown } : {};
+  const message = typeof record.message === "string" ? record.message.trim().slice(0, SANDBOX_TOAST_MAX_CHARS) : "";
+  if (!message) return null;
+  const kind = typeof record.kind === "string" && SANDBOX_TOAST_KINDS.has(record.kind)
+    ? record.kind as "info" | "success" | "error"
+    : "info";
+  const id = `sandbox.${pluginId}.${++toasts.count}`;
+  while (toasts.live.size >= SANDBOX_TOASTS_LIVE) {
+    const oldest = toasts.live.values().next().value!;
+    toasts.live.delete(oldest);
+    dismissNotification(oldest);
+  }
+  toasts.live.add(id);
+  notify({ id, kind, title: message, onDismiss: () => { toasts.live.delete(id); } });
+  return id;
+}
+
+/** A disposed sandbox leaves nothing on screen. */
+export function clearSandboxToasts(toasts: SandboxToasts): void {
+  for (const id of [...toasts.live]) dismissNotification(id);
+  toasts.live.clear();
+}
+
+const live = new Map<string, LiveRuntime>();
+
+export function runtimeKey(pluginId: string, surfaceId: string): string {
+  return `${pluginId}:${surfaceId}`;
+}
+
+export function disposePackageRuntimes(pluginId: string): void {
+  for (const runtime of [...live.values()]) {
+    if (runtime.pluginId === pluginId) tearDown(runtime);
+  }
+  clearPackageComposerActions(pluginId);
+}
+
+function nonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function capabilitySet(plugin: InstalledPluginDto): Set<string> {
+  return new Set(plugin.permissions.effective);
+}
+
+function declaredCapabilitySet(plugin: InstalledPluginDto): Set<string> {
+  return new Set(plugin.permissions.requested.map((item) => item.name));
+}
+
+function sandboxSurfaceIds(plugin: InstalledPluginDto): string[] {
+  const ids: string[] = [];
+  for (const item of plugin.contributions) {
+    if (item.module.startsWith("sandbox-surface:")) {
+      ids.push(item.module.slice("sandbox-surface:".length));
+    }
+  }
+  return ids;
+}
+
+function userDrivenContribution(kind: ContributionInvocationKind): boolean {
+  return kind === "composer-action"
+    || kind === "attachment-provider"
+    || kind === "message-action"
+    || kind === "session-action"
+    || kind === "command"
+    || kind === "context-provider";
+}
+
+function requireRecentUserIntent(runtime: LiveRuntime, action: string): void {
+  const at = runtime.lastUserIntentAt;
+  if (!at || Date.now() - at > USER_INTENT_WINDOW_MS) {
+    throw Object.assign(new Error(`${action} requires a recent user action in Polyth`), {
+      code: "HOST_REJECTED",
+    });
+  }
+  // One observed user action authorizes one prompt/navigation side effect. A
+  // package cannot reuse the same click to open a loop of credential prompts
+  // or external tabs during the window.
+  runtime.lastUserIntentAt = 0;
+}
+
+async function loadBundle(plugin: InstalledPluginDto): Promise<string> {
+  if (!plugin.sandbox) throw new Error("package has no sandbox bundle");
+  const response = await fetch(plugin.sandbox.url);
+  if (!response.ok) throw new Error("sandbox bundle is unavailable");
+  return response.text();
+}
+
+function handshake(plugin: InstalledPluginDto, surfaceId: string, instanceId: string): HandshakeReady {
+  const theme = loadSettings().appearanceMode;
+  const dark = theme === "dark"
+    || (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  return sandboxHandshakeReady({
+    packageId: plugin.id,
+    packageVersion: plugin.version,
+    runtimeInstanceId: instanceId,
+    surfaceId,
+    capabilities: sandboxHandshakeCapabilityList(plugin),
+    theme: { mode: dark ? "dark" : "light" },
+    locale: document.documentElement.lang || "en",
+  });
+}
+
+/** Effective capabilities sent on the sandbox handshake. Never candidate review. */
+export function sandboxHandshakeCapabilityList(plugin: InstalledPluginDto): string[] {
+  return [...capabilitySet(plugin)];
+}
+
+async function issueContributionInvocation(
+  plugin: InstalledPluginDto,
+  request: HostContributionInvocationRequest,
+): Promise<ContributionInvocation> {
+  const response = await fetch(`/api/plugins/${encodeURIComponent(plugin.id)}/invocations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { message?: string; error?: string };
+    throw new Error(body.message ?? body.error ?? `extension invocation failed (${response.status})`);
+  }
+  return response.json() as Promise<ContributionInvocation>;
+}
+
+/** Closing a host surface or reaching its interactive timeout consumes the
+ * exact same one-shot server lease as a package completion. This prevents
+ * abandoned pickers from occupying the bounded lease store until TTL while
+ * adding no new sandbox-visible cancellation authority. */
+function consumeAbandonedInvocation(
+  runtime: LiveRuntime,
+  pending: PendingContribution,
+  reason: string,
+): void {
+  const completion: ContributionCompletion = {
+    invocationId: pending.invocation.invocationId,
+    lease: pending.invocation.lease,
+    ok: false,
+    error: { message: reason.slice(0, 500) },
+  };
+  void api.pluginsRpc(runtime.pluginId, "contribution.complete", completion, {
+    sessionId: pending.invocation.sessionId,
+    projectId: pending.invocation.projectId,
+  }).catch(() => {
+    // Disable/update may have revoked the package lease first. Either way the
+    // authority is gone; teardown must never be held open by cleanup I/O.
+  });
+}
+
+export async function invokeSandboxContribution(
+  plugin: InstalledPluginDto,
+  request: HostContributionInvocationRequest,
+): Promise<ContributionResult | undefined> {
+  const runtime = await acquireSandboxRuntime(plugin, CONTRIBUTION_SURFACE);
+  try {
+    return await runtime.invokeContribution(request);
+  } finally {
+    runtime.dispose();
+  }
+}
+
+export async function acquireSandboxRuntime(
+  plugin: InstalledPluginDto,
+  surfaceId: string,
+): Promise<SandboxRuntime> {
+  const key = runtimeKey(plugin.id, surfaceId);
+  const existing = live.get(key);
+  if (existing && !existing.disposed) {
+    existing.refs += 1;
+    return existing;
+  }
+  const instanceId = `rt-${nonce()}`;
+  const mountNonce = nonce();
+  const source = await loadBundle(plugin);
+  const scriptNonce = nonce();
+  const html = `<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${scriptNonce}'; connect-src 'none'; style-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'">
+</head><body>
+<script type="module" nonce="${scriptNonce}">
+window.__POLYTH_MOUNT__=${JSON.stringify(mountNonce)};
+${source}
+</script>
+</body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-scripts");
+  iframe.setAttribute("referrerpolicy", "no-referrer");
+  iframe.title = `${plugin.name} sandbox`;
+  iframe.className = "polyth-sandbox-frame";
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText = "position:absolute;width:0;height:0;border:0;opacity:0;pointer-events:none";
+  iframe.srcdoc = html;
+
+  let resolveReady!: () => void;
+  let rejectReady!: (error: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  // Only contribution calls await readiness. A runtime disposed before any
+  // call must not surface its "disposed" rejection as an unhandled error;
+  // callers that do await `ready` still observe it.
+  ready.catch(() => undefined);
+
+  const runtime: LiveRuntime = {
+    instanceId,
+    pluginId: plugin.id,
+    surfaceId,
+    refs: 1,
+    iframe,
+    port: null,
+    tree: null,
+    listeners: new Set(),
+    disposed: false,
+    inFlight: 0,
+    limiter: createRateLimiter(),
+    renderLimiter: createRateLimiter(REMOTE_UI_MAX_UPDATES_PER_SEC, 1000),
+    onWindowMessage: () => undefined,
+    ready,
+    resolveReady,
+    rejectReady,
+    readySettled: false,
+    pendingContributions: new Map(),
+    lastUserIntentAt: 0,
+    toasts: { live: new Set(), count: 0 },
+    subscribe(listener) {
+      runtime.listeners.add(listener);
+      listener(runtime.tree);
+      return () => runtime.listeners.delete(listener);
+    },
+    sendAction(action) {
+      runtime.lastUserIntentAt = Date.now();
+      runtime.port?.postMessage(eventEnvelope("ui.action", action));
+    },
+    async invokeContribution(request) {
+      await runtime.ready;
+      if (runtime.disposed || !runtime.port) throw new Error("extension runtime is unavailable");
+      if (userDrivenContribution(request.kind)) runtime.lastUserIntentAt = Date.now();
+      const invocation = await issueContributionInvocation(plugin, request);
+      return new Promise<ContributionResult | undefined>((resolve, reject) => {
+        const interactiveMs = Math.max(1_000, invocation.expiresAt - Date.now());
+        const timer = setTimeout(() => {
+          const pending = runtime.pendingContributions.get(invocation.invocationId);
+          if (!pending) return;
+          runtime.pendingContributions.delete(invocation.invocationId);
+          consumeAbandonedInvocation(runtime, pending, "extension contribution timed out");
+          reject(new Error("extension contribution timed out"));
+        }, interactiveMs);
+        runtime.pendingContributions.set(invocation.invocationId, { invocation, resolve, reject, timer });
+        runtime.port!.postMessage(eventEnvelope("contribution.invoke", invocation));
+      });
+    },
+    dispose() {
+      if (runtime.disposed) return;
+      runtime.refs -= 1;
+      if (runtime.refs > 0) return;
+      tearDown(runtime);
+    },
+  };
+
+  const methods = createMethodRegistry([
+    {
+      method: "runtime.hello",
+      invoke: () => handshake(plugin, surfaceId, instanceId),
+    },
+    {
+      method: "contribution.complete",
+      invoke: async (_ctx, payload) => {
+        const completion = payload as ContributionCompletion | undefined;
+        if (!completion || typeof completion.invocationId !== "string" || typeof completion.lease !== "string") {
+          throw Object.assign(new Error("contribution completion is invalid"), { code: "INVALID_REQUEST" });
+        }
+        const pending = runtime.pendingContributions.get(completion.invocationId);
+        if (!pending || pending.invocation.lease !== completion.lease) {
+          throw Object.assign(new Error("contribution invocation is not active"), { code: "HOST_REJECTED" });
+        }
+        try {
+          const response = await api.pluginsRpc(plugin.id, "contribution.complete", completion, {
+            sessionId: pending.invocation.sessionId,
+            projectId: pending.invocation.projectId,
+          });
+          if (!response.ok) {
+            throw Object.assign(new Error(response.error?.message ?? "contribution completion was rejected"), {
+              code: response.error?.code ?? "HOST_REJECTED",
+            });
+          }
+          clearTimeout(pending.timer);
+          runtime.pendingContributions.delete(completion.invocationId);
+          if (completion.ok) pending.resolve(completion.result);
+          else pending.reject(new Error(completion.error?.message ?? "extension contribution failed"));
+          return { ok: true };
+        } catch (cause) {
+          clearTimeout(pending.timer);
+          runtime.pendingContributions.delete(completion.invocationId);
+          pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
+          throw cause;
+        }
+      },
+    },
+    {
+      method: "ui.render",
+      capability: "ui.render",
+      invoke: (_ctx, payload) => {
+        runtime.tree = parseRemoteUiTree(payload);
+        for (const listener of runtime.listeners) listener(runtime.tree);
+        return { ok: true };
+      },
+    },
+    {
+      method: "ui.toast",
+      capability: "ui.toast",
+      invoke: (_ctx, payload) => {
+        if (!runtime.disposed) raiseSandboxToast(runtime.toasts, plugin.id, payload);
+        return { ok: true };
+      },
+    },
+    {
+      method: "ui.openSurface",
+      capability: "ui.openSurface",
+      invoke: (_ctx, payload) => {
+        const surface = payload && typeof payload === "object" ? String((payload as { surfaceId?: unknown }).surfaceId ?? "") : "";
+        const declared = sandboxSurfaceIds(plugin).includes(surface);
+        if (!declared || surface.includes(".") || surface.includes("/") || surface.includes(":")) {
+          throw Object.assign(new Error("surface is not declared"), { code: "INVALID_REQUEST" });
+        }
+        const id = `slot:${plugin.id}.surface.${surface}`;
+        if (!openWorkspacePane(id)) setRailPlugin(id);
+        return { ok: true };
+      },
+    },
+    {
+      method: "ui.openExternalUrl",
+      capability: "ui.openExternalUrl",
+      invoke: (_ctx, payload) => {
+        requireRecentUserIntent(runtime, "Opening an external URL");
+        const url = payload && typeof payload === "object" ? String((payload as { url?: unknown }).url ?? "") : "";
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+          throw Object.assign(new Error("only credential-free https URLs can be opened"), { code: "INVALID_REQUEST" });
+        }
+        window.open(parsed.toString(), "_blank", "noopener,noreferrer");
+        return { ok: true };
+      },
+    },
+    {
+      method: "clipboard.write",
+      capability: "clipboard.write",
+      invoke: async (_ctx, payload) => {
+        const text = payload && typeof payload === "object" ? String((payload as { text?: unknown }).text ?? "") : "";
+        await navigator.clipboard.writeText(text);
+        return { ok: true };
+      },
+    },
+    {
+      method: "composer.write",
+      capability: "composer.write",
+      invoke: (_ctx, payload) => {
+        const body = payload && typeof payload === "object" ? payload as { text?: unknown; mode?: unknown } : {};
+        const text = typeof body.text === "string" ? body.text : "";
+        const sessionId = getState().activeSessionId;
+        if (body.mode === "append") requestComposerInsert(text);
+        else {
+          requestComposerReplace(text);
+          if (sessionId) saveDraft(sessionId, text);
+        }
+        return { ok: true };
+      },
+    },
+    {
+      method: "composer.send",
+      capability: "composer.send",
+      invoke: async (_ctx, payload) => {
+        const sessionId = getState().activeSessionId;
+        if (!sessionId) throw Object.assign(new Error("no active session"), { code: "INVALID_REQUEST" });
+        const text = payload && typeof payload === "object"
+          ? String((payload as { text?: unknown }).text ?? "")
+          : "";
+        if (!text.trim()) throw Object.assign(new Error("text is required"), { code: "INVALID_REQUEST" });
+        await api.sendMessage(sessionId, { text });
+        return { ok: true };
+      },
+    },
+    {
+      method: "auth.connect",
+      capability: "auth.connection",
+      invoke: async (_ctx, payload) => {
+        requireRecentUserIntent(runtime, "Connecting an extension account");
+        const id = payload && typeof payload === "object" ? String((payload as { id?: unknown }).id ?? "") : "";
+        const spec = (plugin.connections ?? []).find((item) => item.id === id);
+        if (!spec) throw Object.assign(new Error("connection is not declared"), { code: "RESOURCE_NOT_FOUND" });
+        if (spec.kind === "oauth") {
+          const started = await api.pluginsStartOauth(plugin.id, spec.id);
+          if (typeof started.url === "string" && started.url.startsWith("https:")) {
+            window.open(started.url, "_blank", "noopener,noreferrer");
+          }
+          return started;
+        }
+        const token = await promptAlert(tr("packages.plugins.enterTokenFor", { label: spec.label }), {
+          title: tr("packages.plugins.connectionToken"),
+          secret: true,
+        });
+        if (!token) throw Object.assign(new Error("connection cancelled"), { code: "HOST_REJECTED" });
+        return api.pluginsSetConnectionToken(plugin.id, spec.id, token);
+      },
+    },
+  ]);
+
+  const onWindowMessage = (event: MessageEvent) => {
+    if (runtime.disposed || runtime.port) return;
+    if (!verifySandboxHello({
+      eventSource: event.source,
+      expectedSource: iframe.contentWindow,
+      data: event.data,
+      mountNonce,
+    })) return;
+    const channel = new MessageChannel();
+    runtime.port = channel.port1;
+    channel.port1.start();
+    channel.port1.onmessage = (portEvent) => {
+      void handlePort(runtime, plugin, methods, portEvent.data);
+    };
+    iframe.contentWindow?.postMessage(
+      { channel: PROTOCOL_CHANNEL, v: PROTOCOL_VERSION, kind: "port" },
+      "*",
+      [channel.port2],
+    );
+  };
+  runtime.onWindowMessage = onWindowMessage;
+  window.addEventListener("message", onWindowMessage);
+  runtime.unregisterDeliverer = registerComposerActionDeliverer(plugin.id, surfaceId, (actionId) => {
+    if (!runtime.port || runtime.disposed || !runtime.readySettled) return false;
+    runtime.lastUserIntentAt = Date.now();
+    runtime.port.postMessage(eventEnvelope("composer.action", { actionId }));
+    return true;
+  });
+  document.body.appendChild(iframe);
+  live.set(key, runtime);
+  return runtime;
+}
+
+async function handlePort(
+  runtime: LiveRuntime,
+  plugin: InstalledPluginDto,
+  methods: ReturnType<typeof createMethodRegistry>,
+  data: unknown,
+): Promise<void> {
+  if (runtime.disposed || !runtime.port) return;
+  const envelope = parseEnvelope(data);
+  if (!envelope) return;
+  if (envelope.kind !== "request" || !envelope.id || !envelope.method) return;
+  const isRender = envelope.method === "ui.render" || envelope.method === "ui.toast";
+  if (isRender) {
+    if (!runtime.renderLimiter.take()) {
+      runtime.port.postMessage(responseError(envelope.id, "HOST_REJECTED", "render rate limit exceeded"));
+      return;
+    }
+  } else if (!runtime.limiter.take()) {
+    runtime.port.postMessage(responseError(envelope.id, "HOST_REJECTED", "rate limit exceeded"));
+    return;
+  }
+  if (runtime.inFlight >= MAX_IN_FLIGHT) {
+    runtime.port.postMessage(responseError(envelope.id, "HOST_REJECTED", "too many in-flight requests"));
+    return;
+  }
+  runtime.inFlight += 1;
+  const ctx: HostMethodContext = {
+    packageId: plugin.id,
+    runtimeInstanceId: runtime.instanceId,
+    surfaceId: runtime.surfaceId,
+    capabilities: capabilitySet(plugin),
+    declared: declaredCapabilitySet(plugin),
+  };
+  try {
+    let result: unknown;
+    const payload = envelope.payload;
+    if (methods.get(envelope.method)) {
+      result = await methods.invoke(envelope.method, ctx, payload);
+    } else {
+      const state = getState();
+      const response = await api.pluginsRpc(plugin.id, envelope.method, payload, {
+        sessionId: state.activeSessionId ?? undefined,
+        projectId: state.activeProjectId ?? undefined,
+      });
+      if (!response.ok) {
+        throw Object.assign(new Error(response.error?.message ?? "request failed"), {
+          code: response.error?.code ?? "HOST_REJECTED",
+        });
+      }
+      result = response.payload;
+    }
+    if (runtime.disposed || !runtime.port) return;
+    runtime.port.postMessage(responseOk(envelope.id, result));
+    if (envelope.method === "runtime.hello" && !runtime.readySettled) {
+      runtime.readySettled = true;
+      runtime.resolveReady();
+      const pendingAction = takePendingComposerAction(plugin.id, runtime.surfaceId);
+      if (pendingAction) {
+        runtime.lastUserIntentAt = Date.now();
+        runtime.port.postMessage(eventEnvelope("composer.action", { actionId: pendingAction }));
+      }
+    }
+  } catch (cause) {
+    const error = cause as Error & { code?: string };
+    const code = resolvePackageErrorCode(error.code);
+    if (runtime.disposed || !runtime.port) return;
+    runtime.port.postMessage(responseError(envelope.id, code, error.message));
+    if (envelope.method === "runtime.hello" && !runtime.readySettled) {
+      runtime.readySettled = true;
+      runtime.rejectReady(error);
+    }
+  } finally {
+    runtime.inFlight -= 1;
+  }
+}
+
+function tearDown(runtime: LiveRuntime): void {
+  if (runtime.disposed) return;
+  runtime.disposed = true;
+  runtime.refs = 0;
+  runtime.unregisterDeliverer?.();
+  runtime.unregisterDeliverer = undefined;
+  if (!runtime.readySettled) {
+    runtime.readySettled = true;
+    runtime.rejectReady(new Error("extension runtime was disposed"));
+  }
+  for (const pending of runtime.pendingContributions.values()) {
+    clearTimeout(pending.timer);
+    consumeAbandonedInvocation(runtime, pending, "extension runtime was disposed");
+    pending.reject(new Error("extension runtime was disposed"));
+  }
+  runtime.pendingContributions.clear();
+  clearSandboxToasts(runtime.toasts);
+  window.removeEventListener("message", runtime.onWindowMessage);
+  runtime.port?.close();
+  runtime.port = null;
+  runtime.iframe.remove();
+  runtime.listeners.clear();
+  live.delete(runtimeKey(runtime.pluginId, runtime.surfaceId));
+}

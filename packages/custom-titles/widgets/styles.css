@@ -1,0 +1,57 @@
+.custom-titles-action__error,
+.custom-titles-action__note {
+  margin: var(--space-2) var(--space-3);
+  font-size: var(--font-meta);
+}
+
+.custom-titles-action__error {
+  color: var(--red);
+}
+
+.custom-titles-action__note {
+  color: var(--muted);
+}
+
+.custom-titles-settings {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.custom-titles-settings .set-row-control {
+  width: min(18rem, 100%);
+}
+
+.custom-titles-settings__controls {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.custom-titles-settings .set-row-control :is(.ui-select, .picker, select),
+.custom-titles-settings__model-picker {
+  width: 100%;
+}
+
+.custom-titles-settings__hint {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.custom-titles-settings__fields {
+  display: grid;
+  gap: var(--space-4);
+  padding-block: var(--space-3);
+  min-width: 0;
+}
+
+.custom-titles-settings__fields :is(input, textarea) {
+  width: 100%;
+}
+
+@media (max-width: 700px) {
+  .custom-titles-settings .set-row-control {
+    width: 100%;
+  }
+}

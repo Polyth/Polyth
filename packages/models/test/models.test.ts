@@ -1,0 +1,451 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  defaultModelPrefs,
+  filterModels,
+  hiddenModelMatcher,
+  isFavorite,
+  modelKey,
+  orderProviders,
+  parseModelPrefs,
+  planFavoriteMigration,
+  recordRecent,
+  reorderFavorite,
+  reorderProvider,
+  serializeModelPrefs,
+  setModelsHidden,
+  setProviderExpanded,
+  setProviderHidden,
+  showHarnessModels,
+  sortModels,
+  toggleFavorite,
+  validateProfile,
+  type ModelPrefs,
+} from "@polyth/models";
+import {
+  initialModelPickerState,
+  modelPickerReducer,
+  providerIsExpanded,
+} from "@polyth/models/model-picker-state";
+import {
+  modelDetailsPresentation,
+  formatModelPrice,
+  hasModelPricing,
+  modelMetaLine,
+  modelModalityLabels,
+  thinkingVariantLabel,
+} from "@polyth/models/model-presentation";
+import { interactiveMethods } from "../widgets/providerAuth.ts";
+
+test("model providers are collapsed by default and expansion/order persist", () => {
+  const initial = defaultModelPrefs();
+  assert.deepEqual(initial.expandedProviders, []);
+  assert.deepEqual(initial.providerOrder, []);
+
+  const expanded = setProviderExpanded(initial, "anthropic", true);
+  const reordered = reorderProvider(expanded, ["openai", "anthropic", "google"], "google", "openai");
+  const parsed = parseModelPrefs(serializeModelPrefs(reordered));
+  assert.deepEqual(parsed.expandedProviders, ["opencode::anthropic"]);
+  assert.deepEqual(parsed.providerOrder, ["opencode::google", "opencode::openai", "opencode::anthropic"]);
+});
+
+test("provider auth interactive methods are the declared oauth/api methods", () => {
+  assert.deepEqual(interactiveMethods({
+    providerId: "openai",
+    discovery: { status: "loaded", provenance: ["opencode-plugin"], revision: "1", authorityId: "a", generation: 1 },
+    methods: [
+      { id: "openai:0:abc", upstreamIndex: 0, fingerprint: "abc", provenance: "opencode-plugin", kind: "oauth", label: "Sign in", fields: [], usable: true },
+    ],
+  }).map((method) => method.kind), ["oauth"]);
+});
+
+const MODELS = [
+  { providerID: "openai", modelID: "gpt-5", name: "GPT-5" },
+  { providerID: "anthropic", modelID: "claude-4", name: "Claude 4" },
+  { providerID: "anthropic", modelID: "claude-haiku", name: "Claude Haiku" },
+  { providerID: "google", modelID: "gemini-3", name: "Gemini 3" },
+];
+
+test("parse round-trips and rejects garbage", () => {
+  assert.deepEqual(parseModelPrefs(null), defaultModelPrefs());
+  assert.deepEqual(parseModelPrefs("{nope"), defaultModelPrefs());
+  const p = toggleFavorite(defaultModelPrefs(), "openai/gpt-5");
+  const back = parseModelPrefs(serializeModelPrefs({ ...p, sort: "name" }));
+  assert.deepEqual(back.favorites, ["opencode::openai/gpt-5"]);
+  assert.equal(back.sort, "name");
+  assert.equal(parseModelPrefs('{"sort":"bogus"}').sort, "provider");
+});
+
+test("toggleFavorite adds then removes; isFavorite reflects it", () => {
+  let p = defaultModelPrefs();
+  const key = modelKey(MODELS[1]!);
+  p = toggleFavorite(p, key);
+  assert.equal(isFavorite(p, key), true);
+  p = toggleFavorite(p, key);
+  assert.equal(isFavorite(p, key), false);
+});
+
+test("favorite reorder moves a saved favorite ahead of its drop target", () => {
+  const prefs = { ...defaultModelPrefs(), favorites: ["p/first", "p/second", "p/third"] };
+  assert.deepEqual(reorderFavorite(prefs, "p/third", "p/first").favorites, [
+    "p/third", "p/first", "p/second",
+  ]);
+  assert.equal(reorderFavorite(prefs, "p/missing", "p/first"), prefs);
+});
+
+test("sortModels floats favorites first, then provider/name order", () => {
+  let p = defaultModelPrefs();
+  p = toggleFavorite(p, "google/gemini-3");
+  p = toggleFavorite(p, "openai/gpt-5");
+
+  const byProvider = sortModels(MODELS, p).map(modelKey);
+  assert.deepEqual(byProvider, [
+    "google/gemini-3", "openai/gpt-5", // favorites in saved order
+    "anthropic/claude-4", "anthropic/claude-haiku",
+  ]);
+
+  const byName = sortModels(MODELS, { ...p, favorites: [], sort: "name" }).map((m) => m.name);
+  assert.deepEqual(byName, ["Claude 4", "Claude Haiku", "Gemini 3", "GPT-5"]);
+});
+
+test("recent sort uses recorded recency", () => {
+  let p: ModelPrefs = { ...defaultModelPrefs(), sort: "recent" };
+  p = recordRecent(p, "anthropic/claude-haiku");
+  p = recordRecent(p, "google/gemini-3"); // most recent first
+  const keys = sortModels(MODELS, p).map(modelKey);
+  assert.equal(keys[0], "google/gemini-3");
+  assert.equal(keys[1], "anthropic/claude-haiku");
+});
+
+test("filterModels matches provider, id, and display name", () => {
+  assert.equal(filterModels(MODELS, "haiku").length, 1);
+  assert.equal(filterModels(MODELS, "ANTHROPIC").length, 2);
+  assert.equal(filterModels(MODELS, "").length, 4);
+  assert.equal(filterModels(MODELS, "zzz").length, 0);
+});
+
+test("model picker expansion has explicit, deterministic precedence", () => {
+  assert.equal(providerIsExpanded({
+    query: "opus",
+    sessionOverride: false,
+    persistedExpanded: false,
+    selectedProvider: false,
+  }), true, "search reveals matching groups");
+  assert.equal(providerIsExpanded({
+    query: "",
+    sessionOverride: false,
+    persistedExpanded: true,
+    selectedProvider: true,
+  }), false, "session collapse wins after search clears");
+  assert.equal(providerIsExpanded({
+    query: "",
+    sessionOverride: true,
+    persistedExpanded: false,
+    selectedProvider: false,
+  }), true, "session expansion wins");
+  assert.equal(providerIsExpanded({
+    query: "",
+    persistedExpanded: true,
+    selectedProvider: false,
+  }), true, "persisted expansion wins without a session choice");
+  assert.equal(providerIsExpanded({
+    query: "",
+    persistedExpanded: false,
+    selectedProvider: true,
+  }), true, "selected provider is the final fresh-state default");
+});
+
+test("clearing model search restores the prior manual collapse state", () => {
+  let state = initialModelPickerState();
+  state = modelPickerReducer(state, {
+    type: "set-expanded",
+    providerId: "anthropic",
+    expanded: false,
+  });
+  state = modelPickerReducer(state, { type: "search", query: "claude" });
+  assert.equal(providerIsExpanded({
+    query: state.query,
+    sessionOverride: state.expansion.anthropic,
+    persistedExpanded: true,
+    selectedProvider: true,
+  }), true);
+  state = modelPickerReducer(state, { type: "search", query: "" });
+  assert.equal(providerIsExpanded({
+    query: state.query,
+    sessionOverride: state.expansion.anthropic,
+    persistedExpanded: true,
+    selectedProvider: true,
+  }), false);
+});
+
+test("model presentation applies one fallback policy to missing catalog fields", () => {
+  const sparse = { providerID: "local", modelID: "unknown", name: "Unknown" };
+  assert.deepEqual(modelModalityLabels(sparse), ["Text"]);
+  assert.equal(modelMetaLine(sparse), "Text");
+  assert.equal(thinkingVariantLabel("xhigh"), "X-High");
+  assert.equal(thinkingVariantLabel("ultracode"), "Ultracode");
+  assert.deepEqual(modelDetailsPresentation(sparse), {
+    provider: "local",
+    context: "Context unknown",
+    modalities: "Text",
+    reasoning: "Not reported",
+    tools: "Not reported",
+    pricing: null,
+    availability: null,
+  });
+});
+
+test("model pricing hides missing zeros and preserves real small values", () => {
+  assert.equal(hasModelPricing({ input: 0, output: 0 }), false);
+  assert.equal(modelDetailsPresentation({
+    providerID: "local",
+    modelID: "free",
+    name: "Free",
+    cost: { input: 0, output: 0 },
+  }).pricing, null);
+  assert.equal(hasModelPricing({ input: 0.5, output: 60 }), true);
+  assert.equal(formatModelPrice(0.000001), "$0.000001");
+  assert.match(modelDetailsPresentation({
+    providerID: "google",
+    modelID: "gemini",
+    name: "Gemini",
+    cost: { input: 0.5, output: 60 },
+  }).pricing ?? "", /\$0\.5/);
+});
+
+test("parseModelPrefs sanitizes, deduplicates, and caps persisted keys", () => {
+  const recents = Array.from({ length: 25 }, (_, i) => `p/m${i}`);
+  const parsed = parseModelPrefs(JSON.stringify({
+    favorites: ["p/a", 1, "p/a", "p/b"],
+    recents: ["p/repeated", "p/repeated", ...recents],
+    sort: "recent",
+  }));
+
+  assert.deepEqual(parsed.favorites, ["opencode::p/a", "opencode::p/b"]);
+  assert.equal(parsed.recents.length, 20);
+  assert.equal(new Set(parsed.recents).size, parsed.recents.length);
+  assert.deepEqual(parsed.recents.slice(0, 3), ["opencode::p/repeated", "opencode::p/m0", "opencode::p/m1"]);
+});
+
+test("authoritative model keys remain distinct across harnesses", () => {
+  assert.equal(modelKey({ ...MODELS[0]!, harnessId: "opencode" }), "opencode::openai/gpt-5");
+  assert.equal(modelKey({ ...MODELS[0]!, harnessId: "codex" }), "codex::openai/gpt-5");
+  const parsed = parseModelPrefs(JSON.stringify({ favorites: ["codex::openai/gpt-5"] }));
+  assert.deepEqual(parsed.favorites, ["codex::openai/gpt-5"]);
+});
+
+test("provider order and accordion state remain distinct across harnesses", () => {
+  let prefs = defaultModelPrefs();
+  prefs = setProviderExpanded(prefs, "openai", true, "codex");
+  prefs = reorderProvider(
+    prefs,
+    ["openai", "anthropic"],
+    "anthropic",
+    "openai",
+    "codex",
+  );
+
+  assert.deepEqual(prefs.expandedProviders, ["codex::openai"]);
+  assert.deepEqual(prefs.providerOrder, ["codex::anthropic", "codex::openai"]);
+  assert.deepEqual(
+    orderProviders([{ id: "openai" }, { id: "anthropic" }], prefs, "codex").map((provider) => provider.id),
+    ["anthropic", "openai"],
+  );
+  assert.deepEqual(
+    orderProviders([{ id: "openai" }, { id: "anthropic" }], prefs, "opencode").map((provider) => provider.id),
+    ["openai", "anthropic"],
+  );
+
+  const migrated = parseModelPrefs(JSON.stringify({
+    providerOrder: ["openai", "anthropic"],
+    expandedProviders: ["openai"],
+  }));
+  assert.deepEqual(migrated.providerOrder, ["opencode::openai", "opencode::anthropic"]);
+  assert.deepEqual(migrated.expandedProviders, ["opencode::openai"]);
+});
+
+test("favorite and recent updates are immutable and preserve ordering", () => {
+  const original = {
+    ...defaultModelPrefs(),
+    favorites: ["p/a"],
+    sort: "provider" as const,
+    recents: ["p/b", "p/a"],
+  };
+
+  const favorited = toggleFavorite(original, "p/c");
+  const recent = recordRecent(original, "p/a");
+  assert.deepEqual(original, {
+    favorites: ["p/a"],
+    sort: "provider",
+    recents: ["p/b", "p/a"],
+    providerOrder: [],
+    expandedProviders: [],
+    hiddenProviders: [],
+    hiddenModels: [],
+    shownModels: [],
+  });
+  assert.deepEqual(favorited.favorites, ["p/a", "p/c"]);
+  assert.deepEqual(recent.recents, ["p/a", "p/b"]);
+});
+
+test("picker visibility hides whole providers or single models, per harness", () => {
+  let prefs = setProviderHidden(defaultModelPrefs(), "pi", "openrouter", true);
+  prefs = setModelsHidden(prefs, ["pi::opencode/claude-fable-5", "pi::opencode/claude-fable-5", "unqualified/model"], true);
+  assert.deepEqual(prefs.hiddenProviders, ["pi::openrouter"]);
+  assert.deepEqual(prefs.hiddenModels, ["pi::opencode/claude-fable-5"], "keys are unique and always harness-qualified");
+
+  const hidden = hiddenModelMatcher(prefs);
+  assert.equal(hidden({ harnessId: "pi", providerID: "openrouter", modelID: "unbiased/pareto-26.9" }), true);
+  assert.equal(hidden({ harnessId: "pi", providerID: "opencode", modelID: "claude-fable-5" }), true);
+  assert.equal(hidden({ harnessId: "pi", providerID: "opencode", modelID: "other" }), false);
+  assert.equal(hidden({ harnessId: "opencode", providerID: "openrouter", modelID: "unbiased/pareto-26.9" }), false, "another harness's provider of the same name stays");
+  assert.equal(hidden({ providerID: "openrouter", modelID: "x" }, "pi"), true, "an unqualified catalog row takes the picker's harness");
+
+  const roundTrip = parseModelPrefs(serializeModelPrefs(prefs));
+  assert.deepEqual(roundTrip.hiddenProviders, ["pi::openrouter"]);
+  assert.deepEqual(roundTrip.hiddenModels, ["pi::opencode/claude-fable-5"]);
+  assert.deepEqual(parseModelPrefs(JSON.stringify({ hiddenProviders: ["openrouter", 3], hiddenModels: ["openai/gpt"] })).hiddenProviders, [],
+    "a hidden key never guesses its harness");
+
+  const shown = setModelsHidden(setProviderHidden(prefs, "pi", "openrouter", false), ["pi::opencode/claude-fable-5"], false);
+  assert.deepEqual([shown.hiddenProviders, shown.hiddenModels], [[], []]);
+  const other = setProviderHidden(prefs, "codex", "openai", true);
+  assert.deepEqual(showHarnessModels(other, "pi").hiddenProviders, ["codex::openai"]);
+  assert.deepEqual(showHarnessModels(other, "pi").hiddenModels, []);
+});
+
+test("a provider switch is a bulk change; single models stay switchable against it", () => {
+  const catalog = ["pi::openrouter/a/one", "pi::openrouter/b", "pi::openrouter/c", "pi::opencode/x"];
+  let prefs = setModelsHidden(defaultModelPrefs(), ["pi::openrouter/c"], true, catalog);
+  prefs = setProviderHidden(prefs, "pi", "openrouter", true);
+  assert.deepEqual([prefs.hiddenProviders, prefs.hiddenModels, prefs.shownModels], [["pi::openrouter"], [], []],
+    "turning the provider off starts its single-model choices over");
+
+  prefs = setModelsHidden(prefs, ["pi::openrouter/a/one"], false, catalog);
+  assert.deepEqual([prefs.hiddenProviders, prefs.shownModels], [["pi::openrouter"], ["pi::openrouter/a/one"]]);
+  const hidden = hiddenModelMatcher(prefs);
+  assert.equal(hidden({ harnessId: "pi", providerID: "openrouter", modelID: "a/one" }), false, "a model turned back on shows");
+  assert.equal(hidden({ harnessId: "pi", providerID: "openrouter", modelID: "b" }), true);
+  assert.equal(hidden({ harnessId: "pi", providerID: "openrouter", modelID: "added-later" }), true, "a model added later follows the provider");
+  assert.equal(hidden({ harnessId: "pi", providerID: "opencode", modelID: "x" }), false);
+  assert.deepEqual(setModelsHidden(prefs, ["pi::openrouter/a/one"], true, catalog).shownModels, [], "off again drops the exception");
+
+  const allOn = setModelsHidden(prefs, ["pi::openrouter/b", "pi::openrouter/c"], false, catalog);
+  assert.deepEqual([allOn.hiddenProviders, allOn.hiddenModels, allOn.shownModels], [[], [], []],
+    "every model back on folds into the provider switch");
+  const allOff = setModelsHidden(defaultModelPrefs(), ["pi::opencode/x"], true, catalog);
+  assert.deepEqual([allOff.hiddenProviders, allOff.hiddenModels], [["pi::opencode"], []], "every model off turns the provider off");
+  assert.deepEqual(setModelsHidden(defaultModelPrefs(), ["pi::opencode/x"], true).hiddenModels, ["pi::opencode/x"],
+    "without the catalog nothing folds");
+  assert.deepEqual([setProviderHidden(prefs, "pi", "openrouter", false).hiddenProviders, setProviderHidden(prefs, "pi", "openrouter", false).shownModels], [[], []],
+    "turning the provider on shows all of its models");
+  assert.deepEqual(showHarnessModels(prefs, "pi").shownModels, []);
+
+  assert.deepEqual(parseModelPrefs(serializeModelPrefs(prefs)).shownModels, ["pi::openrouter/a/one"]);
+  const parsed = parseModelPrefs(JSON.stringify({
+    hiddenProviders: ["pi::openrouter"],
+    hiddenModels: ["pi::openrouter/b", "pi::opencode/x"],
+    shownModels: ["pi::openrouter/a/one", "pi::opencode/y", "openrouter/z"],
+  }));
+  assert.deepEqual([parsed.hiddenModels, parsed.shownModels], [["pi::opencode/x"], ["pi::openrouter/a/one"]],
+    "a choice that agrees with its provider switch, or names no harness, is dropped");
+});
+
+test("recordRecent keeps only the twenty newest unique keys", () => {
+  let prefs = defaultModelPrefs();
+  for (let i = 0; i < 25; i++) prefs = recordRecent(prefs, `p/m${i}`);
+
+  assert.equal(prefs.recents.length, 20);
+  assert.equal(prefs.recents[0], "p/m24");
+  assert.equal(prefs.recents.at(-1), "p/m5");
+
+  prefs = recordRecent(prefs, "p/m10");
+  assert.equal(prefs.recents[0], "p/m10");
+  assert.equal(prefs.recents.filter((key) => key === "p/m10").length, 1);
+});
+
+test("sortModels and filterModels return new arrays without mutating input", () => {
+  const input = Object.freeze([...MODELS]);
+  const sorted = sortModels(input, { ...defaultModelPrefs(), sort: "name" });
+  const filtered = filterModels(input, "  CLAUDE-4 ");
+  const all = filterModels(input, "  ");
+
+  assert.deepEqual(input.map(modelKey), MODELS.map(modelKey));
+  assert.notEqual(sorted, input);
+  assert.notEqual(all, input);
+  assert.deepEqual(filtered.map(modelKey), ["anthropic/claude-4"]);
+});
+
+test("recent sorting falls back to provider order for unseen models", () => {
+  const prefs = {
+    ...defaultModelPrefs(),
+    sort: "recent" as const,
+    recents: ["google/gemini-3"],
+    favorites: ["openai/gpt-5"],
+  };
+  assert.deepEqual(sortModels(MODELS, prefs).map(modelKey), [
+    "openai/gpt-5",
+    "google/gemini-3",
+    "anthropic/claude-4",
+    "anthropic/claude-haiku",
+  ]);
+});
+
+// ---------------------------------------------------------------- profiles
+
+test("validateProfile proposes repairs but never silently mutates", () => {
+  const agents = [{ name: "build" }, { name: "review" }];
+
+  // Nothing checkable when the adapter reported no models.
+  const unchecked = validateProfile({ providerID: "gone", modelID: "x" }, [], agents);
+  assert.deepEqual(unchecked, { valid: true, checked: false, repairs: [] });
+
+  const ok = validateProfile(
+    { providerID: "openai", modelID: "gpt-5", agent: "build", thinking: "low" },
+    MODELS,
+    agents,
+  );
+  assert.equal(ok.valid, true);
+  assert.equal(ok.checked, true);
+
+  const broken = validateProfile(
+    { providerID: "gone", modelID: "dead", agent: "ghost", thinking: "ultra" },
+    MODELS,
+    agents,
+  );
+  assert.equal(broken.valid, false);
+  assert.deepEqual(broken.repairs.map((r) => r.field), ["model", "agent", "thinking"]);
+  assert.equal(broken.repairs[0]!.from, "gone/dead");
+  assert.equal(broken.repairs[1]!.to, "");
+  assert.equal(broken.repairs[2]!.to, "default");
+});
+
+test("a harness-bound profile only validates against the exact harness catalog", () => {
+  const models = [
+    { harnessId: "opencode", providerID: "shared", modelID: "same", name: "OpenCode model" },
+    { harnessId: "codex", providerID: "codex", modelID: "native", name: "Codex model" },
+    { providerID: "shared", modelID: "same", name: "Unqualified legacy model" },
+  ];
+  const result = validateProfile(
+    { harnessId: "codex", providerID: "shared", modelID: "same", agent: "build" },
+    models,
+    [{ harnessId: "opencode", name: "build" }],
+  );
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.repairs.map((repair) => repair.field), ["model", "agent"]);
+});
+
+test("planFavoriteMigration is idempotent and skips vanished models", () => {
+  const prefs: ModelPrefs = {
+    ...defaultModelPrefs(),
+    favorites: ["openai/gpt-5", "anthropic/claude-4", "gone/dead"],
+  };
+
+  const plan = planFavoriteMigration(prefs, MODELS, []);
+  assert.deepEqual(plan.map((p) => `${p.providerID}/${p.modelID}`), ["openai/gpt-5", "anthropic/claude-4"]);
+  assert.equal(plan[0]!.name, "GPT-5");
+
+  // Re-running with the created profiles present yields an empty plan.
+  const again = planFavoriteMigration(prefs, MODELS, plan);
+  assert.deepEqual(again, []);
+});

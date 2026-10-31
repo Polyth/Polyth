@@ -1,0 +1,81 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type { AgentRuntime } from "@polyth/contracts";
+import { buildCommitMessagePrompt, createCommitMessageGenerator } from "../src/serverEntry.ts";
+
+const DIFF = "diff --git a/a.ts b/a.ts\n@@ -1 +1 @@\n-old\n+new";
+const runtime = {} as AgentRuntime;
+
+test("commit generator caches unchanged selected diff and coalesces concurrent requests", async () => {
+  let calls = 0;
+  let seenTimeoutMs: number | undefined;
+  let selected = { harnessId: "opencode", providerID: "openai", modelID: "small" };
+  let seenHarness: string | undefined;
+  let seenUserId: string | undefined;
+  const generate = createCommitMessageGenerator({
+    diff: async (_root, opts) => ({ diff: opts?.staged ? DIFF : "unstaged ignored" }),
+    runtime: async (_root, model) => { seenHarness = model?.harnessId; return runtime; },
+    model: (userId) => { seenUserId = userId; return selected; },
+    inputBudget: async () => 2_000,
+    complete: async (_rt, options) => {
+      calls += 1;
+      seenTimeoutMs = options.timeoutMs;
+      return { text: "Update the implementation" };
+    },
+  });
+  const [first, second] = await Promise.all([generate("/repo", "usr_test"), generate("/repo", "usr_test")]);
+  assert.equal(first, "Update the implementation");
+  assert.equal(second, first);
+  assert.equal(calls, 1);
+  assert.equal(seenUserId, "usr_test");
+  await generate("/repo", "usr_test");
+  assert.equal(calls, 1);
+  selected = { ...selected, harnessId: "codex" };
+  await generate("/repo", "usr_test");
+  assert.equal(calls, 2);
+  assert.equal(seenHarness, "codex");
+  assert.equal(
+    seenTimeoutMs,
+    90_000,
+    "a free/subscription-auth small model needs headroom well past the old 30s cap",
+  );
+});
+
+test("commit generator preserves staged-first semantics and changes cache key with diff", async () => {
+  let staged = "";
+  let unstaged = DIFF;
+  let calls = 0;
+  const generate = createCommitMessageGenerator({
+    diff: async (_root, opts) => ({ diff: opts?.staged ? staged : unstaged }),
+    runtime: async () => runtime,
+    inputBudget: async () => 2_000,
+    complete: async () => ({ text: `message ${++calls}` }),
+  });
+  assert.equal(await generate("/repo"), "message 1");
+  staged = "staged diff";
+  assert.equal(await generate("/repo"), "message 2");
+  staged = "staged diff changed";
+  assert.equal(await generate("/repo"), "message 3");
+});
+
+test("commit prompt stays within its model-aware global budget", () => {
+  const prompt = buildCommitMessagePrompt(`${DIFF}\n${"+x\n".repeat(5_000)}`, 800);
+  assert.ok(prompt.length <= 800);
+  assert.match(prompt, /<diff>/);
+  assert.match(prompt, /<\/diff>/);
+});
+
+
+test("commit generator honors an explicit model and isolates cached results by caller", async () => {
+  let calls = 0;
+  const selected = { harnessId: "codex", providerID: "openai", modelID: "selected" };
+  const generate = createCommitMessageGenerator({
+    diff: async () => ({ diff: DIFF }),
+    model: () => ({ providerID: "other", modelID: "default" }),
+    runtime: async (_root, model) => { assert.deepEqual(model, selected); return runtime; },
+    inputBudget: async () => 2_000,
+    complete: async (_rt, options) => { assert.deepEqual(options.model, selected); return { text: `message ${++calls}` }; },
+  });
+  assert.equal(await generate("/repo", "a", selected), "message 1");
+  assert.equal(await generate("/repo", "b", selected), "message 2");
+});

@@ -1,0 +1,58 @@
+{
+  "view": "steps",
+  "title": "Release",
+  "options": {},
+  "pick": "none",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "Build",
+      "cells": [
+        "done",
+        "Build",
+        "4 min"
+      ],
+      "status": "done",
+      "subtitle": "4 min"
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "Deploy",
+      "cells": [
+        "doing",
+        "Deploy",
+        "canary 10%"
+      ],
+      "status": "doing",
+      "subtitle": "canary 10%"
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "Smoke tests",
+      "cells": [
+        "fail",
+        "Smoke tests"
+      ],
+      "status": "fail"
+    },
+    {
+      "index": 3,
+      "selected": false,
+      "title": "Announce",
+      "cells": [
+        "Announce"
+      ],
+      "status": "todo"
+    }
+  ],
+  "actions": [],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

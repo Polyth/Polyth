@@ -1,0 +1,4859 @@
+.tt-board,
+.tt-board * {
+  box-sizing: border-box;
+}
+
+/* The board is content on the window's own material, never a second opaque
+   window inside it. A package page lets it grow with its content and scrolls
+   the window body; a widget card gives it a fixed height and the columns and
+   panes scroll inside. `clip` (not `hidden`) keeps the window body as the
+   scroller that sticky bars and footers attach to. */
+.tt-board {
+  --tt-inline: var(--space-3);
+  --tt-block: var(--space-3);
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: clip;
+  color: var(--text);
+  background: transparent;
+  container: task-tracker / inline-size;
+}
+
+/* Package windows render workspace content edge to edge, so the page owns
+   its gutter: it lines up with the window title (the ModuleView header pads
+   by --space-3) and opens up when the board has the whole workspace. */
+.tt-page .tt-board {
+  --tt-inline: var(--tt-gutter, var(--space-3));
+  --tt-block: var(--space-1);
+}
+
+.tt-task-card,
+.tt-list-row,
+.tt-provider-tabs button,
+.tt-view-toggle button {
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  touch-action: manipulation;
+}
+
+.tt-board-picker label .picker,
+.tt-board-picker .picker-chip,
+.tt-filters .picker-chip,
+.tt-status-row .picker,
+.tt-status-row .picker-chip,
+.tt-linked-actions .picker,
+.tt-linked-actions .picker-chip {
+  width: 100%;
+  min-width: 0;
+}
+
+.tt-board-picker .chip-k,
+.tt-filters .chip-k,
+.tt-status-row .chip-k {
+  display: none;
+}
+
+.tt-board-header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--tt-block) var(--tt-inline) 0;
+}
+
+.tt-provider-tabs,
+.tt-header-actions,
+.tt-view-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+/* Provider and view switches match the shared `.ui-tabs` segmented control. */
+.tt-provider-tabs,
+.tt-view-toggle {
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+}
+
+.tt-provider-tabs button,
+.tt-view-toggle button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: max(28px, var(--hit-min));
+  padding: 0 var(--control-pad-x-sm);
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-provider-tabs button:hover:where(:not(:disabled)):not(.active),
+  .tt-view-toggle button:hover:where(:not(:disabled)):not(.active) {
+    color: var(--text);
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.tt-provider-tabs button.active,
+.tt-view-toggle button.active {
+  color: var(--text);
+  background: var(--elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.tt-provider-tabs button:focus-visible,
+.tt-view-toggle button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Connection state: a small dot after the name, never a corner badge. */
+.tt-provider-tabs button > i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-round);
+  background: var(--faint);
+}
+
+.tt-provider-tabs button > i.configured {
+  background: var(--green);
+}
+
+.tt-provider-tabs button > i.demo {
+  background: var(--amber);
+}
+
+.tt-provider-mark {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  border-radius: calc(var(--radius-control) - 2px);
+  color: white;
+  line-height: 1;
+}
+.tt-provider-mark svg {
+  width: 72%;
+  height: 72%;
+}
+.tt-provider-mark.sm {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+}
+.tt-provider-mark.lg {
+  width: 40px;
+  height: 40px;
+  flex-basis: 40px;
+  border-radius: var(--radius-card);
+}
+/* Brand identity colours are the documented exception to semantic tokens. */
+.tt-provider-mark.jira {
+  background: linear-gradient(145deg, #579dff, #0c66e4);
+}
+.tt-provider-mark.trello {
+  background: linear-gradient(145deg, #22a6f2, #0079bf);
+}
+.tt-provider-mark.linear {
+  background: linear-gradient(145deg, #7b84e8, #4f58c9);
+}
+
+.tt-header-actions {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.tt-header-actions .ui-btn,
+.tt-header-actions .ui-icon-btn {
+  flex: none;
+}
+
+.tt-provider-panel {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Breathing room between the toolbar and the tasks. */
+.tt-provider-panel > .tt-board-content {
+  margin-top: var(--space-2);
+}
+
+/* A wide board keeps its chrome to one toolbar row: the board picker and the
+   search/status filter sit side by side above the columns. The panel names
+   its own state (--filtered: the filters are shown, --demo: so is the demo
+   banner); a `:has()` here, before a `> :not(...)` subject, made Chromium
+   restyle the whole document on every keystroke anywhere in the app. */
+@container task-tracker (min-width: 1180px) {
+  .tt-provider-panel--filtered {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: stretch;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .tt-provider-panel--filtered.tt-provider-panel--demo {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .tt-provider-panel--filtered > :not(.tt-board-picker, .tt-filters) {
+    grid-column: 1 / -1;
+  }
+
+  /* The filters can take two lines (people chips); the picker stays at
+     the top of the row they share. */
+  .tt-provider-panel--filtered > .tt-board-picker {
+    align-self: start;
+    padding-inline-end: 0;
+  }
+
+  .tt-provider-panel--filtered > .tt-filters {
+    padding-inline-start: 0;
+  }
+}
+
+/* One quiet line: the amber dot carries the state, the text explains it. */
+.tt-demo-banner {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  margin: 0;
+  padding: 0 var(--tt-inline) var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-demo-banner strong {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--amber-on-wash);
+  font-weight: 600;
+}
+
+.tt-demo-banner strong::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-round);
+  background: var(--amber);
+  content: "";
+}
+
+.tt-demo-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tt-eyebrow i {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-round);
+  color: var(--amber-on-wash);
+  background: var(--amber-wash);
+  font-size: var(--font-meta);
+  font-style: normal;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Board and filter controls: one compact toolbar at control-h-sm. The
+   selected values name themselves; labels stay for assistive technology. */
+.tt-board-picker,
+.tt-filters {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--tt-inline);
+}
+
+.tt-board-picker > label {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 120px;
+}
+
+.tt-board-picker > label:nth-child(2) {
+  flex: 2 1 150px;
+}
+
+.tt-board-picker-actions {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tt-board-picker-actions .ui-btn,
+.tt-board-picker-actions .ui-icon-btn {
+  flex: none;
+}
+
+.tt-detail-section label {
+  min-width: 0;
+}
+
+.tt-search {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1 1 140px;
+  align-items: center;
+}
+
+.tt-search .ui-input {
+  width: 100%;
+}
+
+.tt-filters > .picker {
+  flex: 0 1 190px;
+  min-width: 140px;
+}
+
+.tt-board-content {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  /* Fills a fixed-height widget; grows with content on a page. */
+  grid-template-rows: minmax(0, 1fr);
+  overflow: clip;
+}
+
+.tt-board-content.has-detail {
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 38%);
+}
+
+.tt-task-surface {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
+}
+
+.tt-kanban {
+  display: grid;
+  min-width: 100%;
+  width: max-content;
+  min-height: 100%;
+  grid-auto-columns: minmax(248px, 292px);
+  grid-auto-flow: column;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--tt-inline) max(var(--space-4), var(--safe-bottom));
+  scroll-padding-inline: var(--tt-inline);
+}
+
+/* A column is a faint lane, not a card: no border, one translucent wash, so
+   glass and wallpaper settings read through it. Its corners are concentric
+   with the cards inside (card radius + the lane's inset). */
+.tt-column {
+  --tt-lane-inset: var(--space-2);
+  display: flex;
+  min-width: 0;
+  max-height: 100%;
+  flex-direction: column;
+  border-radius: calc(var(--radius-card) + var(--tt-lane-inset));
+  background: var(--surface-overlay-hover);
+  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-column.pending {
+  opacity: 0.7;
+}
+
+.tt-column > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 42px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+}
+
+.tt-column > header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+.tt-column-count {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-column-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-round);
+  background: var(--faint);
+}
+
+.tt-column.todo .tt-column-dot { background: var(--faint); }
+.tt-column.in_progress .tt-column-dot { background: var(--blue); }
+.tt-column.done .tt-column-dot { background: var(--green); }
+
+/* The column menu stays quiet until the column is pointed at or focused;
+   touch has no hover, so it is always there. */
+.tt-column-menu {
+  margin-inline-end: calc(var(--space-1) * -1);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.tt-column:hover .tt-column-menu,
+.tt-column:has(:focus-visible) .tt-column-menu,
+.tt-column:has([aria-expanded="true"]) .tt-column-menu,
+.tt-column-menu[aria-expanded="true"] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .tt-column-menu { opacity: 1; }
+}
+
+.tt-column-name-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.tt-column.drop-target {
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-overlay));
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.tt-card-drag {
+  min-width: 0;
+}
+
+.tt-card-drag[draggable="true"] {
+  cursor: grab;
+}
+
+.tt-card-drag.dragging {
+  opacity: 0.4;
+}
+
+.tt-column-empty {
+  display: grid;
+  min-height: 64px;
+  margin: 0;
+  place-items: center;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-card);
+  color: var(--faint);
+  font-size: var(--font-meta);
+}
+
+.tt-kanban:not(.dragging) .tt-column-empty {
+  border-color: transparent;
+}
+
+.tt-column-add {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+}
+
+.tt-column-add-button {
+  display: flex;
+  width: 100%;
+  min-height: max(40px, var(--hit-min));
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-surface);
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 550;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-column-add-button:hover:where(:not(:disabled)) {
+    color: var(--text);
+    background: var(--surface-overlay);
+  }
+}
+
+.tt-column-add-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.tt-column-cards {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--tt-lane-inset) var(--tt-lane-inset);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
+}
+
+/* Cards are the one solid surface on the board (Trello's white card): the
+   text on them stays readable whatever the window's glass does. */
+.tt-task-card {
+  --tt-card-pad: var(--space-3);
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--tt-card-pad);
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  background: var(--elevated);
+  box-shadow: var(--shadow-sm);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease),
+    translate var(--motion-normal) var(--motion-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tt-task-card:hover:where(:not(:disabled)) {
+    border-color: var(--hair-strong);
+    background: var(--raised);
+    box-shadow: var(--shadow-md);
+    translate: 0 -1px;
+  }
+}
+
+.tt-task-card:active:where(:not(:disabled)) {
+  translate: 0 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.tt-task-card:focus-visible,
+.tt-list-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.tt-task-card.linked {
+  border-color: color-mix(in srgb, var(--purple) 32%, var(--border-soft));
+}
+
+.tt-task-card.selected,
+.tt-list-row.selected {
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 6%, var(--elevated));
+}
+
+.tt-card-top,
+.tt-task-meta,
+.tt-detail-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.tt-card-top {
+  justify-content: space-between;
+}
+
+.tt-card-top:not(:has(.tt-status)) {
+  justify-content: flex-end;
+}
+
+.tt-task-card > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-label);
+  font-weight: 550;
+  line-height: 1.4;
+}
+
+.tt-status,
+.tt-linked-chip,
+.tt-label,
+.tt-due {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  border-radius: var(--radius-round);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tt-status {
+  max-width: 160px;
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  background: var(--surface-overlay-strong);
+}
+
+.tt-status.in_progress {
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.tt-status.done {
+  color: var(--green-on-wash);
+  background: var(--green-wash);
+}
+
+.tt-linked-chip {
+  gap: var(--space-1);
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  color: var(--purple);
+  background: var(--purple-wash);
+}
+
+.tt-linked-chip svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tt-task-meta {
+  flex-wrap: wrap;
+  margin-top: auto;
+  row-gap: var(--space-1);
+}
+
+.tt-task-meta > * {
+  flex: none;
+}
+
+.tt-card-labels {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tt-card-labels .tt-label {
+  max-width: 140px;
+  color: var(--text-dim);
+  background: var(--accent-wash);
+  font-weight: 550;
+}
+
+.tt-card-labels .tt-label.more {
+  color: var(--muted);
+  background: var(--surface-overlay-hover);
+}
+
+.tt-assignees {
+  display: inline-flex;
+  margin-inline-start: auto;
+  padding-inline-start: var(--space-1);
+}
+
+
+.tt-task-key {
+  flex: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+}
+
+.tt-label {
+  max-width: 96px;
+  min-height: 20px;
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  background: var(--surface-overlay-hover);
+}
+
+
+.tt-due {
+  min-height: 20px;
+  color: var(--muted);
+}
+
+.tt-list {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  padding: 0 var(--tt-inline) max(var(--space-3), var(--safe-bottom));
+}
+
+.tt-list-head,
+.tt-list-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(160px, 1fr) minmax(105px, .25fr) minmax(100px, .25fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tt-list-head {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+
+/* Rows sit on the window material, divided by hairlines. */
+.tt-list-row {
+  width: 100%;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-top-color: var(--hair);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-list-row:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+  }
+  /* A selected row keeps its tint under the pointer. */
+  .tt-list-row.selected:hover:where(:not(:disabled)) {
+    background: color-mix(in srgb, var(--accent) 9%, var(--elevated));
+  }
+}
+
+.tt-list-row.selected,
+.tt-list-row.selected + .tt-list-row,
+.tt-list-row.picked,
+.tt-list-row.picked + .tt-list-row {
+  border-top-color: transparent;
+}
+@media (hover: hover) {
+  .tt-list-row:hover:where(:not(:disabled)),
+  .tt-list-row:hover:where(:not(:disabled)) + .tt-list-row {
+    border-top-color: transparent;
+  }
+}
+
+.tt-list-row > .tt-status {
+  justify-self: start;
+}
+
+.tt-list-title {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--space-3);
+  align-items: center;
+}
+
+.tt-list-title small {
+  grid-row: 1 / 3;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+}
+
+.tt-list-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-label);
+  font-weight: 550;
+}
+
+.tt-list-meta {
+  display: flex;
+  min-width: 0;
+  grid-column: 2;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--space-2);
+}
+
+.tt-list-meta:empty {
+  display: none;
+}
+
+.tt-list-title i {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--purple);
+  font-size: var(--font-meta);
+  font-style: normal;
+}
+
+.tt-list-title i svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tt-list-assignee {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Task detail: a modal card over the board, as in Trello. The host Dialog
+   owns the panel's material (glass, low-resource and reduced-transparency
+   modes), focus trap, Escape and scroll lock; this styles its content. */
+.dialog-panel.tt-task-modal {
+  width: min(940px, 94vw);
+  max-height: min(90vh, calc(var(--visual-vh, 100dvh) - var(--space-6)));
+  animation: tt-modal-in var(--motion-surface) var(--motion-ease) both;
+}
+
+.dialog-backdrop:has(> .tt-task-modal) {
+  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-task-modal:focus-visible {
+  outline: none;
+}
+
+.tt-task-modal > .ui-dialog-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.tt-modal {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  container: task-tracker-modal / inline-size;
+}
+
+@keyframes tt-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(.985);
+  }
+}
+
+.tt-detail-header {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  min-height: calc(var(--control-h-sm) + var(--space-4));
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-5);
+  border-bottom: 1px solid var(--hair);
+}
+
+.tt-detail-tools {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tt-eyebrow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.tt-eyebrow b {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+/* Monogram tile — glyph must fit the 20px box, so it keeps a fixed size. */
+.tt-eyebrow .tt-provider-mark {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+  border-radius: calc(var(--radius-control) - 2px);
+}
+
+.tt-detail h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: calc(var(--font-heading) * 1.12);
+  font-weight: 650;
+  letter-spacing: -.015em;
+  line-height: 1.25;
+}
+
+.tt-detail-scroll {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
+}
+
+/* Cover band: the picture whole (contain) over a blurred copy of itself, so
+   any shape fills the band without cropping what matters. */
+.tt-modal-cover {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: clamp(132px, 26vh, 248px);
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--hair);
+  background: var(--sunken);
+  cursor: zoom-in;
+  isolation: isolate;
+}
+
+.tt-modal-cover > img:not(.tt-modal-cover-glow),
+.tt-modal-cover > .tt-image-fallback {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-control);
+  object-fit: contain;
+  box-shadow: var(--shadow-md);
+  transition: scale var(--motion-surface) var(--motion-ease);
+}
+
+.tt-modal-cover > .tt-image-fallback {
+  width: 120px;
+  height: 90px;
+}
+
+.tt-modal-cover-glow {
+  position: absolute;
+  z-index: -1;
+  inset: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  object-fit: cover;
+  filter: blur(26px) saturate(1.25);
+  opacity: .55;
+}
+
+@media (hover: hover) {
+  .tt-modal-cover:hover:where(:not(:disabled)) > img:not(.tt-modal-cover-glow) {
+    scale: 1.015;
+  }
+}
+
+.tt-modal-cover:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.tt-detail-layout {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-5) max(var(--space-5), var(--safe-bottom));
+}
+
+/* Narrow: one column, and the actions come before a long comment thread
+   (the main column's sections join the layout grid to take that order). */
+.tt-detail-main {
+  display: contents;
+}
+
+.tt-detail-side {
+  order: 1;
+}
+
+.tt-comments-section {
+  order: 2;
+}
+
+/* Wide: Trello's two columns, the work on the left, its actions beside it. */
+@container task-tracker-modal (min-width: 700px) {
+  .tt-detail-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 264px);
+    gap: var(--space-6);
+  }
+
+  .tt-detail-main {
+    display: grid;
+  }
+
+  .tt-detail-side {
+    position: sticky;
+    top: var(--space-4);
+    align-self: start;
+  }
+}
+
+.tt-detail-main,
+.tt-detail-side {
+  min-width: 0;
+  align-content: start;
+  gap: var(--space-5);
+}
+
+.tt-detail-side {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tt-detail-summary {
+  flex-wrap: wrap;
+  margin-top: calc(var(--space-3) * -1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-detail-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-detail-loading .tt-button-spinner {
+  width: 11px;
+  height: 11px;
+  flex-basis: 11px;
+  border-width: 1.5px;
+}
+
+.tt-description {
+  max-width: 65ch;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.tt-description.muted {
+  color: var(--muted);
+}
+
+/* Facts sit in a row of small labelled groups (Members · Labels · Due),
+   as on a Trello card, not a boxed table. */
+.tt-facts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  margin: 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-facts > div {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.tt-facts dt {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.tt-facts dd {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.tt-person,
+.tt-due-chip {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 3px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.tt-due-chip {
+  padding-inline: var(--space-2);
+}
+
+.tt-fact-priority {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 500;
+}
+
+.tt-facts .tt-label {
+  min-height: 26px;
+  max-width: 180px;
+}
+
+.tt-detail-section {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+/* Side groups read as quiet panels on the dialog's material. */
+.tt-side-section {
+  padding: var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+
+.tt-section-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tt-section-heading strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.tt-detail-in {
+  color: var(--muted);
+}
+
+.tt-section-heading small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-detail-section .ui-textarea {
+  width: 100%;
+}
+
+.tt-action-row,
+.tt-status-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: var(--space-2);
+}
+
+.tt-complete {
+  width: 100%;
+}
+
+.tt-task-card:disabled,
+.tt-list-row:disabled,
+.tt-provider-tabs button:disabled,
+.tt-view-toggle button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.tt-inline-hint {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+
+.tt-external {
+  display: inline-grid;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  place-items: center;
+  position: relative;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+/* Same coarse-pointer target as IconButton without growing the glyph. */
+.tt-external::after {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: max(100%, var(--hit-min));
+  height: max(100%, var(--hit-min));
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.tt-external:hover {
+  color: var(--text);
+  background: var(--surface-overlay-hover);
+}
+
+.tt-external:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.tt-external svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.tt-notice,
+.tt-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  overflow-wrap: anywhere;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-notice {
+  color: var(--green-on-wash);
+  background: var(--green-wash);
+}
+
+.tt-error {
+  color: color-mix(in srgb, var(--red) 82%, var(--text));
+  background: var(--red-wash);
+}
+
+.tt-board-error {
+  position: absolute;
+  z-index: 8;
+  right: 12px;
+  bottom: max(12px, var(--safe-bottom));
+  left: 12px;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
+  border-radius: var(--radius-surface);
+  color: var(--text);
+  background: color-mix(in srgb, var(--elevated) 94%, var(--red) 6%);
+  box-shadow: var(--shadow-md);
+  font-size: var(--font-meta);
+}
+
+.tt-board-error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tt-board-error button {
+  min-width: 70px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+}
+
+.tt-board-error > div {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.tt-button-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.tt-button-spinner {
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: tt-spin .75s linear infinite;
+}
+
+.tt-empty,
+.tt-loading-state {
+  display: flex;
+  min-width: 0;
+  min-height: 180px;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 9px;
+  padding: 24px;
+  text-align: center;
+}
+
+.tt-empty {
+  width: min(100%, 460px);
+  align-self: center;
+  margin: auto;
+}
+
+.tt-empty-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: var(--radius-surface);
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.tt-empty-icon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.tt-empty strong {
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+.tt-empty p {
+  max-width: 42ch;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.55;
+}
+
+.tt-empty > button {
+  margin-top: 3px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+}
+
+.tt-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tt-spin .75s linear infinite;
+}
+
+@keyframes tt-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes tt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.tt-linked-widget,
+.tt-linked-widget * {
+  box-sizing: border-box;
+}
+
+.tt-linked-widget {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--space-3);
+  overflow: hidden;
+  container: task-tracker-linked / inline-size;
+}
+
+.tt-linked-main {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.tt-linked-main > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tt-linked-main > div span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+}
+
+.tt-linked-main > div strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-linked-actions {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.tt-linked-actions a {
+  display: inline-flex;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tt-linked-done {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-radius: var(--radius-control);
+  color: color-mix(in srgb, var(--green) 82%, var(--text));
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  font-size: var(--font-meta);
+  font-weight: 700;
+}
+
+.tt-linked-done > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+}
+
+.tt-linked-done svg,
+.tt-linked-updating svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tt-linked-done a {
+  display: inline-grid;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  place-items: center;
+  border-left: 1px solid color-mix(in srgb, var(--green) 25%, var(--border));
+  color: inherit;
+}
+
+.tt-linked-updating {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-linked-empty {
+  display: flex;
+  min-width: 0;
+  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  color: var(--muted);
+  text-align: center;
+  font-size: var(--font-meta);
+}
+
+.tt-linked-empty svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.tt-linked-load-error {
+  flex-wrap: wrap;
+  color: color-mix(in srgb, var(--red) 82%, var(--text));
+}
+
+.tt-linked-load-error button {
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--elevated);
+}
+
+/* Narrow board: the open task (or the new-task composer) replaces the
+   tasks and the toolbar instead of floating over them, so it stays in the
+   normal flow — a page scrolls it, a widget scrolls its body. */
+@container task-tracker (max-width: 820px) {
+  .tt-board.has-detail > .tt-board-header,
+  .tt-board.has-detail .tt-demo-banner,
+  .tt-board.has-detail .tt-board-picker,
+  .tt-board.has-detail .tt-filters,
+  .tt-board-content.has-detail .tt-task-surface {
+    display: none;
+  }
+
+  .tt-board-content.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+}
+
+@container task-tracker (max-width: 560px) {
+  .tt-view-toggle .ui-btn-label,
+  .tt-board-picker-actions .ui-btn-label {
+    display: none;
+  }
+
+  .tt-board-picker-actions .ui-btn {
+    min-width: max(32px, var(--hit-min));
+    padding: 0;
+  }
+
+  .tt-view-toggle button {
+    min-width: max(32px, var(--hit-min));
+    padding: 0;
+  }
+
+  .tt-kanban {
+    width: 100%;
+    grid-auto-columns: minmax(min(84cqi, 300px), 1fr);
+    scroll-snap-type: inline proximity;
+    scroll-padding-inline: var(--tt-inline);
+  }
+
+  .tt-column {
+    scroll-snap-align: start;
+  }
+
+  .tt-list-head {
+    display: none;
+  }
+
+  .tt-list-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-1) var(--space-3);
+  }
+
+  .tt-list-assignee {
+    grid-column: 1 / -1;
+  }
+}
+
+@container task-tracker (max-width: 480px) {
+  .tt-header-actions {
+    justify-content: flex-start;
+  }
+
+  .tt-header-actions > .ui-icon-btn:last-child {
+    margin-inline-start: auto;
+  }
+
+  .tt-empty {
+    min-height: 0;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) var(--space-5);
+  }
+
+  .tt-empty-icon {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@container task-tracker-linked (max-width: 480px) {
+  .tt-linked-actions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--tap);
+  }
+
+  .tt-linked-actions .picker {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---- Staggered card entrance ------------------------------------------- */
+
+.tt-task-card {
+  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
+  animation-delay: calc(var(--tt-i, 0) * 28ms);
+}
+
+.tt-empty-hint {
+  max-width: 42ch;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* ---- Package page ------------------------------------------------------- */
+
+.tt-page {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+  flex-direction: column;
+  color: var(--text);
+  container: task-tracker-page / inline-size;
+}
+
+/* One gutter for the page, the window title's (--space-3), so the tabs, the
+   toolbar and the first column line up under "Tasks" in every mode. */
+.tt-page-bar,
+.tt-page-panel {
+  --tt-gutter: var(--space-3);
+}
+
+.tt-page-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: var(--space-2) var(--tt-gutter) var(--space-1);
+}
+
+.tt-page-bar .ui-tabs {
+  flex-shrink: 0;
+}
+
+.tt-page-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-page-scroll {
+  overflow: auto;
+  padding: var(--space-3) var(--tt-gutter) max(var(--space-5), var(--safe-bottom));
+  overscroll-behavior: contain;
+}
+
+.tt-onboarding {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-6) var(--space-4) max(var(--space-6), env(safe-area-inset-bottom, 0px));
+  overflow: auto;
+  text-align: center;
+}
+
+.tt-onboarding-copy {
+  display: grid;
+  max-width: 46ch;
+  gap: var(--space-2);
+}
+
+.tt-onboarding-copy strong {
+  font-size: var(--font-heading);
+  line-height: 1.2;
+}
+
+.tt-onboarding-copy p {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.tt-onboarding-choices {
+  display: grid;
+  width: min(100%, 620px);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.tt-choice {
+  position: relative;
+  display: grid;
+  min-height: max(160px, var(--hit-min));
+  justify-items: start;
+  align-content: start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--elevated);
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
+  animation-delay: calc(var(--tt-i, 0) * 60ms + 40ms);
+  transition:
+    transform var(--motion-normal) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease);
+}
+
+.tt-choice::after {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 80% at 0% 0%, var(--accent-wash), transparent 60%);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-normal) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-choice:hover:not(:disabled) {
+    border-color: var(--accent-line);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  .tt-choice:hover:not(:disabled)::after {
+    opacity: 1;
+  }
+}
+
+.tt-choice:active:not(:disabled) {
+  transform: translateY(0) scale(.99);
+}
+
+.tt-choice:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.tt-choice:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.tt-choice small {
+  color: var(--text-dim);
+}
+
+.tt-choice-cta {
+  margin-top: auto;
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+/* ---- Management --------------------------------------------------------- */
+
+.tt-settings-page {
+  min-width: 0;
+}
+
+.tt-manage {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-5);
+  color: var(--text);
+  container: task-tracker-manage / inline-size;
+}
+
+.tt-manage-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tt-manage-intro p {
+  flex: 1 1 280px;
+  min-width: 0;
+  max-width: 60ch;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  line-height: 1.45;
+}
+
+.tt-service-off-hint {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-setting-copy small,
+.tt-service-title small,
+.tt-service-hint,
+.tt-account-row small,
+.tt-service-status small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-manage-stats {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.tt-manage-stats span {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-round);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.tt-manage-stats b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-manage-section {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+/* Matches the shared settings Section title (sentence case, label size). */
+.tt-manage-section h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.tt-manage-skeleton {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tt-service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: var(--space-3);
+}
+
+.tt-service-card {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--elevated);
+  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
+  transition:
+    border-color var(--motion-normal) var(--motion-ease),
+    background-color var(--motion-normal) var(--motion-ease),
+    opacity var(--motion-normal) var(--motion-ease);
+}
+
+.tt-service-card + .tt-service-card {
+  animation-delay: 60ms;
+}
+
+.tt-service-card[data-state="connected"] {
+  border-color: color-mix(in srgb, var(--success) 34%, var(--border));
+}
+
+.tt-service-card.off {
+  background: transparent;
+}
+
+.tt-service-card.off .tt-service-head .tt-provider-mark {
+  filter: grayscale(1);
+  opacity: .55;
+}
+
+.tt-service-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tt-service-head .tt-provider-mark {
+  transition: filter var(--motion-normal) var(--motion-ease), opacity var(--motion-normal) var(--motion-ease);
+}
+
+.tt-service-title {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+/* Height animates through grid rows so content never needs a fixed size. */
+.tt-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--motion-surface) var(--motion-ease);
+}
+
+.tt-collapse[data-open="false"] {
+  grid-template-rows: 0fr;
+}
+
+.tt-collapse-inner {
+  display: grid;
+  min-height: 0;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  overflow: hidden;
+  transition: opacity var(--motion-normal) var(--motion-ease);
+}
+
+.tt-collapse[data-open="false"] .tt-collapse-inner {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--motion-fast) var(--motion-ease), visibility 0s var(--motion-surface);
+}
+
+.tt-service-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tt-service-hint {
+  margin: 0;
+}
+
+.tt-account-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-account-row > span:not(.tt-avatar) {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+/* "Use in this Space" for one of the caller's own accounts. */
+.tt-account-switch {
+  flex: none;
+}
+
+.tt-account-row.off strong {
+  color: var(--text-dim);
+}
+
+.tt-account-row strong,
+.tt-account-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-avatar {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 700;
+}
+
+.tt-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tt-service-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tt-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  animation: tt-fade var(--motion-fast) var(--motion-ease) both;
+}
+
+.tt-confirm span {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+
+.tt-inline-message {
+  margin: 0;
+  font-size: var(--font-meta);
+  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-inline-message.success { color: var(--success); }
+.tt-inline-message.error { color: var(--danger); }
+
+.tt-setting-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+}
+
+.tt-setting-row {
+  display: flex;
+  min-width: 0;
+  min-height: max(56px, var(--hit-min));
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  transition: background-color var(--motion-normal) var(--motion-ease);
+}
+
+.tt-setting-row + .tt-setting-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.tt-setting-row:hover {
+  background: var(--surface-overlay);
+}
+
+.tt-setting-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.tt-setting-row.off .tt-setting-copy strong {
+  color: var(--text-dim);
+}
+
+/* ---- Connect wizard ----------------------------------------------------- */
+
+.tt-wizard {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-4);
+}
+
+.tt-wizard-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.tt-stepper {
+  position: relative;
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tt-stepper li {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  transition: color var(--motion-normal) var(--motion-ease);
+}
+
+.tt-stepper-dot {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  transition:
+    background-color var(--motion-normal) var(--motion-ease),
+    border-color var(--motion-normal) var(--motion-ease),
+    color var(--motion-normal) var(--motion-ease),
+    transform var(--motion-normal) var(--motion-ease);
+}
+
+.tt-stepper li.current {
+  color: var(--text);
+}
+
+.tt-stepper li.current .tt-stepper-dot {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: scale(1.12);
+}
+
+.tt-stepper li.done .tt-stepper-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tt-stepper-track {
+  position: absolute;
+  top: 12px;
+  right: 16.66%;
+  left: 16.66%;
+  height: 2px;
+  border-radius: calc(2px * var(--corner-radius-scale));
+  background: var(--border);
+}
+
+.tt-stepper-track i {
+  display: block;
+  width: calc(var(--tt-step, 0) * 50%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--motion-surface) var(--motion-ease);
+}
+
+.tt-wizard-stage {
+  display: grid;
+  min-height: 220px;
+  overflow: hidden;
+}
+
+.tt-wizard-step {
+  min-width: 0;
+  animation: tt-step-forward var(--motion-surface) var(--motion-ease) both;
+}
+
+.tt-wizard-stage[data-direction="back"] .tt-wizard-step {
+  animation-name: tt-step-back;
+}
+
+.tt-wizard-fields {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tt-wizard-lead {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.tt-field {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+.tt-field .ui-input {
+  width: 100%;
+}
+
+/* The label is bold; what the user types is not. */
+.tt-field :is(.ui-input, .ui-textarea) {
+  font-weight: 400;
+}
+
+.tt-reveal {
+  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-site-preview {
+  min-height: 1.4em;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  transition: color var(--motion-normal) var(--motion-ease);
+}
+
+.tt-site-preview.ok {
+  color: var(--success);
+}
+
+.tt-guide {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  counter-reset: tt-guide;
+  list-style: none;
+}
+
+.tt-guide li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  counter-increment: tt-guide;
+}
+
+.tt-guide li::before {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent);
+  content: counter(tt-guide);
+  font-size: var(--font-meta);
+  font-weight: 700;
+}
+
+.tt-guide li > span {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-secure-note {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-authorize {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--elevated);
+}
+
+.tt-authorize > div {
+  display: grid;
+  gap: 2px;
+}
+
+.tt-authorize small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-authorize > :last-child {
+  grid-column: 1 / -1;
+}
+
+.tt-authorize.waiting .tt-provider-mark {
+  animation: tt-pulse 1.4s var(--motion-ease) infinite;
+}
+
+.tt-disclosure {
+  justify-self: start;
+  min-height: max(32px, var(--hit-min));
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+
+.tt-disclosure::after {
+  display: inline-block;
+  margin-inline-start: 6px;
+  content: "\203A";
+  transition: transform var(--motion-normal) var(--motion-ease);
+}
+
+.tt-disclosure[aria-expanded="true"]::after {
+  transform: rotate(90deg);
+}
+
+.tt-verify {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  text-align: center;
+}
+
+.tt-verify small {
+  max-width: 40ch;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-verify-orbit {
+  position: relative;
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+}
+
+.tt-verify-orbit::before {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--accent-wash);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  content: "";
+  animation: tt-spin .9s linear infinite;
+}
+
+.tt-verify-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  text-align: start;
+  animation: tt-rise var(--motion-surface) var(--motion-ease) 260ms both;
+}
+
+.tt-verify-account > span:last-child {
+  display: grid;
+}
+
+.tt-verify-account small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-success-check {
+  width: 56px;
+  height: 56px;
+  fill: none;
+  stroke: var(--success);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  animation: tt-pop var(--motion-surface) var(--motion-ease) both;
+}
+
+.tt-success-check circle {
+  stroke-dasharray: 145;
+  stroke-dashoffset: 145;
+  opacity: .35;
+  animation: tt-draw 520ms var(--motion-ease) forwards;
+}
+
+.tt-success-check path {
+  stroke-dasharray: 36;
+  stroke-dashoffset: 36;
+  animation: tt-draw 300ms var(--motion-ease) 380ms forwards;
+}
+
+/* ---- Overview widget ---------------------------------------------------- */
+
+.tt-overview {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  color: var(--text);
+  container: task-tracker-overview / inline-size;
+}
+
+.tt-overview.empty {
+  align-items: flex-start;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.tt-overview ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tt-overview li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 7rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
+  animation-delay: calc(var(--tt-i, 0) * 50ms);
+}
+
+.tt-overview-name {
+  display: grid;
+  min-width: 0;
+}
+
+.tt-overview-name small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-overview-name small[data-state="connected"] { color: var(--success); }
+
+.tt-overview-progress {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.tt-overview-board,
+.tt-overview-counts,
+.tt-overview-muted {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-overview-counts b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-overview-bar {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+}
+
+.tt-overview-bar i {
+  height: 100%;
+  transition: width 600ms var(--motion-ease);
+}
+
+.tt-overview-bar i.done { background: var(--success); }
+.tt-overview-bar i.in_progress { background: var(--accent); }
+.tt-overview-bar i.todo { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+
+.tt-overview-bar.loading {
+  background: linear-gradient(90deg, var(--surface-overlay-strong), var(--surface-overlay), var(--surface-overlay-strong));
+  background-size: 200% 100%;
+  animation: tt-shimmer 1.2s linear infinite;
+}
+
+.tt-overview-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: auto;
+}
+
+@container task-tracker-overview (max-width: 300px) {
+  .tt-overview li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .tt-overview li > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@container task-tracker-manage (max-width: 420px) {
+  .tt-manage-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  /* In a column the 280px flex-basis becomes a height; size to content. */
+  .tt-manage-intro p {
+    flex: none;
+  }
+
+  .tt-service-card,
+  .tt-setting-row {
+    padding-inline: var(--space-3);
+  }
+}
+
+@keyframes tt-fade {
+  from { opacity: 0; }
+}
+
+@keyframes tt-step-forward {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+@keyframes tt-step-back {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+@keyframes tt-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes tt-pop {
+  from { transform: scale(.6); opacity: 0; }
+  60% { transform: scale(1.06); opacity: 1; }
+}
+
+@keyframes tt-pulse {
+  50% { transform: scale(1.08); }
+}
+
+@keyframes tt-shimmer {
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tt-task-card,
+  .tt-list-row,
+  .tt-detail,
+  .tt-choice,
+  .tt-service-card,
+  .tt-collapse,
+  .tt-collapse-inner,
+  .tt-wizard-step,
+  .tt-stepper-track i,
+  .tt-stepper-dot,
+  .tt-verify-account,
+  .tt-overview li,
+  .tt-overview-bar i,
+  .tt-page-panel,
+  .tt-reveal,
+  .tt-column,
+  .tt-column-menu,
+  .tt-column-add-button,
+  .tt-demo-banner,
+  .tt-provider-tabs button,
+  .tt-view-toggle button {
+    transition: none;
+    animation: none;
+  }
+
+  .tt-spinner,
+  .tt-button-spinner,
+  .tt-verify-orbit::before,
+  .tt-authorize.waiting .tt-provider-mark,
+  .tt-overview-bar.loading {
+    animation: none;
+  }
+
+  .tt-success-check,
+  .tt-success-check circle,
+  .tt-success-check path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Host "reduce animations" / low-resource modes drop every animation; the
+   drawn check must still end fully visible. */
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .tt-success-check :is(circle, path) {
+  stroke-dashoffset: 0;
+}
+
+/* ---------------------------------------------------------------- task work
+   Agent badges, multi-select dispatch, new-task composer, personal accounts. */
+
+.tt-card-badges {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tt-agent-chip {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-round);
+  color: var(--accent);
+  background: var(--accent-wash);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tt-agent-chip svg,
+.tt-pick svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.tt-pick {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  place-items: center;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--accent-ink);
+  background: var(--sunken);
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+
+.tt-pick.on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.tt-list-title small .tt-pick {
+  width: 16px;
+  height: 16px;
+  margin-inline-end: var(--space-2);
+  vertical-align: middle;
+}
+
+.tt-task-card.picked,
+.tt-list-row.picked {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--elevated));
+}
+
+.tt-header-actions > .ui-btn.active {
+  color: var(--text);
+  background: var(--elevated);
+}
+
+.tt-target {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+}
+
+.tt-target button {
+  min-height: max(28px, var(--hit-min));
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-target button:hover:not(.active):not(:disabled) {
+    color: var(--text);
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.tt-target button.active {
+  color: var(--text);
+  background: var(--elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.tt-target button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.tt-target button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.tt-action-row.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tt-agent-sessions {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tt-agent-sessions button {
+  display: grid;
+  width: 100%;
+  min-height: max(var(--control-h), var(--hit-min));
+  grid-template-columns: 10px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--surface-overlay);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-agent-sessions button:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.tt-agent-sessions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.tt-agent-sessions i {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-round);
+  background: var(--muted);
+}
+
+.tt-agent-sessions i.working {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  animation: tt-pulse 1.6s var(--motion-ease) infinite;
+}
+
+.tt-agent-sessions i.idle,
+.tt-agent-sessions i.finished {
+  background: var(--green);
+}
+
+.tt-agent-sessions i.failed {
+  background: var(--red);
+}
+
+.tt-agent-sessions span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.tt-agent-sessions strong {
+  overflow: hidden;
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-agent-sessions small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* The dispatch bar ends the board column and sticks to the bottom of whichever
+   ancestor scrolls: the board itself when it fills a pane, or the host body
+   when a panel host lets the package root grow with its content. */
+.tt-board.floating {
+  overflow: visible;
+}
+
+.tt-dispatch-bar {
+  position: sticky;
+  z-index: 8;
+  bottom: max(var(--space-3), var(--safe-bottom));
+  flex: none;
+  margin: 0 var(--space-3) var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: var(--radius-surface);
+  color: var(--text);
+  background: var(--elevated);
+  box-shadow: var(--shadow-md);
+  font-size: var(--font-meta);
+  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-dispatch-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tt-dispatch-row .ui-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.tt-dispatch-count {
+  white-space: nowrap;
+}
+
+.tt-dispatch-hint {
+  color: var(--muted);
+}
+
+.tt-board-content.has-detail ~ .tt-dispatch-bar {
+  display: none;
+}
+
+.tt-compose {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tt-compose-target {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+
+.tt-compose .tt-field small {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.tt-compose .ui-textarea {
+  width: 100%;
+}
+
+.tt-compose .tt-field .picker,
+.tt-compose .tt-field .picker-chip {
+  width: 100%;
+  min-width: 0;
+}
+
+.tt-compose .tt-field .chip-k {
+  display: none;
+}
+
+.tt-compose .tt-field .tt-inline-hint {
+  font-weight: 500;
+}
+
+/* ---- New task ------------------------------------------------------------
+   The composer lives in the board, never in a popup. A wide board keeps the
+   tasks in view beside it; below 1100px it takes the whole board so the form
+   never squeezes into half of an already narrow window. */
+
+.tt-board-content.has-compose {
+  grid-template-columns: minmax(0, 1fr) clamp(400px, 36%, 540px);
+}
+
+.tt-compose-pane {
+  --tt-compose-from: translateX(calc(var(--space-4) * var(--stack-dir, 1)));
+  position: relative;
+  z-index: 4;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: clip;
+  border-inline-start: 1px solid var(--hair);
+  background: transparent;
+  animation: tt-compose-in var(--motion-surface) var(--motion-ease) both;
+}
+
+.tt-compose-pane.is-leaving {
+  pointer-events: none;
+  animation: tt-compose-out var(--motion-normal) var(--motion-ease) both;
+}
+
+@keyframes tt-compose-in {
+  from {
+    opacity: 0;
+    transform: var(--tt-compose-from);
+  }
+}
+
+@keyframes tt-compose-out {
+  to {
+    opacity: 0;
+    transform: var(--tt-compose-from);
+  }
+}
+
+@container task-tracker (max-width: 1099px) {
+  .tt-board.has-compose > .tt-board-header,
+  .tt-board.has-compose .tt-demo-banner,
+  .tt-board.has-compose .tt-board-picker,
+  .tt-board.has-compose .tt-filters,
+  .tt-board-content.has-compose .tt-task-surface {
+    display: none;
+  }
+
+  .tt-board-content.has-compose {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tt-compose-pane {
+    --tt-compose-from: translateY(var(--space-3)) scale(.99);
+    border-inline-start: 0;
+  }
+
+  .tt-compose-pane :is(.tt-compose-head, .tt-compose-scroll, .tt-compose-footer) {
+    padding-inline: var(--tt-inline);
+  }
+}
+
+.tt-compose-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) max(var(--space-2), var(--safe-right)) var(--space-2) max(var(--space-4), var(--safe-left));
+  border-bottom: 1px solid var(--surface-divider);
+}
+
+.tt-compose-context {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.tt-compose-context i {
+  color: var(--faint);
+  font-style: normal;
+}
+
+.tt-compose-context b {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.tt-compose-context .tt-provider-mark {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+  border-radius: calc(var(--radius-control) - 2px);
+}
+
+.tt-task-form {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.tt-compose-scroll {
+  min-height: 0;
+  flex: 1;
+  padding: var(--space-5) max(var(--space-4), var(--safe-right)) var(--space-5) max(var(--space-4), var(--safe-left));
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tt-compose-column {
+  width: 100%;
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.tt-compose-scroll > .tt-compose-column {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.tt-compose-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -.01em;
+  line-height: 1.25;
+}
+
+/* One writing surface: title, details, images and their tools. */
+.tt-compose-editor {
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--input-bg);
+  box-shadow: var(--inset-hi);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease);
+}
+
+.tt-compose-editor:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: var(--inset-hi), 0 0 0 3px var(--focus-wash);
+}
+
+.tt-compose-editor.is-dragging {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--input-bg) 86%, var(--accent-wash));
+}
+
+.tt-compose-editor .ui-input,
+.tt-compose-editor .ui-textarea {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  padding-inline: var(--space-4);
+}
+
+.tt-compose-editor .ui-input.tt-compose-name {
+  min-height: max(var(--control-h-lg), var(--hit-min));
+  padding-top: var(--space-2);
+  font-size: max(var(--font-input), calc(var(--font-body) * 1.15));
+  font-weight: 600;
+  letter-spacing: -.005em;
+}
+
+.tt-compose-editor .ui-textarea.tt-compose-body {
+  padding-top: 0;
+  padding-bottom: var(--space-3);
+  color: var(--text-dim);
+  line-height: 1.55;
+  resize: none;
+}
+
+.tt-compose-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  list-style: none;
+}
+
+.tt-compose-images li {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  animation: tt-compose-image-in var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-compose-images img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tt-compose-images .ui-icon-btn {
+  position: absolute;
+  top: var(--space-1);
+  inset-inline-end: var(--space-1);
+  border-radius: var(--radius-round);
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Fine pointers reveal the remove button on hover or focus; touch keeps it. */
+@media (hover: hover) and (pointer: fine) {
+  .tt-compose-images .ui-icon-btn {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+
+  .tt-compose-images li:hover .ui-icon-btn,
+  .tt-compose-images .ui-icon-btn:focus-visible {
+    opacity: 1;
+  }
+}
+
+@keyframes tt-compose-image-in {
+  from {
+    opacity: 0;
+    transform: scale(.94);
+  }
+}
+
+.tt-compose-tools {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-top: 1px solid var(--surface-divider);
+}
+
+.tt-compose-hint {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-compose-editor.is-dragging .tt-compose-hint {
+  color: var(--accent);
+}
+
+.tt-compose-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+
+.tt-compose-option > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tt-compose-option strong {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+.tt-compose-option small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-compose-option.is-disabled strong {
+  color: var(--text-dim);
+}
+
+.tt-compose-footer {
+  padding: var(--space-3) max(var(--space-4), var(--safe-right)) max(var(--space-3), var(--safe-bottom)) max(var(--space-4), var(--safe-left));
+  border-top: 1px solid var(--surface-divider);
+}
+
+.tt-compose-footer > .tt-compose-column {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.tt-compose-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-end: auto;
+}
+
+@media not (pointer: fine) {
+  .tt-compose-shortcut {
+    display: none;
+  }
+}
+
+@container task-tracker (max-width: 480px) {
+  .tt-compose-scroll {
+    padding-top: var(--space-4);
+  }
+
+  .tt-compose-footer .ui-btn--primary {
+    flex: 1;
+  }
+}
+
+/* ---- Boards to show ----------------------------------------------------- */
+
+.tt-scope {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-4);
+}
+
+.tt-scope-section {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.tt-scope-section h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+.tt-scope-group {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.tt-scope-group-name {
+  padding-left: 2px;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 650;
+}
+
+.tt-scope-group-name i {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.tt-scope-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  list-style: none;
+}
+
+.tt-scope-row {
+  display: flex;
+  min-width: 0;
+  min-height: max(48px, var(--hit-min));
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  transition: background-color var(--motion-normal) var(--motion-ease);
+}
+
+.tt-scope-row + .tt-scope-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.tt-scope-row:hover {
+  background: var(--surface-overlay);
+}
+
+.tt-scope-row > .ui-checkbox,
+.tt-scope-row > .tt-scope-name {
+  min-width: 0;
+  flex: 1;
+}
+
+.tt-scope-name {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.tt-scope-name strong {
+  overflow: hidden;
+  font-size: var(--font-body);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-scope-name small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-scope-row.off .tt-scope-name strong {
+  color: var(--text-dim);
+}
+
+/* "Make default" reads as a quiet chip; the chosen one is filled. */
+.tt-default-radio {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  min-height: 32px;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-round);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+
+.tt-default-radio input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.tt-default-radio:hover:not(.disabled) {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.tt-default-radio.on {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.tt-default-radio.disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.tt-default-radio:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@container task-tracker (max-width: 480px) {
+  .tt-scope-row {
+    flex-wrap: wrap;
+  }
+
+  .tt-scope-row .tt-default-radio {
+    margin-left: auto;
+  }
+}
+
+.tt-personal {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--border-soft);
+}
+
+.tt-personal-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+@container task-tracker (max-width: 560px) {
+  .tt-dispatch-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .tt-dispatch-row .ui-input {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tt-dispatch-bar,
+  .tt-pick,
+  .tt-target button,
+  .tt-agent-sessions i.working {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* ---- Card menu (right-click / long-press) ------------------------------- */
+
+/* A long-press opens the card menu; keep the system callout and text
+   selection from competing with it. */
+.tt-task-card,
+.tt-list-row {
+  -webkit-touch-callout: none;
+}
+
+.tt-card-menu-surface {
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - var(--space-4)));
+}
+
+.tt-card-menu {
+  display: contents;
+}
+
+.tt-menu-row .ui-menu-item-copy {
+  flex: 1;
+}
+
+.tt-menu-chevron {
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.tt-menu-session-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-inline: 4px;
+  border-radius: var(--radius-round);
+  background: var(--muted);
+}
+
+.tt-menu-session-dot.working {
+  background: var(--accent);
+}
+
+.tt-menu-session-dot.failed {
+  background: var(--red);
+}
+
+.tt-menu-empty {
+  margin: 0;
+  padding: var(--space-2) var(--control-pad-x-sm);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* ---- Card Cover & Meta Badges ------------------------------------------- */
+
+/* Trello-style cover: edge to edge across the top of the card, in the
+   picture's own shape (the ratio is learnt on load and clamped). Until then
+   it reserves a 16:9 band, so a decoded image barely moves the column. */
+.tt-card-cover {
+  position: relative;
+  display: block;
+  flex: none;
+  margin: calc(var(--tt-card-pad) * -1) calc(var(--tt-card-pad) * -1) var(--space-1);
+  aspect-ratio: var(--tt-cover-ratio, 16 / 9);
+  max-height: 200px;
+  overflow: hidden;
+  background: var(--surface-overlay-strong);
+}
+
+.tt-card-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: scale var(--motion-surface) var(--motion-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tt-task-card:hover:where(:not(:disabled)) .tt-card-cover img {
+    scale: 1.03;
+  }
+}
+
+/* Over a photo, not on a theme surface: a fixed dark chip stays legible. */
+.tt-card-cover-count {
+  position: absolute;
+  inset-inline-end: var(--space-2);
+  bottom: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: var(--radius-round);
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.tt-meta-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1;
+}
+
+.tt-meta-badge svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  opacity: .85;
+}
+
+/* ---- Task Detail Editing ------------------------------------------------ */
+
+.tt-detail-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.tt-detail-title-row h3 {
+  flex: 1;
+  min-width: 0;
+}
+
+.tt-detail-edit-form {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.tt-edit-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tt-field-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 550;
+}
+
+.tt-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---- Attached Files & Gallery ------------------------------------------- */
+
+.tt-section-heading {
+  min-width: 0;
+}
+
+.tt-attachments-section .tt-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.tt-attachment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr));
+  gap: var(--space-3);
+}
+
+.tt-attachment-thumb-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: zoom-in;
+  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
+  animation-delay: calc(var(--tt-i, 0) * 30ms);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease),
+    translate var(--motion-normal) var(--motion-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tt-attachment-thumb-card:hover:where(:not(:disabled)) {
+    border-color: var(--accent-line);
+    box-shadow: var(--shadow-md);
+    translate: 0 -1px;
+  }
+}
+
+.tt-attachment-thumb-card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.tt-thumb-media {
+  position: relative;
+  display: block;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--surface-overlay-strong);
+}
+
+.tt-thumb-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: scale var(--motion-surface) var(--motion-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tt-attachment-thumb-card:hover:where(:not(:disabled)) .tt-thumb-media img {
+    scale: 1.04;
+  }
+}
+
+.tt-thumb-cover-badge {
+  position: absolute;
+  top: var(--space-2);
+  inset-inline-start: var(--space-2);
+  padding: 1px 7px;
+  border-radius: var(--radius-round);
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.tt-thumb-caption {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.tt-thumb-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-thumb-caption small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-attachment-list {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.tt-attachment-file-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+
+.tt-file-badge {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-strong);
+  color: var(--muted);
+}
+
+.tt-file-info {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tt-file-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-file-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.tt-file-download-link {
+  position: relative;
+  display: inline-grid;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+.tt-file-download-link::after {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: max(100%, var(--hit-min));
+  height: max(100%, var(--hit-min));
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.tt-file-download-link:hover {
+  color: var(--text);
+  background: var(--surface-overlay-hover);
+}
+
+/* Files dragged anywhere over the open card. */
+.tt-modal-drop {
+  position: absolute;
+  z-index: 6;
+  inset: var(--space-2);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-1);
+  border: 2px dashed var(--accent);
+  border-radius: calc(var(--radius-sheet) - var(--space-2));
+  background: color-mix(in srgb, var(--elevated) 82%, var(--accent-wash));
+  color: var(--accent);
+  pointer-events: none;
+  animation: tt-fade var(--motion-fast) var(--motion-ease) both;
+}
+
+.tt-modal-drop strong {
+  font-size: var(--font-label);
+}
+
+.tt-modal-drop small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* ---- Comments Thread ---------------------------------------------------- */
+
+.tt-comments-list {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.tt-comment-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2) var(--space-3);
+  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
+}
+
+.tt-comment-content {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.tt-comment-body {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  border-start-start-radius: calc(var(--radius-control) / 2);
+  background: var(--surface-overlay);
+}
+
+.tt-comment-item.pending {
+  opacity: 0.7;
+}
+
+.tt-comment-item.failed .tt-comment-body {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--hair));
+}
+
+.tt-comment-failed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tt-comment-header {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.tt-comment-avatar-img,
+.tt-comment-avatar-initial {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--radius-round);
+}
+
+.tt-comment-avatar-img {
+  object-fit: cover;
+}
+
+.tt-comment-avatar-initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  line-height: 1;
+}
+
+.tt-comment-author {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-comment-time {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.tt-comment-body p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.tt-comment-form {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.tt-comment-form .ui-textarea {
+  width: 100%;
+}
+
+.tt-comment-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  animation: tt-fade var(--motion-fast) var(--motion-ease) both;
+}
+
+/* ---- Image Lightbox ----------------------------------------------------- */
+
+/* The preview is a dark viewer above everything, the task modal included:
+   the picture is the content, so its chrome is fixed light-on-dark (like the
+   brand colours, a documented exception to theme tokens). */
+.tt-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-overlay) + 20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(var(--space-4), var(--safe-top)) max(var(--space-4), var(--safe-right)) max(var(--space-4), var(--safe-bottom)) max(var(--space-4), var(--safe-left));
+  background: rgba(8, 9, 12, 0.86);
+  /* Horizontal swipes page the images; vertical pans and pinch stay native. */
+  touch-action: pan-y pinch-zoom;
+  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .tt-lightbox-overlay {
+    background: rgba(8, 9, 12, 0.74);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur, 18px) * .5));
+    backdrop-filter: blur(calc(var(--material-glass-blur, 18px) * .5));
+  }
+}
+
+.tt-lightbox-content {
+  position: relative;
+  display: flex;
+  width: 100%;
+  max-width: min(96vw, 1200px);
+  height: 100%;
+  max-height: 100%;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: #f4f5f7;
+}
+
+.tt-lightbox-header {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tt-lightbox-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tt-lightbox-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tt-lightbox-title small {
+  flex: none;
+  color: rgba(244, 245, 247, 0.6);
+  font-size: var(--font-meta);
+  font-weight: 400;
+}
+
+.tt-lightbox-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tt-lightbox-actions .ui-icon-btn,
+.tt-lightbox-button {
+  color: rgba(244, 245, 247, 0.82);
+}
+
+.tt-lightbox-button {
+  display: inline-grid;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  place-items: center;
+  border-radius: var(--radius-control);
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-lightbox-actions .ui-icon-btn:hover:where(:not(:disabled)),
+  .tt-lightbox-button:hover:where(:not(:disabled)) {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+.tt-lightbox-image-wrap {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+
+.tt-lightbox-image {
+  display: flex;
+  max-width: 100%;
+  max-height: 100%;
+  align-items: center;
+  justify-content: center;
+  animation: tt-lightbox-in var(--motion-surface) var(--motion-ease) both;
+}
+
+@keyframes tt-lightbox-in {
+  from {
+    opacity: 0;
+    transform: scale(.97);
+  }
+}
+
+.tt-lightbox-image img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(var(--visual-vh, 100dvh) - 140px);
+  border-radius: var(--radius-card);
+  object-fit: contain;
+  box-shadow: 0 24px 64px -24px rgba(0, 0, 0, 0.7);
+}
+
+.tt-lightbox-image .tt-image-fallback {
+  width: 160px;
+  height: 120px;
+  border-radius: var(--radius-card);
+}
+
+/* A picture the tracker refused or no longer has. */
+.tt-image-fallback {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-overlay-strong);
+  color: var(--muted);
+}
+
+.tt-lightbox-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-round);
+  background: rgba(20, 22, 28, 0.62);
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), scale var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .tt-lightbox-nav:hover:where(:not(:disabled)) {
+    background: rgba(20, 22, 28, 0.9);
+  }
+}
+
+.tt-lightbox-nav:active:where(:not(:disabled)) {
+  scale: .94;
+}
+
+.tt-lightbox-nav:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.tt-lightbox-nav.prev {
+  inset-inline-start: var(--space-2);
+}
+
+.tt-lightbox-nav.next {
+  inset-inline-end: var(--space-2);
+}
+
+html[dir="rtl"] .tt-lightbox-nav svg {
+  transform: scaleX(-1);
+}
+
+.tt-lightbox-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: rgba(244, 245, 247, 0.62);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Phone: the task opens as a full-screen sheet ------------------------ */
+
+@media (max-width: 700px) {
+  .dialog-backdrop:has(> .tt-task-modal) {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .dialog-panel.tt-task-modal {
+    width: 100%;
+    height: var(--visual-vh, 100dvh);
+    max-height: var(--visual-vh, 100dvh);
+    border: 0;
+    border-radius: 0;
+    animation-name: tt-sheet-in;
+  }
+
+  .tt-task-modal .tt-detail-header {
+    padding-top: max(var(--space-2), var(--safe-top));
+    padding-inline: max(var(--space-4), var(--safe-left)) max(var(--space-2), var(--safe-right));
+  }
+
+  .tt-detail-layout {
+    padding-inline: max(var(--space-4), var(--safe-left)) max(var(--space-4), var(--safe-right));
+  }
+}
+
+@keyframes tt-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+/* ---- Motion and performance preferences --------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog-panel.tt-task-modal,
+  .dialog-backdrop:has(> .tt-task-modal),
+  .tt-modal-drop,
+  .tt-lightbox-overlay,
+  .tt-lightbox-image,
+  .tt-attachment-thumb-card,
+  .tt-comment-item,
+  .tt-comment-form-actions,
+  .tt-detail-loading {
+    animation: none;
+  }
+
+  .tt-task-card,
+  .tt-task-card .tt-card-cover img,
+  .tt-attachment-thumb-card,
+  .tt-thumb-media img,
+  .tt-modal-cover > img {
+    transition: none;
+  }
+}
+
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) :is(
+  .dialog-panel.tt-task-modal,
+  .dialog-backdrop:has(> .tt-task-modal),
+  .tt-modal-drop,
+  .tt-lightbox-overlay,
+  .tt-lightbox-image,
+  .tt-attachment-thumb-card,
+  .tt-comment-item,
+  .tt-comment-form-actions,
+  .tt-task-card,
+  .tt-column,
+  .tt-detail-loading
+) {
+  animation: none;
+}
+
+/* Low-resource mode also drops the blurred cover copy (a large filtered
+   layer) and keeps the plain band. */
+body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
+  display: none;
+}
+
+/* ---- People, priority and due dates ------------------------------------- */
+
+/* A face, else initials on a tint that stays the person's (people.ts picks
+   one of a few token tones from their id). */
+.tt-person-avatar {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  color: var(--accent);
+  background: var(--accent-wash);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+  user-select: none;
+}
+
+.tt-person-avatar.xs {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+.tt-person-avatar.md {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+
+.tt-person-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tt-person-avatar.tone-blue { color: var(--blue); background: var(--blue-wash); }
+.tt-person-avatar.tone-purple { color: var(--purple); background: var(--purple-wash); }
+.tt-person-avatar.tone-green { color: var(--green-on-wash); background: var(--green-wash); }
+.tt-person-avatar.tone-amber { color: var(--amber-on-wash); background: var(--amber-wash); }
+
+/* Unassigned is an empty seat, not a person. */
+.tt-person-avatar.unassigned {
+  border: 1.5px dashed var(--faint);
+  background: transparent;
+}
+
+.tt-avatar-stack {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.tt-avatar-stack > .tt-person-avatar {
+  box-shadow: 0 0 0 2px var(--elevated);
+}
+
+.tt-avatar-stack > * + * {
+  margin-inline-start: -6px;
+}
+
+.tt-avatar-more {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: var(--radius-round);
+  box-shadow: 0 0 0 2px var(--elevated);
+  color: var(--muted);
+  background: var(--surface-overlay-strong);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+/* Signal bars; the urgent tile is the one loud mark on a card. */
+.tt-priority {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+}
+
+.tt-priority svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tt-priority.high {
+  color: var(--text-dim);
+}
+
+.tt-priority.urgent {
+  color: color-mix(in srgb, var(--red) 88%, var(--text));
+}
+
+.tt-priority .tt-priority-ink {
+  fill: none;
+  stroke: var(--red-ink);
+}
+
+.tt-priority .tt-priority-dot {
+  fill: var(--red-ink);
+}
+
+.tt-list-title small .tt-priority {
+  margin-inline-end: var(--space-1);
+  vertical-align: -2px;
+}
+
+.tt-due.overdue,
+.tt-due-chip.overdue {
+  color: color-mix(in srgb, var(--red) 82%, var(--text));
+  font-weight: 600;
+}
+
+/* ---- Assignee filter, display options, filter summary ------------------- */
+
+.tt-people {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 280px;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tt-people-picker {
+  flex: none;
+  max-width: 200px;
+}
+
+.tt-people-picker.active .picker-chip {
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+
+/* One-tap chips scroll sideways rather than wrap, so the toolbar keeps its
+   height. The block padding gives coarse pointers their full hit area inside
+   the scroller (which would otherwise clip it). */
+.tt-people-chips {
+  --tt-chip-h: 28px;
+  --tt-chip-reach: max(0px, calc((var(--hit-min) - var(--tt-chip-h)) / 2));
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-1);
+  margin-block: calc(var(--tt-chip-reach) * -1);
+  padding-block: var(--tt-chip-reach);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.tt-people-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.tt-people-chip {
+  position: relative;
+  display: inline-flex;
+  min-height: var(--tt-chip-h);
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-2) 0 3px;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-round);
+  color: var(--text-dim);
+  background: var(--surface-overlay);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+
+.tt-people-chip::after {
+  position: absolute;
+  inset: calc(var(--tt-chip-reach) * -1) 0;
+  content: "";
+}
+
+.tt-people-chip b {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A teammate is a face until chosen; chosen, their first name shows too. */
+.tt-people-chip.person {
+  padding-inline-end: 3px;
+}
+
+.tt-people-chip.person .tt-people-name {
+  display: none;
+}
+
+.tt-people-chip.person[aria-pressed="true"] {
+  padding-inline-end: var(--space-2);
+}
+
+.tt-people-chip.person[aria-pressed="true"] .tt-people-name {
+  display: inline;
+}
+
+.tt-people-chip[aria-pressed="true"] {
+  border-color: var(--accent-line);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-overlay));
+}
+
+.tt-people-chip[aria-pressed="true"] b {
+  color: var(--text-dim);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tt-people-chip:hover:where(:not(:disabled)):not([aria-pressed="true"]) {
+    color: var(--text);
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.tt-people-chip:active:where(:not(:disabled)) {
+  background: var(--surface-overlay-strong);
+}
+
+.tt-people-chip:focus-visible,
+.tt-filter-clear:focus-visible,
+.tt-list-group-head:focus-visible,
+.tt-pager-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.tt-people-clear,
+.tt-display-trigger {
+  flex: none;
+}
+
+.tt-filter-summary {
+  display: inline-flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.tt-filter-summary b {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-filter-clear {
+  min-height: max(24px, var(--hit-min));
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tt-board-note {
+  margin: var(--space-3) var(--tt-inline) max(var(--space-4), var(--safe-bottom));
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-board-note a {
+  color: var(--accent);
+}
+
+/* ---- Grouped list -------------------------------------------------------- */
+
+.tt-list-group {
+  display: grid;
+  min-width: 0;
+}
+
+.tt-list-group + .tt-list-group {
+  margin-top: var(--space-2);
+}
+
+/* Section headers stay in view while their rows scroll under them. Base
+   material is opaque; capable clients frost it below. */
+.tt-list-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: max(34px, var(--hit-min));
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
+  background: var(--panel);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+
+.tt-list-group-head strong {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-list-group-chevron {
+  flex: none;
+  color: var(--muted);
+  transition: rotate var(--motion-fast) var(--motion-ease);
+}
+
+.tt-list-group-head[aria-expanded="false"] .tt-list-group-chevron {
+  rotate: -90deg;
+}
+
+:dir(rtl) .tt-list-group-head[aria-expanded="false"] .tt-list-group-chevron {
+  rotate: 90deg;
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .tt-list-group-head {
+    background: var(--material-glass-strong);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .6)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * .6)) saturate(var(--material-glass-saturation));
+  }
+}
+
+body[data-glass="off"] .tt-list-group-head,
+body[data-desktop-low-resource="true"] .tt-list-group-head {
+  background: var(--panel);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* On the package page the window body scrolls the list, so the surface must
+   not become the sticky headers' scroller. */
+.tt-page .tt-task-surface:has(> .tt-list) {
+  overflow: visible;
+}
+
+.tt-column-dot.todo { background: var(--faint); }
+.tt-column-dot.in_progress { background: var(--blue); }
+.tt-column-dot.done { background: var(--green); }
+
+/* The list's columns follow its grouping: a section already names what its
+   rows share. */
+.tt-list.group-status .tt-list-head,
+.tt-list.group-status .tt-list-row {
+  grid-template-columns: minmax(160px, 1fr) minmax(110px, .3fr);
+}
+
+.tt-list.group-assignee .tt-list-head,
+.tt-list.group-assignee .tt-list-row {
+  grid-template-columns: minmax(160px, 1fr) minmax(105px, .25fr);
+}
+
+.tt-list-assignee {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tt-list-assignee-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-list-assignee-name.muted {
+  color: var(--faint);
+}
+
+/* ---- Column pager (narrow boards) --------------------------------------- */
+
+/* Wide boards lay columns out as before; the frame takes no box. */
+.tt-kanban-frame {
+  display: contents;
+}
+
+.tt-pager {
+  --tt-pager-reach: max(0px, calc((var(--hit-min) - 30px) / 2));
+  display: none;
+}
+
+.tt-pager-item {
+  position: relative;
+  display: inline-flex;
+  min-height: 30px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-round);
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+
+/* Coarse pointers get the full hit height; the pager's block padding keeps
+   it inside the scroller, which would otherwise clip it. */
+.tt-pager-item::after {
+  position: absolute;
+  inset: calc(var(--tt-pager-reach) * -1) 0;
+  content: "";
+}
+
+.tt-pager-item .tt-column-dot { width: 7px; height: 7px; }
+.tt-pager-item.in_progress .tt-column-dot { background: var(--blue); }
+.tt-pager-item.done .tt-column-dot { background: var(--green); }
+
+.tt-pager-count {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-pager-item[aria-current="true"] {
+  border-color: var(--hair-strong);
+  color: var(--text);
+  background: var(--surface-overlay-strong);
+}
+
+.tt-pager-item[aria-current="true"] .tt-pager-count {
+  color: var(--text-dim);
+}
+
+/* ---- Narrow boards: one column at a time, a compact toolbar -------------- */
+
+@container task-tracker (max-width: 560px) {
+  /* Only the open tracker keeps its name; the others are their marks, still
+     named for assistive technology. */
+  .tt-provider-tabs button:not(.active) .tt-provider-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .tt-provider-tabs button:not(.active) {
+    padding-inline: var(--space-2);
+  }
+
+  .tt-filters .tt-search {
+    flex: 1 1 120px;
+  }
+
+  .tt-filters > .picker.tt-filter-select {
+    flex: 0 1 140px;
+    min-width: 104px;
+  }
+
+  /* The chips get their own row and scroll edge to edge. */
+  .tt-people {
+    flex: 1 1 100%;
+  }
+
+  .tt-people-chips {
+    flex: 1 1 auto;
+  }
+
+  .tt-filter-summary {
+    flex: 1 1 100%;
+    justify-content: space-between;
+    margin-inline-start: 0;
+  }
+
+  /* People alone: the pressed chip and its clear button already say it, and
+     the pager counts what is left, so the summary row would only repeat. */
+  .tt-filter-summary.people-only {
+    display: none;
+  }
+
+  /* One column at a time: skip the columns a filter emptied. */
+  .tt-kanban-frame.filtered .tt-column.empty,
+  .tt-kanban-frame.filtered .tt-pager-item.empty {
+    display: none;
+  }
+
+  /* The key line sits over the title, so titles line up at one edge. */
+  .tt-list-title {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .tt-list-title small {
+    grid-row: auto;
+  }
+
+  .tt-list-meta {
+    grid-column: 1;
+  }
+
+  .tt-kanban-frame {
+    display: flex;
+    min-width: 0;
+    min-height: 100%;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .tt-pager {
+    display: flex;
+    min-width: 0;
+    flex: none;
+    gap: var(--space-1);
+    margin-block: calc(var(--tt-pager-reach) * -1);
+    padding: var(--tt-pager-reach) var(--tt-inline);
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .tt-pager::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* The kanban is its own sideways scroller here, so columns snap like pages
+     and the pager above stays put. */
+  .tt-kanban {
+    flex: 1;
+    min-height: 0;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  .tt-kanban::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tt-list.group-status .tt-list-row,
+  .tt-list.group-assignee .tt-list-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* A phone row: title over its details, faces at the end, the status (when
+     the section doesn't name it) under the title. */
+  .tt-list-title strong {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .tt-list-row > .tt-list-assignee {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+  }
+
+  .tt-list-row > .tt-status {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .tt-list-assignee-name {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tt-people-chip,
+  .tt-pager-item,
+  .tt-list-group-chevron {
+    transition: none;
+  }
+}

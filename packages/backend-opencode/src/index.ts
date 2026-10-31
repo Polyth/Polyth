@@ -1,0 +1,1417 @@
+/** OpenCode runtime composition. Released wire formats stay in the legacy and
+ * V2 protocol adapters; detection and transport are generation-local. */
+
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import type {
+  AgentRuntime,
+  CanonicalTurnRequest,
+  Disposable,
+  JsonObject,
+  ModelRef,
+  MutationOutcome,
+  RuntimeBranchRequest,
+  RuntimeEndpoint,
+  RuntimeCapabilities,
+  RuntimeEndpointLease,
+  RuntimeEvent,
+  RuntimeObservation,
+} from "@polyth/contracts";
+import {
+  admitTranslateTurn,
+  asOcEvent,
+  backendSessionId,
+  claimTerminalStateEvidence,
+  createTranslateState,
+  errorMessageOf,
+  modelUnavailableOf,
+  providerLimitOf,
+  finishTranslateTurn,
+  flushAssistantOnIdle,
+  markTranslateTurnAborting,
+  normalizeOcObservation,
+  translateOcEvent,
+  type TranslateState,
+} from "./events.ts";
+import { classifyProviderLimitNotice } from "./providerLimit.ts";
+import {
+  createOwnedLocalEndpointLease,
+} from "./endpoint.ts";
+import {
+  createRuntimeLifecycle,
+  waitForRuntimeReady,
+  type RuntimeLifecycle,
+  type RuntimeSessionBindingWithProtocol,
+} from "./runtime.ts";
+import {
+  createOpenCodeTransport,
+  type OpenCodeTransportOptions,
+} from "./transport.ts";
+import {
+  createProtocolAdapter,
+  type ProtocolSelection,
+} from "./protocol.ts";
+import { completeSmallModelDirect } from "./smallModel.ts";
+import {
+  createSpeedMeter,
+  EVAL_PURPOSE,
+  EVAL_TIMEOUT_MS,
+  evalPrompt,
+  freeModelUtility,
+  gradeEvalReply,
+  modelKey,
+  SPEED_PROBE_PROMPT,
+  SPEED_PROBE_PURPOSE,
+  SPEED_PROBE_TIMEOUT_MS,
+  type FreeModelEvidence,
+  type SpeedSample,
+} from "./freeModelEvidence.ts";
+import {
+  createFreeModelPicker,
+  createFreeModelUsageObserver,
+  freePickMode,
+  type FreeModelPicker,
+} from "./freeModelPicks.ts";
+
+export interface OpenCodeAdapterOptions {
+  projectId?: string;
+  spaceId?: string;
+  cwd: string;
+  port?: number;
+  hostname?: string;
+  bin?: string;
+  binarySource?: "bundled" | "configured";
+  configDir?: string;
+  /** @deprecated Use configDir. */
+  dataDir?: string;
+  runtimeDir?: string;
+  stateFile?: string;
+  protocol?: ProtocolSelection;
+  configTargetId?: string;
+  startupDeadlineMs?: number;
+  probeDeadlineMs?: number;
+  /** Successful owned-local physical process launch to health readiness. */
+  onRuntimeSpawnTiming?: (durationMs: number) => void;
+}
+
+export {
+  applyOpenCodeV2DelegationGuard,
+  materializeOpenCodeV2DelegationPlugin,
+  mergeOpenCodeV2DelegationConfigContent,
+  OPENCODE_V2_DELEGATION_PLUGIN_FILENAME,
+  OPENCODE_V2_DELEGATION_PLUGIN_SOURCE,
+} from "./delegation.ts";
+export {
+  createConfigApplier,
+  normalizePluginEntries,
+  projectManagedMcp,
+  stripJsonc,
+} from "./config.ts";
+export {
+  applyOpenCodeLaunchOverlay,
+  createOpenCodeProvisioner,
+  peekOpenCodeLaunchOverlay,
+  polythSkillId,
+} from "./provisioner.ts";
+export { createOpenCodeHarness } from "./harness.ts";
+export {
+  createFreeModelPicker,
+  createFreeModelUsageObserver,
+  freePickMode,
+  FREE_PICK_MODES,
+  FREE_PICK_PROVIDER_ID,
+  isFreeModel,
+} from "./freeModelPicks.ts";
+export type { FreeModelPicker, FreePickMode, FreePickRanking, FreePickResolution } from "./freeModelPicks.ts";
+export { configureFreeModelUtility, createFreeModelEvidence } from "./freeModelEvidence.ts";
+export type { FreeModelEvidence, FreeModelUtilityRunner } from "./freeModelEvidence.ts";
+export type { OpenCodeLaunchOverlay } from "./provisioner.ts";
+export type {
+  BackendConfigApplier,
+  McpApplyBatch,
+  McpApplyEntry,
+  ProviderVisibilityApply,
+} from "./config.ts";
+export {
+  adapterForProtocol,
+  addManualModelIntoProvider,
+  applyHeaderPatch,
+  applyProviderOps,
+  dropCustomProvider,
+  inspectProviderEntry,
+  isCustomProviderEntry,
+  mergeCustomProvider,
+  mergeDiscoveredIntoProvider,
+  projectConfig,
+  protocolFromNpm,
+  reconcileDiscoveredModels,
+} from "./customProvider.ts";
+export type { StagedProviderOp } from "./customProvider.ts";
+export { createProviderHttpClient } from "./providerHttp.ts";
+export type { ProviderHttpClient, ProviderHttpTransport } from "./providerHttp.ts";
+export {
+  createRemoteOpenCodeRuntime,
+  installRemoteOpenCode,
+  probeRemoteOpenCode,
+} from "./remote.ts";
+export type { RemoteOpenCodeOptions, RemoteOpenCodeProbe } from "./remote.ts";
+export {
+  DEFAULT_REMOTE_RUNTIME_ROOT_EXPR,
+  prepareRemoteOpenCodeRuntime,
+  resolveRemoteRuntimeDir,
+} from "./remoteStorage.ts";
+export {
+  createBorrowedExternalEndpointLease,
+  createBorrowedServiceEndpointLease,
+  createOwnedLocalEndpointLease,
+  createOwnedSshEndpointLease,
+  isOwnedEndpointLease,
+  ownedSshRuntimeIdentityKey,
+  pickFreePort,
+  pidFileForDirectory,
+  readProcessIdentity,
+} from "./endpoint.ts";
+export type {
+  BorrowedExternalEndpointOptions,
+  BorrowedServiceDescriptor,
+  BorrowedServiceEndpointOptions,
+  OwnedLocalEndpointOptions,
+  OwnedSshEndpointOptions,
+  OwnedSshStorageIdentity,
+  ProcessIdentity,
+  ProcessIdentityReader,
+  ProcessSignaler,
+} from "./endpoint.ts";
+export {
+  createRuntimeLifecycle,
+  DEFAULT_RUNTIME_READY_PATHS,
+  waitForRuntimeReady,
+} from "./runtime.ts";
+export {
+  inspectOpenCodeEngine,
+  OPEN_CODE_QUARANTINE_TTL_MS,
+  OPEN_CODE_RUNTIME_STALE_TTL_MS,
+  OPENCODE_UPDATE_DISABLE_ENV,
+  OPENCODE_PROTOCOL_GENERATION,
+  POLYTH_OPENCODE_BIN_ENV,
+  POLYTH_OPENCODE_BUNDLED_BIN_ENV,
+  parseOpenCodeRuntimeMetadata,
+  openCodeEnginesMatch,
+  prepareOpenCodeRuntime,
+  resolveOpenCodeBinary,
+  sweepOpenCodeRuntimes,
+} from "./runtimeStorage.ts";
+export { createOpenCodeStorageMaintenance } from "./runtimeMaintenance.ts";
+export type {
+  OpenCodeBinarySource,
+  OpenCodeEngineIdentity,
+  OpenCodeRuntimeMetadata,
+  PreparedOpenCodeRuntime,
+  ResolvedOpenCodeBinary,
+} from "./runtimeStorage.ts";
+export type {
+  BaseRuntimeLifecycle,
+  BorrowedRuntimeLifecycle,
+  OwnedRuntimeLifecycle,
+  RuntimeBranchBindingWithProtocol,
+  RuntimeLifecycle,
+  RuntimeLifecycleOptions,
+  RuntimeSessionBindingWithProtocol,
+  RuntimeStreamObservation,
+  RuntimeTurnBindingWithProtocol,
+} from "./runtime.ts";
+export { createOpenCodeTransport } from "./transport.ts";
+export type { OpenCodeTransportOptions } from "./transport.ts";
+export {
+  createProtocolAdapter,
+  probeProtocol,
+} from "./protocol.ts";
+export { flattenLegacyModels as flattenModels } from "./protocolLegacy.ts";
+export type {
+  CreateProtocolAdapterOptions,
+  ProtocolProbe,
+  ProtocolSelection,
+} from "./protocol.ts";
+
+export const CAPABILITIES: RuntimeCapabilities = {
+  streaming: true,
+  permissions: true,
+  questions: true,
+  // Legacy support is negotiated from /doc; static fallback must stay conservative.
+  compaction: false,
+  // Delegation is canonical Polyth child-session orchestration, never OpenCode's native task tool.
+  subagents: false,
+  // Process can consume MCP at startup. Provisioning mutability is separate
+  // (requires-restart) and lives on HarnessCapabilitySupport.
+  mcp: true,
+  // live steering: a prompt posted to a busy session joins the active turn;
+  // steer() reports false on rejection so callers can fall back to queueing
+  steering: true,
+  resume: true,
+  usage: true,
+  cost: true,
+  fork: true,
+  title: "native",
+  attachments: {
+    modalities: {
+      image: "native",
+      file: "native",
+      url: "emulated",
+      pdf: "native",
+      audio: "unsupported",
+    },
+  },
+  commands: { discovery: "unsupported", invoke: "unsupported" },
+  // OpenCode reports the prompt footprint on assistant messages. The model
+  // catalog supplies the matching context limit, so the UI can show derived
+  // occupancy without pretending the provider exposes a native window gauge.
+  contextOccupancy: "derived",
+};
+
+type Listener = (sessionId: string, ev: RuntimeEvent) => void;
+
+interface SessionMaps {
+  forward: Map<string, string>;
+  reverse: Map<string, string>;
+}
+
+/** A title utility turn runs on OpenCode's hidden, tool-less `title` agent: the
+ * default `build` agent sends ~15k tokens of tools and project instructions,
+ * which weak (free) models then title instead of the request. */
+export const turnAgent = (req: Pick<CanonicalTurnRequest, "agent" | "utility">): string | undefined =>
+  req.agent ?? (req.utility?.purpose === "custom-title" ? "title" : undefined);
+
+const mapsFrom = (sessionIdMap?: Map<string, string>): SessionMaps => {
+  const forward = sessionIdMap ?? new Map<string, string>();
+  const reverse = new Map<string, string>();
+  for (const [canonical, backend] of forward) reverse.set(backend, canonical);
+  return { forward, reverse };
+};
+
+const waitForRetry = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
+  if (signal.aborted) { resolve(); return; }
+  const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
+  const timer = setTimeout(done, ms);
+  signal.addEventListener("abort", done, { once: true });
+});
+
+export interface OpenCodeRuntimeExtras {
+  /** Generation-aware seam shared by production and socket-backed tests. */
+  lifecycle: RuntimeLifecycle;
+  sessionIdMap?: Map<string, string>;
+  log?: (level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject) => void;
+  cwd?: string;
+  /** Optional liveness policy for deployments whose endpoint promises
+   * heartbeats. Disabled by default because an idle legacy SSE may be quiet. */
+  sseStallMs?: number;
+  /** Command Code can report a provider-window stop as reasoning and then
+   * leave SSE live without a terminal event. After this quiet grace period,
+   * synthesize the normal retryable terminal event. Test seam only. */
+  rateLimitStallMs?: number;
+  /** Free-model auto-pick state. One per facade unless a test injects it. */
+  freeModelPicker?: FreeModelPicker;
+  /** Evidence store for the facade's own picker; the process-wide one by default. */
+  freeModelEvidence?: FreeModelEvidence;
+}
+
+/** A turn on a free auto-pick re-reads the live catalog when the remembered
+ *  one is older than this, so a model OpenCode just retired is not routed. */
+const FREE_PICK_CATALOG_MAX_AGE_MS = 60_000;
+/** A turn on a pick waits at most this long for missing evidence it ranks by
+ *  (the leaderboard, test responses). Whatever is measured by then ranks
+ *  first; the rest keeps measuring in the background for later turns. */
+const FREE_PICK_EVIDENCE_WAIT_MS = 25_000;
+
+export interface OpenCodeRuntimeLifecycleOptions {
+  lease: RuntimeEndpointLease;
+  protocol?: ProtocolSelection;
+  protocolDeadlineMs?: number;
+  startupDeadlineMs?: number;
+  probeDeadlineMs?: number;
+  transport?: Omit<OpenCodeTransportOptions, "baseUrl" | "headers" | "directory">;
+}
+
+/** Public wiring point: transport and protocol factories are generation-local
+ * and rebuilt together whenever the endpoint lease changes. */
+export const createOpenCodeRuntimeLifecycle = async (
+  options: OpenCodeRuntimeLifecycleOptions,
+): Promise<RuntimeLifecycle> =>
+  await createRuntimeLifecycle({
+    lease: options.lease,
+    createTransport(endpoint, headers) {
+      return createOpenCodeTransport({
+        ...options.transport,
+        baseUrl: endpoint.url,
+        headers,
+        directory: endpoint.location.directory,
+      });
+    },
+    async createProtocol(transport, endpoint) {
+      await waitForRuntimeReady(transport, {
+        startupDeadlineMs: options.startupDeadlineMs ?? 20_000,
+        probeDeadlineMs: options.probeDeadlineMs ?? 250,
+      });
+      return await createProtocolAdapter({
+        protocol: options.protocol ?? "auto",
+        transport,
+        endpoint,
+        deadlineMs: options.protocolDeadlineMs,
+      });
+    },
+  });
+
+export interface ManagedOpenCodeRuntime extends AgentRuntime {
+  readonly lifecycle: RuntimeLifecycle;
+}
+
+export const attachRuntimeLifecycle = (
+  facade: AgentRuntime,
+  lifecycle: RuntimeLifecycle,
+): ManagedOpenCodeRuntime => {
+  const lifecycleListeners = new Set<
+    Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]
+  >();
+  const subscribeFacadeLifecycle = facade.onLifecycle?.bind(facade);
+  facade.onLifecycle = (callback) => {
+    lifecycleListeners.add(callback);
+    const subscription = subscribeFacadeLifecycle?.(callback);
+    return {
+      dispose() {
+        lifecycleListeners.delete(callback);
+        subscription?.dispose();
+      },
+    };
+  };
+  const emitEndpointReplacement = (
+    endpoint: RuntimeEndpoint,
+    reason: Parameters<RuntimeLifecycle["refresh"]>[0] | "crash" | "config" | "manual",
+  ): void => {
+    for (const callback of lifecycleListeners) {
+      callback({
+        type: "endpoint-replaced",
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+        reason,
+      });
+    }
+  };
+  const refresh = lifecycle.refresh.bind(lifecycle);
+  lifecycle.refresh = async (reason) => {
+    const previous = await lifecycle.endpoint();
+    const endpoint = await refresh(reason);
+    if (
+      endpoint.authorityId !== previous.authorityId
+      || endpoint.generation !== previous.generation
+    ) {
+      emitEndpointReplacement(endpoint, reason);
+    }
+    return endpoint;
+  };
+  if (lifecycle.control.kind === "owned" && "restart" in lifecycle) {
+    const restart = lifecycle.restart.bind(lifecycle);
+    lifecycle.restart = async (reason) => {
+      const previous = await lifecycle.endpoint();
+      const endpoint = await restart(reason);
+      if (
+        endpoint.authorityId !== previous.authorityId
+        || endpoint.generation !== previous.generation
+      ) {
+        emitEndpointReplacement(endpoint, reason);
+      }
+      return endpoint;
+    };
+    const withConfigRestart = lifecycle.withConfigRestart.bind(lifecycle);
+    lifecycle.withConfigRestart = async (action) =>
+      withConfigRestart(async (restartGeneration) => {
+        let previous = await lifecycle.endpoint();
+        return action(async () => {
+          const endpoint = await restartGeneration();
+          if (
+            endpoint.authorityId !== previous.authorityId
+            || endpoint.generation !== previous.generation
+          ) {
+            emitEndpointReplacement(endpoint, "config");
+          }
+          previous = endpoint;
+          return endpoint;
+        });
+      });
+  }
+  facade.endpoint ??= () => lifecycle.endpoint();
+  facade.protocol ??= () => lifecycle.protocol();
+  facade.reconcile ??= async (binding, after) => {
+    const protocol = await lifecycle.protocol();
+    return lifecycle.reconcile({ ...binding, protocol }, after);
+  };
+  return Object.assign(facade, { lifecycle });
+};
+
+/** Provider-neutral facade over one lifecycle. It owns translation/listeners
+ * only; every wire path is selected by the lifecycle's protocol adapter. */
+export const createOpenCodeRuntimeFacade = (
+  extras: OpenCodeRuntimeExtras,
+): AgentRuntime => {
+  const lifecycle = extras.lifecycle;
+  const maps = mapsFrom(extras.sessionIdMap);
+  const listeners = new Set<Listener>();
+  const observationListeners = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
+  const lifecycleListeners = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
+  const translate = new Map<string, TranslateState>();
+  const activeTurn = new Map<string, { turnId: string; aborting: boolean }>();
+  const rateLimitStalls = new Map<string, {
+    turnId: string;
+    hint: NonNullable<ReturnType<typeof classifyProviderLimitNotice>>;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  const suppressedAfterAbort = new Set<string>();
+  const reconciliationOrdinals = new Map<string, number>();
+  const seenEventIds = new Set<string>();
+  // Free-pick evidence runs as host one-shot turns on this very runtime: the
+  // free tier answers only OpenCode. A probe turn is recognised by its utility
+  // purpose and timed from its own events; it stays ordinary history-free
+  // one-shot work in every other respect.
+  let runtimeSelf: AgentRuntime | undefined;
+  const pendingSpeedProbes = new Set<string>();
+  const speedProbes = new Map<string, { key: string; meter: ReturnType<typeof createSpeedMeter> }>();
+  /** Native session of each running measurement turn, by purpose and model. */
+  const utilityTurns = new Map<string, string>();
+  const runUtility = async (model: ModelRef, prompt: string, purpose: string, timeoutMs: number): Promise<string> => {
+    const runner = freeModelUtility();
+    const runtime = runtimeSelf;
+    if (!runner || !runtime || !extras.cwd) {
+      throw Object.assign(new Error("free-model measurement needs the host one-shot service"), { code: "unsupported" });
+    }
+    const key = `${purpose}\u0000${modelKey(model)}`;
+    try {
+      return await runner(runtime, { cwd: extras.cwd, prompt, model, purpose, timeoutMs });
+    } catch (error) {
+      if (disposed) throw Object.assign(new Error("runtime disposed during free-model measurement"), { code: "cancelled" });
+      // A one-shot timeout stops waiting, not the model: end the native turn
+      // so an abandoned measurement does not keep spending the free tier.
+      const sessionId = utilityTurns.get(key);
+      if (sessionId && activeTurn.has(sessionId)) {
+        await runtime.abort(sessionId).catch((abortError) =>
+          log("debug", "opencode free-pick measurement abort failed", { error: String(abortError) }));
+      }
+      throw error;
+    } finally {
+      utilityTurns.delete(key);
+    }
+  };
+  const freePicks = extras.freeModelPicker ?? createFreeModelPicker({
+    ...(extras.freeModelEvidence ? { evidence: extras.freeModelEvidence } : {}),
+    measurements: {
+      async measureSpeed(model): Promise<SpeedSample> {
+        const key = modelKey(model);
+        pendingSpeedProbes.add(key);
+        try {
+          await runUtility(model, SPEED_PROBE_PROMPT, SPEED_PROBE_PURPOSE, SPEED_PROBE_TIMEOUT_MS);
+          const probe = [...speedProbes.values()].find((entry) => entry.key === key);
+          if (!probe) throw Object.assign(new Error("free model probe turn was not observed"), { code: "insufficient" });
+          return probe.meter.sample(Date.now());
+        } finally {
+          pendingSpeedProbes.delete(key);
+          for (const [sessionId, entry] of speedProbes) if (entry.key === key) speedProbes.delete(sessionId);
+        }
+      },
+      async evaluate(model) {
+        return gradeEvalReply(await runUtility(model, evalPrompt(), EVAL_PURPOSE, EVAL_TIMEOUT_MS));
+      },
+    },
+  });
+  const freeModelUsage = createFreeModelUsageObserver(freePicks);
+  /** Start timing a probe turn just before it is submitted. */
+  const armSpeedProbe = (req: CanonicalTurnRequest): void => {
+    const purpose = req.utility?.purpose;
+    if ((purpose === SPEED_PROBE_PURPOSE || purpose === EVAL_PURPOSE) && req.model) {
+      utilityTurns.set(`${purpose}\u0000${modelKey(req.model)}`, req.sessionId);
+    }
+    if (purpose !== SPEED_PROBE_PURPOSE || !req.model) return;
+    const key = modelKey(req.model);
+    if (pendingSpeedProbes.has(key)) speedProbes.set(req.sessionId, { key, meter: createSpeedMeter(performance.now()) });
+  };
+  const observeSpeedProbe = (sessionId: string, event: NonNullable<ReturnType<typeof asOcEvent>>): void => {
+    speedProbes.get(sessionId)?.meter.observe(event, performance.now());
+  };
+  const log = extras.log ?? ((level, msg, data) => {
+    if (level === "debug") console.debug(msg, data ?? "");
+  });
+
+  let sseAbort: AbortController | undefined;
+  let disposed = false;
+  const lifetime = new AbortController();
+
+  const clearRateLimitStall = (sessionId: string): void => {
+    const stall = rateLimitStalls.get(sessionId);
+    if (!stall) return;
+    clearTimeout(stall.timer);
+    rateLimitStalls.delete(sessionId);
+  };
+
+  const armRateLimitStall = (
+    sessionId: string,
+    turn: { turnId: string; aborting: boolean },
+    hint: NonNullable<ReturnType<typeof classifyProviderLimitNotice>>,
+  ): void => {
+    clearRateLimitStall(sessionId);
+    const timer = setTimeout(() => {
+      const pending = rateLimitStalls.get(sessionId);
+      if (!pending || pending.turnId !== turn.turnId || activeTurn.get(sessionId) !== turn) return;
+      rateLimitStalls.delete(sessionId);
+      activeTurn.delete(sessionId);
+      finishTranslateTurn(stateFor(sessionId), turn.turnId);
+      emit(sessionId, {
+        type: "turn/stopped",
+        reason: "error",
+        error: "provider rate limit reached",
+        retry: hint,
+      });
+    }, extras.rateLimitStallMs ?? 15_000);
+    timer.unref?.();
+    rateLimitStalls.set(sessionId, { turnId: turn.turnId, hint, timer });
+  };
+
+  const touchRateLimitStall = (sessionId: string): void => {
+    const pending = rateLimitStalls.get(sessionId);
+    const turn = activeTurn.get(sessionId);
+    if (pending && turn && pending.turnId === turn.turnId) armRateLimitStall(sessionId, turn, pending.hint);
+  };
+
+  const emit = (canonical: string, ev: RuntimeEvent) => {
+    for (const cb of listeners) cb(canonical, ev);
+  };
+
+  const refreshNativeCommands = (): void => {
+    void lifecycle.usingProtocol((protocol) =>
+      protocol.commands ? protocol.commands() : Promise.resolve([]))
+      .then((commands) => {
+        for (const canonical of maps.forward.keys()) {
+          emit(canonical, { type: "runtime/commands-changed", commands });
+        }
+      })
+      .catch((error) => log("debug", "opencode command refresh failed", { error: String(error) }));
+  };
+
+  const emitLifecycle = (
+    notification: Parameters<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>[0],
+  ): void => {
+    for (const cb of lifecycleListeners) cb(notification);
+  };
+
+  const stateFor = (canonical: string): TranslateState => {
+    let s = translate.get(canonical);
+    if (!s) {
+      s = createTranslateState();
+      translate.set(canonical, s);
+    }
+    return s;
+  };
+
+  const admitTurn = (sessionId: string, model?: ModelRef): void => {
+    if (disposed) return;
+    clearRateLimitStall(sessionId);
+    suppressedAfterAbort.delete(sessionId);
+    if (activeTurn.has(sessionId)) return;
+    const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    activeTurn.set(sessionId, { turnId, aborting: false });
+    admitTranslateTurn(stateFor(sessionId), turnId, model);
+    emit(sessionId, { type: "turn/started", turnId, ...(model ? { model } : {}) });
+  };
+
+  const terminalEvents = (
+    sessionId: string,
+    event: NonNullable<ReturnType<typeof asOcEvent>>,
+    state: TranslateState,
+  ): RuntimeEvent[] => {
+    const terminal = claimTerminalStateEvidence(event, state);
+    const turn = activeTurn.get(sessionId);
+    if (!terminal || !turn) return [];
+    const assistant = terminal.state === "idle" ? flushAssistantOnIdle(state) : [];
+    clearRateLimitStall(sessionId);
+    activeTurn.delete(sessionId);
+    finishTranslateTurn(state, turn.turnId);
+    if (terminal.state === "idle") {
+      return [
+        ...assistant,
+        {
+          type: "turn/stopped",
+          reason: turn.aborting ? "aborted" : "completed",
+        },
+      ];
+    }
+    if (terminal.state === "interrupted") {
+      return [{ type: "turn/stopped", reason: "aborted" }];
+    }
+    const retry = providerLimitOf(event);
+    // Capacity first: a wait-and-retry failure is never a model-selection one.
+    const modelUnavailable = !retry && modelUnavailableOf(event);
+    return [{
+      type: "turn/stopped",
+      reason: "error",
+      error: errorMessageOf(event) ?? "session failed",
+      ...(retry ? { retry } : {}),
+      ...(modelUnavailable ? { code: "model-unavailable" as const } : {}),
+    }];
+  };
+
+  const finishAbortedTurn = (
+    sessionId: string,
+    turn: { turnId: string; aborting: boolean } | undefined,
+  ): void => {
+    if (!turn) return;
+    clearRateLimitStall(sessionId);
+    activeTurn.delete(sessionId);
+    finishTranslateTurn(stateFor(sessionId), turn.turnId);
+    suppressedAfterAbort.add(sessionId);
+    emit(sessionId, { type: "turn/stopped", reason: "aborted" });
+  };
+
+  const clearAbortRequest = (
+    sessionId: string,
+    turn: { turnId: string; aborting: boolean } | undefined,
+  ): void => {
+    if (!turn || activeTurn.get(sessionId) !== turn) return;
+    turn.aborting = false;
+    const state = stateFor(sessionId);
+    if (state.abortingTurnId === turn.turnId) state.abortingTurnId = undefined;
+  };
+
+  const handlePayload = (
+    id: string | undefined,
+    data: unknown,
+    streamEndpoint?: Pick<RuntimeEndpoint, "authorityId" | "generation" | "location">,
+  ) => {
+    if (disposed) return;
+    const ev = asOcEvent(data);
+    if (!ev) return;
+    if (ev.type === "catalog.updated") {
+      refreshNativeCommands();
+      return;
+    }
+    const eid = id ?? ev.id;
+    if (eid) {
+      const eventIdentity = streamEndpoint
+        ? `${streamEndpoint.authorityId}\0${streamEndpoint.generation}\0${eid}`
+        : eid;
+      if (seenEventIds.has(eventIdentity)) return;
+      seenEventIds.add(eventIdentity);
+      if (seenEventIds.size > 8000) {
+        const first = seenEventIds.values().next().value;
+        if (first) seenEventIds.delete(first);
+      }
+    }
+    const backendId = backendSessionId(ev);
+    if (!backendId) return;
+    const canonical = maps.reverse.get(backendId);
+    if (!canonical) {
+      log("debug", "opencode event for unmapped session", { backendId, type: ev.type ?? "" });
+      return;
+    }
+    freeModelUsage.observe(canonical, ev);
+    observeSpeedProbe(canonical, ev);
+    const st = stateFor(canonical);
+    touchRateLimitStall(canonical);
+    if (suppressedAfterAbort.has(canonical)) return;
+    const observationEndpoint = streamEndpoint;
+    if (observationEndpoint && observationListeners.size > 0) {
+      const reconciliationOrdinal = reconciliationOrdinals.get(canonical);
+      if (reconciliationOrdinal === undefined) {
+        log("debug", "opencode event arrived before the session reconciliation barrier", {
+          canonical,
+          backendId,
+          type: ev.type ?? "",
+        });
+        return;
+      }
+      const observed = {
+        authorityId: observationEndpoint.authorityId,
+        generation: observationEndpoint.generation,
+        location: observationEndpoint.location,
+        backendSessionId: backendId,
+        reconciliationOrdinal,
+      };
+      const normalized = normalizeOcObservation({
+        data,
+        channel: "sse",
+        observed,
+        current: observed,
+        state: st,
+        ...(id ? { cursorAfter: id } : {}),
+      });
+      if (normalized.kind !== "accepted") return;
+      const translated = normalized.observation.events;
+      const events = [
+        ...translated,
+        ...terminalEvents(canonical, ev, st),
+      ];
+      const observation = { ...normalized.observation, events };
+      for (const cb of observationListeners) cb(canonical, observation);
+      const notice = translated.find((event) => event.type === "assistant/message")?.reasoning;
+      const hint = notice ? classifyProviderLimitNotice(notice) : null;
+      const turn = activeTurn.get(canonical);
+      if (hint && turn) armRateLimitStall(canonical, turn, hint);
+      return;
+    }
+    const translated = translateOcEvent(ev, st);
+    for (const runtimeEv of translated) emit(canonical, runtimeEv);
+    for (const runtimeEv of terminalEvents(canonical, ev, st)) emit(canonical, runtimeEv);
+    const notice = translated.find((event) => event.type === "assistant/message")?.reasoning;
+    const hint = notice ? classifyProviderLimitNotice(notice) : null;
+    const turn = activeTurn.get(canonical);
+    if (hint && turn) armRateLimitStall(canonical, turn, hint);
+  };
+
+  const connectSse = async () => {
+    let delay = 500;
+    let lastEndpointUnavailableLog = 0;
+    while (!disposed) {
+      sseAbort = new AbortController();
+      let stalled = false;
+      let stallTimer: NodeJS.Timeout | undefined;
+      const armStall = (): void => {
+        if (disposed || !extras.sseStallMs) return;
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          stalled = true;
+          sseAbort?.abort();
+        }, extras.sseStallMs);
+      };
+      let currentEndpoint: RuntimeEndpoint;
+      try {
+        currentEndpoint = await lifecycle.endpoint();
+      } catch (error) {
+        if (disposed) return;
+        const now = Date.now();
+        if (now - lastEndpointUnavailableLog >= 30_000) {
+          lastEndpointUnavailableLog = now;
+          log("debug", "opencode endpoint unavailable for sse", { error: String(error) });
+        }
+        const requestedRetry = Number((error as { retryAfterMs?: unknown }).retryAfterMs);
+        const retry = Number.isSafeInteger(requestedRetry) && requestedRetry > 0
+          ? Math.min(requestedRetry, 300_000)
+          : delay;
+        await waitForRetry(retry * (0.8 + Math.random() * 0.4), lifetime.signal);
+        delay = Math.min(delay * 2, 5000);
+        continue;
+      }
+      if (disposed) return;
+      const endpointFields = {
+        authorityId: currentEndpoint.authorityId,
+        generation: currentEndpoint.generation,
+      };
+      let connectedAt: number | undefined;
+      let reason = "stream ended";
+      try {
+        await lifecycle.streamEvents({
+          signal: sseAbort.signal,
+          onOpen() {
+            if (disposed) return;
+            connectedAt = Date.now();
+            emitLifecycle({ type: "stream-connected", ...endpointFields });
+            armStall();
+          },
+          onActivity: armStall,
+          onEvent(observation) {
+            armStall();
+            const envelope = observation.value && typeof observation.value === "object"
+              ? observation.value as { id?: unknown; data?: unknown }
+              : { data: observation.value };
+            handlePayload(
+              typeof envelope.id === "string" ? envelope.id : undefined,
+              envelope.data,
+              observation,
+            );
+          },
+        });
+      } catch (err) {
+        if (disposed) return;
+        if ((err as { code?: string }).code === "capability-unsupported") {
+          log("debug", "opencode event stream is capability-gated", { error: String(err) });
+          return;
+        }
+        if (
+          (err as { name?: string }).name === "AbortError"
+          && !stalled
+          && sseAbort.signal.aborted
+        ) return;
+        reason = stalled ? "stream liveness deadline elapsed" : String(err);
+        log("debug", "opencode sse disconnected", { error: String(err) });
+      } finally {
+        if (stallTimer) clearTimeout(stallTimer);
+      }
+      if (disposed) return;
+      if (connectedAt !== undefined && Date.now() - connectedAt >= 10_000) delay = 500;
+      emitLifecycle({ type: "stream-disconnected", ...endpointFields, reason });
+      try {
+        await lifecycle.refresh("disconnect");
+      } catch (error) {
+        log("debug", "opencode endpoint refresh failed", { error: String(error) });
+      }
+      await waitForRetry(delay * (0.8 + Math.random() * 0.4), lifetime.signal);
+      delay = Math.min(delay * 2, 5000);
+    }
+  };
+
+  void connectSse();
+
+  const setMapping = (canonicalSessionId: string, backendSessionId: string): void => {
+    if (disposed) return;
+    const previous = maps.forward.get(canonicalSessionId);
+    if (previous && previous !== backendSessionId) maps.reverse.delete(previous);
+    maps.forward.set(canonicalSessionId, backendSessionId);
+    maps.reverse.set(backendSessionId, canonicalSessionId);
+  };
+
+  const removeMapping = (sessionId: string): string => {
+    const canonicalSessionId = maps.forward.has(sessionId)
+      ? sessionId
+      : maps.reverse.get(sessionId) ?? sessionId;
+    const backendSessionId = maps.forward.get(canonicalSessionId) ?? sessionId;
+    maps.forward.delete(canonicalSessionId);
+    if (maps.reverse.get(backendSessionId) === canonicalSessionId) {
+      maps.reverse.delete(backendSessionId);
+    }
+    reconciliationOrdinals.delete(canonicalSessionId);
+    clearRateLimitStall(canonicalSessionId);
+    activeTurn.delete(canonicalSessionId);
+    translate.delete(canonicalSessionId);
+    suppressedAfterAbort.delete(canonicalSessionId);
+    return backendSessionId;
+  };
+
+  const lifecycleBinding = async (
+    canonicalSessionId: string,
+    backendSessionId = maps.forward.get(canonicalSessionId),
+  ): Promise<RuntimeSessionBindingWithProtocol> => {
+    const endpoint = await lifecycle.endpoint();
+    return {
+      canonicalSessionId,
+      ...(backendSessionId ? { backendSessionId } : {}),
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      location: endpoint.location,
+      protocol: await lifecycle.protocol(),
+    };
+  };
+
+  const outcomeValue = <T,>(outcome: MutationOutcome<T>): T => {
+    if (outcome.kind === "confirmed") return outcome.value;
+    throw Object.assign(new Error(outcome.message), {
+      code: outcome.kind === "rejected" ? outcome.code : "outcome-unknown",
+      component: outcome.kind === "unknown" ? "harness-transport"
+        : ["auth-rejected", "http-401", "http-403"].includes(outcome.code) ? "auth"
+        : ["invalid-input", "http-400", "http-422"].includes(outcome.code) ? "validation" : "provider",
+      operation: "mutation",
+      retryability: "never",
+      recovery: lifecycle.recoveryState?.() ?? "none",
+      mutationOutcome: outcome.kind,
+      ...(outcome.kind === "unknown" ? { operationId: outcome.operationId } : {}),
+    });
+  };
+
+  /** Route a free auto-pick to the concrete model it names now. Any other
+   *  ref passes through untouched. The concrete model is what OpenCode runs
+   *  and what `turn/started` reports; the session keeps the user's choice. */
+  const routeModel = async (sessionId: string, model: ModelRef | undefined): Promise<ModelRef | undefined> => {
+    const mode = freePickMode(model);
+    if (!mode) return model;
+    const refresh = () => lifecycle.usingProtocol(async (protocol) => { freePicks.withPicks(await protocol.models()); })
+      .catch((error) => log("debug", "opencode free-pick catalog refresh failed", { error: String(error) }));
+    if (freePicks.catalogAge() > FREE_PICK_CATALOG_MAX_AGE_MS) await refresh();
+    // A V2 catalog read right after startup can report every provider as
+    // not yet connected; one fresh read settles the pool before evidence is
+    // gathered for it or the pick is refused.
+    if (freePicks.rank(mode).length === 0) await refresh();
+    await freePicks.prepare(mode, FREE_PICK_EVIDENCE_WAIT_MS);
+    const resolved = freePicks.resolve(model);
+    if (!resolved) {
+      throw Object.assign(new Error("No free model is available on this engine right now. Pick a model from the list."), {
+        code: "invalid-model",
+      });
+    }
+    freeModelUsage.routed(sessionId, resolved.model);
+    return resolved.model;
+  };
+
+  const rejectedRoute = (error: unknown): MutationOutcome<never> | undefined =>
+    (error as { code?: unknown })?.code === "invalid-model"
+      ? { kind: "rejected", code: "invalid-model", message: (error as Error).message }
+      : undefined;
+
+  return runtimeSelf = {
+    capabilities: () => lifecycle.usingProtocol(async (protocol) => {
+      const negotiated = await protocol.capabilities();
+      return {
+        ...CAPABILITIES,
+        compaction: negotiated.compaction === true,
+        commands: negotiated.commands === true
+          ? { discovery: "native", invoke: "raw-native-input" }
+          : { discovery: "unsupported", invoke: "unsupported" },
+      };
+    }),
+    models: () => lifecycle.usingProtocol(async (protocol) => freePicks.withPicks(await protocol.models())),
+    agents: () => lifecycle.usingProtocol((protocol) => protocol.agents()),
+    commands: () => lifecycle.usingProtocol((protocol) =>
+      protocol.commands ? protocol.commands() : Promise.resolve([])),
+    sessions: () => lifecycle.usingProtocol((protocol) => protocol.sessions()),
+    listAllProviders: () => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.listAllProviders) throw Object.assign(new Error("provider listing unavailable"), { code: "unsupported" });
+      return protocol.listAllProviders();
+    }),
+    providerAuthMethods: () => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.providerAuthMethods) throw Object.assign(new Error("provider auth methods unavailable"), { code: "unsupported" });
+      return protocol.providerAuthMethods();
+    }),
+    providerAuthorize: (providerID, method, inputs) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.providerAuthorize) throw Object.assign(new Error("provider oauth unavailable"), { code: "unsupported" });
+      return protocol.providerAuthorize(providerID, method, inputs);
+    }),
+    providerAuthCallback: (providerID, method, code) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.providerAuthCallback) throw Object.assign(new Error("provider oauth unavailable"), { code: "unsupported" });
+      return protocol.providerAuthCallback(providerID, method, code);
+    }),
+    setProviderApiKey: (providerID, key, metadata) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.setProviderApiKey) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
+      return protocol.setProviderApiKey(providerID, key, metadata);
+    }),
+    setProviderAuth: (providerID, info) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.setProviderAuth) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
+      return protocol.setProviderAuth(providerID, info);
+    }),
+    removeProviderAuth: (providerID) => lifecycle.usingProtocol((protocol) => {
+      if (!protocol.removeProviderAuth) throw Object.assign(new Error("provider auth unavailable"), { code: "unsupported" });
+      return protocol.removeProviderAuth(providerID);
+    }),
+    async history(sessionId) {
+      const canonicalSessionId = maps.reverse.get(sessionId) ?? sessionId;
+      const backendSessionId = maps.forward.get(canonicalSessionId) ?? sessionId;
+      const binding = await lifecycleBinding(canonicalSessionId, backendSessionId);
+      return lifecycle.usingProtocol((protocol) => protocol.history(binding));
+    },
+    async ensureSession(canonical) {
+      const outcome = await lifecycle.ensureSession(
+        await lifecycleBinding(
+          canonical.sessionId,
+          maps.forward.get(canonical.sessionId) ?? canonical.backendSessionId,
+        ),
+        randomUUID(),
+        canonical.title,
+      );
+      const value = outcomeValue(outcome);
+      setMapping(canonical.sessionId, value.backendSessionId);
+      return value.backendSessionId;
+    },
+    async createSessionOperation(canonical, operationId) {
+      const outcome = await lifecycle.ensureSession(
+        await lifecycleBinding(
+          canonical.sessionId,
+          maps.forward.get(canonical.sessionId) ?? canonical.backendSessionId,
+        ),
+        operationId,
+        canonical.title,
+      );
+      if (outcome.kind === "confirmed") {
+        setMapping(canonical.sessionId, outcome.value.backendSessionId);
+      }
+      return outcome;
+    },
+    async resetSession(canonical) {
+      const binding = await lifecycleBinding(canonical.sessionId);
+      const outcome = await lifecycle.resetSession(binding, canonical.title, randomUUID());
+      const value = outcomeValue(outcome);
+      setMapping(canonical.sessionId, value.backendSessionId);
+      translate.delete(canonical.sessionId);
+      activeTurn.delete(canonical.sessionId);
+      return value.backendSessionId;
+    },
+    async resetSessionOperation(canonical, operationId) {
+      const binding = await lifecycleBinding(canonical.sessionId);
+      const outcome = await lifecycle.resetSession(
+        binding,
+        canonical.title,
+        operationId,
+      );
+      if (outcome.kind === "confirmed") {
+        setMapping(canonical.sessionId, outcome.value.backendSessionId);
+        translate.delete(canonical.sessionId);
+        activeTurn.delete(canonical.sessionId);
+      }
+      return outcome;
+    },
+    // Create a backend session holding EXACTLY the requested
+    // canonical prefix via OpenCode's native /session/{id}/fork. The fork
+    // boundary is resolved positionally (never by text search), the child is
+    // read back and verified, and the canonical↔backend mapping swaps only
+    // after verification — a mismatch or transport failure leaves every
+    // existing mapping untouched.
+    async branchSession(request: RuntimeBranchRequest): Promise<string> {
+      const source = await lifecycleBinding(request.sourceSessionId);
+      const target = await lifecycleBinding(request.target.sessionId, undefined);
+      const outcome = await lifecycle.branchSession({
+        source,
+        target,
+        ...(request.target.title ? { title: request.target.title } : {}),
+        history: request.history,
+      }, randomUUID());
+      const value = outcomeValue(outcome);
+      setMapping(request.target.sessionId, value.backendSessionId);
+      if (request.target.sessionId === request.sourceSessionId) {
+        translate.delete(request.sourceSessionId);
+        activeTurn.delete(request.sourceSessionId);
+      }
+      return value.backendSessionId;
+    },
+    async branchSessionOperation(request, operationId) {
+      const source = await lifecycleBinding(request.sourceSessionId);
+      const target = await lifecycleBinding(request.target.sessionId, undefined);
+      const outcome = await lifecycle.branchSession({
+        source,
+        target,
+        ...(request.target.title ? { title: request.target.title } : {}),
+        history: request.history,
+      }, operationId);
+      if (outcome.kind === "confirmed") {
+        setMapping(request.target.sessionId, outcome.value.backendSessionId);
+        if (request.target.sessionId === request.sourceSessionId) {
+          translate.delete(request.sourceSessionId);
+          activeTurn.delete(request.sourceSessionId);
+        }
+      }
+      return outcome;
+    },
+    async discardSession(sessionId: string): Promise<void> {
+      const backendId = maps.forward.get(sessionId) ?? sessionId;
+      const canonicalId = maps.reverse.get(backendId) ?? sessionId;
+      const binding = await lifecycleBinding(canonicalId, backendId);
+      const outcome = await lifecycle.deleteSession(binding, randomUUID());
+      outcomeValue(outcome);
+      removeMapping(sessionId);
+    },
+    async discardSessionOperation(sessionId, operationId) {
+      const backendId = maps.forward.get(sessionId) ?? sessionId;
+      const canonicalId = maps.reverse.get(backendId) ?? sessionId;
+      const binding = await lifecycleBinding(canonicalId, backendId);
+      const outcome = await lifecycle.deleteSession(binding, operationId);
+      if (outcome.kind === "confirmed") removeMapping(sessionId);
+      return outcome;
+    },
+    async startTurn(req: CanonicalTurnRequest) {
+      freeModelUsage.routed(req.sessionId, undefined);
+      const model = await routeModel(req.sessionId, req.model);
+      armSpeedProbe(req);
+      const outcome = await lifecycle.submit({
+        session: await lifecycleBinding(req.sessionId),
+        text: req.text,
+        ...(req.command ? { command: req.command } : {}),
+        ...(req.attachments ? { attachments: req.attachments } : {}),
+        ...(model ? { model } : {}),
+        ...(turnAgent(req) ? { agent: turnAgent(req) } : {}),
+      }, randomUUID());
+      outcomeValue(outcome);
+      admitTurn(req.sessionId, model);
+    },
+    async startTurnOperation(req, operationId) {
+      let model: ModelRef | undefined;
+      freeModelUsage.routed(req.sessionId, undefined);
+      try {
+        model = await routeModel(req.sessionId, req.model);
+      } catch (error) {
+        const rejected = rejectedRoute(error);
+        if (rejected) return rejected;
+        throw error;
+      }
+      armSpeedProbe(req);
+      const outcome = await lifecycle.submit({
+        session: await lifecycleBinding(req.sessionId),
+        text: req.text,
+        ...(req.command ? { command: req.command } : {}),
+        ...(req.attachments ? { attachments: req.attachments } : {}),
+        ...(model ? { model } : {}),
+        ...(turnAgent(req) ? { agent: turnAgent(req) } : {}),
+      }, operationId);
+      if (outcome.kind === "confirmed") admitTurn(req.sessionId, model);
+      return outcome;
+    },
+    completeSmallModel: (request) => completeSmallModelDirect(request),
+    async steer(sessionId: string, text: string, model?: ModelRef, agent?: string): Promise<boolean> {
+      // Only meaningful while a turn is active; posting to an idle session
+      // would start a fresh turn instead of steering.
+      if (!activeTurn.has(sessionId)) return false;
+      const routed = await routeModel(sessionId, model);
+      const binding = await lifecycleBinding(sessionId);
+      const outcome = await lifecycle.steer({
+        session: binding,
+        text,
+        ...(routed ? { model: routed } : {}),
+        ...(agent ? { agent } : {}),
+      }, randomUUID());
+      return outcome.kind === "confirmed";
+    },
+    async steerOperation(sessionId, text, operationId, model, agent) {
+      if (!activeTurn.has(sessionId)) {
+        return {
+          kind: "rejected",
+          code: "steer-not-admitted",
+          message: "session has no active turn to steer",
+        };
+      }
+      let routed: ModelRef | undefined;
+      try {
+        routed = await routeModel(sessionId, model);
+      } catch (error) {
+        const rejected = rejectedRoute(error);
+        if (rejected) return rejected;
+        throw error;
+      }
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.steer({
+        session: binding,
+        text,
+        ...(routed ? { model: routed } : {}),
+        ...(agent ? { agent } : {}),
+      }, operationId);
+    },
+    async abort(sessionId: string) {
+      const turn = activeTurn.get(sessionId);
+      if (turn) {
+        turn.aborting = true;
+        markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
+      }
+      const binding = await lifecycleBinding(sessionId);
+      const outcome = await lifecycle.abort(binding, randomUUID());
+      if (outcome.kind === "rejected") clearAbortRequest(sessionId, turn);
+      outcomeValue(outcome);
+      finishAbortedTurn(sessionId, turn);
+    },
+    async abortOperation(sessionId, operationId) {
+      const turn = activeTurn.get(sessionId);
+      if (turn) {
+        turn.aborting = true;
+        markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
+      }
+      const binding = await lifecycleBinding(sessionId);
+      const outcome = await lifecycle.abort(binding, operationId);
+      if (outcome.kind === "confirmed") {
+        finishAbortedTurn(sessionId, turn);
+      } else if (outcome.kind === "rejected") {
+        clearAbortRequest(sessionId, turn);
+      }
+      return outcome;
+    },
+    async compact(sessionId, model) {
+      const routed = await routeModel(sessionId, model);
+      const binding = await lifecycleBinding(sessionId);
+      outcomeValue(await lifecycle.compact(binding, randomUUID(), routed));
+    },
+    async compactOperation(sessionId, operationId, model) {
+      let routed: ModelRef | undefined;
+      try {
+        routed = await routeModel(sessionId, model);
+      } catch (error) {
+        const rejected = rejectedRoute(error);
+        if (rejected) return rejected;
+        throw error;
+      }
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.compact(binding, operationId, routed);
+    },
+    async releaseExecution(binding, operationId) {
+      if (!binding.backendSessionId) {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "release requires a backend session identity",
+        };
+      }
+      let snapshot;
+      try {
+        snapshot = await lifecycle.reconcile({
+          ...binding,
+          protocol: await lifecycle.protocol(),
+        });
+      } catch {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "Could not verify that the old execution has stopped",
+        };
+      }
+      if (
+        snapshot.backendSessionId !== binding.backendSessionId
+        || snapshot.authorityId !== binding.authorityId
+        || snapshot.generation !== binding.generation
+      ) {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "release proof does not name this execution incarnation",
+        };
+      }
+      if (snapshot.state.value === "running" || snapshot.state.value === "unknown") {
+        return {
+          kind: "unknown",
+          operationId,
+          message: "Old execution has not been proven idle",
+        };
+      }
+      return {
+        kind: "confirmed",
+        value: {
+          authorityId: binding.authorityId,
+          generation: binding.generation,
+          backendSessionId: binding.backendSessionId,
+        },
+      };
+    },
+    async replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject") {
+      const binding = await lifecycleBinding(sessionId);
+      outcomeValue(await lifecycle.replyPermission(binding, requestId, reply, randomUUID()));
+    },
+    async replyPermissionOperation(sessionId, requestId, reply, operationId) {
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.replyPermission(binding, requestId, reply, operationId);
+    },
+    async replyQuestion(sessionId: string, requestId: string, answers: JsonObject) {
+      const binding = await lifecycleBinding(sessionId);
+      outcomeValue(await lifecycle.replyQuestion(binding, requestId, answers, randomUUID()));
+    },
+    async replyQuestionOperation(sessionId, requestId, answers, operationId) {
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.replyQuestion(binding, requestId, answers, operationId);
+    },
+    endpoint: () => lifecycle.endpoint(),
+    protocol: () => lifecycle.protocol(),
+    async reconcile(binding, after) {
+      const ordinal = binding.reconciliationOrdinal;
+      if (!Number.isSafeInteger(ordinal) || (ordinal ?? 0) <= 0) {
+        throw Object.assign(
+          new Error("runtime reconciliation requires a positive request ordinal"),
+          { code: "invalid-input" },
+        );
+      }
+      const prior = reconciliationOrdinals.get(binding.canonicalSessionId);
+      if (prior !== undefined && ordinal! < prior) {
+        throw Object.assign(
+          new Error("runtime reconciliation request ordinal is stale"),
+          { code: "stale-evidence" },
+        );
+      }
+      reconciliationOrdinals.set(binding.canonicalSessionId, ordinal!);
+      const protocol = await lifecycle.protocol();
+      const snapshot = await lifecycle.reconcile({ ...binding, protocol }, after);
+      if (disposed) return snapshot;
+      if (snapshot.state.value === "idle" || snapshot.state.value === "failed"
+        || snapshot.state.value === "interrupted") {
+        const turn = activeTurn.get(binding.canonicalSessionId);
+        if (turn) {
+          clearRateLimitStall(binding.canonicalSessionId);
+          activeTurn.delete(binding.canonicalSessionId);
+          finishTranslateTurn(stateFor(binding.canonicalSessionId), turn.turnId);
+        }
+      }
+      if (!snapshot.events.some((entry) =>
+        entry.events.some((event) => event.type === "task/snapshot"))) {
+        return snapshot;
+      }
+
+      // Pull adapters rebuild a fresh translation state, while SSE translation
+      // is session-lived. Rebase pulled task snapshots onto that shared state
+      // so every changed replacement remains monotonic across reconnects.
+      const state = stateFor(binding.canonicalSessionId);
+      let revision = state.taskRevision;
+      let key = state.lastTaskKey;
+      const events = snapshot.events.map((entry) => ({
+        ...entry,
+        events: entry.events.map((event) => {
+          if (event.type !== "task/snapshot") return event;
+          const nextKey = JSON.stringify(event.items);
+          if (nextKey !== key) revision += 1;
+          key = nextKey;
+          return { ...event, revision };
+        }),
+      }));
+      state.taskRevision = revision;
+      state.lastTaskKey = key;
+      return { ...snapshot, events };
+    },
+    onObservation(cb) {
+      if (!disposed) observationListeners.add(cb);
+      return { dispose: () => { observationListeners.delete(cb); } };
+    },
+    onLifecycle(cb) {
+      if (!disposed) lifecycleListeners.add(cb);
+      return { dispose: () => { lifecycleListeners.delete(cb); } };
+    },
+    onEvent(cb: Listener): Disposable {
+      if (!disposed) listeners.add(cb);
+      return { dispose: () => { listeners.delete(cb); } };
+    },
+    async dispose() {
+      if (disposed) return;
+      disposed = true;
+      lifetime.abort();
+      sseAbort?.abort();
+      for (const sessionId of rateLimitStalls.keys()) clearRateLimitStall(sessionId);
+      reconciliationOrdinals.clear();
+      activeTurn.clear();
+      translate.clear();
+      suppressedAfterAbort.clear();
+      seenEventIds.clear();
+      listeners.clear();
+      observationListeners.clear();
+      lifecycleListeners.clear();
+      maps.reverse.clear();
+      // The pool may share the canonical mapping between several facades.
+      if (!extras.sessionIdMap) maps.forward.clear();
+    },
+  };
+};
+
+export const createOpenCodeRuntime = async (
+  opts: OpenCodeAdapterOptions & Omit<OpenCodeRuntimeExtras, "lifecycle">,
+): Promise<AgentRuntime> => {
+  const lease = await createOwnedLocalEndpointLease({
+    projectId: opts.projectId,
+    ...(opts.spaceId ? { spaceId: opts.spaceId } : {}),
+    cwd: opts.cwd,
+    port: opts.port,
+    hostname: opts.hostname,
+    bin: opts.bin,
+    binarySource: opts.binarySource,
+    configDir: opts.configDir ?? opts.dataDir,
+    runtimeDir: opts.runtimeDir,
+    stateFile: opts.stateFile,
+    configTargetId: opts.configTargetId
+      ?? (opts.configDir ?? opts.dataDir
+        ? `opencode-config:${resolve((opts.configDir ?? opts.dataDir)!)}`
+        : undefined),
+    onRuntimeSpawnTiming: opts.onRuntimeSpawnTiming,
+  });
+  let lifecycle: RuntimeLifecycle;
+  try {
+    lifecycle = await createOpenCodeRuntimeLifecycle({
+      lease,
+      // Health negotiation is cheap and belongs to this runtime generation.
+      protocol: opts.protocol ?? "auto",
+      startupDeadlineMs: opts.startupDeadlineMs,
+      probeDeadlineMs: opts.probeDeadlineMs,
+    });
+  } catch (err) {
+    await lease.dispose();
+    throw err;
+  }
+  const facade = createOpenCodeRuntimeFacade({
+    ...opts,
+    lifecycle,
+  });
+  const disposeFacade = facade.dispose.bind(facade);
+  let disposed = false;
+  facade.dispose = async () => {
+    if (disposed) return;
+    disposed = true;
+    await disposeFacade();
+    await lifecycle.dispose();
+  };
+  return attachRuntimeLifecycle(facade, lifecycle);
+};

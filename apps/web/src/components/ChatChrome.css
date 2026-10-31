@@ -1,0 +1,304 @@
+/* Chat-owned response/message chrome. Generic UI primitives remain generic. */
+/* One quick-action bar for user messages and assistant answers
+   (MessageActionBar). `data-reveal` is the presentation already resolved for
+   this pointer: `always`, `hover` (fine pointers only) or `menu` (only the
+   More button). */
+.chat-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-message-actions {
+  justify-content: flex-end;
+}
+
+.chat-response-action-area {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Hidden by preference: keep the box so the answer footer never reflows. */
+.chat-action-bar[data-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Hover reveal keeps the button track in flow and animates opacity only, so
+   revealing never moves the footer or the next conversation row. An open
+   More menu holds the bar visible while the pointer is inside the menu. */
+.chat-action-bar[data-reveal="hover"] {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.chat-action-bar[data-reveal="hover"]:not([data-open="true"]) {
+  pointer-events: none;
+}
+
+.msg:hover .chat-action-bar[data-reveal="hover"],
+.msg:has(:focus-visible) .chat-action-bar[data-reveal="hover"],
+.msg:has([aria-expanded="true"]) .chat-action-bar[data-reveal="hover"],
+.chat-action-bar[data-reveal="hover"][data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The More trigger reads as the same quiet glyph; open, it holds the
+   pressed wash so the menu has a visible owner. */
+.chat-action-more.ui-icon-btn[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--surface-overlay-strong);
+}
+
+.chat-action-bar > .placed-mini-widget {
+  display: contents;
+}
+
+.ui-menu.chat-action-menu {
+  min-width: min(220px, calc(100vw - (2 * var(--screen-gutter))));
+}
+
+/* One box per action: the sm icon button. Wrappers must not add a strut or a
+   second gap, or the icon track reads as uneven. */
+.chat-action-bar > .ui-tooltip-host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  line-height: 0;
+}
+
+.chat-action-button.ui-icon-btn {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.chat-action-button.ui-icon-btn:focus-visible {
+  color: var(--text);
+  background: var(--surface-overlay-hover);
+}
+@media (hover: hover) {
+  .chat-action-button.ui-icon-btn:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.chat-action-button.ui-icon-btn:active:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-overlay-strong);
+}
+
+.chat-action-button.ui-icon-btn[aria-pressed="true"],
+.msg.user .chat-action-button.ui-icon-btn[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+/* A successful action is acknowledged by the same control, never a text chip. */
+.chat-action-button.ui-icon-btn.chat-action-button--confirmed,
+.chat-action-button.ui-icon-btn.chat-action-button--confirmed:focus-visible {
+  color: var(--green);
+  background: var(--green-wash);
+  border-color: color-mix(in srgb, var(--green) 28%, transparent);
+}
+@media (hover: hover) {
+  .chat-action-button.ui-icon-btn.chat-action-button--confirmed:hover:not(:disabled) {
+    color: var(--green);
+    background: var(--green-wash);
+    border-color: color-mix(in srgb, var(--green) 28%, transparent);
+  }
+}
+
+.chat-action-button--confirmed .ui-icon {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: chat-action-check-pop 420ms var(--motion-ease) both;
+}
+
+@keyframes chat-action-check-pop {
+  0% { opacity: 0; transform: scale(.55) rotate(-14deg); }
+  62% { opacity: 1; transform: scale(1.18) rotate(5deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+.ui-tooltip.chat-action-tooltip {
+  max-width: min(32ch, calc(100vw - (2 * var(--screen-gutter))));
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+  font-size: var(--font-response-meta);
+  line-height: var(--font-response-meta-lh);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Identity + one icon track. Metadata lives in the same action row so every
+   glyph shares a single gap instead of a separate grid column. */
+.chat-response-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  margin-block-start: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-response-meta);
+  line-height: var(--font-response-meta-lh);
+}
+
+/* While a turn works no answer shows its metadata, but a completed answer's
+   footer keeps its box: hiding it would reflow the whole transcript at every
+   send and again when the turn ends. */
+.chat-response-footer[data-dormant] { visibility: hidden; }
+
+/* An answer followed by more of its turn keeps only the quick actions; a
+   tighter gap keeps it close to the text it acts on. When actions reveal on
+   hover, collapse the empty resting box so the continuing activity sequence
+   keeps its rhythm without a blank void. */
+.chat-response-footer[data-actions-only] { margin-block-start: var(--space-1); }
+.chat-response-footer[data-actions-only]:has(.chat-action-bar[data-reveal="hover"]) {
+  margin-block-start: 0;
+  height: 0;
+}
+/* Touch has no hover: a row of quick actions under every interim answer
+   doubled the gaps of the activity sequence (a blank band while the turn
+   works). On touch only the turn's final answer carries its footer. */
+@media (hover: none), (pointer: coarse) {
+  .chat-response-footer[data-actions-only] { display: none; }
+}
+/* Over a block (a progress update) the footer is the gap to it, not an extra
+   row on top: it sits right under the text and the block follows its last
+   pixel, so a dormant one leaves no blank band either. */
+.timeline > .msg.assistant.progress-update > .chat-response-footer[data-actions-only] {
+  margin-block: 0 calc(-1 * var(--conversation-group-gap));
+}
+.timeline > .msg.assistant.progress-update > .chat-response-footer[data-actions-only]:has(.chat-action-bar[data-reveal="hover"]) {
+  margin-block-end: 0;
+}
+
+.chat-response-identity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 0 1 auto;
+  gap: var(--space-2);
+}
+
+.chat-response-logo {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  flex: none;
+}
+
+.chat-response-model {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-response-duration {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chat-response-duration::before {
+  content: "·";
+  margin-inline-end: var(--space-2);
+  color: var(--faint);
+}
+
+.chat-response-actions {
+  flex: 0 1 auto;
+}
+
+.ui-popover.chat-response-metadata {
+  width: min(300px, calc(100vw - (2 * var(--screen-gutter))));
+  max-width: calc(100vw - (2 * var(--screen-gutter)));
+  padding: var(--space-3);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.chat-response-metadata dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+
+.chat-response-metadata dt {
+  color: var(--muted);
+  font-size: var(--font-response-meta);
+}
+
+.chat-response-metadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-response-meta);
+  font-weight: 600;
+  text-align: end;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-response-metadata code {
+  display: inline;
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .chat-response-duration {
+    display: none;
+  }
+
+  .msg.user .msg-meta {
+    flex-wrap: nowrap;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  /* Visual spacing stays on the shared --space-2 track. Hit size remains the
+     transparent ::after seam on .ui-icon-btn, not a second, looser gap. */
+  .msg.user .msg-meta {
+    min-height: var(--tap);
+  }
+
+  .ui-tooltip.chat-action-tooltip {
+    display: none;
+  }
+}

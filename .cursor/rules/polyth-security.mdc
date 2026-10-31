@@ -1,0 +1,6 @@
+---
+description: polyth-security scoped guidance
+globs: "packages/tenancy/**,packages/permissions/**,packages/secure-safe/**,packages/tunnel/**,crates/polyth-link-*/**,packages/server/src/**"
+alwaysApply: false
+---
+For changes affecting ownership, ingress, credentials or execution, use security and the relevant sessions/link/harnesses route. Preserve scoped services, default-deny remote access and durable execution evidence. This scope is a reminder, not proof that other paths are safe.

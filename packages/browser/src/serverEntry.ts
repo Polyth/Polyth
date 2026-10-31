@@ -1,0 +1,785 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type {
+  AgentCapabilityContributionRegistry,
+  Disposable,
+  BrowserAction,
+  BrowserContextCaptureInput,
+  BrowserSessionDto,
+  JsonObject,
+  RemoteAccessPolicy,
+  RouteHandler,
+  SessionEvent,
+  SpaceStorage,
+} from "@polyth/contracts";
+import { REMOTE_CAPABILITY } from "@polyth/contracts";
+import {
+  SERVER_APPLICATION_SURFACE,
+  SPACE_SECURE_SAFE,
+  serverServiceKey,
+  type ServerPackage,
+  type ServerPackageHost,
+} from "@polyth/plugins";
+import {
+  createBrowserArtifactStore,
+  createBrowserService,
+  createChromiumDriver,
+  createFakeDriver,
+  createFakeProfileDriver,
+  createProfileChromiumDriver,
+  createProfileRegistry,
+  demoWeb,
+  findChromiumExecutable,
+  type BrowserArtifactStore,
+  type BrowserService,
+  type ProfileRegistry,
+} from "./index.ts";
+import {
+  browserSkill,
+  createBrowserAgentTool,
+  createBrowserVaultFillAgentTool,
+} from "./agentTool.ts";
+import {
+  createBrowserVaultFillBroker,
+  type BrowserVaultFillBroker,
+} from "./vaultFill.ts";
+import { readBrowserAgentAutoApprove, writeBrowserAgentAutoApprove } from "./agentToolSettings.ts";
+import { originOf } from "./policy.ts";
+import { isBrowserArtifactId } from "./artifacts.ts";
+import {
+  allowBrowserVaultFill,
+  clearBrowserVaultFillApprovals,
+  isBrowserVaultFillAllowed,
+  readBrowserVaultFillApprovals,
+} from "./vaultFillPolicy.ts";
+
+const STATUS: Record<string, number> = {
+  "not-found": 404,
+  "invalid-input": 400,
+  "empty-text-range": 400,
+  "invalid-url": 400,
+  unavailable: 503,
+  limit: 429,
+  timeout: 504,
+  "agent-paused": 409,
+  "stale-frame": 409,
+  conflict: 409,
+  "context-closed": 410,
+  "blocked-scheme": 403,
+  "blocked-credentials": 403,
+  "blocked-private": 403,
+  "approval-required": 403,
+  "download-blocked": 403,
+  "dns-error": 502,
+  forbidden: 403,
+  "profile-locked": 409,
+};
+
+export function browserRoutes(deps: {
+  browser: BrowserService;
+  profiles?: ProfileRegistry;
+  append: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
+  shotsDir: string;
+  artifacts: BrowserArtifactStore;
+  storage?: SpaceStorage;
+  /** Current authenticated Space for this route invocation. */
+  spaceId?: string;
+  vaultFill?: BrowserVaultFillBroker;
+  canAccess?: (projectId: string, sessionId?: string) => Promise<boolean>;
+  /** The signed-in person; absent for server work. A browser another person
+   * owns is not-found to everyone else (§14.6). */
+  userId?: string;
+}): RouteHandler {
+  const { browser, profiles, append, artifacts } = deps;
+
+  /** May this caller see and drive this browser? Its chat/project must be
+   * open to them, and a person's browser is theirs alone. */
+  const visible = async (session: BrowserSessionDto | null | undefined): Promise<boolean> => {
+    if (!session) return false;
+    const owner = browser.ownerOf?.(session.id);
+    if (owner && owner !== deps.userId) return false;
+    return !deps.canAccess || await deps.canAccess(session.projectId, session.sessionId);
+  };
+
+  const rejectChatTab = (id: string): { error: string; message: string } | null => {
+    if (profiles?.isChatTab(id)) {
+      return {
+        error: "forbidden",
+        message: "chat-workspace-manual-only: agent browser APIs cannot control chat tabs",
+      };
+    }
+    return null;
+  };
+  const saveShot = async (
+    browserSessionId: string,
+    revision: number,
+    data: Uint8Array,
+    mime: string,
+  ): Promise<string> => {
+    await mkdir(deps.shotsDir, { recursive: true });
+    const name = `${browserSessionId}-${revision}.${mime.includes("webp") ? "webp" : "jpg"}`;
+    await writeFile(join(deps.shotsDir, name), data);
+    return name;
+  };
+
+  const parseCaptureInput = (raw: Record<string, unknown>): BrowserContextCaptureInput => {
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    const expectedRevision = Number(raw.expectedRevision);
+    const type = raw.type;
+    const note = typeof raw.note === "string" ? raw.note : undefined;
+    const includeScreenshot = typeof raw.includeScreenshot === "boolean" ? raw.includeScreenshot : undefined;
+    if (!id || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw Object.assign(new Error("invalid browser context capture input"), { code: "invalid-input" });
+    }
+    if (type === "page") {
+      return { type, id, expectedRevision, ...(includeScreenshot !== undefined ? { includeScreenshot } : {}), ...(note ? { note } : {}) };
+    }
+    if (type === "element") {
+      const point = raw.point as { x?: unknown; y?: unknown } | undefined;
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw Object.assign(new Error("element point required"), { code: "invalid-input" });
+      }
+      return { type, id, expectedRevision, point: { x, y }, ...(includeScreenshot !== undefined ? { includeScreenshot } : {}), ...(note ? { note } : {}) };
+    }
+    if (type === "area") {
+      const region = raw.region as Record<string, unknown> | undefined;
+      const x = Number(region?.x);
+      const y = Number(region?.y);
+      const width = Number(region?.width);
+      const height = Number(region?.height);
+      if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+        throw Object.assign(new Error("area region required"), { code: "invalid-input" });
+      }
+      return {
+        type,
+        id,
+        expectedRevision,
+        region: { x, y, width, height },
+        ...(includeScreenshot !== undefined ? { includeScreenshot } : {}),
+        ...(note ? { note } : {}),
+      };
+    }
+    if (type === "text") {
+      const quote = typeof raw.quote === "string" ? raw.quote : undefined;
+      const start = raw.start as { x?: unknown; y?: unknown } | undefined;
+      const end = raw.end as { x?: unknown; y?: unknown } | undefined;
+      const sx = Number(start?.x);
+      const sy = Number(start?.y);
+      const ex = Number(end?.x);
+      const ey = Number(end?.y);
+      const hasRange = [sx, sy, ex, ey].every(Number.isFinite);
+      if (!(quote?.trim()) && !hasRange) {
+        throw Object.assign(new Error("quote required"), { code: "invalid-input" });
+      }
+      return {
+        type,
+        id,
+        expectedRevision,
+        ...(quote ? { quote } : {}),
+        ...(hasRange ? { start: { x: sx, y: sy }, end: { x: ex, y: ey } } : {}),
+        ...(includeScreenshot !== undefined ? { includeScreenshot } : {}),
+        ...(note ? { note } : {}),
+      };
+    }
+    throw Object.assign(new Error("unknown browser context type"), { code: "invalid-input" });
+  };
+
+  return async ({ path, method, url, body, json, res }) => {
+    try {
+      const ownedId = path.match(/^\/api\/browser\/sessions\/([^/]+)/)?.[1];
+      const owned = ownedId ? browser.get(ownedId) : null;
+      if (ownedId && (deps.canAccess || owned)) {
+        if (!await visible(owned)) {
+          json(404, { error: "not-found" });
+          return true;
+        }
+      }
+      if (path === "/api/browser/capability" && method === "GET") {
+        json(200, browser.capability());
+        return true;
+      }
+      if (path === "/api/browser/vault-fill-requests" && method === "GET") {
+        if (!deps.vaultFill) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        const browserSessionId = url.searchParams.get("browserSessionId") ?? "";
+        const session = browser.get(browserSessionId);
+        if (!session || !await visible(session)) {
+          json(404, { error: "not-found" });
+          return true;
+        }
+        json(200, deps.vaultFill.list(browserSessionId));
+        return true;
+      }
+      if (path === "/api/browser/vault-fill-approvals" && method === "GET") {
+        if (!deps.storage) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        json(200, await readBrowserVaultFillApprovals(deps.storage));
+        return true;
+      }
+      if (path === "/api/browser/vault-fill-approvals" && method === "DELETE") {
+        if (!deps.storage) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        await clearBrowserVaultFillApprovals(deps.storage);
+        json(200, { ok: true });
+        return true;
+      }
+      const vaultFillMatch = path.match(/^\/api\/browser\/vault-fill-requests\/([^/]+)$/);
+      if (vaultFillMatch && method === "POST") {
+        if (!deps.vaultFill) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        const request = deps.vaultFill.get(vaultFillMatch[1]!);
+        if (!request) {
+          json(404, { error: "not-found" });
+          return true;
+        }
+        const session = browser.get(request.browserSessionId);
+        if (!session
+          || session.projectId !== request.projectId
+          || session.sessionId !== request.sessionId
+          || (request.spaceId && deps.spaceId !== request.spaceId)
+          || !await visible(session)) {
+          json(404, { error: "not-found" });
+          return true;
+        }
+        const input = await body();
+        const decision = input.decision;
+        if (decision !== "allow" && decision !== "allow-always" && decision !== "deny") {
+          json(400, { error: "invalid-input", message: "decision must be allow, allow-always, or deny" });
+          return true;
+        }
+        if (decision === "allow-always") {
+          if (!deps.storage || !deps.spaceId || request.spaceId !== deps.spaceId) {
+            json(403, { error: "forbidden", message: "persistent credential approval requires the current Space" });
+            return true;
+          }
+          await allowBrowserVaultFill(deps.storage, request);
+        }
+        if (!deps.vaultFill.resolve(request.id, decision)) {
+          json(409, { error: "conflict", message: "credential fill request is no longer pending" });
+          return true;
+        }
+        json(200, { ok: true });
+        return true;
+      }
+      if (path === "/api/browser/agent-auto-approve" && method === "GET") {
+        if (!deps.storage) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        json(200, { enabled: await readBrowserAgentAutoApprove(deps.storage) });
+        return true;
+      }
+      if (path === "/api/browser/agent-auto-approve" && (method === "PATCH" || method === "POST")) {
+        if (!deps.storage) {
+          json(503, { error: "unavailable" });
+          return true;
+        }
+        const input = await body();
+        if (typeof input.enabled !== "boolean") {
+          json(400, { error: "invalid-input", message: "enabled boolean required" });
+          return true;
+        }
+        const saved = await writeBrowserAgentAutoApprove(deps.storage, input.enabled);
+        json(200, saved);
+        return true;
+      }
+      if (path === "/api/browser/artifacts" && method === "GET") {
+        const id = url.searchParams.get("id") ?? "";
+        if (!isBrowserArtifactId(id)) {
+          json(400, { error: "invalid-input", message: "artifact id required" });
+          return true;
+        }
+        const art = await artifacts.read(id);
+        if (!art) {
+          json(404, { error: "not-found", message: "artifact not found" });
+          return true;
+        }
+        res.writeHead(200, {
+          "content-type": art.mime,
+          "content-length": art.size,
+          "cache-control": "private, max-age=3600",
+          "x-content-type-options": "nosniff",
+        });
+        res.end(Buffer.from(art.data));
+        return true;
+      }
+      if (path === "/api/browser/artifacts" && method === "DELETE") {
+        const id = url.searchParams.get("id") ?? "";
+        if (!isBrowserArtifactId(id)) {
+          json(400, { error: "invalid-input", message: "artifact id required" });
+          return true;
+        }
+        const removed = await artifacts.remove(id);
+        json(200, { ok: true, ...(removed ? {} : { retained: true }) });
+        return true;
+      }
+      if (path === "/api/browser/approvals" && method === "GET") {
+        const id = url.searchParams.get("browserSessionId") ?? "";
+        const session = browser.get(id);
+        if (!session || !await visible(session)) {
+          json(404, { error: "not-found" }); return true;
+        }
+        json(200, { origins: browser.approvals(id) });
+        return true;
+      }
+      if (path === "/api/browser/approvals" && method === "POST") {
+        const input = await body();
+        const id = String(input.browserSessionId ?? "");
+        const session = browser.get(id);
+        if (!session || !await visible(session)) {
+          json(404, { error: "not-found" }); return true;
+        }
+        browser.approveOrigin(String(input.origin ?? ""), id);
+        json(200, { origins: browser.approvals(id) });
+        return true;
+      }
+      if (path === "/api/browser/sessions" && method === "GET") {
+        const projectId = url.searchParams.get("projectId");
+        const all = browser.list().filter((session) => !projectId || session.projectId === projectId);
+        const shown = await Promise.all(all.map(async (session) => await visible(session) ? session : null));
+        json(200, shown.filter(Boolean));
+        return true;
+      }
+      if (path === "/api/browser/sessions" && method === "POST") {
+        const input = await body();
+        if (deps.canAccess && !await deps.canAccess(String(input.projectId ?? ""), typeof input.sessionId === "string" ? input.sessionId : undefined)) {
+          json(404, { error: "not-found" });
+          return true;
+        }
+        const viewport = input.viewport as { width?: number; height?: number } | undefined;
+        const colorScheme = input.colorScheme === "light"
+          || input.colorScheme === "dark"
+          || input.colorScheme === "no-preference"
+          ? input.colorScheme
+          : undefined;
+        if (input.colorScheme !== undefined && !colorScheme) {
+          json(400, {
+            error: "invalid-input",
+            message: "colorScheme must be light, dark, or no-preference",
+          });
+          return true;
+        }
+        const target = String(input.url ?? "");
+        const session = await browser.create({
+          projectId: String(input.projectId ?? ""),
+          ...(input.sessionId ? { sessionId: String(input.sessionId) } : {}),
+          ...(target ? { url: target } : {}),
+          ...(viewport && typeof viewport.width === "number" && typeof viewport.height === "number"
+            ? { viewport: { width: viewport.width, height: viewport.height } }
+            : {}),
+          ...(colorScheme ? { colorScheme } : {}),
+          ...(deps.userId ? { ownerUserId: deps.userId } : {}),
+        });
+        // If a URL was requested but the session stayed at about:blank, the
+        // initial navigation needed approval — surface it to the client.
+        if (target && session.url === "about:blank") {
+          json(200, {
+            session,
+            approval: { origin: originOf(target) ?? target, message: `external origin ${originOf(target) ?? target} needs a per-origin approval` },
+          });
+        } else {
+          json(200, session);
+        }
+        return true;
+      }
+
+      let       match = path.match(/^\/api\/browser\/sessions\/([^/]+)$/);
+      if (match && method === "GET") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
+        const session = browser.get(match[1]!);
+        json(session ? 200 : 404, session ?? { error: "not-found" });
+        return true;
+      }
+      if (match && method === "DELETE") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
+        await browser.close(match[1]!);
+        json(200, { ok: true });
+        return true;
+      }
+
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/navigate$/);
+      if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
+        const id = match[1]!;
+        const input = await body();
+        const actor = input.actor === "agent" ? "agent" as const : "user" as const;
+        const target = String(input.url ?? "");
+        try {
+          const session = await browser.navigate(id, target, actor);
+          json(200, session);
+        } catch (error) {
+          const failure = error as Error & { code?: string };
+          // A user navigation that needs approval is an expected product flow,
+          // not a failed transport request. Private-network destinations take
+          // the same per-origin approval path. Keep the durable failed-action
+          // record, but let the client open its approval dialog without a
+          // noisy 403 in the browser console. Agent navigation never gets
+          // this convenience.
+          if (actor === "user"
+            && (failure.code === "approval-required" || failure.code === "blocked-private")) {
+            json(200, {
+              session: browser.get(id),
+              approval: { origin: originOf(target) ?? target, message: failure.message },
+            });
+          } else {
+            json(STATUS[failure.code ?? ""] ?? 500, {
+              error: failure.code ?? "internal",
+              message: failure.message,
+            });
+          }
+        }
+        return true;
+      }
+
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/actions$/);
+      if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
+        const id = match[1]!;
+        const input = await body();
+        const actor = input.actor === "agent" ? "agent" as const : "user" as const;
+        const action = input.action as BrowserAction | undefined;
+        if (!action || typeof action !== "object" || !("kind" in action)) {
+          json(400, { error: "invalid-input", message: "action required" });
+          return true;
+        }
+        // The pane following the app's appearance is a display preference:
+        // same route and ownership checks, but no history, controller change
+        // or agent-queue gating. Only the user's viewer may send it.
+        const source = (action as { source?: unknown }).source;
+        if (source !== undefined) {
+          if (source !== "appearance-sync" || action.kind !== "color-scheme" || actor !== "user") {
+            json(400, { error: "invalid-input", message: "appearance-sync is a user color-scheme action" });
+            return true;
+          }
+          try {
+            const session = await browser.syncAppearanceColorScheme(id, action.colorScheme);
+            json(200, { actionId: "", session });
+          } catch (error) {
+            const failure = error as Error & { code?: string };
+            json(STATUS[failure.code ?? ""] ?? 500, { error: failure.code ?? "internal", message: failure.message });
+          }
+          return true;
+        }
+        try {
+          const { actionId, session, result } = await browser.action(id, action, actor);
+          json(200, { actionId, session, ...(result ? { result } : {}) });
+        } catch (error) {
+          const failure = error as Error & { code?: string };
+          json(STATUS[failure.code ?? ""] ?? 500, {
+            error: failure.code ?? "internal",
+            message: failure.message,
+          });
+        }
+        return true;
+      }
+
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/observe$/);
+      if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
+        const id = match[1]!;
+        const input = await body();
+        const observation = await browser.observe(id, {
+          includeScreenshot: input.includeScreenshot === true,
+          ...(typeof input.selector === "string" && input.selector.trim()
+            ? { selector: input.selector }
+            : {}),
+        });
+        let screenshotRef: string | undefined;
+        if (observation.screenshot) {
+          screenshotRef = await saveShot(
+            id,
+            browser.get(id)?.revision ?? 0,
+            observation.screenshot.data,
+            observation.screenshot.mime,
+          );
+        }
+        const payload = {
+          url: observation.url,
+          title: observation.title,
+          text: observation.text,
+          accessibilityDigest: observation.accessibilityDigest ?? "",
+          ...(screenshotRef ? { screenshotRef } : {}),
+        };
+        json(200, {
+          ...payload,
+          ...(observation.screenshot ? {
+            screenshot: {
+              mime: observation.screenshot.mime,
+              data: Buffer.from(observation.screenshot.data).toString("base64"),
+            },
+          } : {}),
+        });
+        return true;
+      }
+
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/context$/);
+      if (match && method === "POST") {
+        const blocked = rejectChatTab(match[1]!);
+        if (blocked) { json(403, blocked); return true; }
+        const id = match[1]!;
+        const input = parseCaptureInput(await body());
+        const context = await browser.captureContext(id, input, artifacts);
+        const linked = browser.get(id)?.sessionId;
+        if (linked) {
+          await append(linked, "browser/context-captured", {
+            browserSessionId: id,
+            contextId: context.id,
+            type: context.type,
+            url: context.url,
+            title: context.title,
+            frameRevision: context.frameRevision,
+            ...(context.screenshot ? { screenshotId: context.screenshot.id } : {}),
+            ...(context.crop ? { cropId: context.crop.id } : {}),
+          });
+        }
+        json(200, { context });
+        return true;
+      }
+
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/pause-agent$/);
+      if (match && method === "POST") {
+        const input = await body();
+        browser.pauseAgent(match[1]!, input.paused !== false);
+        json(200, { ok: true, paused: browser.agentPaused(match[1]!) });
+        return true;
+      }
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/console$/);
+      if (match && method === "GET") {
+        json(200, browser.console(match[1]!));
+        return true;
+      }
+      match = path.match(/^\/api\/browser\/sessions\/([^/]+)\/frame$/);
+      if (match && method === "GET") {
+        const frame = browser.latestFrame(
+          match[1]!,
+          Number(url.searchParams.get("afterRevision") ?? 0),
+        );
+        if (!frame) {
+          json(204, {});
+          return true;
+        }
+        json(200, {
+          revision: frame.revision,
+          mime: frame.mime,
+          data: Buffer.from(frame.data).toString("base64"),
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      const failure = error as Error & { code?: string };
+      json(STATUS[failure.code ?? ""] ?? 500, {
+        error: failure.code ?? "internal",
+        message: failure.message,
+      });
+      return true;
+    }
+  };
+}
+
+export const BROWSER_REMOTE_ACCESS: RemoteAccessPolicy = {
+  routeScopes: ["browser"],
+  http: [
+    { methods: ["GET"], path: "/api/browser/capability", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["GET"], path: "/api/browser/vault-fill-requests", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["POST"], path: "/api/browser/vault-fill-requests/:id", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/vault-fill-approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["DELETE"], path: "/api/browser/vault-fill-approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/agent-auto-approve", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["PATCH", "POST"], path: "/api/browser/agent-auto-approve", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["POST"], path: "/api/browser/approvals", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/sessions", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["POST"], path: "/api/browser/sessions", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/sessions/:id", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["DELETE"], path: "/api/browser/sessions/:id", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/navigate", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/actions", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/observe", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/context", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["POST"], path: "/api/browser/sessions/:id/pause-agent", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+    { methods: ["GET"], path: "/api/browser/sessions/:id/console", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["GET"], path: "/api/browser/sessions/:id/frame", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["GET"], path: "/api/browser/artifacts", capability: REMOTE_CAPABILITY.browserUse, mutation: false },
+    { methods: ["DELETE"], path: "/api/browser/artifacts", capability: REMOTE_CAPABILITY.browserUse, mutation: true },
+  ],
+};
+
+/** Message attachment captures, resolved per project (`browser.artifacts`). */
+export interface BrowserArtifactService {
+  resolve(id: string, projectId: string): Promise<{ id: string; mime: string; size: number; localPath: string } | null>;
+  commit(ids: ReadonlyArray<string>, projectId: string): Promise<void>;
+}
+
+export default async function registerPackage(host: ServerPackageHost): Promise<ServerPackage> {
+  const chromiumPath = process.env.POLYTH_FAKE_BROWSER === "1" ? null : await findChromiumExecutable();
+  const driver = process.env.POLYTH_FAKE_BROWSER === "1"
+    ? createFakeDriver(demoWeb())
+    : chromiumPath
+      ? createChromiumDriver(chromiumPath)
+      : null;
+  const profileDriver = process.env.POLYTH_FAKE_BROWSER === "1"
+    ? createFakeProfileDriver()
+    : await createProfileChromiumDriver(chromiumPath ?? undefined);
+  const profiles = createProfileRegistry({
+    driver: profileDriver,
+    unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
+  });
+  const browser = createBrowserService({
+    driver,
+    unavailableReason: "Browser engine unavailable. Install a supported desktop build or configure Chromium for development.",
+    allowPublicOrigins: true,
+    // Local-trusted desktop/dev deployments are the generic Browser's
+    // local-first surface: the operator can inspect loopback/LAN services from
+    // the in-app Browser. Non-local-trusted deployments stay explicit-only
+    // and rely on the live self-origin seam below for their own private targets.
+    privateNetwork: host.deployment === "local-trusted" ? "allow" : "explicit-only",
+    // Resolve this on every hop: auth can change while a context is alive.
+    // The surface exposes the deployment's own exact origins — the declared
+    // canonical origin, plus the loopback login origin while cookie-less
+    // loopback requests cannot inherit ambient operator/Space authority.
+    exactAllowedOrigins: () => {
+      const surface = host.services.get(SERVER_APPLICATION_SURFACE);
+      return [...(surface?.controlledBrowserSelfOrigins() ?? [])];
+    },
+    append: (sessionId, type, data) => host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
+  });
+  host.services.provide(serverServiceKey<BrowserService>("browser"), browser);
+  host.services.provide(serverServiceKey<ProfileRegistry>("browser.profiles"), profiles);
+  const storageForSpace = (spaceId: string): SpaceStorage | undefined => {
+    try {
+      return host.spaceStorage(host.systemSpaceContext(spaceId));
+    } catch {
+      return undefined;
+    }
+  };
+  // Captures attached to a message live in the project's Space; the session
+  // service resolves and commits them through this service, never by path.
+  const artifactsForProject = async (projectId: string) => {
+    const project = await host.projects.get(projectId).catch(() => undefined);
+    const storage = project?.spaceId ? storageForSpace(project.spaceId) : undefined;
+    return storage ? createBrowserArtifactStore(storage.path("browser-artifacts")) : undefined;
+  };
+  host.services.provide(serverServiceKey<BrowserArtifactService>("browser.artifacts"), {
+    async resolve(id, projectId) {
+      return (await artifactsForProject(projectId))?.resolve(id) ?? null;
+    },
+    async commit(ids, projectId) {
+      await (await artifactsForProject(projectId))?.commit(ids);
+    },
+  });
+  const vaultFill = createBrowserVaultFillBroker({
+    shouldAutoAllow: async (request) => {
+      if (!request.spaceId) return false;
+      const storage = storageForSpace(request.spaceId);
+      return storage ? isBrowserVaultFillAllowed(storage, request) : false;
+    },
+    onRequested: async (request) => {
+      await host.events.append(request.sessionId, "browser/vault-fill-requested", {
+        requestId: request.id,
+        browserSessionId: request.browserSessionId,
+        ...(request.spaceId ? { spaceId: request.spaceId } : {}),
+        projectId: request.projectId,
+        handle: request.handle,
+        label: request.label,
+        origin: request.origin,
+        selector: request.selector,
+        submit: request.submit,
+        expiresAt: request.expiresAt,
+      }, { ignorable: true, producerPlugin: "browser" });
+    },
+    onResolved: async (request, outcome) => {
+      await host.events.append(request.sessionId, "browser/vault-fill-resolved", {
+        requestId: request.id,
+        browserSessionId: request.browserSessionId,
+        ...(request.spaceId ? { spaceId: request.spaceId } : {}),
+        handle: request.handle,
+        origin: request.origin,
+        selector: request.selector,
+        outcome,
+      }, { ignorable: true, producerPlugin: "browser" });
+    },
+  });
+  let routes: RouteHandler | null = null;
+  let agentTool: Disposable | undefined;
+  let vaultFillTool: Disposable | undefined;
+  let vaultFillEvents: Disposable | undefined;
+  let agentSkill: Disposable | undefined;
+  return {
+    remoteAccess: BROWSER_REMOTE_ACCESS,
+    routes: async (request) => routes ? routes(request) : false,
+    onEnable() {
+      const capabilities = host.services.require(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
+      agentTool = capabilities.register("browser", createBrowserAgentTool(browser));
+      vaultFillTool = capabilities.register(
+        "browser",
+        createBrowserVaultFillAgentTool(
+          browser,
+          (spaceId) => host.services.get(SPACE_SECURE_SAFE)?.forSpaceId(spaceId),
+          vaultFill,
+          (sessionId, type, data) =>
+            host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
+        ),
+      );
+      vaultFillEvents = browser.onEvent((event) => {
+        if (event.kind === "closed") vaultFill.cancelForBrowserSession(event.browserSessionId);
+      });
+      // Deployment skill: available in every Space/project, not a project-owned managed skill.
+      // Design/debug skills remain opt-in; this only covers core browser usage.
+      if (!agentSkill) agentSkill = capabilities.register("browser", browserSkill);
+      routes = async (request) => {
+        if (!request.path.startsWith("/api/browser/")) return false;
+        const scoped = host.forSpace(request.space);
+        const storage = host.spaceStorage(request.space);
+        return browserRoutes({
+          browser, profiles,
+          storage,
+          spaceId: request.space.spaceId,
+          ...(request.space.userId && !request.space.userId.startsWith("system:") ? { userId: request.space.userId } : {}),
+          vaultFill,
+          canAccess: async (projectId, sessionId) => {
+            try {
+              if (!await scoped.projects.get(projectId)) return false;
+              return !sessionId || (await scoped.sessions.snapshot(sessionId)).projectId === projectId;
+            } catch { return false; }
+          },
+          append: (sessionId, type, data) => host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
+          // Screenshots belong to the Space's browser package directory, not
+          // the Space root. browser-artifacts stays where the host resolver
+          // reads it until that seam is inverted.
+          shotsDir: join(storage.packageDir("browser"), "browser-shots"),
+          artifacts: createBrowserArtifactStore(storage.path("browser-artifacts")),
+        })(request);
+      };
+    },
+    async onDisable() {
+      agentSkill?.dispose();
+      agentSkill = undefined;
+      vaultFillTool?.dispose();
+      vaultFillTool = undefined;
+      agentTool?.dispose();
+      agentTool = undefined;
+      vaultFillEvents?.dispose();
+      vaultFillEvents = undefined;
+      vaultFill.cancelAll();
+      routes = null;
+      await browser.closeAll();
+      await profiles.closeAll();
+    },
+  };
+}

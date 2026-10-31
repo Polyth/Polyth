@@ -1,0 +1,203 @@
+/* Isolation lifecycle milestone — a centered seal on a hairline rule. It keeps
+   the `.task-activity` row class for timeline motion/lift selectors and
+   replaces that row's left-border look. */
+.task-activity.isolation-notice {
+  --isolation-notice-tone: var(--muted);
+  --isolation-notice-wash: var(--surface-overlay);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: var(--space-2) 0;
+  padding: 0;
+  border: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  container: isolation-notice / inline-size;
+}
+
+.task-activity.isolation-notice--merged {
+  --isolation-notice-tone: var(--green);
+  --isolation-notice-wash: var(--green-wash);
+}
+
+.task-activity.isolation-notice::before,
+.task-activity.isolation-notice::after {
+  content: "";
+  flex: 1 1 0;
+  min-width: var(--space-3);
+  border-block-start: 1px solid var(--border-soft);
+}
+
+.isolation-notice--merged::before {
+  border-image: linear-gradient(to right, transparent, color-mix(in srgb, var(--green) 38%, var(--border-soft))) 1;
+}
+
+.isolation-notice--merged::after {
+  border-image: linear-gradient(to left, transparent, color-mix(in srgb, var(--green) 38%, var(--border-soft))) 1;
+}
+
+.isolation-notice-seal {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--isolation-notice-tone) 26%, var(--border-soft));
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--isolation-notice-wash) 55%, var(--elevated));
+  box-shadow: var(--inset-hi);
+}
+
+.isolation-notice-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-round);
+  background: var(--isolation-notice-wash);
+  color: var(--isolation-notice-tone);
+}
+
+.isolation-notice-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sentence words around the branch keep their shape; the branch truncates. */
+.isolation-notice-word {
+  flex: none;
+}
+
+/* A label-only seal (returned/discarded) balances its inline end. */
+.isolation-notice-mark + .isolation-notice-text:last-child {
+  padding-inline-end: var(--space-2);
+}
+
+/* Isolation started: what stayed behind in the original checkout. It gives
+   way first on narrow rows, so the branch keeps its name. */
+.isolation-notice-note {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding-inline-end: var(--space-2);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.isolation-notice-chip {
+  flex: none;
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font: 500 var(--font-meta) / var(--font-meta-lh) var(--mono);
+}
+
+.isolation-notice-chip > .ui-icon {
+  flex: none;
+  color: var(--muted);
+}
+
+.isolation-notice-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.isolation-notice-branch {
+  flex: 0 1 auto;
+  min-width: min(9ch, 40%);
+  max-width: 32ch;
+  color: var(--text);
+}
+
+.isolation-notice-commit {
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+
+@media (hover: hover) {
+  .isolation-notice-commit:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+
+.isolation-notice-commit:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.isolation-notice-commit.is-copied {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--hair));
+  color: var(--green-on-wash);
+}
+
+.isolation-notice-commit.is-copied > .ui-icon {
+  color: var(--green);
+}
+
+/* Phone widths: the seal takes the full row so the branch keeps its name. */
+@container isolation-notice (max-width: 420px) {
+  .task-activity.isolation-notice::before,
+  .task-activity.isolation-notice::after {
+    display: none;
+  }
+
+  .isolation-notice-seal {
+    margin-inline: auto;
+  }
+
+  .isolation-notice-commit:not(.is-copied) > .ui-icon {
+    display: none;
+  }
+
+  /* The note takes its own line under the branch instead of squeezing it. */
+  .isolation-notice-seal--noted {
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: var(--radius-lg);
+  }
+
+  .isolation-notice-seal--noted > .isolation-notice-note {
+    flex: 1 0 100%;
+    padding-inline: var(--space-2);
+    text-align: center;
+    white-space: normal;
+  }
+}
+
+/* Coarse pointers: the copy target meets the touch floor without growing the
+   visible chip. */
+@media (pointer: coarse) {
+  .isolation-notice-commit {
+    position: relative;
+  }
+
+  .isolation-notice-commit::after {
+    content: "";
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: max(100%, var(--hit-min));
+    height: var(--hit-min);
+    transform: translate(-50%, -50%);
+  }
+}

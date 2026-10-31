@@ -1,0 +1,255 @@
+// Monotonic, fail-closed permission rules engine.
+// Rules persist to <dataDir>/permissions.json. "always" replies become allow
+// rules whose scope is explicit: user-wide, one project, or one session.
+import { readFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { atomicWriteSync } from "@polyth/plugins";
+import type { ApprovalLevel } from "./approvalDefaults.ts";
+
+export {
+  BLAST_RADIUS_KINDS,
+  PERMISSION_RISK_REASONS,
+  assessPermissionRisk,
+  autoApproveMayAnswer,
+  automaticApprovalMayAnswer,
+  describeBlastRadius,
+  isSessionPlanPermission,
+  type AutomaticApprovalLevel,
+  type BlastRadius,
+  type BlastRadiusEffect,
+  type BlastRadiusKind,
+  type BlastRadiusScope,
+  type PermissionRisk,
+  type PermissionRiskAssessment,
+  type PermissionRiskContext,
+  type PermissionRiskInput,
+  type PermissionRiskReason,
+} from "./risk.ts";
+export {
+  PERMISSION_SCOPE_CHECK_SCOPE,
+  PERMISSION_SCOPE_CHECK_USE,
+  PERMISSION_SCOPE_CHECK_USE_ID,
+  SCOPE_CHECK_REASON,
+  createPermissionScopeCheck,
+  scopeCheckMayAnswer,
+  scopeCheckState,
+  withScopeCheckReason,
+  type PermissionScopeCheck,
+  type ScopeCheckInput,
+  type ScopeCheckOutcome,
+  type ScopeCheckRequest,
+} from "./scopeCheck.ts";
+export {
+  APPROVAL_LEVELS,
+  approvalLevelRank,
+  createApprovalDefaultsService,
+  isApprovalLevel,
+  parseApprovalDefaults,
+  type ApprovalDefault,
+  type ApprovalDefaultsService,
+  type ApprovalDefaultsState,
+  type ApprovalLevel,
+} from "./approvalDefaults.ts";
+
+export type RuleAction = "allow" | "deny" | "ask";
+export interface PermissionRule {
+  permission: string;       // e.g. "bash", "edit", "webfetch"
+  pattern: string;          // exact string or prefix glob "npm *"
+  action: RuleAction;
+  scope: "user" | "project" | "session";
+  projectId?: string;
+  sessionId?: string;
+}
+
+export interface PermissionService {
+  evaluate(permission: string, patterns: string[], projectId?: string, sessionId?: string): RuleAction;
+  addRule(rule: PermissionRule): void;
+  rules(): PermissionRule[];
+}
+
+const matches = (rulePattern: string, value: string): boolean => {
+  if (rulePattern === "*") return true;
+  if (rulePattern.endsWith("*")) return value.startsWith(rulePattern.slice(0, -1));
+  return rulePattern === value;
+};
+
+export function createPermissionService(dataDir: string): PermissionService {
+  const file = `${dataDir}/permissions.json`;
+  let ruleList: PermissionRule[] = [];
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as PermissionRule[];
+    // Older records lack a session scope; anything unrecognized falls back
+    // to the old user scope so existing behavior is preserved.
+    ruleList = parsed.map((r) => ({ ...r, scope: r.scope === "project" || r.scope === "session" ? r.scope : "user" }));
+  } catch { /* first run */ }
+
+  const persist = () => {
+    mkdirSync(dirname(file), { recursive: true });
+    atomicWriteSync(file, JSON.stringify(ruleList, null, 2));
+  };
+
+  return {
+    evaluate(permission, patterns, projectId, sessionId) {
+      // fail closed: default ask. deny wins over allow (monotonic).
+      let verdict: RuleAction = "ask";
+      for (const p of patterns.length ? patterns : ["*"]) {
+        for (const r of ruleList) {
+          if (r.permission !== permission && r.permission !== "*") continue;
+          if (r.scope === "project" && r.projectId !== projectId) continue;
+          if (r.scope === "session" && r.sessionId !== sessionId) continue;
+          if (!matches(r.pattern, p)) continue;
+          if (r.action === "deny") return "deny";
+          verdict = "allow";
+        }
+      }
+      return verdict;
+    },
+    addRule(rule) {
+      ruleList = ruleList.filter(
+        (x) => !(
+          x.permission === rule.permission && x.pattern === rule.pattern &&
+          x.scope === rule.scope && x.projectId === rule.projectId && x.sessionId === rule.sessionId
+        ),
+      );
+      ruleList.push(rule);
+      persist();
+    },
+    rules: () => [...ruleList],
+  };
+}
+
+// ---- Auto-accept resolution + legacy persistence --------------------------
+
+/** "inherit" (default) defers to the nearest ancestor with an explicit
+ *  setting; "off" is a child's explicit opt-out from an inherited "on"/"all".
+ *  "on" approves routine requests; "all" (Full access) approves every request
+ *  that no explicit deny rule blocks, high-risk ones included. */
+export type AutoAcceptSetting = "on" | "all" | "off" | "inherit";
+
+/** Effective level after inheritance. */
+export type AutoAcceptLevel = ApprovalLevel;
+
+/** Explicit choices only; anything else (absent, unknown) means inherit. */
+export const explicitAutoAcceptSetting = (value: unknown): "on" | "all" | "off" | undefined =>
+  value === "on" || value === "all" || value === "off" ? value : undefined;
+
+/** Pure nearest-parent policy resolution. Walks the parent chain until
+ *  an explicit "on"/"all"/"off" appears; otherwise the root default applies:
+ *  the approval default of the session's project or Space, which is OFF
+ *  unless a person chose another level. Cycle- and depth-guarded. */
+export function resolveAutoAcceptLevel(
+  sessionId: string | undefined,
+  settingOf: (id: string) => AutoAcceptSetting,
+  parentOf: (id: string) => string | undefined,
+  rootDefault: AutoAcceptLevel = "off",
+): AutoAcceptLevel {
+  const seen = new Set<string>();
+  let id: string | undefined = sessionId;
+  while (id && !seen.has(id) && seen.size < 64) {
+    seen.add(id);
+    const setting = settingOf(id);
+    if (setting === "on") return "routine";
+    if (setting === "all") return "all";
+    if (setting === "off") return "off";
+    id = parentOf(id);
+  }
+  return rootDefault;
+}
+
+/** Whether any automatic approval applies (routine or Full access). */
+export function resolveAutoAccept(
+  sessionId: string,
+  settingOf: (id: string) => AutoAcceptSetting,
+  parentOf: (id: string) => string | undefined,
+): boolean {
+  return resolveAutoAcceptLevel(sessionId, settingOf, parentOf) !== "off";
+}
+
+export interface AutoAcceptStore {
+  /** Legacy lookup used only when an older projection has no explicit field. */
+  get(sessionId: string): AutoAcceptSetting;
+  /** "inherit" removes the record — only explicit choices persist. */
+  set(sessionId: string, setting: AutoAcceptSetting): void;
+}
+
+/** Compatibility store for pre-projection explicit settings. Current servers
+ * migrate entries into the canonical session projection and clear this file. */
+export function createAutoAcceptStore(file: string): AutoAcceptStore {
+  const settings = new Map<string, "on" | "all" | "off">();
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(raw)) {
+      const setting = explicitAutoAcceptSetting(v);
+      if (setting) settings.set(k, setting);
+    }
+  } catch { /* first run */ }
+
+  const persist = () => {
+    mkdirSync(dirname(file), { recursive: true });
+    atomicWriteSync(file, JSON.stringify(Object.fromEntries(settings), null, 2));
+  };
+
+  return {
+    get: (sessionId) => settings.get(sessionId) ?? "inherit",
+    set(sessionId, setting) {
+      if (setting === "inherit") {
+        if (!settings.delete(sessionId)) return;
+      } else {
+        if (settings.get(sessionId) === setting) return;
+        settings.set(sessionId, setting);
+      }
+      persist();
+    },
+  };
+}
+
+// ---- content-bound trust -----------------------------------------------------
+
+/** The authorization subject for one exact version of repository-controlled
+ * executable content. Consumers keep their own canonical state and embed the
+ * immutable receipt rather than creating a parallel permission database. */
+export interface ContentTrustSubject {
+  spaceId: string;
+  projectId: string;
+  sourceKind: string;
+  sourceIdentity: string;
+  contentDigest: string;
+  semanticDigest?: string;
+}
+
+export type ContentTrustApprovalScope = "current-version" | "once";
+
+export interface ContentTrustReceipt extends ContentTrustSubject {
+  version: 1;
+  approvalScope: ContentTrustApprovalScope;
+  approvedAt: number;
+}
+
+export function issueContentTrustReceipt(
+  subject: ContentTrustSubject,
+  approvalScope: ContentTrustApprovalScope,
+  approvedAt = Date.now(),
+): ContentTrustReceipt {
+  if (!subject.spaceId || !subject.projectId || !subject.sourceKind
+    || !subject.sourceIdentity || !subject.contentDigest) {
+    throw new Error("content trust subject is incomplete");
+  }
+  return { version: 1, ...subject, approvalScope, approvedAt };
+}
+
+/** Any identity, content, semantic, Space, project, or requested-scope mismatch
+ * invalidates trust. Unknown/malformed state is therefore fail-closed. */
+export function contentTrustMatches(
+  receipt: ContentTrustReceipt | undefined,
+  subject: ContentTrustSubject,
+  approvalScope?: ContentTrustApprovalScope,
+): boolean {
+  if (!receipt || receipt.version !== 1) return false;
+  return receipt.spaceId === subject.spaceId
+    && receipt.projectId === subject.projectId
+    && receipt.sourceKind === subject.sourceKind
+    && receipt.sourceIdentity === subject.sourceIdentity
+    && receipt.contentDigest === subject.contentDigest
+    && (receipt.semanticDigest ?? "") === (subject.semanticDigest ?? "")
+    && (approvalScope === undefined || receipt.approvalScope === approvalScope);
+}

@@ -1,0 +1,390 @@
+/* Package-owned walkthrough web styles. */
+.wt-card {
+overflow: hidden; border-radius: var(--radius-card); background: var(--elevated);
+}
+.walkthrough-page {
+container: walkthrough-page / inline-size;
+}
+.wt-header {
+display: flex; align-items: center;
+}
+.wt-mode-tabs {
+max-width: 100%;
+}
+.wt-file {
+padding: 10px 14px; border-bottom: 1px solid var(--border-soft);
+  font-family: var(--mono); font-size: var(--font-meta); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wt-diff {
+font-family: var(--mono); font-size: var(--font-meta); background: var(--sunken);
+  border: none; border-radius: 0; padding: 6px 0; max-height: 420px; overflow: auto; margin: 0;
+}
+.wt-diff-line {
+display: flex; padding: 0 10px; white-space: pre;
+}
+.wt-diff-line.add {
+color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+.wt-diff-line.del {
+color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+.wt-diff-line.hunk {
+color: var(--purple);
+}
+.wt-explain {
+border-inline-start: var(--space-1) solid var(--purple); padding: var(--space-2) var(--space-3);
+  font-size: var(--font-meta); color: var(--text-dim); line-height: 1.55;
+}
+.wt-footer {
+display: flex; justify-content: space-between; align-items: center;
+}
+.wt-footer-mid {
+display: flex; gap: 8px;
+}
+.wt-approve {
+padding: 7px 18px;
+}
+.walkthrough-page .step-dots {
+display: flex; gap: 6px; flex-wrap: wrap;
+}
+.walkthrough-page .step-dot {
+width: 10px; height: 10px; padding: 0; border-radius: 50%; background: var(--elevated); border-color: var(--border);
+}
+.walkthrough-page .step-dot.current {
+outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.walkthrough-page .step-dot.approved {
+background: var(--green); border-color: var(--green);
+}
+.walkthrough-page .step-dot.rejected {
+background: var(--red); border-color: var(--red);
+}
+.walkthrough-generated {
+display: flex; flex-direction: column; gap: 10px;
+}
+.walkthrough-source {
+display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.walkthrough-ref-input {
+width: 130px;
+}
+.walkthrough-pr-input {
+width: 90px;
+}
+.walkthrough-page .auto-review-banner {
+display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-block: var(--space-2); border-bottom: 1px solid var(--border-soft); font-size: var(--font-meta);
+}
+.walkthrough-page .auto-review-banner.passed {
+border-color: var(--green);
+}
+.walkthrough-page .auto-review-banner.failed,
+.walkthrough-page .auto-review-banner.stopped {
+border-color: var(--red);
+}
+.walkthrough-page .auto-review-banner.paused {
+border-color: var(--amber);
+}
+.walkthrough-page .review-card {
+padding-block: var(--space-3); border-block: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: var(--space-2);
+}
+.walkthrough-page .review-summary {
+font-size: var(--font-label); white-space: pre-wrap;
+}
+.walkthrough-page .review-finding {
+display: flex; align-items: baseline; gap: 8px; font-size: var(--font-meta); flex-wrap: wrap;
+}
+.walkthrough-page .review-finding.sev-critical .tag,
+.walkthrough-page .review-finding.sev-high .tag {
+color: var(--red); border-color: var(--red);
+}
+.walkthrough-page .review-finding.sev-medium .tag {
+color: var(--amber); border-color: var(--amber);
+}
+.walkthrough-page .risk-badge {
+  padding: 2px 8px; border-radius: var(--radius-round); font-size: var(--font-meta); font-weight: 700;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.walkthrough-page .risk-badge.risk-1,
+.walkthrough-page .risk-badge.risk-2 {
+color: var(--green); border-color: var(--green);
+}
+.walkthrough-page .risk-badge.risk-3 {
+color: var(--amber); border-color: var(--amber);
+}
+.walkthrough-page .risk-badge.risk-4,
+.walkthrough-page .risk-badge.risk-5 {
+color: var(--red); border-color: var(--red);
+}
+.walkthrough-stale {
+border: 1px solid var(--amber); color: var(--amber); border-radius: var(--radius-control);
+  padding: 8px 10px; font-size: var(--font-meta);
+}
+.walkthrough-stage {
+padding-block: var(--space-3); border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: var(--space-2);
+}
+.walkthrough-stage-title {
+font-weight: 600; font-size: 14px;
+}
+.walkthrough-stop {
+display: flex; flex-direction: column; gap: 4px;
+}
+.walkthrough-stop-explain {
+font-size: var(--font-meta); color: var(--muted);
+}
+.walkthrough-page {
+width: 100%;
+}
+.walkthrough-page,
+.wt-mode-panel {
+display: flex; flex-direction: column; gap: var(--space-3); min-width: 0;
+}
+.wt-replay-notice { margin: 0; }
+.walkthrough-stage {
+min-width: 0;
+}
+.walkthrough-stage-title {
+overflow-wrap: anywhere;
+}
+@container walkthrough-page (max-width: 700px) {
+.wt-header {
+align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.wt-header > .wt-mode-tabs {
+width: 100%;
+}
+
+.wt-header > .wt-mode-tabs .ui-tab {
+flex: 1;
+}
+
+.wt-header .header-spacer {
+display: none;
+}
+
+.wt-diff {
+max-height: min(52dvh, 420px);
+}
+
+.wt-footer {
+display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.wt-footer > button,
+.wt-footer-mid > button {
+width: 100%;
+}
+
+.wt-footer-mid {
+grid-column: 1 / -1;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.walkthrough-source {
+align-items: stretch;
+    flex-direction: column;
+}
+
+.walkthrough-source > :is(.walkthrough-source-tabs, .ui-text-input, .ui-btn) {
+width: 100%;
+    max-width: none;
+}
+
+.walkthrough-source-tabs {
+display: grid; grid-template-columns: minmax(0, 1fr);
+}
+
+.walkthrough-source .header-spacer {
+display: none;
+}
+
+.walkthrough-page .step-dots {
+max-width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+}
+
+.walkthrough-page .step-dots::-webkit-scrollbar {
+display: none;
+}
+
+.walkthrough-page .step-dot {
+position: relative;
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+.walkthrough-page .step-dot::before {
+content: "";
+    position: absolute;
+    inset: 16px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--elevated);
+}
+
+.walkthrough-page .step-dot.current::before {
+outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+.walkthrough-page .step-dot.approved::before {
+border-color: var(--green); background: var(--green);
+}
+
+.walkthrough-page .step-dot.rejected::before {
+border-color: var(--red); background: var(--red);
+}
+
+.walkthrough-page .auto-review-banner {
+align-items: stretch; flex-direction: column;
+}
+
+.walkthrough-page .auto-review-banner .header-spacer {
+display: none;
+}
+
+.walkthrough-page .review-finding {
+align-items: flex-start; flex-direction: column;
+}
+}
+@container walkthrough-page (max-width: 420px) {
+.wt-footer,
+.wt-footer-mid {
+grid-template-columns: minmax(0, 1fr);
+}
+
+.wt-footer-mid {
+grid-column: 1;
+    grid-row: auto;
+}
+}
+
+/* Rules moved from core styles.css: walkthrough context badges. */
+.walkthrough-page .ctx-badge { font-size: var(--font-meta); padding: var(--space-1) var(--space-2); border-radius: var(--radius-round); border: 1px solid var(--border); }
+.walkthrough-page .ctx-badge.green { color: var(--green); border-color: var(--green); }
+.walkthrough-page .ctx-badge.yellow { color: var(--amber); border-color: var(--amber); }
+.walkthrough-page .ctx-badge.red { color: var(--red); border-color: var(--red); }
+
+/* Toolbar progress + step status: meta type role, no inline styles. */
+.wt-progress {
+  margin-right: var(--space-2);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.wt-status-badge {
+  margin-left: var(--space-2);
+}
+/* Replay Theater. Controls compose host primitives; only the layout, the
+   decorative step track and the file strip are package-owned. */
+.wt-replay { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; border-radius: var(--radius-control); outline: none; }
+/* The panel is focusable only to receive shortcuts: a hairline ring when
+   focus arrives from the keyboard, nothing for a pointer user pressing keys. */
+.wt-replay:focus-visible { box-shadow: none; }
+.wt-replay:focus-visible:not([data-pointer-focus]) { outline: 1px solid var(--accent-line); outline-offset: var(--space-1); }
+.wt-replay-scope { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--font-meta); color: var(--text-dim); }
+.wt-replay-scope-label { white-space: nowrap; }
+.wt-replay-turn { min-width: calc(var(--control-h-sm) * 2); }
+/* Compact Select on the row's meta scale, like its labels and the sm buttons. */
+.wt-replay .wt-replay-turn .picker-chip { font-size: var(--font-meta); }
+.wt-replay-filter { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+/* One scrollable row: a 25-file turn must not push the player below the fold. */
+.wt-replay-files {
+  display: flex; flex: 1 1 auto; gap: var(--space-1); min-width: 0;
+  overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin;
+  padding-block: 2px; /* room for the focus ring */
+}
+.wt-replay-chip {
+  display: inline-flex; flex: none; align-items: center; gap: var(--space-1);
+  min-height: max(var(--control-h-sm), var(--hit-min)); max-width: 24ch; padding: 0 var(--space-2);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-round);
+  background: transparent; color: var(--text-dim); font-size: var(--font-meta);
+}
+.wt-replay-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.wt-replay-chip-count { flex: none; min-width: 2ch; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (hover: hover) { .wt-replay-chip:hover:where(:not(:disabled)) { border-color: var(--border); color: var(--text); } }
+.wt-replay-chip.active { border-color: var(--accent-line); background: var(--accent-wash); color: var(--text); }
+.wt-replay-chip.active .wt-replay-chip-count { color: var(--accent); }
+.wt-replay-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wt-replay-clear { flex: none; }
+.wt-replay-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.wt-replay-transport { display: flex; flex: none; align-items: center; gap: var(--space-1); }
+.wt-replay .wt-replay-play { width: var(--control-h); height: var(--control-h); color: var(--accent-ink); background: var(--accent); border-color: var(--accent-line); }
+@media (hover: hover) { .wt-replay .wt-replay-play:hover:not(:disabled) { color: var(--accent-ink); background: var(--accent-hi); } }
+.wt-replay .wt-replay-speed { width: auto; min-width: var(--control-h-sm); padding-inline: var(--space-2); color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
+.wt-replay-track { display: flex; flex: 1 1 200px; align-items: center; gap: var(--space-2); min-width: 0; }
+/* Slider and step ticks share one column, so the ticks start and end with
+   the slider track (host size-stepper treatment: 4px track, 15px thumb). */
+.wt-replay-rail { display: flex; flex: 1 1 auto; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.wt-replay-scrub {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%; min-width: 0;
+  height: max(var(--control-h-sm), var(--hit-min)); margin: 0; padding: 0; border: none; background: transparent; cursor: pointer;
+}
+.wt-replay-scrub::-webkit-slider-runnable-track { height: 4px; border-radius: calc(2px * var(--corner-radius-scale)); background: var(--border); }
+.wt-replay-scrub::-moz-range-track { height: 4px; border-radius: calc(2px * var(--corner-radius-scale)); background: var(--border); }
+.wt-replay-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 15px; height: 15px; margin-top: -5.5px; border-radius: 50%;
+  background: var(--elevated); border: 1px solid var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.wt-replay-scrub::-moz-range-thumb { width: 15px; height: 15px; border-radius: 50%; background: var(--elevated); border: 1px solid var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
+.wt-replay-scrub:focus-visible { outline: none; }
+.wt-replay-scrub:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--focus-wash); border-width: 2px; }
+.wt-replay-scrub:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--focus-wash); border-width: 2px; }
+
+.wt-replay-count { flex: none; min-width: 5ch; font-size: var(--font-meta); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.wt-replay-ticks { display: flex; gap: 2px; margin-top: calc(var(--space-2) * -1); cursor: pointer; }
+.wt-replay-tick { flex: 1 1 0; min-width: 2px; height: var(--space-1); border-radius: calc(2px * var(--corner-radius-scale)); background: var(--border-soft); transition: background-color var(--motion-fast) var(--motion-ease); }
+.wt-replay-tick.done { background: color-mix(in srgb, var(--accent) 45%, var(--border-soft)); }
+.wt-replay-tick.current { background: var(--accent); }
+.wt-replay-file {
+  display: flex; align-items: center; gap: var(--space-2); min-width: 0;
+  padding-block: var(--space-1); padding-inline: var(--space-3) var(--space-1);
+  border-bottom: 1px solid var(--border-soft); min-height: calc(var(--control-h-sm) + var(--space-2));
+}
+/* Paths stay LTR in RTL locales; the start of the path truncates first so the file name stays visible. */
+.wt-replay-path {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+  font-family: var(--mono); font-size: var(--font-meta); font-weight: 600;
+}
+:dir(rtl) .wt-replay-path { text-align: right; }
+.wt-replay-jump { flex: none; }
+.wt-replay-states { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border-bottom: 1px solid var(--border-soft); }
+.wt-replay-pane { min-width: 0; }
+.wt-replay-pane + .wt-replay-pane { border-inline-start: 1px solid var(--border-soft); }
+.wt-replay-pane-title { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; min-height: var(--control-h-sm); padding: var(--space-1) var(--space-3); font-size: var(--font-meta); color: var(--text-dim); }
+.wt-replay-text { margin: 0; padding: var(--space-2) var(--space-3); max-height: 240px; overflow: auto; font-family: var(--mono); font-size: var(--font-meta); background: var(--sunken); white-space: pre-wrap; overflow-wrap: anywhere; border: none; border-radius: 0; direction: ltr; text-align: left; }
+.wt-replay-text:focus-visible, .wt-replay .wt-diff:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wt-replay-unknown { padding: var(--space-2) var(--space-3); font-size: var(--font-meta); }
+/* Snippets and diff lines wrap instead of scrolling sideways: touch and
+   overlay scrollbars give a clipped line no affordance. Wrapped diff text
+   hangs under its own column, clear of the line number. */
+.wt-replay .wt-diff { direction: ltr; text-align: left; }
+.wt-replay .wt-diff-line { white-space: pre-wrap; }
+.wt-replay .wt-diff-line > :last-child { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.wt-replay .wt-explain { overflow-wrap: anywhere; }
+.wt-replay-hint { font-size: var(--font-meta); }
+@media (pointer: coarse) { .wt-replay-hint { display: none; } }
+@container walkthrough-page (max-width: 520px) {
+  .wt-replay-states { grid-template-columns: minmax(0, 1fr); }
+  .wt-replay-pane + .wt-replay-pane { border-inline-start: none; border-top: 1px solid var(--border-soft); }
+  .wt-replay-controls { flex-direction: column; align-items: stretch; }
+  .wt-replay-transport { justify-content: center; }
+  .wt-replay-track { flex: none; }
+  /* Too narrow for per-step ticks to read as anything but noise. */
+  .wt-replay-ticks { display: none; }
+  .wt-replay-text { max-height: 160px; }
+}
+@media (prefers-reduced-motion: reduce) { .wt-replay-tick { transition: none; } }

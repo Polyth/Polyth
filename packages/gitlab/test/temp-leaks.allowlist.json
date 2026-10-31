@@ -1,0 +1,5 @@
+[
+  "auth.test.ts",
+  "credentials.test.ts",
+  "routes.test.ts"
+]

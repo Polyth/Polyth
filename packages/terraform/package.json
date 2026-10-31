@@ -1,0 +1,40 @@
+{
+  "name": "@polyth/terraform",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./types": "./src/types.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Terraform",
+      "description": "Explore infrastructure configurations and review Terraform plans.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "infrastructure",
+      "hasSettings": false,
+      "category": "engineering",
+      "projectAffinity": {
+        "directions": [
+          "engineering",
+          "operations"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/terminal": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

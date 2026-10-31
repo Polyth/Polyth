@@ -1,0 +1,425 @@
+/* Settings content stays with Git; the host owns the surrounding settings
+   panel and dialog chrome. */
+/* ── Source Control settings page ─────────────────────────────────────
+   Provider sections (settings.integrations*) are full settings Sections;
+   the wrapper keeps them in page flow and carries the deep-link target. */
+.git-provider-integrations {
+  display: grid;
+  min-width: 0;
+}
+
+/* Git access: the remote as a fact, the full guide behind a disclosure. */
+
+details.source-control-auth-guide {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+}
+
+details.source-control-auth-guide > summary.source-control-auth-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 500;
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--radius-control);
+}
+
+details.source-control-auth-guide > summary.source-control-auth-summary::-webkit-details-marker {
+  display: none;
+}
+
+details.source-control-auth-guide > summary.source-control-auth-summary::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: var(--text-dim);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 3.5 10.5 8 6 12.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6 3.5 10.5 8 6 12.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform var(--motion-fast) var(--motion-ease, ease);
+}
+
+details.source-control-auth-guide[open] > summary.source-control-auth-summary::before {
+  transform: rotate(90deg);
+}
+
+details.source-control-auth-guide > summary.source-control-auth-summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+details.source-control-auth-guide[open] {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+details.source-control-auth-guide[open] > summary.source-control-auth-summary {
+  margin-inline: calc(-1 * var(--space-3));
+}
+
+@media (max-width: 700px) {
+  .source-control-auth-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .source-control-auth-foot {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* Branches and conflicts: full-width prompt, quiet branch preview. */
+.settings-row .git-conflict-agent-prompt {
+  width: 100%;
+  min-height: 72px;
+}
+
+.git-branch-preview {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+/* Tokens and the example name read as code inside the row hint. */
+.git-settings .set-row-hint code,
+.git-branch-preview code {
+  padding: 0 3px;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+}
+
+/* Commit messages: picker fills the stacked row; notes read as hints. */
+.git-commit-model-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.git-commit-note {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.git-commit-note[role="alert"] {
+  color: var(--red);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  details.source-control-auth-guide > summary.source-control-auth-summary::before {
+    transition: none;
+  }
+}
+
+/* ── Page frame: tabs, the attention dot, the repository summary ───── */
+.git-settings-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* Something on this tab blocks work (no commit identity yet). */
+.git-settings-tab-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+/* A tab panel that opens on the summary list keeps the section rhythm. */
+.git-settings-repository + .settings-section {
+  margin-top: calc(var(--space-5) * var(--density-scale, 1));
+}
+
+.git-settings-branch {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Your commit identity: two fields that share a row where they fit ── */
+.source-control-person-profile {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-block: var(--space-3) 0;
+}
+
+.source-control-person-profile .source-control-person-profile-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.source-control-person-profile .source-control-person-profile-fields > .settings-field {
+  flex: 1 1 14rem;
+  min-width: 0;
+  /* The gap spaces the fields; drop the stacked-form sibling margin. */
+  margin-top: 0;
+}
+
+.source-control-person-profile .ui-input {
+  width: 100%;
+}
+
+.settings-section .git-person-profile-notice {
+  margin-block: var(--space-3) 0;
+}
+
+/* Provider sections ("GitHub", "GitLab", …) are full Sections, so the
+   wrapper only keeps them in page flow. */
+.git-provider-integrations > .settings-section:first-child {
+  margin-top: calc(var(--space-6) * var(--density-scale, 1));
+}
+
+.settings-tab-panel > .git-provider-integrations:first-child > .settings-section:first-child {
+  margin-top: 0;
+}
+
+/* ── Workflow ──────────────────────────────────────────────────────── */
+.settings-row .git-branch-template {
+  width: min(100%, var(--settings-control-w, 300px));
+}
+
+/* ── Display: the inert change-list preview ───────────────────────── */
+.git-settings-preview {
+  margin: var(--space-3) 0 var(--space-1);
+  padding: var(--space-1) 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+
+/* The preview borrows the Source control page scope for its rows only. */
+.git-settings-preview .git-settings-preview-page {
+  flex: none;
+  gap: 0;
+  max-width: none;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  overflow: visible;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Nothing in the preview can be acted on, so its row tools stay hidden. */
+.git-settings-preview :is(.git-file-actions, .git-change-group-actions, .git-tree-dir-actions) {
+  display: none;
+}
+
+/* ── Git identities: project picker, list and the identity dialog ───── */
+.git-identity-status {
+  display: grid;
+  gap: var(--space-1);
+  padding-block: 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+.git-identity-status > span:not(.form-error) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.git-identity-list .git-identity-tile {
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.git-identity-empty {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.git-identity-dialog {
+  container: git-identity-dialog / inline-size;
+}
+
+.git-identity-dialog .git-identity-form {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.git-identity-dialog .git-identity-head {
+  display: grid;
+  grid-template-columns: var(--control-h) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  padding-block-end: var(--space-2);
+}
+
+.git-identity-dialog .git-identity-mark {
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.git-identity-dialog .git-identity-field {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, 9.5rem) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+
+.git-identity-dialog .git-identity-field-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-h);
+  color: var(--text);
+  font-size: var(--font-label);
+}
+
+.git-identity-dialog .git-identity-field-hint {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  cursor: help;
+}
+
+.git-identity-dialog .git-identity-field-hint:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.git-identity-dialog .git-identity-field-control {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.git-identity-dialog .git-identity-signing,
+.git-identity-dialog .git-identity-ssh {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.git-identity-dialog .git-identity-signing > :last-child,
+.git-identity-dialog .git-identity-ssh > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.git-identity-dialog .git-identity-signing .ui-checkbox {
+  flex: none;
+  align-items: center;
+  gap: 0;
+}
+
+.git-identity-dialog .git-identity-auth {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.git-identity-dialog .git-identity-auth .seg {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.git-identity-dialog .git-identity-auth-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.git-identity-dialog .git-identity-note {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+@container git-identity-dialog (max-width: 440px) {
+  .git-identity-dialog .git-identity-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .git-identity-dialog .git-identity-field-label {
+    min-height: 0;
+  }
+}
+
+/* Project settings → Git identity */
+.git-project-identity {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.git-project-identity .git-project-identity-intro {
+  display: flex;
+  align-items: center;
+}
+
+.git-project-identity .git-project-identity-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.git-project-identity .git-project-identity-rows {
+  display: grid;
+  min-width: 0;
+}
+
+.git-project-identity .git-project-identity-actions,
+.git-project-identity .git-project-identity-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.git-project-identity .git-project-identity-member > span {
+  flex: 1 1 12rem;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}

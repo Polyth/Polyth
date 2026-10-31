@@ -1,0 +1,329 @@
+/* Quick-action editor (Settings > Chat). One component serves both roles;
+   everything here is scoped under .mqa-* and reads canonical tokens only. */
+
+/* ---- live preview ------------------------------------------------------ */
+.mqa-preview {
+  container: mqa-preview / inline-size;
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(120% 90% at 100% 0%, var(--accent-wash), transparent 60%),
+    var(--sunken);
+}
+
+.mqa-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mqa-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mqa-preview-head .seg {
+  flex: none;
+  flex-wrap: nowrap;
+}
+
+.mqa-preview-stage {
+  position: relative;
+  display: grid;
+  min-height: 112px;
+  padding: var(--space-3) var(--space-2) var(--space-2);
+  overflow: hidden;
+}
+
+.mqa-preview-message {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  align-content: start;
+}
+
+.mqa-preview-message--user { justify-items: end; }
+
+.mqa-preview-bubble {
+  max-inline-size: min(85%, 420px);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--bubble-user-line);
+  border-radius: var(--radius-card);
+  background: var(--bubble-user-bg);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.mqa-preview-line {
+  display: block;
+  block-size: 8px;
+  border-radius: 999px;
+  background: var(--hair-strong);
+}
+
+.mqa-preview-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  min-width: 0;
+}
+
+.mqa-preview-message--user .mqa-preview-meta { justify-content: flex-end; }
+
+.mqa-preview-time,
+.mqa-preview-identity {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mqa-preview-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.mqa-preview-logo {
+  inline-size: var(--icon-md);
+  block-size: var(--icon-md);
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-line));
+}
+
+.mqa-preview-bar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  transition: opacity var(--motion-normal) var(--motion-ease);
+}
+
+/* Hover mode shows the bar as a ghost under a pointer glyph, so the preview
+   tells "appears on hover" without hiding what will appear. */
+.mqa-preview-bar[data-reveal="hover"] { opacity: 0.5; }
+.mqa-preview-bar[data-reveal="menu"] .mqa-preview-more {
+  color: var(--text);
+  background: var(--surface-overlay-strong);
+}
+
+.mqa-preview-btn {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 26px;
+  block-size: 26px;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+}
+
+.mqa-preview-more { color: var(--text-dim); }
+
+.mqa-preview[data-device="touch"] .mqa-preview-btn {
+  inline-size: 30px;
+  block-size: 30px;
+}
+
+.mqa-preview-cursor {
+  position: absolute;
+  inset-block-start: 55%;
+  inset-inline-end: -10px;
+  color: var(--text);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+  animation: mqa-preview-point 2.4s var(--motion-ease) infinite;
+}
+
+@keyframes mqa-preview-point {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-6px, -3px); }
+}
+
+/* The More menu, drawn open under the bar it belongs to: at the end for a
+   user message, under the answer's footer for an agent reply. */
+.mqa-preview-menu {
+  justify-self: end;
+  display: grid;
+  gap: 1px;
+  min-inline-size: 168px;
+  margin-block-start: var(--space-2);
+  padding: var(--space-1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  box-shadow: var(--shadow-md);
+}
+
+.mqa-preview-message--assistant ~ .mqa-preview-menu { justify-self: start; }
+
+.mqa-preview-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px var(--space-2);
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+
+.mqa-preview-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- ordered action list ----------------------------------------------- */
+.mqa-list {
+  container: mqa-list / inline-size;
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mqa-item {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-1);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-hover);
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
+}
+
+.mqa-item[data-placement="bar"] { border-color: var(--accent-line); }
+.mqa-item[data-placement="off"] { opacity: 0.62; background: transparent; }
+
+.mqa-item[data-dragging="true"] {
+  position: relative;
+  z-index: 1;
+  border-color: var(--accent);
+  background: var(--raised);
+  box-shadow: var(--shadow-md);
+  opacity: 1;
+}
+
+.mqa-list[data-dragging="true"] { cursor: grabbing; user-select: none; }
+
+.mqa-handle {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+}
+
+.mqa-handle:focus-visible {
+  color: var(--text);
+  background: var(--surface-overlay-hover);
+}
+@media (hover: hover) {
+  .mqa-handle:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-overlay-hover);
+  }
+}
+
+.mqa-handle:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+.mqa-handle:disabled { cursor: default; opacity: 0.5; }
+.mqa-item[data-dragging="true"] .mqa-handle { cursor: grabbing; color: var(--accent); }
+
+.mqa-item-glyph {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 32px;
+  block-size: 32px;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text-dim);
+}
+
+.mqa-item[data-placement="bar"] .mqa-item-glyph {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.mqa-item-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.mqa-item-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mqa-item-detail {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.mqa-item-placement { justify-self: end; }
+.mqa-item-placement .seg { flex-wrap: nowrap; }
+
+/* Narrow panes: the placement control drops under the name. */
+@container mqa-list (max-width: 460px) {
+  .mqa-item {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    row-gap: var(--space-2);
+  }
+  .mqa-item-placement {
+    grid-column: 3;
+    justify-self: start;
+  }
+  .mqa-item-detail { display: none; }
+  .mqa-item-name { white-space: normal; }
+}
+
+.mqa-status {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mqa-preview-cursor { animation: none; }
+}

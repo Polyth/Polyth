@@ -1,0 +1,46 @@
+{
+  "name": "@polyth/harness-runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/public.ts",
+    "./features": "./src/features.ts",
+    "./accounts": "./src/accounts.ts",
+    "./capability-text": "./src/capabilityText.ts",
+    "./executable-discovery": "./src/executableDiscovery.ts",
+    "./installers": "./src/installers.ts",
+    "./native-plugins": "./src/nativePlugins.ts",
+    "./native-skills": "./src/nativeSkills.ts",
+    "./process-authority": "./src/processAuthority.ts",
+    "./remote-host": "./src/remoteHost.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/kernel": "0.1.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "polyth": {
+    "serverEntry": "./src/packageEntry.ts",
+    "descriptor": {
+      "name": "Harnesses",
+      "description": "Choose the execution engine for a canonical session",
+      "core": true,
+      "enabled": true,
+      "icon": "cpu",
+      "hasSettings": true,
+      "settingsGroup": "Engineering",
+      "category": "system",
+      "projectAffinity": {}
+    },
+    "webEntry": "./widgets/index.tsx"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

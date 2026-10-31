@@ -1,0 +1,902 @@
+/* Size containment lets the same content fit a canvas card or a shallow slot.
+   Unbounded slots get a useful intrinsic height instead of collapsing. */
+.usage-widget {
+  container: usage-widget / size;
+  flex: 1 1 auto;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  contain-intrinsic-block-size: auto calc(3 * var(--control-h-lg));
+  color: var(--text);
+  font-size: var(--font-meta);
+}
+
+.usage-widget-scroll {
+  block-size: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/* More below the visible end: fade the edge rather than cut a row in half.
+   Set from scroll position (useMoreBelow), so it never animates. */
+.usage-widget-scroll[data-more] {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--space-6)), transparent);
+}
+
+.usage-widget-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-block-size: 100%;
+  padding: var(--space-3);
+}
+
+/* ---- Quiet ledger -----------------------------------------------------------
+   One lead value per card in large type; every other value sits in a short
+   row under a quiet heading and a hairline. Units and lower-bound signs step
+   back so the digits carry the reading. */
+
+.usage-widget-heading,
+.usage-widget-activity figcaption,
+.usage-widget-axis,
+.usage-widget-projects > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--muted);
+  line-height: var(--font-meta-lh);
+}
+
+.usage-widget-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.usage-widget-heading strong {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-widget-range { flex: none; }
+
+.usage-widget-overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-inline-size: 0;
+}
+
+.usage-widget :is(dl, dd, h4) { margin: 0; }
+.usage-widget :is(dt, dd, small) { overflow-wrap: anywhere; }
+.usage-widget dt { color: var(--muted); line-height: var(--font-meta-lh); }
+.usage-widget dd strong { font-weight: 620; font-variant-numeric: tabular-nums; }
+.usage-widget small { display: block; color: var(--muted); font-size: inherit; line-height: var(--font-meta-lh); }
+
+/* The digits lead; the unit and a lower-bound sign read as annotation. Never
+   below the metadata size, so a small value keeps a legible unit. */
+:is(.usage-widget, .usage-limits-widget) .usage-figure-unit {
+  margin-inline-start: .06em;
+  color: var(--muted);
+  font-size: max(.6em, var(--font-meta));
+  font-weight: 550;
+  letter-spacing: 0;
+}
+:is(.usage-widget, .usage-limits-widget) .usage-figure-sign {
+  margin-inline-end: .04em;
+  color: var(--muted);
+  font-size: max(.7em, var(--font-meta));
+  font-weight: 500;
+}
+
+/* Lead: the hero value with its caption, the cache chip beside it, and the
+   context meter under both. */
+.usage-widget-lead { display: grid; gap: var(--space-3); min-inline-size: 0; }
+
+.usage-widget-lead-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  min-inline-size: 0;
+}
+
+.usage-widget-hero { min-inline-size: 0; }
+
+.usage-widget-hero > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-1);
+}
+
+.usage-widget-hero dd {
+  order: -1;
+  flex-basis: 100%;
+  margin-block-end: var(--space-1);
+  font-size: clamp(var(--font-title), calc(var(--font-heading) + 6cqi), calc(1.75 * var(--font-title)));
+  line-height: 1;
+  letter-spacing: -.04em;
+}
+
+.usage-widget-hero dd strong { font-weight: 650; }
+.usage-widget-hero small::before { content: "· "; }
+
+.usage-widget-meter {
+  --usage-widget-meter: var(--accent);
+  block-size: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+}
+
+.usage-widget-meter[data-level="yellow"] { --usage-widget-meter: var(--amber); }
+.usage-widget-meter[data-level="red"] { --usage-widget-meter: var(--red); }
+
+.usage-widget-meter > i {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in oklab, var(--usage-widget-meter) 55%, transparent), var(--usage-widget-meter));
+}
+.usage-widget-meter > i:dir(rtl) { background: linear-gradient(270deg, color-mix(in oklab, var(--usage-widget-meter) 55%, transparent), var(--usage-widget-meter)); }
+
+/* Prompt cache: the text carries the state; the tone only reinforces it.
+   Warning and good-state text use the contrast-adjusted ink on their wash.
+   The ring is the share of the lifetime left; nothing animates. */
+.usage-widget-chip {
+  --usage-chip-ink: var(--text-dim);
+  --usage-chip-wash: var(--surface-overlay);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  max-inline-size: 100%;
+  min-block-size: var(--control-h-sm);
+  padding-inline: var(--space-2) var(--space-3);
+  border-radius: var(--radius-round);
+  background: var(--usage-chip-wash);
+  color: var(--usage-chip-ink);
+  font-size: var(--font-label);
+  line-height: 1.2;
+}
+
+.usage-widget-chip[data-state="warm"] { --usage-chip-ink: var(--green-on-wash, var(--green)); --usage-chip-wash: var(--green-wash); }
+.usage-widget-chip[data-state="expiring"] { --usage-chip-ink: var(--amber-on-wash, var(--amber)); --usage-chip-wash: var(--amber-wash); }
+.usage-widget-chip[data-state="expired"] { --usage-chip-ink: var(--red); --usage-chip-wash: var(--red-wash); }
+.usage-widget-chip[data-state="active"] { --usage-chip-ink: var(--accent-text); --usage-chip-wash: var(--accent-wash); }
+
+.usage-widget-chip > strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+
+.usage-widget-chip > svg {
+  flex: none;
+  inline-size: var(--icon-sm);
+  block-size: var(--icon-sm);
+  transform: rotate(-90deg);
+  fill: none;
+  stroke-width: 3;
+}
+.usage-widget-chip > svg circle { stroke: color-mix(in srgb, currentColor 24%, transparent); }
+.usage-widget-chip > svg circle + circle { stroke: currentColor; stroke-linecap: round; }
+
+.usage-widget-chip > i {
+  flex: none;
+  inline-size: var(--space-2);
+  block-size: var(--space-2);
+  margin-inline: var(--space-1);
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Ledger: groups of three under a quiet heading with a hairline. The session
+   card keeps three columns so its groups line up; Project and Global fit
+   their one row of totals to the width. */
+.usage-widget-ledger { display: grid; gap: var(--space-4); min-inline-size: 0; }
+
+.usage-widget-group { min-inline-size: 0; }
+
+.usage-widget-group > h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-end: var(--space-2);
+  color: var(--muted);
+  font-size: inherit;
+  font-weight: 600;
+  letter-spacing: .02em;
+  line-height: var(--font-meta-lh);
+}
+
+.usage-widget-group > h4::after {
+  content: "";
+  flex: 1;
+  block-size: 1px;
+  background: var(--border-soft);
+}
+
+.usage-widget-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 5em), 1fr));
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+.usage-widget-content[data-scope="session"] .usage-widget-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.usage-widget-metrics > div { min-inline-size: 0; }
+.usage-widget-metrics dt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.usage-widget-metrics dd {
+  margin-block-start: var(--space-1);
+  font-size: var(--font-heading);
+  line-height: 1.15;
+  letter-spacing: -.02em;
+  white-space: nowrap;
+}
+
+.usage-widget-metrics small { margin-block-start: var(--space-1); }
+
+.usage-widget [data-usage-metric][data-tone="warning"] strong { color: var(--amber-on-wash, var(--amber)); }
+.usage-widget [data-usage-metric][data-tone="critical"] strong { color: var(--red); }
+
+/* Activity: the latest bucket in full accent, the rest a quiet wash of it. */
+.usage-widget-activity {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-block-size: calc(2 * var(--control-h));
+  margin: 0;
+}
+
+.usage-widget-activity figcaption > span:first-child,
+.usage-widget-projects > header > span:first-child { font-weight: 600; letter-spacing: .02em; }
+
+.usage-widget-bars {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  gap: 3px;
+  min-block-size: var(--control-h);
+  block-size: calc(2 * var(--control-h));
+  max-block-size: calc(5 * var(--control-h));
+  margin: 0;
+  padding: 0;
+  border-block-end: 1px solid var(--border-soft);
+  list-style: none;
+}
+
+/* Scale with the card only when the host gives it a height. In an unbounded
+   slot (the phone Workspace panel) `cqb` falls back to the viewport. */
+@container usage-widget (min-height: 1px) {
+  .usage-widget-bars { block-size: clamp(var(--control-h), 20cqb, calc(5 * var(--control-h))); }
+}
+
+.usage-widget-bars li {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  min-inline-size: 0;
+}
+
+.usage-widget-bars li > span[aria-hidden] {
+  inline-size: 100%;
+  border-start-start-radius: calc(var(--radius-control) / 2);
+  border-start-end-radius: calc(var(--radius-control) / 2);
+  background: color-mix(in oklab, var(--accent) 34%, transparent);
+}
+
+.usage-widget-bars li[data-latest] > span[aria-hidden] { background: var(--accent); }
+.usage-widget-bars li[data-known="false"] { border-block-end: 1px dashed var(--muted); }
+.usage-widget-axis > span { min-inline-size: 0; overflow-wrap: anywhere; }
+.usage-widget-axis > span:last-child { text-align: end; }
+
+.usage-widget-projects dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  border-block-start: 1px solid var(--border-soft);
+}
+
+/* Each project's part of the total as a soft wash behind its row; the row
+   reaches a little past the content edge so its text stays on the card's line. */
+.usage-widget-projects dl > div {
+  position: relative;
+  isolation: isolate;
+  margin-inline: calc(-1 * var(--space-2));
+  padding-inline: var(--space-2);
+}
+.usage-widget-projects dl > div[style]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block: 3px;
+  inset-inline-start: 0;
+  inline-size: calc(var(--usage-share, 0) * 100%);
+  min-inline-size: var(--space-1);
+  border-radius: var(--radius-control);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+.usage-widget-projects > header { margin-block-end: var(--space-1); }
+.usage-widget-projects dt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.usage-widget-projects dd { font-weight: 600; font-variant-numeric: tabular-nums; text-align: end; }
+
+.usage-widget-state { margin-block: auto; }
+.usage-widget-note { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--text-dim); }
+.usage-widget-note > span { flex: 1; }
+
+.usage-widget-content[data-layout="summary"] .usage-widget-lead { flex: 1; }
+.usage-widget-content[data-layout="metrics"] .usage-widget-overview { flex: none; }
+
+@container usage-widget (min-width: 440px) {
+  .usage-widget-content:not([data-layout="metrics"]) .usage-widget-overview {
+    display: grid;
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.6fr);
+    /* Top-aligned: centring against a long ledger left a void above the hero. */
+    align-items: start;
+    gap: var(--space-5);
+  }
+  .usage-widget-content:not([data-layout="metrics"]) .usage-widget-lead-row { flex-direction: column; align-items: flex-start; }
+}
+
+/* A narrow card keeps every value whole: two columns rather than clipped digits. */
+@container usage-widget (max-width: 300px) {
+  .usage-widget-content[data-scope="session"] .usage-widget-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container usage-widget (max-height: 200px) {
+  .usage-widget-content { gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+  .usage-widget-heading > div { flex-direction: row; align-items: baseline; gap: var(--space-2); }
+  .usage-widget-heading > div > span { flex: none; }
+  .usage-widget-hero dd { font-size: var(--font-heading); }
+  .usage-widget-lead { gap: var(--space-2); }
+  .usage-widget-ledger { gap: var(--space-2); }
+  .usage-widget-group > h4 { display: none; }
+  .usage-widget-metrics { column-gap: var(--space-2); }
+  .usage-widget-content[data-layout="auto"] .usage-widget-activity { display: none; }
+}
+
+@container usage-widget (min-height: 480px) {
+  .usage-widget-content { gap: var(--space-5); padding: var(--space-4); }
+  .usage-widget-overview,
+  .usage-widget-ledger { gap: var(--space-5); }
+}
+
+/* ---- Compact: the Workspace panel's glance ----------------------------------
+   The panel's header names the card, so the glance opens on its lead value:
+   the figure, then on the same line what explains it (the context meter or the
+   activity sparkline, and the cache chip); under it one line of the lead's
+   caption and the next two values. The Metrics layout has no lead: its first
+   four values share one row. */
+.usage-widget[data-compact] { contain-intrinsic-block-size: auto calc(2 * var(--control-h-lg)); }
+.usage-widget[data-compact] .usage-widget-content { gap: var(--space-3); padding: var(--space-2) var(--space-3) var(--space-3); }
+
+.usage-widget-glance { display: grid; gap: var(--space-2); min-inline-size: 0; }
+
+.usage-widget-glance-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+  min-block-size: calc(1.3 * var(--font-title));
+}
+
+.usage-widget-glance-figure {
+  flex: none;
+  font-size: calc(1.3 * var(--font-title));
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.04em;
+  line-height: 1;
+}
+
+.usage-widget-glance-lead > .usage-widget-meter { flex: 1; min-inline-size: var(--space-6); }
+.usage-widget-glance-lead > .usage-widget-chip {
+  min-block-size: calc(var(--control-h-sm) - var(--space-1));
+  margin-inline-start: auto;
+  padding-inline: var(--space-2);
+  font-size: var(--font-meta);
+}
+
+/* The activity chart reduced to its shape, as tall as the figure beside it. */
+.usage-widget-bars.usage-widget-spark {
+  flex: 0 1 62%;
+  gap: 2px;
+  block-size: calc(1.3 * var(--font-title));
+  min-block-size: 0;
+  max-block-size: none;
+  margin-inline-start: auto;
+  border-block-end: 0;
+}
+.usage-widget-spark li > span[aria-hidden] { min-block-size: 2px; border-radius: 1px 1px 0 0; }
+
+.usage-widget-glance-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  min-inline-size: 0;
+  color: var(--muted);
+  line-height: var(--font-meta-lh);
+}
+
+.usage-widget-glance-caption {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-widget-glance-values { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin-inline-start: auto; }
+.usage-widget-glance-values > div { display: flex; align-items: baseline; gap: var(--space-1); }
+.usage-widget-glance-values dd { color: var(--text); font-weight: 620; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-widget-glance-values [data-tone="warning"] dd { color: var(--amber-on-wash, var(--amber)); }
+.usage-widget-glance-values [data-tone="critical"] dd { color: var(--red); }
+
+/* Metrics layout: one row of values split by hairlines; details stay in the full card. */
+.usage-widget[data-compact] .usage-widget-metrics.usage-widget-strip {
+  grid-template-columns: repeat(var(--usage-strip-columns, 4), minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.usage-widget-strip > div + div { padding-inline-start: var(--space-2); border-inline-start: 1px solid var(--border-soft); }
+.usage-widget-strip small { display: none; }
+.usage-widget-strip dd { font-size: var(--font-heading); }
+
+@container usage-widget (max-width: 300px) {
+  .usage-widget[data-compact] .usage-widget-metrics.usage-widget-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--space-3); }
+  .usage-widget-strip > div:nth-child(odd) { padding-inline-start: 0; border-inline-start: 0; }
+}
+
+.usage-widget-settings { display: grid; gap: var(--space-3); padding: var(--space-3); }
+.usage-widget-settings > label:not(.ui-checkbox) { display: grid; gap: var(--space-2); color: var(--text-dim); font-size: var(--font-meta); }
+.usage-widget-settings .picker-select { inline-size: 100%; }
+.usage-widget-settings fieldset { display: grid; gap: var(--space-2); min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.usage-widget-settings legend { margin-block-end: var(--space-2); padding: 0; color: var(--text-dim); font-size: var(--font-meta); }
+
+/* ---- Limits widget ----------------------------------------------------------
+   Shares the card frame above (scroll, content, heading, state, note). Width
+   alone drives layout, so a shallow slot such as the composer keeps its
+   content height instead of collapsing. */
+.usage-limits-widget {
+  container: usage-limits-widget / inline-size;
+  flex: 1 1 auto;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  color: var(--text);
+  font-size: var(--font-meta);
+}
+
+.usage-limits-widget .usage-widget-heading { align-items: center; }
+.usage-limits-widget .usage-widget-heading > div { flex: 0 1 auto; }
+.usage-limits-widget .usage-widget-heading > button { margin-inline-start: auto; }
+
+/* The plan of the one source the headline names (`Max 5x`). */
+.usage-limits-plan {
+  flex: none;
+  max-inline-size: 40%;
+  overflow: hidden;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--accent-wash);
+  color: var(--accent-text);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-limits-widget :is(ul, h3) { margin: 0; padding: 0; }
+.usage-limits-widget ul { list-style: none; }
+.usage-limits-widget :is(strong, td) { font-variant-numeric: tabular-nums; }
+.usage-limits-widget small { color: var(--muted); font-size: inherit; }
+.usage-limits-widget .usage-widget-note { overflow-wrap: anywhere; }
+
+/* Tone is the attention marker every style shares: dot, ring text and row text.
+   The meter fill carries the bar-colour preference instead (see below). */
+.usage-limits-widget [data-tone] { --usage-limits-tone: var(--accent); }
+.usage-limits-widget [data-tone="warning"] { --usage-limits-tone: var(--amber); }
+.usage-limits-widget [data-tone="critical"] { --usage-limits-tone: var(--red); }
+.usage-limits-widget [data-tone="critical"] strong { color: var(--red); }
+
+/* Static palette slots for the `static` bar-colour mode; each names a theme
+   token so the colour follows the active theme rather than a fixed hex. */
+.usage-limits-widget {
+  --usage-bar-accent: var(--accent);
+  --usage-bar-green: var(--green);
+  --usage-bar-amber: var(--amber);
+  --usage-bar-red: var(--red);
+  --usage-bar-blue: var(--blue);
+  --usage-bar-purple: var(--purple);
+  --usage-bar-neutral: var(--muted);
+}
+
+/* The meter fill and the ring arc follow the bar-colour preference. `pace` and
+   `percent` share one heat ramp fed by --usage-limits-pace (0 = calm green,
+   1 = red), so a per-row numeric bucket is not needed; `static` pins one
+   palette slot; and a row with no usable reading stays neutral instead of
+   claiming green. */
+:is(.usage-limits-meter, .usage-limits-ring) { --usage-limits-fill: var(--accent); }
+:is(.usage-limits-meter, .usage-limits-ring)[data-bar="static"] { --usage-limits-fill: var(--usage-limits-static, var(--accent)); }
+:is(.usage-limits-meter, .usage-limits-ring):is([data-bar="pace"], [data-bar="percent"]):not([data-bar-tone="none"]) {
+  --usage-limits-fill: var(--green);
+  --usage-limits-fill: color-mix(
+    in oklab,
+    var(--red) calc(clamp(0, (var(--usage-limits-pace, 0) - 0.75) * 4, 1) * 100%),
+    color-mix(in oklab, var(--amber) calc(clamp(0, (var(--usage-limits-pace, 0) - 0.5) * 4, 1) * 100%), var(--green))
+  );
+}
+
+.usage-limits-widget .usage-limits-dot {
+  display: inline-block;
+  flex: none;
+  inline-size: .55em;
+  block-size: .55em;
+  border-radius: 50%;
+  background: var(--usage-limits-tone);
+}
+
+/* Bars, pace bars and segments: a block per source, a row per window. */
+.usage-limits-group { display: grid; gap: var(--space-3); }
+.usage-limits-group + .usage-limits-group { padding-block-start: var(--space-4); border-block-start: 1px solid var(--border-soft); }
+.usage-limits-group > h3 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  color: var(--text-dim);
+  font: inherit;
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+.usage-limits-group > h3 > span { flex: none; }
+.usage-limits-group > h3 > small {
+  overflow: hidden;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-limits-group > ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16em), 1fr));
+  gap: var(--space-4) var(--space-5);
+}
+.usage-limits-group > ul > li { display: grid; gap: var(--space-2); min-inline-size: 0; }
+
+.usage-limits-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  line-height: var(--font-meta-lh);
+}
+.usage-limits-row-head > span { overflow: hidden; color: var(--text-dim); font-size: var(--font-label); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+/* The value is the row's reading: large, in the attention tone when the
+   window asks for it (low remaining warns, likely to run out is critical). */
+.usage-limits-row-head > strong {
+  flex: none;
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+}
+.usage-limits-group li[data-tone="warning"] .usage-limits-row-head > strong { color: var(--amber-on-wash, var(--amber)); }
+.usage-limits-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  color: var(--muted);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+/* Why the bar has its colour, in a few words; the full forecast is its tooltip. */
+.usage-limits-pace { margin-inline-start: auto; color: var(--text-dim); font-weight: 600; text-align: end; }
+.usage-limits-group li[data-tone="warning"] .usage-limits-pace { color: var(--amber-on-wash, var(--amber)); }
+.usage-limits-group li[data-tone="critical"] .usage-limits-pace { color: var(--red); }
+
+/* Explains the steady-budget tick once, under the rows that draw it. */
+.usage-limits-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--muted);
+  line-height: var(--font-meta-lh);
+}
+.usage-limits-legend::before {
+  content: "";
+  flex: none;
+  inline-size: 2px;
+  block-size: 1.1em;
+  border-radius: 1px;
+  background: var(--text);
+}
+
+.usage-limits-meter {
+  position: relative;
+  display: block;
+  block-size: 8px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+}
+/* The fill deepens toward its end, so the reading point is the strongest colour. */
+.usage-limits-meter > i {
+  display: block;
+  block-size: 100%;
+  border-radius: inherit;
+  background: var(--usage-limits-fill);
+  background: linear-gradient(90deg, color-mix(in oklab, var(--usage-limits-fill) 62%, transparent), var(--usage-limits-fill));
+}
+.usage-limits-meter:not(.usage-limits-meter--segments) > i:dir(rtl) { background: linear-gradient(270deg, color-mix(in oklab, var(--usage-limits-fill) 62%, transparent), var(--usage-limits-fill)); }
+/* Steady budget: where an even burn would stand at this point of the window. */
+.usage-limits-meter > b {
+  position: absolute;
+  inset-block: -4px;
+  inline-size: 2px;
+  margin-inline-start: -1px;
+  border-radius: 1px;
+  background: var(--text);
+}
+.usage-limits-meter--segments { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 2px; block-size: 10px; background: none; }
+.usage-limits-meter--segments > i { border-radius: 2px; background: var(--surface-overlay-strong); }
+.usage-limits-meter--segments > i[data-on="true"] { background: var(--usage-limits-fill); }
+
+/* Rings */
+.usage-limits-rings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 7em), 1fr));
+  gap: var(--space-4) var(--space-2);
+}
+/* The window under its ring, then its source and reset in tighter, quieter lines. */
+.usage-limits-rings > li { display: grid; justify-items: center; align-content: start; min-inline-size: 0; line-height: var(--font-meta-lh); text-align: center; }
+.usage-limits-rings > li > .usage-limits-ring { margin-block-end: var(--space-2); }
+.usage-limits-rings > li > span { max-inline-size: 100%; overflow: hidden; color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; }
+.usage-limits-rings > li > small { max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-limits-ring { position: relative; display: grid; align-content: center; justify-items: center; inline-size: 5.5em; aspect-ratio: 1; }
+.usage-limits-ring > svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; transform: rotate(-90deg); fill: none; stroke-width: 3.2; }
+.usage-limits-ring circle { stroke: var(--surface-overlay-strong); }
+/* The arc follows the same bar-colour preference as the meter fill. */
+.usage-limits-ring circle + circle {
+  stroke: var(--usage-limits-tone);
+  stroke: var(--usage-limits-fill, var(--usage-limits-tone));
+  stroke-linecap: round;
+}
+.usage-limits-ring > :is(strong, small) { position: relative; line-height: 1.15; }
+.usage-limits-ring > strong { max-inline-size: 84%; font-size: var(--font-label); font-weight: 650; overflow-wrap: anywhere; }
+.usage-limits-ring[data-capless] circle { stroke-dasharray: 1.5 2.5; }
+.usage-limits-ring[data-capless] > strong { font-size: var(--font-meta); }
+
+/* Chips: a tile per window in even columns, the value at the end of its name
+   and the reset under it. Compact turns them into one-line pills (below). */
+.usage-limits-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5em), 1fr));
+  gap: var(--space-2);
+}
+.usage-limits-chips > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 2px var(--space-1);
+  min-inline-size: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  line-height: var(--font-meta-lh);
+}
+.usage-limits-chips > li > .usage-limits-dot { align-self: center; margin-inline-end: var(--space-1); }
+.usage-limits-chips > li > span { overflow: hidden; color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; }
+.usage-limits-chips > li > :is(strong, small) { white-space: nowrap; }
+.usage-limits-chips > li > strong { font-size: var(--font-label); font-weight: 650; }
+.usage-limits-chips > li > .usage-limits-reset { grid-column: 2 / -1; overflow: hidden; text-overflow: ellipsis; }
+.usage-limits-chips > li[data-tone="warning"] > strong { color: var(--amber-on-wash, var(--amber)); }
+
+/* Table */
+.usage-limits-table { inline-size: 100%; border-collapse: collapse; }
+.usage-limits-table :is(th, td) {
+  padding: var(--space-2);
+  border-block-end: 1px solid var(--border-soft);
+  font-weight: inherit;
+  line-height: var(--font-meta-lh);
+  text-align: start;
+}
+/* The last row carries the condition, its cells read it (a positional
+   pseudo-class left of `*` restyled whole subtrees across the app). */
+.usage-limits-table tr:last-child { --usage-limits-row-rule: 0px; }
+.usage-limits-table :is(th, td) { border-block-end-width: var(--usage-limits-row-rule, 1px); }
+.usage-limits-table th { inline-size: 100%; color: var(--text-dim); overflow-wrap: break-word; }
+.usage-limits-table th > .usage-limits-dot { margin-inline-end: var(--space-2); }
+.usage-limits-table td { inline-size: 1%; color: var(--muted); white-space: nowrap; }
+.usage-limits-table th + td { color: var(--text); font-weight: 620; }
+.usage-limits-table tr[data-tone="warning"] :is(th + td, .usage-limits-col-pace) { color: var(--amber-on-wash, var(--amber)); }
+.usage-limits-table tr[data-tone="critical"] :is(th + td, .usage-limits-col-pace) { color: var(--red); }
+/* Label and value always; the reset and pace columns only once the card is wide enough for them. */
+.usage-limits-table :is(.usage-limits-col-reset, .usage-limits-col-pace) { display: none; }
+
+/* Spotlight */
+.usage-limits-hero { display: grid; justify-items: center; gap: var(--space-1); padding-block: var(--space-2); text-align: center; }
+.usage-limits-hero > span { display: inline-flex; align-items: center; gap: var(--space-2); max-inline-size: 100%; color: var(--text-dim); }
+.usage-limits-hero > strong {
+  max-inline-size: 100%;
+  font-size: clamp(var(--font-heading), 14cqi, calc(1.6 * var(--font-title)));
+  font-weight: 650;
+  letter-spacing: -.035em;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+.usage-limits-hero[data-tone="warning"] > strong { color: var(--amber-on-wash, var(--amber)); }
+.usage-limits-hero > em { color: var(--muted); font-style: normal; }
+.usage-limits-hero > small { overflow-wrap: anywhere; }
+
+@container usage-limits-widget (min-width: 380px) {
+  .usage-limits-table .usage-limits-col-reset { display: table-cell; }
+}
+@container usage-limits-widget (min-width: 520px) {
+  .usage-limits-table .usage-limits-col-pace { display: table-cell; }
+}
+
+/* ---- Limits, compact: the Workspace panel's glance ---------------------------
+   Every style keeps its character in less room. Bars, pace and segments put
+   the window, its meter and the value on one line, aligned across rows; the
+   reset and the pace verdict move into the row's tooltip. Rings shrink, chips
+   become one-line pills, the table keeps label and value, and the hero puts
+   its figure beside its window. */
+.usage-limits-widget[data-compact] .usage-widget-content { gap: var(--space-3); padding: var(--space-2) var(--space-3) var(--space-3); }
+.usage-limits-widget[data-compact] .usage-limits-group + .usage-limits-group { padding-block-start: var(--space-3); }
+
+/* One grid for every source's rows; sections, lists and rows are subgrids of
+   it, so the window names share one column and the meters start together. */
+.usage-limits-rows {
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(var(--space-6), 1fr) auto;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+.usage-limits-rows :is(.usage-limits-group, .usage-limits-group > ul, .usage-limits-group > ul > li) {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: normal;
+  align-items: center;
+}
+.usage-limits-rows .usage-limits-group { row-gap: var(--space-2); }
+.usage-limits-rows .usage-limits-group > ul { row-gap: var(--space-3); }
+.usage-limits-rows .usage-limits-group > h3 { grid-column: 1 / -1; }
+.usage-limits-row-label {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-limits-widget[data-compact] .usage-limits-group li > strong {
+  justify-self: end;
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.usage-limits-group li[data-tone="warning"] > strong { color: var(--amber-on-wash, var(--amber)); }
+.usage-limits-widget[data-compact] .usage-limits-meter { block-size: 6px; }
+.usage-limits-widget[data-compact] .usage-limits-meter--segments { block-size: 8px; }
+.usage-limits-widget[data-compact] .usage-limits-meter > b { inset-block: -3px; }
+
+.usage-limits-widget[data-compact] .usage-limits-rings {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 4.5em), 1fr));
+  gap: var(--space-3) var(--space-2);
+}
+.usage-limits-widget[data-compact] .usage-limits-ring { inline-size: 3.75em; }
+.usage-limits-widget[data-compact] .usage-limits-ring > strong { font-size: var(--font-meta); }
+
+.usage-limits-widget[data-compact] .usage-limits-chips { display: flex; flex-wrap: wrap; }
+.usage-limits-widget[data-compact] .usage-limits-chips > li {
+  display: inline-flex;
+  max-inline-size: 100%;
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
+  border-radius: var(--radius-round);
+}
+.usage-limits-widget[data-compact] .usage-limits-chips > li > strong { font-size: inherit; }
+
+.usage-limits-widget[data-compact] .usage-limits-table :is(th, td) { padding-block: var(--space-1); }
+
+.usage-limits-widget[data-compact] .usage-limits-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: 0;
+  text-align: start;
+}
+.usage-limits-widget[data-compact] .usage-limits-hero > strong {
+  flex: none;
+  font-size: calc(1.3 * var(--font-title));
+  letter-spacing: -.04em;
+}
+.usage-limits-widget[data-compact] .usage-limits-hero .usage-figure-unit { font-size: max(.5em, var(--font-meta)); }
+.usage-limits-widget[data-compact] .usage-limits-hero > div { display: grid; gap: 2px; min-inline-size: 0; }
+.usage-limits-widget[data-compact] .usage-limits-hero > div > span { display: flex; align-items: center; gap: var(--space-2); color: var(--text-dim); font-weight: 550; }
+.usage-limits-widget[data-compact] .usage-limits-hero > div > small { overflow-wrap: anywhere; }
+
+/* Cache warmth in the composer context card (composer.context.details). */
+.usage-context-cache {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--space-2);
+  padding: 0 var(--space-2) var(--space-2);
+  font-size: var(--font-meta);
+}
+.usage-context-cache > span { color: var(--muted); }
+.usage-context-cache > small { grid-column: 1 / -1; color: var(--muted); font-size: inherit; }
+.usage-context-cache[data-tone="warning"] > strong { color: var(--amber-on-wash, var(--amber)); }
+.usage-context-cache[data-tone="critical"] > strong { color: var(--red); }
+
+/* ---- status-bar segments ----------------------------------------------------
+   Context and spend, prompt cache and the tightest limit. They are host `.sb`
+   segments (chip height, hover chip, focus ring); only the level colours live
+   here. A calm reading keeps the bar's own muted ink, so colour means
+   something: the context level, a cache about to lapse, a limit running low. */
+.usage-sb .sb-text { color: var(--text-dim); }
+.usage-sb-cost { color: var(--faint); }
+.usage-sb-level { color: var(--muted); }
+
+.usage-sb-context[data-level="green"] .usage-sb-level { color: var(--green); }
+.usage-sb-context[data-level="yellow"] .usage-sb-level { color: var(--amber-on-wash, var(--amber)); }
+.usage-sb-context[data-level="red"] .usage-sb-level { color: var(--red); }
+
+.usage-sb-cache[data-state="active"] .ui-icon { color: var(--green); }
+.usage-sb-cache[data-tone="warning"] :is(.sb-text, .ui-icon) { color: var(--amber-on-wash, var(--amber)); }
+.usage-sb-cache[data-tone="critical"] :is(.sb-text, .ui-icon) { color: var(--red); }
+
+.usage-sb-limits[data-tone="ok"] .usage-sb-level { color: var(--green); }
+.usage-sb-limits[data-tone="warning"] .usage-sb-level { color: var(--amber-on-wash, var(--amber)); }
+.usage-sb-limits[data-tone="critical"] :is(.usage-sb-level, .ui-icon) { color: var(--red); }
+
+/* Tone is state, not decoration: the bar's hover keeps it. */
+@media (hover: hover) {
+  .sb.sb-action.usage-sb:hover:where(:not(:disabled)) .sb-text { color: var(--text); }
+}
+
+/* Turn: accent while a turn runs; the finished readout keeps the bar's ink. */
+.usage-sb-turn[data-state="running"] :is(.sb-text, .ui-icon) { color: var(--accent); }
+
+/* Keep warm: a label, then either the period choices or the running state. */
+.usage-keep-warm {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hair);
+}
+.usage-keep-warm-label { color: var(--muted); }
+.usage-keep-warm-state { flex: 1 1 auto; min-width: 0; }
+.usage-keep-warm[data-active="true"] .usage-keep-warm-state { color: var(--text); }
+.usage-keep-warm-periods {
+  display: grid;
+  flex: 1 1 100%;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+.usage-keep-warm-periods > .ui-btn { min-width: 0; padding-inline: var(--space-1); }
+.usage-keep-warm-note { flex: 1 1 100%; color: var(--muted); font-size: inherit; }

@@ -1,0 +1,26 @@
+# Polyth's overlay on `dsh --profile acp` (passed with `--patch`).
+#
+# Delegation belongs to Polyth: a worker is a canonical child session created
+# through the Polyth `agent.spawn` capability. These entries remove DeepSeek
+# Harness's in-process subagent providers and every tool that spawns or steers
+# one (`subagent`, `subagent_fork`, `workflow`, `list_agents`, `send_message`,
+# `interrupt_agent`, Ralph loops). Verified against dsh 0.2.0-rc.2: the
+# composed profile boots and the model's tool roster no longer lists them.
+- id: subagent-spawn-in-process
+  disabled: true
+- id: subagent-fork-in-process
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-subagent-fork
+  disabled: true
+- id: tool-subagent-control
+  disabled: true
+- id: tool-subagent-list-agents
+  disabled: true
+- id: workflow-ptc
+  disabled: true
+- id: tool-workflow
+  disabled: true
+- id: tool-ralph
+  disabled: true

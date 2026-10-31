@@ -1,0 +1,71 @@
+{
+  "view": "list",
+  "title": "Open incidents",
+  "options": {
+    "pick": "one"
+  },
+  "pick": "one",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "INC-7",
+      "cells": [
+        "INC-7",
+        "api latency",
+        "p95 2.4 s",
+        "critical",
+        "tone=danger",
+        "id=inc-7"
+      ],
+      "subtitle": "api latency",
+      "value": "p95 2.4 s",
+      "badge": "critical",
+      "tone": "danger",
+      "id": "inc-7"
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "INC-9",
+      "cells": [
+        "INC-9",
+        "queue backlog",
+        "12k",
+        "warning",
+        "tone=warning",
+        "id=inc-9"
+      ],
+      "subtitle": "queue backlog",
+      "value": "12k",
+      "badge": "warning",
+      "tone": "warning",
+      "id": "inc-9"
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "INC-11",
+      "cells": [
+        "INC-11",
+        "cert renewal",
+        "6 d",
+        "tone=info"
+      ],
+      "subtitle": "cert renewal",
+      "value": "6 d",
+      "tone": "info"
+    }
+  ],
+  "actions": [
+    {
+      "label": "Take it"
+    }
+  ],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

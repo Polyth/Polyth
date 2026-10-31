@@ -1,0 +1,26 @@
+{
+  "name": "@polyth/judgment-jev",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Judgment backend: Jev",
+      "description": "Recommended dedicated backend for Judgment.",
+      "core": false,
+      "enabled": true,
+      "hasSettings": false,
+      "settingsGroup": "Engineering",
+      "icon": "circle-check",
+      "category": "system",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/judgment": "0.1.0",
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@typesafe-ai/sdk": "0.6.0"
+  }
+}

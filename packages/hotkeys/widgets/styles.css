@@ -1,0 +1,101 @@
+.pkg-hotkeys {
+  container: hotkeys-settings / inline-size;
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.pkg-hotkeys .hotkeys-touch-note {
+  display: none;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-hotkeys .hotkeys-reset-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  font-size: var(--font-meta);
+}
+
+.pkg-hotkeys .set-row.hotkey-row .set-row-control {
+  min-width: 9rem;
+  justify-content: flex-end;
+}
+
+.pkg-hotkeys .hotkey-conflict {
+  color: var(--red);
+}
+
+/* The binding is the edit affordance: a real keycap, not plain text. */
+.pkg-hotkeys .hotkey-kbd {
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.pkg-hotkeys .hotkey-kbd kbd {
+  display: inline-block;
+  min-width: 6.5rem;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-1);
+  color: var(--text);
+  font-family: var(--font-code);
+  font-size: var(--font-meta);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.pkg-hotkeys .hotkey-kbd:focus-visible kbd {
+  border-color: var(--accent);
+}
+@media (hover: hover) {
+  .pkg-hotkeys .hotkey-kbd:hover:where(:not(:disabled)) kbd {
+    border-color: var(--accent);
+  }
+}
+
+.pkg-hotkeys .hotkey-kbd.is-conflict kbd {
+  border-color: var(--red);
+}
+
+.pkg-hotkeys .hotkey-capture {
+  width: 9rem;
+  padding: var(--space-1) var(--space-2);
+  border-color: var(--accent);
+  font-size: var(--font-meta);
+  text-align: center;
+}
+
+@container hotkeys-settings (max-width: 480px) {
+  .pkg-hotkeys .set-row.hotkey-row {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .pkg-hotkeys .set-row.hotkey-row .set-row-control {
+    width: auto;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  .pkg-hotkeys .hotkey-kbd kbd {
+    min-width: 0;
+  }
+}
+
+@media (pointer: coarse) {
+  .pkg-hotkeys .hotkeys-touch-note {
+    display: block;
+  }
+
+  .pkg-hotkeys .hotkey-kbd {
+    min-height: var(--tap);
+  }
+}

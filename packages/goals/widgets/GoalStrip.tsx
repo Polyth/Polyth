@@ -1,0 +1,243 @@
+// Goal strip above the timeline: collapsible objective + progress checklist.
+import { useState, useEffect, useCallback } from "react";
+import { api, type GoalState } from "@polyth/session/web-api";
+import { setUiError, useStore } from "../../../apps/web/src/store.ts";
+import { friendlyError } from "../../../apps/web/src/settings.ts";
+import { goalChecklist } from "../../../apps/web/src/utils.ts";
+import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
+import { formatNumber, tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Dialog, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { goalProgressPercent } from "./progress.ts";
+
+export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
+  const activeSessionId = useStore((s) => s.activeSessionId);
+  const model = useStore((s) => {
+    if (!s.activeSessionId) return null;
+    const evts = s.events[s.activeSessionId];
+    if (!evts) return null;
+    for (let i = evts.length - 1; i >= 0; i--) {
+      const e = evts[i]!;
+      if (e.type.startsWith("goal/")) return e;
+    }
+    return null;
+  });
+
+  const [goal, setGoal] = useState<GoalState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!activeSessionId) { setGoal(null); return; }
+    try {
+      const g = await api.goalGet(activeSessionId);
+      setGoal(g);
+    } catch {
+      setGoal(null);
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (model && model.type.startsWith("goal/")) void refresh();
+  }, [model, refresh]);
+
+  if (!goal) {
+    return forceOpen
+      ? <EmptyState title={tr("goalstrip.noGoalAttached")} description={tr("goalstrip.attachAnObjectiveFromTheSessionActions")} />
+      : null;
+  }
+
+  // The pill reflects the control at once; the server's goal events stay the
+  // record. A rejection restores the previous goal and reports. Sent once.
+  const control = async (status: GoalState["status"], request: (sessionId: string) => Promise<unknown>) => {
+    if (busy || !activeSessionId) return;
+    const previous = goal;
+    setBusy(true);
+    setGoal({ ...goal, status });
+    try {
+      await request(activeSessionId);
+    } catch (error) {
+      setGoal((current) => current === null || current.status === status ? previous : current);
+      setUiError(friendlyError(tr("common.error"), error));
+    } finally {
+      setBusy(false);
+      void refresh();
+    }
+  };
+  const pause = () => control("paused", (id) => api.goalPause(id));
+  const resume = () => control("active", (id) => api.goalResume(id));
+  const stop = () => control("stopped", (id) => api.goalStop(id));
+
+  const isActive = goal.status === "active";
+  const items = goalChecklist(goal.objective, goal.status);
+  const doneCount = items.filter((i) => i.done).length;
+  const expanded = forceOpen || open;
+  const progress = goalProgressPercent(goal);
+  const objective = goal.objective.length > 80 ? goal.objective.slice(0, 77) + "…" : goal.objective;
+
+  return (
+    <div className={`goal-strip ${expanded ? "open" : "collapsed"}`}>
+      <button className="goal-toggle" onClick={() => setOpen((v) => !v)} disabled={forceOpen}>
+        <span className="goal-label">{tr("goalstrip.goal")}</span>
+        <span className={`goal-pill goal-pill-${goal.status}`}>{goal.status}</span>
+        <span className="goal-objective">{objective}</span>
+        <span className="goal-progress">{doneCount}/{items.length || 1}</span>
+        {!forceOpen && <span className="goal-chevron">{expanded ? "▾" : "▸"}</span>}
+      </button>
+      {expanded && (
+        <>
+          {items.length > 0 && (
+            <ul className="goal-check">
+              {items.map((it, i) => (
+                <li key={i} className={it.done ? "done" : ""}>{it.text}</li>
+              ))}
+            </ul>
+          )}
+          <div className="goal-stats">
+            <span className="goal-stat">{tr("goalstrip.cont")}{" "}{goal.continuations}/{goal.maxContinuations}</span>
+            <span className="goal-stat">
+              {tr("goalstrip.tok")}{" "}{goal.tokensUsed > 0 ? `${fmtK(goal.tokensUsed)}` : "0"}
+              {goal.budgetTokens > 0 ? `/${fmtK(goal.budgetTokens)}` : ""}
+            </span>
+            {progress !== undefined && (
+              <span className="goal-stat">{tr("goalstrip.progress")}{" "}{progress}%</span>
+            )}
+            {goal.lastVerdict && (
+              <span className={`goal-stat goal-verdict-${goal.lastVerdict}`}>{tr("goalstrip.verdict")}{" "}{goal.lastVerdict}</span>
+            )}
+          </div>
+          {goal.lastReason && <div className="goal-reason" role="status">{goal.lastReason}</div>}
+          <div className="goal-actions">
+            {isActive ? (
+              <Button size="sm" onClick={() => void pause()} disabled={busy}>{tr("common.pause")}</Button>
+            ) : goal.status === "paused" ? (
+              <Button size="sm" onClick={() => void resume()} disabled={busy}>{tr("common.resume")}</Button>
+            ) : null}
+            {(isActive || goal.status === "paused") && (
+              <Button size="sm" variant="danger" onClick={() => void stop()} disabled={busy}>{tr("common.stop")}</Button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function GoalAttachForm({ onDone }: { onDone: () => void }) {
+  const activeSessionId = useStore((s) => s.activeSessionId);
+  const [objective, setObjective] = useState("");
+  const [budget, setBudget] = useState("");
+  const [maxCont, setMaxCont] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [serverError, setServerError] = useState("");
+  const limitError = (value: string, label: string) => {
+    if (!value) return "";
+    const number = Number(value);
+    return Number.isFinite(number) && Number.isInteger(number) && number > 0
+      ? ""
+      : `${label} must be a positive whole number.`;
+  };
+  const budgetError = limitError(budget, "Token budget");
+  const continuationError = limitError(maxCont, "Max continuations");
+
+  const submit = async () => {
+    if (!activeSessionId || !objective.trim() || budgetError || continuationError) return;
+    setBusy(true);
+    setServerError("");
+    try {
+      await api.goalAttach(
+        activeSessionId,
+        objective.trim(),
+        budget ? Number(budget) : undefined,
+        maxCont ? Number(maxCont) : undefined,
+      );
+      onDone();
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : tr("goalstrip.couldnTAttachTheGoal"));
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Dialog
+      title={tr("goalstrip.sessionGoal")}
+      onClose={onDone}
+      className="goal-dialog"
+      initialFocus="textarea"
+      footer={
+        <>
+          <Button onClick={onDone}>{tr("common.cancel")}</Button>
+          <Button
+            variant="primary"
+            className="goal-attach-submit"
+            busy={busy}
+            disabled={!objective.trim() || !!budgetError || !!continuationError}
+            onClick={() => void submit()}
+          >
+            {busy ? tr("goalstrip.attaching") : tr("goalstrip.attachGoal")}
+          </Button>
+        </>
+      }
+    >
+      <div className="goal-dialog-intro">
+        <span className="goal-dialog-mark" aria-hidden="true">◎</span>
+        <div>
+          <strong>{tr("goalstrip.setAClearSessionGoal")}</strong>
+          <p>{tr("goalstrip.polythWillKeepTheObjectiveAndIts")}</p>
+        </div>
+      </div>
+      <div className="goal-attach">
+        <label className="goal-attach-label goal-objective-field">
+          <span>{tr("goalstrip.objective")}</span>
+          <Textarea
+            rows={4}
+            placeholder={tr("goalstrip.whatShouldThisSessionAccomplishOneItem")}
+            value={objective}
+            onChange={(e) => setObjective(e.target.value)}
+          />
+        </label>
+        <div className="goal-attach-row">
+          <label className="goal-attach-label">
+            <span>{tr("goalstrip.tokenBudget")}{" "}<small>{tr("goalstrip.optional")}</small></span>
+            <TextInput
+              type="number"
+              min={1}
+              step={1}
+              placeholder="500000"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              aria-invalid={budgetError ? true : undefined}
+              aria-describedby={budgetError ? "goal-budget-error" : undefined}
+            />
+            {budgetError && <span id="goal-budget-error" className="form-error">{budgetError}</span>}
+          </label>
+          <label className="goal-attach-label">
+            <span>{tr("goalstrip.maxContinuations")}{" "}<small>{tr("goalstrip.optional")}</small></span>
+            <TextInput
+              type="number"
+              min={1}
+              step={1}
+              placeholder="12"
+              value={maxCont}
+              onChange={(e) => setMaxCont(e.target.value)}
+              aria-invalid={continuationError ? true : undefined}
+              aria-describedby={continuationError ? "goal-continuations-error" : undefined}
+            />
+            {continuationError && <span id="goal-continuations-error" className="form-error">{continuationError}</span>}
+          </label>
+        </div>
+        {serverError && <div className="form-error goal-dialog-error" role="alert">{serverError}</div>}
+      </div>
+    </Dialog>
+  );
+}
+
+function fmtK(n: number): string {
+  if (n >= 1_000_000) {
+    return `${formatNumber(n / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+  }
+  if (n >= 1_000) {
+    return `${formatNumber(n / 1_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}k`;
+  }
+  return formatNumber(n);
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@polyth/planner",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Planner",
+      "description": "Plan prompts to run once or on a repeating cadence.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "calendar",
+      "hasSettings": false,
+      "category": "operations",
+      "projectAffinity": {
+        "recommended": true
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/models": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0",
+    "cron-parser": "^5.10.2"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

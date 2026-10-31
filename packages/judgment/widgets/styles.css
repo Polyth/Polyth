@@ -1,0 +1,110 @@
+/* Headings, rows and empty/error states come from the shared settings
+   primitives; this file styles only the status panel and the route list. */
+.judgment-settings { display: grid; gap: var(--space-4); color: var(--text); container-type: inline-size; }
+.judgment-settings > .settings-section { margin-top: var(--space-2); }
+.judgment-settings > .settings-page-blurb { margin-bottom: 0; }
+.judgment-settings .settings-section-body { display: grid; gap: var(--space-3); padding-block-start: var(--space-3); }
+.judgment-settings fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.judgment-settings fieldset:disabled { opacity: 0.6; }
+
+/* Status: one calm panel answering "is it on, is it working, can I prove it". */
+.judgment-status {
+  display: grid; gap: var(--space-3);
+  padding: var(--space-4); border: 1px solid var(--border-soft); border-radius: var(--radius-surface); background: var(--elevated);
+}
+.judgment-status[data-tone="success"] { border-color: color-mix(in srgb, var(--green) 28%, var(--border-soft)); }
+.judgment-status[data-tone="warning"] { border-color: color-mix(in srgb, var(--amber) 32%, var(--border-soft)); }
+.judgment-status-toggle, .judgment-status-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-4); }
+.judgment-status-main { padding-top: var(--space-3); border-top: 1px solid var(--hair); }
+.judgment-status-text { display: grid; gap: 2px; min-width: 0; }
+.judgment-status-text > strong { font-size: var(--font-label); font-weight: 600; }
+.judgment-status-text > span:not(.judgment-status-title) { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.judgment-status-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.judgment-status-title strong { font-size: var(--font-label); font-weight: 600; overflow-wrap: anywhere; }
+.judgment-settings .judgment-status-check { margin: 0; font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.judgment-status-check[data-ok="true"] { color: var(--green-on-wash); }
+.judgment-status-check[data-ok="false"] { color: var(--amber-on-wash); }
+
+/* Routes: one bordered list with hairline rows, not a stack of cards. */
+.judgment-routes { display: grid; border: 1px solid var(--control-border); border-radius: var(--radius-card); overflow: hidden; }
+.judgment-route {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 var(--space-3);
+  padding: var(--space-3) var(--space-4); transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.judgment-route + .judgment-route { border-top: 1px solid var(--hair); }
+.judgment-route:hover:not([data-disabled]) { background: var(--surface-overlay); }
+.judgment-route[data-selected] { background: var(--accent-wash); box-shadow: inset 3px 0 0 var(--accent); }
+.judgment-route[data-disabled] { color: var(--faint); }
+.judgment-route-main { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; min-height: max(var(--control-h-sm), var(--hit-min)); cursor: pointer; }
+.judgment-route[data-disabled] .judgment-route-main { cursor: default; }
+.judgment-route-main input { flex: none; width: var(--icon-sm); height: var(--icon-sm); margin: 2px 0 0; accent-color: var(--accent); }
+.judgment-route-main input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.judgment-route-text { display: grid; gap: 2px; min-width: 0; }
+.judgment-route-name { font-size: var(--font-label); font-weight: 500; }
+.judgment-route-description { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.judgment-route-aside { display: flex; align-items: center; gap: var(--space-2); justify-self: end; }
+.judgment-route-detail {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-1) calc(var(--icon-sm) + var(--space-3));
+}
+.judgment-settings .judgment-route-note { flex-basis: 100%; margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.judgment-link {
+  display: inline-flex; align-items: center; gap: var(--space-1); min-height: max(var(--control-h-sm), var(--hit-min));
+  padding-inline: var(--space-1); border-radius: var(--radius-control); color: var(--accent); font-size: var(--font-meta); text-decoration: none;
+}
+.judgment-link:hover { text-decoration: underline; }
+.judgment-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Uses: one bordered list, a row per registered feature. The switch carries
+   on/off; an accent edge marks the rows that are on without washing them.
+   Options open inline in an inset well aligned with the row's text. */
+.judgment-uses { display: grid; border: 1px solid var(--control-border); border-radius: var(--radius-card); overflow: hidden; transition: opacity var(--motion-fast) var(--motion-ease); }
+.judgment-uses[data-off] { opacity: 0.6; }
+.judgment-use { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.judgment-use + .judgment-use { border-top: 1px solid var(--hair); }
+.judgment-use[data-on] { box-shadow: inset 3px 0 0 var(--accent); }
+.judgment-uses[data-off] .judgment-use[data-on] { box-shadow: inset 3px 0 0 var(--border-soft); }
+/* The switch shares only the title's line; the copy below runs the full row width. */
+.judgment-use-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-1) var(--space-4); }
+.judgment-use-head > .ui-switch { grid-column: 2; grid-row: 1; align-self: start; }
+.judgment-use-text { display: contents; }
+.judgment-use-title { grid-column: 1; grid-row: 1; }
+.judgment-use-description, .judgment-use-effect { grid-column: 1 / -1; max-width: 72ch; }
+.judgment-use-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.judgment-use-title strong { font-size: var(--font-label); font-weight: 600; overflow-wrap: anywhere; }
+.judgment-use-description, .judgment-use-effect { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.judgment-use-effect em { color: var(--text); font-style: normal; font-weight: 500; }
+.judgment-use-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-3); margin-block: calc(-1 * var(--space-1)); }
+/* The disclosure reads as part of the text column: its label starts where the copy does. */
+.judgment-use-toggle.ui-btn--ghost { margin-inline-start: calc(-1 * var(--control-pad-x-sm)); color: var(--text); }
+.judgment-use-toggle svg { transition: transform var(--motion-fast) var(--motion-ease); }
+.judgment-use-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.judgment-use-origin { color: var(--muted); font-size: var(--font-meta); }
+.judgment-use-origin[data-overridden] { color: var(--accent); font-weight: 500; }
+.judgment-use-foot .settings-reset-link { margin-inline-start: calc(-1 * var(--space-2)); }
+.judgment-use-options {
+  display: grid; padding: 0 var(--space-3);
+  border-radius: var(--radius-control); background: var(--surface-overlay); border: 1px solid var(--hair);
+}
+.judgment-use-options > .set-row:last-child { border-bottom: 0; }
+.judgment-use-control { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-1) var(--space-2); min-width: 0; max-width: 100%; }
+.judgment-use-control .ui-input, .judgment-use-control textarea { width: min(100%, 28rem); }
+.judgment-use-options .is-stacked .judgment-use-control { justify-content: stretch; width: 100%; }
+.judgment-use-options .is-stacked .judgment-use-control > * { flex: 1 1 auto; }
+.judgment-settings .judgment-uses-note { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+/* A reset sits before its control so every control keeps the same right edge. */
+.judgment-use-control > .settings-reset-link { order: -1; }
+@media (prefers-reduced-motion: reduce) { .judgment-uses, .judgment-use-toggle svg { transition: none; } }
+
+.judgment-model { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+
+@container (max-width: 32rem) {
+  .judgment-status-main { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+  .judgment-route { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+  .judgment-route-aside { justify-self: start; margin-left: calc(var(--icon-sm) + var(--space-3)); }
+  .judgment-route-detail { margin-top: var(--space-1); }
+  .judgment-use { padding-inline: var(--space-3); }
+  .judgment-use-options { padding-inline: var(--space-3); margin-inline: calc(-1 * var(--space-1)); }
+  .judgment-use-control { justify-content: flex-start; width: 100%; }
+  .judgment-use-control > .settings-reset-link { order: 0; margin-inline-start: calc(-1 * var(--space-2)); }
+}

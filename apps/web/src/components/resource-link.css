@@ -1,0 +1,39 @@
+.resource-link.file-ref {
+  color: inherit; font-family: var(--mono); font-size: inherit;
+  border: 0; padding: 0; background: none; cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--border);
+  text-underline-offset: 3px; overflow-wrap: anywhere;
+}
+.resource-link.file-ref::after { display: none; }
+@media (hover: hover) {
+  .resource-link.file-ref:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); text-decoration-color: currentColor; }
+}
+.resource-link.file-ref:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Phone and short-band viewports need a real touch target for a prose
+   reference, but the touch box must never claim less height than the reference
+   itself occupies. The button is an atomic inline, so a long path wraps inside
+   it; a fixed one-line `min-height` plus a fixed negative block margin then
+   painted those extra lines over the prose above and below (a wrapped path is
+   two or three lines tall, which no fixed height can predict). Symmetric
+   padding grows the target and a matching negative margin removes exactly that
+   padding again, so the line box always equals the reference's real height —
+   one line or many. `text-align: start` keeps a wrapped reference on the
+   paragraph's reading edge instead of centring it like a control label. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .resource-link.file-ref {
+    min-width: var(--tap);
+    min-inline-size: var(--tap);
+    display: inline-block;
+    padding-block: calc((var(--tap) - 1em) / 2);
+    margin-block: calc((1em - var(--tap)) / 2);
+    padding-inline: 4px;
+    text-align: start;
+  }
+}
+.resource-link-missing { font-family: var(--mono); overflow-wrap: anywhere; }
+.resource-link-choice { display: flex; flex-direction: column; align-items: start; gap: var(--space-1); width: 100%; min-height: var(--tap); padding: var(--space-2) var(--space-3); border: 0; border-bottom: 1px solid var(--border); color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+@media (hover: hover) {
+  .resource-link-choice:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.resource-link-choice span { font-family: var(--mono); font-size: var(--font-meta); color: var(--muted); overflow-wrap: anywhere; }
+.resource-link-deleted pre { overflow: auto; max-height: 65dvh; font-family: var(--mono); font-size: var(--font-meta); }

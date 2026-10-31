@@ -1,0 +1,37 @@
+# Build context for the root Dockerfile. Keep local state, build outputs and
+# secrets out of the image: the image builds everything it needs itself.
+.git
+.github
+.scratch
+.claude
+.cursor
+.opencode
+.polyth
+**/node_modules
+**/dist
+target
+data
+logs
+artifacts
+playground
+_inbox
+**/_inbox
+packages/harness-runtime/native/bin
+packages/harness-runtime/resources
+apps/desktop/release
+apps/desktop/resources
+apps/mobile/android
+apps/mobile/ios
+deploy/docker/.env
+*.db
+*.db-wal
+*.db-shm
+*.jks
+*.keystore
+*.p12
+*.cer
+*.mobileprovision
+AuthKey_*.p8
+*service-account.json
+mcp.json
+mcp-secrets.json

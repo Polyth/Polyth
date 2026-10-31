@@ -1,0 +1,10 @@
+[
+  "earningsRoutes.test.ts",
+  "filingsRoutes.test.ts",
+  "inputValidation.test.ts",
+  "personIsolation.test.ts",
+  "portfolio.test.ts",
+  "portfolioRoutes.test.ts",
+  "routes.test.ts",
+  "watchlists.test.ts"
+]

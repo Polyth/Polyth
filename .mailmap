@@ -1,0 +1,6 @@
+# Canonical contributor identities for git shortlog/log --use-mailmap and the
+# release notes (scripts/ci/release-notes.mjs), which @-mention GitHub logins
+# from a users.noreply.github.com address.
+Max <78844585+devmaxer@users.noreply.github.com> <max@polyth.app>
+Max <78844585+devmaxer@users.noreply.github.com> <max@polyth.top>
+Max <78844585+devmaxer@users.noreply.github.com> <devmaxer@users.noreply.github.com>

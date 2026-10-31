@@ -1,0 +1,64 @@
+{
+  "view": "stats",
+  "title": "This week",
+  "options": {},
+  "pick": "none",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "title": "Revenue",
+      "cells": [
+        "Revenue",
+        "$412k",
+        "+12%",
+        "3,4,6,8"
+      ],
+      "value": "$412k",
+      "badge": "+12%",
+      "spark": [
+        3,
+        4,
+        6,
+        8
+      ]
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "title": "Returns",
+      "cells": [
+        "Returns",
+        "2.1%",
+        "−0.6 pp",
+        "2,3,4"
+      ],
+      "value": "2.1%",
+      "badge": "−0.6 pp",
+      "spark": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "index": 2,
+      "selected": false,
+      "title": "Flat",
+      "cells": [
+        "Flat",
+        "1",
+        "0%"
+      ],
+      "value": "1",
+      "badge": "0%"
+    }
+  ],
+  "actions": [],
+  "notes": [],
+  "invalid": [],
+  "problems": []
+}

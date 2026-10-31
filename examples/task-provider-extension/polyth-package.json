@@ -1,0 +1,32 @@
+{
+  "manifestVersion": 2,
+  "id": "example-task-provider",
+  "version": "1.0.0",
+  "engines": { "polyth": ">=0.1.0" },
+  "display": {
+    "name": "Task provider",
+    "description": "Demonstrates native resource pickers, message and session actions, commands, and structured context."
+  },
+  "runtime": {
+    "kind": "sandboxed",
+    "ui": { "entry": "src/index.ts" }
+  },
+  "contributes": {
+    "attachmentProviders": [
+      { "id": "tasks", "label": "Tasks", "description": "Attach a task as structured project context." }
+    ],
+    "messageActions": [
+      { "id": "task-from-message", "label": "Create task", "description": "Create a task from this assistant message.", "roles": ["assistant"] }
+    ],
+    "sessionActions": [
+      { "id": "session-follow-up", "label": "Create follow-up", "description": "Attach a follow-up task for this session." }
+    ],
+    "commands": [
+      { "id": "task", "name": "task", "description": "Find and attach a task." }
+    ],
+    "contextProviders": [
+      { "id": "task-context", "label": "Task context", "description": "Attach current task context." }
+    ]
+  },
+  "capabilities": ["ui.render"]
+}

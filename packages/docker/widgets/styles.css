@@ -1,0 +1,24 @@
+.pkg-docker { display: grid; gap: var(--space-4); container-type: inline-size; color: var(--text); min-width: 0; }
+.pkg-docker__toolbar, .pkg-docker__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.pkg-docker__toolbar { justify-content: space-between; }
+.pkg-docker__overview { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-3); }
+.pkg-docker__eyebrow, .pkg-docker__hint { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-docker h2 { margin: var(--space-1) 0; font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.015em; }
+.pkg-docker h2 span { color: var(--muted); font-size: var(--font-label); font-weight: 400; }
+.pkg-docker h3 { margin: 0; font-size: var(--font-label); font-weight: 600; }
+.pkg-docker p { margin: 0; line-height: 1.5; }
+.pkg-docker__overview p { color: var(--muted); font-size: var(--font-meta); }
+.pkg-docker__status { font-size: var(--font-meta); color: var(--amber-on-wash); background: var(--amber-wash); padding: var(--space-1) var(--space-2); border-radius: var(--radius-control); white-space: nowrap; }
+.pkg-docker__status--ready { color: var(--green-on-wash); background: var(--green-wash); }
+.pkg-docker__notice { color: var(--text-dim); padding-inline-start: var(--space-3); border-inline-start: 2px solid var(--amber); font-size: var(--font-meta); }
+.pkg-docker__error { color: var(--red); overflow-wrap: anywhere; }
+.pkg-docker__healthy { color: var(--green-on-wash); font-size: var(--font-meta); }
+.pkg-docker ul { list-style: none; padding: 0; margin: 0; }
+.pkg-docker__services > li { padding-block: var(--space-3); border-block-start: 1px solid var(--border-soft); }
+.pkg-docker__service-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.pkg-docker__container { display: grid; gap: var(--space-1); padding-block-start: var(--space-2); color: var(--text-dim); font-size: var(--font-meta); }
+.pkg-docker code { font: var(--font-code)/1.5 var(--mono); overflow-wrap: anywhere; }
+.pkg-docker__ports { color: var(--blue); }
+.pkg-docker__builds { display: grid; gap: var(--space-2); }
+.pkg-docker__builds li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-2); }
+@container (max-width: 440px) { .pkg-docker__overview { flex-direction: column; } .pkg-docker__actions { width: 100%; } .pkg-docker__service-heading { flex-wrap: wrap; } }

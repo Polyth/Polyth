@@ -1,0 +1,40 @@
+# Mobile readiness and regression matrix
+
+Shared responsive web, Capacitor bridge, native implementation, release build and real device behavior are different layers. Use the matrix for the affected feature. Mark each cell **not implemented / declared / unit-tested / native-built / device-tested / unknown**, with revision and evidence. Do not fill it from a marketing claim or a previous handoff.
+
+The TypeScript boundary still defaults fail-closed to `MissingNativeCore`, but current Android and iOS projects register real `PolythLink` and discovery plugins and production connection UI installs that adapter. This is source-level wiring evidence, not a permanent readiness claim: native compilation and physical-device behavior remain separate verification layers.
+
+| Flow | Required scenarios | Boundary to inspect |
+| --- | --- | --- |
+| Connection setup | First launch, configured server, invalid URL, unreachable server, required authentication, cancel/retry | ConnectionScreen, runtime, native proxy and server auth |
+| Multiple servers | A/B/A, same project/session IDs on distinct servers, old pending response, forget/disconnect, credential isolation | Identity-keyed caches, listeners, active server state |
+| Local discovery | Permission denied, no server, multiple servers, unreachable/stale candidate, bounded scan, platform restriction | Actual discovery mechanism; do not assume browser subnet scanning/native mDNS exists |
+| QR/digital pairing | Scan/input, malformed/expired/replayed ticket or code, wrong host identity, confirmation, cancel, timeout | Ticket parser, native core, host invitation/grant flow |
+| Paired connection | Direct/relay fallback, trusted host identity, revoked/partial revoke, unknown route | Native proxy, Link ingress, route policy, live grants |
+| Streaming/reconnect | Packet loss, server restart, duplicate/gap events, foreground return, interrupted mutation | Canonical WS/event recovery, epochs and receipt semantics |
+| Session navigation | Navigator tap, quick access, new chat and first-send creation with browser storage full or unavailable | Shared web store navigation; local storage hints are optional and must not block canonical session state |
+| App lifecycle | Screen lock, background suspension, foreground, process termination, fresh launch | Platform lifecycle; no promise of a permanent background socket |
+| Launch and reveal | Cold start with a trusted server (splash → workspace, nothing in between), slow connect (status line, hub after 8 s), unreachable/revoked server, first run (mark flies into the hub), manual server tap (mark flies back, curtain), resume bounce, notification tap, sign-in screen, light and dark themes, wallpaper, reduced motion, rotation, iPad, Android 12+ and pre-12 splash | `apps/web/src/index.html` veil, `launchVeil.ts`, `launchReveal.ts`, `connectionUi.ts` `hubPresentation`, `apps/mobile/src/launch.ts`, LaunchScreen.storyboard, Android `styles.xml`/`polyth_launch.xml`, Link bootstrap page; `docs/mobile/platform-behavior.md` "Launch and reveal". Chromium filmstrips cover the web half; native splash geometry and curtain timing still need a device |
+| Notifications | Denied permission, local delivery, actual push delivery if implemented, routing after tap, duplicate suppression | LocalNotifications is not APNs/FCM registration and push transport |
+| Haptics | Supported/unsupported device, disabled preference, success/error distinction | Shared haptic preferences and native bridge |
+| File/audio/camera | Cancel, deny, oversized/unsupported MIME, safe URI access, cleanup | Native picker/capture, upload, canonical representation, adapter modality |
+| Deep links | Cold/warm start, malformed route, wrong server/Space, pairing versus content link | Native registration, parsing, auth and pending-link lifecycle |
+| Keyboard/gestures | Safe areas, rotation, input focus, multiline/composition, back/escape, scroll versus swipe | Shared viewport, sheets, back handlers, native keyboard events |
+| Layer navigation (phone) | Workspace → package → Back/Close/Escape, Tools resume, reopen of a kept-alive package, double-tap Back, native Back, edge swipe (commit, cancel, flick, vertical start), RTL, reduced motion | `mobileLayerStack.ts`, `MobileWorkspaceLayer`, `ModuleView`, `edgeSwipeBack.ts`, `handleNativeBack`; swipes are off in a coarse-pointer web host (`swipeHost.ts`) because the browser owns the system edge gesture |
+| Shell swipes (phone) | From Chat: right opens Navigator, left opens Workspace; leftward closes Navigator, rightward goes Back; commit, spring home, flick, diagonal/vertical start, over a code block/scroller, over session rows (leftward closes, rightward reveals Pin, an open row drags back), composer text, Anywhere/From edges/Off setting, RTL, reduced motion, installed-app vs phone-browser host | `swipeSurface.ts`, `shellSwipe.ts`, `swipeHost.ts`, `PhoneShellSwipes.tsx`, `MobileNavigator`, `docs/dev/ui.md` "Phone shell swipes"; verified in Chromium (real CDP touch) and happy-dom only, not WebKit or a device |
+| OS widgets | Snapshot refresh, stale/offline display, secure data sharing, tap routing, OS constraints | Actual WidgetKit/AppWidget/native extension, not a web dashboard widget |
+| Live Activity (iOS Dynamic Island) | Approval vs question vs working priority, active-chat question text vs background chat, app suspended (stale after 15 min), work finished/failed final snapshot, Live Activities disabled in iOS Settings, extension absent (`POLYTH_IOS_LIVE_ACTIVITY=0`), tap on the publishing page vs another server, locked-device redaction, Dynamic Island on a foldable's side strip | `apps/web/src/liveActivity.ts`, `apps/web/src/nativeLiveActivity.ts`, `apps/mobile/src/nativeLiveActivity.ts`, `PolythLiveActivityPlugin.swift`, `PolythLiveActivity/` extension, `configure-ios-live-activity.mjs`; unit-tested only, not native-built or device-tested |
+| Foldable / iPhone Duo | Outer display (`phone`), inner portrait and landscape (`compact` tablet shell), fold/unfold while a sheet or drawer is open, Split View halves, side Dynamic Island strip on either edge, RTL | `responsiveShell.ts` seam and per-edge safe insets in `styles.css`; checked in Chromium with simulated insets only — needs the iOS 27.1 SDK and a device |
+| Release | Native plugin linked, permissions declared, identifiers/resources aligned, signed installation | Platform projects, CI/external builder, device smoke |
+
+## Review order
+
+First read the target function/registration, then the required platform configuration and native implementation, then tests for that boundary. Confirm build inclusion. Finally exercise the behavior on an actual affected OS/device or label that step unrun. Do not rewrite the entire app to another UI stack without a concrete, reviewed blocker.
+
+## Privacy and state
+
+Private keys stay native. Server/account/Space changes invalidate or partition state; an old callback must not populate a new server's view. Permission requests follow user intent and use minimal scope. OS widgets and notifications must not leak sensitive prompts on a locked device. Retain authoritative conversation state on the server; any local read cache must not become a second event authority.
+
+## Evidence record
+
+For each tested flow record build/commit, OS version, device/simulator distinction, connection transport and expected/observed outcome. A simulator or mocked plugin can be useful evidence, but it is not automatically a physical-device networking/background/notification test. State the actual limitation.

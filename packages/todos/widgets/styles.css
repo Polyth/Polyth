@@ -1,0 +1,247 @@
+.todos-settings {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.todos-settings__rule {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.todos-settings__rule textarea {
+  width: 100%;
+}
+
+.todos-settings__rule-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.todos-settings__count,
+.todos-settings__hint {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.todos-settings__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.todos-settings__count--over {
+  color: var(--danger);
+}
+
+.todos-settings__preview summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.todos-settings__preview pre {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+  font-family: var(--font-code);
+  font-size: var(--font-meta);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Session progress bar + sub-agent panel. The host card or slot owns the
+   frame, so the widgets add no surface of their own; layout follows the
+   widget's own width, never the viewport. */
+.todos-widget {
+  container: todos-widget / inline-size;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* More below the visible end (useMoreBelow): fade the edge, never animate it. */
+.todos-widget[data-more] {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--space-6)), transparent);
+}
+
+/* Inside a widget the host card is the frame: the shared empty state sits
+   bare and centred in it at any width, not as a second bordered card. */
+.todos-widget:has(> .todos-widget__empty) { display: grid; }
+.todos-widget__empty { display: grid; place-items: center; min-height: 100%; padding: var(--space-3); }
+.todos-widget__empty > .empty-state {
+  width: 100%;
+  max-width: 34ch;
+  padding: var(--space-2);
+  border: 0;
+  background: none;
+}
+
+.todos-progress,
+.todos-agents {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.todos-progress__head,
+.todos-agents__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.todos-progress__count { color: var(--text); font-weight: 600; }
+.todos-progress__failed { color: var(--danger); }
+.todos-progress__elapsed,
+.todos-agents__total { margin-inline-start: auto; color: var(--muted); }
+
+.todos-progress__bar {
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+  overflow: hidden;
+}
+
+.todos-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--motion-normal) var(--motion-ease);
+}
+
+.todos-progress[data-settled="true"] .todos-progress__fill { background: var(--success, var(--accent)); }
+
+/* The label stays whole; only the agent's step text truncates, on its own side. */
+.todos-progress__current {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.todos-progress__now { flex: none; color: var(--muted); font-weight: 600; }
+/* Agent-written text keeps its own direction (bdi) but the row's alignment. */
+.todos-progress__text { min-width: 0; overflow: hidden; text-align: match-parent; text-overflow: ellipsis; white-space: nowrap; }
+
+.todos-agents__note { margin: 0; color: var(--muted); }
+.todos-agents__list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.todos-agents__row { padding-inline-start: calc(var(--todos-depth, 0) * var(--space-3)); min-width: 0; }
+
+.todos-agents__open {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  min-height: max(var(--hit-min, 0px), var(--control-h-sm));
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .todos-agents__open:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.todos-agents__open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.todos-agents__dot { flex: none; width: 8px; height: 8px; border-radius: var(--radius-round); background: var(--muted); }
+.todos-agents__row[data-state="running"] .todos-agents__dot { background: var(--accent); }
+.todos-agents__row[data-state="done"] .todos-agents__dot { background: var(--success, var(--muted)); }
+.todos-agents__row[data-state="failed"] .todos-agents__dot { background: var(--danger); }
+.todos-agents__row[data-state="failed"] .todos-agents__state { color: var(--danger); }
+
+.todos-agents__main { display: grid; flex: 1; min-width: 0; }
+.todos-agents__label,
+.todos-agents__task { overflow: hidden; text-align: match-parent; text-overflow: ellipsis; white-space: nowrap; }
+.todos-agents__label { color: var(--text); text-align: match-parent; }
+.todos-agents__task { color: var(--muted); }
+.todos-agents__meta { display: grid; flex: none; justify-items: end; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-reduce-animations="true"]) .todos-agents__row[data-state="running"] .todos-agents__dot {
+    animation: todos-agent-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes todos-agent-pulse { 50% { opacity: 0.35; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .todos-progress__fill { transition: none; }
+}
+html[data-reduce-animations="true"] .todos-progress__fill { transition: none; }
+
+/* Narrow cards: totals drop under the counts, the step may take two lines. */
+@container todos-widget (max-width: 300px) {
+  .todos-progress__elapsed,
+  .todos-agents__total { margin-inline-start: 0; }
+  .todos-progress__text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  /* State and usage move under the name so the name keeps the width. */
+  .todos-agents__open { flex-wrap: wrap; align-items: flex-start; row-gap: 0; }
+  .todos-agents__main { flex-basis: calc(100% - 8px - var(--space-2)); }
+  .todos-agents__meta {
+    display: flex;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 0 var(--space-2);
+    padding-inline-start: calc(8px + var(--space-2));
+  }
+  .todos-agents__dot { margin-block-start: calc((var(--font-meta-lh, 1.4) * 1em - 8px) / 2); }
+}
+
+/* ---- status-bar segments ------------------------------------------------------
+   Host `.sb` segments (chip height, hover chip, focus ring). The count carries
+   the state colour; the current step is capped and its full text is in the
+   tooltip and the popover. */
+.todos-sb-count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.todos-sb-progress[data-settled="true"] .todos-sb-count,
+.todos-sb-progress[data-settled="true"] .ui-icon { color: var(--green); }
+.todos-sb-progress[data-failed] .todos-sb-count { color: var(--red); }
+.todos-sb-current { max-width: 32ch; color: var(--muted); }
+.todos-sb-background .sb-text { color: var(--text-dim); }
+.todos-sb-background[data-running] .ui-icon { color: var(--accent); }
+
+.todos-sb-pop {
+  width: min(360px, calc(100vw - 2 * var(--screen-gutter, 12px)));
+  max-height: min(420px, 70vh);
+  padding: var(--space-3);
+}
+/* The sub-agent panel brings its own padding, so the popover adds none and
+   the queue line takes the panel's inset. */
+.todos-sb-pop--agents { width: min(420px, calc(100vw - 2 * var(--screen-gutter, 12px))); padding: 0; }
+.todos-sb-list { display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--font-meta); }
+.todos-sb-list__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.todos-sb-list__head strong { color: var(--text); font-weight: 650; }
+.todos-sb-list__head span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.todos-sb-list ol { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.todos-sb-list li { display: grid; grid-template-columns: 14px 1fr; gap: 6px; align-items: baseline; color: var(--text-dim); line-height: var(--font-meta-lh); }
+.todos-sb-list li[data-status="done"] { color: var(--muted); }
+.todos-sb-list li[data-status="active"] { color: var(--text); font-weight: 600; }
+.todos-sb-list__glyph { color: var(--faint); text-align: center; }
+.todos-sb-list li[data-status="done"] .todos-sb-list__glyph { color: var(--green); }
+.todos-sb-list li[data-status="active"] .todos-sb-list__glyph { color: var(--accent); }
+.todos-sb-list li[data-status="failed"] .todos-sb-list__glyph { color: var(--red); }
+.todos-sb-queue { margin: 0; padding: var(--space-3); color: var(--muted); font-size: var(--font-meta); }
+.todos-sb-pop--agents .todos-widget + .todos-sb-queue { padding-top: 0; }

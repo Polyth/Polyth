@@ -1,0 +1,50 @@
+{
+  "view": "media",
+  "title": "Screens",
+  "options": {
+    "pick": "many"
+  },
+  "pick": "many",
+  "columns": [],
+  "columnImages": [],
+  "series": [],
+  "items": [
+    {
+      "index": 0,
+      "selected": false,
+      "image": "https://cdn.example/1.png",
+      "title": "Home",
+      "cells": [
+        "https://cdn.example/1.png",
+        "Home",
+        "https://example.com/1"
+      ],
+      "link": "https://example.com/1"
+    },
+    {
+      "index": 1,
+      "selected": false,
+      "image": "_out/shot.png",
+      "title": "Settings",
+      "cells": [
+        "_out/shot.png",
+        "Settings",
+        "id=s2"
+      ],
+      "id": "s2"
+    }
+  ],
+  "actions": [],
+  "notes": [],
+  "invalid": [
+    "- not-an-image | Broken"
+  ],
+  "problems": [
+    {
+      "code": "bad-row",
+      "line": 4,
+      "text": "- not-an-image | Broken",
+      "hint": "A media row is - image | caption | link (the image must be an http(s) URL or a project image path)."
+    }
+  ]
+}

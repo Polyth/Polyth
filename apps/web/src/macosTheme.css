@@ -1,0 +1,448 @@
+/* macOS theme style — Big Sur.
+   Applies while the active theme declares `style: "macos"`; theme.ts then
+   publishes html[data-theme-style="macos"] and the Big Sur derived roles
+   (separators, subtle fills, smoke, elevation). The palette stays in the
+   theme; this file re-binds geometry, materials and the core primitives only,
+   so packages follow through the canonical tokens. Contract and the reasoning
+   behind each number: docs/dev/styles.md "macOS theme style". */
+
+/* ---- geometry, type, motion --------------------------------------------- */
+html[data-theme-style="macos"] {
+  /* Big Sur rounds controls at 6px, windows, popovers and cards at 10px and
+     menus at 6px; the composer, islands and docks take the 12px of the
+     notification and Control Center modules. Rounding is measured from its default (9 → scale 1.8, uiPrefs.ts),
+     which draws these radii exactly; lower squares them, higher rounds a
+     little past Big Sur. */
+  --macos-round: calc(var(--corner-radius-scale) / 1.8);
+  --radius-control: calc(6px * var(--macos-round));
+  --radius-card: calc(10px * var(--macos-round));
+  --radius-surface: calc(10px * var(--macos-round));
+  --radius-sheet: calc(10px * var(--macos-round));
+  --radius-activity: calc(6px * var(--macos-round));
+  --radius-island: calc(12px * var(--macos-round));
+  --radius-dock: calc(12px * var(--macos-round));
+  --radius-composer: calc(12px * var(--macos-round));
+  --macos-radius-menu: calc(6px * var(--macos-round));
+
+  /* The kit's large push button is 28px; fields and list rows sit one step
+     up. Compact controls keep their --hit-min floor on coarse pointers. */
+  --control-h-sm: 28px;
+  --control-h: 32px;
+  --control-h-lg: 36px;
+  --control-pad-x-sm: 8px;
+  --control-pad-x: 12px;
+
+  /* Core Animation's default timing; state changes are quick, surfaces ease. */
+  --motion-fast: 100ms;
+  --motion-normal: 200ms;
+  --motion-surface: 250ms;
+  --motion-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+
+  /* The keyboard focus ring: a 3px accent halo hugging the control. */
+  --focus-ring: var(--macos-focus-ring);
+
+  /* Materials. Vibrancy tints with the sidebar colour; alerts, sheets and the
+     composer stay on the opaque content surface. */
+  --material-glass: var(--panel);
+  --material-glass-strong: var(--elevated);
+  --material-glass-medium: color-mix(in srgb, var(--elevated) 60%, var(--panel));
+  --material-glass-chrome: var(--panel);
+  /* The style's one contour for every glass surface and shell control. */
+  --contour: var(--macos-stroke-surface);
+  --material-glass-border: var(--contour);
+  --material-glass-shadow: var(--shadow-md);
+}
+
+/* Strokes and fills (Big Sur UI kit). Light controls are white plates on a
+   hairline and a 1px drop; dark ones are 25% white with a light top edge. */
+html[data-theme-style="macos"][data-appearance="light"] {
+  --macos-stroke-control: rgba(0, 0, 0, 0.1);
+  --macos-stroke-strong: rgba(0, 0, 0, 0.18);
+  --macos-stroke-surface: rgba(0, 0, 0, 0.1);
+  --macos-stroke-separator: rgba(0, 0, 0, 0.1);
+  --macos-stroke-field: rgba(0, 0, 0, 0.15);
+  --macos-control-shadow: 0 0 0 0.5px var(--macos-stroke-control), 0 1px 1px rgba(0, 0, 0, 0.1);
+  --macos-field-shadow: 0 0 0 0.5px var(--macos-stroke-field), 0 0.5px 1px rgba(0, 0, 0, 0.08);
+  --macos-fill-control: #ffffff;
+  --macos-fill-control-pressed: #e6e6e6;
+  --macos-fill-well: rgba(0, 0, 0, 0.06);
+  --macos-fill-segment: #ffffff;
+  --macos-fill-check: #ffffff;
+  --macos-fill-switch: rgba(0, 0, 0, 0.09);
+  --macos-knob: #ffffff;
+  --macos-bevel: linear-gradient(rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0));
+  --macos-press: linear-gradient(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.12));
+  --macos-focus-ring: color-mix(in srgb, var(--accent) 50%, transparent);
+  --macos-selection: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+html[data-theme-style="macos"][data-appearance="dark"] {
+  --macos-stroke-control: rgba(0, 0, 0, 0.25);
+  --macos-stroke-strong: rgba(255, 255, 255, 0.22);
+  --macos-stroke-surface: rgba(0, 0, 0, 0.5);
+  --macos-stroke-separator: rgba(255, 255, 255, 0.1);
+  --macos-stroke-field: rgba(255, 255, 255, 0.12);
+  --macos-control-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.15), 0 0 0 0.5px var(--macos-stroke-control), 0 1px 1px rgba(0, 0, 0, 0.2);
+  --macos-field-shadow: 0 0 0 0.5px var(--macos-stroke-field), inset 0 0.5px 0 rgba(0, 0, 0, 0.2);
+  --macos-fill-control: rgba(255, 255, 255, 0.25);
+  --macos-fill-control-pressed: rgba(255, 255, 255, 0.34);
+  --macos-fill-well: rgba(255, 255, 255, 0.1);
+  --macos-fill-segment: rgba(255, 255, 255, 0.24);
+  --macos-fill-check: rgba(255, 255, 255, 0.25);
+  --macos-fill-switch: rgba(255, 255, 255, 0.14);
+  --macos-knob: #e3e3e3;
+  --macos-bevel: linear-gradient(rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0));
+  --macos-press: linear-gradient(rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.14));
+  --macos-focus-ring: color-mix(in srgb, var(--accent) 65%, transparent);
+  --macos-selection: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Interface font: San Francisco where the platform has it, Inter (the closest
+   bundled face) elsewhere. Only the default faces (Open Sans now, Inter for
+   older profiles) yield to it; an explicitly chosen font keeps its place. The
+   setting is an inline style on <html>, so html keeps a copy and body prepends
+   the system face to it (a property cannot reference itself). */
+html[data-theme-style="macos"] { --macos-font-chosen: var(--ui-font-family); }
+html[data-theme-style="macos"][data-font="theme"] body {
+  --ui-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", Inter, var(--macos-font-chosen);
+}
+
+/* ---- materials ------------------------------------------------------------ */
+/* Vibrancy for transient surfaces: the sidebar tint over a 30px blur with the
+   strong saturation that lets the wallpaper's colour through. Clear thins the
+   tint; Off falls back to the solid surface, as macOS with Reduce
+   transparency on. */
+html[data-theme-style="macos"] body {
+  --material-glass-blur: 30px;
+  --material-glass-saturation: 180%;
+  --material-glass-readable-fill: 84%;
+  --material-glass-readable-edge: 84%;
+  --material-glass-readable-control-fill: 72%;
+  --material-glass-readable-control-edge: 72%;
+  --material-glass-mobile-chrome-fill: 80%;
+  --material-glass-mobile-chrome-edge: 80%;
+}
+html[data-theme-style="macos"] body[data-glass="clear"] {
+  --material-glass-blur: 24px;
+  --material-glass-saturation: 200%;
+  --material-glass-readable-fill: 68%;
+  --material-glass-readable-edge: 68%;
+  --material-glass-readable-control-fill: 56%;
+  --material-glass-readable-control-edge: 56%;
+  --material-glass-mobile-chrome-fill: 64%;
+  --material-glass-mobile-chrome-edge: 64%;
+}
+/* Sidebar vibrancy for the window chrome: the sidebar colour over a heavy
+   50px blur, opaque enough that secondary ink keeps its contrast. */
+html[data-theme-style="macos"] :is(.sidebar, .app > .header, .railbar, .statusbar) {
+  --sidebar-glass-surface: var(--panel);
+  --material-glass-readable-fill: 86%;
+  --material-glass-readable-edge: 86%;
+  --material-glass-blur: 50px;
+  --material-glass-saturation: 190%;
+}
+
+/* ---- overlays: menu, popover, tooltip, dialog ---------------------------- */
+html[data-theme-style="macos"] :is(.ui-popover, .picker-pop, .menu-popup) {
+  border-color: var(--macos-stroke-surface);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+}
+/* Menus: 6px corners, 5px inset, rows flush on a 24px pitch. */
+html[data-theme-style="macos"] :is(.ui-popover.ui-menu, .menu-popup) {
+  padding: 5px;
+  border-radius: var(--macos-radius-menu);
+}
+html[data-theme-style="macos"] .ui-menu { --menu-row-gap: 0px; --menu-leading-column: calc(10px + var(--icon-sm) + 8px); }
+html[data-theme-style="macos"] .ui-menu-item {
+  gap: 8px;
+  min-height: max(24px, var(--hit-min));
+  padding: 3px 10px;
+  border-radius: calc(var(--macos-radius-menu) - 2px);
+  font-weight: 400;
+}
+html[data-theme-style="macos"] .ui-menu-item .ui-icon { color: currentColor; }
+/* The highlighted item is an accent plate with white ink, icons, details and
+   checkmarks included; a destructive item highlights in red. */
+html[data-theme-style="macos"] .ui-menu-item:focus-visible {
+  background: var(--accent);
+  color: var(--accent-ink);
+  outline: none;
+}
+@media (hover: hover) {
+  html[data-theme-style="macos"] .ui-menu-item:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+  html[data-theme-style="macos"] .ui-menu-item:hover:not(:disabled) :is(.ui-icon, .ui-menu-item-detail) { color: currentColor; }
+  html[data-theme-style="macos"] .ui-menu-item--danger:hover:not(:disabled) { background: var(--red); color: var(--red-ink); }
+}
+html[data-theme-style="macos"] .ui-menu-item:focus-visible :is(.ui-icon, .ui-menu-item-detail) { color: currentColor; }
+html[data-theme-style="macos"] .ui-menu-item--danger:focus-visible { background: var(--red); color: var(--red-ink); }
+html[data-theme-style="macos"] .ui-menu-item:active:not(:disabled) { background: var(--macos-press), var(--accent); color: var(--accent-ink); }
+html[data-theme-style="macos"] .ui-menu-item--danger:active:not(:disabled) { background: var(--macos-press), var(--red); color: var(--red-ink); }
+/* A row carrying a switch keeps a neutral highlight, so the checked track
+   still reads against it. */
+html[data-theme-style="macos"] .ui-menu-item:has(> .ui-menu-item-switch):focus-visible,
+html[data-theme-style="macos"] .ui-menu-item:has(> .ui-menu-item-switch):active:not(:disabled) {
+  background: var(--surface-overlay-strong);
+  color: var(--text);
+}
+@media (hover: hover) {
+  html[data-theme-style="macos"] .ui-menu-item:has(> .ui-menu-item-switch):hover:not(:disabled) {
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+/* Menu separators group commands, so they stay even when interface borders
+   are hidden: a 10% line inset to the text column, 5px clear of each row. */
+html[data-theme-style="macos"] .ui-menu .ui-separator--horizontal { margin: 5px; background: var(--macos-stroke-separator); }
+html[data-theme-style="macos"] .menu-sep { margin: 5px; background: var(--macos-stroke-separator); }
+html[data-theme-style="macos"] .menu-popup button {
+  min-height: max(24px, var(--hit-min)); padding: 0 10px; gap: 8px;
+  border-radius: calc(var(--macos-radius-menu) - 2px); color: var(--text);
+}
+@media (hover: hover) {
+  html[data-theme-style="macos"] .menu-popup button:hover:where(:not(:disabled)) { background: var(--accent); color: var(--accent-ink); }
+  html[data-theme-style="macos"] .menu-popup button:hover:where(:not(:disabled)) .menu-kbd { color: currentColor; }
+}
+/* Key equivalents are plain glyphs at the trailing edge, not keycaps. */
+html[data-theme-style="macos"] .menu-kbd {
+  padding: 0; border: 0; background: none;
+  color: var(--text-dim); font: 400 var(--font-meta)/1 var(--ui-font-family);
+}
+
+/* Help tag: a small light plate on the surface stroke. */
+html[data-theme-style="macos"] .ui-tooltip {
+  padding: 4px 8px;
+  border-color: var(--macos-stroke-surface);
+  border-radius: calc(5px * var(--macos-round));
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  color: var(--text);
+}
+
+/* Alert and sheet: the content surface on the surface stroke under the alert
+   shadow; title and commands share it, with no rules or bands between. */
+html[data-theme-style="macos"] .dialog-panel {
+  border-color: var(--macos-stroke-surface);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--material-glass-highlight), var(--shadow-lg);
+}
+html[data-theme-style="macos"] .ui-dialog-head { border-bottom-color: transparent; }
+html[data-theme-style="macos"] .ui-dialog-title { font-weight: 650; letter-spacing: 0; }
+html[data-theme-style="macos"] .ui-dialog-foot { border-top-color: transparent; }
+/* Settings is a window, not a popover: it sits on the window background. */
+html[data-theme-style="macos"] .settings-shell { --material-glass-strong: var(--panel); }
+
+/* ---- buttons -------------------------------------------------------------- */
+html[data-theme-style="macos"] .ui-btn {
+  border-radius: var(--radius-control);
+  font-weight: 400;
+  box-shadow: none;
+  transition: background-color var(--motion-fast) linear, color var(--motion-fast) linear;
+}
+/* Push button: a control plate on its hairline and drop. macOS gives push
+   buttons no hover state; only the press darkens (lightens) them. */
+html[data-theme-style="macos"] :is(.ui-btn--quiet, .ui-btn--danger, .ui-icon-btn--quiet) {
+  background: var(--macos-fill-control);
+  border-color: transparent;
+  box-shadow: var(--macos-control-shadow);
+}
+html[data-theme-style="macos"] .ui-btn--quiet { color: var(--text); }
+html[data-theme-style="macos"] .ui-btn--danger { color: var(--red); }
+@media (hover: hover) {
+  html[data-theme-style="macos"] :is(.ui-btn--quiet, .ui-btn--danger, .ui-icon-btn--quiet):hover:not(:disabled) {
+    background: var(--macos-fill-control);
+    border-color: transparent;
+  }
+  html[data-theme-style="macos"] .ui-btn--danger:hover:not(:disabled) { color: var(--red); }
+}
+html[data-theme-style="macos"] :is(.ui-btn--quiet, .ui-btn--danger, .ui-icon-btn--quiet):active:not(:disabled) {
+  background: var(--macos-fill-control-pressed);
+  border-color: transparent;
+}
+/* Default button: the accent plate under a soft top bevel. */
+html[data-theme-style="macos"] .ui-btn--primary {
+  background: var(--macos-bevel), var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 0.5px var(--macos-stroke-control), 0 1px 1px rgba(0, 0, 0, 0.12);
+}
+@media (hover: hover) {
+  html[data-theme-style="macos"] .ui-btn--primary:hover:not(:disabled) {
+    background: var(--macos-bevel), var(--accent);
+    border-color: transparent;
+    color: var(--accent-ink);
+  }
+}
+html[data-theme-style="macos"] .ui-btn--primary:active:not(:disabled) {
+  background: var(--macos-press), var(--accent);
+  border-color: transparent;
+}
+/* Toolbar item: borderless glyph or label with a hover bezel. */
+html[data-theme-style="macos"] .ui-btn--ghost { color: var(--text-dim); }
+html[data-theme-style="macos"] :is(.ui-btn--ghost, .ui-icon-btn:not(.ui-icon-btn--quiet)):active:not(:disabled) { background: var(--surface-overlay-strong); }
+
+/* ---- text fields ----------------------------------------------------------- */
+/* NSTextField: the content surface on a hairline and a half-pixel drop.
+   Focus draws the 3px ring around the field instead of recolouring it. A
+   .ui-field-well is the field around its icon and controls, so the input
+   inside it is bare. */
+html[data-theme-style="macos"] :is(.ui-input, .ui-textarea, .sel select, .ui-field-well):not(:where(.ui-field-well, .ui-field-frame) *) {
+  background: var(--input-bg);
+  border-color: transparent;
+  border-radius: calc(var(--radius-control) - 1px);
+  box-shadow: var(--macos-field-shadow);
+}
+html[data-theme-style="macos"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *) { color: var(--text); }
+@media (hover: hover) {
+  html[data-theme-style="macos"] .sel select:hover { background: var(--input-bg); }
+}
+html[data-theme-style="macos"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *):is(:focus, :focus-visible),
+html[data-theme-style="macos"] .ui-field-well:focus-within {
+  outline: 3px solid var(--macos-focus-ring);
+  outline-offset: 0;
+  border-color: transparent;
+  box-shadow: var(--macos-field-shadow);
+}
+
+/* ---- check box, switch, segmented control, tabs ---------------------------- */
+html[data-theme-style="macos"] .ui-checkbox-box {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-width: 1px;
+  border-radius: calc(4px * var(--macos-round));
+  background: var(--macos-fill-check);
+  box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.12);
+}
+html[data-theme-style="macos"] .ui-checkbox input:checked + .ui-checkbox-box {
+  background: var(--macos-bevel), var(--accent);
+  border-color: var(--accent);
+}
+html[data-theme-style="macos"] .ui-checkbox input:focus-visible + .ui-checkbox-box {
+  outline: 3px solid var(--macos-focus-ring);
+  outline-offset: 0;
+}
+
+/* Switch: a 38×22 capsule whose 20px white knob rides on a hairline drop. */
+html[data-theme-style="macos"] .switch-track {
+  padding: 1px;
+  border-width: 0;
+  background: var(--macos-fill-switch);
+  box-shadow: inset 0 0 0 0.5px var(--macos-stroke-control);
+}
+html[data-theme-style="macos"] .switch i {
+  width: 20px;
+  height: 20px;
+  background: var(--macos-knob);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+html[data-theme-style="macos"] .switch:is([aria-checked="true"], [data-checked="true"]) .switch-track {
+  background: var(--accent);
+  box-shadow: none;
+}
+html[data-theme-style="macos"] .switch:is([aria-checked="true"], [data-checked="true"]) i { background: #ffffff; }
+
+/* Segmented control and tabs: a recessed well; the selected segment is a
+   raised push-button plate, every label in label ink. */
+html[data-theme-style="macos"] :is(.seg, .ui-tabs) {
+  gap: 2px;
+  padding: 2px;
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  background: var(--macos-fill-well);
+}
+html[data-theme-style="macos"] :is(.seg button, .ui-tab) {
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--text);
+  font-weight: 400;
+}
+html[data-theme-style="macos"] :is(.seg button.active, .seg button.on, .ui-tab--selected) {
+  color: var(--text);
+  background: var(--macos-fill-segment);
+  box-shadow: var(--macos-control-shadow);
+}
+@media (hover: hover) {
+  html[data-theme-style="macos"] :is(.seg button.active, .seg button.on, .ui-tab--selected):hover:where(:not(:disabled)) {
+    color: var(--text);
+    background: var(--macos-fill-segment);
+    box-shadow: var(--macos-control-shadow);
+  }
+}
+
+/* ---- navigation: source-list selection ------------------------------------ */
+/* Sidebar rows select the Big Sur way while focus is in the content: a
+   rounded unemphasized plate (10% / 13% ink) behind an unchanged label. */
+html[data-theme-style="macos"] .session-row:hover .session-btn::before { background: var(--surface-overlay-hover); }
+html[data-theme-style="macos"] .session-row.active .session-btn::before {
+  background: var(--surface-overlay-strong);
+  box-shadow: none;
+}
+html[data-theme-style="macos"] .settings-nav-item { font-weight: 400; }
+@media (min-width: 701px) {
+  html[data-theme-style="macos"] .settings-nav-item.active { color: var(--text); background: var(--surface-overlay-strong); }
+  @media (hover: hover) {
+    html[data-theme-style="macos"] .settings-nav-item.active:hover:where(:not(:disabled)) { color: var(--text); background: var(--surface-overlay-strong); }
+  }
+  html[data-theme-style="macos"] .settings-nav-item.active::before { content: none; }
+}
+
+/* ---- composer and conversation --------------------------------------------- */
+/* The composer is the Messages field: the content surface on the style's
+   contour under the menu shadow. The contour composites over the workspace,
+   like the rails'. Focus firms it; it adds no accent outline. */
+html[data-theme-style="macos"] .composer-card {
+  border-color: var(--contour);
+  background-clip: padding-box;
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+}
+html[data-theme-style="macos"] .composer-card:focus-within {
+  border-color: var(--macos-stroke-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+}
+/* The phone composer drops its shadow (styles.css); the contour stays. The
+   top islands are the same floating glass. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  html[data-theme-style="macos"] .composer-mobile :is(.composer-card, .composer-card:focus-within) { box-shadow: none; }
+  html[data-theme-style="macos"] .mobile-session-floats .ui-glass-island:not([data-attention]) { box-shadow: none; }
+}
+html[data-theme-style="macos"] .msg.user .bubble { box-shadow: none; }
+/* Links take linkColor (`blue`), separate from the accent as in AppKit. */
+html[data-theme-style="macos"] .msg.assistant > .bubble a {
+  color: var(--blue);
+  text-decoration-color: color-mix(in srgb, var(--blue) 40%, transparent);
+}
+html[data-theme-style="macos"] .msg.assistant > .bubble a:hover { color: var(--blue); text-decoration-color: currentColor; }
+
+/* ---- progress, spinner, scrollbars, selection, focus ------------------------ */
+/* NSProgressIndicator: a flat accent bar in a rounded 10% track. */
+html[data-theme-style="macos"] .ui-progress { border: 0; background: var(--surface-overlay-strong); }
+html[data-theme-style="macos"] .ui-progress-fill { background: var(--accent); }
+html[data-theme-style="macos"] .ui-spinner { border-color: var(--surface-overlay-strong); border-top-color: var(--accent); }
+/* Overlay scroller: a thin capsule in 30% ink on no track. */
+html[data-theme-style="macos"] * { scrollbar-color: color-mix(in srgb, var(--text) 32%, transparent) transparent; }
+html[data-theme-style="macos"] ::selection { background: var(--macos-selection); }
+/* Same weight as the base rule, so component-specific rings still win. */
+:where(html[data-theme-style="macos"]) :focus-visible {
+  outline: 3px solid var(--macos-focus-ring);
+  outline-offset: 0;
+  box-shadow: none;
+}
+
+/* ---- Hide interface borders ---------------------------------------------- */
+/* Borderless appearance still clears structural borders and separators. Big
+   Sur draws control edges as hairline shadows, which it leaves alone; the
+   stroke of a menu, popover, help tag or alert identifies the surface, and
+   focus is the ring alone, so those keep their macOS look. */
+html[data-theme-style="macos"] body[data-hide-borders="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ui-tooltip, .dialog-panel) {
+  border-color: var(--macos-stroke-surface) !important;
+}
+html[data-theme-style="macos"] body[data-hide-borders="true"] :is(.ui-input, .ui-textarea, .sel select):not(:where(.ui-field-well, .ui-field-frame) *):focus-visible {
+  border-color: transparent !important;
+}
+html[data-theme-style="macos"] body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box {
+  border-color: var(--accent) !important;
+}
+/* The composer keeps the style's contour (styles.css); focus firms it rather
+   than drawing the shared accent edge. */
+html[data-theme-style="macos"] body[data-hide-borders="true"] .composer-card:focus-within {
+  border-color: var(--macos-stroke-strong) !important;
+}
+
+/* Disabled controls keep the shared neutral look (styles.css, !important). */

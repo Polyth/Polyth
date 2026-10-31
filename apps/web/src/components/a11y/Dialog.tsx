@@ -1,0 +1,343 @@
+// Accessible modal dialog primitive: focus trap, Escape close, focus
+// restore to the opener, aria-modal semantics. Feature dialogs (focus editor,
+// image preview, mermaid fullscreen, question stepper) build on this.
+// The focus logic is exported as useModalSurface so the compact
+// session drawer (Sidebar) and panel sheet (ContextRail) share one
+// implementation instead of copying focus traps.
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { heldKeyboardEntry } from "../../mobileViewport.ts";
+import { usePackageWindowOwner } from "../ui/PackageWindowContext.ts";
+import IconButton from "../ui/IconButton.tsx";
+import { CloseIcon } from "../ui/icons.ts";
+import { useExitGhost } from "../../exitGhost.ts";
+import { isImeComposing } from "../input/editorCore.ts";
+
+const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let openModalSurfaces = 0;
+
+/**
+ * Prevent the document behind a modal surface from moving while preserving
+ * scroll inside the surface itself. The counter keeps genuinely nested
+ * dialogs (e.g. a confirm over a settings dialog) locked until the final
+ * surface closes.
+ */
+export function useModalScrollLock(active: boolean): void {
+  useEffect(() => {
+    if (!active || typeof document === "undefined") return;
+    openModalSurfaces += 1;
+    document.documentElement.dataset.modalSurface = "open";
+    return () => {
+      openModalSurfaces = Math.max(0, openModalSurfaces - 1);
+      if (openModalSurfaces === 0) delete document.documentElement.dataset.modalSurface;
+    };
+  }, [active]);
+}
+
+export interface ModalSurfaceOptions {
+  /** The surface is currently open and must behave as the active modal. */
+  open: boolean;
+  /**
+   * The surface participates in modal behavior at all. When false (e.g. the
+   * sidebar in wide mode) the hook removes inert/aria-hidden and does nothing,
+   * so a viewport change never steals or restores focus by itself.
+   */
+  enabled?: boolean;
+  onClose: () => void;
+  containerRef: RefObject<HTMLElement | null>;
+  /** Optional root whose document siblings must be hidden while open. */
+  isolationRootRef?: RefObject<HTMLElement | null>;
+  /** CSS selector inside the container to receive initial focus. */
+  initialFocus?: string;
+  /** Resolve the unmount focus target from the recorded opener. Returning
+   *  null delegates focus to a caller-owned handoff. */
+  resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+  /** Runs after focus restoration so a caller can repair scroll anchoring
+   *  disturbed by the browser bringing the opener back into view. */
+  onAfterRestoreFocus?: () => void;
+  /**
+   * Yield to an editor that a keep-keyboard surface (the composer) is holding
+   * for the current touch gesture. The surface neither claims initial focus
+   * nor inerts the subtree that holds the editor, so the software keyboard
+   * stays open across the modal. A dialog that collects input must not set
+   * this; it would focus a control outside the dialog.
+   */
+  keepKeyboard?: boolean;
+}
+
+const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
+let bodyScrollLocks = 0;
+let bodyOverflowBeforeLock = "";
+
+function lockBodyScroll(): () => void {
+  if (bodyScrollLocks === 0) {
+    bodyOverflowBeforeLock = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  bodyScrollLocks++;
+  return () => {
+    bodyScrollLocks = Math.max(0, bodyScrollLocks - 1);
+    if (bodyScrollLocks === 0) document.body.style.overflow = bodyOverflowBeforeLock;
+  };
+}
+
+function isolateDocumentSiblings(root: HTMLElement | null, keepVisible: HTMLElement | null = null): () => void {
+  const parent = root?.parentElement;
+  if (!root || !parent) return () => {};
+  // Dialogs normally render inside #root. Hiding body children in that case
+  // would inert #root itself, including the dialog. Isolate the backdrop's
+  // actual siblings so the modal remains exposed to focus and accessibility.
+  // A keep-keyboard dialog skips the sibling that holds the editor the
+  // composer is keeping open: hiding or inerting it would cut that editor off
+  // from assistive tech, and an engine that enforces inert focus removal (the
+  // HTML contract) blurs it and dismisses the software keyboard.
+  const siblings = [...parent.children].filter((element) => element !== root && !(keepVisible && element.contains(keepVisible)));
+  const previous = siblings.map((element) => ({
+    element,
+    ariaHidden: element.getAttribute("aria-hidden"),
+    inert: element.hasAttribute("inert"),
+  }));
+  for (const { element } of previous) {
+    element.setAttribute("aria-hidden", "true");
+    element.setAttribute("inert", "");
+  }
+  return () => {
+    for (const { element, ariaHidden, inert } of previous) {
+      if (ariaHidden === null) element.removeAttribute("aria-hidden");
+      else element.setAttribute("aria-hidden", ariaHidden);
+      if (!inert) element.removeAttribute("inert");
+    }
+  };
+}
+
+/**
+ * Shared modal-surface focus contract:
+ * - focuses the requested initial target or first enabled control on open;
+ * - contains forward and reverse Tab traversal;
+ * - closes the active surface on Escape (one layer: transient popovers that
+ *   listen in the capture phase, e.g. useEscape, win and stop propagation);
+ * - restores a still-connected opener on close;
+ * - keeps hidden mounted content inert and aria-hidden while closed.
+ */
+export function useModalSurface({
+  open,
+  enabled = true,
+  onClose,
+  containerRef,
+  isolationRootRef,
+  initialFocus,
+  resolveRestoreFocus,
+  onAfterRestoreFocus,
+  keepKeyboard = false,
+}: ModalSurfaceOptions): void {
+  useModalScrollLock(enabled && open);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const resolverRef = useRef(resolveRestoreFocus);
+  resolverRef.current = resolveRestoreFocus;
+  const afterRestoreRef = useRef(onAfterRestoreFocus);
+  afterRestoreRef.current = onAfterRestoreFocus;
+
+  // Hidden-but-mounted surfaces (keep-alive drawer/sheet) must not be
+  // reachable by focus, pointer, or assistive technology.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (enabled && !open) {
+      el.setAttribute("aria-hidden", "true");
+      el.setAttribute("inert", "");
+    } else {
+      el.removeAttribute("aria-hidden");
+      el.removeAttribute("inert");
+    }
+    return () => {
+      el.removeAttribute("aria-hidden");
+      el.removeAttribute("inert");
+    };
+  }, [enabled, open, containerRef]);
+
+  useEffect(() => {
+    if (!enabled || !open) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const unlockBodyScroll = lockBodyScroll();
+    const opener = document.activeElement as HTMLElement | null;
+    // A keep-keyboard modal yields to the editor the current touch holds:
+    // focusing itself would blur the field and dismiss the software keyboard,
+    // the opening-focus guard would then reclaim the opener the same way, and
+    // inerting the editor's subtree hides it from assistive tech (and blurs
+    // it where the engine enforces inert focus removal).
+    const heldEntry = keepKeyboard ? heldKeyboardEntry() : null;
+    // Surfaces that animate in from visibility:hidden (compact drawer/sheet)
+    // silently swallow a focus() issued before the transition flips them
+    // visible. A completed pointer gesture can also return focus to its opener
+    // after the first successful focus frame, so guard several frames instead
+    // of stopping as soon as focus lands once.
+    // (rAF is feature-detected: the node:test DOM shim does not provide it.)
+    let focusRaf = 0;
+    let focusFrames = 0;
+    const claimFocus = () => {
+      if (heldEntry) return;
+      const target = (initialFocus
+        ? (el.matches(initialFocus) ? el : el.querySelector<HTMLElement>(initialFocus))
+        : null)
+        ?? el.querySelector<HTMLElement>(FOCUSABLE)
+        ?? el;
+      target.focus();
+    };
+    claimFocus();
+    const guardOpeningFocus = () => {
+      if (heldEntry) return;
+      if (focusFrames >= 20 || typeof requestAnimationFrame !== "function") return;
+      focusFrames += 1;
+      focusRaf = requestAnimationFrame(() => {
+        const active = document.activeElement;
+        // A pointer echo may return focus to the opener after the surface
+        // mounted. Reclaim that focus, but never steal it from a newer modal.
+        if (!el.contains(active) && (active === opener || active === document.body)) {
+          claimFocus();
+        }
+        guardOpeningFocus();
+      });
+    };
+    guardOpeningFocus();
+    const restoreBackground = isolateDocumentSiblings(isolationRootRef?.current ?? null, heldEntry);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
+      if (e.key === "Escape") {
+        // Nested menus own their first Escape. In particular, a session-row
+        // menu inside the compact project drawer must close back to its
+        // ellipsis without dismissing the drawer around it.
+        const eventTarget = e.target instanceof Element ? e.target : null;
+        if (eventTarget?.closest('[role="menu"]')) return;
+        e.stopPropagation();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const nodes = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)]
+        .filter((n) => visible(n) || n === document.activeElement);
+      if (nodes.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = nodes[0]!;
+      const last = nodes[nodes.length - 1]!;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === el)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    el.addEventListener("keydown", onKeyDown);
+    return () => {
+      if (focusRaf !== 0 && typeof cancelAnimationFrame === "function") cancelAnimationFrame(focusRaf);
+      el.removeEventListener("keydown", onKeyDown);
+      unlockBodyScroll();
+      restoreBackground();
+      const connectedOpener = opener && opener !== document.body && opener.isConnected && visible(opener)
+        ? opener
+        : null;
+      const target = resolverRef.current ? resolverRef.current(connectedOpener) : connectedOpener;
+      target?.focus();
+      afterRestoreRef.current?.();
+    };
+  }, [enabled, open, initialFocus, containerRef, isolationRootRef, keepKeyboard]);
+}
+
+export interface DialogProps {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  className?: string;
+  backdropClassName?: string;
+  /** wide dialogs (focus editor, fullscreen diagram) */
+  size?: "md" | "lg" | "full";
+  initialFocus?: string; // CSS selector inside the dialog
+  /** Explicit exit-focus intent: given the recorded opener,
+   *  return the element to focus on unmount — a fallback when the opener has
+   *  unmounted, or null when the caller owns a queued focus handoff instead.
+   *  Default behavior (no prop) restores the opener. `BODY` is never a valid
+   *  destination. */
+  resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+  /** Runs after the opener regains focus. */
+  onAfterRestoreFocus?: () => void;
+  /** Keep a keep-keyboard editor holding the software keyboard across this
+   *  modal (see ModalSurfaceOptions.keepKeyboard). */
+  keepKeyboard?: boolean;
+  ariaDescribedBy?: string;
+  /** Shared visible title bar for dialogs that do not need custom content chrome. */
+  showHeader?: boolean;
+  closeLabel?: string;
+}
+
+export default function Dialog({
+  title,
+  onClose,
+  children,
+  className,
+  backdropClassName,
+  size = "md",
+  initialFocus,
+  ariaDescribedBy,
+  resolveRestoreFocus,
+  onAfterRestoreFocus,
+  keepKeyboard = false,
+  showHeader = false,
+  closeLabel = "Close",
+}: DialogProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+  // Owners unmount a dialog the moment it closes; it still leaves with an
+  // exit (exitGhost.ts) instead of vanishing.
+  const backdropGhostRef = useExitGhost<HTMLDivElement>(() => ({ kind: "dialog" }), backdropRef);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const packageWindowOwner = usePackageWindowOwner();
+  useModalSurface({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    isolationRootRef: backdropRef,
+    initialFocus,
+    resolveRestoreFocus,
+    onAfterRestoreFocus,
+    keepKeyboard,
+  });
+
+  const surface = (
+    <div
+      ref={backdropGhostRef}
+      className={`dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`}
+      data-package-window-owner={packageWindowOwner ?? undefined}
+      onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        aria-describedby={ariaDescribedBy}
+        tabIndex={-1}
+        className={`dialog-panel dialog-${size}${className ? ` ${className}` : ""}`}
+      >
+        {showHeader && (
+          <header className="dialog-system-header">
+            <h2 title={title}>{title}</h2>
+            <IconButton icon={CloseIcon} label={closeLabel} size="sm" onClick={onClose} />
+          </header>
+        )}
+        {children}
+      </div>
+    </div>
+  );
+
+  // A fixed backdrop must not stay inside a glass shell. Ancestors with
+  // backdrop-filter (the sidebar/rail/composer) create a containing block and
+  // otherwise clip the dialog to that surface instead of the viewport.
+  return typeof document !== "undefined" && document.body
+    ? createPortal(surface, document.body)
+    : surface;
+}

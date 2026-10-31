@@ -1,0 +1,368 @@
+// Remote (SSH) project filesystem: the same FileService surface as the local
+// implementation, but every operation is one or two bounded `RemoteHost.exec`
+// calls on the remote POSIX shell. Only Linux-compatible remotes are
+// supported (the owned-runtime probe already requires /proc), so GNU
+// coreutils (stat -c, ls, base64) are assumed. Round trips are cheap: the SSH
+// transport multiplexes all channels over one ControlMaster connection.
+import { posix } from "node:path";
+import type { RemoteHost } from "@polyth/contracts";
+import { assertExternalReadPath, DEFAULT_EXTERNAL_READ_POLICY, type ExternalReadPolicy } from "./externalReads.ts";
+import {
+  assertRelative,
+  BINARY_SCAN_BYTES,
+  fold,
+  LIST_MAX_ENTRIES,
+  MAX_EDIT_BYTES,
+  MAX_READ_BYTES,
+  MAX_RAW_BYTES,
+  rawMimeOf,
+  scorePath,
+  type ContentSearchOptions,
+  type FileContentSearchResult,
+  type FileEntry,
+  type FileListResult,
+  type FileRawResult,
+  type FileReadResult,
+  type FileSearchHit,
+  type FileService,
+  type FileStatResult,
+  type SearchOptions,
+  type WriteOptions,
+} from "./index.ts";
+
+const shq = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
+/** GNU stat, with a BSD fallback; prints `kind|size|mtimeSeconds`. */
+const STAT_EXPR = `if stat -c '%F|%s|%Y' -- $1 2>/dev/null; then :; else stat -f '%HT|%z|%m' -- $1; fi`;
+const STAT_LINE_RE = /^([^|]+)\|(\d+)\|(\d+)/;
+const isDirKind = (kind: string): boolean => /directory/i.test(kind);
+const revisionOf = (size: string, mtimeSeconds: string): string =>
+  `${Number(mtimeSeconds).toString(36)}-${Number(size).toString(36)}`;
+
+/** Chunked base64 writes stay well under the ~128 KiB single-argv limit. */
+const WRITE_CHUNK_BYTES = 60 * 1024;
+
+const fail = (code: string, message: string): Error =>
+  Object.assign(new Error(message), { code });
+
+const assertBetaWritable = (): void => {
+  if (process.env.POLYTH_AGENT_BETA === "1") {
+    throw fail("forbidden", "Agent beta mode is read-only for the workspace; filesystem mutations are disabled.");
+  }
+};
+
+/** Stream a remote command's stdout to completion (reads larger than the
+ *  exec cap: file contents up to 20 MiB are base64'd this way). */
+const collect = (host: RemoteHost, command: string): Promise<string> =>
+  new Promise<string>((resolve, reject) => {
+    let out = "";
+    let settled = false;
+    let handle: Awaited<ReturnType<RemoteHost["start"]>> | null = null;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) {
+        void handle?.kill().catch(() => {});
+        reject(err);
+      } else {
+        resolve(out);
+      }
+    };
+    const timer = setTimeout(
+      () => finish(fail("unavailable", "remote read timed out")),
+      60_000,
+    );
+    host.start(command).then(
+      (h) => {
+        handle = h;
+        h.onOutput((chunk) => { out += chunk; });
+        h.onExit((code) => finish(
+          code === 0 ? undefined : fail("unavailable", `remote command exited (${code})`),
+        ));
+      },
+      (err: unknown) => finish(err instanceof Error ? err : new Error(String(err))),
+    );
+  });
+
+export function createRemoteFileService(
+  host: RemoteHost,
+  externalReads: () => ExternalReadPolicy = () => DEFAULT_EXTERNAL_READ_POLICY,
+): FileService {
+  /** Run `cd <root> && <body>`; rel paths are validated before interpolation.
+   *  allowAbsolute lets read-only views reach a path outside the root, but
+   *  only in the owner's folders and file types. The check is lexical: the
+   *  remote host's symlinks are not resolved here. */
+  const run = async (
+    root: string,
+    rel: string,
+    body: string,
+    opts: { timeoutMs?: number; maxOutputBytes?: number; allowAbsolute?: boolean } = {},
+  ) => {
+    if (!opts.allowAbsolute) assertRelative(rel);
+    else {
+      const target = posix.resolve(root, rel);
+      const inside = posix.relative(posix.resolve(root), target);
+      if (inside.startsWith("..") || posix.isAbsolute(inside)) assertExternalReadPath(externalReads(), target, rel);
+    }
+    return host.exec(`cd -- ${shq(root)} && ${body}`, {
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.maxOutputBytes !== undefined ? { maxOutputBytes: opts.maxOutputBytes } : {}),
+    });
+  };
+
+  const stat = async (root: string, rel: string): Promise<FileStatResult> => {
+    const result = await run(root, rel, `stat_one() { ${STAT_EXPR}; }; stat_one ${shq(rel)}`, { allowAbsolute: true });
+    if (result.code !== 0) {
+      throw fail("not-found", `cannot stat ${rel || "."}: ${result.stderr.trim() || `exit ${result.code}`}`);
+    }
+    const match = result.stdout.trim().split(/\r?\n/).at(-1)?.match(STAT_LINE_RE);
+    if (!match) throw fail("not-found", `cannot stat ${rel || "."}: unexpected output`);
+    const kind = isDirKind(match[1]!) ? "dir" as const : "file" as const;
+    const out: FileStatResult = { path: posix.normalize(rel), kind, size: Number(match[2]) };
+    if (kind === "file") {
+      out.mime = rawMimeOf(rel);
+      out.revision = revisionOf(match[2]!, match[3]!);
+    }
+    return out;
+  };
+
+  return {
+    async tree(root, opts = {}) {
+      const rel = opts.path ?? "";
+      const result = await run(root, rel, `ls -1Ap -- ${shq(rel || ".")}`);
+      if (result.code !== 0) throw new Error(`Not a directory: ${rel || "."}`);
+      const hidden = opts.hidden === true;
+      const out: FileEntry[] = [];
+      for (const line of result.stdout.split("\n")) {
+        const name = line.trim();
+        if (!name || name === "." || name === "..") continue;
+        if (name === ".git") continue;
+        if (!hidden && name.startsWith(".")) continue;
+        const isDir = name.endsWith("/");
+        const entryName = isDir ? name.slice(0, -1) : name;
+        out.push({
+          name: entryName,
+          path: posix.join(rel, entryName),
+          dir: isDir,
+        });
+      }
+      out.sort((a, b) => (a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name)));
+      return out;
+    },
+
+    async list(root, opts = {}): Promise<FileListResult> {
+      const base = opts.path ?? "";
+      const limit = Math.max(1, Math.min(opts.limit ?? LIST_MAX_ENTRIES, LIST_MAX_ENTRIES));
+      const hidden = opts.hidden === true;
+      // Same pruning as search; one line per file: size|mtime|path (GNU find).
+      // One extra line tells a capped listing from an exact one.
+      const result = await run(root, base,
+        `find ${shq(base || ".")} -xdev -mindepth 1 `
+          + `\\( -name .git -o -name node_modules -o -name dist -o -name build -o -name out `
+          + `-o -name coverage -o -name .next -o -name .cache -o -name target `
+          + `-o -name __pycache__ -o -name .venv${hidden ? "" : " -o -name '.*'"} \\) -prune `
+          + `-o -type f -printf '%s|%T@|%P\\n' | head -n ${limit + 1}`,
+        { timeoutMs: 15_000, maxOutputBytes: 4 * 1024 * 1024 },
+      );
+      if (result.code !== 0) throw new Error(`list failed: ${result.stderr.trim() || `exit ${result.code}`}`);
+      const entries: FileEntry[] = [];
+      for (const line of result.stdout.split("\n")) {
+        const match = /^(\d+)\|([\d.]+)\|(.+)$/.exec(line);
+        if (!match) continue;
+        const childRel = base ? posix.join(base, match[3]!) : match[3]!;
+        entries.push({
+          name: posix.basename(childRel),
+          path: childRel,
+          dir: false,
+          size: Number(match[1]),
+          mtime: Math.round(Number(match[2]) * 1000),
+        });
+      }
+      const truncated = entries.length > limit;
+      entries.splice(limit);
+      entries.sort((left, right) => left.path.localeCompare(right.path));
+      return { entries, truncated };
+    },
+
+    async read(root, rel, opts): Promise<FileReadResult> {
+      const st = await this.stat(root, rel);
+      if (st.kind !== "file") throw new Error(`Not a file: ${rel}`);
+      const cap = opts?.editable ? MAX_EDIT_BYTES : MAX_READ_BYTES;
+      const truncated = st.size > cap;
+      const body = truncated
+        ? `head -c ${cap} -- ${shq(rel)} | base64`
+        : `base64 < ${shq(rel)}`;
+      const encoded = await collect(host, `cd -- ${shq(root)} && ${body}`);
+      const buf = Buffer.from(encoded.replace(/\s+/g, ""), "base64");
+      if (buf.subarray(0, BINARY_SCAN_BYTES).includes(0)) {
+        return { path: posix.normalize(rel), content: "", truncated: false, tooLarge: true, revision: st.revision };
+      }
+      return { path: posix.normalize(rel), content: buf.toString("utf8"), truncated, revision: st.revision };
+    },
+
+    stat,
+
+    async readRaw(root, rel): Promise<FileRawResult> {
+      const st = await this.stat(root, rel);
+      if (st.kind !== "file") throw new Error(`Not a file: ${rel}`);
+      if (st.size > MAX_RAW_BYTES) throw new Error(`File too large to serve raw: ${rel}`);
+      const encoded = await collect(host, `cd -- ${shq(root)} && base64 < ${shq(rel)}`);
+      return { data: Buffer.from(encoded.replace(/\s+/g, ""), "base64"), mime: rawMimeOf(rel), size: st.size };
+    },
+
+    async write(root, rel, content, opts: WriteOptions = {}) {
+      assertBetaWritable();
+      // Existing-file guards: revision conflict + refuse text over binary.
+      const check = await run(root, rel, [
+        `F=${shq(rel)}`,
+        'if [ -f "$F" ]; then',
+        `  BIN=$(od -An -N ${BINARY_SCAN_BYTES} -t x1 "$F" 2>/dev/null | grep -c ' 00' || true)`,
+        `  STAT=$(stat -c '%s %Y' -- "$F" 2>/dev/null || stat -f '%z %m' -- "$F")`,
+        "  echo POLYTH_EXISTS=1",
+        '  echo "POLYTH_BIN=$BIN"',
+        '  echo "POLYTH_STAT=$STAT"',
+        "else",
+        "  echo POLYTH_EXISTS=0",
+        "fi",
+      ].join("\n"));
+      if (check.code !== 0) throw new Error(`cannot stat ${rel}: ${check.stderr.trim() || `exit ${check.code}`}`);
+      const exists = /POLYTH_EXISTS=1/.test(check.stdout);
+      if (!exists && opts.baseRevision !== undefined) {
+        throw fail("conflict", `File no longer exists: ${rel}`);
+      }
+      if (exists) {
+        const statLine = check.stdout.match(/POLYTH_STAT=(\d+ \d+)/)?.[1];
+        if (statLine) {
+          const [size, mtime] = statLine.split(" ");
+          const currentRev = revisionOf(size!, mtime!);
+          if (opts.baseRevision !== undefined && opts.baseRevision !== currentRev) {
+            throw fail("conflict", `File changed on disk: ${rel}`);
+          }
+        }
+        const bin = /POLYTH_BIN=([0-9]+)/.exec(check.stdout)?.[1];
+        if (Number(bin ?? 0) > 0) {
+          throw fail("invalid-input", `Refusing to overwrite binary file with text: ${rel}`);
+        }
+      }
+      await this.writeBytes(root, rel, Buffer.from(content, "utf8"));
+      const st = await this.stat(root, rel);
+      return { revision: st.revision! };
+    },
+
+    async writeBytes(root, rel, data) {
+      assertBetaWritable();
+      const dir = posix.dirname(rel);
+      const b64 = Buffer.from(data).toString("base64");
+      // One exec per chunk: a single command must stay far below the
+      // ~128 KiB per-argument limit, so large payloads go over several
+      // bounded `printf | base64 -d` round trips through one tmp file.
+      // The tmp name is minted locally (not `$$` — every exec is a fresh
+      // remote shell with its own pid).
+      const step = Math.ceil(WRITE_CHUNK_BYTES / 3) * 4;
+      const chunks: string[] = [];
+      for (let i = 0; i < b64.length; i += step) chunks.push(b64.slice(i, i + step));
+      const tmpExpr = shq(`${rel}.polyth-tmp.${Math.random().toString(36).slice(2, 8)}`);
+      let result = await run(root, rel, [
+        `mkdir -p -- ${shq(dir)}`,
+        `TMP=${tmpExpr}`,
+        `printf '%s' ${shq(chunks.shift() ?? "")} | base64 -d > "$TMP"`,
+      ].join(" && "), { timeoutMs: 60_000 });
+      for (const chunk of chunks) {
+        if (result.code !== 0) break;
+        result = await run(root, rel, `TMP=${tmpExpr} && printf '%s' ${shq(chunk)} | base64 -d >> "$TMP"`, { timeoutMs: 60_000 });
+      }
+      if (result.code === 0) {
+        result = await run(root, rel, `TMP=${tmpExpr} && mv -- "$TMP" ${shq(rel)}`, { timeoutMs: 60_000 });
+      }
+      if (result.code !== 0) {
+        throw new Error(`cannot write ${rel}: ${result.stderr.trim() || `exit ${result.code}`}`);
+      }
+    },
+
+    async mkdir(root, rel) {
+      assertBetaWritable();
+      const result = await run(root, rel, `mkdir -p -- ${shq(rel)}`);
+      if (result.code !== 0) {
+        throw new Error(`cannot create ${rel}: ${result.stderr.trim() || `exit ${result.code}`}`);
+      }
+    },
+
+    async remove(root, rel) {
+      assertBetaWritable();
+      const result = await run(root, rel, `rm -rf -- ${shq(rel)}`);
+      if (result.code !== 0) {
+        throw new Error(`cannot delete ${rel}: ${result.stderr.trim() || `exit ${result.code}`}`);
+      }
+    },
+
+    async rename(root, from, to) {
+      assertBetaWritable();
+      const result = await run(root, from, [
+        `if [ -e ${shq(to)} ]; then echo POLYTH_TARGET_EXISTS >&2; exit 2; fi`,
+        `mv -- ${shq(from)} ${shq(to)}`,
+      ].join("\n"));
+      if (result.code !== 0) {
+        if (result.code === 2) throw new Error(`Path already exists: ${to}`);
+        throw new Error(`cannot rename ${from}: ${result.stderr.trim() || `exit ${result.code}`}`);
+      }
+    },
+
+    async search(root, q, limit) {
+      const hits = await this.searchScored(root, q, { limit });
+      return hits.map((h) => h.path);
+    },
+
+    async searchScored(root, q, opts: SearchOptions = {}) {
+      const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+      const includeDirs = opts.includeDirs === true;
+      const query = fold(q.trim());
+      // Prune the same heavy dirs the local walk skips; `find` never follows
+      // symlinks and -xdev stays on one filesystem. Output is capped both
+      // remotely (head) and locally (transport cap).
+      const result = await host.exec(
+        `find ${shq(posix.normalize(root))} -xdev `
+          + `\\( -name .git -o -name node_modules -o -name dist -o -name build -o -name out `
+          + `-o -name coverage -o -name .next -o -name .cache -o -name target `
+          + `-o -name __pycache__ -o -name .venv \\) -prune `
+          + `-o -type f -printf 'f|%p\\n' -o -type d -printf 'd|%p\\n' | head -n 20000`,
+        { timeoutMs: 15_000, maxOutputBytes: 4 * 1024 * 1024 },
+      );
+      if (result.code !== 0) {
+        throw new Error(`search failed: ${result.stderr.trim() || `exit ${result.code}`}`);
+      }
+      const rootPrefix = `${posix.normalize(root)}/`;
+      const hits: FileSearchHit[] = [];
+      for (const line of result.stdout.split("\n")) {
+        const sep = line.indexOf("|");
+        if (sep < 0) continue;
+        const kind = line.slice(0, sep);
+        const abs = line.slice(sep + 1);
+        if (!abs.startsWith(rootPrefix)) continue;
+        const childRel = abs.slice(rootPrefix.length);
+        if (!childRel) continue;
+        if (kind === "d") {
+          if (includeDirs) {
+            const scored = scorePath(childRel, query);
+            if (scored) hits.push({ path: childRel, kind: "dir", ...scored });
+          }
+          continue;
+        }
+        const scored = scorePath(childRel, query);
+        if (scored) hits.push({ path: childRel, kind: "file", ...scored });
+      }
+      hits.sort((a, b) => (b.score - a.score) || (a.path.length - b.path.length) || a.path.localeCompare(b.path));
+      return hits.slice(0, limit);
+    },
+
+    async searchContent(root, q, opts: ContentSearchOptions = {}): Promise<FileContentSearchResult> {
+      if (!q.trim()) return { hits: [], truncated: false };
+      if (opts.signal?.aborted) throw opts.signal.reason ?? new Error("content search aborted");
+      // RemoteHost exposes bounded command execution but no framed file
+      // stream. Refuse this capability until the SSH owner provides an
+      // unambiguous result protocol; returning guessed grep parsing would
+      // corrupt paths/content containing colons or newlines.
+      throw Object.assign(new Error("remote content search is unavailable"), { code: "unavailable" });
+    },
+  };
+}

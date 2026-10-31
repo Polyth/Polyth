@@ -1,0 +1,140 @@
+/* Rows, sections, fields and empty/error states come from the shared settings
+   primitives; this file styles only the judge list, the editor's repeated
+   option rows, the backtest table and the timeline marker. */
+.judges-settings { display: grid; gap: var(--space-4); color: var(--text); container: judges-settings / inline-size; }
+.judges-settings > .settings-page-blurb { margin-bottom: 0; }
+.judges-settings .settings-section-body { display: grid; gap: var(--space-3); padding-block-start: var(--space-3); }
+.judges-settings .judges-note { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.judges-settings .judges-note code { font-family: var(--mono); font-size: 0.95em; color: var(--text); }
+
+/* Judge list: one bordered list with hairline rows, like Settings → Judgment → Uses.
+   The switch carries on/off; an accent edge marks the judges that are on. */
+.judges-list { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--control-border); border-radius: var(--radius-card); overflow: hidden; }
+.judges-item { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); min-width: 0; }
+.judges-item + .judges-item { border-top: 1px solid var(--hair); }
+.judges-item[data-on] { box-shadow: inset 3px 0 0 var(--accent); }
+.judges-item[data-editing] { background: var(--accent-wash); }
+.judges-item-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-1) var(--space-4); }
+.judges-item-name { grid-column: 1; grid-row: 1; font-size: var(--font-label); font-weight: 600; overflow-wrap: anywhere; }
+.judges-item-main > .ui-switch { grid-column: 2; grid-row: 1; align-self: start; }
+.judges-item-question { grid-column: 1 / -1; max-width: 72ch; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.judges-item-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.judges-item-meta > span { overflow-wrap: anywhere; }
+.judges-item-failure { margin: 0; max-width: 72ch; color: var(--danger); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+/* Ghost actions read as part of the text column: their labels start where the copy does. */
+.judges-item-actions { display: flex; flex-wrap: wrap; gap: 0 var(--space-1); margin-block: calc(-1 * var(--space-1)); margin-inline-start: calc(-1 * var(--control-pad-x-sm)); }
+.judges-item-actions > .ui-btn--ghost { color: var(--text); }
+
+/* Editor. */
+.judges-editor { display: grid; gap: var(--space-3); min-width: 0; scroll-margin-top: var(--space-4); }
+.judges-options { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+.judges-options:disabled { opacity: 0.6; }
+.judges-options > legend { padding: 0; margin-bottom: var(--space-1); font-size: var(--font-label); font-weight: 600; }
+.judges-editor > .judges-options { padding-top: var(--space-2); }
+.judges-options > .ui-btn { justify-self: start; }
+/* Choice answers: name | meaning | remove on wide panes; a small card per answer on narrow ones. */
+.judges-option-head, .judges-option { display: grid; grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
+.judges-option-head { color: var(--muted); font-size: var(--font-meta); }
+.judges-option-name { font-family: var(--mono); }
+/* Meanings grow with their text where the engine supports it; elsewhere they resize by hand. */
+.judges-option-meaning.ui-textarea { min-height: var(--control-h); field-sizing: content; }
+.judges-option.is-level { grid-template-columns: 1.5rem minmax(0, 1fr) auto; }
+.judges-level-index { color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; text-align: center; }
+.judges-pick { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); min-height: max(var(--control-h-sm), var(--hit-min)); }
+.judges-settings .judges-safe {
+  display: flex; align-items: flex-start; gap: var(--space-2); margin: 0;
+  color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
+.judges-safe > .ui-icon { flex: none; margin-top: 2px; color: var(--green-on-wash); }
+/* Actions: one block per answer (or one for the judge), each action a checkbox with its own settings under it. */
+.judges-act > .ui-notice { margin-bottom: var(--space-1); }
+.judges-answer-actions { display: grid; grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr); align-items: start; gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-2); }
+.judges-answer-actions + .judges-answer-actions { border-top: 1px solid var(--hair); }
+.judges-answer-name { padding-top: 2px; font-family: var(--mono); font-size: var(--font-meta); color: var(--text); overflow-wrap: anywhere; }
+.judges-action-controls { display: grid; gap: var(--space-2); min-width: 0; }
+.judges-action { display: grid; gap: var(--space-2); min-width: 0; }
+.judges-action > .seg, .judges-action > .judges-message { margin-inline-start: calc(var(--control-h-sm) * 0.75); }
+.judges-action > .seg { justify-self: start; }
+.judges-message { display: grid; gap: var(--space-2); min-width: 0; }
+.judges-message > .ui-select { justify-self: start; }
+.judges-message .ui-textarea { min-height: calc(var(--control-h) * 1.5); field-sizing: content; }
+.judges-routes { display: grid; gap: var(--space-2); min-width: 0; }
+/* The shared check group aligns to a row's control column; here it is the whole field. */
+.judges-routes .settings-check-group { justify-content: start; }
+.judges-route-name { font-family: var(--mono); font-size: var(--font-meta); overflow-wrap: anywhere; }
+
+.judges-editor-danger { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3);
+  padding-top: var(--space-3); border-top: 1px solid var(--hair); }
+
+/* Backtest results. */
+.judges-backtest { display: grid; gap: var(--space-2); min-width: 0; }
+.judges-table-scroll { overflow-x: auto; border: 1px solid var(--border-soft); border-radius: var(--radius-control); }
+.judges-table { width: 100%; border-collapse: collapse; font-size: var(--font-meta); line-height: var(--font-meta-lh); font-variant-numeric: tabular-nums; }
+.judges-table th, .judges-table td { padding: var(--space-2) var(--space-3); text-align: start; white-space: nowrap; vertical-align: middle; }
+.judges-table th { color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--hair); }
+.judges-table .is-number { text-align: end; }
+.judges-table tbody tr + tr td { border-top: 1px solid var(--hair); }
+.judges-table tr[data-skipped] .judges-table-answer { color: var(--muted); }
+.judges-table .judges-table-quiet { color: var(--muted); }
+.judges-table .judges-table-title { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Narrow panes: each turn becomes two lines (chat title, then answer · chance · result), no sideways scroll. */
+@container judges-settings (max-width: 32rem) {
+  .judges-item { padding-inline: var(--space-3); }
+  .judges-option-head { display: none; }
+  .judges-option { grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-2); border: 1px solid var(--hair); border-radius: var(--radius-control); }
+  .judges-option > .judges-option-meaning { grid-column: 1 / -1; grid-row: 2; }
+  .judges-option.is-level { grid-template-columns: 1.25rem minmax(0, 1fr) auto; padding: 0; border: 0; }
+  .judges-answer-actions { grid-template-columns: minmax(0, 1fr); }
+  .judges-action > .seg, .judges-action > .judges-message { margin-inline-start: 0; }
+  .judges-table-scroll { overflow: visible; }
+  .judges-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .judges-table, .judges-table tbody { display: block; }
+  .judges-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 2px var(--space-3); padding: var(--space-2) var(--space-3); }
+  .judges-table tbody tr + tr { border-top: 1px solid var(--hair); }
+  .judges-table tbody tr + tr td { border-top: 0; }
+  .judges-table td { padding: 0; }
+  .judges-table .judges-table-title { grid-column: 1 / -1; width: auto; max-width: none; white-space: normal; overflow-wrap: anywhere; color: var(--text); }
+}
+
+/* Timeline marker: a quiet note on the turn above it, left-aligned with the answer; highlighted when it needs the person. */
+.judges-marker { display: grid; justify-items: start; gap: 2px; min-width: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.judges-marker-body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; max-width: 100%; }
+/* Judge names are the person's own and may be long: they wrap as a tag rather than overflow as a pill. */
+.judges-marker .ui-badge { white-space: normal; overflow-wrap: anywhere; max-width: 100%; border-radius: var(--radius-control); }
+.judges-marker-detail { font-variant-numeric: tabular-nums; }
+.judges-marker-body > .ui-btn--ghost { margin-inline-start: calc(-1 * var(--space-1)); color: var(--text); }
+/* What the judge did with its owner's access: one quiet line per action; a failure reads in the danger ink. */
+.judges-marker-actions { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; max-width: 100%; }
+.judges-marker-action { padding-inline-start: var(--space-3); color: var(--text-dim); overflow-wrap: anywhere; }
+.judges-marker-action[data-status="skipped"] { color: var(--muted); }
+.judges-marker-action[data-status="failed"] { color: var(--danger); }
+
+/* A permission judge's note inside a request's card, just above its decisions: the
+   verdict as a tag, the judge, and its chance that the request is safe as a short meter;
+   while the judge thinks, a ring turning in place of the tag's dot. The words carry the
+   meaning; the colours only repeat it. One row at every width: the judge's name gives
+   way first (ellipsis), then a narrow card drops the meter. */
+/* Every judge's line as one live region; the gap is the card's own between its rows. */
+.judges-verdicts { display: grid; gap: var(--space-2); min-width: 0; }
+.judges-verdict { container: judges-verdict / inline-size; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2);
+  min-width: 0; margin: 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.judges-verdict-judge { flex: 1 1 0; min-width: 0; max-width: max-content; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.judges-verdict-safety { display: inline-flex; flex: none; align-items: center; gap: var(--space-2); margin-inline-start: auto;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.judges-verdict-meter { position: relative; flex: none; inline-size: 2.5rem; block-size: 4px; overflow: hidden; border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong); }
+.judges-verdict-meter::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: 0;
+  inline-size: calc(var(--judges-verdict-safety, 0) * 100%); border-radius: inherit; background: var(--muted); }
+.judges-verdict:is([data-verdict="approve"], [data-verdict="clear"]) .judges-verdict-meter::before { background: var(--green); }
+.judges-verdict[data-verdict="unsure"] .judges-verdict-meter::before { background: var(--amber); }
+.judges-verdict:is([data-verdict="deny"], [data-verdict="against"]) .judges-verdict-meter::before { background: var(--red); }
+/* The shared spinner (its colours stay the theme's), at the size of the tag's dot. */
+.judges-verdict .judges-verdict-spinner { inline-size: 8px; block-size: 8px; border-width: 1.5px; }
+.judges-verdict:is([data-verdict="checking"], [data-verdict="no-answer"]) .judges-verdict-judge { color: var(--muted); }
+/* Why an approval did not go through, on its own line under the verdict. */
+.judges-verdict-detail { flex-basis: 100%; color: var(--muted); overflow-wrap: anywhere; }
+@container judges-verdict (max-width: 24rem) {
+  .judges-verdict-meter { display: none; }
+}

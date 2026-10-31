@@ -1,0 +1,362 @@
+/* Premium mobile Workspace surface.
+ * Deliberately scoped to the Workspace sheet so shared Sheet and package
+ * widget primitives keep their normal presentation everywhere else. */
+
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  /* Match the shared modal material's specificity: this destination fills the
+     viewport, so only its sheet may tint and blur the conversation beneath. */
+  body .sheet-backdrop:has(> .workspace-panel-sheet.sheet) {
+    align-items: stretch;
+    justify-content: flex-end;
+    padding: 0;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    animation: none;
+  }
+
+  .workspace-panel-sheet.sheet {
+    position: relative;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: var(--material-glass-strong);
+    box-shadow: none;
+    container: workspace-panel / inline-size;
+  }
+
+  .workspace-panel-sheet .sheet-grabber { display: none; }
+
+  /* Back leads (the way a swipe takes the layer) and the Edit switch trails.
+     The row is the same in both modes (the title stays visually hidden,
+     workspacePanelWidgetFixes.css), so turning Edit on never moves it. */
+  .workspace-panel-sheet .sheet-head {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: var(--tap) auto;
+    gap: var(--space-1) var(--space-2);
+    padding:
+      max(var(--space-3), var(--safe-top))
+      max(var(--screen-gutter), var(--safe-right))
+      var(--space-1)
+      max(var(--screen-gutter), var(--safe-left));
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .sheet-title {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin: 0;
+    padding-inline: var(--space-1);
+    font-size: var(--font-title);
+    font-weight: 700;
+    line-height: var(--font-title-lh);
+    letter-spacing: -.03em;
+  }
+
+  .workspace-panel-sheet .sheet-back {
+    grid-column: 1;
+    grid-row: 1;
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    /* Optically on the content edge: the glyph, not its tap box, lines up. */
+    margin-inline-start: calc(var(--space-2) * -1);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-control);
+    color: var(--text);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .workspace-panel-sheet .sheet-back .ui-icon {
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+  }
+
+  .workspace-panel-sheet .sheet-head-switch {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  .workspace-panel-sheet .sheet-back:hover:where(:not(:disabled)),
+  .workspace-panel-sheet .sheet-back:active:where(:not(:disabled)) {
+    border: 0;
+    background: var(--surface-overlay-hover);
+  }
+
+  .workspace-panel-sheet .sheet-body {
+    padding:
+      0
+      max(var(--screen-gutter), var(--safe-right))
+      max(var(--space-5), var(--safe-bottom))
+      max(var(--screen-gutter), var(--safe-left));
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .workspace-panel-sheet .sheet-body::-webkit-scrollbar { display: none; }
+
+  /* Launchers are compact controls with real material, not transparent hit
+     regions floating over whichever chat content sits behind the page. */
+  .workspace-panel-sheet .workspace-panel-items {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .workspace-panel-sheet .workspace-panel-item {
+    min-width: 0;
+    border: 0;
+    border-radius: var(--radius-surface);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--launcher {
+    grid-column: span 1;
+    min-height: calc((2 * var(--control-h)) + var(--space-2));
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher {
+    min-height: calc((2 * var(--control-h)) + var(--space-2));
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-1);
+    border: 1px solid var(--material-glass-border);
+    border-radius: var(--radius-surface);
+    color: var(--text-dim);
+    background: var(--surface-activity);
+    box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+    font-size: var(--font-meta);
+    line-height: var(--font-meta-lh);
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher > svg {
+    width: var(--icon-xl);
+    height: var(--icon-xl);
+    flex: none;
+    color: var(--accent);
+    stroke-width: 1.75;
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher > span {
+    display: -webkit-box;
+    min-width: 0;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+  }
+
+  .workspace-panel-sheet .workspace-panel-launcher:not(:disabled):hover,
+  .workspace-panel-sheet .workspace-panel-launcher:not(:disabled):active {
+    border-color: var(--accent-line);
+    color: var(--text);
+    background: var(--surface-overlay-strong);
+  }
+
+  /* Widgets become sections of one sheet instead of cards inside cards. */
+  .workspace-panel-sheet .workspace-panel-item--widget {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    padding-top: 0;
+    border-radius: 0;
+    border-top: 0;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head {
+    min-height: calc(var(--tap) + var(--space-1));
+    gap: var(--space-2);
+    padding: 0 var(--space-1);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head:not(:disabled):hover,
+  .workspace-panel-sheet .workspace-panel-widget-head:not(:disabled):active {
+    border: 0;
+    background: var(--surface-overlay-hover);
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head > svg {
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+    color: var(--accent);
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head strong {
+    font-size: var(--subheader-font-size);
+    font-weight: 650;
+    letter-spacing: -.015em;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-head > .workspace-panel-disclosure {
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+    flex: none;
+    padding: 0;
+    color: var(--text-dim);
+    stroke-width: 1.75;
+  }
+
+  .workspace-panel-sheet .workspace-panel-widget-body {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--compact .workspace-panel-widget-body,
+  .workspace-panel-sheet .workspace-panel-item--standard .workspace-panel-widget-body {
+    min-height: 0;
+    max-height: calc((2 * var(--control-h-lg)) + var(--space-5));
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .workspace-panel-sheet .workspace-panel-item--compact .workspace-panel-widget-body::-webkit-scrollbar,
+  .workspace-panel-sheet .workspace-panel-item--standard .workspace-panel-widget-body::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Agent actions: one calm status row with a soft semantic state dot. */
+  .workspace-panel-sheet .widget-agent-actions {
+    padding: 0 4px 8px;
+  }
+
+  .workspace-panel-sheet .widget-agent-actions > div {
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 0;
+  }
+
+  .workspace-panel-sheet .widget-agent-actions p {
+    font-size: 13px;
+    line-height: 1.22;
+  }
+
+  .workspace-panel-sheet .widget-agent-actions p strong { font-weight: 620; }
+  .workspace-panel-sheet .widget-agent-actions p small {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .workspace-panel-sheet .action-dot {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border-radius: 50%;
+    font-size: 12px;
+  }
+
+  /* Activity reads as a tiny timeline rather than another boxed table. */
+  .workspace-panel-sheet .widget-activity {
+    position: relative;
+    padding: 0 4px 8px 34px;
+  }
+
+  .workspace-panel-sheet .widget-activity::before {
+    content: "";
+    position: absolute;
+    top: 9px;
+    bottom: 13px;
+    left: 14px;
+    width: 1px;
+    background: color-mix(in srgb, var(--hair) 82%, transparent);
+  }
+
+  .workspace-panel-sheet .widget-activity-row {
+    position: relative;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 34px;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 0;
+    font-size: 12px;
+  }
+
+  .workspace-panel-sheet .widget-activity-row::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -24px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--panel) 82%, transparent);
+    transform: translateY(-50%);
+  }
+
+  .workspace-panel-sheet .widget-activity-row > span:nth-child(2) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-panel-sheet .widget-activity-row time {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Keep workspace content compact without decorative separator strokes. */
+  .workspace-panel-sheet .workspace-panel-item--divider,
+  .workspace-panel-sheet .workspace-panel-item--header,
+  .workspace-panel-sheet .workspace-panel-item--labeled-divider {
+    grid-column: 1 / -1;
+    border: 0;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet:not(.is-editing) .workspace-panel-item--divider {
+    display: none;
+  }
+
+  .workspace-panel-sheet .workspace-panel-divider {
+    margin: 0;
+    background: transparent;
+  }
+
+  .workspace-panel-sheet .workspace-panel-labeled-divider {
+    min-height: 0;
+    gap: var(--space-2);
+    padding-inline: var(--space-1);
+    color: var(--muted);
+    font-size: var(--font-meta);
+  }
+
+  .workspace-panel-sheet .workspace-panel-labeled-divider > i {
+    display: none;
+  }
+
+  /* Package widgets own their inner presentation. The Workspace host only
+     controls the frame, scrolling, and widget placement around them. */
+
+  @container workspace-panel (max-width: 340px) {
+    .workspace-panel-sheet .workspace-panel-items {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @container workspace-panel (min-width: 560px) {
+    .workspace-panel-sheet .workspace-panel-items {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+}

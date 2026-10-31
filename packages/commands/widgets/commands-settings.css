@@ -1,0 +1,95 @@
+/* Settings → Commands / Skills page content. The host owns the settings
+   shell, Section/FormField/EmptyState primitives and their spacing. */
+
+.commands-row .commands-row-hint {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.commands-row .set-row-control {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (hover: hover) {
+  .commands-delete.ui-btn--ghost:hover:not(:disabled) {
+    color: var(--red);
+  }
+}
+
+/* Inline editor that opens inside its Section, under the list it edits. */
+.commands-editor {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  margin-block: var(--space-3) var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  container: commands-editor / inline-size;
+}
+
+.commands-editor-title {
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+}
+
+.commands-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-4) var(--space-3);
+  min-width: 0;
+}
+
+/* The grid gap spaces the fields; drop the stacked-form sibling margin. */
+.commands-editor-grid > .settings-field + .settings-field {
+  margin-top: 0;
+}
+
+.commands-editor-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.commands-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.commands-editor .settings-advanced > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+
+.commands-editor .settings-advanced[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+.commands-scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+@container commands-editor (max-width: 520px) {
+  .commands-editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

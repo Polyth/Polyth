@@ -1,0 +1,38 @@
+# Version updates go to devel, where every change lands first; master only
+# receives promotions from devel (.github/workflows/promote.yml).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: devel
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: devel
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: devel
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    # Actions are pinned to commit SHAs with the version in a trailing comment,
+    # which Dependabot keeps in step. The Rust toolchain action follows
+    # rust-toolchain.toml instead of its own releases.
+    ignore:
+      - dependency-name: dtolnay/rust-toolchain
+    groups:
+      actions:
+        patterns: ["*"]

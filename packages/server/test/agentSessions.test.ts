@@ -1,0 +1,730 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { once } from "node:events";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { createStore } from "@polyth/session";
+import type {
+  AgentDescriptor,
+  AgentRuntime,
+  Project,
+  ProjectService,
+  RuntimeEvent,
+  SessionDebugDto,
+  SessionEvent,
+} from "@polyth/contracts";
+import type { PermissionService } from "@polyth/permissions";
+import { createHttpServer } from "../src/http.ts";
+import { createSessionService, type Broadcaster } from "../src/sessions.ts";
+import {
+  agentSessionRoutes,
+  type AgentGoalState,
+  type AgentGoalService,
+} from "../src/routes/agentSessions.ts";
+import { passthroughSpaces, testTenancy } from "./support/spaces.ts";
+
+const tenancy = await testTenancy();
+
+type Emit = (sessionId: string, event: RuntimeEvent) => void;
+
+function fakeRuntime(agentCatalog: AgentDescriptor[] = [], harnessId?: string) {
+  const listeners = new Set<Emit>();
+  const callbacks: Emit[] = [];
+  const ensured: string[] = [];
+  const permissionReplies: Array<{ sessionId: string; requestId: string; reply: string }> = [];
+  const questionReplies: Array<{ sessionId: string; requestId: string; answers: unknown }> = [];
+  const aborted: string[] = [];
+  const emit = (sessionId: string, event: RuntimeEvent) => {
+    for (const listener of listeners) listener(sessionId, event);
+  };
+  const runtime: AgentRuntime = {
+    ...(harnessId ? { harnessId } : {}),
+    capabilities: async () => ({
+      streaming: true,
+      permissions: true,
+      questions: true,
+      compaction: false,
+      subagents: false,
+      steering: false,
+    }),
+    models: async () => [],
+    agents: async () => agentCatalog,
+    ensureSession: async (input) => {
+      ensured.push(input.sessionId);
+      return `backend_${input.sessionId}`;
+    },
+    sessions: async () => [],
+    history: async () => [],
+    startTurn: async (input) => {
+      emit(input.sessionId, { type: "turn/started", turnId: `turn_${input.sessionId}` });
+    },
+    abort: async (sessionId) => {
+      aborted.push(sessionId);
+      emit(sessionId, { type: "turn/stopped", reason: "aborted" });
+    },
+    replyPermission: async (sessionId, requestId, reply) => {
+      permissionReplies.push({ sessionId, requestId, reply });
+    },
+    replyQuestion: async (sessionId, requestId, answers) => {
+      questionReplies.push({ sessionId, requestId, answers });
+    },
+    onEvent(callback) {
+      listeners.add(callback);
+      callbacks.push(callback);
+      return { dispose: () => { listeners.delete(callback); } };
+    },
+    dispose: async () => {},
+  };
+  return { runtime, emit, callbacks, ensured, permissionReplies, questionReplies, aborted };
+}
+
+function fakeGoals(): AgentGoalService {
+  const states = new Map<string, AgentGoalState>();
+  return {
+    get: (sessionId) => states.get(sessionId) ?? null,
+    rehydrate: async (sessionId) => states.get(sessionId) ?? null,
+    attach: async (sessionId, input) => {
+      const state: AgentGoalState = {
+        objective: input.objective,
+        status: "active",
+        continuations: 0,
+        maxContinuations: input.maxContinuations ?? 5,
+        tokensUsed: 0,
+        budgetTokens: input.budgetTokens ?? 10_000,
+        stuckStreak: 0,
+        updatedAt: Date.now(),
+      };
+      states.set(sessionId, state);
+      return state;
+    },
+    pause: async (sessionId) => {
+      const state = { ...states.get(sessionId)!, status: "paused" as const };
+      states.set(sessionId, state);
+      return state;
+    },
+    resume: async (sessionId) => {
+      const state = { ...states.get(sessionId)!, status: "active" as const };
+      states.set(sessionId, state);
+      return state;
+    },
+    stop: async (sessionId) => {
+      const state = { ...states.get(sessionId)!, status: "stopped" as const };
+      states.set(sessionId, state);
+    },
+  };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+async function makeApp(
+  agentCatalog: AgentDescriptor[] = [],
+  harnessIds: string[] = [],
+  approvalDefault?: (projectId?: string) => "off" | "routine" | "all",
+) {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-agent-sessions-"));
+  const projectRows: Project[] = [
+    { id: "p1", path: join(dir, "one"), name: "One", createdAt: 1 },
+    { id: "p2", path: join(dir, "two"), name: "Two", createdAt: 2 },
+  ];
+  const projects: ProjectService = {
+    list: async () => projectRows,
+    get: async (id) => projectRows.find((project) => project.id === id),
+    add: async () => projectRows[0]!,
+    create: async () => projectRows[0]!,
+    remove: async () => {},
+  };
+  const store = createStore(join(dir, "sessions.db"));
+  const runtime = fakeRuntime(agentCatalog);
+  const runtimesByHarness = new Map(
+    harnessIds.map((harnessId) => [harnessId, fakeRuntime(agentCatalog, harnessId)]),
+  );
+  const permissions = {
+    evaluate: () => "ask",
+    addRule: () => {},
+    rules: () => [],
+  } as unknown as PermissionService;
+  const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
+  const pool = {
+    forProject: async () => runtime.runtime,
+    forSession: async (projection: { harness?: { mode: string; harnessId?: string } }) => {
+      const harnessId = projection.harness?.mode === "pinned"
+        ? projection.harness.harnessId
+        : undefined;
+      return harnessId ? runtimesByHarness.get(harnessId)?.runtime ?? runtime.runtime : runtime.runtime;
+    },
+  };
+  const sessions = createSessionService({
+    store,
+    projects,
+    permissions,
+    runtimes: pool,
+    broadcast,
+    queue: store,
+    org: store,
+    ...(approvalDefault ? { approvalDefaults: { level: (_spaceId: string | undefined, projectId?: string) => approvalDefault(projectId), subscribe: () => () => {} } } : {}),
+  });
+  const goals = fakeGoals();
+  const server = createHttpServer({
+    spaces: tenancy.gateway,
+    runtimes: pool,
+    capabilities: () => ["polyth.sessions", "polyth.goals"],
+    webDist: dir,
+    version: "test",
+    routes: [agentSessionRoutes({
+      spaces: passthroughSpaces({ sessions, projects }),
+      store,
+      capabilities: () => ["polyth.sessions", "polyth.goals"],
+      goals: () => goals,
+      version: "test",
+    })],
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  return {
+    base: `http://127.0.0.1:${port}`,
+    store,
+    sessions,
+    runtime,
+    runtimesByHarness,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await store.close();
+    },
+  };
+}
+
+test("agent session.create requires and normalizes a human-readable title", async () => {
+  const app = await makeApp();
+  try {
+    const missing = await jsonFetch<{ error: string; message?: string }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1" }),
+    );
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.error, "invalid-input");
+
+    const blank = await jsonFetch<{ error: string }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1", title: "   " }),
+    );
+    assert.equal(blank.status, 400);
+
+    const tooLong = await jsonFetch<{ error: string }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1", title: "x".repeat(121) }),
+    );
+    assert.equal(tooLong.status, 400);
+
+    const created = await jsonFetch<{ session: { title: string } }>(
+      app.base,
+      "/api/agent/sessions",
+      jsonRequest("POST", { projectId: "p1", title: "  Fix   mobile navigation  " }),
+    );
+    assert.equal(created.status, 201);
+    assert.equal(created.body.session.title, "Fix mobile navigation");
+
+    const discovery = await jsonFetch<{
+      contracts: { sessionCreate: { required: string[]; title: { maxLength: number } } };
+    }>(app.base, "/api/agent");
+    assert.deepEqual(discovery.body.contracts.sessionCreate.required, ["projectId", "title"]);
+    assert.equal(discovery.body.contracts.sessionCreate.title.maxLength, 120);
+  } finally {
+    await app.close();
+  }
+});
+
+test("agent session.create preserves explicit Claude, Cursor, and Codex harness pins", async () => {
+  const harnessIds = ["claude", "cursor", "codex"];
+  const app = await makeApp([], harnessIds);
+  try {
+    for (const harnessId of harnessIds) {
+      const created = await jsonFetch<{
+        session: { id: string; harness?: { mode: string; harnessId?: string }; resolvedHarnessId?: string };
+      }>(app.base, "/api/agent/sessions", jsonRequest("POST", {
+        projectId: "p1",
+        title: `${harnessId} delegated session`,
+        harness: { mode: "pinned", harnessId },
+      }));
+      assert.equal(created.status, 201);
+      assert.deepEqual(created.body.session.harness, { mode: "pinned", harnessId });
+      assert.equal(created.body.session.resolvedHarnessId, harnessId);
+      assert.equal(app.runtimesByHarness.get(harnessId)?.ensured.length, 1);
+      const createdEvent = (await app.store.events(created.body.session.id))
+        .find((event) => event.type === "session/created");
+      assert.deepEqual((createdEvent?.data as { harness?: unknown }).harness, {
+        mode: "pinned",
+        harnessId,
+      });
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("a late event from a prior wire generation cannot enter after reattach", async () => {
+  const app = await makeApp();
+  try {
+    const created = await app.sessions.create({ projectId: "p1", title: "Reattach" });
+    const staleCallback = app.runtime.callbacks[0];
+    assert.ok(staleCallback);
+    await app.sessions.archive(created.id);
+    await app.sessions.restore(created.id);
+    await app.sessions.activate!(created.id);
+
+    staleCallback(created.id, { type: "assistant/message", partId: "stale", text: "old epoch" });
+    // Turn content only reaches a session that has an admitted turn, so the
+    // wire is live the way a real leg's is.
+    app.runtime.emit(created.id, { type: "turn/started", turnId: "turn-reattach" });
+    app.runtime.emit(created.id, { type: "assistant/message", partId: "fresh", text: "new epoch" });
+    await settle();
+
+    const events = await app.store.events(created.id);
+    assert.equal(events.some((event) => (event.data as { text?: string }).text === "old epoch"), false);
+    assert.equal(events.filter((event) => (event.data as { text?: string }).text === "new epoch").length, 1);
+  } finally {
+    await app.close();
+  }
+});
+
+async function jsonFetch<T>(
+  base: string,
+  path: string,
+  init?: RequestInit,
+): Promise<{ status: number; body: T }> {
+  const response = await fetch(`${base}${path}`, init);
+  return { status: response.status, body: await response.json() as T };
+}
+
+const jsonRequest = (method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: body === undefined ? undefined : { "content-type": "application/json" },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+test("auto agents require the launching agent to provide a model", async () => {
+  const app = await makeApp([{ name: "review", mode: "auto" }]);
+  try {
+    await assert.rejects(
+      () => app.sessions.create({ projectId: "p1", agent: "review" }),
+      (error: unknown) => (error as { code?: string }).code === "invalid-input"
+        && (error as Error).message === 'model is required when launching auto agent "review"',
+    );
+
+    const created = await app.sessions.create({
+      projectId: "p1",
+      agent: "review",
+      model: { providerID: "test", modelID: "launch-model" },
+    });
+    await app.sessions.send(created.id, { text: "uses the launch model", agent: "review" });
+    await app.sessions.send(created.id, {
+      text: "with a model",
+      agent: "review",
+      model: { providerID: "test", modelID: "launch-model" },
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("agent inventory discovers projects and recent cross-project session activity", async () => {
+  const app = await makeApp();
+  try {
+    const first = await app.sessions.create({ projectId: "p1", title: "First" });
+    await app.sessions.send(first.id, { text: "hello" });
+    await settle();
+    app.runtime.emit(first.id, { type: "assistant/message", partId: "a1", text: "hi" });
+    app.runtime.emit(first.id, { type: "turn/stopped", reason: "completed" });
+    await settle();
+
+    const archived = await app.sessions.create({ projectId: "p2", title: "Archived" });
+    await app.sessions.archive(archived.id);
+
+    const inventory = await jsonFetch<{
+      projects: Array<{ project: Project; sessionCount: number }>;
+      sessions: Array<{
+        session: { id: string; status: string };
+        project: Project;
+        recentEvents: SessionEvent[];
+        eventCount: number;
+      }>;
+      total: number;
+    }>(app.base, "/api/agent/sessions?archived=include&recentEvents=2");
+    assert.equal(inventory.status, 200);
+    assert.equal(inventory.body.total, 2);
+    assert.deepEqual(
+      new Set(inventory.body.projects.map((row) => row.project.id)),
+      new Set(["p1", "p2"]),
+    );
+    assert.ok(inventory.body.projects.every((row) => row.sessionCount === 1));
+    const firstRow = inventory.body.sessions.find((row) => row.session.id === first.id)!;
+    assert.equal(firstRow.project.name, "One");
+    assert.ok(firstRow.eventCount >= 5);
+    assert.ok(firstRow.recentEvents.length <= 2);
+
+    const activeOnly = await jsonFetch<{ sessions: Array<{ session: { id: string } }>; total: number }>(
+      app.base,
+      "/api/agent/sessions?archived=exclude",
+    );
+    assert.equal(activeOnly.body.total, 1);
+    assert.equal(activeOnly.body.sessions[0]!.session.id, first.id);
+
+    const projects = await jsonFetch<{ projects: Array<{ project: Project }> }>(
+      app.base,
+      "/api/agent/projects",
+    );
+    assert.deepEqual(new Set(projects.body.projects.map((row) => row.project.id)), new Set(["p1", "p2"]));
+  } finally {
+    await app.close();
+  }
+});
+
+test("agent detail exposes messages, paged events, state, errors, and runtime diagnostics", async () => {
+  const app = await makeApp();
+  try {
+    const ref = await app.sessions.create({ projectId: "p1", title: "Debug me" });
+    await app.sessions.send(ref.id, { text: "investigate" });
+    await settle();
+    app.runtime.emit(ref.id, { type: "tool/error", callId: "c1", tool: "shell", error: "boom" });
+    app.runtime.emit(ref.id, { type: "assistant/message", partId: "a1", text: "found it" });
+    app.runtime.emit(ref.id, { type: "turn/stopped", reason: "error", error: "runtime failed" });
+    await settle();
+
+    const detail = await jsonFetch<{
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>;
+      events: SessionEvent[];
+      state: SessionDebugDto;
+      eventWindow: { total: number; returned: number; truncatedBeforeSeq?: number };
+      links: Record<string, string>;
+    }>(app.base, `/api/agent/sessions/${ref.id}?eventLimit=2`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.events.length, 2);
+    assert.ok(detail.body.eventWindow.total > detail.body.eventWindow.returned);
+    assert.ok(detail.body.eventWindow.truncatedBeforeSeq);
+    assert.equal(detail.body.messages[0]!.role, "user");
+    assert.ok(detail.body.messages.some((message) =>
+      message.parts.some((part) => part.type === "text" && part.text === "found it")));
+    // The turn answered before it stopped, so the session is healthy; the error
+    // stays visible as a tool/error notice.
+    assert.equal(detail.body.state.status, "idle");
+    assert.equal(detail.body.state.runtime.attached, true);
+    assert.ok(detail.body.state.recentErrors.some((error) => error.message === "boom"));
+    assert.match(detail.body.links.debug, new RegExp(`${ref.id}/debug$`));
+    assert.match(detail.body.links.compact, new RegExp(`${ref.id}/compact$`));
+
+    const page = await jsonFetch<{
+      events: SessionEvent[];
+      hasMore: boolean;
+      nextAfterSeq: number;
+    }>(app.base, `/api/agent/sessions/${ref.id}/events?limit=2`);
+    assert.equal(page.body.events.length, 2);
+    assert.equal(page.body.hasMore, true);
+    const next = await jsonFetch<{ events: SessionEvent[] }>(
+      app.base,
+      `/api/agent/sessions/${ref.id}/events?afterSeq=${page.body.nextAfterSeq}&limit=100`,
+    );
+    assert.ok(next.body.events.every((event) => event.seq > page.body.nextAfterSeq));
+
+    const debug = await jsonFetch<{
+      debug: SessionDebugDto;
+      server: { version: string; capabilities: string[] };
+    }>(app.base, `/api/agent/sessions/${ref.id}/debug`);
+    assert.equal(debug.body.debug.latestSeq, detail.body.state.latestSeq);
+    assert.equal(debug.body.server.version, "test");
+    assert.ok(debug.body.server.capabilities.includes("polyth.sessions"));
+  } finally {
+    await app.close();
+  }
+});
+
+test("agent mutations cover create/send, queue, lifecycle, metadata, goals, and delete", async () => {
+  const app = await makeApp();
+  try {
+    const created = await jsonFetch<{
+      session: { id: string; title: string };
+      sendResult: { turnId: string };
+    }>(app.base, "/api/agent/sessions", jsonRequest("POST", {
+      projectId: "p1",
+      title: "Agent-created",
+      message: "start work",
+    }));
+    assert.equal(created.status, 201);
+    const id = created.body.session.id;
+    assert.ok(created.body.sendResult.turnId);
+    await settle();
+
+    const invalidHarness = await jsonFetch<{ error: string }>(
+      app.base,
+      `/api/agent/sessions/${id}/messages`,
+      jsonRequest("POST", { text: "must not send", harness: { mode: "pinned", harnessId: "../escape" } }),
+    );
+    assert.equal(invalidHarness.status, 400);
+    assert.equal(invalidHarness.body.error, "invalid-input");
+
+    const queued = await jsonFetch<{ sendResult: { queued: boolean; queueId: string } }>(
+      app.base,
+      `/api/agent/sessions/${id}/messages`,
+      jsonRequest("POST", { text: "follow up", delivery: "queue" }),
+    );
+    assert.equal(queued.body.sendResult.queued, true);
+    const queue = await jsonFetch<{ items: Array<{ id: string; text: string }> }>(
+      app.base,
+      `/api/agent/sessions/${id}/queue`,
+    );
+    assert.deepEqual(queue.body.items.map((item) => item.text), ["follow up"]);
+
+    const renamed = await jsonFetch<{ session: { title: string } }>(
+      app.base,
+      `/api/agent/sessions/${id}`,
+      jsonRequest("PATCH", { title: "Renamed by agent", pinned: { position: 0 } }),
+    );
+    assert.equal(renamed.body.session.title, "Renamed by agent");
+
+    const goal = await jsonFetch<AgentGoalState>(
+      app.base,
+      `/api/agent/sessions/${id}/goal`,
+      jsonRequest("POST", { objective: "Ship the change", maxContinuations: 3 }),
+    );
+    assert.equal(goal.body.objective, "Ship the change");
+    const paused = await jsonFetch<AgentGoalState>(
+      app.base,
+      `/api/agent/sessions/${id}/goal/pause`,
+      jsonRequest("POST"),
+    );
+    assert.equal(paused.body.status, "paused");
+
+    const archived = await jsonFetch<{ session: { status: string } }>(
+      app.base,
+      `/api/agent/sessions/${id}/archive`,
+      jsonRequest("POST"),
+    );
+    assert.equal(archived.body.session.status, "archived");
+    const restored = await jsonFetch<{ session: { status: string } }>(
+      app.base,
+      `/api/agent/sessions/${id}/unarchive`,
+      jsonRequest("POST"),
+    );
+    assert.equal(restored.body.session.status, "idle");
+
+    const cancelled = await jsonFetch<{ ok: boolean }>(
+      app.base,
+      `/api/agent/sessions/${id}/cancel`,
+      jsonRequest("POST"),
+    );
+    assert.equal(cancelled.body.ok, true);
+
+    const deleted = await jsonFetch<{ ok: boolean; sessionId: string }>(
+      app.base,
+      `/api/agent/sessions/${id}`,
+      jsonRequest("DELETE"),
+    );
+    assert.deepEqual(deleted.body, { ok: true, sessionId: id });
+    const missing = await jsonFetch<{ error: string }>(
+      app.base,
+      `/api/agent/sessions/${id}`,
+    );
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.error, "not-found");
+  } finally {
+    await app.close();
+  }
+});
+
+test("agent permission and question replies use the canonical session service", async () => {
+  const app = await makeApp();
+  try {
+    const ref = await app.sessions.create({ projectId: "p1", title: "Needs input" });
+    app.runtime.emit(ref.id, {
+      type: "permission/requested",
+      requestId: "perm-1",
+      permission: "edit",
+      patterns: ["git status"],
+    });
+    app.runtime.emit(ref.id, {
+      type: "question/asked",
+      requestId: "question-1",
+      questions: [{ id: "choice", prompt: "Proceed?", type: "single" }],
+    });
+    await settle();
+
+    const before = await jsonFetch<{ debug: SessionDebugDto }>(
+      app.base,
+      `/api/agent/sessions/${ref.id}/debug`,
+    );
+    assert.deepEqual(before.body.debug.pending.permissions, ["perm-1"]);
+    assert.deepEqual(before.body.debug.pending.questions, ["question-1"]);
+
+    // Approving is a user decision; the agent actor may only reject.
+    for (const reply of ["once", "always"]) {
+      const refused = await jsonFetch<{ error: { code: string; message: string } }>(
+        app.base,
+        `/api/agent/sessions/${ref.id}/permissions/perm-1`,
+        jsonRequest("POST", { reply }),
+      );
+      assert.equal(refused.status, 403);
+      assert.equal(refused.body.error.code, "forbidden");
+      assert.match(refused.body.error.message, /user decision/);
+    }
+    assert.deepEqual(app.runtime.permissionReplies, []);
+    const permission = await jsonFetch<{ ok: boolean }>(
+      app.base,
+      `/api/agent/sessions/${ref.id}/permissions/perm-1`,
+      jsonRequest("POST", { reply: "reject" }),
+    );
+    assert.equal(permission.body.ok, true);
+    const question = await jsonFetch<{ ok: boolean }>(
+      app.base,
+      `/api/agent/sessions/${ref.id}/questions/question-1`,
+      jsonRequest("POST", { answers: { choice: "yes" } }),
+    );
+    assert.equal(question.body.ok, true);
+    assert.deepEqual(app.runtime.permissionReplies, [{
+      sessionId: ref.id,
+      requestId: "perm-1",
+      reply: "reject",
+    }]);
+    assert.equal(app.runtime.questionReplies.length, 1);
+
+    const after = await jsonFetch<{ debug: SessionDebugDto }>(
+      app.base,
+      `/api/agent/sessions/${ref.id}/debug`,
+    );
+    assert.deepEqual(after.body.debug.pending.permissions, []);
+    assert.deepEqual(after.body.debug.pending.questions, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test("the agent actor can reduce but never grant Auto-Approve", async () => {
+  const app = await makeApp();
+  try {
+    const parent = await app.sessions.create({ projectId: "p1", title: "Parent" });
+    const child = await app.sessions.create({ projectId: "p1", title: "Child", parentId: parent.id });
+    // The user enabled the parent and opted the child out in the UI.
+    await app.sessions.autoAcceptSet!(parent.id, "on");
+    await app.sessions.autoAcceptSet!(child.id, "off");
+    const patch = (sessionId: string, setting: string) => jsonFetch<{ error?: { code: string }; effective?: boolean }>(
+      app.base,
+      `/api/agent/sessions/${sessionId}/permissions/auto-accept`,
+      jsonRequest("PATCH", { setting }),
+    );
+
+    assert.equal((await patch(child.id, "on")).status, 403);
+    assert.equal((await patch(child.id, "all")).status, 403, "Full access is a user decision too");
+    assert.equal((await patch(child.id, "inherit")).status, 403, "clearing an opt-out would inherit the parent's on");
+    assert.deepEqual(await app.sessions.autoAcceptGet!(child.id), { setting: "off", effective: false, level: "off", inherited: "routine" });
+
+    // Nor may clearing a narrower choice inherit a parent's Full access.
+    await app.sessions.autoAcceptSet!(parent.id, "all");
+    await app.sessions.autoAcceptSet!(child.id, "on");
+    assert.equal((await patch(child.id, "inherit")).status, 403, "routine must not become Full access");
+    assert.deepEqual(await app.sessions.autoAcceptGet!(child.id), { setting: "on", effective: true, level: "routine", inherited: "all" });
+    await app.sessions.autoAcceptSet!(child.id, "off");
+    await app.sessions.autoAcceptSet!(parent.id, "on");
+
+    const off = await patch(parent.id, "off");
+    assert.equal(off.status, 200);
+    assert.equal(off.body.effective, false);
+    // With nothing to inherit, clearing the child's opt-out grants nothing.
+    assert.equal((await patch(child.id, "inherit")).status, 200);
+    assert.deepEqual(await app.sessions.autoAcceptGet!(child.id), { setting: "inherit", effective: false, level: "off", inherited: "off" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("the agent actor cannot clear an opt-out into the Space's Full access default", async () => {
+  const app = await makeApp([], [], () => "all");
+  try {
+    const root = await app.sessions.create({ projectId: "p1", title: "Root" });
+    assert.deepEqual(await app.sessions.autoAcceptGet!(root.id), { setting: "inherit", effective: true, level: "all", inherited: "all" });
+    // The user narrowed this chat; an agent must not undo that.
+    await app.sessions.autoAcceptSet!(root.id, "off");
+    const patch = await jsonFetch<{ error?: { code: string } }>(
+      app.base,
+      `/api/agent/sessions/${root.id}/permissions/auto-accept`,
+      jsonRequest("PATCH", { setting: "inherit" }),
+    );
+    assert.equal(patch.status, 403);
+    assert.deepEqual(await app.sessions.autoAcceptGet!(root.id), { setting: "off", effective: false, level: "off", inherited: "all" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("the agent actor cannot clear an opt-out into a project's Auto-approve default", async () => {
+  // p1 auto-approves routine actions; p2 keeps the Space's Ask.
+  const app = await makeApp([], [], (projectId) => projectId === "p1" ? "routine" : "off");
+  try {
+    const root = await app.sessions.create({ projectId: "p1", title: "Root" });
+    assert.deepEqual(await app.sessions.autoAcceptGet!(root.id), { setting: "inherit", effective: true, level: "routine", inherited: "routine" });
+    await app.sessions.autoAcceptSet!(root.id, "off");
+    const patch = (sessionId: string) => jsonFetch<{ error?: { code: string } }>(
+      app.base,
+      `/api/agent/sessions/${sessionId}/permissions/auto-accept`,
+      jsonRequest("PATCH", { setting: "inherit" }),
+    );
+    assert.equal((await patch(root.id)).status, 403);
+    assert.deepEqual(await app.sessions.autoAcceptGet!(root.id), { setting: "off", effective: false, level: "off", inherited: "routine" });
+
+    // Clearing in a project whose default asks raises nothing, so it is allowed.
+    const other = await app.sessions.create({ projectId: "p2", title: "Other" });
+    await app.sessions.autoAcceptSet!(other.id, "off");
+    assert.equal((await patch(other.id)).status, 200);
+    assert.deepEqual(await app.sessions.autoAcceptGet!(other.id), { setting: "inherit", effective: false, level: "off", inherited: "off" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("cancel reattaches a persisted working session after a server restart", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-agent-cancel-restart-"));
+  const store = createStore(join(dir, "sessions.db"));
+  const project: Project = { id: "p1", path: dir, name: "One", createdAt: 1 };
+  const projects: ProjectService = {
+    list: async () => [project],
+    get: async (id) => id === project.id ? project : undefined,
+    add: async () => project,
+    create: async () => project,
+    remove: async () => {},
+  };
+  await store.upsertProjection({
+    id: "persisted-working",
+    projectId: project.id,
+    title: "Persisted",
+    status: "working",
+    backendSessionId: "backend-existing",
+    createdAt: 1,
+    updatedAt: 2,
+  });
+  const runtime = fakeRuntime();
+  const sessions = createSessionService({
+    store,
+    projects,
+    permissions: {
+      evaluate: () => "ask",
+      addRule: () => {},
+      rules: () => [],
+    } as unknown as PermissionService,
+    runtimes: { forProject: async () => runtime.runtime },
+    broadcast: { event: () => {}, projection: () => {} },
+  });
+
+  await sessions.abort("persisted-working");
+  await settle();
+
+  assert.deepEqual(runtime.ensured, ["persisted-working"]);
+  assert.deepEqual(runtime.aborted, ["persisted-working"]);
+  assert.equal((await store.projection("persisted-working"))?.status, "idle");
+  assert.equal(
+    (await store.events("persisted-working")).filter((event) => event.type === "turn/stopped").length,
+    1,
+  );
+  await store.close();
+});

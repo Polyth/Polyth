@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- UX-LAUNCH: the launch screen's brand night, the web launch veil's
+         background (apps/web/src/index.html). -->
+    <color name="polyth_launch_background">#07091C</color>
+</resources>

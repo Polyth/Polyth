@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - devel
+      - master
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  # Every pull request runs, documentation-only ones included, so a required
+  # status check never waits on a workflow that path filters skipped.
+  pull_request:
+    branches:
+      - devel
+      - master
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Run the full Web, TypeScript, test and Rust verification suite
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# Set the repository Actions variable CI_DISABLED=1 (or true) to stop all
+# GitHub-hosted CI before a runner is allocated. An external/self-hosted budget
+# watcher can toggle this from the GitHub Billing API without consuming hosted
+# Actions minutes.
+#
+# Smoke runs on every push and pull request. Full verification runs on demand
+# and, once the repository is public (standard runners cost nothing there), on
+# every push and pull request too.
+concurrency:
+  group: ci-v3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke
+    if: >-
+      ${{
+        vars.CI_DISABLED != '1' &&
+        vars.CI_DISABLED != 'true' &&
+        (github.event_name != 'workflow_dispatch' || inputs.full != true)
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build web
+        run: npm run build:web
+
+      - name: Run critical streaming smoke tests
+        run: >-
+          node --experimental-strip-types --test
+          apps/web/test/streamIngestion.test.ts
+          apps/web/test/sync.test.ts
+
+  full:
+    name: Full verification
+    if: >-
+      ${{
+        vars.CI_DISABLED != '1' &&
+        vars.CI_DISABLED != 'true' &&
+        (
+          (github.event_name == 'workflow_dispatch' && inputs.full == true) ||
+          (github.event_name != 'workflow_dispatch' && github.event.repository.private == false)
+        )
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@f00cc37de62c899691b45db1cc585604520c95a7 # 1.91.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install workspace dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate agent knowledge and repository guidance
+        run: |
+          node scripts/agent-kit.mjs check
+          node --experimental-strip-types --test scripts/test/agent-kit.test.ts
+
+      - name: Run repository quality contract
+        run: node scripts/ci/release-quality.mjs
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --workspace --all-targets

@@ -1,0 +1,6 @@
+---
+description: polyth-ui scoped guidance
+globs: "apps/web/**/*.tsx,apps/web/**/*.css,packages/*/widgets/**,apps/mobile/src/*.tsx,apps/mobile/src/*.css"
+alwaysApply: false
+---
+Use the design and web-ui/mobile routes. Read relevant sections of docs/dev/styles.md, ui.md and components.md; widgets.md for widget changes. Respect current tokens and user performance/transparency/density settings. Package-owned UI stays in its package; the host owns global layout.

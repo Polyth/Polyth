@@ -1,0 +1,307 @@
+/* Chat markers. Every rule is scoped under a .session-markers-* root; a
+   marker's color is one of the canonical status tokens. */
+
+:is(.session-markers-glyph, .session-markers-chip, .session-markers-dialog__swatch, .session-markers-menu-item) {
+  --session-markers-tone: var(--muted);
+  --session-markers-wash: var(--surface-overlay);
+}
+:is(.session-markers-glyph, .session-markers-chip, .session-markers-dialog__swatch, .session-markers-menu-item)[data-color="amber"] {
+  --session-markers-tone: var(--amber);
+  --session-markers-wash: var(--amber-wash);
+}
+:is(.session-markers-glyph, .session-markers-chip, .session-markers-dialog__swatch, .session-markers-menu-item)[data-color="blue"] {
+  --session-markers-tone: var(--blue);
+  --session-markers-wash: var(--blue-wash);
+}
+:is(.session-markers-glyph, .session-markers-chip, .session-markers-dialog__swatch, .session-markers-menu-item)[data-color="red"] {
+  --session-markers-tone: var(--red);
+  --session-markers-wash: var(--red-wash);
+}
+:is(.session-markers-glyph, .session-markers-chip, .session-markers-dialog__swatch, .session-markers-menu-item)[data-color="green"] {
+  --session-markers-tone: var(--green);
+  --session-markers-wash: var(--green-wash);
+}
+:is(.session-markers-glyph, .session-markers-chip, .session-markers-dialog__swatch, .session-markers-menu-item)[data-color="purple"] {
+  --session-markers-tone: var(--purple);
+  --session-markers-wash: var(--purple-wash);
+}
+:is(.session-markers-glyph, .session-markers-chip, .session-markers-dialog__swatch, .session-markers-menu-item)[data-color="accent"] {
+  --session-markers-tone: var(--accent-text);
+  --session-markers-wash: var(--accent-wash);
+}
+
+.session-markers-glyph {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--session-markers-tone);
+}
+
+/* Navigator row: the same quiet weight as the pin and sharing marks. */
+.session-markers-badges {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+.session-markers-badges .session-markers-glyph {
+  width: calc(var(--icon-sm) - 2px);
+  height: calc(var(--icon-sm) - 2px);
+}
+.session-markers-badges .session-markers-glyph svg {
+  width: 100%;
+  height: 100%;
+}
+.session-markers-badges__more {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1;
+}
+
+/* Chat header: labelled chips. */
+.session-markers-header {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+  overflow: hidden;
+}
+.session-markers-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 14em;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--session-markers-wash);
+  color: var(--session-markers-tone);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+}
+.session-markers-chip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Row and selection menus. */
+/* Theme styles recolor menu icons with an html-level selector; the marker's
+   tint must win, except where a theme fills the hovered row with the accent. */
+.ui-menu .session-markers-menu-item[data-color] > .ui-icon.session-markers-menu-item__glyph {
+  color: var(--session-markers-tone);
+}
+html:is([data-theme-style="macos"], [data-theme-style="liquid-glass"]) .ui-menu .session-markers-menu-item:focus-visible > .ui-icon.session-markers-menu-item__glyph {
+  color: currentColor;
+}
+@media (hover: hover) {
+  html:is([data-theme-style="macos"], [data-theme-style="liquid-glass"]) .ui-menu .session-markers-menu-item:where(:not(:disabled)):hover > .ui-icon.session-markers-menu-item__glyph {
+    color: currentColor;
+  }
+}
+.session-markers-menu-item__check {
+  display: inline-grid;
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline-start: var(--space-3);
+  place-items: center;
+  color: var(--accent-text);
+}
+.session-markers-menu__error {
+  margin: var(--space-2) var(--space-3);
+  color: var(--red);
+  font-size: var(--font-meta);
+}
+
+/* Marker dialog. */
+.session-markers-dialog__form {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.session-markers-dialog__field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.session-markers-dialog__field:disabled {
+  opacity: 0.55;
+}
+.session-markers-dialog__label {
+  padding: 0;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+.session-markers-dialog__name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.session-markers-dialog__name-row .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+.session-markers-dialog__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.session-markers-dialog__suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.session-markers-dialog__suggestion[aria-pressed="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+}
+.session-markers-dialog__swatches,
+.session-markers-dialog__icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.session-markers-dialog__swatch {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: var(--session-markers-tone);
+  cursor: pointer;
+}
+.session-markers-dialog__swatch[aria-checked="true"] {
+  outline: 2px solid var(--session-markers-tone);
+  outline-offset: 2px;
+}
+.session-markers-dialog__icon {
+  display: inline-grid;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+}
+.session-markers-dialog__icon[aria-checked="true"] {
+  border-color: var(--control-border);
+  background: var(--surface-overlay-strong);
+}
+@media (hover: hover) {
+  .session-markers-dialog__suggestion:where(:not(:disabled)):hover,
+  .session-markers-dialog__icon:where(:not(:disabled)):hover {
+    background: var(--surface-overlay-hover);
+  }
+}
+.session-markers-dialog :is(.session-markers-dialog__swatch, .session-markers-dialog__icon, .session-markers-dialog__suggestion):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.session-markers-dialog fieldset:disabled :is(.session-markers-dialog__swatch, .session-markers-dialog__icon) {
+  cursor: default;
+}
+.session-markers-dialog__error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-meta);
+}
+
+/* Marked chats panel. */
+.session-markers-panel {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+}
+.session-markers-panel__group {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.session-markers-panel__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+.session-markers-panel__count {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 500;
+}
+.session-markers-panel__list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.session-markers-panel__chat {
+  display: grid;
+  width: 100%;
+  min-height: var(--control-h);
+  align-content: center;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .session-markers-panel__chat:where(:not(:disabled)):hover {
+    background: var(--surface-overlay-hover);
+  }
+}
+.session-markers-panel__chat:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.session-markers-panel__title,
+.session-markers-panel__note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-markers-panel__note {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* Settings page. */
+.session-markers-settings__empty,
+.session-markers-settings__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.session-markers-settings__error {
+  margin: var(--space-2) 0 0;
+  color: var(--red);
+  font-size: var(--font-meta);
+}

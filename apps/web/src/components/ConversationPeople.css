@@ -1,0 +1,110 @@
+/* People-first conversation creation and start dialogs: quiet fields and an
+   inline member list with check marks. No boxes around whole sections —
+   spacing and the shared controls carry the structure. */
+.conversation-create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.sheet .conversation-create { padding: var(--space-2) var(--space-2) var(--space-3); }
+
+.conversation-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.conversation-field-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+.conversation-create-status,
+.conversation-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.conversation-people {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  max-height: min(38vh, 320px);
+  overflow: auto;
+  list-style: none;
+}
+.conversation-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .conversation-person:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.conversation-person.is-selected { background: var(--surface-overlay); }
+.conversation-person-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-person-check { flex: none; }
+.conversation-person.is-selected .conversation-person-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.conversation-empty {
+  padding: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.conversation-field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+}
+.conversation-field-meta { color: var(--muted); font-size: var(--font-meta); }
+
+/* Start-session participant rows: name + access + remove, one line each. */
+.conversation-start-people { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.conversation-start-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: max(var(--control-h), var(--hit-min));
+  padding-block: var(--space-1);
+}
+.conversation-start-person-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-start-person-access { flex: 0 0 auto; max-width: 52%; }
+.conversation-start-empty { margin: 0; color: var(--muted); font-size: var(--font-meta); }
+.conversation-start-dialog-foot { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.conversation-start-dialog-foot > .ui-btn { flex: 1; }

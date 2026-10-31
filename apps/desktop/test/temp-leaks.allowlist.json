@@ -1,0 +1,6 @@
+[
+  "appimage-e2e.mjs",
+  "appimage-profile.mjs",
+  "serverPort.test.ts",
+  "settings.test.ts"
+]

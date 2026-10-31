@@ -1,0 +1,8 @@
+[
+  "generatedSources.test.ts",
+  "provisioner.test.ts",
+  "remoteExecution.test.ts",
+  "toolProjection.test.ts",
+  "turnInput.test.ts",
+  "turnInputRange.test.ts"
+]
