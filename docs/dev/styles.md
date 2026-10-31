@@ -636,6 +636,7 @@ class strength joins a role instead of getting a rule of its own:
 | 1c Options and buttons | Quiet chips; the default (quiet) button is an option and the destructive one its red wash; a disabled button keeps the base's neutral look | queue chips, attachments, New-session Shortcuts, prompt suggestion, add-menu tiles, `.ui-btn--quiet`, `.ui-btn--danger` | `--look-option*` |
 | 1f Fields | Every text field and select; a field well is the field and its input stays bare | navigator search, picker filter well, `.ui-field-well`, `.ui-input`, `.ui-textarea`, `.sel select`, the theme picker | `--look-field`, `--look-field-edge`, `--look-field-rule`, `--look-field-radius`, `--look-focus-ring` |
 | 1g Corners | One radius role per control | rows, menu items, icon buttons, segments → `--look-select-radius`; push buttons, chips, wells → `--look-control-radius` | — |
+| 1h Phone layers | The phone navigator and Workspace panel are one full-screen material; the navigator's current chat, titles and date captions speak the look's selection and quiet inks; launchers are the look's tile (Edit mode's tiles too, but not the drag hole or lifted copy); a widget is the look's panel card | `.mobile-navigator`, `.mobile-nav-session-row.is-active`, `.mobile-nav-date-divider`, `.workspace-panel-sheet`, `.workspace-panel-launcher`, `.workspace-editor-item--launcher`, `.workspace-panel-item--widget` (all panel rules sit in the panel's phone media query) | `--look-phone-layer*`, `--look-phone-select*`, `--look-select-mark`, `--look-tile*`, `--look-widget*` |
 
 Role rules use `:is()` where the shared block owns the element; the button
 rules use `:where()` so a look that draws its own button (Line's hairline,
@@ -644,7 +645,23 @@ as inset shadows, so it keeps its box; focus adds the `--look-focus-ring`
 ring, and an invalid field keeps a red edge. A floating full-height column takes `--look-column-radius`; a flush one
 rounds its inner corners with `--look-rail-radius` (`shellLayout.css`).
 Package content (a package's own panes and cards inside its window) is the
-package's: it follows the theme tokens, not the look.
+package's: it follows the theme tokens, not the look. In the Workspace panel
+that means a look styles the widget's frame and head, never the widget body.
+
+On the phone each look also carries its own character past the 1h tokens: a
+phone navigator row runs the screen's width, so `--look-phone-select*`
+(default: the look's `--look-select*`) lets the current chat differ from the
+desktop plate, and `--look-select-mark` adds a bar on its leading edge.
+
+| Look | Phone navigator | Workspace panel |
+| --- | --- | --- |
+| `paper` | Sheet; projects parted by a rule; current chat in ink, weight and an ink bar; bare project marks | Bare ink glyphs on the sheet; the widget is a ruled passage |
+| `line` | A ruled column: a hairline over every chat and project, mono dates heading their rule; current chat = accent bar, no box | Hairline cells; the widget is framed, its head a mono label |
+| `air` | Each project is an island; current chat an accent pill; marks are accent discs | Islands with the glyph in an accent disc; the widget is an island |
+| `monolith` | The backdrop; current chat is a raised piece of the sheet; heavier project names | Raised sheet tiles and widget on the backdrop |
+| `monolith-reverse` | The lit plane; current chat and marks carved into it | Keys carved into the plane (a press sinks deeper); the widget a recessed window |
+| `obsidian` | Dark glass (the light canvas in pearl); accent pill; polished accent discs | Glass tiles with the gradient rim; only a pressed tile takes the accent rim and glow |
+| `editorial` | A contents page: a rule under the toolbar and between chapters, serif entries, the open one in italic, small-capital dates | A two-column index in serif with warm glyphs and a rule under each entry; the widget a ruled section |
 
 **Contract:**
 - Look-scoped tokens are `--look-*`. Their shared defaults sit in
