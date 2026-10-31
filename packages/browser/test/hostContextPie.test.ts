@@ -144,7 +144,7 @@ function composerFixture(layout: Layout, value: ContextGauge): string {
             <div class="picker picker-model"><button class="config-chip model-picker-trigger" id="model"><span class="model-trigger-name">Claude Opus 5.5</span></button></div>
             <button class="config-chip composer-effort-trigger" id="effort"><span class="config-chip-text">High</span></button>
             ${pie(value)}
-            ${layout === "desktop" ? "" : `<button class="ui-icon-btn mobile-composer-edit" id="edit">${glyph}</button>`}
+            ${layout === "desktop" ? "" : `<button class="mobile-composer-edit-entry" id="edit">Edit composer buttons</button>`}
           </div>
           <div class="composer-input"><textarea class="composer-editor" rows="3" placeholder="Message Polyth…"></textarea></div>
           ${rail}

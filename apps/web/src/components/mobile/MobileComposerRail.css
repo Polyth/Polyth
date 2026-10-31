@@ -26,42 +26,30 @@
   line-height: var(--font-response-lh);
 }
 
-.composer-mobile .mobile-composer-edit {
-  position: relative;
-  flex: none;
-  width: var(--tap);
-  height: var(--tap);
-  margin-inline-start: auto;
-  color: var(--muted);
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.mobile-composer-edit > .ui-icon {
-  opacity: .08;
-  transition: opacity var(--motion-fast) var(--motion-ease);
-}
-
-.mobile-composer-edit:is([aria-pressed="true"], [data-holding], :focus-visible) > .ui-icon {
-  opacity: 1;
-}
-
-.mobile-composer-edit::after {
-  content: "";
+/* Arranging starts with a hold on any button (MobileComposerRail). This
+   entry exists for keyboards and assistive tech and stays out of sight until
+   it has focus. */
+.mobile-composer-edit-entry {
   position: absolute;
-  inset: var(--space-2);
-  border-radius: var(--radius-round);
-  background: var(--accent-wash);
-  opacity: 0;
-  transform: scale(.6);
-  pointer-events: none;
+  inset-inline-end: var(--space-2);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.mobile-composer-edit[data-holding]::after {
-  opacity: 1;
-  transform: scale(1);
-  transition: transform var(--mobile-composer-hold) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+.mobile-composer-edit-entry:focus-visible {
+  width: auto;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  clip-path: none;
+  color: var(--text);
+  font-size: var(--font-meta);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  box-shadow: var(--focus-ring);
+  z-index: 1;
 }
 
 .composer-mobile.composer-mobile-grid .mobile-composer-rail {
@@ -72,26 +60,56 @@
   gap: var(--mobile-rail-gap);
   order: 2;
   padding: 0 var(--space-3) var(--space-2);
+  /* The narrow-composer rule scrolls the desktop rail; here the leading run
+     scrolls on its own, and the rail must not clip the Remove badges. */
+  overflow: visible;
   isolation: isolate;
 }
 
+/* Arranging: room above the row for the Remove badges, and the rail above
+   the editor, so the badge (and its larger tap box) is never under the text. */
+.composer-mobile.composer-mobile-grid .mobile-composer-rail[data-editing] {
+  position: relative;
+  z-index: 1;
+  padding-block-start: var(--space-2);
+}
+
+/* Two runs: the leading one reads from the start and scrolls when it
+   overflows; the run beside Send never moves away from it. The space between
+   them is whatever the leading run leaves. */
 .mobile-composer-launchers {
+  position: relative;
   min-width: 0;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: calc((100% - (var(--mobile-rail-lanes) - 1) * var(--mobile-rail-gap)) / var(--mobile-rail-lanes));
+  display: flex;
+  align-items: flex-start;
   gap: var(--mobile-rail-gap);
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mobile-composer-run {
+  display: flex;
+  gap: var(--mobile-rail-gap);
+}
+
+.mobile-composer-run[data-run-box="start"] {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   scrollbar-width: none;
   scroll-snap-type: x proximity;
 }
 
-.mobile-composer-launchers::-webkit-scrollbar { display: none; }
+.mobile-composer-run[data-run-box="start"]::-webkit-scrollbar { display: none; }
+.mobile-composer-run[data-run-box="end"] { flex: none; }
+.mobile-composer-run[data-run-box="end"][data-empty] { gap: 0; }
 
 .mobile-composer-cell {
   position: relative;
-  min-width: 0;
+  flex: none;
+  width: var(--tap);
   min-height: var(--tap);
   border-radius: var(--radius-control);
   scroll-snap-align: start;
@@ -134,46 +152,98 @@
 
 .mobile-composer-primary { min-width: var(--tap); }
 
-.mobile-composer-rail[data-editing] .mobile-composer-launchers {
-  grid-auto-flow: row;
-  grid-auto-columns: auto;
-  grid-template-columns: repeat(var(--mobile-rail-lanes), minmax(0, 1fr));
-  max-height: min(40dvh, calc(3 * var(--tap) + 2 * var(--mobile-rail-gap)));
-  overflow-x: hidden;
-  overflow-y: auto;
+/* Arranging: the leading run wraps instead of scrolling, so every button
+   is in reach, while the run beside Send stays on the first row. */
+.mobile-composer-rail[data-editing] .mobile-composer-run[data-run-box="start"] {
+  flex-wrap: wrap;
+  overflow: visible;
   scroll-snap-type: none;
-  overscroll-behavior-block: contain;
 }
 
-.mobile-composer-cell-edit {
+/* A launcher with nothing to show right now: its catalog glyph, quietened,
+   so it can still be moved or removed. */
+.mobile-composer-glyph {
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  color: var(--muted);
+  opacity: .6;
+}
+
+.mobile-composer-glyph > .widget-choice-glyph {
+  color: inherit;
+  background: none;
+  box-shadow: none;
+}
+
+/* The whole cell is the handle; the launcher under it stays inert. */
+.mobile-composer-cell-grab {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   padding: 0;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  border: 1px dashed var(--control-border);
+  border: 0;
   border-radius: inherit;
-  background: var(--surface-overlay);
+  background: transparent;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
-  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+  cursor: grab;
+}
+
+.mobile-composer-cell-grab:focus-visible { box-shadow: var(--focus-ring); }
+
+.mobile-composer-cell-remove {
+  position: absolute;
+  inset-block-start: calc(var(--space-1) * -1);
+  inset-inline-start: calc(var(--space-1) * -1);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--text);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-sm);
   animation: mobile-composer-edit-enter var(--motion-normal) var(--motion-ease);
 }
 
-.mobile-composer-cell[data-launcher-id] .mobile-composer-cell-edit { border-style: solid; background: transparent; }
-.mobile-composer-cell[data-drop] .mobile-composer-cell-edit { border-color: var(--accent-line); background: var(--accent-wash); }
-.mobile-composer-cell[data-dragging] { z-index: var(--z-shell); pointer-events: none; }
-/* --material-glass-control-fill is a share, not a colour: the lifted cell is
-   a light tint of the theme's glass, so the launcher under it stays legible. */
-.mobile-composer-cell[data-dragging] .mobile-composer-cell-edit {
+/* A larger tap box for the small badge, grown only outward: the middle of
+   the button stays the handle, so a drag never starts on Remove. */
+.mobile-composer-cell-remove::before {
+  content: "";
+  position: absolute;
+  inset-block: calc(var(--space-2) * -1) 0;
+  inset-inline: calc(var(--space-2) * -1) 0;
+}
+
+.mobile-composer-cell[data-dragging] { z-index: var(--z-shell); }
+.mobile-composer-cell[data-dragging] .mobile-composer-cell-remove { opacity: 0; }
+.mobile-composer-cell[data-dragging] > .mobile-composer-launcher {
+  scale: 1.12;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--material-glass) var(--material-glass-control-fill), transparent);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
+  transition: scale var(--motion-fast) var(--motion-ease);
 }
 .mobile-composer-rail[data-editing] .mobile-composer-primary { opacity: .45; }
+
+/* The Home Screen wiggle, staggered per button; still when motion is reduced. */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-animations="true"]) body:not([data-desktop-low-resource="true"]) .mobile-composer-rail[data-editing] .mobile-composer-cell:not([data-dragging]) > .mobile-composer-launcher {
+    animation: mobile-composer-jiggle 280ms ease-in-out var(--mobile-rail-jiggle-delay, 0ms) infinite alternate;
+  }
+}
+
+@keyframes mobile-composer-jiggle {
+  from { rotate: -2.5deg; }
+  to { rotate: 2.5deg; }
+}
 
 /* Resting (no focus, draft, shell mode or rail editing) is one row:
    Add · context pie · placeholder · first launcher · Send. The rail dissolves into the card
@@ -187,8 +257,8 @@
   padding: 0 var(--space-2);
 }
 
-.composer-mobile.composer-mobile-grid.composer-collapsed :is(.composer-config-row, .mobile-composer-editor-bar) { display: none; }
-.composer-mobile.composer-mobile-grid.composer-collapsed :is(.mobile-composer-rail, .mobile-composer-launchers) { display: contents; }
+.composer-mobile.composer-mobile-grid.composer-collapsed :is(.composer-config-row, .mobile-composer-editor) { display: none; }
+.composer-mobile.composer-mobile-grid.composer-collapsed :is(.mobile-composer-rail, .mobile-composer-launchers, .mobile-composer-run) { display: contents; }
 .composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-cell:not([data-resting]) { display: none; }
 .composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-cell { flex: none; width: var(--tap); }
 .composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-cell[data-resting="add"] { order: 1; }
@@ -220,16 +290,124 @@
   text-overflow: ellipsis;
 }
 
-.mobile-composer-editor-bar {
+.mobile-composer-editor {
   display: flex;
+  flex-direction: column;
   order: 3;
-  align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
   padding: 0 var(--space-3) var(--space-2);
+  animation: mobile-composer-edit-enter var(--motion-normal) var(--motion-ease);
+}
+
+/* What is not in the rail, each with a green plus, as in Control Center. */
+.mobile-composer-tray {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--surface-divider);
+}
+
+.mobile-composer-tray-title {
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
+}
+
+/* Two rows that scroll sideways, so a long catalog never pushes the rail and
+   the message off screen; the fading edge says there is more. */
+.mobile-composer-tray-items {
+  --mobile-tray-fade: var(--space-6);
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-columns: max-content;
+  justify-content: start;
+  justify-items: start;
+  gap: var(--space-2);
+  /* Badges overhang the chips; the scroll box leaves them room. */
+  padding-block: var(--space-1) 0;
+  padding-inline: var(--space-1) var(--mobile-tray-fade);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--mobile-tray-fade)), transparent);
+}
+
+.mobile-composer-tray-items:dir(rtl) { mask-image: linear-gradient(to left, #000 calc(100% - var(--mobile-tray-fade)), transparent); }
+.mobile-composer-tray-items::-webkit-scrollbar { display: none; }
+
+.mobile-composer-tray-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tap);
+  max-width: 16em;
+  padding: 0 var(--space-3) 0 var(--space-1);
+  text-align: start;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  cursor: pointer;
+}
+
+.mobile-composer-tray-item:focus-visible { box-shadow: var(--focus-ring); }
+@media (hover: hover) { .mobile-composer-tray-item:hover { background: var(--surface-overlay-hover); } }
+
+.mobile-composer-tray-glyph {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--tap) - var(--space-2));
+  height: calc(var(--tap) - var(--space-2));
+  color: var(--muted);
+}
+
+.mobile-composer-tray-glyph > .widget-choice-glyph {
+  color: inherit;
+  background: none;
+  box-shadow: none;
+}
+
+.mobile-composer-tray-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-composer-tray-label > small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.mobile-composer-tray-badge {
+  position: absolute;
+  inset-block-start: calc(var(--space-1) * -1);
+  inset-inline-start: calc(var(--space-1) * -1);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: #fff;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--green) 82%, black);
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-composer-editor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
 }
 
 .mobile-composer-editor-bar .ui-btn { flex: none; }

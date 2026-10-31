@@ -62,7 +62,7 @@ import { sessionDraftPreview } from "@polyth/contracts";
 import type { ComposerAddMenuItem, ComposerContributionContext, ComposerDraftContext, ComposerMode, ComposerSuggestionOffer } from "@polyth/web-sdk";
 import SlotHost from "./slots/SlotHost.tsx";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
-import MobileComposerRail, { MobileComposerEditButton } from "./mobile/MobileComposerRail.tsx";
+import MobileComposerRail, { MobileComposerEditEntry } from "./mobile/MobileComposerRail.tsx";
 import { mobileRailKey, subscribeMobileRailEditRequest } from "../composer/mobileRail.ts";
 import { setNewChatModel } from "../composer/newChatModel.ts";
 import { useHeroWidgetPrefs } from "./mobile/HeroWidgets.tsx";
@@ -3749,6 +3749,11 @@ function ComposerBody({
   };
   const phoneLayout = isPhone;
   useEffect(() => setMobileRailEditing(false), [phoneLayout, spaceId, activeProjectId]);
+  // Arranging the buttons puts the keyboard away so the whole rail is in view.
+  const editMobileRail = (editing: boolean) => {
+    setMobileRailEditing(editing);
+    if (editing) inputRef.current?.element()?.blur();
+  };
   // The new chat's Customize panel hands phone users to this rail's editor;
   // only the fresh-chat composer answers, never a widget or open-chat one.
   const answersRailEditRequest = phoneLayout && !session && !widgetMode;
@@ -4312,10 +4317,7 @@ function ComposerBody({
           {effortControl}
           {contextPie}
           <SlotHost slot="composer.config" context={slotContext} />
-          {phoneLayout && <MobileComposerEditButton key={`${activeBrowserAccountId()}:${spaceId}:${activeProjectId ?? ""}`} editing={mobileRailEditing} onChange={(editing) => {
-            setMobileRailEditing(editing);
-            if (editing) inputRef.current?.element()?.blur();
-          }} />}
+          {phoneLayout && <MobileComposerEditEntry editing={mobileRailEditing} onChange={editMobileRail} />}
         </div>
       )}
       {selectingConversation && (
@@ -4500,7 +4502,7 @@ function ComposerBody({
           primary={primaryAction}
           resting={!presentedExpanded}
           editing={mobileRailEditing}
-          onEditingChange={setMobileRailEditing}
+          onEditingChange={editMobileRail}
         />
       ) : (
         <div className="composer-rail">

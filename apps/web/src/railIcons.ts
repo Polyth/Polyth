@@ -210,5 +210,7 @@ export function railIconFor(id: string): RailIcon {
 
 /** Widget pickers use the same domain mark as panels and launchers. */
 export function widgetIconFor(widget: Pick<WidgetDef, "id" | "pluginId" | "capabilities">): RailIcon {
-  return railIconMatch([...(widget.capabilities ?? []), widget.id, widget.pluginId]) ?? WidgetFallbackGlyph;
+  // A capability launcher (`capability:browser`) wears that capability's mark.
+  const capability = widget.id.startsWith("capability:") ? widget.id.slice("capability:".length) : undefined;
+  return railIconMatch([...(widget.capabilities ?? []), capability, widget.id, widget.pluginId]) ?? WidgetFallbackGlyph;
 }

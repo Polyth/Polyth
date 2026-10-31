@@ -1832,10 +1832,10 @@ contributions. Desktop continues to use its independent slot placements.
 An idle composer (no focus, draft, attachment, shell mode or rail editing)
 *rests* as one `--composer-height` row: Add · the context pie (when the open
 session has one) · placeholder · the launcher the engaged rail shows nearest
-Send (the last one on its first, unscrolled page; the first placed launcher
-only when that page holds nothing but Add) · Send/Stop. The resting row
+Send (the last one of the run beside Send, else the last one of the leading
+run's unscrolled part, else its first launcher besides Add) · Send/Stop. The resting row
 measures the engaged lane count from the card, so both states agree before the
-composer has ever been engaged. The model line, pencil and
+composer has ever been engaged. The model line and
 other launchers are hidden with CSS, not unmounted, so a control in use (an
 active dictation) survives engagement; only rail editing, not the rail itself,
 holds the composer engaged (`composerLayoutState({ railEditing })`). A running
@@ -1873,34 +1873,67 @@ rows runs first (the editor's auto-grow is a layout effect declared before the
 hook), no row but the opening editor grows or shrinks with the easing height
 (the editor counts at its content's size), and a row that still changes
 mid-way — the keyboard re-banding the shell, a late render — re-aims the
-running morph instead of snapping the card at the end. Engaged, the model/effort line stays above the editor,
-with a small edit pencil at its upper inline end. The pencil is nearly
-transparent at rest; holding, keyboard focus and the active Done state remain
-visible.
+running morph instead of snapping the card at the end. Engaged, the model/effort line stays above the editor.
 
-The measured rail and primary-action widths determine the number of sections
-(a full `--tap` control plus the measured `--space-1` gap between sections).
-All launcher glyphs, including Add, are centered in their section. Send/Stop owns the final
-section and cannot be removed; extra launchers scroll horizontally while it
-stays reachable. Empty sections have no chrome in normal use. A 420 ms pencil
-hold enters editing; a short touch tap only announces the hold instruction.
-Mouse, keyboard and assistive activation enter directly. Done or Escape exits. Editing blurs the
-editor to release the software keyboard and temporarily makes live launcher
-controls and Send inert.
+The rail is two runs of `--tap` launchers, not a grid of lanes: the leading
+run reads from the inline start (and scrolls horizontally when it overflows),
+and the run beside Send hugs Send/Stop, which cannot be removed. The space
+between them is whatever the leading run leaves. Membership and order are what
+is saved, so a narrower screen, a wider Stop/split action or a launcher with
+nothing to show (`isAvailable` false, which gives up its place outside
+editing) never moves another launcher; a launcher put beside Send stays beside
+Send. The measured lane count (`mobileRailColumns`) only picks the resting
+launcher and the drop zone beside Send.
 
-Editing reveals quiet cell boundaries, empty-cell add pickers, and an extra
-row when another section is needed. Touch/pointer dragging swaps occupied
-sections or moves into an empty section. Tapping an occupied cell opens the
-shared anchored Menu with previous/next moves and removal; package-required
-controls cannot be removed. Reset restores catalog defaults. Drag cancellation,
-window blur, resize and unmount do not commit a move. Movement follows the
-pointer through a composited transform; committed rearrangements use the shared
-motion duration and skip animation for reduced-motion and low-resource modes.
+Editing works like the iOS Home Screen. There is no edit control: a 500 ms
+touch hold on any launcher (`MOBILE_RAIL_HOLD_MS`; not on Send) starts it, and
+the release does not also press the launcher. A mouse press never does (the mic
+uses it for push-to-talk); a right click arranges straight away. Keyboard and
+assistive users get a visually hidden "Edit composer buttons" button on the
+model line that appears on focus; the new chat's Customize panel still asks
+through `requestMobileRailEdit`. Editing blurs the editor to release the
+software keyboard, makes live launchers and Send inert and wiggles every
+launcher (still under any reduce-motion source: the OS preference,
+`data-reduce-animations`, desktop low-resource). Each one carries a minus badge
+(none for package-required controls) whose enlarged tap box grows only outward,
+so the middle of a button is always the drag handle. The badges overhang the
+row, so the phone rail never clips (`overflow: visible`, overriding the narrow
+desktop rail's scroll) and, while editing, gains top padding and stacks above
+the editor so a badge is never under the text field; a launcher with nothing
+to show is drawn with its quiet catalog glyph. Dragging lifts the launcher under
+the finger and reflows the others live; reaching the last lane or Send drops
+it into the run beside Send, anywhere else places it by reading order in the
+leading run, which wraps while editing. Arrow keys move the focused launcher
+along the row and across the gap. Only the drop persists; cancellation, window
+blur and unmount do not. Below the rail, as in the iOS Control Center editor,
+a "More buttons" tray lists every launcher not in the rail (the rail's own
+defaults first, so one just removed is in sight) as chips with the launcher's
+mark (`widgetIconFor`; `capability:<id>` launchers wear that capability's mark),
+its name and a green plus badge. The tray is two rows that scroll sideways
+behind a fading edge, so a long catalog never pushes the rail off screen; two
+chips with the same name add their widget descriptions. Tapping a chip adds the
+launcher to the end of the leading run, where it settles in like an arriving
+one. Under the tray, Reset (the catalog defaults, saved for this scope) and
+Done; Escape or a tap anywhere outside the rail also
+ends editing. Reflow and the drop settle on the shared motion duration and skip
+animation for reduced-motion and low-resource modes. Holding and dragging in
+one gesture is attempted (a non-passive `touchmove` keeps the touch once a
+launcher is lifted), but Chromium's touch emulation still cancels it;
+releasing and dragging again always works.
 
 The arrangement is one account-owned UI preference (`core.mobile-composer-rail`
 in `composer/mobileRail.ts`), a map of Space + project key to arrangement that
 `settingsSync` mirrors to the server blob, so a client that has never opened
-the project still inherits the buttons the user arranged elsewhere. It never
+the project still inherits the buttons the user arranged elsewhere. A scope
+with no record of its own shows the arrangement most recently edited in the
+same Space (`readEffectiveMobileRail`) and gets its own record only once it is
+edited, so a project the user has not arranged yet does not fall back to the
+package defaults. Records keep the `{v:1,slots}` shape: the leading run, then
+`slot:gap` and the run beside Send. A client that predates the runs reads the
+gap as an unknown launcher id and keeps it, rather than stripping and pushing
+back the record; positional records from such a client (`null` lanes) are
+read with the last empty lane before a launcher as the start of the run beside
+Send (`mobileRailFromSlots`). It never
 changes desktop visibility or placement, and one project's key never touches
 another's. `localStorage` (`polyth.composer.mobile-rail.v2`) is the synchronous
 cache; the paired mobile app also mirrors it through the app-owned
@@ -1909,9 +1942,8 @@ client-context store, because its Link loopback shell starts from an empty
 first render). The older per-key `polyth.composer.mobile-rail.v1.<space>.<project>`
 record is read once as a migration source and never wins over the map.
 Unknown launcher ids survive package disable/re-enable; a malformed id or
-unknown key from another client is dropped at the parse boundary.
-Resize changes the presentation without truncating saved positions; additional
-launchers remain available by scrolling.
+unknown key from another client is dropped at the parse boundary (never read
+as an empty lane). Resize changes only the presentation.
 If browser storage rejects a write, editing remains usable in memory for the
 current page lifetime. The editing grid scrolls vertically after three rows,
 so a large arrangement stays bounded on short phone viewports. Widget
