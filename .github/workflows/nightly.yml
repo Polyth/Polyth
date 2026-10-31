@@ -49,8 +49,9 @@ permissions:
 env:
   POLYTH_RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'nightly' }}
 
+# One queue per channel: a test or stable run never waits behind (or bumps) a nightly.
 concurrency:
-  group: nightly
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'nightly' }}
   cancel-in-progress: false
 
 jobs:
