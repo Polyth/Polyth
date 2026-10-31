@@ -1,10 +1,11 @@
 name: Nightly
-run-name: "Nightly ${{ github.event_name == 'workflow_dispatch' && inputs.ref || 'devel' }} #${{ github.run_number }}"
+run-name: "${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'nightly' }} ${{ github.event_name == 'workflow_dispatch' && inputs.ref || 'devel' }} #${{ github.run_number }}"
 
 # Nightly builds of `devel`, published as `vX.Y.N-nightly` prereleases of this
 # repository for clients on the Nightly update channel (scripts/ci/update-feed.mjs,
-# docs/operations/releases.md#nightly-builds-from-devel). Stable releases stay
-# with release.yml, which builds `master`.
+# docs/operations/releases.md#nightly-builds-from-devel). A manual run with
+# channel `test` or `stable` (ref `master`) publishes the update feed's
+# `vX.Y.N-beta` prerelease or `vX.Y.N` Latest release the same way.
 #
 # Scheduled and dispatched runs stay off until the repository variable
 # POLYTH_NIGHTLY is `1`; a manual run always works. GitHub delays scheduled
@@ -24,6 +25,12 @@ on:
     types: [nightly]
   workflow_dispatch:
     inputs:
+      channel:
+        description: Release channel (test and stable build `master`)
+        type: choice
+        required: true
+        default: nightly
+        options: [nightly, test, stable]
       ref:
         description: Source branch, tag or commit
         type: string
@@ -38,6 +45,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  POLYTH_RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'nightly' }}
 
 concurrency:
   group: nightly
@@ -246,7 +256,6 @@ jobs:
           REMOTE_BUILD_TARGET: ${{ matrix.target }}
           REMOTE_BUILD_ARCH: ${{ matrix.remote_arch || '' }}
           REMOTE_BUILD_OUTPUT: ${{ runner.temp }}/build-output
-          POLYTH_RELEASE_CHANNEL: nightly
           POLYTH_UPDATE_REPOSITORY: ${{ github.repository }}
           POLYTH_BUILD_NUMBER: ${{ needs.plan.outputs.build }}
           # Developer ID signing + notarization, scoped to the macOS jobs so the
@@ -326,8 +335,6 @@ jobs:
 
       - name: Assemble feed
         id: feed
-        env:
-          POLYTH_RELEASE_CHANNEL: nightly
         run: node scripts/ci/update-feed.mjs assemble "$RUNNER_TEMP/products" "$RUNNER_TEMP/feed"
 
       - name: Write release notes
@@ -339,11 +346,11 @@ jobs:
         run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
-          node scripts/ci/release-notes.mjs --repo . --channel nightly --version "$VERSION" \
+          node scripts/ci/release-notes.mjs --repo . --channel "$POLYTH_RELEASE_CHANNEL" --version "$VERSION" \
             --releases "$RUNNER_TEMP/releases.json" --out "$RUNNER_TEMP/notes.md"
           cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish prerelease
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.feed.outputs.version }}
@@ -355,8 +362,14 @@ jobs:
           set -euo pipefail
           test -n "$VERSION"
           test -n "$TITLE"
-          if [ "$PRERELEASE" != "true" ] || [[ "$VERSION" != *-nightly ]]; then
-            echo "Refusing to publish $VERSION from the nightly workflow" >&2
+          # Stable is the only non-prerelease and the only one marked Latest.
+          case "$POLYTH_RELEASE_CHANNEL:$PRERELEASE:$VERSION" in
+            nightly:true:*-nightly|test:true:*-beta) kind=(--prerelease); latest=false ;;
+            stable:false:*-*) ;;
+            stable:false:*) kind=(); latest=true ;;
+          esac
+          if [ -z "${latest:-}" ]; then
+            echo "Refusing to publish $VERSION as a $POLYTH_RELEASE_CHANNEL release" >&2
             exit 1
           fi
           tag="v$VERSION"
@@ -367,25 +380,27 @@ jobs:
           fi
           if [ "$draft" = "missing" ]; then
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$SOURCE" --title "$TITLE" \
-              --notes-file "$RUNNER_TEMP/notes.md" --prerelease --draft
+              --notes-file "$RUNNER_TEMP/notes.md" "${kind[@]}" --draft
           else
             gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
-              --notes-file "$RUNNER_TEMP/notes.md" --prerelease
+              --notes-file "$RUNNER_TEMP/notes.md" "${kind[@]}"
           fi
           # Upload into a draft, then publish: the updater never sees a half-uploaded release.
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "$RUNNER_TEMP"/feed/*
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
 
-      - name: Prune old nightlies
+      - name: Prune old prereleases of the channel
+        if: env.POLYTH_RELEASE_CHANNEL != 'stable'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          # Keep the three newest nightlies, ordered by version. Stable and test
-          # releases belong to release.yml and are never touched here.
+          # Keep the three newest nightlies or betas, ordered by version; the
+          # other channels' releases and every stable release are never touched.
+          case "$POLYTH_RELEASE_CHANNEL" in nightly) suffix=-nightly ;; *) suffix=-beta ;; esac
           gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName \
-            --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly$"))]
+            --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+'"$suffix"'$"))]
               | sort_by(.tagName | ltrimstr("v") | sub("-.*$"; "") | split(".") | map(tonumber)) | reverse | .[3:]
               | .[].tagName' |
           while IFS= read -r tag; do
