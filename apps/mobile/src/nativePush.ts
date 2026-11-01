@@ -1,16 +1,22 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { OPAQUE_NATIVE_PUSH_ID, parseNativePushOpen, type NativePushOpen } from "./nativePushPayload.ts";
 
-/** Values which may cross the WebView bridge. Provider and relay credentials
- * deliberately do not have a TypeScript representation in web code. The
- * account id is a binding input from the currently authenticated connection;
- * native obtains Link identities and the server independently verifies it. */
+/** Values which may cross the WebView bridge. Relay credentials deliberately
+ * do not have a TypeScript representation in web code. With a relay the APNs
+ * token stays native too; without one (direct mode) the page's own server
+ * sends to APNs itself, so the page carries the token to it over Polyth Link.
+ * The account id is a binding input from the currently authenticated
+ * connection; native obtains Link identities and the server independently
+ * verifies it. */
 export type NativePushState = "unavailable" | "disabled" | "enabling" | "enabled" | "denied" | "failed";
 
 export interface NativePushStatus {
   state: NativePushState;
   reason?: "firebase-not-configured" | "permission-denied" | "relay-not-configured" | "registration-failed";
   subscriptionId?: string;
+  /** Direct mode only: the current registration, re-sent on foreground so a
+   *  rotated APNs token reaches the server. */
+  registration?: NativePushDirect;
 }
 
 export interface NativePushEnableInput {
@@ -18,7 +24,7 @@ export interface NativePushEnableInput {
   accountId: string;
 }
 
-export interface NativePushClaim {
+export interface NativePushRelayClaim {
   subscriptionId: string;
   claimToken: string;
   claimExpiresAt: number;
@@ -26,6 +32,16 @@ export interface NativePushClaim {
    * The private half stays in native secure storage and never reaches JS. */
   contentKey?: NativePushContentKey;
 }
+
+/** Direct mode: the device's APNs token, filed under a device-made id. */
+export interface NativePushDirect {
+  subscriptionId: string;
+  providerToken: string;
+  environment: "sandbox" | "production";
+  contentKey?: NativePushContentKey;
+}
+
+export type NativePushClaim = NativePushRelayClaim | NativePushDirect;
 
 export interface NativePushContentKey {
   p256dh: string;
@@ -47,6 +63,7 @@ const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9_-]{22}$/u;
 const CLAIM_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
 const P256DH = /^[A-Za-z0-9_-]{87}$/u;
 const AUTH_SECRET = /^[A-Za-z0-9_-]{22}$/u;
+const PROVIDER_TOKEN = /^[0-9a-f]{64,512}$/u;
 
 function decodeBase64Url(value: string): Uint8Array | undefined {
   try {
@@ -67,7 +84,25 @@ function assertOpaque(value: string, name: string): void {
   if (!OPAQUE_NATIVE_PUSH_ID.test(value)) throw new Error(`Invalid native push ${name}.`);
 }
 
+/** The direct registration in `value`, or undefined. */
+export function parseNativePushDirect(value: unknown): NativePushDirect | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { subscriptionId, providerToken, environment, contentKey } = value as Record<string, unknown>;
+  if (typeof subscriptionId !== "string" || !SUBSCRIPTION_ID.test(subscriptionId)
+    || typeof providerToken !== "string" || !PROVIDER_TOKEN.test(providerToken)
+    || (environment !== "sandbox" && environment !== "production")) return undefined;
+  return {
+    subscriptionId, providerToken, environment,
+    ...(validContentKey(contentKey) ? { contentKey: { p256dh: contentKey.p256dh, auth: contentKey.auth } } : {}),
+  };
+}
+
 function assertClaim(value: NativePushClaim): NativePushClaim {
+  if ("providerToken" in value) {
+    const direct = parseNativePushDirect(value);
+    if (!direct) throw new Error("Native push registration returned an invalid token.");
+    return direct;
+  }
   if (!SUBSCRIPTION_ID.test(value.subscriptionId)
     || !CLAIM_TOKEN.test(value.claimToken)
     || !Number.isSafeInteger(value.claimExpiresAt)
@@ -104,11 +139,13 @@ export async function refreshNativePushStatus(): Promise<NativePushStatus> {
     nativeProjectionEnabled = false;
     return { state: "unavailable" };
   }
-  const status = await NativePush.getStatus();
+  const raw = await NativePush.getStatus();
   // Native state is only half of the authorization decision. Clear any prior
   // projection until the authenticated server confirms the same subscription.
   nativeProjectionEnabled = false;
-  return status;
+  const registration = parseNativePushDirect(raw);
+  const { providerToken: _token, environment: _environment, ...status } = raw as NativePushStatus & { providerToken?: unknown; environment?: unknown };
+  return registration && status.state === "enabled" ? { ...status, registration } : status;
 }
 
 export async function enableNativePush(input: NativePushEnableInput): Promise<NativePushClaim> {

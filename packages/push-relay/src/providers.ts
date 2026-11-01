@@ -2,7 +2,7 @@ import { createHash, createPrivateKey, sign } from "node:crypto";
 import { connect, constants, type ClientHttp2Session } from "node:http2";
 
 import {
-  type DeliveryInput, type Destination, type ProviderAdapter, type ProviderClass, type ProviderReply, ProviderTransportError,
+  type ActivityInput, type DeliveryInput, type Destination, type ProviderAdapter, type ProviderClass, type ProviderReply, ProviderTransportError,
 } from "./types.ts";
 
 const APNS_ORIGIN = {
@@ -51,6 +51,26 @@ const ttlSeconds = (kind: DeliveryInput["kind"]): number => kind === "mention" |
 /** Provider payload ceiling (APNs and FCM both allow 4 KiB); beyond it the sealed text is left out. */
 const MAX_PROVIDER_PAYLOAD_BYTES = 4096;
 const collapseId = (tag: string): string => createHash("sha256").update(tag).digest("base64url").slice(0, 32);
+/** ActivityKit decodes a `Date` in `content-state` with JSONDecoder's default
+ *  strategy: seconds since 2001-01-01, not since 1970. */
+const APPLE_REFERENCE_EPOCH = 978_307_200;
+
+/** `aps` for a Live Activity: the device keeps the chat's words and draws them
+ *  beside this state (`PolythLiveActivityWidget.swift`). */
+export const apnsActivityBody = (input: ActivityInput, nowSeconds: number): string => JSON.stringify({
+  aps: {
+    timestamp: nowSeconds,
+    event: input.event,
+    "content-state": {
+      state: input.state,
+      waiting: input.waiting,
+      working: input.working,
+      ...(input.startedAt !== undefined ? { startedAt: input.startedAt - APPLE_REFERENCE_EPOCH } : {}),
+    },
+    "stale-date": input.staleAt,
+    ...(input.dismissAt !== undefined ? { "dismissal-date": input.dismissAt } : {}),
+  },
+});
 
 const apnsBody = (input: DeliveryInput, notice: { title: string; body: string }, sealed: string | undefined): string => {
   const build = (withSealed: boolean) => JSON.stringify({
@@ -200,6 +220,32 @@ export class ApnsProvider implements ProviderAdapter {
       body: apnsBody(input, notice, input.sealed),
       signal,
     };
+    return this.send(request);
+  }
+
+  async deliverActivity(destination: Destination, input: ActivityInput, signal?: AbortSignal): Promise<ProviderClass> {
+    if (destination.platform !== "ios" || !destination.environment || destination.channel !== "liveactivity") return "config";
+    let authorization: string;
+    try { authorization = `bearer ${this.jwt()}`; } catch { return "config"; }
+    const now = this.now();
+    return this.send({
+      origin: APNS_ORIGIN[destination.environment],
+      path: `/3/device/${encodeURIComponent(destination.providerToken)}`,
+      headers: {
+        authorization,
+        "apns-topic": `${this.options.topic}.push-type.liveactivity`,
+        "apns-push-type": "liveactivity",
+        "apns-priority": input.urgent ? "10" : "5",
+        // An end clears a claim of live work, so it may arrive late; an update is replaced by the next one.
+        "apns-expiration": String(now + (input.event === "end" ? 3600 : 300)),
+        "content-type": "application/json",
+      },
+      body: apnsActivityBody(input, now),
+      signal,
+    });
+  }
+
+  private async send(request: ApnsRequest): Promise<ProviderClass> {
     try {
       return classifyApns(await this.transport.send(request));
     } catch (error) {

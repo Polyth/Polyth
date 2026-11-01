@@ -5,6 +5,12 @@ export const PUSH_KINDS = ["completed", "failed", "question", "permission", "sub
 export type PushKind = (typeof PUSH_KINDS)[number];
 export type Platform = "ios" | "android";
 export type Environment = "sandbox" | "production";
+/** What an iOS destination token addresses: the app (alerts) or its one Live
+ *  Activity. */
+export type Channel = "alert" | "liveactivity";
+/** The Live Activity's states (`PolythActivityAttributes.ContentState.state`). */
+export const ACTIVITY_STATES = ["needs-approval", "needs-reply", "working", "failed", "done"] as const;
+export type ActivityState = (typeof ACTIVITY_STATES)[number];
 
 export type ProviderClass = "success" | "permanent" | "auth" | "rate" | "transient" | "config" | "invalid";
 
@@ -19,7 +25,28 @@ export interface Destination {
   version: number;
   platform: Platform;
   environment?: Environment;
+  /** Absent means "alert". */
+  channel?: Channel;
   providerToken: string;
+}
+
+/** A Live Activity update, sent in process by a Polyth server that holds its
+ *  own APNs key (`ApnsProvider.deliverActivity`). Only enums, counts and
+ *  times: the chat's words stay on the device, which draws them from its own
+ *  copy. Times are Unix seconds. */
+export interface ActivityInput {
+  event: "update" | "end";
+  state: ActivityState;
+  /** Start of the current work, for the system-drawn timer. */
+  startedAt?: number;
+  /** Other chats waiting for a person / working. */
+  waiting: number;
+  working: number;
+  staleAt: number;
+  /** End only: when the final state leaves the Lock Screen. */
+  dismissAt?: number;
+  /** False sends at APNs priority 5 (a heartbeat outside the update budget). */
+  urgent: boolean;
 }
 
 export interface DeliveryInput {
@@ -34,6 +61,8 @@ export interface DeliveryInput {
 
 export interface ProviderAdapter {
   deliver(destination: Destination, input: DeliveryInput, signal?: AbortSignal): Promise<ProviderClass>;
+  /** Absent: the platform has no Live Activities. */
+  deliverActivity?(destination: Destination, input: ActivityInput, signal?: AbortSignal): Promise<ProviderClass>;
   close?(): void;
 }
 

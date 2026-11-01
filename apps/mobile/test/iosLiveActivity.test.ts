@@ -114,7 +114,7 @@ test("the extension target compiles the widget and the App's shared attributes",
     const text = await readFile(path, "utf8");
     const all = assertClosedGraph(text);
     const added = [...all.keys()].filter((key) => key.startsWith("A2D15C0D2F5C"));
-    assert.equal(added.length, 17);
+    assert.equal(added.length, 18);
     for (const key of added) assert.ok(text.split(key).length - 1 >= 2, `${key} is defined but never referenced`);
 
     const target = assertEmbedded(all, "PolythLiveActivity");
@@ -130,10 +130,11 @@ test("the extension target compiles the widget and the App's shared attributes",
     assert.equal(configs.length, 2);
     for (const config of configs) {
       assert.match(config, /PRODUCT_BUNDLE_IDENTIFIER = com\.polyth\.mobile\.LiveActivity;/);
+      assert.match(config, /CODE_SIGN_ENTITLEMENTS = PolythLiveActivity\/PolythLiveActivity\.entitlements;/);
       assert.match(config, /IPHONEOS_DEPLOYMENT_TARGET = 16\.2;/);
       assert.match(config, /INFOPLIST_FILE = PolythLiveActivity\/Info\.plist;/);
     }
-    for (const file of ["PolythLiveActivity/PolythLiveActivityWidget.swift", "PolythLiveActivity/Info.plist", "App/PolythActivityAttributes.swift"]) {
+    for (const file of ["PolythLiveActivity/PolythLiveActivityWidget.swift", "PolythLiveActivity/Info.plist", "PolythLiveActivity/PolythLiveActivity.entitlements", "App/PolythActivityAttributes.swift"]) {
       await readFile(join(iosApp, file), "utf8");
     }
   });
@@ -186,7 +187,6 @@ test("the App declares, registers and gates the Live Activity plugin", async () 
   assert.match(plugin, /let jsName = "PolythLiveActivity"/);
   // Only the bundled shell or the current Link proxy page may write to the Lock Screen.
   assert.match(plugin, /PolythLinkPlugin\.ownsCurrentProxy\(url\)/);
-  assert.doesNotMatch(plugin, /pushType: \.token/);
   const extension = await readFile(join(iosApp, "PolythLiveActivity/Info.plist"), "utf8");
   assert.match(extension, /<string>com\.apple\.widgetkit-extension<\/string>/);
 });
@@ -200,7 +200,33 @@ test("the activity turns stale when the page's confirmation runs out, and stale 
   assert.doesNotMatch(plugin, /if current\.content\.state != state/, "a heartbeat with unchanged content must still move the stale date");
   const widget = await readFile(join(iosApp, "PolythLiveActivity/PolythLiveActivityWidget.swift"), "utf8");
   assert.match(widget, /if state\.state == "working", !stale, let startedAt = state\.startedAt \{\n\s+Text\(timerInterval:/);
-  for (const use of ["Trailing(state: state, stale: stale)", "Trailing(state: context.state, stale: context.isStale)", "CompactTrailing(state: context.state, stale: context.isStale)"]) {
+  for (const use of ["Trailing(state: state, stale: stale)", "Trailing(state: state, stale: context.isStale)", "CompactTrailing(state: state, stale: context.isStale)"]) {
     assert.ok(widget.includes(use), use);
   }
+});
+
+test("a pushed update carries no words: the widget draws them from the App's shared Keychain copy", async () => {
+  const attributes = await readFile(join(iosApp, "App/PolythActivityAttributes.swift"), "utf8");
+  // A push brings only these; every other field must decode as absent.
+  assert.match(attributes, /var state: String\n/);
+  for (const field of ["sessionId: String?", "title: String?", "detail: String?", "label: String?", "summary: String?", "staleHint: String?", "done: Int?", "total: Int?", "waiting: Int?", "working: Int?"]) {
+    assert.ok(attributes.includes(`var ${field}`), field);
+  }
+  assert.match(attributes, /kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/);
+  const group = "$(AppIdentifierPrefix)com.polyth.mobile.live-activity";
+  for (const file of ["App/App.entitlements", "PolythLiveActivity/PolythLiveActivity.entitlements"]) {
+    assert.ok((await readFile(join(iosApp, file), "utf8")).includes(`<string>${group}</string>`), file);
+  }
+  const widget = await readFile(join(iosApp, "PolythLiveActivity/PolythLiveActivityWidget.swift"), "utf8");
+  assert.match(widget, /PolythLiveActivityStore\.read\(PolythLiveActivityStore\.Snapshot\.self/);
+  // The question or task line belongs to the state it was written for.
+  assert.match(widget, /detail: same \? last\?\.detail \?\? "" : ""/);
+  const plugin = await readFile(join(iosApp, "App/PolythLiveActivityPlugin.swift"), "utf8");
+  assert.match(plugin, /pushType: \.token/);
+  assert.match(plugin, /self\.remember\(state\)/);
+  // The token goes to the page, which registers it with its own server over Polyth Link.
+  assert.match(plugin, /notifyListeners\("pushToken", data: \["providerToken": token, "environment": environment\]/);
+  // Another connection/account's activity ends, so its server cannot push into this island.
+  assert.match(plugin, /if UserDefaults\.standard\.string\(forKey: Self\.ownerKey\) != owner \{[\s\S]*?activity\.end\(nil, dismissalPolicy: \.immediate\)/);
+  assert.doesNotMatch(plugin, /relay/i);
 });

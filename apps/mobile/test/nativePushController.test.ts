@@ -71,10 +71,24 @@ test("the content key from native enable is passed to the server claim, and only
   const seen: unknown[] = [];
   const { bridge, server } = setup();
   bridge.enable = async () => ({ ...claim, contentKey });
-  server.claim = async (_token, key) => { seen.push(key); return { subscriptionId: claim.subscriptionId }; };
+  server.claim = async (value) => { seen.push(value.contentKey); return { subscriptionId: claim.subscriptionId }; };
   await new NativePushController(bridge, server).enable(input);
   const plain = setup();
-  plain.server.claim = async (_token, key) => { seen.push(key); return { subscriptionId: claim.subscriptionId }; };
+  plain.server.claim = async (value) => { seen.push(value.contentKey); return { subscriptionId: claim.subscriptionId }; };
   await plain.controller.enable(input);
   assert.deepEqual(seen, [contentKey, undefined]);
+});
+
+test("direct mode: the APNs token goes to the server, and a foreground re-sends the current registration", async () => {
+  const registration = { subscriptionId: claim.subscriptionId, providerToken: "ab".repeat(32), environment: "production" as const };
+  const sent: unknown[] = [];
+  const { bridge, server } = setup();
+  bridge.enable = async () => registration;
+  server.claim = async (value) => { sent.push(value); return { subscriptionId: registration.subscriptionId }; };
+  const controller = new NativePushController(bridge, server);
+  assert.equal((await controller.enable(input)).claimed, true);
+  bridge.status = async () => ({ state: "enabled", subscriptionId: registration.subscriptionId, registration: { ...registration, providerToken: "cd".repeat(32) } });
+  await controller.setForeground(input, true);
+  await controller.setForeground(input, false);
+  assert.deepEqual(sent, [registration, { ...registration, providerToken: "cd".repeat(32) }]);
 });

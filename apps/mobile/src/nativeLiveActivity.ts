@@ -3,15 +3,22 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor
 import {
   liveActivitySessionFromUrl,
   normalizeLiveActivitySnapshot,
+  normalizeLiveActivityTexts,
+  parseLiveActivityPushToken,
+  type LiveActivityPushToken,
   type LiveActivitySnapshot,
+  type LiveActivityTexts,
 } from "./liveActivityPayload.ts";
 
 export {
+  LIVE_ACTIVITY_COUNTS,
   liveActivitySessionFromUrl,
   liveActivitySnapshotKey,
   normalizeLiveActivitySnapshot,
+  type LiveActivityPushToken,
   type LiveActivitySnapshot,
   type LiveActivityState,
+  type LiveActivityTexts,
 } from "./liveActivityPayload.ts";
 
 export interface NativeLiveActivityStatus {
@@ -21,10 +28,18 @@ export interface NativeLiveActivityStatus {
   enabled: boolean;
 }
 
+/** Whether the activity takes pushes for this page (an account was named and
+ *  the build has an APNs environment). */
+export interface NativeLiveActivityContext {
+  push: boolean;
+}
+
 interface NativeLiveActivityPlugin {
   getStatus(): Promise<NativeLiveActivityStatus>;
   update(options: { snapshot: LiveActivitySnapshot; staleAt?: number }): Promise<{ active: boolean }>;
   end(options: { final?: LiveActivitySnapshot }): Promise<{ active: boolean }>;
+  setContext(options: { accountId?: string; texts: LiveActivityTexts }): Promise<NativeLiveActivityContext>;
+  addListener(event: "pushToken", listener: (token: unknown) => void): Promise<PluginListenerHandle>;
 }
 
 const NativeLiveActivity = registerPlugin<NativeLiveActivityPlugin>("PolythLiveActivity");
@@ -58,6 +73,33 @@ export async function endNativeLiveActivity(final?: LiveActivitySnapshot): Promi
   if (!nativeLiveActivityAvailable()) return;
   const normalized = final ? normalizeLiveActivitySnapshot(final) : undefined;
   await NativeLiveActivity.end(normalized ? { final: normalized } : {});
+}
+
+/** Hands native the words a push cannot carry and, with an account, lets the
+ * activity take pushes for this page's connection/account. Call it before the
+ * first update: an activity started without a push token never takes one. */
+export async function setNativeLiveActivityContext(input: { accountId?: string; texts: LiveActivityTexts }): Promise<NativeLiveActivityContext> {
+  if (!nativeLiveActivityAvailable()) return { push: false };
+  const context = await NativeLiveActivity.setContext({ ...input, texts: normalizeLiveActivityTexts(input.texts) });
+  return { push: context.push === true };
+}
+
+/** Each push token of the activity, for the page to register with its server. */
+export function onNativeLiveActivityPushToken(listener: (token: LiveActivityPushToken) => void): () => void {
+  if (!nativeLiveActivityAvailable()) return () => {};
+  let removed = false;
+  let handle: PluginListenerHandle | undefined;
+  void NativeLiveActivity.addListener("pushToken", (raw) => {
+    const token = parseLiveActivityPushToken(raw);
+    if (token) listener(token);
+  }).then((next) => {
+    if (removed) void next.remove();
+    else handle = next;
+  }).catch(() => undefined);
+  return () => {
+    removed = true;
+    void handle?.remove();
+  };
 }
 
 /** Taps on the activity arrive as `polyth://live-activity/<id>`. The caller

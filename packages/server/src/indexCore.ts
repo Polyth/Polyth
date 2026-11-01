@@ -129,7 +129,7 @@ import { createPushNotifier, createPushService, plainTextExcerpt, type PushPaylo
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
-import { createNativePushService, nativePushRoutes } from "./nativePush.ts";
+import { apnsFromDir, createNativePushService, nativePushRoutes } from "./nativePush.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
@@ -149,7 +149,8 @@ import {
 import { assistRoutes } from "./routes/assist.ts";
 import { promptHistoryRoutes } from "./routes/promptHistory.ts";
 import { sharingRoutes } from "./routes/sharing.ts";
-import { createSessionSharingService, privateSessionOwner, sessionAccess } from "./sessionSharing.ts";
+import { createSessionSharingService, privateSessionOwner, rowForReader, sessionAccess } from "./sessionSharing.ts";
+import { projectVisibleToUser } from "./accountLimits.ts";
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -675,10 +676,18 @@ export async function boot(opts: BootOptions = {}) {
   // Sessions and package transitions can emit before WS attaches. This box
   // starts forwarding as soon as the live broadcaster is installed.
   let live: WsGateway | null = null;
+  // Phone Live Activities that show a chat re-evaluate when it changes; set
+  // once the native push service exists (sessions may emit before that).
+  let liveActivityTouched: ((sessionId: string) => void) | null = null;
   const eventWaiters = createSessionEventWaiters();
   const broadcast: Broadcaster = {
-    event: (e: SessionEvent) => { live?.event(e); eventWaiters.event(e.sessionId); },
-    projection: (p: SessionProjection) => { live?.projection(p); eventWaiters.projection(); personalMcpReprovision?.projectionChanged(p); },
+    event: (e: SessionEvent) => { live?.event(e); eventWaiters.event(e.sessionId); liveActivityTouched?.(e.sessionId); },
+    projection: (p: SessionProjection) => {
+      live?.projection(p);
+      eventWaiters.projection();
+      personalMcpReprovision?.projectionChanged(p);
+      liveActivityTouched?.(p.id);
+    },
     notification: (n, recipient) => live?.notification?.(n, recipient),
     pluginChanged: (packageId) => live?.pluginChanged?.(packageId),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
@@ -2311,8 +2320,27 @@ export async function boot(opts: BootOptions = {}) {
   const nativePush = createNativePushService({
     file: `${dataDir}/native-push.json`,
     relayOrigin: process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN,
+    // This server's own APNs key, if its owner placed one: then phones
+    // register over Polyth Link and this process sends to APNs itself.
+    apns: apnsFromDir(`${dataDir}/native-push`),
     authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
+    // A Live Activity only ever reflects chats this person could open in the
+    // navigator: same Space, visible project, readable row (as the WS fan-out).
+    activityViews: async ({ userId, spaceId }, sessionIds) => {
+      const views = new Map<string, import("./nativePush.ts").LiveActivityView>();
+      const attention = await store.attentionFor(sessionIds, userId);
+      for (const id of sessionIds) {
+        const row = await store.projection(id);
+        if (!row || row.spaceId !== spaceId || !projectVisibleToUser(userId, row.projectId) || !rowForReader(row, userId, spaceId)) continue;
+        views.set(id, {
+          status: row.status, backgroundWork: row.backgroundWork, resume: row.resume, lastTurnAt: row.lastTurnAt, updatedAt: row.updatedAt,
+          ...(attention[id] ? { attention: attention[id] } : {}),
+        });
+      }
+      return views;
+    },
   });
+  liveActivityTouched = nativePush.sessionTouched;
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
@@ -3488,6 +3516,8 @@ export async function boot(opts: BootOptions = {}) {
       // Destroying a TCP socket is not handler completion: admission tracks
       // request JS and fences leftovers before services go away.
       live?.close();
+      liveActivityTouched = null;
+      nativePush.close();
       await runtimeStorageMaintenance.dispose();
       await packageLifecycle.stopIngress();
       httpAdmission.stop();

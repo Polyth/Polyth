@@ -82,3 +82,38 @@ export function liveActivitySessionFromUrl(raw: string): string | undefined {
   }
   return SESSION_ID.test(id) ? id : undefined;
 }
+
+/** Words a pushed update cannot carry (the relay sees no text): the status
+ *  word for each state and the line about the other chats, pre-rendered by
+ *  the page for 1…99 so plural forms stay the page's job. The widget draws a
+ *  push from these and the last snapshot this device showed. */
+export interface LiveActivityTexts {
+  labels: Record<LiveActivityState, string>;
+  /** Index n-1 reads "n other chats waiting". */
+  waiting: string[];
+  working: string[];
+}
+
+export const LIVE_ACTIVITY_COUNTS = 99;
+
+export function normalizeLiveActivityTexts(value: LiveActivityTexts): LiveActivityTexts {
+  const labels = {} as Record<LiveActivityState, string>;
+  for (const state of STATES) labels[state as LiveActivityState] = clamp(value.labels[state as LiveActivityState] ?? "", LIVE_ACTIVITY_LIMITS.label);
+  const lines = (list: string[]) => list.slice(0, LIVE_ACTIVITY_COUNTS).map((line) => clamp(String(line), LIVE_ACTIVITY_LIMITS.summary));
+  return { labels, waiting: lines(value.waiting), working: lines(value.working) };
+}
+
+/** The activity's APNs push token, which the page registers with its own
+ *  server over Polyth Link (that server holds the APNs key). */
+export interface LiveActivityPushToken {
+  providerToken: string;
+  environment: "sandbox" | "production";
+}
+
+export function parseLiveActivityPushToken(value: unknown): LiveActivityPushToken | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { providerToken, environment } = value as Record<string, unknown>;
+  if (typeof providerToken !== "string" || !/^[0-9a-f]{64,512}$/u.test(providerToken)
+    || (environment !== "sandbox" && environment !== "production")) return undefined;
+  return { providerToken, environment };
+}

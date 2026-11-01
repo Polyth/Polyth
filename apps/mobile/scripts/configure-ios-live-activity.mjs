@@ -37,6 +37,7 @@ export const IDS = {
   proxy: id(15),
   dependency: id(16),
   embedPhase: id(17),
+  entitlementsRef: id(18),
 };
 
 // Existing objects of the Capacitor project this patch attaches to.
@@ -96,6 +97,7 @@ function configuration(objectId, name) {
 \t\t\tisa = XCBuildConfiguration;
 \t\t\tbuildSettings = {
 \t\t\t\tAPPLICATION_EXTENSION_API_ONLY = YES;
+\t\t\t\tCODE_SIGN_ENTITLEMENTS = ${NAME}/${NAME}.entitlements;
 \t\t\t\tCODE_SIGN_STYLE = Automatic;
 \t\t\t\tCURRENT_PROJECT_VERSION = 1;
 \t\t\t\tINFOPLIST_FILE = ${NAME}/Info.plist;
@@ -161,6 +163,7 @@ export function patchProject(project) {
   p = before(p, "/* End PBXFileReference section */\n",
     `\t\t${IDS.widgetRef} /* ${WIDGET} */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ${WIDGET}; sourceTree = "<group>"; };\n`
     + `\t\t${IDS.plistRef} /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };\n`
+    + `\t\t${IDS.entitlementsRef} /* ${NAME}.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ${NAME}.entitlements; sourceTree = "<group>"; };\n`
     + `\t\t${IDS.productRef} /* ${NAME}.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ${NAME}.appex; sourceTree = BUILT_PRODUCTS_DIR; };\n`,
     "PBXFileReference section");
 
@@ -185,6 +188,7 @@ export function patchProject(project) {
 \t\t\tchildren = (
 \t\t\t\t${IDS.widgetRef} /* ${WIDGET} */,
 \t\t\t\t${IDS.plistRef} /* Info.plist */,
+\t\t\t\t${IDS.entitlementsRef} /* ${NAME}.entitlements */,
 \t\t\t);
 \t\t\tpath = ${NAME};
 \t\t\tsourceTree = "<group>";

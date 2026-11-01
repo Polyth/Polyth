@@ -277,13 +277,26 @@ a partial intent handler.
 
 ## Notifications
 
-Mobile push is a native-controller and relay flow. Permission is requested only
-from the explicit Mobile push notifications setting, never at startup or
-pairing. Android requests `POST_NOTIFICATIONS` only on Android 13+; a fresh
-install remains actionable until that request has been made. iOS registers APNs
-only after authorization. The native controller keeps provider tokens and relay
-manage capabilities in secure native storage, while web content receives only
-semantic state and a short-lived claim.
+Mobile push is a native-controller flow with two senders. Permission is
+requested only from the explicit Mobile push notifications setting, never at
+startup or pairing. Android requests `POST_NOTIFICATIONS` only on Android 13+; a
+fresh install remains actionable until that request has been made. iOS
+registers APNs only after authorization.
+
+- **Direct (iOS builds without a relay origin, the shipped setup).** The
+  Polyth server itself holds the app's APNs key (see
+  [Direct APNs key](#direct-apns-key)) and sends to APNs; there is no separate
+  push service. `enable` files the registration natively under a fresh
+  subscription id and hands the page that id, the APNs token and the build's
+  APNs environment; the page registers them with its server
+  (`POST /api/native-push`) over the same Polyth Link connection it uses for
+  everything else, and re-sends them on every foreground so a rotated token
+  arrives. Only the last hop, server → APNs → phone, leaves Link: a suspended
+  iPhone has no connection, and only APNs can reach it.
+- **Relay (a build with `POLYTH_PUSH_RELAY_ORIGIN`, Android).** The native
+  controller keeps provider tokens and relay manage capabilities in secure
+  native storage, while web content receives only semantic state and a
+  short-lived claim that the server redeems with the blind relay.
 
 Provider data is strictly limited to version, subscription id, notification
 UUID, kind, and opaque tag. Receipt validates and displays an OS notification
@@ -300,12 +313,30 @@ The app uses `polyth_activity` for completed/subagent activity and
 browser notifications remain the fallback when native push is unavailable or
 not successfully claimed. Inside the native app, Settings shows only the Mobile
 push row: browser Web Push can never subscribe from the WebView, so its row is
-hidden there. A build without a relay origin (`POLYTH_PUSH_RELAY_ORIGIN` +
-`POLYTH_PUSH_ENVIRONMENT` on iOS, `-PpolythPushRelayOrigin` +
-`google-services.json` on Android) reports `unavailable`, and the row says local
+hidden there. An iOS build without `POLYTH_PUSH_ENVIRONMENT`, an Android build
+without `-PpolythPushRelayOrigin` + `google-services.json`, or a server with
+neither an APNs key nor a relay reports `unavailable`, and the row says local
 alerts still appear while the app is open. APNs/FCM provider delivery, signing, Firebase
 configuration, and device lifecycle behavior remain external-verification work;
 the repository tests do not make provider calls.
+
+### Direct APNs key
+
+Only the Apple developer team that owns the app's bundle id
+(`com.polyth.mobile`) can create its APNs key, so direct push works on that
+team's own servers. The server reads two files from its data directory and
+re-reads them when they change (no restart):
+
+- `<dataDir>/native-push/apns.json`: `{"teamId": "<10 chars>", "keyId":
+  "<10 chars>"}`, optionally `"topic"` (default `com.polyth.mobile`);
+- `<dataDir>/native-push/apns.p8` (mode 0600): the key from Apple Developer →
+  Keys → Apple Push Notifications service (APNs). A copy flattened onto one
+  line by a form field is accepted.
+
+One key serves both APNs environments: development builds register as
+`sandbox`, TestFlight and App Store builds as `production`. An unusable pair
+is logged without its contents and leaves direct push off. The key never
+leaves the server; phones only ever send it their tokens.
 
 ## Live Activity (Dynamic Island)
 
@@ -334,11 +365,12 @@ extension (shared `PolythActivityAttributes.swift`).
   island's right in place of the timer. The minimal presentation is the mark
   alone in the state's colour (the gradient while working). Android's
   monochrome `ic_stat_polyth` is a separate, older glyph.
-- **Freshness.** Updates are local only, throttled to one per second and sent
-  only when the snapshot changes. The page's socket closes the moment it hides,
-  so nothing can tell the activity that a turn ended or a question was answered
-  elsewhere while the phone is locked. Every update therefore carries a stale
-  date two minutes (`LIVE_ACTIVITY_TRUST_MS`) after the server last confirmed
+- **Freshness.** Local updates are throttled to one per second and sent only
+  when the snapshot changes. The page's socket closes the moment it hides, so
+  without push (below) nothing can tell the activity that a turn ended or a
+  question was answered elsewhere while the phone is locked. Every update
+  therefore carries a stale date two minutes (`LIVE_ACTIVITY_TRUST_MS`) after
+  the server last confirmed
   the store current — the sync receipts for both the open chat and the list
   (`getSyncFreshness`). While they hold, a 30-second heartbeat moves the date
   on, so a long quiet turn never goes stale under an open app; once they stop
@@ -351,13 +383,48 @@ extension (shared `PolythActivityAttributes.swift`).
   waiting (`refreshSessionIds`, see the [architecture](../dev/architecture.md)
   subscribe contract), so a chat that ended in another project while the phone
   slept no longer keeps the activity on "Working" or "Reply needed".
-  There is deliberately no ActivityKit push token: remote updates would need
-  APNs `liveactivity` pushes through the relay, which would expose plaintext
-  content to it (Live Activities have no service-extension decryption step).
   When nothing is live any more the activity ends with a final Done/Failed
   snapshot that stays ten minutes; a chat that vanished ends it at once. The
   first evaluation after a page load always reaches native, so an activity left
   by a previous process or server is replaced or ended.
+- **Push while suspended.** When the server holds the app's APNs key
+  ([Direct APNs key](#direct-apns-key)) it keeps the activity current while
+  the app is suspended, over the same path as alerts: the phone talks only to
+  its own server over Polyth Link, and the server sends to APNs. A Live
+  Activity push cannot be decrypted on the device (no service-extension step),
+  so **no words leave the server**: a push carries only the state, the work's
+  start, and how many other chats wait or work. The widget draws the words
+  from the copy the App keeps in a Keychain group it shares with the widget
+  (`PolythLiveActivityStore`, `com.polyth.mobile.live-activity`): the last
+  snapshot the page showed, plus the page's status word per state and count
+  lines pre-rendered for 1–99 (plural forms stay the page's job). The question
+  or task line and progress are drawn only while the pushed state equals the
+  one they were written for. The flow:
+  1. `setContext` (before the first update) gives native the account and the
+     texts; the activity is then requested with `pushType: .token`. An
+     activity another connection/account started is ended first, so a server
+     the page no longer talks to cannot push into the island.
+  2. Native reports each push token as a `pushToken` event; the page
+     registers it (`POST /api/native-push/live-activity
+     {providerToken, environment}`) when `GET` says the server can send.
+  3. The page then sends `PUT …/live-activity` with `{sessionId, others,
+     shown}` whenever the shown chat, the chats its line counts (at most 20)
+     or the shown state change, and `DELETE` when the activity ends.
+  4. The server (`packages/server/src/nativePush.ts`) re-evaluates those chats
+     about 1.5 s after any of their events or row changes, as the person sees
+     them (same Space, visible project, readable row; `liveActivityState`
+     mirrors `resolveSessionStatus`), and pushes a change at APNs priority 10
+     (`ApnsProvider.deliverActivity` from `@polyth/push-relay`, in process).
+     Unchanged live content is re-sent every 4 minutes at priority 5, so an
+     accepted track earns the page a 10-minute stale date
+     (`LIVE_ACTIVITY_PUSH_TRUST_MS`) instead of two. When the shown chat is no
+     longer live and no counted chat is, the server sends `end`: a finished or
+     failed chat stays ten minutes, a vanished or unreadable one leaves at
+     once. Tracking survives a server restart and lapses after 8 hours (iOS
+     ends the activity then); a token APNs retires is dropped.
+  A push cannot switch the island to another chat (that needs its title); a
+  question from another chat moves only the count, and an alert still
+  announces it.
 - **Trust.** Only the bundled shell or the page on the current Link proxy may
   drive the plugin (same gate as the push semantic reader). Native re-validates
   state, session id and bounds every string.
@@ -374,10 +441,12 @@ extension (shared `PolythActivityAttributes.swift`).
   and retries when signing or the archive fails, so TestFlight never breaks
   over it. The person can turn Live Activities off in iOS Settings → Polyth.
 - **Evidence.** Projection, payload bounds, publisher ordering and stale-date
-  anchoring, the reconnect re-read and the Xcode project patch are unit-tested;
-  the Swift stale-date and timer changes are checked as source text only. The
-  Swift sources were not compiled here (no Xcode on Linux) and nothing is
-  device-verified yet.
+  anchoring, the reconnect re-read, the Xcode project patch, the APNs
+  `liveactivity` request shape, the key loader and the server's
+  registration/track/push cycle are unit-tested; the Swift stale-date, timer,
+  push-token, owner and widget store changes are checked as source text only.
+  The Swift sources were not compiled here (no Xcode on Linux), and push is
+  device-verified only once a server holds a key.
 
 ## Permissions
 

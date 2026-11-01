@@ -5,7 +5,9 @@ import WidgetKit
 /// Renders Polyth's Live Activity: the chat that needs a person (a question or
 /// an approval) or the one that is working, in the Dynamic Island and on the
 /// Lock Screen. Content arrives localized from the web shell through
-/// `PolythLiveActivityPlugin`; this extension only lays it out. Chat text is
+/// `PolythLiveActivityPlugin`; this extension only lays it out. A server push
+/// brings only the state and counts: the words then come from the copy the
+/// App keeps in `PolythLiveActivityStore` (see `shown`). Chat text is
 /// `privacySensitive`, so the system can redact it on a locked device.
 @main
 struct PolythLiveActivityBundle: WidgetBundle {
@@ -14,11 +16,59 @@ struct PolythLiveActivityBundle: WidgetBundle {
     }
 }
 
-private typealias State = PolythActivityAttributes.ContentState
+/// What the activity draws: a local update as it came, a push completed from
+/// the store. The question or task line and the progress belong to the state
+/// the page last showed, so a push to another state drops them.
+private struct State {
+    var state: String
+    var sessionId: String
+    var title: String
+    var detail: String
+    var label: String
+    var summary: String
+    var staleHint: String
+    var startedAt: Date?
+    var done: Int
+    var total: Int
+}
+
+private func shown(_ content: PolythActivityAttributes.ContentState) -> State {
+    if let title = content.title {
+        return State(
+            state: content.state, sessionId: content.sessionId ?? "", title: title, detail: content.detail ?? "",
+            label: content.label ?? "", summary: content.summary ?? "", staleHint: content.staleHint ?? "",
+            startedAt: content.startedAt, done: content.done ?? 0, total: content.total ?? 0
+        )
+    }
+    let last = PolythLiveActivityStore.read(PolythLiveActivityStore.Snapshot.self, account: "snapshot")
+    let texts = PolythLiveActivityStore.read(PolythLiveActivityStore.Texts.self, account: "texts")
+    let same = last?.state == content.state
+    // "n waiting · n working", as the page joins it.
+    let line = { (list: [String]?, count: Int?) -> String in
+        guard let list, let count, count > 0, !list.isEmpty else { return "" }
+        return list[min(count, list.count) - 1]
+    }
+    let summary = [line(texts?.waiting, content.waiting), line(texts?.working, content.working)]
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    return State(
+        state: content.state,
+        sessionId: last?.sessionId ?? "",
+        title: last?.title ?? "Polyth",
+        detail: same ? last?.detail ?? "" : "",
+        label: texts?.labels[content.state] ?? "",
+        summary: summary,
+        staleHint: last?.staleHint ?? "",
+        startedAt: content.startedAt,
+        done: same ? last?.done ?? 0 : 0,
+        total: same ? last?.total ?? 0 : 0
+    )
+}
 
 /// The tap opens the chat only in the page that published it; other pages
 /// ignore the URL and the app simply comes to the foreground.
 private func openURL(_ state: State) -> URL? {
+    guard !state.sessionId.isEmpty else { return nil }
     var parts = URLComponents()
     parts.scheme = "polyth"
     parts.host = "live-activity"
@@ -250,38 +300,40 @@ private struct LockScreen: View {
 struct PolythLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PolythActivityAttributes.self) { context in
-            LockScreen(state: context.state, stale: context.isStale)
-                .widgetURL(openURL(context.state))
+            let state = shown(context.state)
+            LockScreen(state: state, stale: context.isStale)
+                .widgetURL(openURL(state))
         } dynamicIsland: { context in
-            DynamicIsland {
+            let state = shown(context.state)
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Mark(size: 32).padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Trailing(state: context.state, stale: context.isStale).font(.callout).foregroundStyle(.secondary)
+                    Trailing(state: state, stale: context.isStale).font(.callout).foregroundStyle(.secondary)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(spacing: 0) {
-                        StatusLabel(state: context.state)
-                        Text(context.state.title).font(.headline).lineLimit(1).privacySensitive()
+                        StatusLabel(state: state)
+                        Text(state.title).font(.headline).lineLimit(1).privacySensitive()
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Details(state: context.state, stale: context.isStale)
+                    Details(state: state, stale: context.isStale)
                 }
             } compactLeading: {
                 Mark(size: 20)
             } compactTrailing: {
-                CompactTrailing(state: context.state, stale: context.isStale)
+                CompactTrailing(state: state, stale: context.isStale)
             } minimal: {
                 Mark(
                     size: 20,
-                    tint: context.state.state == "working" ? nil : stateTint(context.state.state),
-                    label: context.state.label
+                    tint: state.state == "working" ? nil : stateTint(state.state),
+                    label: state.label
                 )
             }
-            .widgetURL(openURL(context.state))
-            .keylineTint(stateTint(context.state.state))
+            .widgetURL(openURL(state))
+            .keylineTint(stateTint(state.state))
         }
     }
 }

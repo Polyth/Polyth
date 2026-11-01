@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { parseNativePushOpen } from "../src/nativePushPayload.ts";
 
-test("native push bridge exposes only semantic claim and pending-open values", async () => {
+test("native push bridge exposes only a claim (or, direct, the token for this server) and pending-open values", async () => {
   const source = await readFile(new URL("../src/nativePush.ts", import.meta.url), "utf8");
-  assert.match(source, /interface NativePushClaim[\s\S]*subscriptionId[\s\S]*claimToken[\s\S]*claimExpiresAt/);
+  assert.match(source, /interface NativePushRelayClaim[\s\S]*subscriptionId[\s\S]*claimToken[\s\S]*claimExpiresAt/);
+  // Direct mode only: the page's own server holds the APNs key, so it needs the token.
+  assert.match(source, /interface NativePushDirect[\s\S]*providerToken[\s\S]*environment/);
   assert.match(source, /consumePendingOpen\(\)/);
-  assert.doesNotMatch(source, /providerToken|manageToken|senderSecret|identitySecret/);
+  assert.doesNotMatch(source, /manageToken|senderSecret|identitySecret/);
 });
 
 test("local notification suppression requires matching authoritative server state", async () => {
@@ -50,7 +52,12 @@ test("native source keeps provider material out of the Capacitor web contract", 
   ]);
   assert.match(swift, /CAPPluginMethod\(name: "enable"/);
   assert.match(android, /@PluginMethod\s+public void enable/);
-  assert.doesNotMatch(swift, /call\.resolve\([^\n]*providerToken/);
+  // iOS resolves the token only in direct mode (no relay origin in the build).
+  const direct = swift.slice(swift.indexOf("private func registerDirect("), swift.indexOf("private func rotate(token:"));
+  assert.match(swift, /if relayOrigin\(\) == nil \{ registerDirect\(/);
+  assert.match(direct, /"providerToken": token, "environment": environment/);
+  const relayed = swift.slice(swift.indexOf("private func register(token:"), swift.indexOf("private func registerDirect("));
+  assert.doesNotMatch(relayed, /"providerToken": token\]?\)?, "environment"|result\["providerToken"\]/);
   assert.doesNotMatch(android, /call\.resolve\([^\n]*providerToken/);
 });
 
@@ -209,5 +216,5 @@ test("the claim bridge validates the content key, drops an invalid one, and keep
   assert.match(source, /0x04/);
   assert.match(source, /dropped, not fatal/);
   assert.doesNotMatch(source, /privateKey|private_key|pkcs8/i);
-  assert.match(web, /claim: \(claimToken, contentKey\) =>[\s\S]*contentKey \? \{ claimToken, contentKey \} : \{ claimToken \}/);
+  assert.match(web, /claim: \(claim\) => request<\{ subscriptionId: string \}>\("\/api\/native-push", json\("POST", \{ \.\.\.claim \}\)\)/);
 });

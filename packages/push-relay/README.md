@@ -48,6 +48,15 @@ stays generic) and FCM gets a data-only high-priority message carrying
 4096 bytes is sent without `sealed`. Contract:
 [native push content](../../docs/mobile/native-push-content.md).
 
+`ApnsProvider.deliverActivity` sends an iOS Live Activity update
+(`apns-push-type: liveactivity` on `<topic>.push-type.liveactivity`, priority
+10 when `urgent` and 5 otherwise, an `aps` of `timestamp`, `event`,
+`content-state` with `startedAt` in seconds since 2001 as ActivityKit decodes a
+`Date`, `stale-date` and `dismissal-date`). It has no relay route: a Polyth
+server that holds its own APNs key calls it in process, and the input carries
+only a state, counts and times, never words
+([Live Activity](../../docs/mobile/platform-behavior.md#live-activity-dynamic-island)).
+
 The logger receives only `{subscriptionId, provider, status, code, latencyMs}`.
 It receives no provider response body, capability, binding, or provider token.
 AES-GCM also authenticates each token's

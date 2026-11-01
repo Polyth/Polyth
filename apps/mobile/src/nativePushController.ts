@@ -1,4 +1,4 @@
-import type { NativePushClaim, NativePushContentKey, NativePushEnableInput, NativePushStatus } from "./nativePush.ts";
+import type { NativePushClaim, NativePushEnableInput, NativePushStatus } from "./nativePush.ts";
 
 export interface NativePushBridge {
   status(): Promise<NativePushStatus>;
@@ -10,7 +10,8 @@ export interface NativePushBridge {
 export interface NativePushServer {
   /** Authenticated paired-device route; the server derives the account/Space. */
   status(): Promise<{ enabled: boolean; subscribed: boolean; subscriptionId?: string }>;
-  claim(claimToken: string, contentKey?: NativePushContentKey): Promise<{ subscriptionId: string }>;
+  /** A relay claim, or (direct mode) the device's APNs token; both over Polyth Link. */
+  claim(claim: NativePushClaim): Promise<{ subscriptionId: string }>;
   unregister(): Promise<void>;
 }
 
@@ -48,7 +49,7 @@ export class NativePushController {
   async enable(input: NativePushEnableInput): Promise<NativePushControllerResult> {
     const claim = await this.bridge.enable(input);
     try {
-      const result = await this.server.claim(claim.claimToken, claim.contentKey);
+      const result = await this.server.claim(claim);
       if (result.subscriptionId !== claim.subscriptionId) throw new Error("Native push claim did not match its subscription.");
       await this.bridge.setForeground({ accountId: input.accountId, active: true });
       return { status: await this.status(), claimed: true };
@@ -77,5 +78,9 @@ export class NativePushController {
 
   async setForeground(input: Pick<NativePushEnableInput, "accountId">, active: boolean): Promise<void> {
     await this.bridge.setForeground({ ...input, active });
+    if (!active) return;
+    // Direct mode: APNs may have rotated the token since; the server upserts.
+    const local = await this.bridge.status().catch(() => undefined);
+    if (local?.state === "enabled" && local.registration) await this.server.claim(local.registration).catch(() => undefined);
   }
 }

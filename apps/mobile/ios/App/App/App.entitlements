@@ -3,11 +3,13 @@
 <plist version="1.0">
 <dict>
 	<!-- The app's own group stays first so existing Keychain items keep their
-	     default group; the second is shared with the Notification Service Extension. -->
+	     default group; the second is shared with the Notification Service
+	     Extension, the third with the Live Activity widget. -->
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.polyth.mobile</string>
 		<string>$(AppIdentifierPrefix)com.polyth.mobile.push-content</string>
+		<string>$(AppIdentifierPrefix)com.polyth.mobile.live-activity</string>
 	</array>
 	<!-- Set per signing configuration; release builds must supply their own
 	     development/production value and never inherit a hard-coded default. -->

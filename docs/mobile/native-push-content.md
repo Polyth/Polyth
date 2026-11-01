@@ -6,6 +6,14 @@ record, while the push relay, APNs and FCM see only the generic text
 that device can open it. This document is the contract the host, the relay and
 both native apps implement; change it here first.
 
+The same sealing applies in direct mode, where the Polyth server holds the
+APNs key and sends itself ([notifications](platform-behavior.md#notifications)):
+the device's content key is registered with the server alongside its token,
+and APNs sees only the generic text. A Live Activity push cannot be sealed
+(iOS hands its `content-state` to the widget unopened), so it carries no text
+at all, only a state, counts and times; the widget draws the words from the
+App's own copy. See [Live Activity](platform-behavior.md#live-activity-dynamic-island).
+
 ## Device content key
 
 - One key per relay subscription, generated natively in `enable`: a P-256 ECDH

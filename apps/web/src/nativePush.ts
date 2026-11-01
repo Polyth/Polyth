@@ -36,7 +36,9 @@ function controller() {
     },
     {
       status: () => request<{ enabled: boolean; subscribed: boolean; subscriptionId?: string }>("/api/native-push", json("GET")),
-      claim: (claimToken, contentKey) => request<{ subscriptionId: string }>("/api/native-push", json("POST", contentKey ? { claimToken, contentKey } : { claimToken })),
+      // A relay claim, or (direct mode) the APNs token for this server's own
+      // sender; either way over the Polyth Link connection this page uses.
+      claim: (claim) => request<{ subscriptionId: string }>("/api/native-push", json("POST", { ...claim })),
       unregister: async () => { await request<{ ok: boolean }>("/api/native-push", json("DELETE")); },
     },
   );

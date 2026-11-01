@@ -41,13 +41,19 @@ export {
 export { NativePushController, type NativePushBridge, type NativePushServer } from "./nativePushController.ts";
 export {
   endNativeLiveActivity,
+  LIVE_ACTIVITY_COUNTS,
   liveActivitySnapshotKey,
   nativeLiveActivityAvailable,
   nativeLiveActivityStatus,
   onNativeLiveActivityOpen,
+  onNativeLiveActivityPushToken,
+  setNativeLiveActivityContext,
   updateNativeLiveActivity,
+  type LiveActivityPushToken,
   type LiveActivitySnapshot,
   type LiveActivityState,
+  type LiveActivityTexts,
+  type NativeLiveActivityContext,
   type NativeLiveActivityStatus,
 } from "./nativeLiveActivity.ts";
 
