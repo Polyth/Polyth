@@ -357,7 +357,7 @@
 }
 
 .mobile-composer-tray-item:focus-visible { box-shadow: var(--focus-ring); }
-@media (hover: hover) { .mobile-composer-tray-item:hover { background: var(--surface-overlay-hover); } }
+@media (hover: hover) { .mobile-composer-tray-item:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); } }
 
 .mobile-composer-tray-glyph {
   display: grid;

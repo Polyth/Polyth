@@ -197,7 +197,11 @@ the shell and every package stylesheet.
 - **Press composes.** Core gives `:active` a `scale(.98)` settle at zero
   specificity (a button that positions itself with a transform keeps it) and
   an inset `--surface-overlay-strong` wash over the fill; `Button` variants
-  own their press.
+  own their press. The phone shell's floating islands are the exception:
+  their buttons (☰, ✎, ⋮, ⧉ and a title shown as a control) press and stay
+  open (`aria-expanded`) as a glyph colour change to `--accent-text` alone,
+  with no plate, glow or settle; release fades it back (`styles.css`, phone
+  island block; looks recolour those glyphs at rest only).
 - **Disabled is gray and inert at rest.** No hover, press, tap highlight or
   pointer cursor. Every `:hover`/`:active` rule on a button carries the
   zero-specificity `:where(:not(:disabled))` guard (`:not(:disabled)` where
@@ -312,6 +316,10 @@ All from `apps/web/src/components/ui` (see `index.ts`):
   radios: give the action `entries` (its choices) and `value` (the current
   one, shown muted before a chevron). Selecting it shows those entries in
   place of the menu under a Back row; the footer belongs to the top level.
+  So does `header`: content before the entries, such as the head row naming
+  the session the phone ⋮ menu acts on (interactive rows take
+  `role="menuitem"` to join arrow keys). `anchorRef` places the menu against
+  another element than its trigger, e.g. the island that holds it.
   ```tsx
   <Menu label="Session actions" entries={[
     { id: "rename", label: "Rename", icon: EditIcon, onSelect: rename },

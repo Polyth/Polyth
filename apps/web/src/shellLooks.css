@@ -1083,7 +1083,8 @@ body[data-shell-look="paper"]:not(#\#) .mobile-nav-search {
   border-radius: 0 !important;
 }
 
-body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn {
+/* At rest only: pressed and open islands keep the shared accent glyph. */
+body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
   color: var(--text-dim);
 }
 
@@ -2587,7 +2588,8 @@ body[data-shell-look="editorial"]:not(#\#) .mobile-nav-project-name {
   font-weight: 600;
 }
 
-body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn {
+/* At rest only: pressed and open islands keep the shared accent glyph. */
+body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
   color: var(--text-dim);
 }
 

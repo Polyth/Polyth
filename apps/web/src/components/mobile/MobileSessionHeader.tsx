@@ -72,6 +72,7 @@ import SessionActivityDetails from "../SessionActivityDetails.tsx";
 import { useUiSettings } from "../../uiPrefs.ts";
 import { POLYTH_MARK_SRC } from "../../brandAsset.ts";
 import { MobileStatusIcon } from "./MobileStatusIcon.tsx";
+import MobileSessionMenu from "./MobileSessionMenu.tsx";
 import {
   closeSessionStatusPopover,
   useSessionStatusPopover,
@@ -758,6 +759,7 @@ export default function MobileSessionHeader() {
   // The new chat's edit mode borrows the actions island for its Done.
   const heroEditing = useHeroEditing();
   const [surface, setSurface] = useState<"island" | null>(null);
+  const actionsIslandRef = useRef<HTMLDivElement | null>(null);
   const pages = useSessionSummaryPages({ projectId: projectId ?? undefined, archived: false }, surface === "island" && projectId !== null);
   const [recentVisibleLimit, setRecentVisibleLimit] = useState(ISLAND_RECENT_LIMIT);
   const title = session
@@ -869,6 +871,7 @@ export default function MobileSessionHeader() {
   const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
 
   const modelName = descriptor?.name ?? activeModel?.modelID ?? null;
+  const sessionStatus = session ? resolveSessionStatus(session) : null;
 
   useEffect(() => {
     if (statusPopover.open) setSurface(null);
@@ -990,11 +993,29 @@ export default function MobileSessionHeader() {
       {!attentionCue && taskProgressTitle && <span className="sr-only" role="status" aria-live="polite">{displayedTitle}</span>}
       {heroEditing ? <GlassIsland className="mobile-float-actions mobile-float-done">
         <Button variant="ghost" size="sm" onClick={() => setHeroEditing(false)}>{tr("common.done")}</Button>
-      </GlassIsland> : <GlassIsland className="mobile-float-actions">
+      </GlassIsland> : <GlassIsland ref={actionsIslandRef} className="mobile-float-actions">
         <IconButton icon={ComposeIcon} label={tr("mobile.island.newSession")} size="lg" variant="ghost" disabled={!projectId} onClick={() => {
           hideMobileWorkspaceHome();
           if (projectId) startFreshSession(projectId);
         }} />
+        {/* The open chat's menu; a new chat has nothing to act on yet. */}
+        {session && sessionStatus && <MobileSessionMenu
+          session={session}
+          title={title}
+          status={sessionStatus}
+          meta={conversation ? "" : [
+            statusLabel(sessionStatus),
+            modelName,
+            contextPercent ? `${tr("capabilities.context")} ${contextPercent}` : "",
+          ].filter(Boolean).join(" · ")}
+          pinnedSessions={pinnedSessions}
+          onOpenOverview={conversation ? undefined : () => {
+            closeSessionStatusPopover();
+            setSurface("island");
+          }}
+          onChanged={() => { if (projectId) void refreshSessions(projectId); }}
+          anchorRef={actionsIslandRef}
+        />}
         <IconButton icon={LayersIcon} label={tr("mobile.island.openTools")} size="lg" variant="ghost" data-workspace-trigger="" aria-expanded={workspaceNav.homeOpen} onClick={openWorkspaceNavigation} />
       </GlassIsland>}
     </div>

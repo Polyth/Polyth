@@ -1,0 +1,94 @@
+/* The ⋮ menu (MobileSessionMenu.tsx): the shared action rows under one head
+   naming the chat they act on. The head is not a .ui-menu-item, so it keeps
+   its own flush start edge while the rows keep their icon column. */
+.ui-menu.mobile-session-menu {
+  width: min(304px, calc(100vw - 2 * var(--screen-gutter)));
+}
+
+.mobile-session-menu-head {
+  display: flex;
+  align-items: center;
+  gap: var(--control-gap);
+  width: 100%;
+  min-height: max(32px, var(--hit-min));
+  padding: var(--space-2) var(--control-pad-x-sm);
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+}
+
+button.mobile-session-menu-head:focus-visible {
+  background: var(--surface-overlay-hover);
+  border-color: transparent;
+}
+
+@media (hover: hover) {
+  button.mobile-session-menu-head:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+    border-color: transparent;
+  }
+}
+
+.mobile-session-menu-head-copy {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mobile-session-menu-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.mobile-session-menu-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.mobile-session-menu-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-session-menu-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: var(--muted);
+}
+
+.mobile-session-menu-status .mobile-nav-state-icon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.mobile-session-menu-status.working { color: var(--accent-text); }
+.mobile-session-menu-status:is(.needs-approval, .needs-reply, .epoch-pending) { color: var(--amber); }
+.mobile-session-menu-status.failed { color: var(--red); }
+.mobile-session-menu-status.unread { color: var(--green); }
+.mobile-session-menu-status.reconciling { color: var(--blue); }
+
+.mobile-session-menu-head-chevron {
+  flex: none;
+  color: var(--faint);
+}

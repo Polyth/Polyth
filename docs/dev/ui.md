@@ -1478,8 +1478,9 @@ The command palette
   available; never reach past it into host internals.
 
 `sidebar.session.actions` renders after the built-in entries in both desktop
-and phone session menus. Contributions receive `sessionId`, `status`, and
-`closeMenu()` for dismissing the invoking menu after an action succeeds. Use
+and phone session menus, including the phone header's ⋮ menu. Contributions
+receive `sessionId`, `status`, and `closeMenu()` for dismissing the invoking
+menu after an action succeeds. Use
 the shared menu-item styling and semantics so keyboard navigation includes the
 contributed action; unregister it when the package is disabled.
 
@@ -1796,6 +1797,19 @@ that copy. The level transitions through the registered `--context-fill`;
 reduced-motion and low-resource modes keep a still level. The idle Send stays
 solid. `contextLiquid.test.ts` measures glyph alignment and tones through the
 real cascade.
+
+**Phone session menu (⋮):** the actions island holds ✎ New session, a
+narrower ⋮ and ⧉ Open tools (`MobileSessionMenu.tsx`; a new chat has no ⋮).
+⋮ opens a compact popover lined up under the island: a head with the chat
+title and one status · model · context line (a tap opens the session
+overview, which a hidden title would otherwise open; a conversation's head
+only names it), then Rename (shared prompt), Pin, Share/Who has access, Fork
+(not for an isolated chat), Mute for a conversation, Copy session ID, Archive
+and Delete, the same routes and manage gates as the Navigator row menu, and
+the `sidebar.session.actions` contributions. Every island button presses and
+stays open as an accent glyph colour only ([design system](design-system.md),
+"Press composes"). `apps/web/test/mobileSessionMenu.test.ts` covers the menu
+and the press/open rule.
 
 **Context pie:** an open session also shows its context-window share as a
 quiet pie on the model line, right after the thinking-effort chip (after the

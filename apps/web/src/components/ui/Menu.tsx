@@ -90,6 +90,12 @@ export interface MenuProps {
   /** Focus lands here on dismissal instead of the trigger — for menus opened
    *  from a different element than their anchored trigger. */
   returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Place the menu against this element instead of the trigger — e.g. the
+   *  island holding it, so the menu lines up with the island's edge. */
+  anchorRef?: RefObject<HTMLElement | null>;
+  /** Content before the entries at the top level (e.g. the session the menu
+   *  acts on). Interactive rows use `role="menuitem"` to join arrow keys. */
+  header?: ReactNode;
   /** Extra content after the entries (e.g. plugin slot contributions). */
   footer?: ReactNode;
   /** Replace the flat entry list while keeping Menu's anchoring, dismissal, and
@@ -109,7 +115,7 @@ function roleOf(action: MenuAction): "menuitem" | "menuitemradio" | "menuitemche
 
 export default function Menu({
   label, title, entries, children, align = "start", className,
-  phonePresentation = "popover", open: controlledOpen, onOpenChange, returnFocusRef, footer,
+  phonePresentation = "popover", open: controlledOpen, onOpenChange, returnFocusRef, anchorRef, header, footer,
   renderContent,
 }: MenuProps) {
   const packageWindowOwner = usePackageWindowOwner();
@@ -150,7 +156,7 @@ export default function Menu({
   };
   // The anchored menu unmounts the moment it closes; it still fades out.
   const surfaceGhostRef = useExitGhost<HTMLDivElement>(() => ({ kind: "popover" }), surfaceRef);
-  const position = useAnchoredPosition(open && !asSheet, triggerRef, surfaceRef, {
+  const position = useAnchoredPosition(open && !asSheet, anchorRef ?? triggerRef, surfaceRef, {
     align,
     compact: !asSheet && shellMode === "phone",
   });
@@ -289,10 +295,11 @@ export default function Menu({
   );
   const list = (sheet: boolean) => (
     <>
+      {/* Header and footer belong to the top level, not to a drilled-in list. */}
+      {!drill && header}
       {backRow(sheet)}
       {drill && <div className="ui-separator ui-separator--horizontal" aria-hidden="true" />}
       {shownEntries.map((entry, index) => renderEntry(entry, index, sheet))}
-      {/* The footer belongs to the top level, not to a drilled-in list. */}
       {!drill && footer}
     </>
   );
@@ -308,7 +315,7 @@ export default function Menu({
         >
           <div className="ui-menu-sheet-list">
             {renderContent
-              ? <>{renderContent({ close, sheet: true })}{footer}</>
+              ? <>{header}{renderContent({ close, sheet: true })}{footer}</>
               : list(true)}
           </div>
         </Sheet>
@@ -332,7 +339,7 @@ export default function Menu({
           onKeyDown={onMenuKeyDown}
         >
           {renderContent
-            ? <>{renderContent({ close, sheet: false })}{footer}</>
+            ? <>{header}{renderContent({ close, sheet: false })}{footer}</>
             : list(false)}
         </div>,
         document.body,

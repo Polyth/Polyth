@@ -18588,9 +18588,29 @@ body[data-activity-style="chip"] .activity-group.has-live-stop > .activity-live-
     box-shadow: none;
   }
 
-  .mobile-float-navigation > .ui-icon-btn[aria-expanded="true"],
-  .mobile-float-actions > .ui-icon-btn[aria-expanded="true"] {
-    color: var(--text);
+  /* Press and open state are the glyph's colour alone: no plate, glow or
+     settle. The press takes the accent at once; release (and a closing
+     menu) fades it back. Covers the title too when it is a control. */
+  :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn,
+  .mobile-session-title-island .mobile-session-selector {
+    transition: color var(--motion-normal) var(--motion-ease);
+  }
+  :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:is(:active, [aria-expanded="true"]):not(:disabled),
+  .mobile-session-title-island .mobile-session-selector:active:where(:not(:disabled, [data-conversation])) {
+    color: var(--accent-text);
+    transform: none;
+  }
+  :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:active:not(:disabled),
+  .mobile-session-title-island .mobile-session-selector:active:where(:not(:disabled, [data-conversation])) {
+    transition: none;
+  }
+  /* ⋮ sits between ✎ and ⧉ as a narrower control. Its hit box is its own
+     width: the shared 44px ::after would reach under its neighbours. */
+  .mobile-float-actions > .ui-icon-btn.mobile-session-menu-trigger {
+    width: calc(var(--tap) - var(--space-4));
+  }
+  .mobile-float-actions > .mobile-session-menu-trigger::after {
+    width: 100%;
   }
 
   body:not([data-shift-held]) .mobile-float-navigation > .ui-icon-btn:focus-visible,

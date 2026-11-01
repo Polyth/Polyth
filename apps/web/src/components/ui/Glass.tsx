@@ -1,8 +1,9 @@
-import type { HTMLAttributes } from "react";
+import type { ComponentProps } from "react";
 
 export type GlassStrength = "chrome" | "medium" | "strong";
 
-export interface GlassProps extends HTMLAttributes<HTMLDivElement> {
+// ComponentProps carries `ref` (React 19), so a caller can anchor to the surface.
+export interface GlassProps extends ComponentProps<"div"> {
   strength?: GlassStrength;
 }
 
