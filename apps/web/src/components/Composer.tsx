@@ -1128,6 +1128,11 @@ function ComposerBody({
     session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "",
     hasInFlightPrompt(getState(), session?.id ?? null) || sessionAdmitting(session?.id),
   ));
+  // What the field shows while a phone keyboard still composes a word. `text`
+  // only follows committed edits, so a one-word draft would otherwise keep
+  // Send disabled until the keyboard committed it (Enter, space).
+  const [composingText, setComposingText] = useState<string | null>(null);
+  const liveText = composingText ?? text;
   const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
   const [queueEditStarting, setQueueEditStarting] = useState(false);
   const [queueEditSaving, setQueueEditSaving] = useState(false);
@@ -1283,6 +1288,7 @@ function ComposerBody({
   const submitMode = useCallback((override?: string) => {
     const mode = activeModeRef.current;
     if (!mode || modeSubmittingRef.current) return;
+    inputRef.current?.finishComposition();
     const raw = (override ?? inputRef.current?.getText() ?? "").trim();
     if (!raw) return;
     const target = sessionIdRef.current;
@@ -1797,6 +1803,7 @@ function ComposerBody({
 
   const sendPeopleMessage = useCallback((override?: string) => {
     const target = sessionIdRef.current;
+    inputRef.current?.finishComposition();
     const raw = (override ?? inputRef.current?.getText() ?? text).trim();
     if (!target || raw === "" || peopleSendingRef.current) return;
     const mentions = personMentionsRef.current.map((mention) => ({ userId: mention.userId, name: mention.name }));
@@ -2360,6 +2367,10 @@ function ComposerBody({
     // Send held: keep the message as a draft chat in the navigator instead.
     parkAsDraft = false,
   ) => {
+    // A Send tap keeps focus in the field, so a phone keyboard may still be
+    // composing the last word. Commit it first: the sent text and the
+    // composer clear must both see the final draft, not a deferred one.
+    inputRef.current?.finishComposition();
     // A composer mode takes the draft instead of the session: never queued,
     // steered, parked or blocked by the running turn.
     if (activeModeRef.current && !queueEdit) {
@@ -3929,10 +3940,10 @@ function ComposerBody({
   const borrowedEpochPending = session?.status === "epoch-pending"
     && session.runtimeControl === "borrowed";
   const draftNativeCommand = !queueEdit && !shellMode && commandCatalog.state === "available"
-    ? nativeCommandInput(text.trim(), commandCatalog.items, selectedCommandRef.current)
+    ? nativeCommandInput(liveText.trim(), commandCatalog.items, selectedCommandRef.current)
     : undefined;
   const draftCompactCommand = !queueEdit && !shellMode && commandCatalog.state === "available"
-    && isCompactCommand(text.trim(), commandCatalog.items, selectedCommandRef.current);
+    && isCompactCommand(liveText.trim(), commandCatalog.items, selectedCommandRef.current);
   const hostOnlyCommandReady = (isHostOnlyExtensionCommand(draftNativeCommand) || draftCompactCommand)
     && attachments.length === 0;
   const sendDisabled = creatingSession
@@ -3941,10 +3952,10 @@ function ComposerBody({
     || compactPending
     || queueEditSaving
     || borrowedEpochPending
-    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
+    || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
-  const hasDraft = text.trim() !== "" || attachments.length > 0;
-  const peopleSendDisabled = peopleSending || text.trim() === "";
+  const hasDraft = liveText.trim() !== "" || attachments.length > 0;
+  const peopleSendDisabled = peopleSending || liveText.trim() === "";
   const runningHasSend = !sendDisabled;
   const runningPrimaryLabel = queueEdit
     ? tr("composer.saveQueuedMessageInIts")
@@ -4026,7 +4037,7 @@ function ComposerBody({
       onClick={() => submitMode()}
       aria-label={modeSubmitLabel}
       title={`${modeSubmitLabel} (${sendKey})`}
-      disabled={modeSubmitting || text.trim() === ""}
+      disabled={modeSubmitting || liveText.trim() === ""}
       aria-busy={modeSubmitting || undefined}
     >
       <span className="send-plane" aria-hidden="true"><Icon.send /></span>
@@ -4417,6 +4428,7 @@ function ComposerBody({
             ...(acSel >= 0 && acOptions[acSel] ? { ariaActiveDescendant: acOptions[acSel].id } : {}),
           } : {})}
           onTextChange={onTextChange}
+          onComposingText={setComposingText}
           onKeyIntercept={onKeyIntercept}
           onUnmovedArrow={onUnmovedArrow}
           onPaste={onPaste}

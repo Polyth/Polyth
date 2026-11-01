@@ -3,6 +3,7 @@
 // observes committed edits, and programmatic changes flow through the handle.
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -35,6 +36,9 @@ export interface TextInputHandle {
   getText(): string;
   getSelection(): { start: number; end: number };
   isComposing(): boolean;
+  /** Commit an active IME composition now (a Send tap while a phone keyboard
+   *  still holds the last word). No-op when nothing is being composed. */
+  finishComposition(): void;
   element(): HTMLTextAreaElement | null;
 }
 
@@ -57,6 +61,11 @@ export interface AdaptiveTextInputProps {
   ariaActiveDescendant?: string;
   /** Fires on committed edits only — never mid-composition. */
   onTextChange?: (text: string) => void;
+  /** Live text while an IME composition is open, then `null` once it ends.
+   *  Phone keyboards compose whole words, so the committed text can be empty
+   *  while the field visibly holds one; use this for display state such as
+   *  whether Send is enabled, never for edits. */
+  onComposingText?: (text: string | null) => void;
   /** Raw keydown with a composition flag; return true to consume the event. */
   onKeyIntercept?: (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean) => boolean;
   /** Fires after native ArrowUp/Down when the caret did not move. */
@@ -70,7 +79,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     initialText = "", placeholder, rows = 3, className, disabled, ariaLabel,
     "data-composer-input": dataComposerInput,
     role, ariaAutocomplete, ariaExpanded, ariaControls, ariaActiveDescendant,
-    onTextChange, onKeyIntercept, onUnmovedArrow, onPaste, onFocusChange,
+    onTextChange, onComposingText, onKeyIntercept, onUnmovedArrow, onPaste, onFocusChange,
   },
   ref,
 ) {
@@ -84,6 +93,11 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
   const committed = useRef(initialText);
   const arrowGen = useRef(0);
   const historyTick = useRef(0);
+  // A blur/focus round trip that only commits the IME is not a focus change.
+  const refocusing = useRef(false);
+  // The imperative handle is built once; it must still reach current callbacks.
+  const latest = useRef({ onTextChange, onComposingText });
+  latest.current = { onTextChange, onComposingText };
 
   const applyCommand = (cmd: EditorCommand) => {
     const el = taRef.current;
@@ -105,6 +119,24 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
 
   const runOrDefer = (cmd: EditorCommand) => {
     if (admitCommand(gate.current, cmd) === "apply") applyCommand(cmd);
+  };
+
+  // Close the composition gate and commit what the field holds. Runs on
+  // compositionend, and also when the browser dropped a composition without
+  // one: Chromium cancels it silently when script writes `value`, and some
+  // phone keyboards lose it. A gate left open would ignore every later input,
+  // leaving Send disabled until another composition happened to end.
+  const closeComposition = () => {
+    const el = taRef.current;
+    el?.classList.remove("is-composing");
+    commitEdit(gate.current);
+    const deferred = endComposition(gate.current);
+    latest.current.onComposingText?.(null);
+    if (el) {
+      committed.current = el.value;
+      latest.current.onTextChange?.(el.value);
+    }
+    for (const cmd of deferred) applyCommand(cmd);
   };
 
   useImperativeHandle(ref, () => ({
@@ -133,6 +165,24 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     isComposing() {
       return gate.current.composing;
     },
+    finishComposition() {
+      if (!gate.current.composing) return;
+      const el = taRef.current;
+      // Moving focus is the portable way to make the platform IME commit:
+      // browsers end the composition (compositionend) before blur, and the
+      // keyboard learns the word is final. Refocusing in the same task keeps
+      // the caret and, inside a tap, the phone keyboard.
+      if (el && el.ownerDocument.activeElement === el) {
+        refocusing.current = true;
+        try {
+          el.blur();
+          el.focus({ preventScroll: true });
+        } finally {
+          refocusing.current = false;
+        }
+      }
+      if (gate.current.composing) closeComposition();
+    },
     element() {
       return taRef.current;
     },
@@ -146,9 +196,24 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A field removed mid-composition must not leave its live text behind.
+  useEffect(() => () => {
+    if (gate.current.composing) latest.current.onComposingText?.(null);
+  }, []);
+
   const onInput = (e: FormEvent<HTMLTextAreaElement>) => {
     const el = e.currentTarget;
-    if (gate.current.composing) return; // committed on compositionend
+    if (gate.current.composing) {
+      const native = e.nativeEvent as Partial<InputEvent>;
+      // An input that is not part of any composition proves the composition
+      // ended without compositionend; commit instead of ignoring it forever.
+      if (native.isComposing === false && !native.inputType?.includes("Composition")) {
+        closeComposition();
+        return;
+      }
+      onComposingText?.(el.value); // committed on compositionend
+      return;
+    }
     commitEdit(gate.current);
     committed.current = el.value;
     onTextChange?.(el.value);
@@ -160,15 +225,13 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
   };
 
   const onCompositionEnd = (_e: CompositionEvent<HTMLTextAreaElement>) => {
-    const el = taRef.current;
-    el?.classList.remove("is-composing");
-    commitEdit(gate.current);
-    const deferred = endComposition(gate.current);
-    if (el) {
-      committed.current = el.value;
-      onTextChange?.(el.value);
-    }
-    for (const cmd of deferred) applyCommand(cmd);
+    closeComposition();
+  };
+
+  // Browsers commit a composition before blur; one still open here was lost.
+  const onBlur = () => {
+    if (gate.current.composing) closeComposition();
+    if (!refocusing.current) onFocusChange?.(false);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -227,8 +290,8 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       onCompositionEnd={onCompositionEnd}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
-      onFocus={() => onFocusChange?.(true)}
-      onBlur={() => onFocusChange?.(false)}
+      onFocus={() => { if (!refocusing.current) onFocusChange?.(true); }}
+      onBlur={onBlur}
     />
   );
 });

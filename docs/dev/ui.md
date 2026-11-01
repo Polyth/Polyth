@@ -265,6 +265,18 @@ A release before the hold completes sends: touch/pen Send is admitted on
 off Send does not send), and the click that ends a hold is swallowed. An empty
 composer or a queued-message edit never starts a hold.
 
+**IME composition.** Phone keyboards (Gboard and others) keep the word being
+typed in an open IME composition, and `AdaptiveTextInput` commits draft edits
+(`onTextChange`) only when it ends. Send, the mode and People send buttons
+therefore gate on the live text (`onComposingText`), so a one-word draft
+enables them before the keyboard commits it. Every send path first calls
+`finishComposition()`, a same-task blur/refocus that makes the browser commit
+the word (focus changes are not reported for it), so the sent text and the
+submit-time clear see the final draft. A composition the browser drops without
+`compositionend` (Chromium does so when script writes `value`) is closed by the
+next non-composition `input` or by blur, never left to ignore later typing.
+Enter during a composition still never sends.
+
 Both navigators and the new chat's recent list show drafts among all chats
 with an accent **Draft** `Badge` (`apps/web/src/sessionDraft.ts`). A chat that
 never ran a turn is named by the first line of its draft (navigator, title
