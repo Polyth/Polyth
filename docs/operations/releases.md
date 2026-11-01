@@ -277,7 +277,9 @@ own runners; no deploy key or second repository is involved.
   one target or `all`). Enable it once the repository is public: private-repository macOS and
   Windows minutes are expensive, and while the external builder still publishes nightlies, two feeds
   would compete.
-- **Triggers.** Three schedule slots (05:17, 09:47, 14:17 Kyiv) and `repository_dispatch` type
+- **Triggers.** Three schedule slots at 03:17, 07:47 and 12:17 UTC (05:17, 09:47, 14:17 Kyiv in
+  winter, an hour later in summer; the cron entries carry no `timezone`, because with
+  `timezone: Europe/Kyiv` no slot fired in this repository) and `repository_dispatch` type
   `nightly` (`client_payload.ref` overrides `devel`). Only the first run of each Kyiv day that did
   not fail builds, and a `devel` commit that the newest nightly already holds (its release-notes
   source marker) is not rebuilt.
@@ -326,7 +328,7 @@ The plan job resolves the source ref to one commit (`git ls-remote` with the dep
 
 | Channel | Trigger | Version / tag | GitHub release | Desktop metadata |
 |---|---|---|---|---|
-| Nightly | Automatic: `nightly.yml` schedule 05:17/09:47/14:17 Kyiv or `repository_dispatch` (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
+| Nightly | Automatic: `nightly.yml` schedule 03:17/07:47/12:17 UTC or `repository_dispatch` (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
 | Test | Manual: **Actions → Nightly → Run workflow**, channel `test`, ref `master` | `X.Y.N-beta` | prerelease | `latest*.yml` + `beta*.yml` |
 | Stable | Manual: **Actions → Nightly → Run workflow**, channel `stable`, ref `master` | `X.Y.N` | release, marked **Latest** | `latest*.yml` + `beta*.yml` |
 

@@ -13,14 +13,15 @@ run-name: "${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'ni
 # morning build and the schedule slots act as fallbacks: only the first nightly
 # of each Kyiv day that did not fail builds, and a devel commit that already
 # has a nightly is not built again.
+#
+# The slots are plain UTC (05:17/09:47/14:17 Kyiv in winter, an hour later in
+# summer): with `timezone: Europe/Kyiv` no slot ever fired in this repository
+# (2026-10-31 to 2026-11-01). The plan job computes the Kyiv day itself.
 on:
   schedule:
-    - cron: '17 5 * * *'
-      timezone: Europe/Kyiv
-    - cron: '47 9 * * *'
-      timezone: Europe/Kyiv
-    - cron: '17 14 * * *'
-      timezone: Europe/Kyiv
+    - cron: '17 3 * * *'
+    - cron: '47 7 * * *'
+    - cron: '17 12 * * *'
   repository_dispatch:
     types: [nightly]
   workflow_dispatch:
