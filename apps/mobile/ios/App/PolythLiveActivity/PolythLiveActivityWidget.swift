@@ -161,11 +161,13 @@ private struct StatusLabel: View {
 }
 
 /// Elapsed timer while working (drawn by the system, no per-second updates),
-/// otherwise task progress or nothing.
+/// otherwise task progress or nothing. A stale snapshot draws no timer: the
+/// work may have ended since, and a running clock would claim it has not.
 private struct Trailing: View {
     let state: State
+    let stale: Bool
     var body: some View {
-        if state.state == "working", let startedAt = state.startedAt {
+        if state.state == "working", !stale, let startedAt = state.startedAt {
             Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
@@ -178,16 +180,22 @@ private struct Trailing: View {
 }
 
 /// Compact island, right side: the elapsed timer while working, otherwise the
-/// state glyph, since the status word does not fit there.
+/// state glyph, since the status word does not fit there. Stale work shows an
+/// ellipsis in place of the timer.
 private struct CompactTrailing: View {
     let state: State
+    let stale: Bool
     var body: some View {
         if let name = symbol(state.state) {
             Image(systemName: name)
                 .foregroundStyle(stateTint(state.state))
                 .accessibilityLabel(Text(state.label))
+        } else if stale {
+            Image(systemName: "ellipsis")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(Text(state.staleHint))
         } else {
-            Trailing(state: state)
+            Trailing(state: state, stale: stale)
                 .font(.caption2)
                 .frame(maxWidth: 44)
         }
@@ -225,7 +233,7 @@ private struct LockScreen: View {
                 HStack {
                     StatusLabel(state: state)
                     Spacer(minLength: 8)
-                    Trailing(state: state).font(.caption).foregroundStyle(.secondary)
+                    Trailing(state: state, stale: stale).font(.caption).foregroundStyle(.secondary)
                 }
                 Text(state.title).font(.headline).lineLimit(1).privacySensitive()
                 Details(state: state, stale: stale)
@@ -250,7 +258,7 @@ struct PolythLiveActivityWidget: Widget {
                     Mark(size: 32).padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Trailing(state: context.state).font(.callout).foregroundStyle(.secondary)
+                    Trailing(state: context.state, stale: context.isStale).font(.callout).foregroundStyle(.secondary)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(spacing: 0) {
@@ -264,7 +272,7 @@ struct PolythLiveActivityWidget: Widget {
             } compactLeading: {
                 Mark(size: 20)
             } compactTrailing: {
-                CompactTrailing(state: context.state)
+                CompactTrailing(state: context.state, stale: context.isStale)
             } minimal: {
                 Mark(
                     size: 20,

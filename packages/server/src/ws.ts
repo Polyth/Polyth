@@ -104,6 +104,8 @@ interface Sub {
     summaryProjections: boolean;
     /** Client-chosen token echoed on `synced` receipts; absent = no receipts. */
     syncToken: number | null;
+    /** Rows the client still shows as active; the snapshot re-reads them. */
+    refreshSessionIds: string[];
   } | null;
   snapshotScope: string | null;
   liveBuffer: SessionEvent[];
@@ -142,6 +144,21 @@ const AUDIO_FRAMES_PER_SECOND = 100;
 const AUDIO_FRAME_BURST = 2_000;
 const FRAME_HIGH_WATER = 1_000_000;
 const GAP_FILL_CHUNK = 500;
+/** A subscribe's `refreshSessionIds` hint: bounded like one summary page. */
+const REFRESH_IDS_MAX = 100;
+const SESSION_ID_SHAPE = /^[A-Za-z0-9._:-]{1,160}$/u;
+
+/** Untrusted hint, so only well-formed ids, deduped and capped. Access is
+ *  still decided by the scoped summary read, never by this list. */
+function refreshIdsOf(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  for (const id of value) {
+    if (ids.size >= REFRESH_IDS_MAX) break;
+    if (typeof id === "string" && SESSION_ID_SHAPE.test(id)) ids.add(id);
+  }
+  return [...ids];
+}
 /** A replay read can race a busy producer. Bound that race per client; a
  * canonical event is never silently discarded -- overflow closes for replay. */
 const LIVE_BUFFER_MAX_EVENTS = 2_048;
@@ -544,7 +561,7 @@ export function createWsGateway(
       let audioFrame: DictationAudioFrame | null = null;
       let msg: {
         type?: string; sessionId?: string; afterSeq?: number; projectId?: string; liveEventBatches?: boolean; summaryProjections?: boolean;
-        syncToken?: number;
+        syncToken?: number; refreshSessionIds?: unknown;
         browserSessionId?: string; afterRevision?: number;
         tabId?: string; visible?: boolean; quality?: number;
         dictationId?: string;
@@ -672,6 +689,7 @@ export function createWsGateway(
         liveEventBatches: msg.liveEventBatches === true,
         summaryProjections: msg.summaryProjections === true,
         syncToken: Number.isSafeInteger(msg.syncToken) ? Number(msg.syncToken) : null,
+        refreshSessionIds: refreshIdsOf(msg.refreshSessionIds),
       };
       if (sub.busy) return;
       sub.busy = true;
@@ -836,6 +854,8 @@ export function createWsGateway(
                 send(ws, { type: "projections", sessions: list.slice(i, i + GAP_FILL_CHUNK) });
               }
               sub.snapshotScope = scope;
+              const sent = new Set(list.map((row) => row.id));
+              if (selected) sent.add(selected.id);
               // The project rail shows activity from every project while the
               // navigator list above stays scoped to the open one. A summary
               // subscriber therefore also gets the Space's active rows, so a
@@ -850,6 +870,27 @@ export function createWsGateway(
                   if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
                   for (let i = 0; i < active.length; i += GAP_FILL_CHUNK) {
                     send(ws, { type: "projections", sessions: active.slice(i, i + GAP_FILL_CHUNK) });
+                  }
+                  for (const row of active) sent.add(row.id);
+                } catch { /* status stays as last known; live updates still follow */ }
+              }
+              // Active rows cover what started while the link was down, not
+              // what ended: a turn that finished or a question answered
+              // elsewhere leaves the row out of them, and the client would
+              // keep showing it as working or waiting (on the rail and in the
+              // phone's Live Activity). Re-read the rows it still shows that
+              // way through the same scoped summaries, so access rules match.
+              const refresh = cur.refreshSessionIds.filter((id) => !sent.has(id));
+              if (refresh.length > 0 && cur.summaryProjections && sub.sessions.summaries) {
+                try {
+                  const wanted = new Set(refresh);
+                  const rows = (await sub.sessions.summaries({ ids: refresh, limit: REFRESH_IDS_MAX })).sessions
+                    .filter((row) => wanted.has(row.id));
+                  if (closed) return;
+                  if (sub.pendingSubscribe) continue subscriptions;
+                  if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;
+                  for (let i = 0; i < rows.length; i += GAP_FILL_CHUNK) {
+                    send(ws, { type: "projections", sessions: rows.slice(i, i + GAP_FILL_CHUNK) });
                   }
                 } catch { /* status stays as last known; live updates still follow */ }
               }

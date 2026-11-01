@@ -190,3 +190,17 @@ test("the App declares, registers and gates the Live Activity plugin", async () 
   const extension = await readFile(join(iosApp, "PolythLiveActivity/Info.plist"), "utf8");
   assert.match(extension, /<string>com\.apple\.widgetkit-extension<\/string>/);
 });
+
+test("the activity turns stale when the page's confirmation runs out, and stale work draws no clock", async () => {
+  const plugin = await readFile(join(iosApp, "App/PolythLiveActivityPlugin.swift"), "utf8");
+  // The page names the stale date; native only bounds it (never past 15 minutes).
+  assert.match(plugin, /Self\.staleDate\(call\.getDouble\("staleAt"\)\)/);
+  assert.match(plugin, /min\(max\(Date\(timeIntervalSince1970: ms \/ 1000\), now\), latest\)/);
+  assert.match(plugin, /ActivityContent\(state: state, staleDate: staleDate\)/);
+  assert.doesNotMatch(plugin, /if current\.content\.state != state/, "a heartbeat with unchanged content must still move the stale date");
+  const widget = await readFile(join(iosApp, "PolythLiveActivity/PolythLiveActivityWidget.swift"), "utf8");
+  assert.match(widget, /if state\.state == "working", !stale, let startedAt = state\.startedAt \{\n\s+Text\(timerInterval:/);
+  for (const use of ["Trailing(state: state, stale: stale)", "Trailing(state: context.state, stale: context.isStale)", "CompactTrailing(state: context.state, stale: context.isStale)"]) {
+    assert.ok(widget.includes(use), use);
+  }
+});

@@ -101,7 +101,11 @@ run across the scoped catalog. Rows omit runtime binding, workspace/config
 and draft payloads. A page carries completeness, continuation and a
 Space-scoped catalog revision. A caller can pin `revision`; changes reject
 the continuation with `catalog-changed`. Pages upsert rows and never imply
-deletion of other cached sessions. Full metadata is available by ID.
+deletion of other cached sessions. Full metadata is available by ID. The
+internal `ids` filter (WS only, at most 100, never read from HTTP) returns just
+the named rows of the reader's Space; the socket's reconnect snapshot uses it
+for the rows the client still shows as active (`refreshSessionIds`), because no
+other query returns a row whose activity ended while the link was down.
 A recency page never guarantees a pinned chat, so `pinned=true` filters the
 catalog to the reader's pinned rows (their own pin, else the shared pre-v21
 one; `pin_position -1` is an explicit unpin). The WS navigator snapshot and the

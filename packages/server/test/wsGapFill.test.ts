@@ -182,6 +182,51 @@ test("a scoped summary subscriber also sees every project's active rows so the r
   assert.equal(live?.draft, undefined);
 });
 
+test("a reconnect re-reads the rows the client still shows as active, whose end the active rows miss", async (t) => {
+  // "ended" finished while the phone slept, in another project and already
+  // read on another device: no active-rows query returns it any more.
+  const ended = { ...proj, id: "ended", projectId: "p2", status: "idle" as const, updatedAt: 5, summary: true as const };
+  const queries: Array<{ projectId?: string; attentionOnly?: boolean; ids?: readonly string[] }> = [];
+  const sessions = {
+    replayPage: async () => ({ events: [], cursor: 0, highWater: 0, complete: true }),
+    summaries: async (query: { projectId?: string; attentionOnly?: boolean; ids?: readonly string[] }) => {
+      queries.push(query);
+      if (query.ids) {
+        // A store returns only rows the reader may see; "foreign" is not one.
+        return { sessions: [ended, { ...proj, id: "unasked", summary: true as const }], complete: true, revision: 1 };
+      }
+      return query.attentionOnly
+        ? { sessions: [{ ...proj, id: "busy", projectId: "p2", status: "working" as const, summary: true as const }], complete: true, revision: 1 }
+        : { sessions: [{ ...proj, summary: true as const }], complete: true, revision: 1 };
+    },
+    snapshot: async (id: string) => ({ ...proj, id }),
+  } as unknown as SessionService;
+  const server = createServer();
+  attachWs(server, sessions);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const client = await connect((server.address() as { port: number }).port);
+  t.after(() => { client.ws.terminate(); server.close(); });
+  client.ws.send(JSON.stringify({
+    type: "subscribe", projectId: "p1", sessionId: "s1", afterSeq: 0, summaryProjections: true, syncToken: 1,
+    // Already covered by the list/active rows, the open chat, junk and a
+    // foreign id: only the rest is asked for.
+    refreshSessionIds: ["ended", "busy", "s1", "foreign", 42, "bad id/../x", "ended"],
+  }));
+  const rows: SessionProjection[] = [];
+  for (;;) {
+    const message = await client.next();
+    if (message.type === "projections") rows.push(...message.sessions ?? []);
+    if (message.type === "synced" && message.phase === "sessions") break;
+  }
+  const refreshQuery = queries.find((query) => query.ids);
+  assert.deepEqual(refreshQuery?.ids, ["ended", "foreign"], "only rows no other part of the snapshot carried");
+  assert.equal(refreshQuery?.projectId, undefined, "read across the Space, through the scoped summaries");
+  assert.equal(rows.find((row) => row.id === "ended")?.status, "idle", "the missed end reaches the client before its receipt");
+  assert.equal(rows.some((row) => row.id === "unasked"), false, "never more than was asked");
+  assert.equal(rows.some((row) => row.id === "foreign"), false);
+});
+
 test("the navigator snapshot carries the reader's pinned chats beyond the recency page", async (t) => {
   const recent = { ...proj, id: "recent", updatedAt: 9, summary: true as const };
   const oldPin = { ...proj, id: "old-pin", updatedAt: 1, pinned: { position: 0 }, summary: true as const };

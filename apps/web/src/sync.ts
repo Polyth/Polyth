@@ -59,6 +59,10 @@ export interface SyncClientOptions {
   /** A gateway that never sent a receipt is presumed to predate them; after
    *  this long on an open socket its replay is treated as done. */
   receiptFallbackMs?: number;
+  /** Rows the client still shows as working or waiting. A new socket's
+   *  snapshot re-reads them: what ended while the link was down is in no
+   *  other part of the catch-up. */
+  refreshSessionIds?: () => readonly string[];
 }
 
 /** Legacy test seam only. SyncClient deliberately does not use this: its
@@ -184,6 +188,7 @@ export class SyncClient {
   private receiptFallbackTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   private freshness: SyncFreshness = { session: false, sessions: false };
   private freshnessListeners = new Set<(freshness: SyncFreshness) => void>();
+  private readonly refreshSessionIds: (() => readonly string[]) | undefined;
   private readonly webSocket: (url: string) => WebSocketLike;
   private readonly schedule: (callback: () => void, ms: number) => ReturnType<typeof globalThis.setTimeout>;
   private readonly cancel: (timer: ReturnType<typeof globalThis.setTimeout>) => void;
@@ -207,6 +212,7 @@ export class SyncClient {
     this.maxSessionCursors = Math.max(1, options.maxSessionCursors ?? 256);
     this.syncReceipts = options.syncReceipts ?? false;
     this.receiptFallbackMs = options.receiptFallbackMs ?? 8_000;
+    this.refreshSessionIds = options.refreshSessionIds;
     this.backoff = this.baseDelay;
   }
 
@@ -515,6 +521,10 @@ export class SyncClient {
     if (!ws || !this.isCurrent(ws, generation) || ws.readyState !== WS_OPEN || !this.sub) return;
     const { sessionId, projectId } = this.sub;
     const afterSeq = sessionId ? ((this.manualAcknowledgement ? this.appliedSeq.get(sessionId) : this.cursor(sessionId)) ?? this.sub.afterSeq) : this.sub.afterSeq;
+    // Sent on every subscribe: a later subscribe can supersede this one before
+    // the gateway reaches its snapshot, and the hint must not be lost then.
+    let refreshSessionIds: readonly string[] = [];
+    try { refreshSessionIds = this.refreshSessionIds?.() ?? []; } catch { /* a hint only */ }
     try {
       ws.send(JSON.stringify({
         type: "subscribe",
@@ -524,6 +534,7 @@ export class SyncClient {
         liveEventBatches: true,
         summaryProjections: true,
         ...(this.syncReceipts ? { syncToken: this.subscriptionGeneration } : {}),
+        ...(refreshSessionIds.length > 0 ? { refreshSessionIds } : {}),
       }));
     } catch {
       if (this.isCurrent(ws, generation)) {

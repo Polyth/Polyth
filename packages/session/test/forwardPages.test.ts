@@ -50,6 +50,11 @@ test("summaries page stable ties, query the whole Space, and never disclose runt
     await store.patchProjection!("valid-foreign", (row) => ({ ...row, title: "changed" }));
     assert.equal((await store.summaries!({ spaceId: "a" })).revision, first.revision);
     assert.equal((await store.summaries!({ spaceId: "a", worktreePath: "/absent" })).sessions.length, 0);
+    // A reconnect re-reads named rows across projects, still inside the Space.
+    const named = await store.summaries!({ spaceId: "a", ids: ["s007", "s000", "valid-foreign", "s007", "missing"] });
+    assert.deepEqual(named.sessions.map((r) => r.id).sort(), ["s000", "s007"]);
+    assert.equal(named.sessions[0]?.draft, undefined);
+    assert.equal((await store.summaries!({ spaceId: "a", ids: [] })).sessions.length, 0, "no ids, no rows");
     await store.patchProjection!("s000", (row) => ({ ...row, updatedAt: 2 }));
     await assert.rejects(async () => store.summaries!({ spaceId: "a", cursor: first.next, revision: first.revision }), { code: "catalog-changed" });
   } finally { await store.close(); }

@@ -501,3 +501,27 @@ test("a gateway that never sends receipts settles freshness after the bounded fa
   assert.deepEqual(modern.client.getFreshness(), { session: false, sessions: false });
   modern.client.close();
 });
+
+test("every subscribe carries the rows the client still shows as active", () => {
+  const sockets: FakeSocket[] = [];
+  let active: string[] = ["working-elsewhere"];
+  const client = new SyncClient({
+    webSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    refreshSessionIds: () => active,
+  });
+  client.setSubscription("s1", 0, "p1");
+  client.connect("ws://test/ws");
+  sockets[0]!.open();
+  assert.deepEqual(JSON.parse(sockets[0]!.sent[0]!).refreshSessionIds, ["working-elsewhere"]);
+  // Nothing shown as active: the field is left out, not sent empty.
+  active = [];
+  client.setSubscription("s2", 0, "p1");
+  assert.equal("refreshSessionIds" in JSON.parse(sockets[0]!.sent.at(-1)!), false);
+  // A reconnect asks again with what the store shows now.
+  active = ["a", "b"];
+  sockets[0]!.ended();
+  client.reconnect();
+  sockets[1]!.open();
+  assert.deepEqual(JSON.parse(sockets[1]!.sent[0]!).refreshSessionIds, ["a", "b"]);
+  client.close();
+});

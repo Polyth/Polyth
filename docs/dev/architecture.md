@@ -504,7 +504,15 @@ The client (`apps/web/src/sync.ts`) resends its subscription on reconnect and de
 
 Subscribe order is a priority contract: the subscribed session's gap-fill, then
 its full `projection`, then the navigator `projections` page (which omits that
-row). A subscriber that sends `syncToken: <int>` also gets `synced {phase,
+row). A summary subscriber then gets the Space's active rows from other
+projects and, when it sends `refreshSessionIds` (at most 100 well-formed ids),
+the summaries of those rows that no earlier part carried, read through the same
+scoped `summaries({ids})`, so access rules match and a foreign id returns
+nothing. The web client sends the rows it still shows as working, waiting or
+unread (`sessionIdsToRefresh`): active rows cover what started while the link
+was down, not what ended, and without the re-read a turn that finished or a
+question answered elsewhere kept its mark on the rail and in the phone's Live
+Activity. Deleted rows are not reported this way. A subscriber that sends `syncToken: <int>` also gets `synced {phase,
 token}` after each part — `phase: "session"` once the open session and its row
 are current, `phase: "sessions"` once the list is too (sent on every subscribe,
 also when a same-scope resubscribe skips the list). The client

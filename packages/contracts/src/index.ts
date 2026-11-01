@@ -2866,6 +2866,9 @@ export interface SessionSummaryQuery {
   /** Only rows the reader pinned: their own pin (v21), else the shared
    *  pre-v21 one. Recency pages never guarantee an old pinned chat. */
   pinned?: boolean;
+  /** Only these rows (at most 100). A reconnecting socket re-reads the rows its
+   *  client still shows as active, whose end it may have missed. */
+  ids?: readonly string[];
   fromTime?: number;
   toTime?: number;
 }

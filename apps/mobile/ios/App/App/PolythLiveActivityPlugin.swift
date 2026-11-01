@@ -6,9 +6,11 @@ import ActivityKit
 
 /// Starts, updates and ends Polyth's Live Activity (Dynamic Island / Lock
 /// Screen) from the shared web shell. Updates are local and foreground-only:
-/// the web page publishes while it runs, and once iOS suspends the app the
-/// activity keeps its last snapshot and turns stale after `staleAfter`, so it
-/// never claims a live state it no longer knows. No push token is requested.
+/// the web page publishes while it runs, with a stale date anchored to when
+/// the server last confirmed what it shows. Once iOS suspends the app the
+/// activity keeps its last snapshot and turns stale at that date (never later
+/// than `staleAfter`), so it never claims a live state it no longer knows. No
+/// push token is requested.
 ///
 /// Only the bundled shell or the page on the current Polyth Link proxy may
 /// drive it (same gate as the push semantic reader); any other origin in the
@@ -23,6 +25,8 @@ final class PolythLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "end", returnType: CAPPluginReturnPromise),
     ]
 
+    /// Latest stale date a page may ask for, and the one used when it names
+    /// none (an older page).
     static let staleAfter: TimeInterval = 15 * 60
     /// How long a finished/failed final snapshot stays on the Lock Screen.
     static let finalDismissAfter: TimeInterval = 10 * 60
@@ -75,6 +79,15 @@ final class PolythLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         return int < 0 ? 0 : min(int, 999)
     }
 
+    /// The page's `staleAt` (epoch ms; 0 = not confirmed, stale at once),
+    /// clamped to now ... now + `staleAfter`.
+    private static func staleDate(_ ms: Double?) -> Date {
+        let now = Date()
+        let latest = now.addingTimeInterval(staleAfter)
+        guard let ms, ms.isFinite, ms >= 0 else { return latest }
+        return min(max(Date(timeIntervalSince1970: ms / 1000), now), latest)
+    }
+
     #if canImport(ActivityKit)
     @available(iOS 16.2, *)
     private static func content(_ object: [String: Any]?) -> PolythActivityAttributes.ContentState? {
@@ -125,14 +138,15 @@ final class PolythLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("invalid", "invalid")
                 return
             }
+            let staleDate = Self.staleDate(call.getDouble("staleAt"))
             enqueue {
-                let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(Self.staleAfter))
+                let content = ActivityContent(state: state, staleDate: staleDate)
                 let running = Activity<PolythActivityAttributes>.activities
                     .filter { $0.activityState == .active || $0.activityState == .stale }
                 if let current = running.first {
-                    if current.content.state != state || current.activityState == .stale {
-                        await current.update(content)
-                    }
+                    // Always applied: the page sends only changed content or a
+                    // stale date the server confirmed further.
+                    await current.update(content)
                     // A second one can only come from an older process; keep one.
                     for extra in running.dropFirst() { await extra.end(nil, dismissalPolicy: .immediate) }
                     call.resolve(["active": true])

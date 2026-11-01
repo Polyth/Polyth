@@ -3869,7 +3869,9 @@ by `apps/web/test/sidebarFolderMode.test.ts`.
 Each project tile carries a live status dot: green while any of that project's
 sessions works, amber when one needs attention. The socket keeps active rows
 from every project current as summary projections, so the dot appears and
-clears without opening that project.
+clears without opening that project; after a reconnect it also re-reads the
+rows the client still shows as active, so a turn that ended while the link was
+down clears its dot too.
 
 **Primary workbench profiles.** A package profile opts into the same top-level
 switcher as Chat with `presentation: { navigation: "primary" }`. Profiles without

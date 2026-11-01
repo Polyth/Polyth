@@ -1,6 +1,7 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
 import { api, errorCodeOf } from "@polyth/session/web-api";
 import { SyncClient, type SyncFreshness, type SyncStatus } from "./sync.ts";
+import { sessionIdsToRefresh } from "./sessionStatus.ts";
 import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
@@ -1198,7 +1199,11 @@ async function refreshAgents(projectId = store.getState().activeProjectId ?? und
 
 function startSync(): void {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  sync = new SyncClient({ manualAcknowledgement: true, syncReceipts: true });
+  sync = new SyncClient({
+    manualAcknowledgement: true,
+    syncReceipts: true,
+    refreshSessionIds: () => sessionIdsToRefresh(store.getState().sessions),
+  });
   sync.setRetryHints({
     online: typeof navigator === "undefined" || navigator.onLine !== false,
     foreground: typeof document === "undefined" || document.visibilityState !== "hidden",

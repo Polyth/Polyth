@@ -335,8 +335,22 @@ extension (shared `PolythActivityAttributes.swift`).
   alone in the state's colour (the gradient while working). Android's
   monochrome `ic_stat_polyth` is a separate, older glyph.
 - **Freshness.** Updates are local only, throttled to one per second and sent
-  only when the snapshot changes. Once iOS suspends the page the activity keeps
-  its last snapshot and turns stale after 15 minutes ("Open Polyth to update").
+  only when the snapshot changes. The page's socket closes the moment it hides,
+  so nothing can tell the activity that a turn ended or a question was answered
+  elsewhere while the phone is locked. Every update therefore carries a stale
+  date two minutes (`LIVE_ACTIVITY_TRUST_MS`) after the server last confirmed
+  the store current — the sync receipts for both the open chat and the list
+  (`getSyncFreshness`). While they hold, a 30-second heartbeat moves the date
+  on, so a long quiet turn never goes stale under an open app; once they stop
+  (page hidden, link lost) the date stays put and iOS marks the activity stale:
+  dimmed, "Open Polyth to update", and no running timer (a ticking clock would
+  claim the work goes on). A snapshot never confirmed is stale at once. Native
+  caps the date at 15 minutes and uses that cap for a page that sends none.
+  The rows are the ones the navigator shows (`overlaySessionProjection`), and on
+  reconnect the socket re-reads every row the client still shows as working or
+  waiting (`refreshSessionIds`, see the [architecture](../dev/architecture.md)
+  subscribe contract), so a chat that ended in another project while the phone
+  slept no longer keeps the activity on "Working" or "Reply needed".
   There is deliberately no ActivityKit push token: remote updates would need
   APNs `liveactivity` pushes through the relay, which would expose plaintext
   content to it (Live Activities have no service-extension decryption step).
@@ -359,9 +373,11 @@ extension (shared `PolythActivityAttributes.swift`).
   files best effort; `scripts/ci/remote-build.mjs` drops the newest extension
   and retries when signing or the archive fails, so TestFlight never breaks
   over it. The person can turn Live Activities off in iOS Settings → Polyth.
-- **Evidence.** Projection, payload bounds, publisher ordering and the Xcode
-  project patch are unit-tested. The Swift sources were not compiled here (no
-  Xcode on Linux) and nothing is device-verified yet.
+- **Evidence.** Projection, payload bounds, publisher ordering and stale-date
+  anchoring, the reconnect re-read and the Xcode project patch are unit-tested;
+  the Swift stale-date and timer changes are checked as source text only. The
+  Swift sources were not compiled here (no Xcode on Linux) and nothing is
+  device-verified yet.
 
 ## Permissions
 
