@@ -1,15 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { parseNativePushClaim } from "../src/nativePush.ts";
 import { parseNativePushOpen } from "../src/nativePushPayload.ts";
 
-test("native push bridge exposes only a claim (or, direct, the token for this server) and pending-open values", async () => {
+test("native push bridge exposes only the token for the page's own server and pending-open values", async () => {
   const source = await readFile(new URL("../src/nativePush.ts", import.meta.url), "utf8");
-  assert.match(source, /interface NativePushRelayClaim[\s\S]*subscriptionId[\s\S]*claimToken[\s\S]*claimExpiresAt/);
-  // Direct mode only: the page's own server holds the APNs key, so it needs the token.
-  assert.match(source, /interface NativePushDirect[\s\S]*providerToken[\s\S]*environment/);
+  // The page registers the token with its server, which sends through Polyth's push service.
+  assert.match(source, /interface NativePushClaim[\s\S]*providerToken[\s\S]*platform\?: "android"[\s\S]*environment/);
   assert.match(source, /consumePendingOpen\(\)/);
-  assert.doesNotMatch(source, /manageToken|senderSecret|identitySecret/);
+  assert.doesNotMatch(source, /claimToken|manageToken|senderSecret|identitySecret/);
+});
+
+test("a registration is an iOS hex token with its environment or an Android FCM token", () => {
+  const subscriptionId = `sub_${"s".repeat(22)}`;
+  const ios = { subscriptionId, providerToken: "ab".repeat(32), environment: "sandbox" };
+  assert.deepEqual(parseNativePushClaim(ios), ios);
+  assert.equal(parseNativePushClaim({ ...ios, environment: undefined }), undefined);
+  assert.equal(parseNativePushClaim({ ...ios, providerToken: "fcm:not-hex-token" }), undefined);
+  assert.equal(parseNativePushClaim({ ...ios, platform: "ios" }), undefined);
+  const android = { subscriptionId, providerToken: "fcm:opaque-token-abcdefgh", platform: "android" };
+  assert.deepEqual(parseNativePushClaim(android), android);
+  assert.equal(parseNativePushClaim({ ...android, providerToken: "has space in it" }), undefined);
+  assert.deepEqual(parseNativePushClaim({ ...ios, contentKey: { p256dh: "bad", auth: "bad" } }), ios, "a bad content key is dropped");
 });
 
 test("local notification suppression requires matching authoritative server state", async () => {
@@ -58,7 +71,9 @@ test("native source keeps provider material out of the Capacitor web contract", 
   assert.match(direct, /"providerToken": token, "environment": environment/);
   const relayed = swift.slice(swift.indexOf("private func register(token:"), swift.indexOf("private func registerDirect("));
   assert.doesNotMatch(relayed, /"providerToken": token\]?\)?, "environment"|result\["providerToken"\]/);
-  assert.doesNotMatch(android, /call\.resolve\([^\n]*providerToken/);
+  // Android hands the FCM token to the page the same way; the private content key never.
+  assert.match(android, /result\.put\("platform", "android"\);\s*result\.put\("providerToken", providerToken\)/);
+  assert.doesNotMatch(android, /result\.put\("contentPrivate"|HttpURLConnection|openConnection/);
 });
 
 test("native platforms keep permission, token rotation, foreground dedupe, and channels native", async () => {
@@ -121,7 +136,7 @@ test("receipt validation never creates an open; only a validated notification ta
   assert.match(swift, /forwardedNotificationDelegate[\s\S]*didReceive: response/);
 });
 
-test("relay requests have a build-owned iOS environment, strict rotation shapes, and refuse redirects", async () => {
+test("iOS has a build-owned environment and strict rotation shapes; Android keeps a rotated token locally", async () => {
   const [swift, android, info] = await Promise.all([
     readFile(new URL("../ios/App/App/AppDelegate.swift", import.meta.url), "utf8"),
     readFile(new URL("../android/app/src/main/java/com/polyth/mobile/PolythPushPlugin.java", import.meta.url), "utf8"),
@@ -130,10 +145,11 @@ test("relay requests have a build-owned iOS environment, strict rotation shapes,
   assert.match(info, /PolythPushEnvironment[\s\S]*POLYTH_PUSH_ENVIRONMENT/);
   assert.match(swift, /"environment": environment/);
   assert.match(swift, /RelayRedirectGuard[\s\S]*completionHandler\(nil\)/);
-  assert.match(android, /setInstanceFollowRedirects\(false\)/);
+  assert.doesNotMatch(info, /PolythPushRelayOrigin/, "no build talks to a relay itself");
   const androidRotate = android.slice(android.indexOf("private static void rotateProviderToken"), android.indexOf("static void receiveMessage"));
   const swiftRotate = swift.slice(swift.indexOf("private func rotate(token:"), swift.indexOf("private func binding"));
-  assert.match(androidRotate, /new JSONObject\(\)\.put\("providerToken", providerToken\)/);
+  // Re-registered with the server by the page on the next foreground (getStatus carries it).
+  assert.match(androidRotate, /store\.put\(KEY_MAPPING \+ mapping\.getString\("subscriptionId"\), mapping\.put\("providerToken", providerToken\)\)/);
   assert.doesNotMatch(androidRotate, /binding/);
   assert.match(swiftRotate, /\["providerToken": token\]/);
   assert.doesNotMatch(swiftRotate, /binding/);

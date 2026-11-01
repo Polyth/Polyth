@@ -7,7 +7,7 @@ import { after, test } from "node:test";
 import type { ActivityInput, DeliveryInput, Destination, ProviderClass } from "@polyth/push-relay";
 import {
   apnsFromDir, apnsKeyPem, createNativePushService, LIVE_ACTIVITY_HEARTBEAT_MS, liveActivityState, nativePushRoutes,
-  type ApnsSender, type LiveActivityView,
+  type LiveActivityView, type PushSender,
 } from "../src/nativePush.ts";
 
 const alice = { userId: "usr_alice", spaceId: "sp_alice", deviceId: "dev_alice", deviceEndpointId: "end_alice" };
@@ -21,7 +21,7 @@ const tempDir = (): string => {
   return dir;
 };
 
-class FakeApns implements ApnsSender {
+class FakeApns implements PushSender {
   alerts: Array<{ destination: Destination; input: DeliveryInput }> = [];
   activity: Array<{ destination: Destination; input: ActivityInput }> = [];
   result: ProviderClass | (() => Promise<ProviderClass>) = "success";
@@ -45,7 +45,6 @@ function setup(views: Map<string, LiveActivityView>, file = join(tempDir(), "nat
     authority: () => ({ hostEndpointId: async () => "host-endpoint", validate: async (input) => input.userId === alice.userId }),
     // Only chats this person can read are returned at all.
     activityViews: async (account, ids) => new Map(account.userId === alice.userId ? ids.flatMap((id) => views.has(id) ? [[id, views.get(id)!] as const] : []) : []),
-    fetchFn: async () => { throw new Error("direct push never calls a relay"); },
   });
   return {
     service, apns, file, tick: (ms: number) => { now += ms; }, at: () => now,
@@ -204,19 +203,19 @@ test("a push answered after the device named another chat leaves the new track u
   t.service.close();
 });
 
-test("a phone registered over Link gets alerts straight from this server, and a retired token is dropped", async () => {
+test("with the app's own APNs key, a phone registered over Link gets alerts straight from this server, and a retired token is dropped", async () => {
   const t = setup(new Map());
-  assert.deepEqual(await t.service.status(alice), { enabled: true, subscribed: false, direct: true });
+  assert.deepEqual(await t.service.status(alice), { enabled: true, subscribed: false });
   const subscriptionId = `sub_${"d".repeat(22)}`;
   await assert.rejects(t.service.register({ ...alice, subscriptionId, providerToken: token, environment: "staging" }), { code: "invalid-input" });
   assert.deepEqual(await t.service.register({ ...alice, subscriptionId, providerToken: token, environment: "sandbox" }), { subscriptionId });
-  assert.deepEqual(await t.service.status(alice), { enabled: true, subscribed: true, subscriptionId, direct: true });
+  assert.deepEqual(await t.service.status(alice), { enabled: true, subscribed: true, subscriptionId });
   assert.deepEqual(await t.service.send({ ...alice, notificationId: "n-1", kind: "completed", transitionKey: "s:turn:idle", title: "Docs", body: "Done" }), { sent: 1 });
   assert.deepEqual(t.apns.alerts[0]!.destination, { subscriptionId, version: 1, platform: "ios", environment: "sandbox", providerToken: token });
   assert.equal(t.apns.alerts[0]!.input.subscriptionId, subscriptionId);
   t.apns.result = "permanent";
   assert.deepEqual(await t.service.send({ ...alice, notificationId: "n-2", kind: "completed", transitionKey: "s:turn:idle" }), { sent: 0 });
-  assert.deepEqual(await t.service.status(alice), { enabled: true, subscribed: false, direct: true });
+  assert.deepEqual(await t.service.status(alice), { enabled: true, subscribed: false });
   t.service.close();
 });
 

@@ -277,26 +277,26 @@ a partial intent handler.
 
 ## Notifications
 
-Mobile push is a native-controller flow with two senders. Permission is
-requested only from the explicit Mobile push notifications setting, never at
-startup or pairing. Android requests `POST_NOTIFICATIONS` only on Android 13+; a
-fresh install remains actionable until that request has been made. iOS
-registers APNs only after authorization.
+Mobile push is a native-controller flow. Permission is requested only from the
+explicit Mobile push notifications setting, never at startup or pairing.
+Android requests `POST_NOTIFICATIONS` only on Android 13+; a fresh install
+remains actionable until that request has been made. iOS registers APNs only
+after authorization.
 
-- **Direct (iOS builds without a relay origin, the shipped setup).** The
-  Polyth server itself holds the app's APNs key (see
-  [Direct APNs key](#direct-apns-key)) and sends to APNs; there is no separate
-  push service. `enable` files the registration natively under a fresh
-  subscription id and hands the page that id, the APNs token and the build's
-  APNs environment; the page registers them with its server
-  (`POST /api/native-push`) over the same Polyth Link connection it uses for
-  everything else, and re-sends them on every foreground so a rotated token
-  arrives. Only the last hop, server → APNs → phone, leaves Link: a suspended
-  iPhone has no connection, and only APNs can reach it.
-- **Relay (a build with `POLYTH_PUSH_RELAY_ORIGIN`, Android).** The native
-  controller keeps provider tokens and relay manage capabilities in secure
-  native storage, while web content receives only semantic state and a
-  short-lived claim that the server redeems with the blind relay.
+`enable` files the registration natively under a fresh subscription id and
+hands the page that id and the device token (iOS: the APNs token and the
+build's APNs environment; Android: the FCM token with `platform: "android"`).
+The page registers them with its own server (`POST /api/native-push`) over the
+same Polyth Link connection it uses for everything else, and re-sends them on
+every foreground so a rotated token arrives. The phone never talks to a push
+service itself.
+
+The server sends through [Polyth's push service](#polyths-push-service)
+(`https://push.polyth.app`), which holds the app's APNs key and Firebase
+account; a server whose owner placed the app's own APNs key sends iOS pushes
+to APNs itself ([Own APNs key](#own-apns-key)). Only the last hop, server →
+APNs/FCM → phone, leaves Link: a suspended phone has no connection, and only
+APNs/FCM can reach it. Users set up nothing beyond allowing notifications.
 
 Provider data is strictly limited to version, subscription id, notification
 UUID, kind, and opaque tag. Receipt validates and displays an OS notification
@@ -314,18 +314,31 @@ browser notifications remain the fallback when native push is unavailable or
 not successfully claimed. Inside the native app, Settings shows only the Mobile
 push row: browser Web Push can never subscribe from the WebView, so its row is
 hidden there. An iOS build without `POLYTH_PUSH_ENVIRONMENT`, an Android build
-without `-PpolythPushRelayOrigin` + `google-services.json`, or a server with
-neither an APNs key nor a relay reports `unavailable`, and the row says local
+without `google-services.json`, or a server with neither the push service nor
+an own APNs key (`POLYTH_NATIVE_PUSH_RELAY_ORIGIN=off`) reports `unavailable`, and the row says local
 alerts still appear while the app is open. APNs/FCM provider delivery, signing, Firebase
 configuration, and device lifecycle behavior remain external-verification work;
 the repository tests do not make provider calls.
 
-### Direct APNs key
+### Polyth's push service
 
-Only the Apple developer team that owns the app's bundle id
-(`com.polyth.mobile`) can create its APNs key, so direct push works on that
-team's own servers. The server reads two files from its data directory and
-re-reads them when they change (no restart):
+APNs and FCM deliver only for keys of the team that publishes the app, so the
+publisher runs one stateless forwarder for every server
+([`packages/push-relay`](../../packages/push-relay/README.md)). A server
+sends it `POST /v1/send` with the device token and either an alert (version,
+subscription id, notification UUID, kind, opaque tag, and text sealed for the
+device) or a Live Activity update (state, counts, times): never a chat's words,
+names or ids. It stores nothing, logs only provider/status/latency and limits
+each device token and each sender address. Only a server the phone registered
+with knows the token. `POLYTH_NATIVE_PUSH_RELAY_ORIGIN` points a server at
+another deployment of the same service; `off` turns it off.
+
+### Own APNs key
+
+The team that owns the app's bundle id (`com.polyth.mobile`) may also place
+its APNs key on a server, which then sends iOS pushes to APNs itself instead
+of through the push service. The server reads two files from its data
+directory and re-reads them when they change (no restart):
 
 - `<dataDir>/native-push/apns.json`: `{"teamId": "<10 chars>", "keyId":
   "<10 chars>"}`, optionally `"topic"` (default `com.polyth.mobile`);
@@ -335,8 +348,7 @@ re-reads them when they change (no restart):
 
 One key serves both APNs environments: development builds register as
 `sandbox`, TestFlight and App Store builds as `production`. An unusable pair
-is logged without its contents and leaves direct push off. The key never
-leaves the server; phones only ever send it their tokens.
+is logged without its contents. The push service reads the same two files.
 
 ## Live Activity (Dynamic Island)
 
@@ -387,10 +399,10 @@ extension (shared `PolythActivityAttributes.swift`).
   snapshot that stays ten minutes; a chat that vanished ends it at once. The
   first evaluation after a page load always reaches native, so an activity left
   by a previous process or server is replaced or ended.
-- **Push while suspended.** When the server holds the app's APNs key
-  ([Direct APNs key](#direct-apns-key)) it keeps the activity current while
-  the app is suspended, over the same path as alerts: the phone talks only to
-  its own server over Polyth Link, and the server sends to APNs. A Live
+- **Push while suspended.** The server keeps the activity current while the
+  app is suspended, over the same path as alerts: the phone talks only to its
+  own server over Polyth Link, and the server sends through
+  [Polyth's push service](#polyths-push-service) (or its [own key](#own-apns-key)). A Live
   Activity push cannot be decrypted on the device (no service-extension step),
   so **no words leave the server**: a push carries only the state, the work's
   start, and how many other chats wait or work. The widget draws the words

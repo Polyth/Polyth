@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { NativePushController, type NativePushBridge, type NativePushServer } from "../src/nativePushController.ts";
 
 const input = { accountId: "account-1" };
-const claim = { subscriptionId: `sub_${"s".repeat(22)}`, claimToken: "c".repeat(43), claimExpiresAt: Date.now() + 60_000 };
+const claim = { subscriptionId: `sub_${"s".repeat(22)}`, providerToken: "ab".repeat(32), environment: "production" as const };
 
 function setup() {
   const calls: string[] = [];

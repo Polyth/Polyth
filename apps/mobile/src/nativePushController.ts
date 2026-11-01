@@ -10,7 +10,7 @@ export interface NativePushBridge {
 export interface NativePushServer {
   /** Authenticated paired-device route; the server derives the account/Space. */
   status(): Promise<{ enabled: boolean; subscribed: boolean; subscriptionId?: string }>;
-  /** A relay claim, or (direct mode) the device's APNs token; both over Polyth Link. */
+  /** The device's APNs or FCM token, over Polyth Link. */
   claim(claim: NativePushClaim): Promise<{ subscriptionId: string }>;
   unregister(): Promise<void>;
 }
@@ -64,8 +64,7 @@ export class NativePushController {
 
   async disable(input: Pick<NativePushEnableInput, "accountId">): Promise<NativePushStatus> {
     await this.bridge.setForeground({ ...input, active: false }).catch(() => undefined);
-    // The native mapping owns its relay management capability. Attempt that
-    // privacy-preserving revoke concurrently so an unresponsive authenticated
+    // Forget the native mapping concurrently so an unresponsive authenticated
     // server cannot postpone device-side cleanup.
     const [serverResult, nativeResult] = await Promise.allSettled([
       this.server.unregister(),
@@ -79,7 +78,7 @@ export class NativePushController {
   async setForeground(input: Pick<NativePushEnableInput, "accountId">, active: boolean): Promise<void> {
     await this.bridge.setForeground({ ...input, active });
     if (!active) return;
-    // Direct mode: APNs may have rotated the token since; the server upserts.
+    // APNs/FCM may have rotated the token since; the server upserts.
     const local = await this.bridge.status().catch(() => undefined);
     if (local?.state === "enabled" && local.registration) await this.server.claim(local.registration).catch(() => undefined);
   }

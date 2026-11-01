@@ -129,7 +129,7 @@ import { createPushNotifier, createPushService, plainTextExcerpt, type PushPaylo
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
-import { apnsFromDir, createNativePushService, nativePushRoutes } from "./nativePush.ts";
+import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
@@ -2319,9 +2319,9 @@ export async function boot(opts: BootOptions = {}) {
   });
   const nativePush = createNativePushService({
     file: `${dataDir}/native-push.json`,
-    relayOrigin: process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN,
-    // This server's own APNs key, if its owner placed one: then phones
-    // register over Polyth Link and this process sends to APNs itself.
+    // Phones register over Polyth Link; pushes go out through Polyth's push
+    // service, or straight to APNs when this server's owner placed the app's key.
+    relay: relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
     apns: apnsFromDir(`${dataDir}/native-push`),
     authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
     // A Live Activity only ever reflects chats this person could open in the

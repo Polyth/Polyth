@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createNativePushService, parseContentKey, sealNativeContent } from "../src/nativePush.ts";
+import { createNativePushService, parseContentKey, relaySender, sealNativeContent } from "../src/nativePush.ts";
 
 // Receiver-side reference opener: steps 1-11 of docs/mobile/native-push-content.md,
 // written independently of encryptWebPush (HMAC/ECDH/AES-GCM from node:crypto only).
@@ -104,26 +104,27 @@ const alice = { userId: "usr_alice", spaceId: "sp_alice", deviceId: "dev_alice",
 const subscriptionId = `sub_${"c".repeat(22)}`;
 const authority = () => ({ hostEndpointId: async () => "host-endpoint", validate: async () => true });
 
-function harness(deliver: (body: Record<string, unknown>, n: number) => number = () => 200, persisted = join(mkdtempSync(join(tmpdir(), "polyth-native-content-")), "native-push.json")) {
+/** The push service's view: the alert each `/v1/send` carried. */
+function harness(persisted = join(mkdtempSync(join(tmpdir(), "polyth-native-content-")), "native-push.json")) {
   const delivered: Array<Record<string, unknown>> = [];
   const service = createNativePushService({
-    file: persisted, relayOrigin: "http://127.0.0.1:8787", authority,
-    fetchFn: async (url, init) => {
-      if (String(url).endsWith("/v1/claims/redeem")) return new Response(JSON.stringify({ subscriptionId, senderToken: "b".repeat(43) }), { status: 200 });
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      delivered.push(body);
-      return new Response("{}", { status: deliver(body, delivered.length) });
-    },
+    file: persisted, authority,
+    relay: relaySender("http://127.0.0.1:8787", async (_url, init) => {
+      delivered.push((JSON.parse(String(init?.body)) as { alert: Record<string, unknown> }).alert);
+      return new Response(JSON.stringify({ result: "success" }), { status: 200 });
+    }),
   });
   return { service, delivered, persisted };
 }
+const register = (service: ReturnType<typeof harness>["service"], contentKey?: unknown) =>
+  service.register({ ...alice, subscriptionId, providerToken: "ab".repeat(32), environment: "production", ...(contentKey !== undefined ? { contentKey } : {}) });
 const sendInput = { userId: alice.userId, spaceId: alice.spaceId, notificationId: "n-1", kind: "completed" as const, transitionKey: "s:turn:idle", title: "Done", body: "It worked" };
 
-test("claim rejects an invalid content key and stores nothing", async () => {
+test("registration rejects an invalid content key and stores nothing", async () => {
   const { service, delivered } = harness();
   const { key } = newKey();
   for (const bad of [{ ...key, auth: "short" }, { p256dh: "!".repeat(87), auth: key.auth }, "nope", 7, {}]) {
-    await assert.rejects(service.claim({ ...alice, claimToken: "a".repeat(43), contentKey: bad }), { code: "invalid-input" });
+    await assert.rejects(register(service, bad), { code: "invalid-input" });
   }
   assert.equal((await service.send(sendInput)).sent, 0);
   assert.equal(delivered.length, 0);
@@ -132,27 +133,27 @@ test("claim rejects an invalid content key and stores nothing", async () => {
 test("send seals for an entry with a key and omits sealed without one", async () => {
   const device = newKey();
   const keyed = harness();
-  await keyed.service.claim({ ...alice, claimToken: "a".repeat(43), contentKey: device.key });
+  await register(keyed.service, device.key);
   assert.equal((await keyed.service.send(sendInput)).sent, 1);
   const body = keyed.delivered[0]!;
   assert.deepEqual(Object.keys(body).sort(), ["kind", "notificationId", "sealed", "subscriptionId", "tag", "version"]);
   assert.deepEqual(JSON.parse(open(b(body.sealed as string), device.priv, device.pub, device.auth).toString()), { v: 1, title: "Done", body: "It worked" });
 
   const plain = harness();
-  await plain.service.claim({ ...alice, claimToken: "a".repeat(43) });
+  await register(plain.service);
   await plain.service.send(sendInput);
   assert.deepEqual(Object.keys(plain.delivered[0]!).sort(), ["kind", "notificationId", "subscriptionId", "tag", "version"]);
 });
 
-test("a key persists (0600, survives restart) and a re-claim without one clears it", async () => {
+test("a key persists (0600, survives restart) and a re-registration without one clears it", async () => {
   const device = newKey();
   const first = harness();
-  await first.service.claim({ ...alice, claimToken: "a".repeat(43), contentKey: device.key });
+  await register(first.service, device.key);
   assert.equal(statSync(first.persisted).mode & 0o777, 0o600);
-  const restarted = harness(() => 200, first.persisted);
+  const restarted = harness(first.persisted);
   await restarted.service.send(sendInput);
   assert.ok(typeof restarted.delivered[0]!.sealed === "string");
-  await restarted.service.claim({ ...alice, claimToken: "a".repeat(43) });
+  await register(restarted.service);
   await restarted.service.send(sendInput);
   assert.equal("sealed" in restarted.delivered[1]!, false);
   assert.equal("contentKey" in (JSON.parse(readFileSync(first.persisted, "utf8")).subscriptions[0] as object), false);
@@ -160,36 +161,19 @@ test("a key persists (0600, survives restart) and a re-claim without one clears 
 
 test("old files without a content key, and files with a malformed one, still load", async () => {
   const first = harness();
-  await first.service.claim({ ...alice, claimToken: "a".repeat(43) });
+  await register(first.service);
   const file = JSON.parse(readFileSync(first.persisted, "utf8"));
   file.subscriptions[0].contentKey = { p256dh: "bad", auth: "bad" };
   writeFileSync(first.persisted, JSON.stringify(file));
-  const loaded = harness(() => 200, first.persisted);
+  const loaded = harness(first.persisted);
   assert.equal((await loaded.service.send(sendInput)).sent, 1);
   assert.equal("sealed" in loaded.delivered[0]!, false);
-});
-
-test("a 400 on a sealed delivery is retried exactly once without sealed", async () => {
-  const { service, delivered } = harness((body) => ("sealed" in body ? 400 : 200));
-  await service.claim({ ...alice, claimToken: "a".repeat(43), contentKey: newKey().key });
-  assert.equal((await service.send(sendInput)).sent, 1);
-  assert.equal(delivered.length, 2);
-  assert.ok("sealed" in delivered[0]!);
-  assert.equal("sealed" in delivered[1]!, false);
-  const failing = harness(() => 400);
-  await failing.service.claim({ ...alice, claimToken: "a".repeat(43), contentKey: newKey().key });
-  assert.equal((await failing.service.send(sendInput)).sent, 0);
-  assert.equal(failing.delivered.length, 2, "one retry only");
-  const server = harness(() => 503);
-  await server.service.claim({ ...alice, claimToken: "a".repeat(43), contentKey: newKey().key });
-  await server.service.send(sendInput);
-  assert.equal(server.delivered.length, 1, "other failures are not retried");
 });
 
 test("an oversized body is shortened, not dropped, in send", async () => {
   const device = newKey();
   const { service, delivered } = harness();
-  await service.claim({ ...alice, claimToken: "a".repeat(43), contentKey: device.key });
+  await register(service, device.key);
   await service.send({ ...sendInput, body: "lorem ".repeat(2000) });
   const sealed = delivered[0]!.sealed as string;
   assert.ok(sealed.length <= 3072);

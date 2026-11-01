@@ -1,5 +1,7 @@
 import { createHash, createPrivateKey, sign } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { connect, constants, type ClientHttp2Session } from "node:http2";
+import { join } from "node:path";
 
 import {
   type ActivityInput, type DeliveryInput, type Destination, type ProviderAdapter, type ProviderClass, type ProviderReply, ProviderTransportError,
@@ -273,6 +275,54 @@ export class ApnsProvider implements ProviderAdapter {
   }
 }
 
+/** A `.p8` as PEM whether it was stored with its line breaks or flattened onto
+ *  one line by a form field (base64 body between the markers, or the body alone). */
+export function apnsKeyPem(text: string): string | undefined {
+  const body = text.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, "").replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body)) return undefined;
+  const pem = `-----BEGIN PRIVATE KEY-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
+  try {
+    const key = createPrivateKey(pem);
+    return key.asymmetricKeyType === "ec" ? pem : undefined;
+  } catch { return undefined; }
+}
+
+/** An APNs sender from `<dir>/apns.json` (`{teamId, keyId, topic?}`, topic
+ *  defaulting to the app's bundle id) and `<dir>/apns.p8`, re-read when either
+ *  file changes so placing the key needs no restart. Absent or unusable files
+ *  mean no sender. */
+export function apnsFromDir<T extends { close?(): void } = ApnsProvider>(
+  dir: string,
+  create: (options: ApnsProviderOptions) => T = (options) => new ApnsProvider(options) as unknown as T,
+): () => T | undefined {
+  const configFile = join(dir, "apns.json");
+  const keyFile = join(dir, "apns.p8");
+  let stamp = "";
+  let sender: T | undefined;
+  return () => {
+    let next: string;
+    try { next = `${statSync(configFile).mtimeMs}:${statSync(keyFile).mtimeMs}`; } catch { next = ""; }
+    if (next === stamp) return sender;
+    stamp = next;
+    sender?.close?.();
+    sender = undefined;
+    if (!next) return undefined;
+    try {
+      const config = JSON.parse(readFileSync(configFile, "utf8")) as { teamId?: unknown; keyId?: unknown; topic?: unknown };
+      const p8 = apnsKeyPem(readFileSync(keyFile, "utf8"));
+      const topic = config.topic === undefined ? "com.polyth.mobile" : config.topic;
+      if (!p8 || typeof config.teamId !== "string" || !/^[A-Z0-9]{10}$/.test(config.teamId)
+        || typeof config.keyId !== "string" || !/^[A-Z0-9]{10}$/.test(config.keyId)
+        || typeof topic !== "string" || !/^[A-Za-z0-9.-]{1,200}$/.test(topic)) throw new Error("invalid");
+      sender = create({ teamId: config.teamId, keyId: config.keyId, p8, topic });
+    } catch {
+      // Never log the key or its parse error text.
+      console.error(`[polyth] push: the APNs key in ${dir} is incomplete or unusable`);
+    }
+    return sender;
+  };
+}
+
 export const classifyApns = (reply: ProviderReply): ProviderClass => {
   if (reply.status >= 200 && reply.status < 300) return "success";
   if (["BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered"].includes(reply.reason ?? "")) return "permanent";
@@ -399,6 +449,16 @@ export const classifyFcm = (reply: ProviderReply, validPayload: boolean): Provid
   if (reply.status >= 500 || reply.status === 0 || reply.reason === "UNAVAILABLE") return "transient";
   return "config";
 };
+
+/** An FCM sender from a Firebase service-account JSON file (its `project_id`
+ *  names the project), or undefined when the file is absent. */
+export function fcmFromFile(file: string): FcmProvider | undefined {
+  let text: string;
+  try { text = readFileSync(file, "utf8"); } catch { return undefined; }
+  const project = (JSON.parse(text) as { project_id?: unknown }).project_id;
+  if (typeof project !== "string") throw new Error("invalid service account");
+  return new FcmProvider({ project, accessTokenProvider: new ServiceAccountAccessTokenProvider({ serviceAccountJson: text }) });
+}
 
 export interface ServiceAccountTokenOptions { serviceAccountJson: string; fetchFn?: typeof fetch; now?: () => number; timeoutMs?: number; }
 /** Minimal OAuth2 service-account exchange; no ambient credential files are read. */

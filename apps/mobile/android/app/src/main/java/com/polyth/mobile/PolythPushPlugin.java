@@ -27,14 +27,10 @@ import com.google.firebase.messaging.FirebaseMessaging;
 
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -51,9 +47,10 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 /**
- * The only Android authority that sees FCM or relay-management credentials.
- * JS can request semantic enable/disable/status/open operations; it has no
- * raw provider-token, relay URL, manage-capability, or filesystem surface.
+ * The Android owner of FCM registration and the sealed-content key. JS can
+ * request semantic enable/disable/status/open operations; it receives the FCM
+ * token only to register it with the page's own server over Polyth Link, which
+ * sends through Polyth's push service. The private content key never leaves.
  */
 @CapacitorPlugin(
     name = "PolythPush",
@@ -64,7 +61,6 @@ public final class PolythPushPlugin extends Plugin {
     static final String ATTENTION_CHANNEL = "polyth_attention";
     private static final String STORE = "polyth_native_push_secure";
     private static final String KEY_ALIAS = "polyth-native-push-v1";
-    private static final String BINDING_DOMAIN = "polyth-native-push-binding-v1\0";
     private static final String KEY_PENDING = "pending-open";
     private static final String KEY_MAPPING = "mapping/";
     private static final String KEY_SEEN = "seen-notification-ids";
@@ -90,10 +86,6 @@ public final class PolythPushPlugin extends Plugin {
         return value != null && value.matches("sub_[A-Za-z0-9_-]{22}");
     }
 
-    private static boolean capability(String value) {
-        return value != null && value.matches("[A-Za-z0-9_-]{43}");
-    }
-
     private static boolean tag(String value) {
         return value != null && value.length() <= MAX_TAG_LENGTH && value.matches("[A-Za-z0-9._:-]{1,128}");
     }
@@ -113,7 +105,7 @@ public final class PolythPushPlugin extends Plugin {
     }
 
     /** The exact Polyth Link loopback proxy can invoke only this semantic
-     * contract. Raw provider/relay/identity operations are not plugin methods. */
+     * contract. Raw provider/identity operations are not plugin methods. */
     private boolean semanticReader(PluginCall call) {
         String url = PolythLinkOrigin.currentUrl(getBridge());
         return PolythLinkOrigin.isBundledOrigin(url) || PolythLinkPlugin.ownsCurrentProxy(getContext(), url);
@@ -144,9 +136,6 @@ public final class PolythPushPlugin extends Plugin {
         if (!BuildConfig.POLYTH_FCM_CONFIGURED) {
             result.put("state", "unavailable"); result.put("reason", "firebase-not-configured"); call.resolve(result); return;
         }
-        if (!relayOriginValid()) {
-            result.put("state", "unavailable"); result.put("reason", "relay-not-configured"); call.resolve(result); return;
-        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             // Fresh Android 13+ installs are also DENIED at the framework
@@ -162,7 +151,11 @@ public final class PolythPushPlugin extends Plugin {
         try {
             JSONObject mapping = secure.foregroundMapping(FOREGROUND_MAPPING.get());
             if (mapping == null) { result.put("state", "disabled"); }
-            else { result.put("state", "enabled"); result.put("subscriptionId", mapping.optString("subscriptionId")); }
+            else {
+                // The current registration, re-sent on foreground so a rotated FCM token reaches the server.
+                result.put("state", "enabled"); result.put("subscriptionId", mapping.optString("subscriptionId"));
+                result.put("platform", "android"); result.put("providerToken", mapping.optString("providerToken"));
+            }
         } catch (Exception ignored) {
             result.put("state", "failed"); result.put("reason", "registration-failed");
         }
@@ -172,7 +165,6 @@ public final class PolythPushPlugin extends Plugin {
     @PluginMethod public void enable(PluginCall call) {
         if (!requireSemanticReader(call)) return;
         if (!BuildConfig.POLYTH_FCM_CONFIGURED) { call.reject("firebase-not-configured", "firebase-not-configured"); return; }
-        if (!relayOriginValid()) { call.reject("relay-not-configured", "relay-not-configured"); return; }
         JSONObject input;
         try { input = currentInput(getContext(), call.getString("accountId")); }
         catch (Exception ignored) { call.reject("push-binding-invalid", "push-binding-invalid"); return; }
@@ -206,18 +198,16 @@ public final class PolythPushPlugin extends Plugin {
             EXECUTOR.execute(() -> {
                 try {
                     if (!activeInput(getContext(), input)) throw new PushFailure("push-binding-invalid");
-                    JSONObject mapping = register(getContext(), providerToken, input);
-                    if (!activeInput(getContext(), input)) {
-                        try { relay("DELETE", "/v1/registrations/" + mapping.getString("subscriptionId"), null, mapping.getString("manageToken")); }
-                        catch (Exception ignored) { }
-                        throw new PushFailure("push-binding-invalid");
-                    }
+                    // Filed locally under a device-made id; the page registers it with its server.
+                    byte[] id = new byte[16];
+                    new SecureRandom().nextBytes(id);
+                    JSONObject mapping = new JSONObject(input.toString())
+                        .put("subscriptionId", "sub_" + Base64.encodeToString(id, Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING))
+                        .put("providerToken", providerToken);
                     JSObject result = new JSObject();
                     result.put("subscriptionId", mapping.getString("subscriptionId"));
-                    result.put("claimToken", mapping.getString("claimToken"));
-                    result.put("claimExpiresAt", mapping.getLong("claimExpiresAt"));
-                    // The claim is intentionally not retained once returned.
-                    mapping.remove("claimToken"); mapping.remove("claimExpiresAt");
+                    result.put("platform", "android");
+                    result.put("providerToken", providerToken);
                     // Sealed content key: lives and dies with this mapping. A
                     // generation failure only means generic notification text.
                     try {
@@ -232,23 +222,13 @@ public final class PolythPushPlugin extends Plugin {
                         mapping.remove("contentPrivate"); mapping.remove("contentPublic"); mapping.remove("contentAuth");
                     }
                     String subscription = mapping.getString("subscriptionId");
-                    try {
-                        secure.put(KEY_MAPPING + subscription, mapping);
-                    } catch (Exception storageFailure) {
-                        // Do not orphan a live provider destination when local
-                        // secure persistence fails after relay registration.
-                        try { relay("DELETE", "/v1/registrations/" + subscription, null, mapping.getString("manageToken")); }
-                        catch (Exception ignored) { }
-                        throw storageFailure;
-                    }
+                    secure.put(KEY_MAPPING + subscription, mapping);
                     // Explicit re-enable replaces this connection/account's
-                    // prior destination instead of accumulating stale senders.
+                    // prior mapping; the server keeps one registration per device.
                     for (JSONObject prior : secure.mappings()) {
                         if (subscription.equals(prior.optString("subscriptionId"))
                             || !mapping.getString("connectionId").equals(prior.optString("connectionId"))
                             || !mapping.getString("accountId").equals(prior.optString("accountId"))) continue;
-                        try { relay("DELETE", "/v1/registrations/" + prior.getString("subscriptionId"), null, prior.getString("manageToken")); }
-                        catch (Exception ignored) { }
                         secure.remove(KEY_MAPPING + prior.getString("subscriptionId"));
                     }
                     call.resolve(result);
@@ -267,12 +247,9 @@ public final class PolythPushPlugin extends Plugin {
         EXECUTOR.execute(() -> {
             try {
                 if (!activeInput(getContext(), input)) throw new PushFailure("push-binding-invalid");
+                // The page unregisters with its server; this forgets the local mapping.
                 JSONObject mapping = secure.currentMapping(input);
-                if (mapping != null) {
-                    try { relay("DELETE", "/v1/registrations/" + mapping.getString("subscriptionId"), null, mapping.getString("manageToken")); }
-                    catch (Exception ignored) { /* Offline delete is best effort; mapping is still forgotten locally. */ }
-                    secure.remove(KEY_MAPPING + mapping.getString("subscriptionId"));
-                }
+                if (mapping != null) secure.remove(KEY_MAPPING + mapping.getString("subscriptionId"));
                 call.resolve(new JSObject().put("ok", true));
             } catch (Exception ignored) { call.reject("push-disable-failed", "push-disable-failed"); }
         });
@@ -334,18 +311,6 @@ public final class PolythPushPlugin extends Plugin {
         );
     }
 
-    private static JSONObject register(Context context, String providerToken, JSONObject input) throws Exception {
-        String binding = binding(input.getString("hostEndpointId"), input.getString("deviceEndpointId"), input.getString("accountId"));
-        JSONObject body = new JSONObject().put("platform", "android").put("providerToken", providerToken).put("binding", binding);
-        JSONObject response = relay("POST", "/v1/registrations", body, null);
-        String subscription = response.optString("subscriptionId");
-        String manage = response.optString("manageToken");
-        String claim = response.optString("claimToken");
-        long expires = response.optLong("claimExpiresAt", 0);
-        if (!subscriptionId(subscription) || !capability(manage) || !capability(claim) || expires <= System.currentTimeMillis()) throw new PushFailure("push-registration-failed");
-        return input.put("subscriptionId", subscription).put("manageToken", manage).put("claimToken", claim).put("claimExpiresAt", expires).put("binding", binding);
-    }
-
     static void onProviderToken(Context context, String providerToken) {
         if (providerToken == null || providerToken.isEmpty()) return;
         LATEST_PROVIDER_TOKEN.set(providerToken);
@@ -355,12 +320,11 @@ public final class PolythPushPlugin extends Plugin {
     private static void rotateProviderToken(Context context, String providerToken) {
         EXECUTOR.execute(() -> {
             try {
+                // Kept locally; the page re-registers it with its server on the next foreground.
                 SecureStore store = new SecureStore(context);
                 for (JSONObject mapping : store.mappings()) {
-                    // The relay deliberately accepts only a rotated provider token here.
-                    JSONObject body = new JSONObject().put("providerToken", providerToken);
-                    try { relay("PUT", "/v1/registrations/" + mapping.getString("subscriptionId"), body, mapping.getString("manageToken")); }
-                    catch (Exception ignored) { /* A later token refresh retries; no token is logged. */ }
+                    if (providerToken.equals(mapping.optString("providerToken"))) continue;
+                    store.put(KEY_MAPPING + mapping.getString("subscriptionId"), mapping.put("providerToken", providerToken));
                 }
             } catch (Exception ignored) { }
         });
@@ -454,8 +418,6 @@ public final class PolythPushPlugin extends Plugin {
                 SecureStore store = new SecureStore(context);
                 for (JSONObject mapping : store.mappings()) {
                     if (!connectionId.equals(mapping.optString("connectionId"))) continue;
-                    try { relay("DELETE", "/v1/registrations/" + mapping.getString("subscriptionId"), null, mapping.getString("manageToken")); }
-                    catch (Exception ignored) { /* Local forget remains authoritative for this install. */ }
                     store.remove(KEY_MAPPING + mapping.getString("subscriptionId"));
                     FOREGROUND_MAPPING.compareAndSet(connectionId + "\0" + mapping.optString("accountId"), null);
                 }
@@ -487,46 +449,6 @@ public final class PolythPushPlugin extends Plugin {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel(ACTIVITY_CHANNEL, "Polyth activity", NotificationManager.IMPORTANCE_DEFAULT));
         manager.createNotificationChannel(new NotificationChannel(ATTENTION_CHANNEL, "Polyth needs attention", NotificationManager.IMPORTANCE_HIGH));
-    }
-
-    private static String binding(String host, String device, String account) throws Exception {
-        byte[] tuple = (BINDING_DOMAIN + host + "\0" + device + "\0" + account).getBytes(StandardCharsets.UTF_8);
-        byte[] digest = MessageDigest.getInstance("SHA-256").digest(tuple);
-        return Base64.encodeToString(digest, Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING)
-            .toLowerCase(java.util.Locale.ROOT);
-    }
-
-    private static boolean relayOriginValid() {
-        try {
-            URI uri = URI.create(BuildConfig.POLYTH_PUSH_RELAY_ORIGIN);
-            boolean root = (uri.getRawPath() == null || uri.getRawPath().isEmpty() || "/".equals(uri.getRawPath()))
-                && uri.getRawUserInfo() == null && uri.getRawQuery() == null && uri.getRawFragment() == null;
-            if (!root || uri.getHost() == null) return false;
-            if ("https".equalsIgnoreCase(uri.getScheme())) return true;
-            return BuildConfig.DEBUG && "http".equalsIgnoreCase(uri.getScheme()) && ("127.0.0.1".equals(uri.getHost()) || "localhost".equals(uri.getHost()));
-        } catch (Exception ignored) { return false; }
-    }
-
-    private static JSONObject relay(String method, String path, JSONObject body, String manageToken) throws Exception {
-        if (!relayOriginValid()) throw new PushFailure("relay-not-configured");
-        URL url = URI.create(BuildConfig.POLYTH_PUSH_RELAY_ORIGIN).resolve(path).toURL();
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setInstanceFollowRedirects(false);
-        connection.setConnectTimeout(8_000); connection.setReadTimeout(8_000); connection.setRequestMethod(method);
-        connection.setRequestProperty("Accept", "application/json");
-        if (manageToken != null) connection.setRequestProperty("Authorization", "Bearer " + manageToken);
-        if (body != null) {
-            connection.setDoOutput(true); connection.setRequestProperty("Content-Type", "application/json");
-            try (OutputStream output = connection.getOutputStream()) { output.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
-        }
-        int status = connection.getResponseCode();
-        if (status < 200 || status >= 300) throw new PushFailure("relay-request-failed");
-        if ("DELETE".equals(method)) return new JSONObject();
-        StringBuilder raw = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-            for (String line; (line = reader.readLine()) != null;) raw.append(line);
-        }
-        return new JSONObject(raw.toString());
     }
 
     /** Small Keystore-backed record store; regular web storage never sees it. */

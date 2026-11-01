@@ -138,25 +138,23 @@ canonical `--safe-*` tokens. Native keyboard height feeds
 `apps/web/src/mobileViewport.ts`. Browser and Electron behavior is unchanged.
 
 Native push is owned by the single native controller, not by ordinary web code.
-The generic Capacitor push plugin was not used because its normal registration
-listener exposes the raw provider token to JavaScript, contradicting this
-feature's secret boundary; the narrow app-owned plugin exposes semantic values
-only. It keeps APNs/FCM tokens inside native/provider transport code and relay
-management capabilities in Keychain/Keystore-backed storage, derives the binding from the saved Link identities plus the
-authenticated account input, and exposes only status, enable/disable, and one
-bounded pending-open record to the bundled app. Enabling is point-of-use and is
-not considered enabled until the authenticated server redeems the short-lived
-claim. The relay origin and iOS environment are build-owned; redirects and
-non-origin relay configuration are rejected.
+The narrow app-owned plugin (not the generic Capacitor push plugin) keeps the
+registration and the private content key in Keychain/Keystore-backed storage
+and exposes status, enable/disable, and one bounded pending-open record. The
+page receives the device's APNs/FCM token only to register it with its own
+server over Polyth Link; that server sends through Polyth's push service
+([notifications](platform-behavior.md#notifications)). Enabling is
+point-of-use and is not considered enabled until the authenticated server
+confirms the same subscription id. The iOS environment is build-owned; no
+build talks to a push service itself.
 
 A provider payload has a validated subscription id, notification UUID, kind,
 and opaque tag, plus, for a device that registered a content key, an opaque
 `sealed` blob: the notification-centre title and body encrypted by the host
-for that device (RFC 8291) and opened only on the device. The relay, APNs and
+for that device (RFC 8291) and opened only on the device. The push service, APNs and
 FCM never see the text, and the private key never reaches JavaScript. The
-contract (key, claim, sealing, opening, compatibility) is
-[native-push-content.md](native-push-content.md). A receipt never opens
-content through the relay. A user tap records the
+contract (key, registration, sealing, opening, compatibility) is
+[native-push-content.md](native-push-content.md). A user tap records the
 saved trusted connection/account mapping, returns to the bundled Connection
 Hub, reconnects that exact saved Link connection, and forwards only the UUID to
 the authenticated server for canonical notification lookup. Foreground delivery
@@ -164,7 +162,7 @@ for that exact mapping is suppressed in favour of WebSocket/in-app state; other
 trusted mappings keep their OS notification. Browser/local fallback remains
 when native push is disabled or unavailable.
 
-The native controller and relay contract are source-tested. APNs/FCM delivery,
+The native controller and push-service contract are source-tested. APNs/FCM delivery,
 Apple entitlement signing, Firebase project configuration, and physical-device
 foreground/background behavior still require externally configured device
 verification; no provider call is made during normal tests.

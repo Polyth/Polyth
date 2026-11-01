@@ -1,22 +1,21 @@
 # Native push content (sealed end to end)
 
 A phone notification shows the same title and body as the notification-centre
-record, while the push relay, APNs and FCM see only the generic text
+record, while Polyth's push service, APNs and FCM see only the generic text
 ("Polyth / A task completed"). The host seals the text for one device key; only
-that device can open it. This document is the contract the host, the relay and
-both native apps implement; change it here first.
+that device can open it. This document is the contract the host, the push
+service and both native apps implement; change it here first.
 
-The same sealing applies in direct mode, where the Polyth server holds the
-APNs key and sends itself ([notifications](platform-behavior.md#notifications)):
-the device's content key is registered with the server alongside its token,
-and APNs sees only the generic text. A Live Activity push cannot be sealed
+The device's content key is registered with its server alongside its token
+over Polyth Link ([notifications](platform-behavior.md#notifications)); a
+server with its own APNs key seals the same way. A Live Activity push cannot be sealed
 (iOS hands its `content-state` to the widget unopened), so it carries no text
 at all, only a state, counts and times; the widget draws the words from the
 App's own copy. See [Live Activity](platform-behavior.md#live-activity-dynamic-island).
 
 ## Device content key
 
-- One key per relay subscription, generated natively in `enable`: a P-256 ECDH
+- One key per registration, generated natively in `enable`: a P-256 ECDH
   key pair and a 16-byte random auth secret (the Web Push key shape).
 - Public half, sent to the host: `p256dh` = the uncompressed point
   `0x04 ‖ X ‖ Y` (65 bytes) and `auth` (16 bytes), both base64url without
@@ -57,11 +56,10 @@ App's own copy. See [Live Activity](platform-behavior.md#live-activity-dynamic-i
 - At most 3072 base64url characters; a longer body is shortened before
   sealing, never dropped.
 
-## Relay
+## Push service
 
-- `POST /v1/deliver` accepts an optional `sealed` (base64url, ≤ 3072). The relay
-  never inspects it. A relay that predates the field answers 400; the host then
-  retries that delivery once without it.
+- `POST /v1/send` takes the alert with an optional `sealed` (base64url,
+  ≤ 3072). The service never inspects it.
 - APNs, only with `sealed`: `aps["mutable-content"] = 1` and a top-level
   `sealed`; the alert stays generic.
 - FCM, only with `sealed`: a data-only message (no `notification`, no
@@ -70,7 +68,7 @@ App's own copy. See [Live Activity](platform-behavior.md#live-activity-dynamic-i
 - Lifetime (APNs `apns-expiration`, FCM `ttl`): 5 minutes for task kinds, 12
   hours for a person's `mention`/`message`. Both people kinds alert on the
   Android attention channel; their generic text is "Someone mentioned you" /
-  "New message" until the device opens `sealed`. The relay, the Android plugin
+  "New message" until the device opens `sealed`. The push service, the Android plugin
   (`pushKind`) and the iOS delegate (`payloadKind`) each refuse a kind they do
   not list, so a new host notification kind must join all three.
 - A provider payload over 4096 bytes is delivered without `sealed`.
@@ -112,16 +110,15 @@ Known-answer vector (RFC 8291 Appendix A), verified against step 1–10:
 
 ## Compatibility
 
-| Host | Relay | App | Result |
+| Host | Push service | App | Result |
 | --- | --- | --- | --- |
 | new | new | new | sealed text on the phone |
-| new | old | any | host retries without `sealed`: generic text |
 | new | any | old | no content key, no `sealed`: generic text |
 | old | any | new | host ignores `contentKey`: generic text |
 
 ## Verification status
 
-**Tested in Node:** host and relay sealing, the claim, the RFC vector, and the
+**Tested in Node:** host and push-service sealing, the registration, the RFC vector, and the
 Xcode project patch (`apps/mobile/test/iosNotificationService.test.ts`: idempotent,
 no dangling object ids, App depends on and embeds the extension, switch `0`
 leaves the file byte-identical).
@@ -150,8 +147,8 @@ Android SDK, Swift or Xcode):**
    App ID and App Store profile (`fetch-signing-files --create`); check the
    build log has no "WITHOUT the Notification Service Extension" warning and that the IPA's
    `Payload/App.app/PlugIns/NotificationService.appex` exists and is signed.
-2. The Firebase/Apple side needs nothing extra for the extension; the relay's
-   FCM project must accept data-only high-priority messages.
+2. The Firebase/Apple side needs nothing extra for the extension; the push
+   service's FCM project must accept data-only high-priority messages.
 3. On a physical iPhone and Android phone: enable push, trigger a notification
    and confirm the real title/body appears (and that a build or key mismatch
    shows the generic text rather than nothing). The iOS Keychain access group

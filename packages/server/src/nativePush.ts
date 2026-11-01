@@ -1,27 +1,31 @@
-// Native push to the phone app. Two senders:
-// - direct: this server holds the app's APNs key (`<dataDir>/native-push/apns.*`,
-//   `apnsFromDir`), the phone registers its tokens with it over Polyth Link
-//   (the paired-device `/api/native-push` routes) and this process talks to
-//   APNs itself, for alerts and the Live Activity;
-// - relay (`POLYTH_NATIVE_PUSH_RELAY_ORIGIN`): a blind relay holds the tokens.
-// Session/project/request/action data never leaves this process, title/body
-// only leave it sealed for one device key (docs/mobile/native-push-content.md),
-// and a Live Activity push carries no words at all.
-import { createECDH, createHash, createPrivateKey } from "node:crypto";
-import { mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+// Native push to the phone app. The phone registers its tokens with this
+// server over Polyth Link (the paired-device `/api/native-push` routes), and
+// this server sends alerts and Live Activity updates through the hosted push
+// service (`packages/push-relay`, `POLYTH_NATIVE_PUSH_RELAY_ORIGIN`), which
+// holds the app's APNs key and Firebase account and keeps nothing. A server
+// whose owner placed the app's own APNs key (`<dataDir>/native-push/apns.*`)
+// talks to APNs itself instead. Session/project/request/action data never
+// leaves this process, title/body only leave it sealed for one device key
+// (docs/mobile/native-push-content.md), and a Live Activity push carries no
+// words at all.
+import { createECDH, createHash } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
 import type { NotificationKind, SessionProjection } from "@polyth/contracts";
-import { ApnsProvider } from "@polyth/push-relay/providers";
-import type { ActivityInput, DeliveryInput, Destination, Environment, ProviderClass } from "@polyth/push-relay";
+import type { ActivityInput, DeliveryInput, Destination, Environment, Platform, ProviderClass } from "@polyth/push-relay";
 import type { RouteHandler } from "./http.ts";
 import { b64u, encryptWebPush } from "./push.ts";
 
+export { apnsFromDir, apnsKeyPem } from "@polyth/push-relay/providers";
+
 const TIMEOUT_MS = 5_000;
-const CAPABILITY_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9_-]{22}$/;
 /** An APNs device or Live Activity token, hex as iOS hands it out. */
 const PROVIDER_TOKEN = /^[0-9a-f]{64,512}$/;
+/** An FCM registration token: opaque printable ASCII. */
+const FCM_TOKEN = /^[!-~]{10,4096}$/;
+const PROVIDER_CLASSES: ReadonlySet<string> = new Set(["success", "permanent", "auth", "rate", "transient", "config", "invalid"]);
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 /** Sealed content ceiling in base64url characters (docs/mobile/native-push-content.md). */
 const MAX_SEALED_CHARS = 3072;
@@ -33,8 +37,9 @@ export interface NativePushAuthority {
   validate(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<boolean>;
 }
 
-/** This server's own APNs sender (`ApnsProvider` from @polyth/push-relay). */
-export interface ApnsSender {
+/** Sends to APNs/FCM: the hosted push service (`relaySender`) or this
+ *  server's own APNs key (`ApnsProvider` from @polyth/push-relay). */
+export interface PushSender {
   deliver(destination: Destination, input: DeliveryInput): Promise<ProviderClass>;
   deliverActivity(destination: Destination, input: ActivityInput): Promise<ProviderClass>;
   close?(): void;
@@ -46,11 +51,10 @@ interface NativeSubscription {
   deviceId: string;
   deviceEndpointId: string;
   hostEndpointId: string;
-  /** Relay registration: which relay and this host's sender capability. */
-  relayId?: string;
-  senderToken?: string;
-  /** Direct registration: the device's APNs token and environment. */
-  providerToken?: string;
+  /** Absent means iOS (registrations from before Android). */
+  platform?: "android";
+  /** The device's APNs (with its environment) or FCM token. */
+  providerToken: string;
   environment?: Environment;
   subscriptionId: string;
   createdAt: number;
@@ -81,7 +85,7 @@ interface ActivityTrack {
   pushedAt: number;
 }
 
-/** A device's Live Activity push token (direct only: a relay never sees it). */
+/** A device's Live Activity push token. */
 interface NativeActivity {
   userId: string;
   spaceId: string;
@@ -172,55 +176,15 @@ const isText = (value: unknown, max = 512): value is string => typeof value === 
 const isEnvironment = (value: unknown): value is Environment => value === "sandbox" || value === "production";
 const isDirect = (value: { providerToken?: unknown; environment?: unknown }): boolean =>
   typeof value.providerToken === "string" && PROVIDER_TOKEN.test(value.providerToken) && isEnvironment(value.environment);
+const isAndroid = (value: { platform?: unknown; providerToken?: unknown; environment?: unknown }): boolean =>
+  value.platform === "android" && typeof value.providerToken === "string" && FCM_TOKEN.test(value.providerToken) && value.environment === undefined;
+const destinationOf = (entry: NativeSubscription): Destination => entry.platform === "android"
+  ? { subscriptionId: entry.subscriptionId, version: 1, platform: "android", providerToken: entry.providerToken }
+  : { subscriptionId: entry.subscriptionId, version: 1, platform: "ios", environment: entry.environment!, providerToken: entry.providerToken };
 const accountDeviceKey = (input: { userId: string; spaceId: string; deviceEndpointId: string }): string =>
   `${input.userId}\0${input.spaceId}\0${input.deviceEndpointId}`;
 const unavailable = () => Object.assign(new Error("native push unavailable"), { code: "unavailable" });
 const invalid = (what: string) => Object.assign(new Error(`${what} is invalid`), { code: "invalid-input" });
-
-/** A `.p8` as PEM whether it was stored with its line breaks or flattened onto
- *  one line by a form field (base64 body between the markers, or the body alone). */
-export function apnsKeyPem(text: string): string | undefined {
-  const body = text.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, "").replace(/\s+/g, "");
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body)) return undefined;
-  const pem = `-----BEGIN PRIVATE KEY-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
-  try {
-    const key = createPrivateKey(pem);
-    return key.asymmetricKeyType === "ec" ? pem : undefined;
-  } catch { return undefined; }
-}
-
-/** This server's APNs sender from `<dir>/apns.json` (`{teamId, keyId, topic?}`,
- *  topic defaulting to the app's bundle id) and `<dir>/apns.p8`, re-read when
- *  either file changes so placing the key needs no restart. Absent or unusable
- *  files mean no direct push. */
-export function apnsFromDir(dir: string, create: (options: ConstructorParameters<typeof ApnsProvider>[0]) => ApnsSender = (options) => new ApnsProvider(options)): () => ApnsSender | undefined {
-  const configFile = join(dir, "apns.json");
-  const keyFile = join(dir, "apns.p8");
-  let stamp = "";
-  let sender: ApnsSender | undefined;
-  return () => {
-    let next: string;
-    try { next = `${statSync(configFile).mtimeMs}:${statSync(keyFile).mtimeMs}`; } catch { next = ""; }
-    if (next === stamp) return sender;
-    stamp = next;
-    sender?.close?.();
-    sender = undefined;
-    if (!next) return undefined;
-    try {
-      const config = JSON.parse(readFileSync(configFile, "utf8")) as { teamId?: unknown; keyId?: unknown; topic?: unknown };
-      const p8 = apnsKeyPem(readFileSync(keyFile, "utf8"));
-      const topic = config.topic === undefined ? "com.polyth.mobile" : config.topic;
-      if (!p8 || typeof config.teamId !== "string" || !/^[A-Z0-9]{10}$/.test(config.teamId)
-        || typeof config.keyId !== "string" || !/^[A-Z0-9]{10}$/.test(config.keyId)
-        || typeof topic !== "string" || !/^[A-Za-z0-9.-]{1,200}$/.test(topic)) throw new Error("invalid");
-      sender = create({ teamId: config.teamId, keyId: config.keyId, p8, topic });
-    } catch {
-      // Never log the key or its parse error text.
-      console.error(`[polyth] native push: the APNs key in ${dir} is incomplete or unusable`);
-    }
-    return sender;
-  };
-}
 
 /** Strict content-key check: base64url, a 65-byte uncompressed point that is on P-256, a 16-byte auth. */
 export const parseContentKey = (value: unknown): NativeContentKey | undefined => {
@@ -257,16 +221,7 @@ export const sealNativeContent = (key: NativeContentKey, title: string, body: st
   return sealed;
 };
 
-/** Frozen native/client binding: lowercase base64url SHA-256 of a canonical tuple. */
-export const nativePushBinding = (input: { hostEndpointId: string; deviceEndpointId: string; userId: string }): string =>
-  createHash("sha256")
-    .update("polyth-native-push-binding-v1\0")
-    .update(input.hostEndpointId).update("\0")
-    .update(input.deviceEndpointId).update("\0")
-    .update(input.userId)
-    .digest("base64url").toLowerCase();
-
-/** Relay receives only a bounded opaque transition fingerprint. */
+/** The push service receives only a bounded opaque transition fingerprint. */
 export const nativePushTag = (transitionKey: string): string =>
   createHash("sha256").update("polyth-native-push/tag/v1\0").update(transitionKey).digest("base64url").slice(0, 43);
 
@@ -280,26 +235,51 @@ const relayOrigin = (raw: string | undefined): URL | undefined => {
   } catch { return undefined; }
 };
 
-async function relayFetch(fetchFn: typeof fetch, url: URL, init: RequestInit): Promise<Response> {
-  const signal = AbortSignal.timeout(TIMEOUT_MS);
-  return fetchFn(url, { ...init, signal, redirect: "error", headers: { accept: "application/json", ...(init.headers ?? {}) } });
+/** Polyth's hosted push service, the default for every server. */
+export const PUSH_SERVICE_ORIGIN = "https://push.polyth.app";
+
+/** The hosted push service (`packages/push-relay`): it receives the device
+ *  token and a payload of enums, counts, times and device-sealed text. Unset
+ *  means Polyth's own; `off` (or any value that is not an https origin) sends
+ *  no push through a service. */
+export function relaySender(origin: string | undefined, fetchFn: typeof fetch = fetch): PushSender | undefined {
+  const url = relayOrigin(origin || PUSH_SERVICE_ORIGIN);
+  if (!url) return undefined;
+  const post = async (body: unknown): Promise<ProviderClass> => {
+    try {
+      const response = await fetchFn(new URL("/v1/send", url), {
+        method: "POST", signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error",
+        headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (response.status === 429) return "rate";
+      if (response.status === 400) return "invalid";
+      const result = response.ok ? (await response.json() as { result?: unknown }).result : undefined;
+      return typeof result === "string" && PROVIDER_CLASSES.has(result) ? result as ProviderClass : "transient";
+    } catch { return "transient"; }
+  };
+  const to = (destination: Destination) => ({
+    platform: destination.platform, token: destination.providerToken,
+    ...(destination.platform === "ios" ? { environment: destination.environment } : {}),
+  });
+  return {
+    deliver: (destination, alert) => post({ to: to(destination), alert }),
+    deliverActivity: (destination, activity) => post({ to: to(destination), activity }),
+  };
 }
 
 export interface NativePushService {
-  /** `direct`: this server sends to APNs itself, so the device registers its token here. */
-  status(account: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<{ enabled: boolean; subscribed: boolean; subscriptionId?: string; direct?: boolean }>;
-  claim(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string; claimToken: string; contentKey?: unknown }): Promise<{ subscriptionId: string }>;
-  /** Direct registration over Polyth Link: the device's APNs token, the id it
-   *  files the registration under and the public half of its content key. */
-  register(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string; subscriptionId: unknown; providerToken: unknown; environment: unknown; contentKey?: unknown }): Promise<{ subscriptionId: string }>;
+  status(account: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<{ enabled: boolean; subscribed: boolean; subscriptionId?: string }>;
+  /** Registration over Polyth Link: the device's APNs token (with its
+   *  environment) or FCM token (`platform: "android"`), the id it files the
+   *  registration under and the public half of its content key. */
+  register(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string; subscriptionId: unknown; providerToken: unknown; environment: unknown; platform?: unknown; contentKey?: unknown }): Promise<{ subscriptionId: string }>;
   unregister(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<boolean>;
-  /** Internal account-deletion hook; local sender authority is removed before
-   * best-effort relay revocation, so an offline relay cannot retain delivery. */
+  /** Internal account-deletion hook: its devices stop receiving at once. */
   removeAccount(userId: string): Promise<number>;
   send(input: { userId: string; spaceId: string; notificationId: string; kind: NotificationKind; transitionKey: string; title?: string; body?: string }): Promise<{ sent: number }>;
-  /** Live Activity push (docs/mobile/platform-behavior.md), direct only: the
-   *  activity's push token, the chat it shows, and pushes of state changes
-   *  while the app is suspended. */
+  /** Live Activity push (docs/mobile/platform-behavior.md): the activity's
+   *  push token, the chat it shows, and pushes of state changes while the app
+   *  is suspended. */
   activityStatus(account: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<{ enabled: boolean; subscribed: boolean }>;
   registerActivity(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string; providerToken: unknown; environment: unknown }): Promise<{ ok: true }>;
   /** The device names the chat its island shows (and the ones its line counts)
@@ -316,19 +296,18 @@ export interface NativePushService {
 
 export function createNativePushService(opts: {
   file: string;
-  relayOrigin?: string;
-  /** This server's own APNs sender (`apnsFromDir`), read on every use. */
-  apns?: () => ApnsSender | undefined;
+  /** The hosted push service (`relaySender`). */
+  relay?: PushSender;
+  /** This server's own APNs sender (`apnsFromDir`), read on every use; it
+   *  takes over iOS from the push service. */
+  apns?: () => PushSender | undefined;
   /** Resolved lazily: package enable order is not dependency order. */
   authority?: () => NativePushAuthority | undefined;
-  fetchFn?: typeof fetch;
   now?: () => number;
   /** The named chats as this person sees them; a chat they cannot open is absent. */
   activityViews?: (account: { userId: string; spaceId: string }, sessionIds: string[]) => Promise<Map<string, LiveActivityView>>;
 }): NativePushService {
-  const relay = relayOrigin(opts.relayOrigin);
-  const apns = (): ApnsSender | undefined => opts.apns?.();
-  const fetchFn = opts.fetchFn ?? fetch;
+  const senderFor = (platform: Platform): PushSender | undefined => (platform === "ios" ? opts.apns?.() : undefined) ?? opts.relay;
   const now = opts.now ?? Date.now;
   const base = (entry: Record<string, unknown>): boolean =>
     isText(entry.userId) && isText(entry.spaceId) && isText(entry.deviceId) && isText(entry.deviceEndpointId)
@@ -339,7 +318,8 @@ export function createNativePushService(opts: {
     if (raw.version === 1 && Array.isArray(raw.subscriptions)) {
       state.subscriptions = raw.subscriptions.filter((entry): entry is NativeSubscription =>
         !!entry && base(entry as unknown as Record<string, unknown>) && isText(entry.subscriptionId) && SUBSCRIPTION_ID.test(entry.subscriptionId)
-        && ((isText(entry.relayId) && isText(entry.senderToken) && CAPABILITY_TOKEN.test(entry.senderToken)) || isDirect(entry)))
+        // Relay-claim entries (a sender capability, no token) are dropped: the phone registers again.
+        && (isDirect(entry) || isAndroid(entry)))
         // A malformed stored key degrades to generic text; the subscription stays.
         .map((entry) => {
           const contentKey = parseContentKey(entry.contentKey);
@@ -364,7 +344,7 @@ export function createNativePushService(opts: {
   /** The pinned host identity when this device may receive native push at all. */
   const verify = async (input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<string | undefined> => {
     const authority = opts.authority?.();
-    if ((!relay && !apns()) || !authority || !await authority.validate(input)) return undefined;
+    if ((!opts.relay && !opts.apns?.()) || !authority || !await authority.validate(input)) return undefined;
     const hostEndpointId = await authority.hostEndpointId();
     return isText(hostEndpointId) ? hostEndpointId : undefined;
   };
@@ -378,14 +358,6 @@ export function createNativePushService(opts: {
     const key = parseContentKey(value);
     if (!key) throw invalid("contentKey");
     return key;
-  };
-  const revokeSender = async (entry: NativeSubscription): Promise<void> => {
-    if (!relay || entry.relayId !== relay.origin || !entry.senderToken) return;
-    try {
-      await relayFetch(fetchFn, new URL(`/v1/senders/${encodeURIComponent(entry.subscriptionId)}`, relay), {
-        method: "DELETE", headers: { authorization: `Bearer ${entry.senderToken}` },
-      });
-    } catch { /* local revocation is durable */ }
   };
 
   // --- Live Activity: one evaluation at a time per device, a short settle
@@ -404,7 +376,7 @@ export function createNativePushService(opts: {
     if (!entry || !track || !opts.activityViews) return;
     const at = now();
     if (at - track.trackedAt > LIVE_ACTIVITY_MAX_MS) { dropTrack(key, track); return; }
-    const sender = apns();
+    const sender = senderFor("ios");
     const hostEndpointId = await verify(entry);
     if (!sender || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) return;
     const views = await opts.activityViews({ userId: entry.userId, spaceId: entry.spaceId }, [track.sessionId, ...track.others]);
@@ -478,62 +450,28 @@ export function createNativePushService(opts: {
         enabled: Boolean(hostEndpointId),
         subscribed,
         ...(subscribed && entry ? { subscriptionId: entry.subscriptionId } : {}),
-        ...(hostEndpointId && apns() ? { direct: true } : {}),
       };
-    },
-    async claim(input) {
-      if (!CAPABILITY_TOKEN.test(input.claimToken)) throw invalid("claimToken");
-      const contentKey = contentKeyOf(input.contentKey);
-      const hostEndpointId = await verify(input);
-      if (!hostEndpointId || !relay) throw unavailable();
-      let response: Response;
-      try {
-        response = await relayFetch(fetchFn, new URL("/v1/claims/redeem", relay), {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ claimToken: input.claimToken, binding: nativePushBinding({ hostEndpointId, deviceEndpointId: input.deviceEndpointId, userId: input.userId }) }),
-        });
-      } catch { throw Object.assign(new Error("native relay unavailable"), { code: "unavailable" }); }
-      let body: unknown;
-      try { body = await response.json(); } catch { body = null; }
-      if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)
-        || Object.getPrototypeOf(body) !== Object.prototype
-        || Object.keys(body).length !== 2 || !("subscriptionId" in body) || !("senderToken" in body)) {
-        throw Object.assign(new Error("native claim rejected"), { code: "invalid-input" });
-      }
-      const result = body as { subscriptionId?: unknown; senderToken?: unknown };
-      if (typeof result.subscriptionId !== "string" || !SUBSCRIPTION_ID.test(result.subscriptionId)
-        || typeof result.senderToken !== "string" || !CAPABILITY_TOKEN.test(result.senderToken)) {
-        throw Object.assign(new Error("invalid native relay response"), { code: "invalid-input" });
-      }
-      const previous = current(input);
-      const entry: NativeSubscription = {
-        userId: input.userId, spaceId: input.spaceId, deviceId: input.deviceId, deviceEndpointId: input.deviceEndpointId, hostEndpointId,
-        relayId: relay.origin, subscriptionId: result.subscriptionId, senderToken: result.senderToken,
-        createdAt: previous?.createdAt ?? now(), updatedAt: now(),
-        // A re-claim without a key clears the previous one.
-        ...(contentKey ? { contentKey } : {}),
-      };
-      state.subscriptions = [...state.subscriptions.filter((row) => accountDeviceKey(row) !== accountDeviceKey(input)), entry];
-      save();
-      return { subscriptionId: entry.subscriptionId };
     },
     async register(input) {
+      const platform: Platform = input.platform === "android" ? "android" : "ios";
+      if (input.platform !== undefined && input.platform !== "ios" && input.platform !== "android") throw invalid("platform");
       if (typeof input.subscriptionId !== "string" || !SUBSCRIPTION_ID.test(input.subscriptionId)) throw invalid("subscriptionId");
-      if (typeof input.providerToken !== "string" || !PROVIDER_TOKEN.test(input.providerToken)) throw invalid("providerToken");
-      if (!isEnvironment(input.environment)) throw invalid("environment");
+      if (typeof input.providerToken !== "string" || !(platform === "ios" ? PROVIDER_TOKEN : FCM_TOKEN).test(input.providerToken)) throw invalid("providerToken");
+      if (platform === "ios" ? !isEnvironment(input.environment) : input.environment !== undefined) throw invalid("environment");
       const contentKey = contentKeyOf(input.contentKey);
       const hostEndpointId = await verify(input);
-      if (!hostEndpointId || !apns()) throw unavailable();
+      if (!hostEndpointId || !senderFor(platform)) throw unavailable();
       const previous = current(input);
       const entry: NativeSubscription = {
         userId: input.userId, spaceId: input.spaceId, deviceId: input.deviceId, deviceEndpointId: input.deviceEndpointId, hostEndpointId,
-        subscriptionId: input.subscriptionId, providerToken: input.providerToken, environment: input.environment,
+        subscriptionId: input.subscriptionId, providerToken: input.providerToken,
+        ...(platform === "android" ? { platform } : { environment: input.environment as Environment }),
         createdAt: previous?.createdAt ?? now(), updatedAt: now(),
+        // A registration without a key clears the previous one.
         ...(contentKey ? { contentKey } : {}),
       };
       state.subscriptions = [...state.subscriptions.filter((row) => accountDeviceKey(row) !== accountDeviceKey(input)), entry];
       save();
-      if (previous) await revokeSender(previous);
       return { subscriptionId: entry.subscriptionId };
     },
     async unregister(input) {
@@ -541,7 +479,6 @@ export function createNativePushService(opts: {
       if (!entry) return false;
       state.subscriptions = state.subscriptions.filter((row) => accountDeviceKey(row) !== accountDeviceKey(input));
       save();
-      await revokeSender(entry);
       return true;
     },
     async removeAccount(userId) {
@@ -552,62 +489,44 @@ export function createNativePushService(opts: {
       state.subscriptions = state.subscriptions.filter((entry) => entry.userId !== userId);
       state.activities = activities().filter((entry) => entry.userId !== userId);
       save();
-      await Promise.allSettled(removed.map(revokeSender));
       return removed.length;
     },
     async send(input) {
       let sent = 0;
       for (const entry of state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId)) {
         const hostEndpointId = await verify(entry);
-        if (!hostEndpointId || hostEndpointId !== entry.hostEndpointId) continue;
+        const destination = destinationOf(entry);
+        const sender = senderFor(destination.platform);
+        if (!sender || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) continue;
         let sealed: string | undefined;
         if (entry.contentKey && typeof input.title === "string" && typeof input.body === "string") {
           try { sealed = sealNativeContent(entry.contentKey, input.title, input.body); } catch { /* generic text */ }
         }
-        const delivery: DeliveryInput = {
+        const result = await sender.deliver(destination, {
           version: 1, subscriptionId: entry.subscriptionId, notificationId: input.notificationId, kind: input.kind, tag: nativePushTag(input.transitionKey),
           ...(sealed ? { sealed } : {}),
-        };
-        const sender = apns();
-        if (entry.providerToken && entry.environment) {
-          if (!sender) continue;
-          const result = await sender.deliver(
-            { subscriptionId: entry.subscriptionId, version: 1, platform: "ios", environment: entry.environment, providerToken: entry.providerToken },
-            delivery,
-          ).catch((): ProviderClass => "transient");
-          if (result === "success") sent++;
-          else if (result === "permanent") {
-            // APNs retired the token (app removed or token replaced): stop sending.
-            state.subscriptions = state.subscriptions.filter((row) => row !== entry);
-            save();
-          }
-          continue;
+        }).catch((): ProviderClass => "transient");
+        // Best effort: a failed push is never replayed; the inbox row stays.
+        if (result === "success") sent++;
+        else if (result === "permanent") {
+          // The provider retired the token (app removed or token replaced): stop sending.
+          state.subscriptions = state.subscriptions.filter((row) => row !== entry);
+          save();
         }
-        if (!relay || entry.relayId !== relay.origin || !entry.senderToken) continue;
-        const deliver = (withSealed: boolean) => relayFetch(fetchFn, new URL("/v1/deliver", relay), {
-          method: "POST", headers: { authorization: `Bearer ${entry.senderToken}`, "content-type": "application/json" },
-          body: JSON.stringify(withSealed ? delivery : { ...delivery, sealed: undefined }),
-        });
-        try {
-          let response = await deliver(Boolean(sealed));
-          // A relay that predates `sealed` rejects the unknown key: retry once without it.
-          if (sealed && response.status === 400) response = await deliver(false);
-          if (response.ok) sent++;
-        } catch { /* best effort; never replays canonical transition */ }
       }
       return { sent };
     },
     async activityStatus(input) {
       const hostEndpointId = await verify(input);
       const entry = currentActivity(input);
-      const enabled = Boolean(hostEndpointId && apns());
+      const enabled = Boolean(hostEndpointId && senderFor("ios"));
       return { enabled, subscribed: Boolean(enabled && entry?.hostEndpointId === hostEndpointId) };
     },
     async registerActivity(input) {
       if (typeof input.providerToken !== "string" || !PROVIDER_TOKEN.test(input.providerToken)) throw invalid("providerToken");
       if (!isEnvironment(input.environment)) throw invalid("environment");
       const hostEndpointId = await verify(input);
-      if (!hostEndpointId || !apns()) throw unavailable();
+      if (!hostEndpointId || !senderFor("ios")) throw unavailable();
       const previous = currentActivity(input);
       // The same token is the same activity: keep what it shows.
       const same = previous?.providerToken === input.providerToken && previous.environment === input.environment;
@@ -663,11 +582,11 @@ export function nativePushRoutes(service: NativePushService): RouteHandler {
     if (rc.path === "/api/native-push" && rc.method === "GET") { rc.json(200, await service.status(account)); return true; }
     if (rc.path === "/api/native-push" && rc.method === "POST") {
       const body = await rc.body();
-      const contentKey = body.contentKey !== undefined ? { contentKey: body.contentKey } : {};
-      // A token means a direct registration; otherwise a relay claim.
-      rc.json(200, body.providerToken !== undefined
-        ? await service.register({ ...account, subscriptionId: body.subscriptionId, providerToken: body.providerToken, environment: body.environment, ...contentKey })
-        : await service.claim({ ...account, claimToken: typeof body.claimToken === "string" ? body.claimToken : "", ...contentKey }));
+      rc.json(200, await service.register({
+        ...account, subscriptionId: body.subscriptionId, providerToken: body.providerToken, environment: body.environment,
+        ...(body.platform !== undefined ? { platform: body.platform } : {}),
+        ...(body.contentKey !== undefined ? { contentKey: body.contentKey } : {}),
+      }));
       return true;
     }
     if (rc.path === "/api/native-push" && rc.method === "DELETE") { rc.json(200, { ok: await service.unregister(account) }); return true; }

@@ -30,10 +30,9 @@ export interface Destination {
   providerToken: string;
 }
 
-/** A Live Activity update, sent in process by a Polyth server that holds its
- *  own APNs key (`ApnsProvider.deliverActivity`). Only enums, counts and
- *  times: the chat's words stay on the device, which draws them from its own
- *  copy. Times are Unix seconds. */
+/** A Live Activity update (`ApnsProvider.deliverActivity`). Only enums,
+ *  counts and times: the chat's words stay on the device, which draws them
+ *  from its own copy. Times are Unix seconds. */
 export interface ActivityInput {
   event: "update" | "end";
   state: ActivityState;
@@ -66,20 +65,20 @@ export interface ProviderAdapter {
   close?(): void;
 }
 
+/** All the relay logs: never a token, payload or source address. */
 export interface RelayLogEvent {
-  subscriptionId?: string;
-  provider?: Platform;
-  status?: number;
-  code: "provider-result" | "storage-failure" | "request-rejected";
-  latencyMs?: number;
+  provider: Platform;
+  status: number;
+  code: "alert" | "activity";
+  latencyMs: number;
 }
 
 export type RelayLogger = (event: RelayLogEvent) => void;
 
 export class RelayFault extends Error {
-  readonly code: "invalid" | "unauthorized" | "not-found" | "rate" | "storage" | "unavailable";
+  readonly code: "invalid" | "not-found" | "rate" | "unavailable";
 
-  constructor(code: "invalid" | "unauthorized" | "not-found" | "rate" | "storage" | "unavailable") {
+  constructor(code: "invalid" | "not-found" | "rate" | "unavailable") {
     super(code);
     this.code = code;
   }
