@@ -2379,6 +2379,48 @@ narrow column the words wrap under the title instead of being cut. Only
 switch when the provider declares `watch` and a chat is open; its name never
 changes, `aria-pressed` and the accent wash with a dot say it is on.
 
+**A chat's planned runs above the composer:** Planner tasks that post into a
+chat (an `existing-session` task for it, including every `polyth_planner` task
+the agent made there, or a "Keep one chat" task whose runs go there) show in
+that chat through two Planner package contributions
+(`packages/planner/widgets/ChatSchedule.tsx`). `planner.chat-schedule` in
+`session.composer.before` (order 890, just above a watched pull request's line)
+is one more line of the same grammar while at least one of them is upcoming:
+the calendar-clock mark (an accent dot while a run is in flight), when the
+next run comes (*Due now*, *in 12 minutes* within the hour, else *Tomorrow,
+09:00* / *Mon, 09:00* / a date), its title, its short cadence and `+N` for the
+others, then a chevron. Pressing it opens the chat's planned tasks **upward**,
+so the line stays under the pointer: a row per task (day and time in a
+tabular column, title, cadence, a failed-last-run warning), *Run now* for an
+upcoming task and a menu with Run now, Pause/Resume, *Open in Planner* (the
+pane opens on that task's page
+through `plannerOpen.ts`) and Delete (confirmed), then a closing note that each
+run arrives as the person's own message. Paused tasks list after the upcoming
+ones; a finished one-time task has left. While open, the line stays even when
+its last upcoming task is paused; folded, it leaves once nothing is upcoming.
+Escape folds the list and returns focus to the line. Line and list enter and
+leave through `ComposerNoticeRow`. The look follows Chat settings → *Status
+above the composer*: `line` is plateless with a faint tray when open, `tab`
+insets both to the tab's line, `capsule` hugs the folded line in a centred
+hairline pill and frames the open list; outlines and the chevron are inset
+shadows and an icon, so *Hide interface borders* keeps them. Inks come from
+the chat frame (wallpaper wash). As an `inline-size` container the line drops
+the cadence at 520 px, and at 360 px the list stacks time over title and
+keeps only the menu. `planner.run-fact` in `session.timeline.event` renders
+each `planner/run-started` event as a centred line between background
+hairlines just before the prompt it sent: *Planned run*, *Started by hand* or
+*Late run* (from the run record's `manual`/`late`, carried on the event), the
+task's title (a link to it while it exists) and the time; on a narrow column
+what ran takes its own line. Both read one browser snapshot of the Space's
+tasks (`widgets/plannerTasks.ts`) that the Planner pane shares: it reloads
+after a change made in either, when a planned run starts or an agent's
+`polyth_planner` call settles in an open chat (a result is matched to its call
+by `callId`, because some harnesses report every result as tool `tool`), when
+the page becomes visible, on opening a chat whose snapshot is older than
+15 s, and every 60 s while something shows it. Pinned in
+`packages/planner/test/chatSchedule.test.ts` and
+`packages/planner/test/chatScheduleLine.test.ts`.
+
 **Subagents above the composer:** while any delegated child of the open chat
 works, waits for a person or is paused, its subagents hang from the agent's own status
 line: one island (`.subagent-island`, `SubagentActivityDock.tsx`) holds the

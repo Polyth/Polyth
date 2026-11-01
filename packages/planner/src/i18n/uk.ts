@@ -147,6 +147,22 @@ export const uk: PlannerMessages = {
   "history.showLess": "Показати менше",
   "history.ranTimes": "Запусків: {count}",
 
+  // Розклад чату
+  "chat.title": "Заплановано в цьому чаті",
+  "chat.next": "Наступний запланований запуск:",
+  "chat.at": "{day}, {time}",
+  "chat.more": "+{count}",
+  "chat.moreLabel": "Ще заплановано в цьому чаті: {count}",
+  "chat.nothingUpcoming": "Найближчих запусків немає",
+  "chat.pausedCount": "На паузі: {count}",
+  "chat.explain": "Кожне прийде сюди у свій час як ваше повідомлення.",
+  "chat.openTask": "Відкрити в Планувальнику",
+  "chat.openPlanner": "Планувальник",
+  "chat.runPlanned": "Запланований запуск",
+  "chat.runManual": "Запущено вручну",
+  "chat.runLate": "Запізнілий запуск",
+  "chat.runLateHint": "У запланований час Polyth був вимкнений, тож запуск відбувся під час старту.",
+
   "template.briefing": "Ранковий брифінг",
   "template.briefingPrompt": "Дай короткий брифінг на сьогодні: що змінилося в цьому проєкті з учора, які відкриті пул-реквести потребують моєї уваги і що схоже на зламане.",
   "template.review": "Щотижневий огляд залежностей",

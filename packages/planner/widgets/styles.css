@@ -1060,3 +1060,355 @@
     .planner .planner-shortcut { display: inline; }
   }
 }
+
+/* ---- A chat's own schedule (ChatSchedule.tsx) -----------------------------
+   One quiet line above the composer, in the grammar of the agent status and
+   watched pull request lines: a mark, when the next run comes, what it is,
+   its cadence and how many more. It opens upward into the chat's planned
+   tasks so the line stays under the pointer. No plate while folded; inks
+   come from the chat frame, so a wallpaper's wash reaches it. Chat settings
+   → Status above the composer picks the look (body[data-composer-status-style]):
+   `line` is this base, `tab` sets the open list in a tray rising from the
+   composer's edge, `capsule` hugs the folded line in a centred hairline pill
+   and frames the open list. Outlines are inset shadows so Hide interface
+   borders keeps them. */
+.planner-chat {
+  --planner-chat-row: max(32px, var(--hit-min));
+  container: planner-chat / inline-size;
+  /* The chat frame the agent status line uses: aligned with the composer. */
+  width: min(
+    var(--chat-measure, 100%),
+    calc(100% - var(--conversation-frame-inline-start, 0px) - var(--conversation-frame-inline-end, 0px))
+  );
+  margin-inline-start: var(--conversation-frame-inline-start, 0px);
+  margin-inline-end: var(--conversation-frame-inline-end, 0px);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.2;
+}
+.planner-chat-line {
+  display: flex;
+  min-width: 0;
+  min-height: var(--planner-chat-row);
+  padding: 0 var(--space-1);
+}
+.planner-chat-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--planner-chat-row);
+  margin: 0;
+  padding: 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.planner-chat-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.planner-chat-mark {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--text-dim);
+}
+/* A run is in flight: the agent status line's accent dot says it is live. */
+.planner-chat-mark > i,
+.planner-chat-live > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: status-pulse 1.8s ease-in-out infinite;
+}
+.planner-chat-mark > i { position: absolute; inset-inline-end: -2px; inset-block-end: -1px; }
+.planner-chat-when {
+  flex: none;
+  color: var(--text-dim);
+  font-weight: 550;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.planner-chat-title,
+.planner-chat-cadence {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The ellipsis clips: give descenders their ink back without growing the row. */
+  padding-block: 0.12em;
+  margin-block: -0.12em;
+}
+.planner-chat-title { flex: 0 1 auto; }
+.planner-chat-cadence { flex: 0 1000 auto; color: var(--faint); }
+.planner-chat-title::before,
+.planner-chat-cadence::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
+/* How many more, then the disclosure, at the line's far end. */
+.planner-chat-more {
+  flex: none;
+  margin-inline-start: auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text-dim);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+}
+/* It opens upward: the chevron points up while folded, down while open.
+   Up and down need no mirroring. */
+.planner-chat-chevron {
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin-inline: 0 calc(var(--space-1) * -1);
+  color: var(--faint);
+  transition: transform var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.planner-chat-cadence + .planner-chat-chevron,
+.planner-chat-title + .planner-chat-chevron { margin-inline-start: auto; }
+.planner-chat[data-open] .planner-chat-chevron { transform: rotate(180deg); }
+.planner-chat[data-open] .planner-chat-when { color: var(--text); }
+@media (hover: hover) {
+  .planner-chat-toggle:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+  .planner-chat-toggle:hover:where(:not(:disabled)) .planner-chat-when { color: var(--text); }
+  .planner-chat-toggle:hover:where(:not(:disabled)) .planner-chat-chevron { color: var(--text-dim); }
+}
+
+/* The chat's planned tasks, opened above the line: a faint tray, a row per
+   task (when, what and how often, its actions), and one closing note. */
+.planner-chat-panel {
+  margin: 0 0 var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.planner-chat-tasks {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  max-height: min(40dvh, 22rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+.planner-chat-task {
+  min-width: 0;
+  min-height: max(var(--control-h), var(--hit-min));
+  display: grid;
+  grid-template-columns: minmax(4.25rem, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-3);
+  padding-inline: var(--space-2) var(--space-1);
+  border-radius: var(--radius-control);
+}
+.planner-chat-task[aria-busy="true"] { opacity: 0.6; }
+.planner-chat-task-when {
+  min-width: 0;
+  display: grid;
+  justify-items: start;
+  line-height: var(--font-meta-lh);
+  font-variant-numeric: tabular-nums;
+}
+.planner-chat-task-when strong { color: var(--text-dim); font-weight: 600; }
+.planner-chat-task-day { color: var(--faint); white-space: nowrap; }
+.planner-chat-task-main {
+  min-width: 0;
+  min-height: var(--hit-min);
+  margin: 0;
+  padding: var(--space-2) 0;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.planner-chat-task-main:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.planner-chat-task-title {
+  min-width: 0;
+  overflow: hidden;
+  /* A title in another script still lines up with the list's own edge. */
+  text-align: match-parent;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.planner-chat-task[data-state="idle"] .planner-chat-task-title { color: var(--text-dim); }
+.planner-chat-task-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  color: var(--muted);
+}
+.planner-chat-task-meta > * + *::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
+.planner-chat-live,
+.planner-chat-task-error { display: inline-flex; align-items: center; gap: var(--space-1); }
+.planner-chat-live { color: var(--accent-text); }
+.planner-chat-task-error { color: color-mix(in srgb, var(--red) 82%, var(--muted)); }
+.planner-chat-task-tools { display: flex; align-items: center; gap: 2px; }
+.planner-chat-foot {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  color: var(--faint);
+}
+button.planner-chat-foot-open {
+  min-height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--chat-ink-accent, var(--accent-text));
+  font: inherit;
+  cursor: pointer;
+}
+button.planner-chat-foot-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+@media (hover: hover) {
+  .planner-chat-task:hover { background: var(--surface-overlay-hover); }
+  /* The row carries the hover band; the theme's quiet-button fill stays off. */
+  button.planner-chat-task-main:hover:where(:not(:disabled)) { background: transparent; }
+  .planner-chat-task-main:hover:where(:not(:disabled)) .planner-chat-task-title { text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
+  button.planner-chat-foot-open:hover:where(:not(:disabled)) { background: transparent; text-decoration: underline; }
+}
+
+/* A narrow line keeps the time and what runs: the cadence steps aside, then
+   the open list folds each task's time into one column line. */
+@container planner-chat (max-width: 520px) {
+  .planner-chat-cadence { display: none; }
+}
+@container planner-chat (max-width: 360px) {
+  .planner-chat-task { grid-template-columns: minmax(0, 1fr) auto; }
+  .planner-chat-task-when { grid-column: 1; grid-row: 1; display: flex; gap: var(--space-1); padding-block-start: var(--space-2); }
+  .planner-chat-task-main { grid-column: 1; grid-row: 2; padding-block-start: 0; }
+  .planner-chat-task-tools { grid-column: 2; grid-row: 1 / span 2; }
+  .planner-chat-task-run { display: none; }
+  .planner-chat-foot > span { display: none; }
+}
+
+/* Status above the composer → Tab: the open list rises from the composer's
+   edge in the tab's own tint. */
+body[data-composer-status-style="tab"] .planner-chat { padding-inline: var(--composer-status-tab-inset, var(--space-4)); }
+body[data-composer-status-style="tab"] .planner-chat-panel {
+  border-radius: calc(var(--radius-card) + 4px);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+/* Capsule: folded, a centred pill that hugs its words; open, the list sits
+   in a hairline frame. */
+body[data-composer-status-style="capsule"] .planner-chat-line { justify-content: center; padding: 0 0 var(--space-2); }
+body[data-composer-status-style="capsule"] .planner-chat-toggle {
+  flex: 0 1 auto;
+  min-height: max(30px, var(--hit-min));
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-round);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
+}
+body[data-composer-status-style="capsule"] .planner-chat-more { margin-inline-start: 0; }
+body[data-composer-status-style="capsule"] .planner-chat-cadence + .planner-chat-chevron,
+body[data-composer-status-style="capsule"] .planner-chat-title + .planner-chat-chevron { margin-inline-start: var(--space-1); }
+body[data-composer-status-style="capsule"] .planner-chat-panel {
+  border-radius: calc(var(--radius-card) + 6px);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
+}
+
+/* Where a planned run arrived: a centred line between hairlines, like the
+   other facts of a chat's history. On a narrow column the words wrap. */
+.planner-run-fact {
+  container: planner-run-fact / inline-size;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.planner-run-fact-line {
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* The hairlines are backgrounds, so Hide interface borders keeps them. */
+.planner-run-fact-line::before,
+.planner-run-fact-line::after {
+  content: "";
+  flex: 1 1 0;
+  min-width: var(--space-3);
+  height: 1px;
+  background: var(--borderless-edge);
+}
+.planner-run-fact-copy {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0 var(--space-2);
+  padding-block: var(--space-1);
+  text-align: center;
+  text-wrap: balance;
+}
+.planner-run-fact-head { display: inline-flex; align-items: center; gap: var(--space-2); }
+.planner-run-fact-mark { flex: none; display: inline-grid; place-items: center; color: var(--text-dim); }
+.planner-run-fact-head > strong { color: var(--text-dim); font-weight: 600; }
+.planner-run-fact-what { min-width: 0; }
+.planner-run-fact-what::before,
+.planner-run-fact-what > time::before { content: "·"; margin-inline: 0 var(--space-2); color: var(--faint); }
+.planner-run-fact-what > time::before { margin-inline-start: var(--space-2); }
+/* Without a title the group's own separator stands before the time. */
+.planner-run-fact-what > time:first-child::before { content: none; }
+@container planner-run-fact (max-width: 520px) {
+  .planner-run-fact-what { flex-basis: 100%; }
+  .planner-run-fact-what::before { content: none; }
+}
+.planner-run-fact[data-kind="late"] .planner-run-fact-mark { color: color-mix(in srgb, var(--amber) 70%, var(--muted)); }
+.planner-run-fact-title { min-width: 0; overflow-wrap: anywhere; }
+button.planner-run-fact-title {
+  min-height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+button.planner-run-fact-title:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+.planner-run-fact-what > time { color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (hover: hover) {
+  button.planner-run-fact-title:hover:where(:not(:disabled)) { background: transparent; color: var(--text); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .planner-run-fact > .planner-run-fact-line { animation: planner-run-fact-in var(--motion-normal) var(--motion-ease) both; }
+}
+@keyframes planner-run-fact-in {
+  from { opacity: 0; transform: translate3d(0, 3px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+html[data-reduce-animations="true"] :is(.planner-chat-mark > i, .planner-chat-live > i, .planner-run-fact > .planner-run-fact-line),
+body[data-desktop-low-resource="true"] :is(.planner-chat-mark > i, .planner-chat-live > i, .planner-run-fact > .planner-run-fact-line) { animation: none; }
+html[data-reduce-animations="true"] .planner-chat-chevron,
+body[data-desktop-low-resource="true"] .planner-chat-chevron { transition: none; }

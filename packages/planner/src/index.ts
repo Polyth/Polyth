@@ -29,10 +29,6 @@ export { describeCron, nextRun, nextRuns, validateCron } from "./cron.ts";
 export { settlePlannedRun } from "./runSettlement.ts";
 export type { RunSettlementOptions } from "./runSettlement.ts";
 
-/** Event a run appends to its session before the prompt; settlement reads
- *  only what follows it. */
-export const PLANNER_RUN_STARTED_EVENT = "planner/run-started";
-
 /** A run acts for the task's owner; the session facade refuses the run if
  *  that person is no longer a member of the Space. */
 export function plannerTurnAdmission(task: Pick<PlannerTask, "ownerUserId">): TurnAdmission | undefined {

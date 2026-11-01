@@ -220,10 +220,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         sessionId = ref.id;
         sessions = await systemSessionsForSession(host, sessionId);
       }
+      // The run's record is already in the history: the chat's timeline fact
+      // tells a person's "Run now" and a late catch-up from a planned run.
+      const record = task.history?.find((item) => item.runId === runId);
       const marker = await systemAppendSessionEvent(host, sessionId, PLANNER_RUN_STARTED_EVENT, {
         taskId: task.id,
         runId,
         ...(task.title ? { taskTitle: task.title } : {}),
+        ...(record?.manual ? { manual: true } : {}),
+        ...(record?.late ? { late: true } : {}),
       }, { ignorable: true, producerPlugin: PLANNER_PACKAGE_ID });
       const sent = await sessions.send(sessionId, { text: task.prompt, ...execution }, plannerTurnAdmission(task));
       return {

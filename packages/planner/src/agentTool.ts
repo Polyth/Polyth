@@ -4,13 +4,13 @@
 // the same timer, overlap/catch-up rules, run history and Planner UI apply.
 // Server-only: it reads session ownership and writes the Planner store.
 import type { AgentCapabilityContribution, JsonObject, ToolExecutionContext } from "@polyth/contracts";
-import type { PlannerCadence, PlannerTask } from "./model.ts";
+import { PLANNER_TOOL_NAME, type PlannerCadence, type PlannerTask } from "./model.ts";
 import type { PlannerService } from "./index.ts";
 import { describeCron, validateCron } from "./cron.ts";
 import { PLANNER_PACKAGE_ID } from "./packageId.ts";
 
 export const PLANNER_TOOL_ID = "planner.tool";
-export const PLANNER_TOOL_NAME = "polyth_planner";
+export { PLANNER_TOOL_NAME };
 
 /** Active tasks one session may hold; a looping agent cannot pile up wakes. */
 export const PLANNER_TOOL_MAX_ACTIVE = 10;
@@ -244,9 +244,9 @@ export function createPlannerAgentTool(deps: PlannerToolDeps): AgentCapabilityCo
       kind: "tool",
       owner: PLANNER_PACKAGE_ID,
       scope: "deployment",
-      revision: "1",
+      revision: "2",
       name: PLANNER_TOOL_NAME,
-      description: "Schedule a prompt to arrive later in THIS session, once or repeating, e.g. \"check the repo status at 17:00\". Actions: create (prompt + exactly one of at, inMinutes, everyMinutes, cron), list (this session's scheduled tasks), cancel (id). At the time, Polyth sends the prompt to this session as a new message on the user's behalf; if a turn is running it waits in the queue. Times without an offset use timeZone (default: the server's zone; the result shows the current time). Confirm the resolved time to the user. The user also sees and manages these tasks in the Planner.",
+      description: "Schedule a prompt to arrive later in THIS session, once or repeating, e.g. \"check the repo status at 17:00\". Actions: create (prompt + exactly one of at, inMinutes, everyMinutes, cron), list (this session's scheduled tasks), cancel (id). At the time, Polyth sends the prompt to this session as a new message on the user's behalf; if a turn is running it waits in the queue. Times without an offset use timeZone (default: the server's zone; the result shows the current time). Confirm the resolved time to the user. The user sees this session's tasks on a line above its composer and manages them there or in the Planner.",
       inputSchema,
       trust: "workspace",
       mutating: true,

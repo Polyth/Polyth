@@ -4,7 +4,8 @@ import { openSettingsPage, useStore } from "../../../apps/web/src/store.ts";
 import { Button, confirmAlert, EmptyState, Skeleton } from "../../../apps/web/src/components/ui/index.ts";
 import type { PlannerTask } from "../src/model.ts";
 import { plannerScopeForPick, resolvePlannerScope, type PlannerScope } from "../src/plannerList.ts";
-import { plannerApi } from "./plannerApi.ts";
+import { subscribePlannerTaskRequests, takePlannerTaskRequest } from "./plannerOpen.ts";
+import { plannerTasksSnapshot, refreshPlannerTasks, subscribePlannerTasks } from "./plannerTasks.ts";
 import PlannerList, { type PlannerTab } from "./PlannerList.tsx";
 import PlannerTaskPage, { type PlannerSeed } from "./PlannerTaskPage.tsx";
 import type { PlannerTemplate } from "./plannerTemplates.ts";
@@ -63,9 +64,10 @@ export default function PlannerView({ host, projectId: shellProjectId }: {
   const reload = useCallback(async () => {
     const mine = ++ticket.current;
     try {
-      const next = await plannerApi.list();
+      // The shared snapshot: a chat's schedule line reads the same list.
+      const next = await refreshPlannerTasks();
       if (mine !== ticket.current) return;
-      setTasks(next);
+      setTasks([...next]);
       setLoadError("");
     } catch (cause) {
       if (mine !== ticket.current) return;
@@ -85,6 +87,13 @@ export default function PlannerView({ host, projectId: shellProjectId }: {
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     return () => { clearInterval(timer); clearInterval(clock); ticket.current += 1; };
   }, [reload]);
+
+  // A change made elsewhere (a chat's schedule line, an agent's call) lands
+  // in the shared snapshot; the list follows it.
+  useEffect(() => subscribePlannerTasks(() => {
+    const next = plannerTasksSnapshot().tasks;
+    if (next) setTasks([...next]);
+  }), []);
 
   useEffect(() => {
     if (!freshId) return;
@@ -131,6 +140,19 @@ export default function PlannerView({ host, projectId: shellProjectId }: {
     setRoute(next);
     rootRef.current?.closest(".rail-body, .wb-surface-mount, .module-view-content")?.scrollTo?.({ top: 0 });
   };
+
+  // "Open in Planner" from a chat shows that task's page, now or as soon as
+  // this pane mounts.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  useEffect(() => {
+    const take = () => {
+      const id = takePlannerTaskRequest();
+      if (id) void navigateRef.current({ kind: "task", id });
+    };
+    take();
+    return subscribePlannerTaskRequests(take);
+  }, []);
 
   const defaultProjectId = scopedProjectId
     ?? resolvePlannerScope("current", currentProjectId, projectIds)

@@ -1,8 +1,12 @@
 import "./styles.css";
+import type { SessionEvent } from "@polyth/contracts";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { CalendarIcon } from "../../../apps/web/src/components/ui/index.ts";
+import { PLANNER_RUN_STARTED_EVENT } from "../src/model.ts";
 import { PLANNER_PACKAGE_ID } from "../src/packageId.ts";
+import { ChatScheduleLine, PlannedRunFact } from "./ChatSchedule.tsx";
 import PlannerView from "./PlannerView.tsx";
+import { connectPlannerTasks } from "./plannerTasks.ts";
 import { t } from "./plannerText.ts";
 
 export default defineWebPackage((host) => () => {
@@ -51,6 +55,28 @@ export default defineWebPackage((host) => () => {
         render: ({ projectId }) => <PlannerView host={host} projectId={projectId} />,
       }],
     }),
+    // The chat's own schedule: one line above the composer while runs are
+    // planned to arrive in it, just above a watched pull request's line.
+    host.slots.register({
+      slot: "session.composer.before",
+      id: "planner.chat-schedule",
+      order: 890,
+      meta: { title: t("chat.title") },
+      render: (props) => <ChatScheduleLine
+        key={typeof props.sessionId === "string" ? props.sessionId : "none"}
+        host={host}
+        sessionId={typeof props.sessionId === "string" ? props.sessionId : null}
+      />,
+    }),
+    // Where each planned run arrived, just before the prompt it sent.
+    host.slots.register({
+      slot: "session.timeline.event",
+      id: "planner.run-fact",
+      order: 30,
+      meta: { eventTypes: [PLANNER_RUN_STARTED_EVENT] },
+      render: (props) => <PlannedRunFact host={host} event={props.event as SessionEvent} />,
+    }),
+    connectPlannerTasks(host),
   ];
   return () => off.toReversed().forEach((dispose) => dispose());
 });
