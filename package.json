@@ -70,7 +70,7 @@
     "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
-    "typescript": "^5.7.0"
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "katex": "^0.19.1",
