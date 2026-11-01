@@ -57,7 +57,7 @@ import { installNativeMobileIntegration } from "@polyth/mobile/native";
 import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
 import { handleNativeBack } from "./nativeMobile.ts";
 import { applyBackgroundToDom } from "./backgrounds.ts";
-import { openPendingNativePushAfterHydration, reconcileNativePushForeground } from "./nativePush.ts";
+import { autoEnableNativePush, openPendingNativePushAfterHydration, reconcileNativePushForeground } from "./nativePush.ts";
 import { installLiveActivity } from "./nativeLiveActivity.ts";
 import { isClientSettingsSettled, subscribeClientSettingsSettled } from "./settingsSync.ts";
 import { launchVeil, reloadBehindVeil } from "./launchVeil.ts";
@@ -163,6 +163,7 @@ const bootOnce = (): void => {
     // After hydration, so the first Live Activity snapshot sees real
     // projections instead of ending one a previous process left for the same work.
     void installLiveActivity().catch(() => undefined);
+    void autoEnableNativePush().catch(() => undefined);
   });
 };
 

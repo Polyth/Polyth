@@ -277,11 +277,15 @@ a partial intent handler.
 
 ## Notifications
 
-Mobile push is a native-controller flow. Permission is requested only from the
-explicit Mobile push notifications setting, never at startup or pairing.
-Android requests `POST_NOTIFICATIONS` only on Android 13+; a fresh install
-remains actionable until that request has been made. iOS registers APNs only
-after authorization.
+Mobile push is a native-controller flow that turns itself on: the first time
+the app has loaded a connected server for an account, it asks the OS for
+permission and registers (`autoEnableNativePush`, `apps/web/src/nativePush.ts`).
+From then on only the Phone notifications setting changes it; once push has
+been on, or the user turned it off there, the app never enables it again for
+that server and account. A refused prompt is not repeated: the OS reports
+"denied" and the setting shows it as unavailable. Android requests
+`POST_NOTIFICATIONS` only on Android 13+; a fresh install remains actionable
+until that request has been made. iOS registers APNs only after authorization.
 
 `enable` files the registration natively under a fresh subscription id and
 hands the page that id and the device token (iOS: the APNs token and the
@@ -470,7 +474,7 @@ Every prompt follows an explicit user action.
 | Camera | `CAMERA`, hardware optional | `NSCameraUsageDescription` | Pairing QR: iOS native scanner and WebView fallback. Android's Google code scanner needs no camera permission; `CAMERA` serves only the WebView fallback |
 | Microphone | `RECORD_AUDIO` + `MODIFY_AUDIO_SETTINGS`, hardware optional | `NSMicrophoneUsageDescription` | Dictation and voice mode (WebView `getUserMedia`) |
 | Local network | `CHANGE_WIFI_MULTICAST_STATE` | `NSLocalNetworkUsageDescription`, `NSBonjourServices` `_polyth._udp` | Nearby server discovery |
-| Notifications | `POST_NOTIFICATIONS` (Android 13+) | runtime authorization, `aps-environment` | Mobile push setting |
+| Notifications | `POST_NOTIFICATIONS` (Android 13+) | runtime authorization, `aps-environment` | Mobile push: asked after the first connection, then the Phone notifications setting |
 
 Capacitor's Android `BridgeWebChromeClient` requests `MODIFY_AUDIO_SETTINGS`
 together with `RECORD_AUDIO` for every WebView audio capture and denies the

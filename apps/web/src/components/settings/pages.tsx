@@ -1502,7 +1502,8 @@ export function NotificationsPage() {
 }
 
 /** Capacitor-native delivery is separate from browser Web Push. It is shown
- * only inside the actual native client and asks the OS only after user intent. */
+ * only inside the actual native client; the app turns it on by itself after
+ * connecting (autoEnableNativePush), and this row turns it off or back on. */
 function NativePushRow() {
   const available = nativePushSettingsAvailable();
   const [status, setStatus] = useState<"loading" | "unavailable" | "disabled" | "enabling" | "enabled" | "denied" | "failed">("loading");

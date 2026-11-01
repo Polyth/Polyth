@@ -1438,7 +1438,7 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
     override public func load() {
         // Keychain may survive uninstall while UserDefaults does not. Never
         // treat an orphaned mapping or tap as identity recovery for a fresh
-        // installation; the user must explicitly enable each server/account.
+        // installation; each server/account registers afresh through enable().
         if !UserDefaults.standard.bool(forKey: Self.installMarker) {
             secureRemoveAll()
             setMappingIds([])

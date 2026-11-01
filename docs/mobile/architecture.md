@@ -143,8 +143,8 @@ registration and the private content key in Keychain/Keystore-backed storage
 and exposes status, enable/disable, and one bounded pending-open record. The
 page receives the device's APNs/FCM token only to register it with its own
 server over Polyth Link; that server sends through Polyth's push service
-([notifications](platform-behavior.md#notifications)). Enabling is
-point-of-use and is not considered enabled until the authenticated server
+([notifications](platform-behavior.md#notifications)). The app enables it
+after its first connection to a server, and it is not considered enabled until the authenticated server
 confirms the same subscription id. The iOS environment is build-owned; no
 build talks to a push service itself.
 
