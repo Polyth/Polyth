@@ -29,7 +29,7 @@
     "@polyth/plugins": "0.1.0",
     "@polyth/session": "0.1.0",
     "@polyth/web-sdk": "0.1.0",
-    "playwright-core": "^1.62.1",
+    "playwright-core": "^1.64.1",
     "three": "0.186.1"
   },
   "peerDependencies": {
