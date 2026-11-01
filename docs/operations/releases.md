@@ -89,7 +89,7 @@ There are five permanent GitHub Actions workflows:
 |---|---|---|
 | `ci.yml` | Push to `devel`/`master`, pull request to them, manual | Repository validation |
 | `promote.yml` | Manual only | Rebuild `master` from `devel`, verify, fast-forward |
-| `nightly.yml` | Schedule/dispatch once enabled, manual | `devel` nightly prereleases |
+| `nightly.yml` | Schedule/dispatch once enabled, manual | `devel` nightly prereleases; manual `test`/`stable` update-feed releases |
 | `build-apps.yml` | Manual only | Unpublished smoke/download artifacts |
 | `release.yml` | Manual only, enforced `master` | Signed/publishable release artifacts and GitHub Release |
 
@@ -291,6 +291,11 @@ own runners; no deploy key or second repository is involved.
   downgrade; every scheduled slot, skipped or not, consumes a run number.
 - **Publication.** Only a full (`all`) run publishes: draft, upload, then public prerelease, never
   marked Latest. The three newest nightlies are kept; stable and test releases are never pruned here.
+- **Test and stable.** A manual run with `channel` `test` or `stable` (set `ref` to `master`) builds
+  the same way and publishes `vX.Y.N-beta` (prerelease; the three newest are kept) or `vX.Y.N`
+  (marked **Latest**, never pruned), sharing the build-number sequence, so every channel's build is
+  newer than the last. These runs do not submit to TestFlight external testing; `release.yml` stays
+  the signed manifest-versioned release path.
 - **Signing.** The same secrets as the builder sign macOS (`CSC_LINK`, `CSC_KEY_PASSWORD`,
   `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) and iOS/TestFlight (the five App
   Store Connect secrets under [iOS / TestFlight](#ios--testflight)); without them the builds are
@@ -321,11 +326,11 @@ The plan job resolves the source ref to one commit (`git ls-remote` with the dep
 
 | Channel | Trigger | Version / tag | GitHub release | Desktop metadata |
 |---|---|---|---|---|
-| Nightly | Automatic: host cron 06:00 Kyiv `repository_dispatch`, schedule fallbacks (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
-| Test | Manual: **Actions → Build → Run workflow**, channel `test` | `X.Y.N-beta` | prerelease | `latest*.yml` + `beta*.yml` |
-| Stable | Manual: **Actions → Build → Run workflow**, channel `stable` | `X.Y.N` | release, marked **Latest** | `latest*.yml` + `beta*.yml` |
+| Nightly | Automatic: `nightly.yml` schedule 05:17/09:47/14:17 Kyiv or `repository_dispatch` (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
+| Test | Manual: **Actions → Nightly → Run workflow**, channel `test`, ref `master` | `X.Y.N-beta` | prerelease | `latest*.yml` + `beta*.yml` |
+| Stable | Manual: **Actions → Nightly → Run workflow**, channel `stable`, ref `master` | `X.Y.N` | release, marked **Latest** | `latest*.yml` + `beta*.yml` |
 
-The manual form also takes `ref` (branch, tag or SHA, default `master`), `target` and `arch`; only `target=all` with `arch=all` publishes a release. A manual `nightly` run is for retrying a failed nightly and is not deduplicated; set `ref` to `devel` for it, since the form's default is the release line. Every channel's `ios-app` job uploads to TestFlight; `test` and `stable` also distribute to external testers ([iOS / TestFlight](#ios--testflight)). Releases from before the channel split (`v0.1.132`–`v0.1.137`, plain `X.Y.N`) count as stable.
+The manual form also takes `ref` (default `devel`; use `master` for `test` and `stable`) and `target`; only `target=all` publishes a release. A manual `nightly` run is for retrying a failed nightly and is not deduplicated. Every channel's `ios-app` job uploads to TestFlight; only the external builder's `test` and `stable` runs also distributed to external testers ([iOS / TestFlight](#ios--testflight)). Releases from before the channel split (`v0.1.132`–`v0.1.137`, plain `X.Y.N`) count as stable.
 
 The desktop app follows the channel chosen in **Settings → Desktop → Update channel**; until the user picks one, a build follows the channel it was published on (its version's prerelease id; `apps/desktop/src/updaterChannel.ts`). electron-updater's GitHub provider gives the channels their semantics:
 

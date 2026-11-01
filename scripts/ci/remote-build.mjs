@@ -560,7 +560,8 @@ function buildMac({ legacy = false } = {}) {
         minimum="$(plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist")"
         electron="$(ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/Polyth" -p process.versions.electron)"
         echo "remote-build mac legacy: LSMinimumSystemVersion=$minimum Electron=$electron"
-        if [ "$minimum" != "$LEGACY_MINIMUM" ] || [ "$electron" != "$LEGACY_ELECTRON" ]; then
+        # electron-builder writes 12.0 as "12"; compare without a trailing ".0".
+        if [ "\${minimum%.0}" != "\${LEGACY_MINIMUM%.0}" ] || [ "$electron" != "$LEGACY_ELECTRON" ]; then
           echo "Expected LSMinimumSystemVersion $LEGACY_MINIMUM and Electron $LEGACY_ELECTRON in $app" >&2
           exit 1
         fi
