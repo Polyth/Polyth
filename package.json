@@ -64,7 +64,7 @@
     "polyth": "node packages/cli/bin/polyth.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/ws": "^8.18.2",
