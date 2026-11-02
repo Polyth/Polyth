@@ -113,16 +113,58 @@ export function actionPhrase(description: ToolActivityDescription, phrases: Narr
 const sentence = (phrase: string, period: string): string =>
   /[.!?。！？…]$/.test(phrase) ? phrase : `${phrase}${period}`;
 
+/** `[label](target)` → `label`, left to right like `/\[([^\]]*)\]\([^)]*\)/g`
+ * but by index: a run of unmatched `[` or `](` must not rescan the tail. */
+function stripLinks(value: string): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const open = value.indexOf("[", from);
+    if (open < 0) break;
+    const close = value.indexOf("]", open + 1);
+    if (close < 0) break;
+    if (value[close + 1] !== "(") {
+      // Every `[` before this `]` shares it, so none of them can link.
+      out += value.slice(from, close + 1);
+      from = close + 1;
+      continue;
+    }
+    const end = value.indexOf(")", close + 2);
+    if (end < 0) break;
+    out += value.slice(from, open) + value.slice(open + 1, close);
+    from = end + 1;
+  }
+  return out + value.slice(from);
+}
+
 /** Markdown emphasis, code ticks and links reduced to their words. */
 function plain(value: string): string {
-  return value
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+  return stripLinks(value)
     .replace(/[*_`#>]+/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-const HEADING = /^\s*(?:#{1,6}\s+(.+?)|\*\*(.+?)\*\*|__(.+?)__)\s*:?\s*$/;
+/** The text of a heading line: `# Plan`, `**Plan**` or `__Plan__`, each with
+ * an optional trailing colon. Peeled by index; the equivalent single regex
+ * overlaps `\s*:?\s*` with its lazy body. */
+function headingText(line: string): string | undefined {
+  const text = line.trim();
+  const hashes = /^#{1,6}(?=\s)/.exec(text);
+  if (hashes) {
+    let body = text.slice(hashes[0].length).trim();
+    if (body.length > 1 && body.endsWith(":")) body = body.slice(0, -1).trimEnd();
+    return body || undefined;
+  }
+  for (const marker of ["**", "__"]) {
+    if (!text.startsWith(marker)) continue;
+    let end = text;
+    if (!end.endsWith(marker) && end.endsWith(":")) end = end.slice(0, -1).trimEnd();
+    if (end.length <= marker.length * 2 || !end.endsWith(marker)) return undefined;
+    return end.slice(marker.length, end.length - marker.length);
+  }
+  return undefined;
+}
 
 /** Headline lines of a reasoning text ("**Planning the fix**", "## Plan"),
  *  counting the last line only when the text is complete. */
@@ -131,8 +173,7 @@ export function thoughtHeadlines(reasoning: string, complete: boolean): string[]
   if (!complete) lines.pop();
   const out: string[] = [];
   for (const line of lines) {
-    const match = HEADING.exec(line);
-    const value = match ? plain(match[1] ?? match[2] ?? match[3] ?? "") : "";
+    const value = plain(headingText(line) ?? "");
     if (value) out.push(value);
   }
   return out;
@@ -236,7 +277,7 @@ export function createNarrationTracker(options: NarrationTrackerOptions): Narrat
       current.sentenceSaid = true;
       return out;
     }
-    if (current.sentenceSaid || HEADING.test(current.raw.split(/\r?\n/)[0] ?? "")) return out;
+    if (current.sentenceSaid || headingText(current.raw.split(/\r?\n/)[0] ?? "") !== undefined) return out;
     const first = firstThoughtSentence(current.raw, complete);
     if (first) {
       current.sentenceSaid = true;

@@ -14,8 +14,34 @@ type Graph = Pick<WorkflowDto, "nodes" | "edges">;
 
 /** The single line a review unit ends with. Markdown emphasis, list markers
  * and a trailing period are tolerated; only the last such line counts. */
-const VERDICT_LINE =
-  /^\s*(?:[-*>#]+\s*)?(?:\*\*|__|`)?\s*verdict\s*(?:\*\*|__|`)?\s*[:：]\s*(?:\*\*|__|`)?\s*(.+?)\s*(?:\*\*|__|`)?\s*\.?\s*$/i;
+const VERDICT_LABEL = labelledLine("verdict", true);
+
+/** `<marker>? <label> <marker>? : <marker>? <value> <marker>? .?` with every
+ * gap optional whitespace. The prefix is a linear regex (each `\s*` is
+ * followed by a character it cannot match) and the tail is peeled in code, so
+ * neither end can backtrack over a long whitespace run. */
+function labelledLine(label: string, tail: boolean): (line: string) => string | undefined {
+  const head = new RegExp(
+    `^(?:[-*>#]+\\s*)?(?:(?:\\*\\*|__|\`)\\s*)?${label}\\s*(?:(?:\\*\\*|__|\`)\\s*)?[:：]\\s*(?:(?:\\*\\*|__|\`)\\s*)?(.*)$`,
+    "i"
+  );
+  return (line) => {
+    const match = head.exec(line.trim());
+    if (!match) return undefined;
+    let value = match[1]!.trimEnd();
+    if (tail) {
+      if (value.endsWith(".")) value = value.slice(0, -1).trimEnd();
+      for (const marker of ["**", "__", "`"]) {
+        if (value.length > marker.length && value.endsWith(marker)) {
+          value = value.slice(0, -marker.length).trimEnd();
+          break;
+        }
+      }
+    }
+    return value || undefined;
+  };
+}
+
 const NEGATED = /\b(?:not|never|un)\s*(?:approv|accept|pass)/i;
 const APPROVED = /\b(?:approv|accept|pass|lgtm|ok(?:ay)?\b|ship|no\s+(?:material\s+)?(?:findings|changes|issues))/i;
 const CHANGES = /\b(?:changes?|reject|fail|block|rework|revis|request|needs?\s+work|incomplete)/i;
@@ -25,9 +51,8 @@ const CHANGES = /\b(?:changes?|reject|fail|block|rework|revis|request|needs?\s+w
 export function parseReviewVerdict(output: string): WorkflowReviewVerdict | undefined {
   const lines = output.split(/\r?\n/);
   for (let index = lines.length - 1; index >= 0; index--) {
-    const match = VERDICT_LINE.exec(lines[index]!);
-    if (!match) continue;
-    const value = match[1]!;
+    const value = VERDICT_LABEL(lines[index]!);
+    if (value === undefined) continue;
     // "approved, no changes needed" approves; "not approved" does not.
     if (NEGATED.test(value)) return "changes-requested";
     if (APPROVED.test(value)) return "approved";
@@ -88,7 +113,20 @@ const FINDING_LINE = new RegExp(
 const BLOCKER = new RegExp(`^(?:${BLOCKER_WORDS})$`, "i");
 /** The first token of a finding: `path`, `path:line` or `path:line-line`,
  * optionally in backticks or bold, optionally followed by a colon. */
-const LOCATION_TOKEN = /^(?:\*\*|__|`)*([^\s`*]+?)(?::(\d+)(?:-\d+)?)?(?:\*\*|__|`)*:?(?=\s|$)/;
+const LOCATION_TOKEN = /^(?:\*\*|__|`)*([^\s`*]+?)(?::(\d+)(?:-\d+)?)?(?:\*\*|__|`)*:?$/;
+/** A location token longer than this is not a path. The cap also bounds the
+ * `__`-marker/path overlap in LOCATION_TOKEN. */
+const MAX_LOCATION_TOKEN = 300;
+
+/** Matches LOCATION_TOKEN against the first whitespace-delimited word of
+ * `rest`; `length` is how much of `rest` the token covers. */
+function locationToken(rest: string): { match: RegExpExecArray; length: number } | undefined {
+  const space = rest.search(/\s/);
+  const word = space < 0 ? rest : rest.slice(0, space);
+  if (word.length > MAX_LOCATION_TOKEN) return undefined;
+  const match = LOCATION_TOKEN.exec(word);
+  return match ? { match, length: word.length } : undefined;
+}
 const SEPARATOR = /^\s*(?:—|–|--|-|:)\s*/;
 
 const strip = (text: string): string =>
@@ -106,13 +144,14 @@ export function parseReviewFindings(output: string): WorkflowReviewFindingDto[] 
     let rest = match[2]!.trim();
     let path: string | undefined;
     let line: number | undefined;
-    const located = LOCATION_TOKEN.exec(rest);
+    const token = locationToken(rest);
+    const located = token?.match;
     // Only a token that looks like a path counts as one: it has a separator
     // or an extension, or a line number follows it.
     if (located && (located[2] || /[/\\]|\.[A-Za-z][A-Za-z0-9]*$/.test(located[1]!))) {
       path = located[1];
       if (located[2]) line = Number(located[2]);
-      rest = rest.slice(located[0].length);
+      rest = rest.slice(token!.length);
     }
     rest = rest.replace(SEPARATOR, "");
     const message = strip(rest).slice(0, MAX_FINDING_MESSAGE);
@@ -142,16 +181,16 @@ export function verdictFromFindings(
     : "approved";
 }
 
-const DISPUTE_LINE = /^\s*(?:[-*>#]+\s*)?(?:\*\*|__|`)?\s*disputed\s*(?:\*\*|__|`)?\s*[:：]\s*(?:\*\*|__|`)?\s*(.+?)\s*$/i;
+const DISPUTE_LABEL = labelledLine("disputed", false);
 
 /** `Disputed: <finding in a few words> — <why>` lines from an executor's
  * report. A line without a reason is not a dispute. */
 export function parseDisputes(output: string): WorkflowDisputeDto[] {
   const found: WorkflowDisputeDto[] = [];
   for (const raw of output.split(/\r?\n/)) {
-    const match = DISPUTE_LINE.exec(raw);
-    if (!match) continue;
-    const body = strip(match[1]!);
+    const value = DISPUTE_LABEL(raw);
+    if (value === undefined) continue;
+    const body = strip(value);
     const split = /\s(?:—|–|--)\s|\s-\s|:\s/.exec(body);
     if (!split) continue;
     const finding = body.slice(0, split.index).trim().slice(0, MAX_DISPUTE_TEXT);

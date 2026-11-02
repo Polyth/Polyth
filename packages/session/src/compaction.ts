@@ -106,13 +106,32 @@ export function compactionPrompt(transcript: string): string {
   return `${COMPACTION_INSTRUCTIONS}\n\n<transcript>\n${safe}\n${TRANSCRIPT_CLOSE}`;
 }
 
+/** The body of a whole-text ```` ```[markdown|md] ```` fence, or undefined.
+ * By index rather than `/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i`, whose
+ * `\s*\n` and lazy body rescan a long whitespace run. */
+function unwrapFence(text: string): string | undefined {
+  const opener = /^```(?:markdown|md)?/i.exec(text);
+  if (!opener || !text.endsWith("\n```")) return undefined;
+  const afterOpener = opener[0].length;
+  const lead = text.length - text.slice(afterOpener).trimStart().length;
+  const newline = text.indexOf("\n", afterOpener);
+  if (newline < 0 || newline >= lead) return undefined;
+  const closeAt = text.length - 4;
+  return closeAt >= newline + 1 ? text.slice(newline + 1, closeAt) : undefined;
+}
+
 /** Strip wrapper noise a model may add and bound the result. */
 export function normalizeCompactionSummary(text: string): string {
   let summary = text.trim();
-  const fenced = summary.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
-  if (fenced) summary = fenced[1]!.trim();
-  const tagged = summary.match(/<summary>([\s\S]*?)<\/summary>/i);
-  if (tagged) summary = tagged[1]!.trim();
+  const fenced = unwrapFence(summary);
+  if (fenced !== undefined) summary = fenced.trim();
+  const open = /<summary>/i.exec(summary);
+  if (open) {
+    const closer = /<\/summary>/gi;
+    closer.lastIndex = open.index + open[0].length;
+    const close = closer.exec(summary);
+    if (close) summary = summary.slice(open.index + open[0].length, close.index).trim();
+  }
   return clip(summary, COMPACTION_SUMMARY_MAX_CHARS);
 }
 

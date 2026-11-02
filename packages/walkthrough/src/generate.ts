@@ -35,6 +35,27 @@ export interface DiffFileSummary {
 
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
+/** `diff --git a/x b/y`, with either side optionally quoted: the a-side ends
+ * at the first ` b/` (or ` "b/`) separator. Scanned by index so a header with
+ * many `b/` look-alikes stays linear. */
+function parseDiffGitHeader(line: string): { a: string; b: string } | undefined {
+  let rest = line.slice("diff --git ".length);
+  if (rest.startsWith('"')) rest = rest.slice(1);
+  if (!rest.startsWith("a/")) return undefined;
+  rest = rest.slice(2);
+  for (let i = 0; i <= rest.length; i++) {
+    let j = i;
+    if (rest[j] === '"') j++;
+    if (rest[j] !== " ") continue;
+    let k = j + 1;
+    if (rest[k] === '"') k++;
+    if (!rest.startsWith("b/", k)) continue;
+    const b = rest.slice(k + 2);
+    return { a: rest.slice(0, i), b: b.endsWith('"') ? b.slice(0, -1) : b };
+  }
+  return undefined;
+}
+
 /** Parse unified diff text into files + hunks with stable ids. Handles
  *  renames (`rename from/to`), binary markers, and /dev/null paths. */
 export function parseUnifiedDiffText(diff: string): DiffFileSummary[] {
@@ -65,9 +86,9 @@ export function parseUnifiedDiffText(diff: string): DiffFileSummary[] {
     if (line.startsWith("diff --git ")) {
       flushFile();
       // `diff --git a/x b/y` — prefer the b-side path; quoted paths keep quotes off
-      const m = /^diff --git (?:"?a\/(.*?)"?) (?:"?b\/(.*?)"?)$/.exec(line);
-      const aPath = m?.[1] ?? "";
-      const bPath = m?.[2] ?? aPath;
+      const header = parseDiffGitHeader(line);
+      const aPath = header?.a ?? "";
+      const bPath = header?.b ?? aPath;
       current = {
         path: bPath || aPath || "unknown",
         ...(aPath && bPath && aPath !== bPath ? { oldPath: aPath } : {}),

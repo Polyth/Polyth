@@ -81,7 +81,7 @@ export function parseHtml(html: string): ElementNode {
     }
     return -1;
   };
-  const token = /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?(?:\]\]>|$)|<![^>]*>|<\?[^>]*>|<\/([a-zA-Z][\w:-]*)\s*>|<([a-zA-Z][\w:-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>|[^<]+|</g;
+  const token = /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?(?:\]\]>|$)|<![^>]*>|<\?[^>]*>|<\/([a-zA-Z][\w:-]*)\s*>|<([a-zA-Z][\w:-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"'][^\s>]*))?)*)\s*(\/?)>|[^<]+|</g;
   let match: RegExpExecArray | null;
   while ((match = token.exec(source))) {
     const [text, closing, opening, attrs = "", selfClose] = match;
@@ -201,7 +201,7 @@ function renderTable(node: ElementNode, context: RenderContext): string {
   const rows = find(node, (element) => element.tag === "tr").map((row) =>
     elements(row)
       .filter((cell) => cell.tag === "td" || cell.tag === "th")
-      .map((cell) => render(cell, { ...context, listDepth: 0 }).replace(/\s+/g, " ").replace(/\|/g, "\\|").trim()));
+      .map((cell) => render(cell, { ...context, listDepth: 0 }).replace(/\s+/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim()));
   const width = Math.max(0, ...rows.map((row) => row.length));
   const filled = rows.filter((row) => row.some(Boolean));
   if (width === 0 || filled.length === 0) return "";

@@ -15,9 +15,14 @@ const fileOf = (input: Record<string, unknown>): string | undefined => {
   return typeof v === "string" && v ? v : undefined;
 };
 
+const trimTrailingSlashes = (path: string): string => {
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === 47) end--;
+  return path.slice(0, end);
+};
 const slashes = (path: string): string => path.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 const rootsOf = (roots: readonly string[]): string[] =>
-  [...new Set(roots.filter(Boolean).map((root) => slashes(root).replace(/\/+$/, "")).filter(Boolean))]
+  [...new Set(roots.filter(Boolean).map((root) => trimTrailingSlashes(slashes(root))).filter(Boolean))]
     .sort((a, b) => b.length - a.length);
 
 /** Workspace-relative display path: the longest matching root is stripped and

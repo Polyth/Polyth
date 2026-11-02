@@ -216,10 +216,21 @@ function requireMatchingString(value: unknown, pattern: RegExp, message: string)
   return value as string;
 }
 
+/** True when `value` contains `<` followed by at least one non-`>` character
+ * and a closing `>` (what `/<[^>]+>/` tests), without rescanning per `<`. */
+function hasHtmlTag(value: string): boolean {
+  for (let open = value.indexOf("<"); open >= 0; open = value.indexOf("<", open + 1)) {
+    const close = value.indexOf(">", open + 1);
+    if (close < 0) return false;
+    if (close > open + 1) return true;
+  }
+  return false;
+}
+
 function parseIcon(value: unknown, message = "icon is invalid"): string | undefined {
   if (value === undefined) return undefined;
   const icon = requireNonEmptyString(value, message, 64);
-  if (/:\/\//.test(icon) || /javascript:/i.test(icon) || /<[^>]+>/.test(icon)) {
+  if (/:\/\//.test(icon) || /javascript:/i.test(icon) || hasHtmlTag(icon)) {
     fail("invalid-input", `${message}; URLs and HTML are not allowed`);
   }
   return icon;

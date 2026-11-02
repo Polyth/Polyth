@@ -186,6 +186,17 @@ function bridgeMarkup(): string {
   return "<meta name=\"referrer\" content=\"no-referrer\"><style>" + css + "</style><script>" + js + "</script>";
 }
 
+/** Index just past the first `<name>` / `<name …>` opening tag, or -1. The
+ * tag ends at the first `>` after the name, so an unterminated candidate means
+ * no later one closes either and the scan stops. */
+function openTagEnd(source: string, name: string): number {
+  const open = new RegExp(`<${name}(?=[\\s>])`, "gi");
+  const found = open.exec(source);
+  if (!found) return -1;
+  const close = source.indexOf(">", found.index + name.length + 1);
+  return close < 0 ? -1 : close + 1;
+}
+
 export function sandboxPreviewDocument(html: string, networkEnabled = false): string {
   const remote = networkEnabled ? " https:" : "";
   const connect = networkEnabled ? "https:" : "'none'";
@@ -207,11 +218,11 @@ export function sandboxPreviewDocument(html: string, networkEnabled = false): st
   if (!source) {
     return "<!doctype html><html><head>" + injection + "</head><body></body></html>";
   }
-  if (/<head(?:\s[^>]*)?>/i.test(source)) {
-    return source.replace(/<head(\s[^>]*)?>/i, (match) => match + injection);
-  }
-  if (/<html(?:\s[^>]*)?>/i.test(source)) {
-    return source.replace(/<html(\s[^>]*)?>/i, (match) => match + "<head>" + injection + "</head>");
+  const headEnd = openTagEnd(source, "head");
+  if (headEnd >= 0) return source.slice(0, headEnd) + injection + source.slice(headEnd);
+  const htmlEnd = openTagEnd(source, "html");
+  if (htmlEnd >= 0) {
+    return source.slice(0, htmlEnd) + "<head>" + injection + "</head>" + source.slice(htmlEnd);
   }
   return "<!doctype html><html><head>" + injection + "</head><body>" + source + "</body></html>";
 }

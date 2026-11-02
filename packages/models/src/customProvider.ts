@@ -53,13 +53,16 @@ export interface ValidatedCustomProvider {
 }
 
 export function slugifyProviderId(name: string): string {
-  const slug = name
+  const dashed = name
     .trim()
     .toLowerCase()
     .replace(/['"]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
+    .replace(/[^a-z0-9]+/g, "-");
+  let start = 0;
+  let end = dashed.length;
+  while (start < end && dashed[start] === "-") start++;
+  while (end > start && dashed[end - 1] === "-") end--;
+  const slug = dashed.slice(start, end).slice(0, 48);
   if (!slug) return "custom";
   return /^[a-z]/.test(slug) ? slug : `p-${slug}`.slice(0, 48);
 }
