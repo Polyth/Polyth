@@ -210,7 +210,8 @@ test("the tunnel package restores ingress and trust before a new invitation afte
       const calls = readFileSync(join(dataDir, "calls"), "utf8").trim().split("\n");
       assert.equal(calls.filter((method) => method === "pairing.create").length, 2);
       assert.equal(calls.filter((method) => method === "trust.sync_finish").length, 2);
-      assert.deepEqual(calls.slice(-5), ["ingress.configure", "trust.sync_begin", "trust.sync_finish", "endpoint.start", "pairing.create"]);
+      // The server name reaches the host before its endpoint takes connections.
+      assert.deepEqual(calls.slice(-6), ["ingress.configure", "trust.sync_begin", "trust.sync_finish", "host.set_label", "endpoint.start", "pairing.create"]);
     } finally { await pkg.onDisable?.(); }
   });
   rmSync(dir, { recursive: true, force: true });

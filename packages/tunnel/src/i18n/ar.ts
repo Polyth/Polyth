@@ -97,6 +97,7 @@ export const ar: TunnelMessages = {
   "tunnel.hero.title": "هذا الحاسوب",
   "tunnel.hero.pairFirst": "جاهز لاقتران هاتفك الأول.",
   "tunnel.hero.connected": "المتصل الآن: {online} من {total}",
+  "tunnel.hero.serverName": "الاسم على الهواتف",
   "tunnel.hero.address": "العنوان",
   "tunnel.hero.copyAddress": "نسخ العنوان",
   "tunnel.hero.signIn": "تسجيل الدخول",

@@ -166,7 +166,7 @@ events, malformed matrices and outgoing requests retain the normal limit.
 ## Canonical API
 
 Remote clients use the same `/api/*` and `/ws` (plus declared `/ws/<package>`)
-surface as the local web UI. Tunnel-only routes are pairing, devices,
+surface as the local web UI. Tunnel-only routes are pairing, devices, server name,
 diagnostics, and transport status. There is no `/mobile-api`.
 
 Static mobile assets are served by the local proxy, not tunneled from the host.
@@ -215,7 +215,28 @@ disclosure picks a narrower preset, which reissues the invitation. Each device's
 Permissions disclosure holds the Full access switch; switching it off keeps the
 device's other grants and reveals presets plus per-capability toggles
 (`widgets/permissions.ts` names every capability, pinned by test). Fingerprint,
-diagnostics and identity reset live under Advanced. The phone connection screen
+diagnostics and identity reset live under Advanced. The host card's **Name on
+phones** field sets the server name (see below). The phone connection screen
 has one primary action (Scan QR code, or tapping a known computer). Nearby/code
 pairing are quiet links, network failures render on the affected server card,
 and manual/insecure URLs stay under Advanced. Phones cannot edit grants.
+
+## Server name
+
+Phones show a server by the name its owner gives it. The tunnel package keeps
+it in `tunnel.db` (`tunnel_setting` key `server-name`; empty means the short OS
+host name). `GET /api/tunnel/server-name` returns `{ name, fallback, editable }`
+to a local tunnel admin; `PUT` with `{ name }` is the server owner's only
+(`usr_owner`), because every member's phones see it, and emits
+`tunnel/server-name-changed`. Names are one printable line of at most 80
+characters (`cleanServerName` in `src/serverName.ts`, `clean_label` in
+`polyth-link-core`).
+
+The name reaches phones two ways. New pairing tickets carry it as
+`host.label` (QR and six-digit code alike). The host also holds it
+(`host.set_label`, sent after trust sync and before `endpoint.start`, and on
+every change) and returns it in `ConnectionAccepted.host_label`, so a phone
+that paired earlier stores the current name on its next connection. The field
+is optional in both directions: older hosts send none, older clients ignore it.
+A name the person gave the server on their phone always wins (see
+`docs/mobile/polyth-link.md`, "Server names").

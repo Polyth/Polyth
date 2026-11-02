@@ -910,6 +910,22 @@ public final class PolythLinkPlugin extends Plugin {
         });
     }
 
+    /** The hub's name for a saved server, kept with its metadata so the server
+     *  menu shows it too. An empty name goes back to the server's own. */
+    @PluginMethod
+    public void renameConnection(PluginCall call) {
+        if (!trusted(call)) return;
+        String connectionId = require(call, "connectionId", "device-unknown");
+        if (connectionId == null) return;
+        String label = call.getString("label", "");
+        executor.execute(() -> {
+            try {
+                invoke("connections.rename", new JSObject().put("connectionId", connectionId).put("label", label), null);
+                call.resolve(new JSObject().put("ok", true));
+            } catch (Exception error) { reject(call, error); }
+        });
+    }
+
     @PluginMethod
     public void getStatus(PluginCall call) {
         if (!trusted(call)) return;

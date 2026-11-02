@@ -432,8 +432,41 @@
   border-radius: var(--radius-control);
   padding: 0 var(--space-3);
   background: transparent;
-  color: var(--red);
+  color: var(--text);
   text-align: left;
+}
+
+.mobile-connect-server-menu button.is-danger {
+  color: var(--red);
+}
+
+/* A saved server's row while it is renamed on this phone. */
+.mobile-connect-rename {
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+  background: var(--material-glass-medium);
+  box-shadow: var(--inset-hi);
+}
+
+.mobile-connect-rename-hint,
+.mobile-connect-rename-error {
+  margin: 0;
+  font-size: var(--font-meta);
+}
+
+.mobile-connect-rename-hint {
+  color: var(--muted);
+}
+
+.mobile-connect-rename-error {
+  color: var(--red);
+}
+
+.mobile-connect-rename .mobile-connect-inline-actions .is-end {
+  margin-inline-start: auto;
 }
 
 .mobile-connect-pair-actions {

@@ -50,6 +50,20 @@ trusted servers, reconnect/switch state, revoke or identity failures, and
 pair-another-server actions. Forgetting a connection removes that native trust
 record; it is not presented as an ordinary server URL.
 
+### Server names
+
+A saved server shows the name its owner set on the Link page (the computer's
+host name until then; see [Server name](../architecture/polyth-link.md#server-name)).
+The hub's ••• menu offers **Rename**: the row turns into a field ("Name on this
+phone", the server's own name as placeholder), Save stores it and **Use
+computer's name** drops it. The name stays on this phone only: the bundled-only
+`PolythLink.renameConnection({ connectionId, label })` calls the Link client's
+`connections.rename`, which keeps it as `customLabel` in `connections.json`
+beside the server's `hostLabel`. `connections.list` returns `hostLabel` as the
+name to show (`customLabel`, else the server's), plus `serverLabel` and
+`customLabel`, so the native server menu shows the same name. Pairing the same
+server again keeps the phone's name; a blank name goes back to the server's.
+
 ## Pairing
 
 The production pairing choices are:

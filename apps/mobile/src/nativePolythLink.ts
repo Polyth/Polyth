@@ -21,6 +21,7 @@ interface PolythLinkCapacitorPlugin {
   recoverConnection(options: { connectionId: string }): Promise<ConnectionRecovery>;
   disconnect(options: { connectionId: string }): Promise<{ ok: boolean }>;
   forgetConnection(options: { connectionId: string }): Promise<{ ok: boolean }>;
+  renameConnection(options: { connectionId: string; label: string }): Promise<{ ok: boolean }>;
   getStatus(options: { connectionId: string }): Promise<{
     state: string;
     transport?: "direct" | "relay";
@@ -106,6 +107,9 @@ export function installNativePolythLink(): void {
     },
     forgetConnection: async (connectionId) => {
       await NativePolythLink.forgetConnection({ connectionId });
+    },
+    renameConnection: async (connectionId, label) => {
+      await NativePolythLink.renameConnection({ connectionId, label });
     },
     getStatus: (connectionId) => NativePolythLink.getStatus({ connectionId }),
   };

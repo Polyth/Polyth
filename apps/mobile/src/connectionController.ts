@@ -568,6 +568,17 @@ export class ConnectionController {
     });
   }
 
+  /** Names a saved server on this phone. Only the list changes: the phase,
+   *  any connection in progress and the server's own name stay as they are. */
+  async rename(connectionId: string, label: string): Promise<void> {
+    await this.#native.renameConnection(connectionId, label);
+    const saved = await this.#native.listConnections();
+    this.#set({
+      trusted: this.#state.trusted.map((connection) =>
+        saved.find((item) => item.id === connection.id) ?? connection),
+    });
+  }
+
   async forget(connectionId: string): Promise<void> {
     const epoch = this.#intent("loading-trusted-connections", { targetConnectionId: connectionId });
     await this.#enqueueConnection(async () => {

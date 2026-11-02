@@ -58,6 +58,7 @@ test("setPolythLinkNative flips nativeLinkAvailable", async () => {
     recoverConnection: async () => ({ state: "needs-pairing", connectionId: "c1" }),
     disconnect: async () => {},
     forgetConnection: async () => {},
+    renameConnection: async () => {},
     getStatus: async () => ({ state: "connected" }),
   });
   assert.equal(nativeLinkAvailable(), true);

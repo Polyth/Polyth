@@ -23,7 +23,13 @@ export interface NumericPairingInput {
 export interface ConnectionMetadata {
   id: string;
   hostEndpointId: string;
+  /** The name to show: this phone's own name for the server, otherwise the
+   *  server's. */
   hostLabel: string;
+  /** The name the server gives itself (its owner sets it in Polyth Link). */
+  serverLabel?: string;
+  /** The name given to the server on this phone; empty when there is none. */
+  customLabel?: string;
   pairingState?: "prepared" | "active" | "revoked";
   lastUsedAt: number;
   lastTransport?: "direct" | "relay";
@@ -52,6 +58,9 @@ export interface PolythLinkNative {
   recoverConnection(connectionId: string): Promise<ConnectionRecovery>;
   disconnect(connectionId: string): Promise<void>;
   forgetConnection(connectionId: string): Promise<void>;
+  /** Names a saved server on this phone only; an empty name goes back to
+   *  the server's own. */
+  renameConnection(connectionId: string, label: string): Promise<void>;
   getStatus(connectionId: string): Promise<{ state: string; transport?: "direct" | "relay"; reconnecting?: boolean; error?: string }>;
 }
 
@@ -69,6 +78,7 @@ class MissingNativeCore implements PolythLinkNative {
   recoverConnection() { return Promise.reject(this.fail()); }
   disconnect() { return Promise.resolve(); }
   forgetConnection() { return Promise.resolve(); }
+  renameConnection() { return Promise.reject(this.fail()); }
   getStatus() { return Promise.resolve({ state: "unavailable", error: "host-identity-unavailable" }); }
 }
 

@@ -97,6 +97,7 @@ export const uk: TunnelMessages = {
   "tunnel.hero.title": "Цей комп’ютер",
   "tunnel.hero.pairFirst": "Усе готово, щоб спарувати ваш перший телефон.",
   "tunnel.hero.connected": "Підключено зараз: {online} з {total}",
+  "tunnel.hero.serverName": "Назва на телефонах",
   "tunnel.hero.address": "Адреса",
   "tunnel.hero.copyAddress": "Копіювати адресу",
   "tunnel.hero.signIn": "Вхід",

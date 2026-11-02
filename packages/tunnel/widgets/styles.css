@@ -98,6 +98,18 @@
   white-space: nowrap;
 }
 
+/* The name paired phones show; the placeholder is the host name. */
+.pkg-tunnel-name {
+  inline-size: min(18rem, 100%);
+  min-inline-size: 0;
+}
+
+.pkg-tunnel-name-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pkg-tunnel-hero-pair {
   align-self: flex-end;
 }

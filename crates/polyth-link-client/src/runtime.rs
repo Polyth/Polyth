@@ -336,6 +336,26 @@ async fn dispatch(
             let _metadata = metadata_lock.lock().await;
             list_metadata(&data_dir).map_err(|error| error.code())
         }
+        "connections.rename" => {
+            let id = params
+                .get("connectionId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or(LinkError::DeviceUnknown.code())?;
+            let label = params.get("label").and_then(Value::as_str).unwrap_or("");
+            let (data_dir, metadata_lock) = {
+                let guard = state.lock().await;
+                (guard.data_dir.clone(), guard.metadata_lock.clone())
+            };
+            let shown = {
+                let _metadata = metadata_lock.lock().await;
+                rename_metadata(&data_dir, id, label).map_err(|error| error.code())?
+            };
+            if let Some(session) = state.lock().await.sessions.get_mut(id) {
+                session.host_label = shown.clone();
+            }
+            Ok(json!({ "ok": true, "hostLabel": shown }))
+        }
         "connect" => connect_existing(state, params, ExistingConnectionMode::Active).await,
         "disconnect" => {
             let id = params
@@ -599,7 +619,7 @@ async fn confirm_pairing(
             } => {
                 let connection_id = attempt.ticket.host.endpoint_id.clone();
                 let transport = path_transport(&attempt.connection);
-                {
+                let host_label = {
                     let _metadata = metadata_lock.lock().await;
                     persist_metadata(
                         &data_dir,
@@ -610,9 +630,11 @@ async fn confirm_pairing(
                         "active",
                         Some(&device_id),
                     )
-                    .and_then(|_| mark_metadata_connected(&data_dir, &connection_id, transport))
-                    .map_err(|_| LinkError::PairingStorageFailed.code())?;
-                }
+                    .and_then(|_| {
+                        mark_metadata_connected(&data_dir, &connection_id, transport, None)
+                    })
+                    .map_err(|_| LinkError::PairingStorageFailed.code())?
+                };
                 let (link, link_rx) = watch::channel(Some(attempt.connection.clone()));
                 let probe = Arc::new(Notify::new());
                 let reconnect_addr = endpoint_addr_from_ticket(&attempt.ticket)
@@ -640,7 +662,7 @@ async fn confirm_pairing(
                             generation,
                             connection_id: connection_id.clone(),
                             host_endpoint_id: connection_id.clone(),
-                            host_label: attempt.ticket.host.label.clone().unwrap_or_default(),
+                            host_label,
                             endpoint: attempt.endpoint.clone(),
                             link,
                             probe: probe.clone(),
@@ -737,7 +759,7 @@ async fn connect_existing(
     };
     let identity_path = data_dir.join("hosts").join(id).join("identity");
     let identity = identity::load_existing(&identity_path).map_err(identity_error_code)?;
-    let (policy, saved_direct, saved_relays, host_label) = {
+    let (policy, saved_direct, saved_relays) = {
         let _metadata = metadata_lock.lock().await;
         let saved = read_metadata(&metadata_path(&data_dir)).map_err(|error| error.code())?;
         let item = saved
@@ -781,10 +803,6 @@ async fn connect_existing(
             policy,
             strings("directAddresses")?,
             strings("relayUrls")?,
-            item.get("hostLabel")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
         )
     };
     let identity_endpoint_id = identity.endpoint_id();
@@ -841,13 +859,13 @@ async fn connect_existing(
             "identityEndpointId": identity_endpoint_id,
         }));
     }
-    validate_connection_response(response)?;
+    let server_label = validate_connection_response(response)?;
     let transport = path_transport(&connection);
-    {
+    let host_label = {
         let _metadata = metadata_lock.lock().await;
-        mark_metadata_connected(&data_dir, id, transport)
-            .map_err(|_| LinkError::PairingStorageFailed.code())?;
-    }
+        mark_metadata_connected(&data_dir, id, transport, server_label.as_deref())
+            .map_err(|_| LinkError::PairingStorageFailed.code())?
+    };
     let (link, link_rx) = watch::channel(Some(connection.clone()));
     let probe = Arc::new(Notify::new());
     let proxy = start_proxy(link_rx, web_dist, data_dir.clone(), id.to_string())
@@ -908,9 +926,16 @@ async fn connect_existing(
     Ok(result)
 }
 
-fn validate_connection_response(message: ControlMessage) -> Result<(), &'static str> {
+/// The server's current name on success, when the host sends one.
+fn validate_connection_response(message: ControlMessage) -> Result<Option<String>, &'static str> {
     match message {
-        ControlMessage::ConnectionAccepted { version, .. } if version == PROTOCOL_VERSION => Ok(()),
+        ControlMessage::ConnectionAccepted {
+            version,
+            host_label,
+            ..
+        } if version == PROTOCOL_VERSION => Ok(host_label
+            .as_deref()
+            .and_then(polyth_link_core::clean_label)),
         ControlMessage::ConnectionAccepted { .. } => {
             Err(LinkError::TransportVersionUnsupported.code())
         }
@@ -2009,7 +2034,9 @@ fn list_metadata(data_dir: &Path) -> Result<Value, LinkError> {
                 json!({
                     "id": item.get("id").cloned().unwrap_or(Value::Null),
                     "hostEndpointId": item.get("hostEndpointId").cloned().unwrap_or(Value::Null),
-                    "hostLabel": item.get("hostLabel").cloned().unwrap_or(Value::String(String::new())),
+                    "hostLabel": display_label(&item),
+                    "serverLabel": item.get("hostLabel").cloned().unwrap_or(Value::String(String::new())),
+                    "customLabel": item.get("customLabel").cloned().unwrap_or(Value::String(String::new())),
                     "lastUsedAt": item.get("lastUsedAt").cloned().unwrap_or(Value::from(0)),
                     "lastTransport": item.get("lastTransport").cloned().unwrap_or(Value::Null),
                     "revoked": item.get("revoked").cloned().unwrap_or(Value::Bool(false)),
@@ -2018,6 +2045,17 @@ fn list_metadata(data_dir: &Path) -> Result<Value, LinkError> {
             })
             .collect::<Vec<_>>()
     ))
+}
+
+/// What people see for a saved server: the name they gave it on this device,
+/// otherwise the server's own name (`hostLabel`, from the ticket or the host).
+fn display_label(item: &Value) -> String {
+    ["customLabel", "hostLabel"]
+        .iter()
+        .filter_map(|field| item.get(*field).and_then(Value::as_str))
+        .find(|label| !label.is_empty())
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn read_metadata(path: &Path) -> Result<Vec<Value>, LinkError> {
@@ -2073,12 +2111,15 @@ fn persist_metadata(
 ) -> Result<(), LinkError> {
     let path = metadata_path(data_dir);
     let mut list = read_metadata(&path)?;
+    // Pairing the same server again keeps the name given to it here.
+    let custom_label = list
+        .iter()
+        .find(|item| item.get("hostEndpointId").and_then(Value::as_str) == Some(host_endpoint_id))
+        .and_then(|item| item.get("customLabel").cloned());
     list.retain(|item| {
         item.get("hostEndpointId").and_then(Value::as_str) != Some(host_endpoint_id)
     });
-    list.insert(
-        0,
-        json!({
+    let mut record = json!({
             "id": host_endpoint_id,
             "hostEndpointId": host_endpoint_id,
             "hostLabel": label,
@@ -2092,16 +2133,22 @@ fn persist_metadata(
             "activePolicy": candidate.map(|item| item.policy.clone()).unwrap_or_else(|| "direct-preferred".into()),
             "directAddresses": candidate.and_then(|item| item.direct_addresses.clone()).unwrap_or_default(),
             "relayUrls": candidate.map(|item| item.relay_urls.clone()).unwrap_or_default(),
-        }),
-    );
+    });
+    if let Some(custom_label) = custom_label {
+        record["customLabel"] = custom_label;
+    }
+    list.insert(0, record);
     write_metadata(&path, &list)
 }
 
+/// Records a successful connection and the server's current name, if the
+/// host sent one. Returns the name to show for this server.
 fn mark_metadata_connected(
     data_dir: &Path,
     host_endpoint_id: &str,
     transport: &str,
-) -> Result<(), LinkError> {
+    server_label: Option<&str>,
+) -> Result<String, LinkError> {
     let path = metadata_path(data_dir);
     let mut list = read_metadata(&path)?;
     let item = list
@@ -2115,7 +2162,37 @@ fn mark_metadata_connected(
     object.insert("lastUsedAt".into(), Value::from(now_ms()));
     object.insert("lastTransport".into(), Value::String(transport.into()));
     object.insert("revoked".into(), Value::Bool(false));
-    write_metadata(&path, &list)
+    if let Some(label) = server_label {
+        object.insert("hostLabel".into(), Value::String(label.into()));
+    }
+    let label = display_label(item);
+    write_metadata(&path, &list)?;
+    Ok(label)
+}
+
+/// The name this device shows for a saved server. An empty or blank name
+/// goes back to the server's own name.
+fn rename_metadata(
+    data_dir: &Path,
+    host_endpoint_id: &str,
+    label: &str,
+) -> Result<String, LinkError> {
+    let path = metadata_path(data_dir);
+    let mut list = read_metadata(&path)?;
+    let item = list
+        .iter_mut()
+        .find(|item| item.get("id").and_then(Value::as_str) == Some(host_endpoint_id))
+        .ok_or(LinkError::DeviceUnknown)?;
+    let object = item
+        .as_object_mut()
+        .ok_or(LinkError::PairingStorageFailed)?;
+    match polyth_link_core::clean_label(label) {
+        Some(label) => object.insert("customLabel".into(), Value::String(label)),
+        None => object.remove("customLabel"),
+    };
+    let label = display_label(item);
+    write_metadata(&path, &list)?;
+    Ok(label)
 }
 
 fn mark_metadata_revoked(
@@ -2266,6 +2343,72 @@ mod tests {
     }
 
     #[test]
+    fn a_name_given_here_wins_over_the_server_name_until_cleared() {
+        let dir = tempdir().unwrap();
+        let pair = |label: &str| {
+            persist_metadata(
+                dir.path(),
+                "host-endpoint",
+                label,
+                None,
+                "pairing-id",
+                "active",
+                None,
+            )
+        };
+        pair("Desk").unwrap();
+        assert_eq!(
+            rename_metadata(dir.path(), "host-endpoint", "  Studio\n").unwrap(),
+            "Studio"
+        );
+        let public = list_metadata(dir.path()).unwrap();
+        assert_eq!(public[0]["hostLabel"], "Studio");
+        assert_eq!(public[0]["serverLabel"], "Desk");
+        assert_eq!(public[0]["customLabel"], "Studio");
+
+        // The host's current name updates the server name, not this device's.
+        assert_eq!(
+            mark_metadata_connected(dir.path(), "host-endpoint", "direct", Some("Office")).unwrap(),
+            "Studio"
+        );
+        // Pairing the same server again keeps the name given to it here.
+        pair("Office").unwrap();
+        assert_eq!(list_metadata(dir.path()).unwrap()[0]["hostLabel"], "Studio");
+
+        assert_eq!(
+            rename_metadata(dir.path(), "host-endpoint", " ").unwrap(),
+            "Office"
+        );
+        let public = list_metadata(dir.path()).unwrap();
+        assert_eq!(public[0]["hostLabel"], "Office");
+        assert_eq!(public[0]["customLabel"], "");
+        assert_eq!(
+            rename_metadata(dir.path(), "other-host", "Studio"),
+            Err(LinkError::DeviceUnknown)
+        );
+    }
+
+    #[test]
+    fn a_connection_without_a_host_name_keeps_the_saved_one() {
+        let dir = tempdir().unwrap();
+        persist_metadata(
+            dir.path(),
+            "host-endpoint",
+            "Desk",
+            None,
+            "pairing-id",
+            "active",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            mark_metadata_connected(dir.path(), "host-endpoint", "relay", None).unwrap(),
+            "Desk"
+        );
+        assert_eq!(list_metadata(dir.path()).unwrap()[0]["serverLabel"], "Desk");
+    }
+
+    #[test]
     fn all_supported_transport_policies_restore_exactly() {
         assert_eq!(
             transport_policy("direct-preferred").unwrap(),
@@ -2288,8 +2431,12 @@ mod tests {
             version,
             connection_id: "connection".into(),
             grant_revision: 1,
+            host_label: Some(" Studio\n".into()),
         };
-        assert!(validate_connection_response(accepted(PROTOCOL_VERSION)).is_ok());
+        assert_eq!(
+            validate_connection_response(accepted(PROTOCOL_VERSION)),
+            Ok(Some("Studio".into()))
+        );
         assert_eq!(
             validate_connection_response(accepted(PROTOCOL_VERSION + 1)),
             Err(LinkError::TransportVersionUnsupported.code())
@@ -2403,6 +2550,7 @@ mod tests {
                             version: PROTOCOL_VERSION,
                             connection_id: format!("conn-{index}"),
                             grant_revision: 1,
+                            host_label: None,
                         },
                     )
                     .await

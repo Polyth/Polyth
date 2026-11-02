@@ -99,6 +99,7 @@ export const en = {
   "tunnel.hero.title": "This computer",
   "tunnel.hero.pairFirst": "Ready to pair your first phone.",
   "tunnel.hero.connected": "Connected now: {online} of {total}",
+  "tunnel.hero.serverName": "Name on phones",
   "tunnel.hero.address": "Address",
   "tunnel.hero.copyAddress": "Copy address",
   "tunnel.hero.signIn": "Sign-in",

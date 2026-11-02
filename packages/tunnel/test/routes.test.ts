@@ -340,3 +340,62 @@ test("trust changes during initialization wait and reach the ready host", async 
   assert.deepEqual(calls, ["trust.update_grants"]);
   store.close();
 });
+
+test("the owner names the server for new pairings and connected phones; members only read it", async () => {
+  const store = createTunnelStore(join(tmp(), "tunnel.db"));
+  const events = new TunnelEventBus();
+  const created: Array<Record<string, unknown>> = [];
+  const published: string[] = [];
+  const host = {
+    available: true,
+    request: async (method: string, params: Record<string, unknown>) => {
+      if (method === "pairing.create") created.push(params);
+      return method === "pairing.create" ? { pairing: { id: `pair-${created.length}` } } : { ok: true };
+    },
+  } as never;
+  const routes = tunnelRoutes({
+    store, events, host: () => host, connections: new Map(),
+    status: async () => ({}), diagnostics: async () => ({}), closeDeviceSockets() {},
+    fallbackServerName: "studio",
+    publishServerName: async (name) => { published.push(name); },
+  });
+  const local: AuthPrincipal = { kind: "local-user", trustedLoopback: true };
+  const owner: SpaceContext = { ...SPACE, userId: "usr_owner" };
+
+  const initial = request({ path: "/api/tunnel/server-name", principal: local, space: owner });
+  assert.equal(await routes(initial.rc), true);
+  assert.deepEqual(initial.bodies, [{ name: "", fallback: "studio", editable: true }]);
+  await routes(request({ path: "/api/tunnel/pairing", method: "POST", principal: local, space: owner }).rc);
+  assert.equal(created[0]?.label, "studio");
+
+  const renamed = request({ path: "/api/tunnel/server-name", method: "PUT", principal: local, space: owner, body: { name: "  Home\nstudio " } });
+  assert.equal(await routes(renamed.rc), true);
+  assert.deepEqual(renamed.bodies, [{ name: "Home studio", fallback: "studio", editable: true }]);
+  assert.deepEqual(published, ["Home studio"]);
+  assert.equal(events.snapshot(0, "usr_test").events.at(-1)?.type, "tunnel/server-name-changed");
+  await routes(request({ path: "/api/tunnel/pairing", method: "POST", principal: local, space: owner }).rc);
+  assert.equal(created[1]?.label, "Home studio");
+
+  const member = request({ path: "/api/tunnel/server-name", principal: local });
+  assert.equal(await routes(member.rc), true);
+  assert.deepEqual(member.bodies, [{ name: "Home studio", fallback: "studio", editable: false }]);
+  await assert.rejects(
+    () => routes(request({ path: "/api/tunnel/server-name", method: "PUT", principal: local, body: { name: "Mine" } }).rc),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
+  const paired: AuthPrincipal = {
+    kind: "paired-device", deviceId: "dev-1", deviceEndpointId: "ep", connectionId: "c1",
+    transport: "direct", grants: ["tunnel.status.read"], grantRevision: 1,
+  };
+  await assert.rejects(
+    () => routes(request({ path: "/api/tunnel/server-name", method: "PUT", principal: paired, space: owner, body: { name: "x" } }).rc),
+    (error: Error & { code?: string }) => error.code === "forbidden",
+  );
+
+  const cleared = request({ path: "/api/tunnel/server-name", method: "PUT", principal: local, space: owner, body: { name: " " } });
+  await routes(cleared.rc);
+  assert.deepEqual(cleared.bodies, [{ name: "", fallback: "studio", editable: true }]);
+  assert.deepEqual(published, ["Home studio", "studio"]);
+  assert.equal(store.serverName(), "");
+  store.close();
+});

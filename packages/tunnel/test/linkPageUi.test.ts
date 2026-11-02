@@ -50,6 +50,7 @@ const device: TunnelDeviceDto = {
   grants: [...GRANT_PROFILE_PRESETS["full-remote"]], online: true, lastTransport: "direct", activeConnectionCount: 1,
 };
 const requests: Array<{ method: string; path: string; body: unknown }> = [];
+let serverName = { name: "", fallback: "studio", editable: true };
 const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
 globalThis.fetch = async (input, init) => {
   const path = new URL(String(input), "http://127.0.0.1:4400").pathname;
@@ -59,6 +60,10 @@ globalThis.fetch = async (input, init) => {
   if (path === "/api/tunnel/status") return json(status);
   if (path === "/api/tunnel/devices") return json([device]);
   if (path === "/api/auth/status") return json({ required: true });
+  if (path === "/api/tunnel/server-name") {
+    if (method === "PUT") serverName = { ...serverName, name: String((body as { name: string }).name).trim() };
+    return json(serverName);
+  }
   if (path === "/api/tunnel/pairing" && method === "POST") {
     return json({
       pairing: { id: "p1", expiresAt: new Date(Date.now() + 120_000).toISOString(), safetyPhrase: null, state: "pending" },
@@ -112,4 +117,52 @@ test("Link page pairs with Full access by default and edits permissions on deman
   assert.equal(host.querySelector(".pkg-tunnel-groups") !== null, true, "individual toggles appear once full access is off");
 
   await act(async () => { root.unmount(); });
+});
+
+test("the owner names this server for phones on the Link page", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: LinkPage } = await import("../widgets/LinkPage.tsx");
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const flush = async () => { for (let i = 0; i < 5; i += 1) await act(async () => { await Promise.resolve(); }); };
+  const type = async (input: HTMLInputElement, value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(input, value);
+      input.dispatchEvent(new dom.Event("input", { bubbles: true }) as never);
+    });
+  };
+  requests.length = 0;
+  serverName = { name: "", fallback: "studio", editable: true };
+
+  await act(async () => { root.render(createElement(LinkPage)); });
+  await flush();
+  let field = host.querySelector("input[name='server-name']") as HTMLInputElement;
+  assert.equal(field.placeholder, "studio", "until it is named, phones see the host name");
+  assert.equal(field.value, "");
+  assert.equal(host.querySelector(`label[for="${field.id}"]`)?.textContent, "Name on phones");
+
+  await type(field, "Home studio");
+  assert.equal(requests.some((entry) => entry.method === "PUT"), false, "typing alone saves nothing");
+  await act(async () => { field.dispatchEvent(new dom.FocusEvent("focusout", { bubbles: true }) as never); });
+  await flush();
+  const puts = requests.filter((entry) => entry.method === "PUT" && entry.path === "/api/tunnel/server-name");
+  assert.deepEqual(puts.map((entry) => entry.body), [{ name: "Home studio" }]);
+  assert.match(host.textContent ?? "", /Saved/);
+
+  await type(field, "Something else");
+  await act(async () => { field.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Escape", bubbles: true }) as never); });
+  assert.equal(field.value, "Home studio", "Escape goes back to the saved name");
+  await act(async () => { root.unmount(); });
+
+  serverName = { name: "Home studio", fallback: "studio", editable: false };
+  const member = createRoot(host);
+  await act(async () => { member.render(createElement(LinkPage)); });
+  await flush();
+  field = host.querySelector("input[name='server-name']") as HTMLInputElement;
+  assert.equal(field === null, true, "only the owner can change it");
+  assert.match(host.querySelector(".pkg-tunnel-hero")?.textContent ?? "", /Name on phonesHome studio/);
+  await act(async () => { member.unmount(); });
 });

@@ -647,6 +647,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "recoverConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "forgetConnection", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "renameConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getStatus", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "scanPairingQr", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "presentServerMenu", returnType: CAPPluginReturnPromise),
@@ -1166,6 +1167,19 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
                 try self.keychain.delete(connectionID)
                 _ = try self.invoke("forget", ["connectionId": connectionID])
                 self.forgetTransport(connectionID)
+                call.resolve(["ok": true])
+            } catch { self.reject(call, error) }
+        }
+    }
+
+    /** The hub's name for a saved server, kept with its metadata so the server
+     *  menu shows it too. An empty name goes back to the server's own. */
+    @objc func renameConnection(_ call: CAPPluginCall) {
+        guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
+        let label = call.getString("label") ?? ""
+        queue.async {
+            do {
+                _ = try self.invoke("connections.rename", ["connectionId": connectionID, "label": label])
                 call.resolve(["ok": true])
             } catch { self.reject(call, error) }
         }

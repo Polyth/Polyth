@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
+import { hostname } from "node:os";
 import type {
   AuthPrincipal,
   GrantProfileId,
@@ -23,6 +24,7 @@ import { startLinkHost, randomIngressSecret, unpackQrModules, type LinkHostClien
 import { createLinkHostLifecycle } from "./hostLifecycle.ts";
 import { attachTunnelEventsWs, TunnelEventBus } from "./events.ts";
 import { buildTunnelDiagnostics, buildTunnelStatus, type TunnelLiveSnapshot } from "./status.ts";
+import { fallbackServerName, type TunnelServerNameDto } from "./serverName.ts";
 
 const OWNER_USER_ID = "usr_owner";
 
@@ -114,7 +116,17 @@ export function tunnelRoutes(deps: {
   status: (userId: string) => Promise<TunnelStatusDto | Record<string, unknown>>;
   diagnostics: (userId: string) => Promise<TunnelDiagnosticsDto | Record<string, unknown>>;
   closeDeviceSockets: (deviceId: string) => void;
+  /** The server name while the owner has not set one (the host name). */
+  fallbackServerName?: string;
+  /** Hands a changed server name to the running Link host. */
+  publishServerName?: (name: string) => Promise<void>;
 }): RouteHandler {
+  const fallbackName = deps.fallbackServerName ?? "Polyth";
+  const serverNameDto = (userId: string): TunnelServerNameDto => ({
+    name: deps.store.serverName(),
+    fallback: fallbackName,
+    editable: userId === OWNER_USER_ID,
+  });
   const connectionCount = (deviceId: string): number => {
     let count = 0;
     for (const principal of deps.connections.values()) {
@@ -176,7 +188,7 @@ export function tunnelRoutes(deps: {
       const result = await host.request("pairing.create", {
         profile,
         mode: "direct-preferred",
-        label: typeof body.label === "string" ? body.label : "",
+        label: typeof body.label === "string" && body.label.trim() ? body.label : deps.store.serverName() || fallbackName,
         grants,
       });
       const packedModules = result.qrModulesPacked as { size?: unknown; bits?: unknown } | undefined;
@@ -198,6 +210,24 @@ export function tunnelRoutes(deps: {
       }
       deps.events.emit("tunnel/pairing-created", { id: pairingId }, request.space.userId);
       json(200, result);
+      return true;
+    }
+
+    if (path === "/api/tunnel/server-name" && (method === "GET" || method === "PUT")) {
+      request.requireCapability(REMOTE_CAPABILITY.tunnelPairingManage);
+      if (method === "PUT") {
+        // One name for the whole server: every member's phones show it.
+        if (request.space.userId !== OWNER_USER_ID) {
+          throw Object.assign(new Error("not allowed"), { code: "forbidden" });
+        }
+        const body = await request.body();
+        const name = deps.store.setServerName(body.name);
+        try {
+          await deps.publishServerName?.(name || fallbackName);
+        } catch { /* the host picks it up when it next starts */ }
+        deps.events.emit("tunnel/server-name-changed", { name });
+      }
+      json(200, serverNameDto(request.space.userId));
       return true;
     }
 
@@ -397,6 +427,13 @@ export function tunnelRoutes(deps: {
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const store = createTunnelStore(join(host.storageDir, "tunnel", "tunnel.db"));
   const events = new TunnelEventBus();
+  const fallbackName = fallbackServerName(hostname());
+  /** Paired devices learn the name when they connect. A host binary that
+   *  predates `host.set_label` answers an error; tickets still carry it. */
+  const publishServerName = async (activeHost: LinkHostClient | null, name: string): Promise<void> => {
+    if (!activeHost?.available) return;
+    await activeHost.request("host.set_label", { label: name });
+  };
   const connections = new Map<string, AuthPrincipal>();
   let linkHost: LinkHostClient | null = null;
   let ingressHandle: { close(): Promise<void> } | null = null;
@@ -677,6 +714,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         throw Object.assign(new Error("Polyth Link ingress configuration failed"), { code: "ingress-configure-failed", cause: error });
       }
       await syncTrust();
+      await publishServerName(activeHost, store.serverName() || fallbackName).catch(() => undefined);
       try {
         await activeHost.request("endpoint.start");
         endpointBound = true;
@@ -718,6 +756,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       status: async (userId) => buildTunnelStatus(await liveSnapshot(userId)),
       diagnostics: async (userId) => buildTunnelDiagnostics(await liveSnapshot(userId)),
       closeDeviceSockets: (deviceId) => host.closePairedDevice(deviceId),
+      fallbackServerName: fallbackName,
+      publishServerName: (name) => publishServerName(lifecycle.ready ? linkHost : null, name),
     }),
     async onEnable() {
       eventsEnabled = true;

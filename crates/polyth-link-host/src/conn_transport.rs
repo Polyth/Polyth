@@ -296,7 +296,7 @@ async fn serve_trusted(
     let mut id = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut id);
     let connection_id = hex::encode(id);
-    {
+    let host_label = {
         let mut guard = state.lock().await;
         let existing: Vec<String> = guard
             .connections
@@ -329,13 +329,15 @@ async fn serve_trusted(
             "grantRevision": device.grant_revision,
             "grants": device.grants,
         }));
-    }
+        guard.label.clone()
+    };
     write_control(
         &mut send,
         &ControlMessage::ConnectionAccepted {
             version: PROTOCOL_VERSION,
             connection_id: connection_id.clone(),
             grant_revision: device.grant_revision,
+            host_label,
         },
     )
     .await?;

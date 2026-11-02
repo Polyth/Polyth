@@ -97,6 +97,7 @@ export const de: TunnelMessages = {
   "tunnel.hero.title": "Dieser Computer",
   "tunnel.hero.pairFirst": "Bereit, Ihr erstes Telefon zu koppeln.",
   "tunnel.hero.connected": "Jetzt verbunden: {online} von {total}",
+  "tunnel.hero.serverName": "Name auf Telefonen",
   "tunnel.hero.address": "Adresse",
   "tunnel.hero.copyAddress": "Adresse kopieren",
   "tunnel.hero.signIn": "Anmeldung",

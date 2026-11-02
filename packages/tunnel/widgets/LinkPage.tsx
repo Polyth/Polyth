@@ -9,8 +9,9 @@ import type {
 import { GRANT_PROFILE_PRESETS } from "@polyth/contracts";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import type { TunnelMessageKey } from "../src/i18n/en.ts";
-import { CheckGroup, EmptyState, ErrorState, PageHead, ReadonlyRow, Row, Section, Seg, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
-import { Badge, Button, ChevronDownIcon, Dialog, Icon, IconButton, QrCodeIcon, RefreshIcon, Spinner, type BadgeTone } from "../../../apps/web/src/components/ui/index.ts";
+import { SERVER_NAME_MAX_CHARS, type TunnelServerNameDto } from "../src/serverName.ts";
+import { CheckGroup, EmptyState, ErrorState, PageHead, ReadonlyRow, Row, SaveStatus, Section, Seg, Toggle, type SaveStatusState } from "../../../apps/web/src/components/settings/parts.tsx";
+import { Badge, Button, ChevronDownIcon, Dialog, Icon, IconButton, QrCodeIcon, RefreshIcon, Spinner, TextInput, type BadgeTone } from "../../../apps/web/src/components/ui/index.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { applyTunnelStatusToCapability, setPolythLinkCapabilityAvailable } from "./availability.ts";
@@ -98,6 +99,66 @@ function QrMatrix({ modules, t }: { modules: boolean[][]; t: Translate }) {
           ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} />
           : null))}
       </svg>
+    </div>
+  );
+}
+
+/** The name paired phones show for this server: commits on blur or Enter,
+ *  Escape goes back. Empty means the host name (the placeholder). */
+function ServerNameFact({ value, onSave, t }: {
+  value: TunnelServerNameDto;
+  onSave: (name: string) => Promise<void>;
+  t: Translate;
+}) {
+  const id = useId();
+  const [draft, setDraft] = useState(value.name);
+  const [state, setState] = useState<SaveStatusState>("idle");
+  const [failure, setFailure] = useState("");
+  useEffect(() => { setDraft(value.name); }, [value.name]);
+  const commit = async () => {
+    if (draft.trim() === value.name) {
+      setDraft(value.name);
+      return;
+    }
+    setState("saving");
+    try {
+      await onSave(draft);
+      setState("saved");
+    } catch (cause) {
+      setFailure(errorText(cause));
+      setState("error");
+    }
+  };
+  return (
+    <div className="pkg-tunnel-fact" data-settings-item="tunnel.serverName">
+      <dt>{value.editable ? <label htmlFor={id}>{t("tunnel.hero.serverName")}</label> : t("tunnel.hero.serverName")}</dt>
+      <dd>
+        {state !== "idle" && <SaveStatus state={state} {...(failure ? { error: failure } : {})} />}
+        {value.editable ? (
+          <TextInput
+            id={id}
+            name="server-name"
+            uiSize="sm"
+            className="pkg-tunnel-name"
+            value={draft}
+            placeholder={value.fallback}
+            maxLength={SERVER_NAME_MAX_CHARS}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setState("idle");
+            }}
+            onBlur={() => { void commit(); }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") setDraft(value.name);
+            }}
+          />
+        ) : (
+          <span className="pkg-tunnel-name-value">{value.name || value.fallback}</span>
+        )}
+      </dd>
     </div>
   );
 }
@@ -220,6 +281,7 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
   const [pairing, setPairing] = useState<PairingStateDto | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [signInRequired, setSignInRequired] = useState<boolean | null>(null);
+  const [serverName, setServerName] = useState<TunnelServerNameDto | null>(null);
   const pairingIdRef = useRef<string | null>(null);
   const statusRequestRef = useRef(0);
   pairingIdRef.current = offer?.pairing.id ?? null;
@@ -255,6 +317,15 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
   }, [refreshStatus]);
 
   useEffect(() => { void reload(); }, [reload]);
+  const refreshServerName = useCallback(async () => {
+    try {
+      const next = await api.get<TunnelServerNameDto>("/api/tunnel/server-name");
+      if (typeof next.name === "string" && typeof next.fallback === "string") setServerName(next);
+    } catch {
+      // A server without the setting shows no row.
+    }
+  }, []);
+  useEffect(() => { void refreshServerName(); }, [refreshServerName]);
   useEffect(() => {
     let live = true;
     void api.get<{ required?: unknown }>("/api/auth/status").then(
@@ -312,13 +383,14 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
       if (type.startsWith("tunnel/device") || type.startsWith("tunnel/grants") || type === "tunnel/identity-rotated") {
         void reload();
       }
+      if (type === "tunnel/server-name-changed") void refreshServerName();
     };
     socket.addEventListener("message", onMessage);
     return () => {
       socket.removeEventListener("message", onMessage);
       socket.close();
     };
-  }, [reload, refreshStatus, t]);
+  }, [reload, refreshStatus, refreshServerName, t]);
 
   useEffect(() => {
     if (!offer?.pairing.id) return;
@@ -456,6 +528,15 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
           <Badge tone={hostInfo.tone} dot>{hostInfo.label}</Badge>
         </div>
         <dl className="pkg-tunnel-facts">
+          {serverName && (
+            <ServerNameFact
+              value={serverName}
+              t={t}
+              onSave={async (name) => {
+                setServerName(await api.put<TunnelServerNameDto>("/api/tunnel/server-name", { name }));
+              }}
+            />
+          )}
           {address && (
             <div className="pkg-tunnel-fact">
               <dt>{t("tunnel.hero.address")}</dt>

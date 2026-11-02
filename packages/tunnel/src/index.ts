@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { TunnelDeviceDto } from "@polyth/contracts";
 import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY, normalizeDeviceGrants, type GrantProfileId } from "@polyth/contracts";
+import { cleanServerName } from "./serverName.ts";
 
 const LEGACY_OWNER_USER_ID = "usr_owner";
 
@@ -94,6 +95,10 @@ export class TunnelStore {
         connection_id TEXT,
         created_at INTEGER NOT NULL,
         metadata_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS tunnel_setting (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       );
     `);
     this.db.exec("INSERT OR IGNORE INTO tunnel_meta(key, value) VALUES ('schema', 1)");
@@ -355,6 +360,23 @@ export class TunnelStore {
       ? this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state = 'active' AND owner_user_id = ? ORDER BY updated_at DESC").all(userId)
       : this.db.prepare("SELECT * FROM tunnel_device WHERE pairing_state = 'active' ORDER BY updated_at DESC").all();
     return (rows as Record<string, unknown>[]).map((row) => this.hydrate(row));
+  }
+
+  /** The owner's name for this server; empty until one is set. */
+  serverName(): string {
+    const row = this.db.prepare("SELECT value FROM tunnel_setting WHERE key = 'server-name'").get() as { value?: unknown } | undefined;
+    return typeof row?.value === "string" ? row.value : "";
+  }
+
+  /** Stores a cleaned name; an empty one goes back to the host name. */
+  setServerName(value: unknown): string {
+    const name = cleanServerName(value);
+    if (name) {
+      this.db.prepare("INSERT INTO tunnel_setting(key, value) VALUES ('server-name', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(name);
+    } else {
+      this.db.prepare("DELETE FROM tunnel_setting WHERE key = 'server-name'").run();
+    }
+    return name;
   }
 
   rename(id: string, label: string): TunnelDeviceRecord | undefined {

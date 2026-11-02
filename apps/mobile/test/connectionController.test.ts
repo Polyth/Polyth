@@ -72,6 +72,7 @@ function native(overrides: Partial<PolythLinkNative> = {}): PolythLinkNative {
     recoverConnection: async (connectionId) => ({ state: "connected", launch: launch(connectionId) }),
     disconnect: async () => undefined,
     forgetConnection: async () => undefined,
+    renameConnection: async () => undefined,
     getStatus: async () => ({ state: "disconnected" }),
     ...overrides,
   };
@@ -449,4 +450,32 @@ test("a stall report for a launch that is no longer current is ignored", async (
   controller.launchStalled("a");
   assert.equal(controller.state.phase, "connected");
   assert.equal(controller.state.activeConnectionId, "b");
+});
+
+test("renaming a saved server changes only its name on this phone", async () => {
+  const names = new Map<string, string>();
+  const renamed: Array<[string, string]> = [];
+  const adapter = native({
+    listConnections: async () => [connection("a"), connection("b")].map((item) => ({
+      ...item,
+      serverLabel: item.hostLabel,
+      customLabel: names.get(item.id) ?? "",
+      hostLabel: names.get(item.id) || item.hostLabel,
+    })),
+    renameConnection: async (connectionId, label) => {
+      renamed.push([connectionId, label]);
+      names.set(connectionId, label.trim());
+    },
+  });
+  const controller = await loadedController(adapter);
+  const connecting = controller.connect("a");
+  await controller.rename("b", " Studio ");
+  assert.deepEqual(renamed, [["b", " Studio "]]);
+  assert.equal(controller.state.trusted.find((item) => item.id === "b")?.hostLabel, "Studio");
+  assert.equal(controller.state.trusted.find((item) => item.id === "b")?.serverLabel, "Server B");
+  assert.equal(controller.state.trusted.find((item) => item.id === "a")?.hostLabel, "Server A");
+  assert.ok(await connecting, "a rename does not cancel a connection in progress");
+
+  await controller.rename("b", "");
+  assert.equal(controller.state.trusted.find((item) => item.id === "b")?.hostLabel, "Server B");
 });
