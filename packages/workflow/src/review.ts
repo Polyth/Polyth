@@ -101,7 +101,9 @@ export const MAX_DISPUTE_TEXT = 400;
 
 const BLOCKER_WORDS = "blocker|blocking|critical|major|must[- ]?fix";
 const NOTE_WORDS = "warning|minor|nit|note|suggestion|optional";
-const EMPHASIS = "(?:\\*\\*|__|\\*|_|`)*";
+// Single characters: the pairs `**`/`__` split in two ways inside a star, which backtracked
+// exponentially on a long run of markers with no `[` after it.
+const EMPHASIS = "[*_`]*";
 /** `- [blocker] path:line — message`. The severity word must be in square
  * brackets (emphasis around them and any case are fine): a plain bullet such
  * as `- Note: I could not run the tests` is prose, never a finding. The

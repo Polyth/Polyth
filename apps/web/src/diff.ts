@@ -307,7 +307,8 @@ const decodePath = (raw: string): string => {
 const pathAfterPrefix = (raw: string): string | null => {
   const value = decodePath(raw);
   if (value === "/dev/null") return null;
-  return value.replace(/^[ab]\//, "");
+  // A header naming nothing ("+++ " or a stray quote) is no path.
+  return value.replace(/^[ab]\//, "") || null;
 };
 
 const gitHeaderPaths = (header: string): [string, string] | null => {
@@ -376,7 +377,7 @@ export function splitFileDiffs(diff: string, fallbackPath = "file"): FileDiff[] 
     const newPath = renameTo !== undefined
       ? decodePath(renameTo)
       : newHeader ? pathAfterPrefix(newHeader) : paths ? pathAfterPrefix(paths[1]) : null;
-    const path = newPath ?? oldPath ?? fallbackPath;
+    const path = newPath || oldPath || fallbackPath;
     return withStats({
       path,
       ...(oldPath && newPath && oldPath !== newPath ? { previousPath: oldPath } : {}),

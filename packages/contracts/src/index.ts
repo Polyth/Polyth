@@ -8450,6 +8450,10 @@ export interface ErrorBodyTextOptions {
   limit?: number;
 }
 
+/** A reference outside Unicode (or a surrogate) is kept as written rather than throwing. */
+const markupCodePoint = (match: string, code: number): string =>
+  code >= 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : match;
+
 const decodeMarkupEntities = (text: string): string =>
   text
     .replace(/&nbsp;/gi, " ")
@@ -8458,8 +8462,8 @@ const decodeMarkupEntities = (text: string): string =>
     .replace(/&quot;/gi, "\"")
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&amp;/gi, "&")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number.parseInt(dec, 10)));
+    .replace(/&#x([0-9a-f]+);/gi, (match, hex: string) => markupCodePoint(match, Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (match, dec: string) => markupCodePoint(match, Number.parseInt(dec, 10)));
 
 /**
  * Reduce a non-JSON HTTP error body to one readable line.

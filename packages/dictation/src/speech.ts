@@ -93,9 +93,12 @@ export function speakableLine(line: string): string {
     .replace(/`([^`]*)`/g, "$1")
     .replace(/\*\*|__|~~|\*/g, "")
     .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,!?:;]|$)/g, "$1$2")
-    .replace(/\s*\|\s*/g, ", ")
+    // Collapsed first, so `\s*\|\s*` cannot rescan a long whitespace run from every start.
     .replace(/\s+/g, " ")
-    .trim();
+    .replace(/\s*\|\s*/g, ", ")
+    .replace(/\s+/g, " ");
+  // Dropping markers can join the halves around them into a new tag ("<**b>"), so strip once more.
+  return stripHtmlTags(prose).replace(/\s+/g, " ").trim();
 }
 
 const endsSentence = (text: string): boolean => /[.!?…。！？:;]["'”’)\]]*$/.test(text);
@@ -336,8 +339,9 @@ export function applySpokenPunctuation(text: string, lang: string): string {
   // "word ." → "word." and no doubled marks from "period period".
   out = dropSpaceBeforePunctuation(out)
     .replace(/([,.;:?!])(?:[ \t]*\1)+/g, "$1")
-    // Capitalize after a sentence end or a line break.
-    .replace(/([.?!]\s+|\n\s*)([a-z])/g, (_m, lead: string, letter: string) => lead + letter.toUpperCase());
+    // Capitalize after a sentence end or a line break (a blank line's own break starts the match,
+    // so `\n\s*` need not rescan a run of line breaks).
+    .replace(/([.?!]\s+|\n[ \t]*)([a-z])/g, (_m, lead: string, letter: string) => lead + letter.toUpperCase());
   // Spaces and tabs around every line break and at both ends of the text.
   out = out.split("\n").map(trimSpacesAndTabs).join("\n");
   return out.trim() ? out : "";

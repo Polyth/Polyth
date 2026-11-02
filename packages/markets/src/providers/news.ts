@@ -6,11 +6,16 @@ export interface NewsProviderOptions {
   fetch?: FetchLike;
 }
 
+/** A numeric character reference outside Unicode (or a surrogate) decodes to U+FFFD instead of throwing. */
+function codePointChar(code: number): string {
+  return Number.isInteger(code) && code >= 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : "\uFFFD";
+}
+
 function decodeXml(value: string): string {
   return value
     .replace(/^<!\[CDATA\[|\]\]>$/g, "")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&#(\d+);/g, (_, code: string) => codePointChar(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => codePointChar(Number.parseInt(code, 16)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')

@@ -165,7 +165,7 @@ export function plainTextExcerpt(raw: unknown, cap = MAX_BODY_CHARS): string {
       }
       if (open) { fence = open[1]!; continue; }
       if (/^\s*([-*_]\s*){3,}$/.test(line)) continue;
-      if (/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line) && line.includes("|")) continue;
+      if (line.includes("|") && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line)) continue;
       let text = line
         .replace(/^\s{0,3}#{1,6}\s+/, "")
         .replace(/^\s*(>\s?)+/, "")
@@ -186,8 +186,9 @@ export function plainTextExcerpt(raw: unknown, cap = MAX_BODY_CHARS): string {
       .replace(/(?<![A-Za-z0-9_])__+([^_]+?)__+(?![A-Za-z0-9_])/g, "$1")
       .replace(/(?<![A-Za-z0-9_])_(?!\s)([^_]+?)(?<!\s)_(?![A-Za-z0-9_])/g, "$1")
       .replace(/~~([^~]+?)~~/g, "$1");
+    // Dropping markdown markers can join the halves around them into a new tag ("<**b>"), so strip again.
     // eslint-disable-next-line no-control-regex
-    const clean = redactPushText(flat.replace(/[\u0000-\u001f\u007f]/g, " ")).replace(/\s+/g, " ").trim();
+    const clean = redactPushText(withoutTags(flat.replace(/[\u0000-\u001f\u007f]/g, " "))).replace(/\s+/g, " ").trim();
     if (clean.length <= cap) return clean;
     const room = clean.slice(0, cap - 1);
     const space = room.lastIndexOf(" ");
