@@ -88,7 +88,7 @@
   position: fixed;
   left: 50%;
   top: 50%;
-  width: min(372px, calc(100vw - 24px));
+  width: min(400px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
   display: flex;
   flex-direction: column;
@@ -214,8 +214,11 @@
   line-height: 1.45;
 }
 
+/* Buttons keep the normal control size; a long locale drops them onto their
+ * own row instead of spilling out of the card. */
 .shell-intro-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 14px 20px 14px;
@@ -247,7 +250,7 @@
 }
 .shell-intro .shell-intro-dot.active { width: 20px; background: var(--accent); }
 
-.shell-intro-actions { display: flex; gap: 8px; flex: none; }
+.shell-intro-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
 
 .shell-intro-skip-link {
   align-self: center;
