@@ -10,8 +10,9 @@
 // previous release of the channel is the newest older version the channel
 // would update from; its hidden source marker gives the exact commit range.
 // Commits are grouped into New / Improvements / Fixes / Under the hood, and
-// every human and AI contributor (authors and Co-authored-by trailers) is
-// credited. Writes `title=` to $GITHUB_OUTPUT when set.
+// every human contributor (authors and Co-authored-by trailers) is credited;
+// bot and AI-agent identities are skipped. Writes `title=` to $GITHUB_OUTPUT
+// when set.
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -163,15 +164,15 @@ function identityKind(person) {
 }
 
 /**
- * Humans and AI agents credited by the commits, most active first. Human
- * identities sharing an email or exact name are one person (the repository
- * .mailmap applies to authors first); a GitHub noreply address becomes an
- * @mention. Each commit counts once per contributor.
+ * Humans credited by the commits, most active first. Human identities sharing
+ * an email or exact name are one person (the repository .mailmap applies to
+ * authors first); a GitHub noreply address becomes an @mention. Each commit
+ * counts once per contributor. Bot and AI-agent identities (including any
+ * Co-authored-by trailer naming a model or harness) are never credited.
  */
 export function summarizeContributors(commits) {
   const people = [];
   const byKey = new Map();
-  const agents = new Map();
   const personFor = (identity) => {
     const keys = [`e:${identity.email.toLowerCase()}`, `n:${identity.name.trim().toLowerCase()}`];
     const found = [...new Set(keys.map((key) => byKey.get(key)).filter(Boolean))];
@@ -194,13 +195,7 @@ export function summarizeContributors(commits) {
     for (const identity of [commit.author, ...(commit.coAuthors ?? [])]) {
       if (!identity?.name || !identity.email) continue;
       const kind = identityKind(identity);
-      if (kind === "bot") continue;
-      if (kind === "agent") {
-        const agent = agents.get(identity.name) ?? new Set();
-        agent.add(commit.sha);
-        agents.set(identity.name, agent);
-        continue;
-      }
+      if (kind !== "human") continue;
       const person = personFor(identity);
       person.names.set(identity.name, (person.names.get(identity.name) ?? 0) + 1);
       const login = NOREPLY_LOGIN.exec(identity.email)?.[1];
@@ -209,14 +204,11 @@ export function summarizeContributors(commits) {
     }
   }
   const byActivity = (a, b) => b.commits - a.commits || a.name.localeCompare(b.name);
-  return {
-    people: people.map((person) => ({
-      name: [...person.names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0],
-      login: [...person.logins].sort()[0] ?? null,
-      commits: person.commits.size,
-    })).sort(byActivity),
-    agents: [...agents].map(([name, shas]) => ({ name, commits: shas.size })).sort(byActivity),
-  };
+  return people.map((person) => ({
+    name: [...person.names].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0],
+    login: [...person.logins].sort()[0] ?? null,
+    commits: person.commits.size,
+  })).sort(byActivity);
 }
 
 function git(cwd, args, allowFailure = false) {
@@ -345,17 +337,11 @@ export function renderReleaseNotes({ channel, version, commits, base, basis, sou
     }
   }
 
-  const { people, agents } = summarizeContributors(commits);
-  if (people.length > 0 || agents.length > 0) {
+  const people = summarizeContributors(commits);
+  if (people.length > 0) {
     lines.push("### 💜 Contributors", "");
-    if (people.length > 0) {
-      const names = people.map((person) => `${person.login ? `@${person.login}` : `**${escapeMarkdown(person.name)}**`} (${plural(person.commits, "commit")})`);
-      lines.push(`Thank you to ${formatList(names)}.`, "");
-    }
-    if (agents.length > 0) {
-      const names = agents.map((agent) => `${escapeMarkdown(agent.name)} (${agent.commits})`);
-      lines.push(`Paired with AI agents: ${formatList(names)}.`, "");
-    }
+    const names = people.map((person) => `${person.login ? `@${person.login}` : `**${escapeMarkdown(person.name)}**`} (${plural(person.commits, "commit")})`);
+    lines.push(`Thank you to ${formatList(names)}.`, "");
   }
   lines.push(releaseMarker(releaseChannel, source));
   return `${lines.join("\n")}\n`;

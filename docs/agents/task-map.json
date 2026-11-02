@@ -517,6 +517,7 @@
       ],
       "testHints": [
         "scripts/test/release-version.test.ts",
+        "scripts/test/release-notes.test.ts",
         "scripts/test/bump-version.test.ts",
         "scripts/test/release-quality-gates.test.ts"
       ],

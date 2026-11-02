@@ -68,10 +68,10 @@ test("the summary is the body's first sentence without trailers", () => {
   assert.ok(long.length <= 221 && long.endsWith("…"), long);
 });
 
-test("contributors merge identities and credit AI agents separately", () => {
+test("contributors merge identities and skip bots and AI agents", () => {
   const commit = (sha: string, name: string, email: string, coAuthors: Array<{ name: string; email: string }> = []) =>
     ({ sha, subject: "x", body: "", files: [], author: { name, email }, coAuthors });
-  const { people, agents } = summarizeContributors([
+  const people = summarizeContributors([
     commit("a", "Max", "max@polyth.app", [{ name: "Claude Opus 5.5", email: "noreply@anthropic.com" }]),
     commit("b", "Max", "78844585+devmaxer@users.noreply.github.com", [{ name: "Claude Opus 5.5", email: "noreply@anthropic.com" }]),
     commit("c", "Max", "max@polyth.top"),
@@ -85,7 +85,6 @@ test("contributors merge identities and credit AI agents separately", () => {
     { name: "Ada", login: null, commits: 1 },
     { name: "Grace Hopper", login: null, commits: 1 },
   ]);
-  assert.deepEqual(agents, [{ name: "Claude Opus 5.5", commits: 2 }, { name: "Cursor Agent", commits: 1 }]);
 });
 
 test("notes are collected from the marked source range and rendered by section", () => {
@@ -126,9 +125,10 @@ test("notes are collected from the marked source range and rendered by section",
     assert.match(notes, /### ✨ New\n\n- \*\*Add view tabs to the header\*\*\n  <br><sub>Tabs sit in the header\.<\/sub>/);
     assert.match(notes, /### 🐛 Fixes\n\n- \*\*Keep updates on the chosen channel\*\*\n/);
     assert.match(notes, /<summary><strong>🧰 Under the hood<\/strong> \(1\)<\/summary>\n\n- Document the channels/);
-    // .mailmap applies to authors and co-authors, turning Max into an @-mention.
+    // .mailmap applies to authors and co-authors, turning Max into an @-mention;
+    // the Claude co-author is not credited at all.
     assert.match(notes, /Thank you to @devmaxer \(3 commits\) and \*\*Ada\*\* \(1 commit\)\./);
-    assert.match(notes, /Paired with AI agents: Claude Opus 5\.5 \(1\)\./);
+    assert.doesNotMatch(notes, /Paired with AI agents|Claude Opus/);
     assert.equal(releaseSource(notes), source);
 
     // A marker that is not an ancestor (rewritten history) falls back to the publication date.
