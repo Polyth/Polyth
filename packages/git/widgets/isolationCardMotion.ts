@@ -40,6 +40,9 @@ export const CARD_DONE_BEAT_MS = 1_350;
 const MORPH_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 const EXIT_EASE = "cubic-bezier(0.65, 0, 0.35, 1)";
 const FADE_EASE = "cubic-bezier(0.2, 0, 0, 1)";
+// Leaving content fades on an even curve: visibly fading from the first frame,
+// but not blinking out within the first 100 ms while the box still stands.
+const EXIT_FADE_EASE = "cubic-bezier(0.25, 0.1, 0.25, 1)";
 
 // Peak travel speed in px/ms. The ease's steepest slope is about 2.25× its
 // average, so pacing the duration by distance keeps every frame's step well
@@ -212,12 +215,12 @@ export function playCardMotion(
     // Leaving: the content fades before the box closes over it. Arriving: it
     // fades in once there is room for it, so text never squeezes into view.
     const fade = kind === "exit"
-      ? { duration: Math.round(duration * 0.55), delay: 0 }
-      : { duration: Math.round(duration * 0.7), delay: Math.round(duration * 0.3) };
+      ? { duration: Math.round(duration * 0.6), delay: 0, easing: EXIT_FADE_EASE }
+      : { duration: Math.round(duration * 0.7), delay: Math.round(duration * 0.3), easing: FADE_EASE };
     animations.push(element.animate([
       { opacity: from.opacity, transform: kind === "exit" ? "none" : "translate3d(0, 6px, 0) scale(0.985)" },
       { opacity: to.opacity, transform: kind === "exit" ? "translate3d(0, 4px, 0) scale(0.985)" : "none" },
-    ], { ...fade, easing: FADE_EASE, fill: "both" }));
+    ], { ...fade, fill: "both" }));
   }
   const motion: RunningMotion = { animations, overflow, kind };
   running.set(element, motion);

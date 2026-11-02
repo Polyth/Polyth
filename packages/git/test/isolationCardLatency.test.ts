@@ -28,7 +28,7 @@ Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, 
 register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { activateSession, seedSessionCache, upsertSession } = await import("../../../apps/web/src/store.ts");
+const { activateSession, applyEvents, beginPendingSend, endPendingSend, seedSessionCache, upsertSession } = await import("../../../apps/web/src/store.ts");
 const { IsolationCard } = await import("../widgets/IsolationCard.tsx");
 const { tr } = await import("../../../apps/web/src/i18n/index.ts");
 const { api } = await import("@polyth/session/web-api");
@@ -89,6 +89,68 @@ test("the turn's end shows the card in the same commit as the projection, not af
     });
     assert.equal(title(mounted.container), tr("isolation.changesAreReady"),
       "the working-time answer does not hide the ready card");
+  } finally {
+    api.isolationStatus = original;
+    await mounted.close();
+  }
+});
+
+const readyAnswer = (path: string): IsolationStatusDto => ({
+  isolation: isolationAt(path, "merge-ready"),
+  effectiveState: "merge-ready",
+  suggestion: { eligible: true, hasChanges: true, targetBranch: "main", targetDirty: false, revision: "r" },
+  actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
+});
+let eventSeq = 0;
+const event = (sessionId: string, type: string) =>
+  ({ id: `${sessionId}-${++eventSeq}`, sessionId, seq: eventSeq, time: eventSeq, type, data: {}, v: 1 as const });
+
+test("a send takes the ready card away at once, before the server admits the prompt", async () => {
+  const original = api.isolationStatus;
+  api.isolationStatus = async () => readyAnswer("/wt-send");
+  const mounted = await mount(projection("latency-send", isolationAt("/wt-send", "merge-ready")));
+  try {
+    await act(async () => { await wait(); });
+    assert.equal(title(mounted.container), tr("isolation.changesAreReady"));
+    let pending = "";
+    await act(async () => {
+      pending = beginPendingSend({ sessionId: "latency-send", text: "one more thing", attachments: [] });
+    });
+    assert.equal(title(mounted.container), null, "the echo is enough; no wait for the status or a read");
+    await act(async () => { endPendingSend(pending); await wait(); });
+    assert.equal(title(mounted.container), tr("isolation.changesAreReady"), "a refused send brings the card back");
+  } finally {
+    api.isolationStatus = original;
+    await mounted.close();
+  }
+});
+
+test("an admitted prompt keeps the card away until its turn ends", async () => {
+  const original = api.isolationStatus;
+  api.isolationStatus = async () => readyAnswer("/wt-admit");
+  const id = "latency-admit";
+  const mounted = await mount(projection(id, isolationAt("/wt-admit", "merge-ready")));
+  try {
+    await act(async () => { applyEvents([event(id, "turn/started"), event(id, "assistant/message"), event(id, "turn/stopped")]); await wait(); });
+    assert.equal(title(mounted.container), tr("isolation.changesAreReady"));
+    // The prompt lands (its echo retires) while the projection still reads
+    // idle: `working` arrives only with `turn/started`.
+    api.isolationStatus = never;
+    await act(async () => { applyEvents([event(id, "user/message")]); await wait(); });
+    assert.equal(title(mounted.container), null, "the gap before turn/started does not bring the card back");
+    await act(async () => {
+      applyEvents([event(id, "turn/started")]);
+      upsertSession(projection(id, isolationAt("/wt-admit", "merge-ready"), { status: "working", updatedAt: 2 }));
+      await wait();
+    });
+    assert.equal(title(mounted.container), null, "the answer read while resting does not offer Integrate during the turn");
+    api.isolationStatus = async () => readyAnswer("/wt-admit");
+    await act(async () => {
+      applyEvents([event(id, "assistant/message"), event(id, "turn/stopped")]);
+      upsertSession(projection(id, isolationAt("/wt-admit", "merge-ready"), { status: "idle", updatedAt: 3 }));
+      await wait();
+    });
+    assert.equal(title(mounted.container), tr("isolation.changesAreReady"), "the turn's end shows it again");
   } finally {
     api.isolationStatus = original;
     await mounted.close();

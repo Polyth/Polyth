@@ -2648,7 +2648,13 @@ server (only it knows whether they block Merge). Pressing Integrate shows the
 integrating steps at once: the server persists its first phase (`publishing`)
 only after snapshotting the workspace and building the merge, seconds on a busy
 host, so the card's own merge request stands for that phase until the server's
-answer or a refusal returns it to the ready card. While the agent works the
+answer or a refusal returns it to the ready card. A new prompt starts the
+card's collapse in the commit that stages its echo: the echo, and then the
+admitted prompt until `turn/started` (the projection still reads idle in
+between), count as the agent working, and an answer read while the session
+rested never offers Integrate during a turn. The card waits neither for the
+status nor for a fresh read, its content fades on an even curve while the box
+closes, and it returns when the turn ends. While the agent works the
 status is read once, not on every projection update of the turn. A read that
 fails in transit (a phone's
 Link connection still returning after resume outlasts the shared ~4 s read
