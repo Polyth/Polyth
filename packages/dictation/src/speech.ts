@@ -88,7 +88,7 @@ export function speakableLine(line: string): string {
     .replace(/^\s{0,3}#{1,6}\s+/, "")
     .replace(/^\s*>+\s?/, "")
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "");
-  return replaceLinkSpans(replaceLinkSpans(prose, "![", () => " "), "[", (label) => label)
+  const spoken = replaceLinkSpans(replaceLinkSpans(prose, "![", () => " "), "[", (label) => label)
     .replace(/<?https?:\/\/[^\s>)]+>?/g, " link ")
     .replace(/`([^`]*)`/g, "$1")
     .replace(/\*\*|__|~~|\*/g, "")
@@ -98,7 +98,7 @@ export function speakableLine(line: string): string {
     .replace(/\s*\|\s*/g, ", ")
     .replace(/\s+/g, " ");
   // Dropping markers can join the halves around them into a new tag ("<**b>"), so strip once more.
-  return stripHtmlTags(prose).replace(/\s+/g, " ").trim();
+  return stripHtmlTags(spoken).replace(/\s+/g, " ").trim();
 }
 
 const endsSentence = (text: string): boolean => /[.!?…。！？:;]["'”’)\]]*$/.test(text);

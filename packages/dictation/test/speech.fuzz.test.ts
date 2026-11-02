@@ -37,12 +37,12 @@ test("applySpokenPunctuation is deterministic, trims, and leaves other languages
 });
 
 test("speech text helpers handle 50k repetitions of each token in bounded time", () => {
-  assertBoundedTime(TOKENS, (input) => { speakableLine(input); sentenceBoundaries(input); applySpokenPunctuation(input, "en"); }, { skip: ["[", "!["] });
+  assertBoundedTime(TOKENS, (input) => { speakableLine(input); sentenceBoundaries(input); applySpokenPunctuation(input, "en"); });
 });
 
-// Finding: the link patterns `\[([^\]]+)\]\(` rescan to the end of the line from every `[`, so
-// 50k brackets take ~5 s in speakableLine.
-test("speakableLine is linear on unclosed link brackets", { todo: "quadratic link regexes" }, () => {
+// Regression: the link patterns `\[([^\]]+)\]\(` rescanned to the end of the line from every `[`
+// (50k brackets took ~5 s); links are now replaced by index.
+test("speakableLine is linear on unclosed link brackets", () => {
   assertBoundedTime(["[", "!["], speakableLine, { reps: 10_000, limitMs: 100 });
 });
 
