@@ -3785,7 +3785,11 @@ column 24px from the screen (`--nav-axis`): the thumb aims at the glyph and a
 phone's rounded edge and case lip make the last few points hard to press, so
 the axis sits clear of the screen's rounded edge (close's ink
 lands on the platform's 16pt margin) while every target still runs out to the
-edge. New chat and every ⋮ draw the same 28px press circle centred on that
+edge. Close's column is the toolbar's `--nav-bar-axis`: `--nav-axis` unless an
+interface style floats the rows in from the edge (Air insets it with its
+islands, so close stays on their ⋮; inside an island Air also gives the rows
+their own `--nav-row-inset`, so a mark sits as far in from the island's side
+as from its top and names, chats, Add project and the title follow it). New chat and every ⋮ draw the same 28px press circle centred on that
 axis (`--nav-dots-wash`), whatever the axis. A row's trailing marks (isolation, merge,
 running clock, an agent's next wake) end 12px clear of the ⋮ dots
 (`--nav-mark-end`, 37px from the screen): the body runs `--nav-mark-tuck`
