@@ -17,42 +17,129 @@
   position: relative;
 }
 
-/* Attachments are next-turn context, not text-field chrome. The strip
-   scrolls sideways, which clips both axes — so it pads the cards' focus ring
-   and every control stays inside its own card (styles.css). */
-.composer-simple > .attachment-pills {
+/* Attachment tray (composer/attachmentTray.ts): the next message's files are
+   one row of the card, between the model line and the editor, in a new chat
+   and an open one alike. The row scrolls sideways, which clips both axes — so
+   it pads the cards' focus ring and every control stays inside its own card
+   (styles.css). */
+.composer-tray {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.composer-tray > .attachment-pills {
+  --att-h: calc(var(--tap) + var(--space-1));
+  --tray-fade-start: 0px;
+  --tray-fade-end: 0px;
+  /* Held to the row's bottom edge: while the row opens or closes the cards
+     sit still on the text and only the edge above them travels. */
+  align-self: end;
   min-width: 0;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
+  scroll-padding-inline: var(--space-4);
   scrollbar-width: none;
 }
 
-.composer-simple > .attachment-pills::-webkit-scrollbar {
+.composer-tray > .attachment-pills::-webkit-scrollbar {
   display: none;
 }
 
-.composer-simple > .attachment-pills .attachment-pill {
-  max-width: min(260px, 70vw);
-  flex: 0 0 auto;
+/* A row scrolled away from an edge fades into it instead of cutting a card. */
+.composer-tray > .attachment-pills:is([data-overflow-start], [data-overflow-end]) {
+  mask-image: linear-gradient(to right, transparent, black var(--tray-fade-start), black calc(100% - var(--tray-fade-end)), transparent);
+}
+.composer-tray > .attachment-pills:is([data-overflow-start], [data-overflow-end]):dir(rtl) {
+  mask-image: linear-gradient(to left, transparent, black var(--tray-fade-start), black calc(100% - var(--tray-fade-end)), transparent);
+}
+.composer-tray > .attachment-pills[data-overflow-start] { --tray-fade-start: var(--space-6); }
+.composer-tray > .attachment-pills[data-overflow-end] { --tray-fade-end: var(--space-6); }
+
+/* Cards share the row before it scrolls: they narrow to a readable name, and
+   only then does the row scroll. */
+.composer-tray .attachment-pill {
+  flex: 0 1 auto;
+  min-width: min(148px, 60vw);
+  max-width: 236px;
+  padding-inline-start: var(--space-1);
   border-color: var(--hair-strong);
   background: var(--surface-overlay-hover);
   box-shadow: none;
 }
 
-.composer-simple > .attachment-pills .attachment-pill.att-tile {
+.composer-tray .attachment-pill :is(.att-icon, .att-thumb) {
+  width: calc(var(--att-h) - var(--space-3));
+  height: calc(var(--att-h) - var(--space-3));
+}
+
+.composer-tray .attachment-pill.att-tile {
+  flex: none;
+  min-width: 0;
   background: var(--sunken);
 }
 
-.composer-simple > .attachment-pills .attachment-open,
-.composer-simple > .attachment-pills .att-remove {
+.composer-tray .attachment-open,
+.composer-tray .att-remove {
   border: 0;
   box-shadow: none;
+}
+
+/* Remove shows on the card under the pointer or keyboard focus; touch keeps it. */
+@media (hover: hover) and (pointer: fine) {
+  .composer-tray .attachment-pill .att-remove {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .composer-tray .attachment-pill:is(:hover, :focus-within) .att-remove { opacity: 1; }
+}
+
+/* Opening and closing. The row's track eases between 0fr and 1fr, so the card
+   grows and shrinks with it: its top edge and the model line rise off the
+   cards, the editor and the rail stay where they are, and whatever sits above
+   the card (a new chat's project row, the transcript) follows the edge. The
+   row clips only while it moves. Closing takes the last card first. Reduced
+   motion switches at once (attachmentTray.ts settles without an animation). */
+.composer-tray[data-motion] {
+  overflow: clip;
+}
+.composer-tray[data-motion="open"] {
+  animation: composer-tray-open var(--motion-surface) var(--motion-ease) both;
+}
+.composer-tray[data-motion="close"] {
+  animation: composer-tray-close var(--motion-normal) var(--motion-ease) both;
+}
+/* The card settles into the slot once the edge has nearly cleared it (past
+   half the opening, when the eased edge has travelled ~85%), so the clip edge
+   never cuts a visible card; several cards follow one another. */
+.composer-tray[data-motion="open"] .attachment-pill {
+  animation: composer-tray-card-in var(--motion-normal) var(--motion-ease) both;
+  animation-delay: calc(var(--motion-surface) * 0.55 + min(var(--att-i, 0), 4) * var(--motion-fast) / 4);
+}
+.composer-tray[data-motion="close"] .attachment-pill {
+  animation: composer-tray-card-out var(--motion-fast) var(--motion-ease) both;
+}
+/* A card added to an open row enters in place. */
+.composer-tray .attachment-pill.att-fresh {
+  animation: composer-tray-card-in var(--motion-normal) var(--motion-ease) both;
+}
+@keyframes composer-tray-open {
+  from { grid-template-rows: minmax(0, 0fr); }
+}
+@keyframes composer-tray-close {
+  to { grid-template-rows: minmax(0, 0fr); }
+}
+@keyframes composer-tray-card-in {
+  from { opacity: 0; transform: translateY(var(--space-1)) scale(0.97); }
+}
+@keyframes composer-tray-card-out {
+  to { opacity: 0; transform: scale(0.97); }
 }
 
 /* Configuration row: the model and its pending effort share one quiet line
@@ -638,12 +725,15 @@ action off a narrow phone's composer. */
     color: var(--muted);
   }
 
-  .composer-mobile > .attachment-pills {
-    padding-inline: 0;
+  /* A phone row scrolls rather than squeezing: each card keeps its width. */
+  .composer-mobile .composer-tray .attachment-pill {
+    flex: 0 0 auto;
+    max-width: min(200px, 60vw);
   }
 
-  .composer-mobile > .attachment-pills .attachment-pill {
-    max-width: min(220px, 68vw);
+  /* The resting row has no tray: a file engages the composer. */
+  .composer-mobile.composer-collapsed .composer-tray {
+    display: none;
   }
 }
 

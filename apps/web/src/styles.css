@@ -2775,19 +2775,15 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 
 /* Attachment cards — composer draft and timeline user messages.
    Every kind shares one height: a previewable image is a square tile, any
-   other kind a card with a kind icon, its title and one quiet type/size line.
+   other kind a card with a neutral glyph (a file's extension, else a kind
+   icon), its title and one quiet size/location line. The glyph stays quiet so
+   the accent remains the composer's Send.
    The remove control sits INSIDE the card, so a scrolling strip (overflow
    clips both axes) can never crop it. */
 .attachment-pills {
   --att-h: calc(var(--tap) + var(--space-3));
   --att-remove: var(--space-6);
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: 8px 10px 0;
-}
-.composer-card > .attachment-pills {
-  max-height: calc(var(--att-h) * 2 + var(--space-2) * 2);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
 }
 .msg .attachment-pills { padding: 8px 0 0; }
 .msg.user > .attachment-pills { align-self: flex-end; max-inline-size: 100%; }
@@ -2813,9 +2809,16 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 }
 .attachment-pill .att-icon {
   display: grid; place-items: center;
-  background: var(--accent-wash);
-  color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+}
+/* A file's type as a word: small caps-height label, not a coloured glyph. */
+.attachment-pill .att-type {
+  font-size: calc(var(--font-meta) * 0.8);
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
 }
 .attachment-pill .att-icon svg { width: 18px; height: 18px; }
 .attachment-pill .att-thumb {

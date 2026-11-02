@@ -99,6 +99,7 @@ import { retryAfterReconnect } from "../retryAfterReconnect.ts";
 import { composerLayoutState } from "../composerLayout.ts";
 import { applyComposerEditorHeight, measureComposerEditor } from "../composerAutoGrow.ts";
 import { useComposerMorph } from "../composerMorph.ts";
+import { useAttachmentTray } from "../composer/attachmentTray.ts";
 import {
   advanceModelAbsenceGate,
   catalogFromResult,
@@ -4166,31 +4167,55 @@ function ComposerBody({
     // The visible viewport supplies the emergency cap; the shared
     // --composer-max-input-height token supplies the normal five-line cap.
     // On phones the input never grows past the room its own chrome (model
-    // header, actions, context bar) needs on a keyboard-squeezed viewport.
+    // header, actions, context bar, the attachment tray) needs on a
+    // keyboard-squeezed viewport. The tray's cards keep their full height
+    // while the row opens, so its room is known from the first frame.
+    const trayRoom = phone
+      ? rootRef.current?.querySelector<HTMLElement>(".composer-tray > .attachment-pills")?.offsetHeight ?? 0
+      : 0;
     const cap = phone
-      ? Math.max(44, Math.min(visible * 0.42, visible - 240))
+      ? Math.max(44, Math.min(visible * 0.42, visible - 240 - trayRoom))
       : Math.max(44, visible * 0.42);
     applyComposerEditorHeight(el, Math.min(natural + 2, cap));
     if (followDictationRef.current) {
       followDictationRef.current = false;
       el.scrollTop = el.scrollHeight;
     }
-  }, [text, inputFocused, layoutState, isPhone, bandHeight]);
+  }, [text, inputFocused, layoutState, isPhone, bandHeight, attachments.length > 0]);
   // Resting row ⇄ engaged card eases on the keyboard's curve instead of jumping;
   // resting, the card stays presented as engaged until it has shrunk to the row.
   const presentedExpanded = useComposerMorph(rootRef, expanded, layoutState !== "desktop");
   const stateClass = layoutState === "desktop"
     ? ""
     : ` composer-mobile composer-mobile-grid ${presentedExpanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`;
-  const attachmentStrip = attachments.length > 0 && (
-    <AttachmentPills
-      attachments={attachments}
-      onRemove={(id) => {
-        const sid = session?.id ?? null;
-        if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
-        removeAttachment(sid, id);
-      }}
-    />
+  // The next message's files are a row of the card, between the model line and
+  // the editor (composer/attachmentTray.ts): the first file opens it, the last
+  // one's removal closes it over that card.
+  const tray = useAttachmentTray(attachments, session?.id ?? `new:${activeProjectId ?? ""}`, expanded);
+  const attachmentTray = tray.shown.length > 0 && (
+    <div
+      ref={tray.ref}
+      className="composer-tray"
+      data-motion={tray.motion ?? undefined}
+      inert={tray.motion === "close" ? true : undefined}
+      onAnimationEnd={tray.settle}
+    >
+      <AttachmentPills
+        attachments={tray.shown}
+        onRemove={(id) => {
+          const sid = session?.id ?? null;
+          if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
+          const last = attachments.length === 1 && attachments[0]?.id === id ? attachments[0] : null;
+          // The removed card's own button goes with the tray: hand focus to
+          // the editor on desktop (a phone would raise its keyboard).
+          const focused = last !== null && !phoneLayout
+            && rootRef.current?.querySelector(".composer-tray")?.contains(document.activeElement);
+          if (last) tray.closeOver(last);
+          removeAttachment(sid, id);
+          if (focused) inputRef.current?.focus();
+        }}
+      />
+    </div>
   );
 
   return (
@@ -4210,7 +4235,6 @@ function ComposerBody({
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
-      {!session && attachmentStrip}
       {!session && !creatingSession && !soloPersonal && heroChrome.location && (
         <SessionContextBar {...contextBar} showIsolation={heroChrome.isolation} />
       )}
@@ -4236,7 +4260,6 @@ function ComposerBody({
           onItemsChange={updateQueuedItems}
         />
       )}
-      {session && attachmentStrip}
       {/* Headless next-prompt sources (Session Assist): mounted for every agent
           chat whatever the rail shows, so hiding a rail button never turns
           suggestions off. They draw nothing and offer through composerDraft. */}
@@ -4314,9 +4337,6 @@ function ComposerBody({
           {PROFILE_MISSING_NOTE}
         </div>
       )}
-      {attachments.length > 0 && !noModels && attachNote && (
-        <div className="composer-attach-note">{attachNote}</div>
-      )}
       {/* Three rows: the model, its pending effort and the context pie share
           one quiet line above the editor (model over the Add control, effort
           and the pie immediately beside it), then the editor, then the rail.
@@ -4330,6 +4350,10 @@ function ComposerBody({
           <SlotHost slot="composer.config" context={slotContext} />
           {phoneLayout && <MobileComposerEditEntry editing={mobileRailEditing} onChange={editMobileRail} />}
         </div>
+      )}
+      {attachmentTray}
+      {attachments.length > 0 && !noModels && attachNote && (
+        <div className="composer-attach-note">{attachNote}</div>
       )}
       {selectingConversation && (
         <div className="composer-selection" role="region" aria-label={tr("conversation.startSession")}>

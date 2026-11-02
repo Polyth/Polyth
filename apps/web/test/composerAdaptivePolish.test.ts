@@ -16,16 +16,20 @@ test("adaptive composer polish loads after the shared style layers", async () =>
     "adaptive composer rules are the final shell-level style layer");
 });
 
-test("composer attachments live outside the writing surface", async () => {
+test("composer attachments are a row of the card between the model line and the editor", async () => {
   const css = await read("../src/composerAdaptive.css");
   const composer = await read("../src/components/Composer.tsx");
   const pills = await read("../src/components/AttachmentPills.tsx");
 
-  assert.match(composer, /\{!session && attachmentStrip\}[\s\S]*?<SessionContextBar/);
-  assert.match(composer, /<QueuedMessageList[\s\S]*?\{session && attachmentStrip\}[\s\S]*?<GlassDock/);
-  assert.match(css, /\.composer-simple > \.attachment-pills\s*\{/);
-  assert.match(css, /flex-wrap:\s*nowrap;/);
-  assert.match(css, /overflow-x:\s*auto;/);
+  // One place in a new chat and an open one: never above the project row.
+  assert.doesNotMatch(composer, /attachmentStrip/);
+  const config = composer.indexOf('className="composer-config composer-config-row"');
+  const tray = composer.indexOf("{attachmentTray}");
+  const editor = composer.indexOf('<div className="composer-input">');
+  const card = composer.indexOf("<GlassDock");
+  assert.ok(card > -1 && card < config && config < tray && tray < editor, "the tray is rendered inside the card, after the model line, before the editor");
+  assert.match(css, /\.composer-tray > \.attachment-pills\s*\{[^}]*align-self:\s*end;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;/s);
+  assert.match(css, /@keyframes composer-tray-open\s*\{\s*from\s*\{\s*grid-template-rows:\s*minmax\(0, 0fr\);/);
   assert.match(pills, /imagePreview \? <img className="att-thumb"/, "a previewable image is a bare tile");
 });
 

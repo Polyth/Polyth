@@ -1,12 +1,14 @@
 // Attachment pills — removable in the composer, read-only on timeline
-// user messages. Images and browser contexts show a thumbnail when available.
-import { useState, type ReactElement } from "react";
+// user messages. Images and browser contexts show a thumbnail when available;
+// a file names its type with its extension instead of a glyph.
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import { browserContextHostPath } from "@polyth/contracts";
 import { browserContextChipTitle, PASTED_TEXT_NAME } from "../attachments.ts";
 import { isBlockedAttachment } from "../composer/history.ts";
 import { formatNumber, tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
+import { motionIsReduced } from "../motionPresence.ts";
 import AttachmentPreview from "./AttachmentPreview.tsx";
 
 const KIND_ICONS: Record<string, () => ReactElement> = {
@@ -44,6 +46,11 @@ function parentDir(path: string | undefined): string {
   return slash > 0 ? path.slice(0, slash) : "";
 }
 
+/** The extension a file card shows as its type; empty for every other card. */
+function typeLabel(a: AttachmentRef, kind: string, blocked: boolean): string {
+  return kind === "file" && !blocked && a.name !== PASTED_TEXT_NAME ? fileExtension(a.name) : "";
+}
+
 /** Card copy: a readable title plus one quiet line of type/size/location. */
 function cardText(a: AttachmentRef, kind: string, blocked: boolean): { title: string; meta: string } {
   if (kind === "browser-context") {
@@ -56,7 +63,57 @@ function cardText(a: AttachmentRef, kind: string, blocked: boolean): { title: st
   if (kind === "url") return { title, meta: urlHost(a.url) };
   if (kind === "range") return { title, meta: parentDir(a.path) };
   const size = fmtSize(a.size);
-  return { title, meta: [pasted ? "" : fileExtension(a.name), size].filter(Boolean).join(" · ") };
+  // A file's type is its card's glyph; an image the tile cannot show keeps it here.
+  const type = kind === "file" || pasted ? "" : fileExtension(a.name);
+  return { title, meta: [type, size].filter(Boolean).join(" · ") };
+}
+
+/** Composer strips: which cards arrived after the strip was first drawn (they
+ *  enter on their own, composerAdaptive.css), whether the row is scrolled
+ *  away from either edge (the edges fade), and a scroll to a card that
+ *  arrives past the visible end. */
+function useLiveStrip(attachments: AttachmentRef[], live: boolean) {
+  const strip = useRef<HTMLDivElement | null>(null);
+  const seen = useRef<Set<string> | null>(null);
+  const fresh = useRef(new Set<string>());
+  const revealed = useRef<string | undefined>(undefined);
+  if (live) {
+    if (seen.current === null) seen.current = new Set(attachments.map((a) => a.id));
+    for (const a of attachments) if (!seen.current.has(a.id)) fresh.current.add(a.id);
+  }
+  const newest = live ? attachments.findLast((a) => fresh.current.has(a.id))?.id : undefined;
+
+  useLayoutEffect(() => {
+    const el = strip.current;
+    if (!live || !el) return;
+    const mark = () => {
+      // Inline offset from the start edge; RTL scrolls with a negative scrollLeft.
+      const offset = Math.abs(el.scrollLeft);
+      el.toggleAttribute("data-overflow-start", offset > 1);
+      el.toggleAttribute("data-overflow-end", offset + el.clientWidth < el.scrollWidth - 1);
+    };
+    mark();
+    el.addEventListener("scroll", mark, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(mark) : null;
+    observer?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", mark);
+      observer?.disconnect();
+    };
+  }, [live]);
+
+  useLayoutEffect(() => {
+    for (const a of attachments) seen.current?.add(a.id);
+    const el = strip.current;
+    // Once per arrival: removing another card must not scroll the row again.
+    if (!live || !el || !newest || newest === revealed.current) return;
+    revealed.current = newest;
+    if (el.scrollWidth <= el.clientWidth) return;
+    const rtl = getComputedStyle(el).direction === "rtl";
+    el.scrollTo({ left: rtl ? -el.scrollWidth : el.scrollWidth, behavior: motionIsReduced() ? "auto" : "smooth" });
+  }, [attachments, live, newest]);
+
+  return { strip, fresh: fresh.current };
 }
 
 export default function AttachmentPills({ attachments, onRemove }: {
@@ -65,15 +122,17 @@ export default function AttachmentPills({ attachments, onRemove }: {
   onRemove?: (id: string) => void;
 }) {
   const [previewAt, setPreviewAt] = useState<number | null>(null);
+  const { strip, fresh } = useLiveStrip(attachments, Boolean(onRemove));
   if (attachments.length === 0) return null;
   const preview = previewAt === null ? null : attachments[previewAt];
   return (
     <>
-      <div className="attachment-pills" aria-label={tr("attachmentpills.attachments")}>
+      <div ref={strip} className="attachment-pills" aria-label={tr("attachmentpills.attachments")}>
         {attachments.map((a, i) => {
           const kind = a.kind ?? "file";
           const blocked = kind !== "browser-context" && isBlockedAttachment(a);
           const { title, meta } = cardText(a, kind, blocked);
+          const type = typeLabel(a, kind, blocked);
           const detail = kind === "url" ? a.url : kind === "browser-context" ? meta : a.path;
           const imagePreview = kind === "image" && a.url && !blocked;
           const KindIcon = KIND_ICONS[kind] ?? Icon.file;
@@ -82,7 +141,9 @@ export default function AttachmentPills({ attachments, onRemove }: {
             <>
               {kind === "browser-context" && a.url
                 ? <img className="att-thumb" src={a.url} alt="" />
-                : <span className="att-icon" aria-hidden><LeadIcon /></span>}
+                : type
+                  ? <span className="att-icon att-type" aria-hidden>{type}</span>
+                  : <span className="att-icon" aria-hidden><LeadIcon /></span>}
               <span className="att-text" title={detail ? `${title} · ${detail}` : title}>
                 <span className="att-name">{title}</span>
                 {meta && <span className="att-meta">{meta}</span>}
@@ -90,7 +151,11 @@ export default function AttachmentPills({ attachments, onRemove }: {
             </>
           );
           return (
-            <span key={a.id || i} className={`attachment-pill att-${kind}${imagePreview ? " att-tile" : ""}${blocked ? " att-unavailable" : ""}`}>
+            <span
+              key={a.id || i}
+              className={`attachment-pill att-${kind}${imagePreview ? " att-tile" : ""}${blocked ? " att-unavailable" : ""}${fresh.has(a.id) ? " att-fresh" : ""}`}
+              style={onRemove ? { "--att-i": i } as CSSProperties : undefined}
+            >
               {blocked ? (
                 <span
                   className="attachment-open"

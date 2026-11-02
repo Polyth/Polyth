@@ -1834,6 +1834,33 @@ stays open as an accent glyph colour only ([design system](design-system.md),
 "Press composes"). `apps/web/test/mobileSessionMenu.test.ts` covers the menu
 and the press/open rule.
 
+**Composer attachments:** the next message's files are one row of the card —
+the *attachment tray* — between the model line and the editor, in a new chat
+and an open one alike (never above the project row). `AttachmentPills` draws
+quiet cards: a file names its type with its extension in a neutral glyph (the
+accent stays on Send), a previewable image is a bare tile, and remove shows
+on hover or keyboard focus with a fine pointer (always on touch). The row does
+not wrap: cards narrow to a readable name, then the row scrolls sideways and
+fades into the edge it is scrolled away from (`data-overflow-start|end`); a
+card that arrives past the visible end scrolls into view. The first file
+*opens* the tray and removing the last one *closes* it over that card
+(`useAttachmentTray`, `apps/web/src/composer/attachmentTray.ts`;
+composerAdaptive.css "Attachment tray"): the row's track eases between `0fr`
+and `1fr` (`--motion-surface` open, `--motion-normal` close), so the card
+grows and shrinks with it. The cards hold the row's bottom edge, so they sit
+still on the text while the top edge and the model line rise off them; the
+editor and Send never move and whatever sits above the card follows the edge.
+A card waits until the edge has nearly cleared it, so the clip never cuts a
+visible card; one added to an open tray enters on its own (`att-fresh`).
+Nothing animates when the composer mounts or switches scope with files
+already there (a restored draft, the hero → transcript remount), when a send
+takes the files, under reduced motion (the hook settles when there is no
+animation), or on a resting phone row: a file engages it and
+`useComposerMorph` grows the card, treating the tray like the model line.
+On phones the editor's cap leaves the tray its room.
+`apps/web/test/composerAttachmentTray.test.ts` scrubs the real Composer
+through both changes.
+
 **Context pie:** an open session also shows its context-window share as a
 quiet pie on the model line, right after the thinking-effort chip (after the
 model when it has no effort), on desktop and engaged phones. `ContextPie`
