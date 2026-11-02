@@ -3317,6 +3317,8 @@ export const zhCN: AppMessages = {
   "shellintro.startBody": "用你自己的话写下需求——可以是一个问题、一项任务或一份草稿——然后发送。回答会出现在这里。只有你能看到你的聊天。",
   "shellintro.projectsTitle": "聊天和项目",
   "shellintro.projectsBody": "你所有的聊天都保存在这里，随时可以回到任何一个。以后添加的项目也会出现在这里，每个项目都有自己的聊天。小圆点表示助手正在工作或在等你回答。",
+  "shellintro.statusWorking": "正在工作",
+  "shellintro.statusWaiting": "在等你回答",
   "shellintro.addProjectTitle": "需要时再添加项目",
   "shellintro.addProjectBody": "开始时不需要项目。项目就是一个存放你文件的文件夹——文档、照片、网站或代码。添加后，助手可以在你需要时打开并编辑这些文件。（开发者还可以连接 Git 仓库，或通过 SSH 连接另一台电脑。）",
   "shellintro.topRailTitle": "顶部的工具",

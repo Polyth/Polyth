@@ -25,7 +25,7 @@ export const SHELL_INTRO_VERSION = 1;
 export const SHELL_INTRO_RESUME_DELAY_MS = 360;
 
 export type ShellIntroPlacement = "right" | "left" | "bottom" | "top";
-export type ShellIntroArt = "shell" | "drag";
+export type ShellIntroArt = "shell" | "drag" | "status";
 export type ShellIntroStepId =
   | "welcome"
   | "start"
@@ -93,6 +93,9 @@ export const SHELL_INTRO_STEPS: readonly ShellIntroStep[] = [
       ".header-drawer-btn",
     ],
     prefer: "right",
+    // A new account has no project tiles yet, so the card shows what the
+    // status dot on one looks like and what each colour means.
+    art: "status",
     phone: {
       title: "shellintro.projectsPhoneTitle",
       body: "shellintro.projectsPhoneBody",

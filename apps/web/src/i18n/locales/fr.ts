@@ -3317,6 +3317,8 @@ export const fr: AppMessages = {
   "shellintro.startBody": "Écrivez ce dont vous avez besoin avec vos propres mots – une question, une tâche ou un brouillon – puis envoyez. La réponse apparaît juste ici. Vous seul voyez vos discussions.",
   "shellintro.projectsTitle": "Discussions et projets",
   "shellintro.projectsBody": "Toutes vos discussions sont rangées ici, pour que vous puissiez revenir à n’importe laquelle. Les projets que vous ajouterez plus tard apparaîtront ici aussi, chacun avec ses discussions. Un petit point indique que l’assistant travaille ou attend votre réponse.",
+  "shellintro.statusWorking": "Au travail",
+  "shellintro.statusWaiting": "Attend votre réponse",
   "shellintro.addProjectTitle": "Des projets, quand vous en aurez besoin",
   "shellintro.addProjectBody": "Inutile pour commencer. Un projet, c’est simplement un dossier avec vos fichiers – documents, photos, site web ou code. Ajoutez-en un, et l’assistant pourra ouvrir et modifier ces fichiers sur votre demande. (Les développeurs peuvent aussi connecter un dépôt Git ou un autre ordinateur en SSH.)",
   "shellintro.topRailTitle": "Les outils en haut",

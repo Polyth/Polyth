@@ -288,6 +288,18 @@ test("mounted tour walks the steps with a spotlight and arrow, then records that
     assert.equal(spotlight.style.width, "61px");
     assert.equal(document.querySelector(".shell-intro")?.getAttribute("data-placement"), "right");
     assert.ok(document.querySelector(".shell-intro-arrow-line")?.getAttribute("d")?.startsWith("M "), "an arrow points at the rail");
+    // A new account has no project tile to show it on, so the card draws the
+    // status dot and says what each colour means.
+    const status = document.querySelector(".shell-intro-media .shell-intro-art--status");
+    assert.ok(status, "the projects step illustrates the status dot");
+    assert.deepEqual(
+      [...status.querySelectorAll(".art-status-dot")].map((dot) => dot.className),
+      ["art-status-dot working", "art-status-dot attention"],
+    );
+    assert.deepEqual(
+      [...status.querySelectorAll(".art-status-label")].map((label) => label.textContent),
+      ["Working", "Waiting for your answer"],
+    );
 
     await act(async () => { button(/^Next$/)!.click(); });
     assert.match(card()!.textContent ?? "", /Projects, when you need them/);

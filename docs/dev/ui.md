@@ -1030,6 +1030,15 @@ active project's rail tile); a cancelled dialog continues with the step after
 add-project. A resume lands by step id (`shellIntroResumeIndex`), so a changed
 step list cannot shift it; replaying the tour drops a pending resume.
 
+A step may carry art above its text (`ShellIntroStep.art`): the shell
+schematic on welcome, the drag pass on drag, and on the chats-and-projects step
+(phone too) a column of project tiles wearing the real status dot — same
+corner and `--green` / `--amber` colours as `.sidebar-project-rail-status`,
+each led to a translated label (`shellintro.statusWorking` /
+`statusWaiting`). A new account has no project tile to point at, so the card
+shows the dot itself. Change that art together with the rail dot. Art is
+`aria-hidden`; the step text must say the same thing on its own.
+
 Tour copy is written for people who have never used a developer tool: everyday
 words ("buttons", "tools at the top", "add-ons"), no rail/composer/package
 jargon in the main text, and Git/SSH only as a developer aside. Keep new steps
