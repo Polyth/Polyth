@@ -1821,8 +1821,8 @@ reduced-motion and low-resource modes keep a still level. The idle Send stays
 solid. `contextLiquid.test.ts` measures glyph alignment and tones through the
 real cascade.
 
-**Phone session menu (⋮):** the actions island holds ✎ New session, a
-narrower ⋮ and ⧉ Open tools (`MobileSessionMenu.tsx`; a new chat has no ⋮).
+**Phone session menu (⋮):** the actions island holds a narrower ⋮,
+✎ New session and ⧉ Open tools (`MobileSessionMenu.tsx`; a new chat has no ⋮).
 ⋮ opens a compact popover lined up under the island: a head with the chat
 title and one status · model · context line (a tap opens the session
 overview, which a hidden title would otherwise open; a conversation's head

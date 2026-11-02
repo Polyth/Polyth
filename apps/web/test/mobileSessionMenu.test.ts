@@ -145,9 +145,9 @@ test("island buttons press and stay open as a colour change, with no plate or se
   for (const look of ["paper", "editorial"]) {
     assert.match(looks, new RegExp(`data-shell-look="${look}"\\]:not\\(#\\\\#\\) :is\\(\\.mobile-float-navigation, \\.mobile-float-actions\\) \\.ui-icon-btn:not\\(:active, \\[aria-expanded="true"\\]\\)`));
   }
-  // ⋮ sits between New session and Open tools.
+  // ⋮ leads the island, then New session and Open tools.
   const compose = header.indexOf('label={tr("mobile.island.newSession")}');
   const more = header.indexOf("<MobileSessionMenu");
   const tools = header.indexOf('label={tr("mobile.island.openTools")}');
-  assert.ok(compose > 0 && compose < more && more < tools);
+  assert.ok(more > 0 && more < compose && compose < tools);
 });
