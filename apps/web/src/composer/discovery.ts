@@ -783,7 +783,7 @@ export function nativeCommandInput(
   selected?: ComposerCommand,
 ): { id: string; args?: string } | undefined {
   const firstLine = text.split("\n", 1)[0] ?? "";
-  const match = firstLine.match(/^\/([A-Za-z0-9_-]+)(?:[ \t]+(.*))?$/);
+  const match = firstLine.match(/^\/([A-Za-z0-9_-]+)(?:[ \t](.*))?$/);
   if (!match) return undefined;
   const name = match[1]!;
   const selectedExtension = selected && !("invocation" in selected)

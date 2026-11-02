@@ -14,10 +14,27 @@ type Tab = "overview" | "files" | "checks" | "comments";
 type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
 type MessageTone = "error" | "warning" | "success";
 
+/** Remove `<!-- ... -->` until none is left, so removing one cannot splice a new `<!--` together.
+ *  indexOf scans keep it linear (a lazy `[\s\S]*?` pattern rescans after every unterminated `<!--`). */
+function stripHtmlComments(text: string): string {
+  let current = text;
+  for (;;) {
+    let out = "";
+    let from = 0;
+    for (let open = current.indexOf("<!--"); open !== -1; open = current.indexOf("<!--", from)) {
+      const close = current.indexOf("-->", open + 4);
+      if (close === -1) break;
+      out += current.slice(from, open);
+      from = close + 3;
+    }
+    if (from === 0) return current;
+    current = out + current.slice(from);
+  }
+}
+
 /** Hide HTML comments and Cursor's agent footer without altering fenced examples. */
 export function stripCursorMarkers(markdown: string): string {
-  const stripOutsideFence = (text: string): string => text
-    .replace(/<!--[\s\S]*?-->/g, "")
+  const stripOutsideFence = (text: string): string => stripHtmlComments(text)
     .replace(/<div\b[^>]*>[\s\S]*?<\/div>/gi, (block) =>
       /(?:cursor_ref=pr_footer|cursor\.com\/(?:agents|background-agent))/i.test(block) ? "" : block)
     .replace(/^\s*(?:(?:begin|end|start|stop)[_\s-]+cursor(?:[_\s:-].*)?|cursor(?:_[a-z0-9-]+)+)\s*$/gim, "");

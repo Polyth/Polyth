@@ -8384,9 +8384,66 @@ export function resolveVariantPreference(
 /** Elements that only appear in a rendered HTML document, never in ordinary
  *  prose, so an incidental `<` in a message is left untouched. */
 const MARKUP_BODY = /<\s*(?:!doctype\s+html|html|head|body|title|h[1-6]|p|div|center|br|table|pre)\b/i;
-const MARKUP_TITLE = /<title[^>]*>([\s\S]*?)<\/title>/i;
-const MARKUP_SCRIPT = /<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi;
-const MARKUP_TAG = /<[^>]*>/g;
+
+// The title and tag scans below walk the text with indexOf instead of lazy
+// `[^>]*` / `[\s\S]*?` patterns: an unterminated `<title` or `<script` repeated
+// many times would make those patterns rescan the rest of the body from every
+// opener. Each scan is linear because a missing ">" or closing tag ends it.
+const matchesAt = (text: string, at: number, word: string): boolean =>
+  text.slice(at, at + word.length).toLowerCase() === word;
+
+/** The text of the first `<title ...>...</title>` element, if any. */
+function markupTitle(html: string): string | undefined {
+  const closing = /<\/title>/gi;
+  for (let at = html.indexOf("<"); at !== -1; at = html.indexOf("<", at + 1)) {
+    if (!matchesAt(html, at + 1, "title")) continue;
+    const open = html.indexOf(">", at + 6);
+    if (open === -1) return undefined;
+    closing.lastIndex = open + 1;
+    const end = closing.exec(html);
+    return end ? html.slice(open + 1, end.index) : undefined;
+  }
+  return undefined;
+}
+
+/** The text with `<script>`/`<style>` elements and every remaining tag replaced by a space. */
+function markupVisibleText(html: string): string {
+  const unclosed = new Set<string>();
+  let out = "";
+  let from = 0;
+  let at = html.indexOf("<");
+  while (at !== -1) {
+    const name = ["script", "style"].find((word) => matchesAt(html, at + 1, word) && !/\w/.test(html[at + 1 + word.length] ?? " "));
+    if (name && !unclosed.has(name)) {
+      const open = html.indexOf(">", at + 1 + name.length);
+      const close = open === -1 ? null : new RegExp(`</${name}>`, "gi");
+      if (close) close.lastIndex = open + 1;
+      const end = close?.exec(html);
+      if (end) {
+        out += `${html.slice(from, at)} `;
+        from = end.index + end[0].length;
+        at = html.indexOf("<", from);
+        continue;
+      }
+      // Without a ">" or a closing tag here there is none later either.
+      if (open === -1) break;
+      unclosed.add(name);
+    }
+    at = html.indexOf("<", at + 1);
+  }
+  out += html.slice(from);
+  // Remaining tags: "<" up to the next ">" (an unclosed "<" is plain text).
+  let text = "";
+  let tail = 0;
+  for (let lt = out.indexOf("<"); lt !== -1;) {
+    const gt = out.indexOf(">", lt + 1);
+    if (gt === -1) break;
+    text += `${out.slice(tail, lt)} `;
+    tail = gt + 1;
+    lt = out.indexOf("<", tail);
+  }
+  return text + out.slice(tail);
+}
 
 export interface ErrorBodyTextOptions {
   /** Maximum returned length before an ellipsis is appended. */
@@ -8417,10 +8474,8 @@ export function errorBodyText(body: string, options: ErrorBodyTextOptions = {}):
   const trimmed = body.trim();
   if (!trimmed || !MARKUP_BODY.test(trimmed)) return trimmed;
   const limit = options.limit ?? 200;
-  const title = MARKUP_TITLE.exec(trimmed)?.[1]?.trim();
-  const visible = trimmed
-    .replace(MARKUP_SCRIPT, " ")
-    .replace(MARKUP_TAG, " ");
+  const title = markupTitle(trimmed)?.trim();
+  const visible = markupVisibleText(trimmed);
   const chosen = title || visible;
   const collapsed = decodeMarkupEntities(chosen).replace(/\s+/g, " ").trim();
   return collapsed.length > limit ? `${collapsed.slice(0, limit - 1).trimEnd()}…` : collapsed;

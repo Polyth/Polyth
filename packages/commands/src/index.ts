@@ -264,12 +264,12 @@ export function createCommandService(opts: CommandServiceOptions = {}): CommandS
       const firstNl = out.indexOf("\n");
       const firstLine = firstNl === -1 ? out : out.slice(0, firstNl);
       const restLines = firstNl === -1 ? "" : out.slice(firstNl + 1);
-      const cmdMatch = firstLine.match(/^\/([A-Za-z0-9_-]+)(?:[ \t]+(.*))?$/);
+      const cmdMatch = firstLine.match(/^\/([A-Za-z0-9_-]+)(?:[ \t](.*))?$/);
       if (cmdMatch) {
         const name = cmdMatch[1]!;
         const cmd = cmdBy.get(name);
         if (cmd) {
-          const args = [cmdMatch[2] ?? "", restLines].filter((s) => s.length > 0).join("\n");
+          const args = [(cmdMatch[2] ?? "").replace(/^[ \t]+/, ""), restLines].filter((s) => s.length > 0).join("\n");
           usedCommand = name;
           agent = cmd.agent;
           model = cmd.model;

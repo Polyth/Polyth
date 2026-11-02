@@ -247,7 +247,7 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   // classify the contributed tool itself so ordinary package actions do not
   // render as Subagent cards.
   const value = tool.toLowerCase().replace(
-    /^(?:mcp(?:__|[_:/-])*)?polyth-agent-tools(?:__|[_:/-])+/, "",
+    /^(?:mcp[_:/-]*)?polyth-agent-tools[_:/-]+/, "",
   );
   const action = firstString(input, ["action"]);
   if (value === "polyth" && action === "agent.spawn") return "subagent";

@@ -25,7 +25,7 @@ const pathAfterPrefix = (raw: string): string | null => {
 };
 
 const headerPaths = (header: string): [string, string] | null => {
-  const tokens = header.slice("diff --git ".length).match(/"(?:\\.|[^"])*"|\S+/g);
+  const tokens = header.slice("diff --git ".length).match(/"(?:\\.|[^"\\])*"|\S+/g);
   return tokens?.length === 2 ? [tokens[0]!, tokens[1]!] : null;
 };
 

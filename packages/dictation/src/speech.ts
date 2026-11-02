@@ -37,10 +37,32 @@ const ABBREVIATIONS = new Set([
   "no", "fig", "approx", "cf", "al", "inc", "ltd", "co", "dept", "est",
 ]);
 
+/** Replace each `<tag ...>` / `</tag>` with a space. A linear scan: an unclosed `<a` run
+ *  would make a `<\/?[a-z][^>]*>` pattern rescan the rest of the line from every `<`. */
+function stripHtmlTags(line: string): string {
+  let out = "";
+  let from = 0;
+  let lt = line.indexOf("<");
+  while (lt !== -1) {
+    const nameAt = line[lt + 1] === "/" ? lt + 2 : lt + 1;
+    const first = line.charCodeAt(nameAt) | 0x20;
+    if (first >= 97 && first <= 122) {
+      const gt = line.indexOf(">", nameAt);
+      // No ">" anywhere after this point means no later tag can close either.
+      if (gt === -1) break;
+      out += line.slice(from, lt) + " ";
+      from = gt + 1;
+      lt = line.indexOf("<", from);
+    } else {
+      lt = line.indexOf("<", lt + 1);
+    }
+  }
+  return out + line.slice(from);
+}
+
 /** Strip inline markdown from one line of prose. */
 export function speakableLine(line: string): string {
-  return line
-    .replace(/<\/?[a-z][^>]*>/gi, " ")
+  return stripHtmlTags(line)
     .replace(/^\s{0,3}#{1,6}\s+/, "")
     .replace(/^\s*>+\s?/, "")
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "")
@@ -62,10 +84,12 @@ const endsSentence = (text: string): boolean => /[.!?…。！？:;]["'”’)\]
  *  abbreviations and single initials ("J. Smith"). */
 export function sentenceBoundaries(text: string): number[] {
   const out: number[] = [];
-  const pattern = /([.!?…]+["'”’)\]]*)(\s+)|([。！？]+)/g;
+  const pattern = /(?<![.!?…])([.!?…]+["'”’)\]]*)(\s+)|(?<![。！？])([。！？]+)/g;
   for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
     if (match[3]) { out.push(match.index + match[0].length); continue; }
-    const word = /([A-Za-z.]+)$/.exec(text.slice(0, match.index))?.[1]?.toLowerCase() ?? "";
+    let wordStart = match.index;
+    while (wordStart > 0 && /[A-Za-z.]/.test(text[wordStart - 1]!)) wordStart--;
+    const word = text.slice(wordStart, match.index).toLowerCase();
     if (match[1]!.startsWith(".") && (ABBREVIATIONS.has(word) || /^[a-z]$/i.test(word))) continue;
     out.push(match.index + match[1]!.length + match[2]!.length);
   }
@@ -268,14 +292,14 @@ export function voiceTier(voice: VoiceLike): "natural" | "enhanced" | "standard"
 // ---------------------------------------------------------------------------
 
 const SPOKEN_EN: ReadonlyArray<readonly [RegExp, string]> = [
-  [/\s*\bnew paragraph\b\s*/gi, "\n\n"],
-  [/\s*\bnew ?line\b\s*/gi, "\n"],
-  [/\s*\b(?:question mark)\b/gi, "?"],
-  [/\s*\b(?:exclamation (?:mark|point))\b/gi, "!"],
-  [/\s*\b(?:full stop|period)\b/gi, "."],
-  [/\s*\bcomma\b/gi, ","],
-  [/\s*\bsemicolon\b/gi, ";"],
-  [/\s*\bcolon\b/gi, ":"],
+  [/(?:(?<!\s)\s+)?\bnew paragraph\b\s*/gi, "\n\n"],
+  [/(?:(?<!\s)\s+)?\bnew ?line\b\s*/gi, "\n"],
+  [/(?:(?<!\s)\s+)?\b(?:question mark)\b/gi, "?"],
+  [/(?:(?<!\s)\s+)?\b(?:exclamation (?:mark|point))\b/gi, "!"],
+  [/(?:(?<!\s)\s+)?\b(?:full stop|period)\b/gi, "."],
+  [/(?:(?<!\s)\s+)?\bcomma\b/gi, ","],
+  [/(?:(?<!\s)\s+)?\bsemicolon\b/gi, ";"],
+  [/(?:(?<!\s)\s+)?\bcolon\b/gi, ":"],
 ];
 
 /** Apply English spoken-punctuation commands ("comma", "new line", …) to a
@@ -288,15 +312,42 @@ export function applySpokenPunctuation(text: string, lang: string): string {
   if (base !== "en" && base !== "auto" && base !== "") return text;
   let out = text;
   for (const [pattern, replacement] of SPOKEN_EN) out = out.replace(pattern, replacement);
-  out = out
-    // "word ." → "word." and no doubled marks from "period period".
-    .replace(/[ \t]+([,.;:?!])/g, "$1")
+  // "word ." → "word." and no doubled marks from "period period".
+  out = dropSpaceBeforePunctuation(out)
     .replace(/([,.;:?!])(?:[ \t]*\1)+/g, "$1")
     // Capitalize after a sentence end or a line break.
-    .replace(/([.?!]\s+|\n\s*)([a-z])/g, (_m, lead: string, letter: string) => lead + letter.toUpperCase())
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n[ \t]+/g, "\n");
-  return out.trim() ? out.replace(/^[ \t]+|[ \t]+$/g, "") : "";
+    .replace(/([.?!]\s+|\n\s*)([a-z])/g, (_m, lead: string, letter: string) => lead + letter.toUpperCase());
+  // Spaces and tabs around every line break and at both ends of the text.
+  out = out.split("\n").map(trimSpacesAndTabs).join("\n");
+  return out.trim() ? out : "";
+}
+
+const isSpaceOrTab = (ch: string | undefined): boolean => ch === " " || ch === "\t";
+
+function trimSpacesAndTabs(line: string): string {
+  let start = 0;
+  let end = line.length;
+  while (start < end && isSpaceOrTab(line[start])) start++;
+  while (end > start && isSpaceOrTab(line[end - 1])) end--;
+  return line.slice(start, end);
+}
+
+/** "word ." → "word.": drop each space/tab run that directly precedes , . ; : ? ! */
+function dropSpaceBeforePunctuation(text: string): string {
+  let out = "";
+  let from = 0;
+  let i = 0;
+  while (i < text.length) {
+    if (!isSpaceOrTab(text[i])) { i++; continue; }
+    let end = i;
+    while (end < text.length && isSpaceOrTab(text[end])) end++;
+    if (end < text.length && ",.;:?!".includes(text[end]!)) {
+      out += text.slice(from, i);
+      from = end;
+    }
+    i = end;
+  }
+  return out + text.slice(from);
 }
 
 // ---------------------------------------------------------------------------

@@ -1775,7 +1775,11 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       const name = identity.name.trim();
       const email = identity.email.trim();
       if (!name || name.length > 160) throw Object.assign(new Error("git name required (≤160 characters)"), { code: "invalid-input" });
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+      // local@domain.tld with no whitespace, checked by a linear scan (no backtracking pattern).
+      const at = email.indexOf("@");
+      const dot = at < 1 ? -1 : email.indexOf(".", at + 2);
+      const wellFormed = at >= 1 && at === email.lastIndexOf("@") && !/\s/.test(email) && dot !== -1 && dot < email.length - 1;
+      if (!wellFormed || email.length > 254) {
         throw Object.assign(new Error("valid git email required"), { code: "invalid-input" });
       }
       await run(root, ["config", "--local", "user.name", name]);
