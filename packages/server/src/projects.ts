@@ -279,19 +279,25 @@ function normalizeIncomingPresentationSettings(value: unknown): Record<string, J
   return settings;
 }
 
-function sanitizeProjectIconSvg(svg: string): string {
-  return svg
-    .replace(/^\uFEFF/, "")
-    .replace(/<\?xml[\s\S]*?\?>/gi, "")
-    .replace(/<!doctype[\s\S]*?>/gi, "")
-    .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
-    .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
-    .trim();
+export function sanitizeProjectIconSvg(svg: string): string {
+  let clean = svg.replace(/^\uFEFF/, "");
+  // Repeat until nothing changes: removing one piece can join its neighbours
+  // into a new `<script` or `on\u2026=` ("<scr<script></script>ipt>").
+  for (let previous = ""; previous !== clean;) {
+    previous = clean;
+    clean = clean
+      .replace(/<\?xml[\s\S]*?\?>/gi, "")
+      .replace(/<!doctype[\s\S]*?>/gi, "")
+      .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+      .replace(/<\/?(?:script|foreignObject)\b[^>]*>?/gi, "")
+      .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
+      .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*'|[^\s"'>#][^\s>]*)/gi, "")
+      .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)/gi, "");
+  }
+  return clean.trim();
 }
 
-function ensureProjectIconSvgXmlns(svg: string): string {
+export function ensureProjectIconSvgXmlns(svg: string): string {
   if (/\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/i.test(svg)) return svg;
   return svg.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
 }

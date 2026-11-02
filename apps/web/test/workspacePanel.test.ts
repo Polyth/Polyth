@@ -385,7 +385,7 @@ test("every kind default names a widget its package really registers", async () 
   for (const id of new Set(Object.values(DEFAULT_PANEL_WIDGETS).flat())) {
     const source = await packageSource(id.slice(0, id.indexOf(".")));
     if (source === null) continue;
-    assert.match(source, new RegExp(`id: "${id.replace(/\./g, "\\.")}"`), id);
+    assert.match(source, new RegExp(`id: "${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), id);
     verified += 1;
   }
   // Non-vacuous even when the removable packages in the defaults are absent.

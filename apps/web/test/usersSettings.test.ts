@@ -105,7 +105,7 @@ test("the Access page is gone and its settings live in Users and Polyth Link", a
     "settings.accesspage.signOut": "Sign out",
   } as const;
   for (const [key, title] of Object.entries(ownTitles)) {
-    assert.match(own, new RegExp(`title=\\{tr\\("${key.replace(/\./g, "\\.")}"\\)\\}`), title);
+    assert.match(own, new RegExp(`title=\\{tr\\("${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\)\\}`), title);
     assert.equal(en[key as keyof typeof en], title);
   }
   assert.match(own, /changeAccountPassword\(/);

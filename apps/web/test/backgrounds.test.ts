@@ -198,8 +198,8 @@ test("background and glass controls are wired into Appearance and the held-Shift
     "the initial PWA paint publishes the workspace tint to the document canvas");
   for (const preset of BACKGROUND_PRESETS) {
     if (!preset.systemBar) continue;
-    assert.match(index, new RegExp(preset.systemBar.dark.replace("#", "#")));
-    assert.match(index, new RegExp(preset.systemBar.light.replace("#", "#")));
+    assert.ok(index.includes(preset.systemBar.dark), preset.systemBar.dark);
+    assert.ok(index.includes(preset.systemBar.light), preset.systemBar.light);
   }
   assert.match(theme, /apple-mobile-web-app-status-bar-style[^;]+[\s\S]*?setAttribute\("content", "black-translucent"\)/,
     "light-theme changes must not restore an opaque iOS status-bar band");

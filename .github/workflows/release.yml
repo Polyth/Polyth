@@ -52,11 +52,10 @@ on:
         required: true
         default: false
 
+# Read-only by default; each job below asks for the writes it needs.
 permissions:
-  contents: write
+  contents: read
   actions: read
-  id-token: write
-  packages: write
 
 concurrency:
   group: release
@@ -64,6 +63,9 @@ concurrency:
 
 jobs:
   prepare:
+    permissions:
+      contents: write
+      actions: read
     name: Validate release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -220,6 +222,9 @@ jobs:
           fi
 
   linux:
+    permissions:
+      contents: write
+      actions: read
     name: Linux ${{ matrix.arch }} AppImage
     needs: prepare
     strategy:
@@ -299,6 +304,9 @@ jobs:
           if-no-files-found: error
 
   windows:
+    permissions:
+      contents: write
+      actions: read
     name: Windows ${{ matrix.arch }} NSIS
     needs: prepare
     strategy:
@@ -377,6 +385,9 @@ jobs:
           if-no-files-found: error
 
   macos:
+    permissions:
+      contents: write
+      actions: read
     name: macOS x64 + arm64 DMG + ZIP
     needs: prepare
     runs-on: macos-15
@@ -619,6 +630,10 @@ jobs:
           if-no-files-found: error
 
   docker:
+    permissions:
+      contents: read
+      actions: read
+      packages: write
     name: Docker ${{ matrix.target }} ${{ matrix.arch }}
     if: inputs.docker_image
     needs: prepare
@@ -694,6 +709,10 @@ jobs:
           if-no-files-found: error
 
   publish:
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
     name: Publish release
     if: >-
       always()
@@ -795,6 +814,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   docker-publish:
+    permissions:
+      contents: read
+      actions: read
+      packages: write
     name: Publish Docker ${{ matrix.target }}
     if: >-
       always()

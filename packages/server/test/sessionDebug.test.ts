@@ -171,7 +171,7 @@ test("debug reports binding, counts, and epoch stats without waking a runtime", 
     const json = observabilityJson(debug as unknown as Record<string, unknown>);
     assert.equal(json.includes(PROMPT), false);
     assert.equal(json.includes(TOKEN), false);
-    assert.equal(json.includes("http://runtime.invalid"), false);
+    assert.doesNotMatch(json, /http:\/\/runtime\.invalid/);
     assert.equal(json.includes("cfg-secret"), false);
     assert.equal(json.includes("recoveryContext"), false);
   } finally {
@@ -196,7 +196,7 @@ test("debug includes a redacted attached endpoint after a live bind", async () =
     assert.deepEqual(debug.endpoint.control, { kind: "owned" });
     const json = observabilityJson(debug as unknown as Record<string, unknown>);
     assert.equal(json.includes(TOKEN), false);
-    assert.equal(json.includes("http://runtime.invalid"), false);
+    assert.doesNotMatch(json, /http:\/\/runtime\.invalid/);
     assert.equal(json.includes("cfg-secret"), false);
     assert.equal(json.includes(PROMPT), false);
   } finally {

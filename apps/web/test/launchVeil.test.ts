@@ -7,7 +7,7 @@ import { Window } from "happy-dom";
 
 const html = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
 const veilMarkup = html.match(/<div id="polyth-launch"[\s\S]*?<\/div>/)?.[0] ?? "";
-const activation = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+const activation = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)]
   .map((match) => match[1]!)
   .find((script) => script.includes("polyth-launch")) ?? "";
 

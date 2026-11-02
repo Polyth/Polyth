@@ -107,7 +107,7 @@ test("one-shot direct requests never opt into provider prompt caching", async ()
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     bodies.push(await request.text());
-    return request.url.startsWith("https://anthropic.test")
+    return new URL(request.url).origin === "https://anthropic.test"
       ? new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 })
       : new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
   };

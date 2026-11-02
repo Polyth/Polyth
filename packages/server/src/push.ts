@@ -136,6 +136,17 @@ const clip = (raw: string, cap: number): string => {
 
 const EXCERPT_INPUT_CHARS = 8000;
 
+/** HTML-ish tags dropped until none is left: one pass can join the halves
+ *  around a removed tag into a new one ("<scr<b>ipt>"). */
+function withoutTags(text: string): string {
+  let out = text;
+  for (let previous = ""; previous !== out;) {
+    previous = out;
+    out = out.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  }
+  return out;
+}
+
 /** Plain-text excerpt of a markdown reply for a notification body: fenced
  *  blocks (including ```ui / ```page) are dropped, markdown syntax is reduced
  *  to its text, whitespace collapses, secret-shaped text is redacted, and the
@@ -164,12 +175,11 @@ export function plainTextExcerpt(raw: unknown, cap = MAX_BODY_CHARS): string {
       }
       lines.push(text);
     }
-    const flat = lines.join(" ")
+    const flat = withoutTags(lines.join(" ")
       .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
       .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
       .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
-      .replace(/<(https?:\/\/[^>\s]+)>/g, "$1")
-      .replace(/<\/?[a-zA-Z][^>]*>/g, "")
+      .replace(/<(https?:\/\/[^>\s]+)>/g, "$1"))
       .replace(/`+([^`]*)`+/g, "$1")
       .replace(/\*\*+([^*]+?)\*\*+/g, "$1")
       .replace(/(?<![\w*])\*(?!\s)([^*]+?)(?<!\s)\*(?![\w*])/g, "$1")

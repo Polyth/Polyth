@@ -43,7 +43,7 @@ const posixScript = (spec: string): string => [
   `  [ -n "$L" ] || ${fail("Could not reach nodejs.org to download Node.js. Check the internet connection, then try again.")}`,
   '  F=${L##* }; T=$(mktemp -d) && $G "$U/$F" > "$T/$F" || ' + fail("Downloading Node.js failed. Try again."),
   '  H=$( (sha256sum "$T/$F" 2>/dev/null || shasum -a 256 "$T/$F") | cut -d" " -f1)',
-  `  [ "$H" = "\${L%% *}" ] || ${fail("The Node.js download was damaged (checksum mismatch). Try again.")}`,
+  '  [ "$H" = "${L%% *}" ] || ' + fail("The Node.js download was damaged (checksum mismatch). Try again."),
   '  rm -rf "$N" && mkdir -p "$N" "$P/bin" && tar -xzf "$T/$F" -C "$N" --strip-components=1 || ' + fail("Unpacking Node.js failed."),
   '  rm -rf "$T"; ln -sf "$N/bin/node" "$N/bin/npm" "$N/bin/npx" "$P/bin/"',
   "fi",

@@ -232,7 +232,7 @@ test("the web shell uses only its own and framework translation keys", async () 
     const exportsField = (manifests.get(id) as { exports?: Record<string, string> } | undefined)?.exports;
     const pattern = exportsField?.["./i18n/*"];
     if (!pattern) continue;
-    const file = join(root, "packages", id, pattern.replace("*", "en"));
+    const file = join(root, "packages", id, pattern.replaceAll("*", "en"));
     if (!existsSync(file)) continue;
     const catalog = (await import(file) as { en?: Record<string, string> }).en ?? {};
     for (const key of Object.keys(catalog)) owner.set(key, id);

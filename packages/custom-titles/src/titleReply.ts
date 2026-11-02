@@ -249,7 +249,11 @@ export function readGeneratedTitle(raw: string, message?: string): GeneratedTitl
   text = withoutReasoning(text);
   if (!text.trim()) return { rejected: "reasoning" };
   text = answerElement(text) ?? text;
-  text = text.replace(INLINE_TAG, "").replace(BLOCK_TAG, "\n");
+  // Until none is left: one pass can join the halves around a removed tag.
+  for (let previous = ""; previous !== text;) {
+    previous = text;
+    text = text.replace(INLINE_TAG, "").replace(BLOCK_TAG, "\n");
+  }
   if (MODEL_MARKUP.test(text)) return { rejected: "markup" };
   // Fenced code is an answer to the request, not a title; a plain or JSON fence
   // only wrapped the title.

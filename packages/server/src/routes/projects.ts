@@ -4,25 +4,9 @@ import type { RouteHandler } from "../http.ts";
 import type { SpaceServicesFor } from "../spaceScope.ts";
 import { loadAllowlistedIconifySvg, parseAllowlistedIconifyName, type IconifyFetch } from "./iconify.ts";
 import { isProjectIconRef, projectIconRef, sendProjectIcon } from "../projectIconRefs.ts";
+import { ensureProjectIconSvgXmlns, sanitizeProjectIconSvg } from "../projects.ts";
 
 const invalid = (message: string) => Object.assign(new Error(message), { code: "invalid-input" });
-
-function sanitizeProjectIconSvg(svg: string): string {
-  return svg
-    .replace(/^\uFEFF/, "")
-    .replace(/<\?xml[\s\S]*?\?>/gi, "")
-    .replace(/<!doctype[\s\S]*?>/gi, "")
-    .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
-    .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
-    .trim();
-}
-
-function ensureProjectIconSvgXmlns(svg: string): string {
-  if (/\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/i.test(svg)) return svg;
-  return svg.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
-}
 
 function inlineAllowlistedIcon(name: string, svg: string, _color: string): string {
   let clean = ensureProjectIconSvgXmlns(sanitizeProjectIconSvg(svg));

@@ -50,6 +50,10 @@ const MAX_STEPS = 50;
 const MAX_PROMPT = 32 * 1024;
 const MAX_COMMAND = 2_000;
 
+// Only a real array index: "__proto__" or "length" must not reach the step writes.
+const stepAt = (track: { steps: TrackStepDto[] }, stepIndex: number): TrackStepDto | undefined =>
+  Number.isSafeInteger(stepIndex) && stepIndex >= 0 ? track.steps[stepIndex] : undefined;
+
 function fail(message: string, code = "invalid-input"): never {
   throw Object.assign(new Error(message), { code });
 }
@@ -242,7 +246,7 @@ export function createTrackStore(opts: TrackStoreOptions): TrackStore {
 
     bindSchedule(id, stepIndex, scheduleTaskId) {
       const track = mustGet(id);
-      const step = track.steps[stepIndex];
+      const step = stepAt(track, stepIndex);
       if (!step || step.status !== "running") fail("track step is not running", "conflict");
       step!.scheduleTaskId = bounded(scheduleTaskId, "scheduleTaskId", 200);
       touch(track);
@@ -251,7 +255,7 @@ export function createTrackStore(opts: TrackStoreOptions): TrackStore {
 
     fail(id, stepIndex, error, test) {
       const track = mustGet(id);
-      const step = track.steps[stepIndex];
+      const step = stepAt(track, stepIndex);
       if (!step || step.status !== "running") fail("track step is not running", "conflict");
       step!.status = "failed";
       step!.error = bounded(error, "error", 4_000);
@@ -263,7 +267,7 @@ export function createTrackStore(opts: TrackStoreOptions): TrackStore {
 
     async complete(id, stepIndex, commitSha, test) {
       const track = mustGet(id);
-      const step = track.steps[stepIndex];
+      const step = stepAt(track, stepIndex);
       if (!step || step.status !== "running") fail("track step is not running", "conflict");
       const sha = bounded(commitSha, "commitSha", 160);
       if (!/^[0-9a-f]{40,64}$/i.test(sha)) fail("commitSha must be a full Git commit hash");
