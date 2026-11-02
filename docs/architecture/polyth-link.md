@@ -16,6 +16,15 @@ or unauthenticated share link.
 3. **Device grants.** Persistent trust is SQLite in
    `<dataDir>/tunnel/tunnel.db`. Revoke is targeted per `deviceId` and awaited
    through host RPC; a host failure returns HTTP 503 `state: "partial"`.
+   Removing a server account revokes and disconnects every device it paired
+   (`SERVER_ACCOUNT_REMOVAL_BUS`, awaited before the credential goes; an
+   unreachable host gets the revoke on its next trust sync). A phone keeps one
+   identity per host, so a revoked device presents the same EndpointId when it
+   pairs again: the host routes a `PairingHello` from an unknown *or revoked*
+   peer to pairing, and holds only an active device to `ConnectionHello`.
+   Paired under another account, it becomes that account's new device record
+   (the old one is deleted); an active device of another account is still
+   refused.
 4. **Ingress.** Tunnel requests do not enter the public HTTP listener.
    They use a unix-domain internal listener plus a per-boot secret. Loopback
    is not an identity. `RequestIngress.kind = "polyth-link"` is built by
@@ -220,6 +229,17 @@ phones** field sets the server name (see below). The phone connection screen
 has one primary action (Scan QR code, or tapping a known computer). Nearby/code
 pairing are quiet links, network failures render on the affected server card,
 and manual/insecure URLs stay under Advanced. Phones cannot edit grants.
+
+## Device names
+
+Each phone names itself when it pairs: iOS sends `UIDevice.current.name`
+(the model, "iPhone"/"iPad", on iOS 16+ without the user-assigned-name
+entitlement), Android the name set in Settings (`Settings.Global.DEVICE_NAME`)
+or maker and model. Older apps sent the placeholder "This phone"; the tunnel
+package shows a placeholder as the platform ("iPhone", "Android",
+`src/deviceLabel.ts`). One account's devices never share a name: a new pairing
+stores the first free numbered form ("iPhone 2"), and device rows of older
+same-named pairings are numbered by pairing time when listed.
 
 ## Server name
 

@@ -484,7 +484,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
     setPreferNumericDiscovery(false);
     rememberPendingPairingLink(raw);
     if (!controller) return;
-    const pairing = await controller.beginPairing(raw, "This phone");
+    const pairing = await controller.beginPairing(raw);
     if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
   };
 
@@ -564,7 +564,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
         setCameraPermission("granted");
         rememberPendingPairingLink(raw);
         setTicket(raw);
-        const pairing = await controller.acceptQrResult(scanEpoch, raw, "This phone");
+        const pairing = await controller.acceptQrResult(scanEpoch, raw);
         if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
       } catch (cause) {
         const detail = cause instanceof Error ? cause.message : String(cause);
@@ -627,7 +627,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
           rememberPendingPairingLink(raw);
           setTicket(raw);
           stopCamera();
-          const pairing = await controller.acceptQrResult(scanEpoch, raw, "This phone");
+          const pairing = await controller.acceptQrResult(scanEpoch, raw);
           if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
           return;
         }
@@ -669,7 +669,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
 
   const submitNumericCode = async () => {
     if (!controller || !numericCodeValid) return;
-    const pairing = await controller.submitNumericCode(normalizedNumericCode, "This phone");
+    const pairing = await controller.submitNumericCode(normalizedNumericCode);
     if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
   };
 

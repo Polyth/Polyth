@@ -70,6 +70,7 @@ import {
   SERVER_TURN_COMPLETION_BUS,
   SERVER_TURN_STOPPED_BUS,
   SERVER_PERMISSION_WAITING_BUS,
+  SERVER_ACCOUNT_REMOVAL_BUS,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
   SERVER_BEHAVIOR_SECTIONS,
@@ -2612,6 +2613,13 @@ export async function boot(opts: BootOptions = {}) {
     guardedSpace: spaceHasGuardedMember,
   });
   services.provide(SERVER_PERMISSION_WAITING_BUS, permissionWaiting.service);
+  const accountRemovedListeners = new Set<(event: { userId: string }) => void | Promise<void>>();
+  services.provide(SERVER_ACCOUNT_REMOVAL_BUS, {
+    subscribe(listener) {
+      accountRemovedListeners.add(listener);
+      return { dispose: () => { accountRemovedListeners.delete(listener); } };
+    },
+  });
   const purposeContexts = new Map<string, (session: SessionProjection) => string>();
   services.provide(SESSION_PURPOSES, {
     register(purpose, context) {
@@ -3280,6 +3288,11 @@ export async function boot(opts: BootOptions = {}) {
         await nativePush.removeAccount(userId);
         // The person's connected accounts, secrets and enablement go with them.
         people.removePerson(userId);
+        // Package-granted access (paired phones…) ends with the account.
+        await Promise.all([...accountRemovedListeners].map((listener) =>
+          Promise.resolve()
+            .then(() => listener({ userId }))
+            .catch((error) => console.error("[polyth] package account removal listener failed", error))));
       },
     }),
     spaceRoutes({

@@ -867,7 +867,11 @@ Removing someone from a Space deletes nothing: their enablement for it stays
 on disk but is ignored, because `isMember` fails. Deleting an identity account
 (`DELETE /api/auth/accounts/:id` → `onAccountRemoved`) deletes
 `people/<userId>` — storage, secrets and enablement — and drops the cached
-vault, so a recreated account with the same id starts empty.
+vault, so a recreated account with the same id starts empty. Packages end
+access they granted the account through `SERVER_ACCOUNT_REMOVAL_BUS`
+(`@polyth/plugins`): listeners are awaited before the credential is removed and
+a failing one is logged without keeping the account. Polyth Link revokes and
+disconnects the account's paired phones this way.
 
 **Google accounts are person-owned** (`packages/google`, source-inspected and
 unit-tested, live Google not exercised): members connect their own account in

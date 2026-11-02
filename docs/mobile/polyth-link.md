@@ -82,6 +82,13 @@ waits for host approval.
 Pairing tickets are short-lived and remain process-memory bootstrap material;
 they are not durable device credentials.
 
+The phone names itself to the computer: JavaScript passes no label, so the
+native plugin sends the device name (see "Device names" in
+`docs/architecture/polyth-link.md`). After the computer revoked the phone, or
+removed the account it was paired to, scanning a new invitation pairs it again
+with the same per-host identity; the old server entry does not have to be
+deleted first.
+
 ## Native trust and storage
 
 Private device identity material never enters JavaScript.

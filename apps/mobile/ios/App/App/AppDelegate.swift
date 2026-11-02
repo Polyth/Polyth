@@ -767,6 +767,15 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         return String(cString: pointer)
     }
 
+    /// This phone's name on the server's Link page. iOS 16 and later give an
+    /// app the model ("iPhone", "iPad"), not the name its owner chose; the
+    /// server numbers phones that share a name.
+    private func deviceLabel() -> String {
+        let read = { UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let name = Thread.isMainThread ? read() : DispatchQueue.main.sync(execute: read)
+        return name.isEmpty ? "iPhone" : String(name.prefix(80))
+    }
+
     private func freshSecret() throws -> Data {
         var bytes = [UInt8](repeating: 0, count: 32)
         defer { for index in bytes.indices { bytes[index] = 0 } }
@@ -992,7 +1001,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func beginPairing(_ call: CAPPluginCall) {
         guard trusted(call), let raw = require(call, "raw", code: "pairing-invalid") else { return }
-        let label = call.getString("label") ?? "This phone"
+        let label = call.getString("label") ?? deviceLabel()
         queue.async {
             do {
                 let hostID = try self.hostID(raw)
@@ -1022,7 +1031,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         guard trusted(call),
               let hostID = require(call, "hostEndpointId", code: "pairing-invalid"),
               let code = require(call, "code", code: "pairing-invalid") else { return }
-        let label = call.getString("label") ?? "This phone"
+        let label = call.getString("label") ?? deviceLabel()
         let addresses = call.getArray("addresses", String.self) ?? []
         let port = call.getInt("port")
         queue.async {

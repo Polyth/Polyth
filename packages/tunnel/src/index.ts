@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import type { TunnelDeviceDto } from "@polyth/contracts";
 import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY, normalizeDeviceGrants, type GrantProfileId } from "@polyth/contracts";
 import { cleanServerName } from "./serverName.ts";
+import { deviceBaseLabel, uniqueDeviceLabel } from "./deviceLabel.ts";
 
 const LEGACY_OWNER_USER_ID = "usr_owner";
 
@@ -205,10 +206,21 @@ export class TunnelStore {
     if (existing && (existing.pairing_state === "pending" || existing.pairing_state === "host-acknowledged")) {
       throw new Error("device already has an unfinished pairing");
     }
-    const id = existing?.id ?? randomBytes(16).toString("hex");
+    // A phone keeps one identity per server, so a revoked device can come back
+    // under another account. That account gets a new device, not the
+    // previous owner's record and history.
+    const previous = existing && existing.owner_user_id !== ownerUserId ? existing : undefined;
+    const reused = previous ? undefined : existing;
+    const id = reused?.id ?? randomBytes(16).toString("hex");
+    // Two phones of one account never share a name on its Link page.
+    const label = uniqueDeviceLabel(
+      deviceBaseLabel(input.label, input.platform),
+      this.list(ownerUserId).filter((device) => device.endpointId !== input.endpointId).map((device) => device.label),
+    );
     const grantRevision = (existing?.grant_revision ?? 0) + 1;
     this.db.exec("BEGIN");
     try {
+      if (previous) this.db.prepare("DELETE FROM tunnel_device WHERE id = ?").run(previous.id);
       this.db.prepare(`
         INSERT INTO tunnel_device(id, endpoint_id, owner_user_id, label, platform, model, app_version, created_at, updated_at, last_seen_at, revoked_at, grant_revision, paired_via, last_transport, pairing_id, pairing_state)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, 'pending')
@@ -228,11 +240,11 @@ export class TunnelStore {
         id,
         input.endpointId,
         ownerUserId,
-        input.label,
+        label,
         input.platform ?? null,
         input.model ?? null,
         input.appVersion ?? null,
-        existing?.created_at ?? now,
+        reused?.created_at ?? now,
         now,
         now,
         grantRevision,

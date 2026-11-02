@@ -332,7 +332,7 @@ export class ConnectionController {
     this.#intent("idle", { pairingAttempt: null });
   }
 
-  async submitNumericCode(code: string, label = "This phone"): Promise<PairingAttempt | undefined> {
+  async submitNumericCode(code: string, label?: string): Promise<PairingAttempt | undefined> {
     const target = this.#state.numericTarget;
     if (!target) {
       this.#intent("fatal-error", { error: "Choose a nearby Polyth first." });
@@ -348,7 +348,7 @@ export class ConnectionController {
         addresses: target.addresses,
         port: target.port,
         code,
-        label,
+        ...(label === undefined ? {} : { label }),
       });
       if (!this.#current(epoch)) {
         await this.#native.cancelPairing(attempt.attemptId).catch(() => undefined);
@@ -384,12 +384,12 @@ export class ConnectionController {
     this.#set({ phase: "idle", error: errorText(cause) });
   }
 
-  async acceptQrResult(epoch: number, raw: string, label = "This phone"): Promise<PairingAttempt | undefined> {
+  async acceptQrResult(epoch: number, raw: string, label?: string): Promise<PairingAttempt | undefined> {
     if (!this.#current(epoch)) return undefined;
     return this.beginPairing(raw, label);
   }
 
-  async beginPairing(raw: string, label = "This phone"): Promise<PairingAttempt | undefined> {
+  async beginPairing(raw: string, label?: string): Promise<PairingAttempt | undefined> {
     const epoch = this.#intent("validating-pairing", { pairingAttempt: null });
     try {
       await this.#native.parsePairingTicket(raw);

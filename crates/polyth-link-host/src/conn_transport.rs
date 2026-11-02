@@ -81,16 +81,23 @@ pub async fn handle_connection(
         let guard = state.lock().await;
         guard.trust.get(&peer).cloned()
     };
+    let hello = read_control(&mut recv).await?;
 
-    if let Some(device) = trusted {
-        if let Err(error) = validate_connection_hello(read_control(&mut recv).await?, &peer) {
+    // A phone keeps one identity per host, so after its device was revoked
+    // (or its account removed) the same identity comes back with a new
+    // invitation. Pairing proves that invitation; only an active device is
+    // held to a connection hello.
+    let repairing = matches!(hello, ControlMessage::PairingHello { .. })
+        && trusted.as_ref().is_none_or(|device| device.revoked);
+    if let Some(device) = trusted.filter(|_| !repairing) {
+        if let Err(error) = validate_connection_hello(hello, &peer) {
             connection.close(0u32.into(), b"protocol");
             return Err(error);
         }
         return serve_trusted(state, connection, send, recv, peer, device).await;
     }
 
-    serve_pairing(state, connection, send, recv, peer).await
+    serve_pairing(state, connection, send, recv, peer, hello).await
 }
 
 fn validate_connection_hello(message: ControlMessage, peer: &str) -> Result<(), LinkError> {
@@ -113,8 +120,9 @@ async fn serve_pairing(
     mut send: SendStream,
     mut recv: RecvStream,
     peer: String,
+    hello: ControlMessage,
 ) -> Result<(), LinkError> {
-    let hello = match read_control(&mut recv).await? {
+    let hello = match hello {
         ControlMessage::PairingHello {
             pairing_id,
             client_nonce,

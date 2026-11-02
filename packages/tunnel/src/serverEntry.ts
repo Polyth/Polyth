@@ -15,6 +15,7 @@ import {
   requireLocalTunnelAdmin,
 } from "@polyth/contracts";
 import {
+  SERVER_ACCOUNT_REMOVAL_BUS,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -25,6 +26,7 @@ import { createLinkHostLifecycle } from "./hostLifecycle.ts";
 import { attachTunnelEventsWs, TunnelEventBus } from "./events.ts";
 import { buildTunnelDiagnostics, buildTunnelStatus, type TunnelLiveSnapshot } from "./status.ts";
 import { fallbackServerName, type TunnelServerNameDto } from "./serverName.ts";
+import { deviceBaseLabel, distinctDeviceLabels } from "./deviceLabel.ts";
 
 const OWNER_USER_ID = "usr_owner";
 
@@ -107,6 +109,38 @@ export async function commitPairingDevice(input: {
   }
 }
 
+/** Ends a removed account's Link access: every phone it paired is revoked
+ *  and disconnected. A host that cannot be reached learns it from the next
+ *  trust sync. The phone keeps its identity and may pair under another
+ *  account. Returns the revoked device ids. */
+export async function revokeAccountDevices(userId: string, deps: {
+  store: TunnelStore;
+  connections: Map<string, AuthPrincipal>;
+  closeDeviceSockets: (deviceId: string) => void;
+  host: LinkHostClient | null;
+  events: TunnelEventBus;
+}): Promise<string[]> {
+  const revoked = deps.store.trustList(userId)
+    .filter((device) => !device.revokedAt)
+    .map((device) => deps.store.revoke(device.id))
+    .filter((device): device is NonNullable<typeof device> => Boolean(device?.revokedAt));
+  for (const device of revoked) {
+    for (const [connectionId, principal] of deps.connections) {
+      if (principal.kind === "paired-device" && principal.deviceId === device.id) deps.connections.delete(connectionId);
+    }
+    deps.closeDeviceSockets(device.id);
+    if (deps.host?.available) {
+      try {
+        await deps.host.request("trust.revoke", { deviceId: device.id, endpointId: device.endpointId });
+      } catch (error) {
+        console.error("[polyth-link] revoke for a removed account failed", error instanceof Error ? error.message : error);
+      }
+    }
+    deps.events.emit("tunnel/device-revoked", { id: device.id, deviceId: device.id }, userId);
+  }
+  return revoked.map((device) => device.id);
+}
+
 export function tunnelRoutes(deps: {
   store: TunnelStore;
   events: TunnelEventBus;
@@ -134,10 +168,13 @@ export function tunnelRoutes(deps: {
     }
     return count;
   };
-  const dto = (device: ReturnType<TunnelStore["device"]>) => {
+  /** Same-named devices of one account are told apart on its Link page. */
+  const shownLabels = (ownerUserId: string) => distinctDeviceLabels(deps.store.list(ownerUserId));
+  const dto = (device: ReturnType<TunnelStore["device"]>, labels = device && shownLabels(device.ownerUserId)) => {
     if (!device) return null;
     const count = connectionCount(device.id);
-    return deps.store.toDto(device, count > 0, count);
+    const shown = deps.store.toDto(device, count > 0, count);
+    return { ...shown, label: labels?.get(device.id) ?? shown.label };
   };
   const ownedDevice = (id: string, userId: string) => {
     const device = deps.store.deviceForUser(id, userId);
@@ -242,7 +279,13 @@ export function tunnelRoutes(deps: {
         return true;
       }
       if (method === "GET" && !pairingMatch[2]) {
-        json(200, await host.request("pairing.get", { id }));
+        const pairing = await host.request("pairing.get", { id });
+        const device = pairing.device as { label?: unknown; platform?: unknown } | null | undefined;
+        // The approval dialog names the phone as its device row will.
+        if (device && typeof device.label === "string") {
+          device.label = deviceBaseLabel(device.label, typeof device.platform === "string" ? device.platform : null);
+        }
+        json(200, pairing);
         return true;
       }
       if (method === "POST" && pairingMatch[2] === "approve") {
@@ -265,7 +308,9 @@ export function tunnelRoutes(deps: {
 
     if (path === "/api/tunnel/devices" && method === "GET") {
       request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
-      json(200, deps.store.list(request.space.userId).map((device) => dto(device)));
+      const devices = deps.store.list(request.space.userId);
+      const labels = distinctDeviceLabels(devices);
+      json(200, devices.map((device) => dto(device, labels)));
       return true;
     }
 
@@ -442,6 +487,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   let lastErrorCode: string | undefined;
   let acceptingCommitTasks = false;
   let detachHostEvents: (() => void) | null = null;
+  let accountRemoval: { dispose(): void } | undefined;
   const pairingCommits = new Map<string, Promise<void>>();
   let ingressSecret = randomIngressSecret();
   const socketDir = join(host.storageDir, "tunnel");
@@ -762,9 +808,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     async onEnable() {
       eventsEnabled = true;
       for (const ctx of httpContexts) attachEvents(ctx);
+      accountRemoval?.dispose();
+      accountRemoval = host.services.get(SERVER_ACCOUNT_REMOVAL_BUS)?.subscribe(({ userId }) =>
+        revokeAccountDevices(userId, {
+          store,
+          connections,
+          closeDeviceSockets: (deviceId) => host.closePairedDevice(deviceId),
+          host: lifecycle.ready ? linkHost : null,
+          events,
+        }).then(() => undefined));
       await lifecycle.enable();
     },
     async onDisable() {
+      accountRemoval?.dispose();
+      accountRemoval = undefined;
       eventsEnabled = false;
       for (const stop of detachers.values()) stop();
       detachers.clear();

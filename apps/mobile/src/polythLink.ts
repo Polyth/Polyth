@@ -17,7 +17,8 @@ export interface NumericPairingInput {
   addresses: string[];
   port?: number | null;
   code: string;
-  label: string;
+  /** Absent: the native app sends this phone's own device name. */
+  label?: string;
 }
 
 export interface ConnectionMetadata {
@@ -49,7 +50,8 @@ export type ConnectionRecovery =
 
 export interface PolythLinkNative {
   parsePairingTicket(raw: string): Promise<PairingPreview>;
-  beginPairing(raw: string, label: string): Promise<PairingAttempt>;
+  /** Without a label the native app sends this phone's own device name. */
+  beginPairing(raw: string, label?: string): Promise<PairingAttempt>;
   beginNumericPairing(input: NumericPairingInput): Promise<PairingAttempt>;
   confirmPairing(attemptId: string): Promise<ProxyLaunch>;
   cancelPairing(attemptId: string): Promise<void>;

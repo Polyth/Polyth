@@ -350,7 +350,6 @@ test("numeric pairing uses the selected hostile discovery result only as a pinne
     addresses: target.addresses,
     port: target.port,
     code: "482 731",
-    label: "This phone",
   }]);
 });
 
