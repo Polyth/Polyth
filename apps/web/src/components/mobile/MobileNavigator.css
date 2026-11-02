@@ -43,15 +43,17 @@
        put their glyph on --nav-axis, 24px from the screen: a target may run
        to the edge, the ink keeps a margin. Close, project ⋯ and session ⋯
        share that column. The thumb aims at the glyph, and a phone's rounded
-       edge and case lip make the last few points hard to press, so the
-       column sits a little further in than the start side's marks (close's
-       ink lands on the platform's 16pt margin).
-     - Project marks start on the --nav-gutter content edge. A session's
-       state mark is centred in the same leading column, and the select
-       tool's glyph sits on that column's centre too: 20px from the screen,
-       never further in than the end column.
+       edge and case lip make the last few points hard to press, so the axis
+       keeps the glyph clear of the screen edge (close's ink lands on the
+       platform's 16pt margin) while the start side matches its ink.
+     - Project marks start on the --nav-gutter content edge, which is the
+       ⋮ ink's own edge (the end axis less half a mark): the empty margin
+       measures the same at both ends of the row, so the list does not read
+       as more tightly inset on one side. A session's state mark is centred
+       in the same leading column, and the select tool's glyph sits on that
+       column's centre too.
      - Names, titles, pagination and the empty text share one start edge:
-       gutter + an icon-xl mark + one --space-2 step, 40px in. */
+       gutter + an icon-xl mark + one --space-2 step, 47px in. */
   --nav-edge: 6px;
   --nav-axis: 24px;
   /* The press circle of the end column's small controls (New chat and every
@@ -59,7 +61,9 @@
      inset is the room left between it and the row's end. */
   --nav-dots-wash: calc(var(--icon-md) + var(--space-3) - 2px);
   --nav-dots-inset: calc(var(--nav-axis) - var(--nav-edge) - var(--nav-dots-wash) / 2);
-  --nav-gutter: var(--space-2);
+  /* The start side's ink margin: the ⋮ glyph's edge, half an icon in from
+     the end axis, so both edges of the row carry the same air. */
+  --nav-gutter: calc(var(--nav-axis) - var(--icon-md) / 2);
   --nav-lead-col: var(--icon-xl);
   --nav-row-inset: calc(var(--nav-gutter) - var(--nav-edge));
   --nav-lead-gap: var(--space-2);
@@ -1753,8 +1757,8 @@ body[data-hide-borders="true"] .mobile-nav-running-ring {
   .mobile-nav-session-row { transition: none; }
 }
 
-/* Small phones (iPhone SE/mini class) give the titles back 2px at the start
-   and 4px at the end. */
+/* Small phones (iPhone SE/mini class) pull both edge columns in: the content
+   edge follows the axis, so the two margins stay equal. */
 @media (max-width: 360px) {
-  .mobile-navigator { --nav-edge: 4px; --nav-gutter: 6px; --nav-axis: 20px; }
+  .mobile-navigator { --nav-edge: 4px; --nav-axis: 20px; }
 }

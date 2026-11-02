@@ -209,9 +209,9 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
 const near = (actual: number, expected: number, label: string) =>
   assert.ok(Math.abs(actual - expected) <= 0.6, `${label}: ${actual} ≠ ${expected}`);
 
-// gutter: content edge; axis: end-column glyph centre from the screen;
-// titleStart: gutter + 24px mark + 8px.
-for (const [width, gutter, axis, titleStart] of [[320, 6, 20, 38], [390, 8, 24, 40], [430, 8, 24, 40]] as const) {
+// gutter: content edge, the ⋮ glyph's own edge; axis: end-column glyph
+// centre from the screen; titleStart: gutter + 24px mark + 8px.
+for (const [width, gutter, axis, titleStart] of [[320, 11, 20, 43], [390, 15, 24, 47], [430, 15, 24, 47]] as const) {
   for (const density of ["comfortable", "compact"]) {
     test(`phone navigator grid holds at ${width}px, ${density}`, { skip: !CHROME }, async () => {
       const m = await measure(width, { density });
@@ -219,7 +219,9 @@ for (const [width, gutter, axis, titleStart] of [[320, 6, 20, 38], [390, 8, 24, 
       near(m.searchEnd, gutter, "the open search field ends on the content edge");
       for (const g of m.glyphs) near(g, gutter, "project mark on the content edge");
       near(m.glyphCentre, gutter + 12, "a 24px project mark: the leading column is no wider than the marks need");
-      assert.ok(m.glyphCentre - axis <= 2.6, `the leading column (${m.glyphCentre}px) sits no further in than the ⋮ axis (${axis}px), so the start side carries no extra margin`);
+      // Both ends of a row keep the same air: the start edge is the ⋮ glyph's
+      // own edge (the axis less half an 18px glyph).
+      near(m.glyphs[0]!, axis - 9, "the start edge sits on the ⋮ glyph's edge, so the two margins measure the same");
       near(m.backCentre, m.glyphCentre, "search's Back glyph sits over the project marks");
       for (const lead of m.leads) near(lead, m.glyphCentre, "session state mark centred under the project mark");
       const titleEdge = m.names[0]!;

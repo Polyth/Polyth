@@ -3763,15 +3763,16 @@ list says "No sessions".
 The phone Navigator is one grid (`MobileNavigator.css`, pinned by
 `mobileNavigatorLayout.test.ts` at 320–430px, every density and RTL). Most
 rows leave the leading column empty and every row ends in ⋮, so both edge
-columns are kept to what their marks need. Project marks are 24px tiles on an
-8px content edge; a session's state mark is centred in the same leading
-column, and search's Back glyph on that column's centre, 20px from the
-screen, never further in than the ⋮ column, so the start side carries no
-extra margin. Names, titles, pagination and the empty text share one start
-edge 40px in (gutter + mark + 8px). On the end side close, project ⋯ and session ⋯ glyphs share one
+columns are kept to what their marks need. Project marks are 24px tiles on a
+content edge that is the ⋮ glyph's own edge (the end axis less half a glyph,
+`--nav-gutter`, 15px on a standard phone), so the empty margin measures the
+same at both ends of a row; a session's state mark is centred in the same
+leading column, and search's Back glyph on that column's centre. Names,
+titles, pagination and the empty text share one start
+edge 47px in (gutter + mark + 8px). On the end side close, project ⋯ and session ⋯ glyphs share one
 column 24px from the screen (`--nav-axis`): the thumb aims at the glyph and a
 phone's rounded edge and case lip make the last few points hard to press, so
-the end column sits a little further in than the start side (close's ink
+the axis sits clear of the screen's rounded edge (close's ink
 lands on the platform's 16pt margin) while every target still runs out to the
 edge. New chat and every ⋮ draw the same 28px press circle centred on that
 axis (`--nav-dots-wash`), whatever the axis. A row's trailing marks (isolation, merge,
@@ -3782,7 +3783,8 @@ title with no marks runs to that same edge (the row grid has no column gap,
 each present mark brings its own 8px lead-in), so the last few pixels of a
 long title sit over the ⋮ target; only a subagent pill, a real control,
 stays clear of it. Rows keep a 6px edge for the current row's rounded wash.
-Small phones (≤360px) use a 6px gutter, a 20px end column and a 4px edge.
+Small phones (≤360px) use an 11px content edge, a 20px end column and a 4px
+edge.
 The toolbar is the title and four tools. The title is the active Space's
 name on the content edge, at a project name's size and a firmer weight; in
 the native app it opens the native server menu (the separate Switch server
