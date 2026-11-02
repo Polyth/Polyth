@@ -14,11 +14,8 @@ if ! node scripts/check-node.mjs >/dev/null 2>&1; then
 fi
 node scripts/check-node.mjs
 
-if [ -f package-lock.json ]; then
-  npm ci
-else
-  npm install
-fi
+# Only the locked dependency tree: without package-lock.json the checkout is incomplete.
+npm ci
 
 npm run build
 

@@ -438,11 +438,8 @@ jobs:
           PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
 
       - name: Install both esbuild binaries
-        run: |
-          ESBUILD_VERSION="$(node -p "require('./node_modules/esbuild/package.json').version")"
-          npm install --ignore-scripts --no-save --package-lock=false --force \
-            "@esbuild/darwin-x64@$ESBUILD_VERSION" \
-            "@esbuild/darwin-arm64@$ESBUILD_VERSION"
+        # Both come from package-lock.json, checked against its integrity hashes.
+        run: node scripts/ci/install-locked-packages.mjs @esbuild/darwin-x64 @esbuild/darwin-arm64
 
       - name: Build multi-arch desktop bundle
         run: npm run build:desktop
@@ -608,7 +605,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
-          cache: npm
+          # No npm cache: a release job must not write the default branch's cache.
 
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund

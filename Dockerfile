@@ -11,16 +11,15 @@
 # pinned OpenCode binary. It binds loopback by default: run it with host
 # networking, or behind a TLS proxy with POLYTH_PUBLIC_ORIGIN (see the docs).
 
-ARG NODE_IMAGE=node:22-bookworm
-ARG NODE_RUNTIME_IMAGE=node:22-bookworm-slim
-ARG RUST_IMAGE=rust:1.91.0-bookworm
+# Base images are pinned by digest (tag kept for reading); Dependabot's docker
+# updates move tag and digest together (.github/dependabot.yml).
 # host = build the Polyth Link host executable, none = omit Polyth Link.
 ARG POLYTH_LINK=host
 
 # ---------------------------------------------------------------------------
 # Workspace manifests only, so dependency installation stays cached while
 # source files change.
-FROM ${NODE_IMAGE} AS manifests
+FROM node:22-bookworm@sha256:18a6d90fd60542269850c80ca03b29b1d9b14d6b221ac7ee8e35b0d33ef904bd AS manifests
 WORKDIR /src
 COPY . .
 # scripts/check-node.mjs is the root preinstall hook.
@@ -29,7 +28,7 @@ RUN find . -type f ! -name package.json ! -name package-lock.json \
  && find . -depth -type d -empty -delete
 
 # ---------------------------------------------------------------------------
-FROM ${NODE_IMAGE} AS build
+FROM node:22-bookworm@sha256:18a6d90fd60542269850c80ca03b29b1d9b14d6b221ac7ee8e35b0d33ef904bd AS build
 WORKDIR /opt/polyth
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
@@ -47,7 +46,7 @@ RUN POLYTH_WEB_BUILD_ID="${POLYTH_WEB_BUILD_ID}" npm run build \
 
 # ---------------------------------------------------------------------------
 # Polyth Link host (remote/mobile access). Selected by POLYTH_LINK.
-FROM ${RUST_IMAGE} AS link-host
+FROM rust:1.91.0-bookworm@sha256:e187887ec511b3d93e45c0231d2f0fd59f1347526c58aa86343aa83c74f3e1a9 AS link-host
 WORKDIR /src
 # The image already pins the toolchain; rust-toolchain.toml would only add
 # rustfmt/clippy downloads that a release build does not need.
@@ -58,13 +57,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --locked --release -p polyth-link-host \
  && install -D -m 0755 target/release/polyth-link-host /out/polyth-link-host
 
-FROM busybox:stable AS link-none
+FROM busybox:stable@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 AS link-none
 RUN mkdir -p /out
 
 FROM link-${POLYTH_LINK} AS link
 
 # ---------------------------------------------------------------------------
-FROM ${NODE_RUNTIME_IMAGE} AS runtime
+FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS runtime
 ARG POLYTH_UID=1000
 ARG POLYTH_GID=1000
 ARG GH_CLI=1
