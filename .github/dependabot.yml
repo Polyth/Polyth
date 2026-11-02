@@ -13,7 +13,7 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: cargo
-    directory: /
+    directories: ["/", "/fuzz"]
     target-branch: devel
     schedule:
       interval: weekly

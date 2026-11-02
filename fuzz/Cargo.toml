@@ -1,0 +1,63 @@
+[package]
+name = "polyth-link-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+polyth-link-core = { path = "../crates/polyth-link-core" }
+serde = { version = "=1.0.229" }
+tokio = { version = "=1.54.1", features = ["rt", "time", "io-util"] }
+
+# Not a member of the root workspace: its own lockfile and build output.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "ticket_parse"
+path = "fuzz_targets/ticket_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "numeric_wire"
+path = "fuzz_targets/numeric_wire.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "protocol_heads"
+path = "fuzz_targets/protocol_heads.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ws_frames"
+path = "fuzz_targets/ws_frames.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "http_head"
+path = "fuzz_targets/http_head.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "stream_readers"
+path = "fuzz_targets/stream_readers.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "string_validators"
+path = "fuzz_targets/string_validators.rs"
+test = false
+doc = false
