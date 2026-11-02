@@ -67,7 +67,8 @@ export function decodeSvgDataUrl(value: string): string | null {
 export function sanitizeProjectIconSvg(svg: string): string {
   let clean = svg.replace(/^\uFEFF/, "");
   // Repeat until nothing changes: removing one piece can join its neighbours
-  // into a new `<script` or `on\u2026=` ("<scr<script></script>ipt>").
+  // into a new `<script` or `on\u2026=` ("<scr<script></script>ipt>"). A quoted value
+  // that never closes is removed to the end, as a browser would read it.
   for (let previous = ""; previous !== clean;) {
     previous = clean;
     clean = clean.replace(/<\?xml[\s\S]*?\?>/gi, "");
@@ -75,8 +76,8 @@ export function sanitizeProjectIconSvg(svg: string): string {
     clean = clean.replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
     clean = clean.replace(/<\/?(?:script|foreignObject)\b[^>]*>?/gi, "");
     clean = clean.replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
-    clean = clean.replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*'|[^\s"'>#][^\s>]*)/gi, "");
-    clean = clean.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)/gi, "");
+    clean = clean.replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"?|'(?!#)[^']*'?|[^\s"'>#][^\s>]*)/gi, "");
+    clean = clean.replace(/\son\w+\s*=\s*(?:"[^"]*"?|'[^']*'?|[^\s"'>]+)/gi, "");
   }
   return clean.trim();
 }
