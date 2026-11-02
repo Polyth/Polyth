@@ -280,7 +280,6 @@ export default function ShellIntroTour() {
           {step.id === "add-project" && (
             <>
               <Button
-                size="sm"
                 className="shell-intro-cta"
                 onClick={() => {
                   // The tour waits while the project dialog is open and picks
@@ -299,7 +298,6 @@ export default function ShellIntroTour() {
           )}
           {step.id === "appearance" && (
             <Button
-              size="sm"
               className="shell-intro-cta"
               onClick={() => { close(); openSettingsPage("appearance"); }}
             >
@@ -322,11 +320,11 @@ export default function ShellIntroTour() {
           </div>
           <div className="shell-intro-actions">
             {welcome ? (
-              <Button size="sm" variant="ghost" className="shell-intro-skip" onClick={close}>{tr("shellintro.skip")}</Button>
+              <Button variant="ghost" className="shell-intro-skip" onClick={close}>{tr("shellintro.skip")}</Button>
             ) : (
-              <Button size="sm" variant="ghost" onClick={back}>{tr("common.back")}</Button>
+              <Button variant="ghost" onClick={back}>{tr("common.back")}</Button>
             )}
-            <Button size="sm" variant="primary" className="shell-intro-primary" onClick={next}>
+            <Button variant="primary" className="shell-intro-primary" onClick={next}>
               {welcome ? tr("shellintro.start") : lastStep ? tr("shellintro.finish") : tr("common.next")}
             </Button>
           </div>

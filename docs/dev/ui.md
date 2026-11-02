@@ -1004,7 +1004,9 @@ and without any project (none could be made for it) there is no composer, so
 the start step is left out. Steps
 resolve the first *visible* selector in `anchors` and centre the card when none
 is on screen. `data-intro-anchor` marks controls whose class is ambiguous —
-keep those attributes when restyling the rail.
+keep those attributes when restyling the rail. The card's buttons use the
+normal control size (no `size="sm"`): the footer wraps a long locale's
+buttons onto their own row rather than shrinking them.
 
 Admission (`decideShellIntroAdmission`, run by `App.tsx`) waits for the first
 account settings snapshot (`isClientSettingsSettled`, 5 s fallback) and a
