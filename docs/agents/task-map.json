@@ -497,6 +497,7 @@
       "entrypoints": [
         "package.json",
         ".github/workflows/ci.yml",
+        ".github/workflows/co-authors.yml",
         ".github/workflows/build-apps.yml",
         ".github/workflows/release.yml",
         "scripts/ci/release-quality.mjs",
@@ -517,6 +518,8 @@
       ],
       "testHints": [
         "scripts/test/release-version.test.ts",
+        "scripts/test/release-notes.test.ts",
+        "scripts/test/checkCoAuthors.test.ts",
         "scripts/test/bump-version.test.ts",
         "scripts/test/release-quality-gates.test.ts"
       ],

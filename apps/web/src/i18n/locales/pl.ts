@@ -3317,6 +3317,8 @@ export const pl: AppMessages = {
   "shellintro.startBody": "Napisz własnymi słowami, czego potrzebujesz — pytanie, zadanie albo szkic — i wyślij. Odpowiedź pojawi się właśnie tutaj. Twoje czaty widzisz tylko Ty.",
   "shellintro.projectsTitle": "Czaty i projekty",
   "shellintro.projectsBody": "Tu przechowywane są wszystkie Twoje czaty, więc możesz wrócić do każdego z nich. Projekty, które dodasz później, też pojawią się tutaj, każdy z własnymi czatami. Mała kropka oznacza, że asystent pracuje lub czeka na Twoją odpowiedź.",
+  "shellintro.statusWorking": "Pracuje",
+  "shellintro.statusWaiting": "Czeka na Twoją odpowiedź",
   "shellintro.addProjectTitle": "Projekty — gdy będą potrzebne",
   "shellintro.addProjectBody": "Nie jest potrzebny na start. Projekt to po prostu folder z Twoimi plikami — dokumentami, zdjęciami, stroną internetową lub kodem. Dodaj go, a asystent będzie mógł otwierać i edytować te pliki na Twoją prośbę. (Programiści mogą też połączyć repozytorium Git lub inny komputer przez SSH.)",
   "shellintro.topRailTitle": "Narzędzia u góry",

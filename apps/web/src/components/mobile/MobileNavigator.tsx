@@ -748,6 +748,45 @@ function NavigatorPlace() {
   );
 }
 
+/** A project's inline name field. It owns the text being typed, so a
+ *  keystroke re-renders only the field, not the whole Navigator. It takes
+ *  focus while it mounts (still inside the tap that opened it, so the phone
+ *  keyboard comes up) without scrolling: the Navigator is a fixed layer and
+ *  the field already sits at the top of it. */
+function ProjectRenameField({ initial, fieldRef, onDone }: {
+  initial: string;
+  fieldRef: (node: HTMLInputElement | null) => void;
+  /** The name to save, or null to keep the current one. Called once. */
+  onDone: (name: string | null) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const doneRef = useRef(false);
+  const finish = (name: string | null) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onDone(name);
+  };
+  useLayoutEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <input
+      className="mobile-nav-project-rename"
+      ref={(node) => { inputRef.current = node; fieldRef(node); }}
+      value={value}
+      aria-label={tr("common.rename")}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => finish(value)}
+      onKeyDown={(event) => {
+        if (isImeComposing(event)) return;
+        if (event.key === "Enter") finish(value);
+        if (event.key === "Escape") finish(null);
+      }}
+    />
+  );
+}
+
 export default function MobileNavigator() {
   const guardrails = useGuardrails();
   const accountLimits = useAccountLimits();
@@ -820,7 +859,10 @@ export default function MobileNavigator() {
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [conversationProjectId, setConversationProjectId] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("");
+  // The project-name field while one is open. A project menu closing hands
+  // focus back here instead of to its ⋮, which would blur the field it just
+  // opened and save the unchanged name at once.
+  const projectRenameRef = useRef<HTMLElement | null>(null);
   const [now, setNow] = useState(Date.now());
   const navRef = useRef<HTMLElement>(null);
   const navScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1144,8 +1186,8 @@ export default function MobileNavigator() {
     });
   };
 
-  const saveProjectName = async (projectId: string) => {
-    const next = projectName.trim();
+  const saveProjectName = async (projectId: string, name: string | null) => {
+    const next = name?.trim() ?? "";
     const current = projects.find((project) => project.id === projectId);
     setRenamingProjectId(null);
     if (!current || !next || next === current.name) return;
@@ -1468,7 +1510,7 @@ export default function MobileNavigator() {
               {
                 id: "rename",
                 label: tr("common.rename"),
-                onSelect: () => { setProjectName(project.name || project.path); setRenamingProjectId(project.id); },
+                onSelect: () => setRenamingProjectId(project.id),
               },
               {
                 id: "copy-path",
@@ -1519,17 +1561,10 @@ export default function MobileNavigator() {
                       icon and colour are project identity, not decoration. */}
                   <ProjectGlyph project={project} />
                   {renamingProjectId === project.id ? (
-                    <input
-                      className="mobile-nav-project-rename"
-                      autoFocus
-                      value={projectName}
-                      onChange={(event) => setProjectName(event.target.value)}
-                      onBlur={() => void saveProjectName(project.id)}
-                      onKeyDown={(event) => {
-                        if (isImeComposing(event)) return;
-                        if (event.key === "Enter") void saveProjectName(project.id);
-                        if (event.key === "Escape") setRenamingProjectId(null);
-                      }}
+                    <ProjectRenameField
+                      initial={project.name || project.path}
+                      fieldRef={(node) => { projectRenameRef.current = node; }}
+                      onDone={(name) => void saveProjectName(project.id, name)}
                     />
                   ) : (
                     <button
@@ -1598,7 +1633,12 @@ export default function MobileNavigator() {
                     >
                       <UiIcon icon={NewChatIcon} size="lg" />
                     </button>
-                    <Menu label={tr("sidebar.actionsForValue", { value: project.name || project.path })} align="end" entries={projectEntries}>
+                    <Menu
+                      label={tr("sidebar.actionsForValue", { value: project.name || project.path })}
+                      align="end"
+                      entries={projectEntries}
+                      returnFocusRef={projectRenameRef}
+                    >
                       {(trigger) => (
                         <button className="mobile-nav-project-action" aria-label={tr("common.more")} {...trigger}>
                           <Icon.more />

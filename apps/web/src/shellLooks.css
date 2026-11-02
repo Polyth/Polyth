@@ -1557,6 +1557,31 @@ body[data-shell-look="air"]:not(#\#) .mobile-nav-project {
   box-shadow: var(--look-shadow);
 }
 
+/* Inside an island the mark sits as far in from its side as from its top,
+   and names and chats keep their edge after it; a current chat's pill still
+   spans the island. The lifted copy of a project keeps the same inset. */
+body[data-shell-look="air"]:not(#\#) :is(.mobile-nav-project, .mobile-navigator .workspace-arrange-ghost-body) {
+  --nav-row-inset: var(--space-4);
+  --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
+}
+
+/* Rows on the field after the islands (Add project, the next remote page)
+   keep the islands' mark and name columns. */
+body[data-shell-look="air"]:not(#\#) .mobile-nav-scroll > :is(.mobile-nav-add-project, .mobile-nav-more-sessions) {
+  --nav-row-inset: calc(var(--space-2) + var(--space-4));
+  --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
+}
+
+/* The toolbar steps in with the islands: the title starts where their marks
+   do (the islands' edge plus that inset) and close sits on their ⋮ column. */
+body[data-shell-look="air"]:not(#\#) .mobile-nav-toolbar {
+  --nav-bar-axis: calc(var(--nav-axis) + var(--space-2));
+}
+
+body[data-shell-look="air"]:not(#\#) .mobile-nav-place {
+  padding-inline-start: calc(var(--nav-edge) + var(--space-2) + var(--space-4));
+}
+
 body[data-shell-look="air"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
   border-radius: 999px;
   background: var(--accent-wash);

@@ -101,10 +101,41 @@ function DragArt() {
   );
 }
 
+/** Project tiles as they sit in the Navigator, wearing the real status dot
+ *  (same corner and colours as `.sidebar-project-rail-status`), each labelled.
+ *  HTML, not SVG, so the labels are translated and follow the text direction. */
+function StatusArt() {
+  const rows = [
+    { tone: null, label: null },
+    { tone: "working", label: tr("shellintro.statusWorking") },
+    { tone: "attention", label: tr("shellintro.statusWaiting") },
+  ] as const;
+  return (
+    <div className="shell-intro-art shell-intro-art--status">
+      <div className="art-status-rows">
+        {rows.map((row, index) => (
+          <div key={index} className="art-status-row">
+            <span className="art-status-tile">
+              <span className="art-status-glyph" />
+              {row.tone && <span className={`art-status-dot ${row.tone}`} />}
+            </span>
+            {row.label && (
+              <>
+                <span className="art-status-leader" />
+                <span className="art-status-label">{row.label}</span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function IntroArt({ art }: { art: ShellIntroArt }) {
   return (
     <div className="shell-intro-media" aria-hidden="true">
-      {art === "shell" ? <ShellArt /> : <DragArt />}
+      {art === "shell" ? <ShellArt /> : art === "status" ? <StatusArt /> : <DragArt />}
     </div>
   );
 }

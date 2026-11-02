@@ -1030,6 +1030,15 @@ active project's rail tile); a cancelled dialog continues with the step after
 add-project. A resume lands by step id (`shellIntroResumeIndex`), so a changed
 step list cannot shift it; replaying the tour drops a pending resume.
 
+A step may carry art above its text (`ShellIntroStep.art`): the shell
+schematic on welcome, the drag pass on drag, and on the chats-and-projects step
+(phone too) a column of project tiles wearing the real status dot — same
+corner and `--green` / `--amber` colours as `.sidebar-project-rail-status`,
+each led to a translated label (`shellintro.statusWorking` /
+`statusWaiting`). A new account has no project tile to point at, so the card
+shows the dot itself. Change that art together with the rail dot. Art is
+`aria-hidden`; the step text must say the same thing on its own.
+
 Tour copy is written for people who have never used a developer tool: everyday
 words ("buttons", "tools at the top", "add-ons"), no rail/composer/package
 jargon in the main text, and Git/SSH only as a developer aside. Keep new steps
@@ -3776,7 +3785,11 @@ column 24px from the screen (`--nav-axis`): the thumb aims at the glyph and a
 phone's rounded edge and case lip make the last few points hard to press, so
 the axis sits clear of the screen's rounded edge (close's ink
 lands on the platform's 16pt margin) while every target still runs out to the
-edge. New chat and every ⋮ draw the same 28px press circle centred on that
+edge. Close's column is the toolbar's `--nav-bar-axis`: `--nav-axis` unless an
+interface style floats the rows in from the edge (Air insets it with its
+islands, so close stays on their ⋮; inside an island Air also gives the rows
+their own `--nav-row-inset`, so a mark sits as far in from the island's side
+as from its top and names, chats, Add project and the title follow it). New chat and every ⋮ draw the same 28px press circle centred on that
 axis (`--nav-dots-wash`), whatever the axis. A row's trailing marks (isolation, merge,
 running clock, an agent's next wake) end 12px clear of the ⋮ dots
 (`--nav-mark-end`, 37px from the screen): the body runs `--nav-mark-tuck`

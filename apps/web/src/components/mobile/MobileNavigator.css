@@ -291,7 +291,9 @@ html[data-appearance="light"] .mobile-navigator {
   flex: 0 0 auto;
   min-height: calc(var(--control-h-lg) + var(--safe-top));
   /* The bar's end tool reaches the screen edge (its glyph sits on the edge
-     column). */
+     column). The column is the rows' ⋮ axis; a look that floats the rows in
+     from the edge moves it in with them. */
+  --nav-bar-axis: var(--nav-axis);
   padding:
     calc(var(--space-1) + var(--safe-top))
     var(--safe-right)
@@ -334,7 +336,7 @@ html[data-appearance="light"] .mobile-navigator {
   --nav-search-ease: var(--motion-stack-ease);
   /* The tool glyph's centre from the bar's end edge: close's half-step box,
      two tool steps and half of the search tool's own. */
-  --nav-search-axis: calc(var(--nav-axis) + 3 * var(--nav-tool-step));
+  --nav-search-axis: calc(var(--nav-bar-axis) + 3 * var(--nav-tool-step));
   --nav-search-seed: calc(var(--icon-lg) + var(--space-3));
 }
 
@@ -470,12 +472,13 @@ button.mobile-nav-place:active:where(:not(:disabled)) {
   isolation: isolate;
 }
 
-/* Close: the glyph on the axis and the target out to the screen edge, half
-   a step wide on the inner side, so its glyph is one step from Settings'. */
+/* Close: the glyph on the bar's axis and the target out to the screen edge,
+   half a step wide on the inner side, so its glyph is one step from
+   Settings'. */
 .mobile-nav-tools > .mobile-nav-tool:last-child {
-  --nav-wash-end: calc(var(--nav-axis) - var(--nav-wash) / 2);
-  width: calc(var(--nav-axis) + var(--nav-tool-step) / 2);
-  padding-inline-end: calc(var(--nav-axis) - var(--icon-lg) / 2);
+  --nav-wash-end: calc(var(--nav-bar-axis) - var(--nav-wash) / 2);
+  width: calc(var(--nav-bar-axis) + var(--nav-tool-step) / 2);
+  padding-inline-end: calc(var(--nav-bar-axis) - var(--icon-lg) / 2);
   place-items: center end;
 }
 

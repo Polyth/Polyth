@@ -138,6 +138,10 @@ To sign off commits you already made on a branch, run
 `git rebase --signoff devel` and force-push the branch. The DCO check on each
 pull request lists any commit that is missing its author's sign-off.
 
+Commits must not credit an AI agent, model or harness as a co-author. The
+co-author check on each pull request rejects a new `Co-authored-by:` trailer
+naming one; existing history is not rewritten. See `AGENTS.md`.
+
 Contributions are licensed under the [Apache License 2.0](LICENSE), the same
 license as the project (inbound = outbound); the sign-off records that you
 agree to this.

@@ -1,0 +1,32 @@
+name: Co-authors
+
+# A pull request's new commits must not credit an AI agent, model or harness as
+# a Co-authored-by (see AGENTS.md). Only the commits the pull request adds are
+# checked, so existing history with such trailers does not block every branch.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: co-authors-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  co-authors:
+    name: Co-authors
+    if: ${{ vars.CI_DISABLED != '1' && vars.CI_DISABLED != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check agent co-authors
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci/check-co-authors.mjs "$BASE_SHA" "$HEAD_SHA"

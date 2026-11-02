@@ -657,7 +657,7 @@ desktop plate, and `--look-select-mark` adds a bar on its leading edge.
 | --- | --- | --- |
 | `paper` | Sheet; projects parted by a rule; current chat in ink, weight and an ink bar; bare project marks | Bare ink glyphs on the sheet; the widget is a ruled passage |
 | `line` | A ruled column: a hairline over every chat and project, mono dates heading their rule; current chat = accent bar, no box | Hairline cells; the widget is framed, its head a mono label |
-| `air` | Each project is an island; current chat an accent pill; marks are accent discs | Islands with the glyph in an accent disc; the widget is an island |
+| `air` | Each project is an island, its mark as far in from the island's side as from its top (names, chats and Add project keep those columns); the toolbar steps in with them (title on the marks' edge, close on their ⋮ column); current chat an accent pill; marks are accent discs | Islands with the glyph in an accent disc; the widget is an island |
 | `monolith` | The backdrop; current chat is a raised piece of the sheet; heavier project names | Raised sheet tiles and widget on the backdrop |
 | `monolith-reverse` | The lit plane; current chat and marks carved into it | Keys carved into the plane (a press sinks deeper); the widget a recessed window |
 | `obsidian` | Dark glass (the light canvas in pearl); accent pill; polished accent discs | Glass tiles with the gradient rim; only a pressed tile takes the accent rim and glow |

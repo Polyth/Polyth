@@ -3320,6 +3320,8 @@ export const en = {
   "shellintro.startBody": "Write what you need in your own words — a question, a task or a draft — and send it. The answer appears right here. Only you can see your chats.",
   "shellintro.projectsTitle": "Chats and projects",
   "shellintro.projectsBody": "All your chats are kept here, so you can go back to any of them. Projects you add later appear here too, each with its own chats. A small dot means the assistant is working or waiting for your answer.",
+  "shellintro.statusWorking": "Working",
+  "shellintro.statusWaiting": "Waiting for your answer",
   "shellintro.addProjectTitle": "Projects, when you need them",
   "shellintro.addProjectBody": "You don’t need one to start. A project is simply a folder with your files — documents, photos, a website or code. Add one, and the assistant can open and edit those files when you ask. (Developers can also connect a Git repository or another computer over SSH.)",
   "shellintro.topRailTitle": "Tools at the top",
