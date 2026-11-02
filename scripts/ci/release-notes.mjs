@@ -18,6 +18,7 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { channelOfVersion, resolveReleaseChannel } from "./update-feed.mjs";
+import { identityKind, parseCoAuthors } from "./commit-identities.mjs";
 
 /** Releases whose changes a channel's notes are measured from. */
 const BASE_CHANNELS = { stable: ["stable"], test: ["test", "stable"], nightly: ["nightly"] };
@@ -57,9 +58,6 @@ const VERB_SECTIONS = [
 const MAINTENANCE_PATH = /(^|\/)(docs?|tests?|__tests__|\.agents|\.github|\.claude|\.pi)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.md$|^AGENTS\.md$|^scripts\/test\//;
 const NOISE_SUBJECT = /^(wip\b|fixup!|squash!|amend!|merge (branch|remote-tracking|pull request|origin))/i;
 
-const AI_EMAILS = new Set(["noreply@anthropic.com", "cursoragent@cursor.com", "noreply@opencode.ai", "noreply@openai.com", "noreply@google.com"]);
-const AI_NAMES = /^(claude|codex|gpt|chatgpt|openai|gemini|copilot|cursor\b|cursor agent|opencode|devin|aider|sweep|jules|amp\b|pi agent)/i;
-const BOT = /\[bot\]$|^(actions|github-actions)@|@localhost$|^noreply@github\.com$|^(dependabot|renovate)/i;
 const NOREPLY_LOGIN = /^(?:\d+\+)?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))@users\.noreply\.github\.com$/i;
 
 function parseArgs(argv) {
@@ -114,14 +112,6 @@ export function releaseMarker(channel, source) {
   return `<!-- polyth-release: channel=${channel} source=${source} -->`;
 }
 
-export function parseCoAuthors(body) {
-  const people = [];
-  for (const match of (body ?? "").matchAll(/^co-authored-by:\s*(.+?)\s*<([^>\s]+)>\s*$/gim)) {
-    people.push({ name: match[1], email: match[2] });
-  }
-  return people;
-}
-
 /** Commit message body without trailers and with the first paragraph's first sentence as the summary. */
 export function commitSummary(body) {
   const text = (body ?? "")
@@ -154,13 +144,6 @@ export function classifyCommit(commit) {
   if (files.length > 0 && files.every((file) => MAINTENANCE_PATH.test(file))) section = "maintenance";
   const title = subject.charAt(0).toUpperCase() + subject.slice(1).replace(/\.$/, "");
   return { section, title };
-}
-
-function identityKind(person) {
-  const email = person.email.toLowerCase();
-  if (BOT.test(person.name) || BOT.test(email)) return "bot";
-  if (AI_EMAILS.has(email) || AI_NAMES.test(person.name)) return "agent";
-  return "human";
 }
 
 /**
