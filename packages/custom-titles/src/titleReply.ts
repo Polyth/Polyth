@@ -252,7 +252,8 @@ export function readGeneratedTitle(raw: string, message?: string): GeneratedTitl
   // Until none is left: one pass can join the halves around a removed tag.
   for (let previous = ""; previous !== text;) {
     previous = text;
-    text = text.replace(INLINE_TAG, "").replace(BLOCK_TAG, "\n");
+    text = text.replace(INLINE_TAG, "");
+    text = text.replace(BLOCK_TAG, "\n");
   }
   if (MODEL_MARKUP.test(text)) return { rejected: "markup" };
   // Fenced code is an answer to the request, not a title; a plain or JSON fence

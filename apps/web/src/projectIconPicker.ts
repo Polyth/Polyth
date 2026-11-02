@@ -70,14 +70,13 @@ export function sanitizeProjectIconSvg(svg: string): string {
   // into a new `<script` or `on\u2026=` ("<scr<script></script>ipt>").
   for (let previous = ""; previous !== clean;) {
     previous = clean;
-    clean = clean
-      .replace(/<\?xml[\s\S]*?\?>/gi, "")
-      .replace(/<!doctype[\s\S]*?>/gi, "")
-      .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
-      .replace(/<\/?(?:script|foreignObject)\b[^>]*>?/gi, "")
-      .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
-      .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*'|[^\s"'>#][^\s>]*)/gi, "")
-      .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)/gi, "");
+    clean = clean.replace(/<\?xml[\s\S]*?\?>/gi, "");
+    clean = clean.replace(/<!doctype[\s\S]*?>/gi, "");
+    clean = clean.replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
+    clean = clean.replace(/<\/?(?:script|foreignObject)\b[^>]*>?/gi, "");
+    clean = clean.replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
+    clean = clean.replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*'|[^\s"'>#][^\s>]*)/gi, "");
+    clean = clean.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)/gi, "");
   }
   return clean.trim();
 }

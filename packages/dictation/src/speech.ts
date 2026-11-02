@@ -60,14 +60,35 @@ function stripHtmlTags(line: string): string {
   return out + line.slice(from);
 }
 
+/** Markdown `[label](target)` spans (`![…](…)` with `opener` "!["), replaced
+ *  by index: the first "]" is reused while it stays ahead, and a missing "]"
+ *  or ")" ends the scan, so a long run of unclosed brackets stays linear. */
+function replaceLinkSpans(text: string, opener: "[" | "![", replace: (label: string) => string): string {
+  let out = "";
+  let from = 0;
+  let close = -1;
+  for (let open = text.indexOf(opener); open !== -1; open = text.indexOf(opener, open + 1)) {
+    const labelStart = open + opener.length;
+    if (close < labelStart) close = text.indexOf("]", labelStart);
+    if (close === -1) break;
+    const label = text.slice(labelStart, close);
+    if ((opener === "[" && !label) || text[close + 1] !== "(") continue;
+    const end = text.indexOf(")", close + 2);
+    if (end === -1) break;
+    out += text.slice(from, open) + replace(label);
+    from = end + 1;
+    open = end;
+  }
+  return out + text.slice(from);
+}
+
 /** Strip inline markdown from one line of prose. */
 export function speakableLine(line: string): string {
-  return stripHtmlTags(line)
+  const prose = stripHtmlTags(line)
     .replace(/^\s{0,3}#{1,6}\s+/, "")
     .replace(/^\s*>+\s?/, "")
-    .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "");
+  return replaceLinkSpans(replaceLinkSpans(prose, "![", () => " "), "[", (label) => label)
     .replace(/<?https?:\/\/[^\s>)]+>?/g, " link ")
     .replace(/`([^`]*)`/g, "$1")
     .replace(/\*\*|__|~~|\*/g, "")
