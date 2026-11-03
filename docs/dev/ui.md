@@ -2666,9 +2666,11 @@ and `online`; a 4xx is final. On the server the read uses the indexed newest
 independent Git reads together; the latency contract is
 `packages/git/test/isolationCardLatency.test.ts`. An idle read keeps only the
 held tail position described above. While a turn is in progress, answers
-already closed by a later prompt keep their response footer's box but render it
-dormant (`data-dormant`, invisible); removing those footers reflowed the whole
-transcript at every send and again at turn end. The identity panel is one per
+already closed by a later prompt keep their response footer in place and
+visible (identity and quick actions); removing those footers reflowed the
+whole transcript at every send and again at turn end, and hiding them
+(`data-dormant`, now only the working turn's own answers) left a blank band
+above the block under the answer. The identity panel is one per
 turn (its terminal answer), but every finished answer keeps its quick actions:
 an interim answer that tools, an answered question or more prose of the same
 turn follow gets an actions-only footer (`data-actions-only`). In the live turn
@@ -2683,7 +2685,10 @@ footer *is* the group gap (no top margin, a negative bottom margin of
 gap (`--conversation-group-gap` = `--timeline-gap`, 12px); touch block rows
 keep a 44px hit box but lay out as 36px (`--activity-row-trim` pulls the
 block into the gaps around it), and consecutive blocks' hit boxes meet
-(`--space-1` apart with a mouse). A thought row keeps prose's ink gap (group
+(`--space-1` apart with a mouse). The trim only reaches into a row's empty
+padding, so a look that draws the summary's box (the Chip outline, Air's pill
+and open island, Line's rule) sets it to 0 on the block and keeps the full
+gap; trimmed, a prompt under Air's pill sat 8px from it. A thought row keeps prose's ink gap (group
 gap less its header pad). A progress update (an
 interim answer followed by a block) only quiets its ink; new type metrics would
 reflow the lines right above the block that just arrived. The overflowing think

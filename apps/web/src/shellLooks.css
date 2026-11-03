@@ -1233,6 +1233,9 @@ body[data-shell-look="line"]:not(#\#) .md-code-block {
   border-radius: var(--look-r) !important;
 }
 
+/* The rule sits on the touch box's bottom edge: no touch trim under it. */
+body[data-shell-look="line"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+
 body[data-shell-look="line"]:not(#\#) .activity-group > .ui-run-summary {
   border-radius: 0 !important;
   border-bottom: 1px solid var(--look-line-strong) !important;
@@ -1489,6 +1492,10 @@ body[data-shell-look="air"]:not(#\#) .md-code-block {
   box-shadow: var(--look-shadow) !important;
   border-radius: calc(18px * var(--look-round)) !important;
 }
+
+/* The pill (and the open block's island) fill the row's whole touch box:
+   no touch trim, so they keep the full gap to the rows around them. */
+body[data-shell-look="air"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
 
 body[data-shell-look="air"]:not(#\#) .activity-group > .ui-run-summary {
   width: auto !important;

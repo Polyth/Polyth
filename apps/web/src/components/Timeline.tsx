@@ -3570,11 +3570,11 @@ export default function Timeline({
   // panel's duration stays truthful when the turn state is no longer in the
   // store. While the session is actively working no answer shows any metadata
   // row; panels appear once the turn completes.
-  // Answers closed by a later prompt keep their footer's box through the next
-  // turn (dormant: invisible while it works). Removing every completed footer
-  // while a turn ran reflowed the whole transcript at each send and again at
-  // each turn end. Only the trailing answer waits, unless a sent prompt
-  // already closes it.
+  // Answers closed by a later prompt keep their footer, visible, through the
+  // next turn: removing every completed footer while a turn ran reflowed the
+  // whole transcript at each send and again at each turn end, and an invisible
+  // one left a blank band above the block under it. Only the working turn's
+  // answers wait (dormant), unless a sent prompt already closes the turn.
   const terminalAnswers = useMemo(() => {
     const terminal = new Map<number, number>();
     let openAt = 0;
@@ -4385,7 +4385,9 @@ export default function Timeline({
                 entering={r.id === latestRowId}
                 terminal={r.kind === "assistant" && terminalAnswers.terminal.has(r.eventSeq)
                   && (!turnInProgress || pendingSends.length > 0 || r.eventSeq !== terminalAnswers.trailing)}
-                dormant={turnInProgress}
+                // Only the working turn's own answers wait: an answer a later
+                // prompt closed keeps its footer (actions, identity) in view.
+                dormant={turnInProgress && pendingSends.length === 0 && r.eventSeq > terminalAnswers.openSeq}
                 progress={r.kind === "assistant" && nextRowIsActivity(chronologicalRows, index)}
                 // An interim answer of a live turn takes its (still invisible)
                 // footer's box the moment a row lands under it, while it is

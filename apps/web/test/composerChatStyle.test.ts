@@ -325,16 +325,20 @@ test("assistant identity panel renders once per turn, after the turn completes",
   // While a turn is in progress (working, waiting on a request, or a sent
   // prompt not yet admitted) no answer shows its metadata. The terminal answer
   // of the live turn mounts its panel only after the turn completes; answers
-  // already closed by a later prompt keep the panel's box but render it
-  // dormant, so the transcript above the live turn never reflows.
+  // already closed by a later prompt keep their panel in place, so the
+  // transcript above the live turn never reflows.
   assert.match(timeline, /const sessionActive = sessionStatus === "working" \|\| sessionStatus === "waiting" \|\| pendingSends\.length > 0;/);
-  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}\s*dormant=\{turnInProgress\}/);
+  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}/);
+  // Only the working turn's own answers are dormant: a closed turn's footer
+  // (its quick actions) stays visible while the next turn works; invisible, it
+  // was a blank band above the block under it.
+  assert.match(timeline, /dormant=\{turnInProgress && pendingSends\.length === 0 && r\.eventSeq > terminalAnswers\.openSeq\}/);
+  assert.match(timeline, /\{m\.finalized && hasAnswer && \(terminal \|\| settled\) && \(/);
   assert.match(timeline, /if \(lastAssistant !== null\) terminal\.set\(lastAssistant\.eventSeq, openAt\);/);
   // Interim answers keep quick actions (no identity panel). In a live turn an
   // interim answer takes its dormant footer's box as soon as a row lands under
   // it, so the turn's end only reveals footers and moves no row below them.
   assert.match(timeline, /settled=\{r\.kind === "assistant"\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq < terminalAnswers\.openSeq\s*\|\| r\.id !== latestRowId\)\}/);
-  assert.match(timeline, /\{m\.finalized && hasAnswer && \(terminal \|\| settled\) && \(/);
   assert.match(footer, /data-actions-only=\{identity \? undefined : "true"\}/);
   assert.match(footer, /data-dormant=\{dormant \|\| undefined\}/);
   assert.match(chrome, /\.chat-response-footer\[data-dormant\] \{ visibility: hidden; \}/);
@@ -355,6 +359,14 @@ test("assistant identity panel renders once per turn, after the turn completes",
   assert.match(css, /--activity-row-trim: max\(0px, calc\(\(var\(--hit-min\) - 36px\) \/ 2\)\);/);
   assert.match(css, /\.timeline > \.msg\.activity-group \{ margin-block-end: calc\(-1 \* var\(--activity-row-trim\)\); \}/);
   assert.match(css, /\.timeline > \.msg\.activity-group \+ \.msg\.activity-group \{\s*margin-block-start: calc\(max\(var\(--space-1\), 2 \* var\(--activity-row-trim\)\) - var\(--timeline-gap\) - var\(--activity-row-trim\)\);/);
+  // The trim only reaches into a row's empty padding. A look that draws the
+  // summary's box (chip outline, Air's pill and open island, Line's rule) has
+  // none: trimmed, a prompt under the pill sat 8px from it on phones.
+  const looks = read("../src/shellLooks.css");
+  assert.match(css, /body\[data-activity-style="chip"\] \.activity-group \{[^}]*--activity-row-trim: 0px;/);
+  for (const look of ["air", "line"]) {
+    assert.match(looks, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\.activity-group \\{ --activity-row-trim: 0px; \\}`), look);
+  }
   const progress = read("../src/components/ConversationProgress.css");
   // A progress update only quiets its ink: new type metrics would reflow the
   // lines right above the block that just arrived under it.

@@ -2329,7 +2329,9 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 .msg.user { align-items: flex-end; }
 /* --activity-row-trim: on touch a block's rows keep their 44px hit box but lay
    out as 36px ones. The block reaches into the gaps around it by the trim,
-   which only its rows' empty block padding fills. */
+   which only its rows' empty block padding fills. A look that draws the
+   summary's box (a pill, an outline, a rule) has no such padding and sets
+   the trim to 0 on the block, or the drawn edge eats the gap. */
 .timeline {
   --activity-row-trim: max(0px, calc((var(--hit-min) - 36px) / 2));
 }
@@ -18191,7 +18193,9 @@ body[data-activity-style="ledger"] .activity-group-items > * + * { box-shadow: i
 
 /* Chip: the summary is an outlined pill that hugs its words (accent while
    live); the steps sit under it with no lines. */
-body[data-activity-style="chip"] .activity-group { --activity-step-inset: var(--space-3); }
+/* The outline is drawn on the row's whole touch box, so the block has no
+   empty padding for the touch trim to reach into: it keeps the full gaps. */
+body[data-activity-style="chip"] .activity-group { --activity-step-inset: var(--space-3); --activity-row-trim: 0px; }
 body[data-activity-style="chip"] .activity-group > .ui-run-summary {
   width: fit-content;
   max-width: calc(100% - 2 * var(--activity-bleed));
