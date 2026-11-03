@@ -2200,8 +2200,42 @@ view, the extent floor retains exactly enough space to prevent the browser
 from clamping the scroll, including when the working-status dock leaves and the
 scrollport grows in the completion commit. Idle layout refreshes preserve this
 position; content growing over the blank, the reader scrolling away from it, a
-new send, session switch or explicit Jump to latest clears the hold. A newly opened short chat starts naturally at the top. The
-mounted regression checks are in `apps/web/test/timelineMotion.test.ts`; the
+new send, session switch or explicit Jump to latest clears the hold. A newly opened short chat starts naturally at the top.
+
+**Opening a long chat:** a chat opens on a passive read of its newest 400
+events (`INITIAL_EVENT_WINDOW` in `init.ts`; streamed answers and thoughts are
+many chunk events, so the newest 40 were often one answer and the first frame
+showed a row or two at the top of the screen). The first frame lands at rest
+on the tail (or the saved reading position): apart from the surface's one
+reveal, no lift, entrance or fade for rows already in the log. The background
+backfill (2,000-event pages up to 4,000) then lands above without changing what is rendered: the suffix window
+keeps its first row (`heldWindowStart`, located again by its first rows' ids
+when history merges into it, `locateWindowHead` in `timelineWindow.ts`), so
+nothing the reader sees moves and no long mount runs under them. The window's
+earlier rows are revealed `TIMELINE_AUTO_CHUNK` (30) at a time once the
+reader is within a screen of its first row, anchored like Show earlier and
+never while a finger owns the scroll (the gesture's rest reveals them); at
+the top with every cached row shown, scrolling pulls the server's next page,
+which lands held the same way. The explicit Show earlier / Load earlier
+controls keep their chunk / everything reveals. A held window grows with the
+live turn up to the 150-row window and slides from there, like a window the
+reader filled by revealing history. While only part of a longer
+chat is rendered, the earlier-history host takes the free space above it
+(`margin-block-start: auto`), so a short partial transcript rests on the
+composer edge and what is revealed fills the blank over it instead of
+pushing the rows down. A user prompt that arrives with that history (a live
+turn's prompt older than the opening window) is no send: its sequence is at
+or below the tail already on screen, so it neither aligns the view on the
+focus line nor reattaches a reader who scrolled away. Treating it as one
+scrolled the view to an unpainted position and lifted every row from there,
+across the rows still in place. Pinned by the two "history that lands" /
+"held history" cases in `apps/web/test/timelineMotion.test.ts`, the window
+math in `timelineWindow.test.ts`, and the phone-over-a-slow-link case of
+`timelineMotion.live.ts`. On the old code that gate fails every run (the
+backfill mounted ~140 rows under the reader), and in most runs a row also
+glided 800–2,000 px across the rows still in place, text drawn over text.
+
+The mounted regression checks are in `apps/web/test/timelineMotion.test.ts`; the
 overflowing-chat Chromium gate is `apps/web/test/timelineMotion.live.ts`. On phones
 the floating session island covers the top of the
 timeline scrollport. Its CSS clearance (`--timeline-pad-top`) also publishes

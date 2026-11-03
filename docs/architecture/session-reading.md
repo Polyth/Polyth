@@ -93,6 +93,13 @@ are distinct; only the applied contiguous prefix is acknowledged for resume.
 HTTP reconciliation/backfill uses bounded pages and stops stale navigation or
 Space work. A connected WS owns foreground suffix reconciliation.
 
+The web client opens a chat on a passive (`prefetch=1`) newest window of 400
+events, about 30–50 KB compressed (40 events of a real chat were mostly one
+answer's chunk events), then backfills 2,000-event `beforeSeq` pages up to
+4,000 events in the background. The timeline holds that history above its
+rendered window until the reader scrolls toward it (see
+[UI: Opening a long chat](../dev/ui.md)).
+
 ## Navigator and client state
 
 `GET /api/sessions/summaries` defaults to 50 rows, at most 100, ordered by

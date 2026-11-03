@@ -1340,7 +1340,12 @@ function startSync(): void {
 // stay correct: active rewind markers are recent by construction (they sit at
 // the log tail), and the auto-backfill below extends the window past the
 // rewind TARGET so undone-range marking is complete.
-const INITIAL_EVENT_WINDOW = 40;
+// Streamed answers and thoughts arrive as many chunk events: the newest 40 of
+// a real chat were mostly one answer's chunks, so the first paint showed one
+// or two rows at the top of the screen and the whole view then jumped when
+// the backfill landed. 400 events (~30-50 KB compressed) fill a phone screen
+// several times over; the backfill then lands above without moving anything.
+const INITIAL_EVENT_WINDOW = 400;
 const BACKFILL_CHUNK = 2000;
 /** Background backfill stops here; scroll-up keeps loading beyond on demand. */
 const AUTO_BACKFILL_TARGET = 4000;

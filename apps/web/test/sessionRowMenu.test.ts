@@ -944,7 +944,7 @@ test("pointer intent wires the bounded session-tail prefetch once", async () => 
     });
     assert.deepEqual(
       fetchCalls.slice(before).filter((call) => call.url.includes("/api/sessions/s-idle/events")),
-      [{ url: "/api/sessions/s-idle/events?afterSeq=0&limit=40&prefetch=1", method: "GET" }],
+      [{ url: "/api/sessions/s-idle/events?afterSeq=0&limit=400&prefetch=1", method: "GET" }],
     );
   } finally {
     await unmount();

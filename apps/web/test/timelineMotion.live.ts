@@ -2,8 +2,10 @@
 // of every transcript row on every animation frame while (a) a live action
 // names itself in its block's line and the turn ends, (b) a revert fades its
 // cut, glides the survivors and shows the marker, (c) a long existing chat
-// opens. Contract: rows never move down while a turn is live or as it ends (a
-// revert glide is the one allowed release) and never down-then-up.
+// opens, (d) a long live chat opens on a phone over a slow link while its
+// history lands. Contract: rows never move down while a turn is live or as it
+// ends (a revert glide is the one allowed release), never down-then-up, and
+// are never drawn over each other.
 //
 // Kept OUTSIDE the default *.test.ts glob on purpose; run it explicitly:
 //
@@ -590,6 +592,16 @@ test("motion: a long session's sliding window never lifts the live tail out of v
   }
   const { page, errors } = await openSession(longSessionId, { ready: ".timeline > .msg" });
   await page.waitForSelector(".timeline > .timeline-earlier", { timeout: 20_000 });
+  // History that lands after the open waits above the window until the
+  // reader asks for it; a full, sliding window is one whose earlier rows the
+  // reader revealed. A DOM click: Playwright's click() would scroll the
+  // control into view, away from the followed tail.
+  await page.waitForFunction(() => {
+    const bar = document.querySelector<HTMLElement>(".timeline > .timeline-earlier");
+    if (!bar) return true;
+    if (!bar.querySelector("[aria-busy='true'], .ui-spinner")) bar.querySelector<HTMLButtonElement>("button")?.click();
+    return false;
+  }, undefined, { timeout: 30_000, polling: 500 });
   await settleLayout(page);
   await startSampler(page);
   const prompt = "Motion tools: run several actions in a row.";
@@ -619,5 +631,103 @@ test("motion: a long session's sliding window never lifts the live tail out of v
     .filter((move) => move.frame < liveEnd && move.delta > 0)
     .find((move) => visible(frames[move.frame - 1]!, move.id) || visible(frames[move.frame]!, move.id));
   assert.equal(sink, undefined, `row ${sink?.id} sank ${sink?.delta}px while the turn was live:\n    ${describeFrames(frames, sink?.frame ?? -1)}`);
+  assert.deepEqual(errors, []);
+});
+
+test("motion: a long live chat opened on a phone over a slow link never overlaps rows or moves one down", async () => {
+  // The newest window of a long live chat holds neither the turn's prompt nor
+  // the history before it: those arrive with the background backfill while
+  // the reader already watches the tail. That arrival once read as a send —
+  // the prompt was aligned on the focus line in an unpainted frame and every
+  // row was lifted from there, across the rows still in place (text drawn
+  // over text), and the backfill mounted a hundred rows under the reader.
+  const longId = (await post<{ id: string }>("/api/sessions", { projectId, title: "Motion marathon session" })).id;
+  for (let turn = 1; turn <= 3; turn += 1) {
+    await sendAndSettle(longId, `Marathon 30 30: settled padding turn ${turn} above the live one.`);
+  }
+  await post(`/api/sessions/${longId}/message`, { text: "Marathon 400 700: the live turn opened on a phone." });
+  await sleep(10_000);
+  const context = await browser!.newContext({
+    viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true,
+    reducedMotion: "no-preference", serviceWorkers: "block",
+  });
+  contexts.push(context);
+  await context.addInitScript(() => {
+    localStorage.setItem("polyth.prefs", JSON.stringify({ persona: "engineer", plugins: [] }));
+    localStorage.setItem("polyth.shellIntro.v1", JSON.stringify({ seenVersion: 1_000_000 }));
+    localStorage.setItem("polyth.uiSettings.v1", JSON.stringify({ glassEffect: "off" }));
+    // The longest travel any transcript row is given by a glide: a lift from
+    // an unpainted position travelled 800-2,000 px (not every run samples
+    // the overlapping frame, but every such run starts that glide).
+    const host = window as unknown as { __longestGlide: number };
+    host.__longestGlide = 0;
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, keyframes: Keyframe[] | PropertyIndexedKeyframes | null, options?: number | KeyframeAnimationOptions) {
+      const first = Array.isArray(keyframes) ? keyframes[0] : undefined;
+      const travel = /translate3d\(0(?:px)?, (-?[\d.]+)px/.exec(String(first?.transform ?? ""));
+      if (travel && this.parentElement?.classList.contains("timeline")) {
+        host.__longestGlide = Math.max(host.__longestGlide, Math.abs(Number(travel[1])));
+      }
+      return animate.call(this, keyframes, options);
+    } as typeof Element.prototype.animate;
+  });
+  // A slow phone link for API reads: the backfill lands after the first paint.
+  await context.route(/\/api\//, async (route) => {
+    try {
+      const response = await route.fetch();
+      await sleep(400);
+      await route.fulfill({ response });
+    } catch {
+      // The context closed with this request in flight (a live poll).
+    }
+  });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(String(error)));
+  // Start in another chat (the launch veil lifts over it), then open the long
+  // one the way the navigator does: an in-app open, nothing covering it.
+  await page.goto(`${BASE}/p/${projectId}/s/${workSessionId}`, { waitUntil: "load" });
+  await page.waitForSelector(".timeline > .msg", { state: "visible", timeout: 20_000 });
+  await settleLayout(page);
+  await startSampler(page);
+  await page.evaluate(() => { (window as unknown as { __longestGlide: number }).__longestGlide = 0; });
+  await page.evaluate((path) => {
+    history.pushState({}, "", path);
+    dispatchEvent(new PopStateEvent("popstate"));
+  }, `/p/${projectId}/s/${longId}`);
+  await page.waitForTimeout(8_000);
+  const all = await stopSampler(page);
+  // Frames of the long chat only: from the first one without the rows of the
+  // chat it came from.
+  const known = new Set(all[0]?.rows.map(([id]) => id) ?? []);
+  const first = all.findIndex((frame) => frame.rows.length > 0 && frame.rows.every(([id]) => !known.has(id)));
+  assert.ok(first >= 0, "the long chat painted");
+  const frames = all.slice(first);
+  const inView = (frame: MotionFrame) => frame.rows.filter(([, top, , height]) => height > 0 && top < frame.view[1] && top + height > frame.view[0]);
+  let overlap: string | null = null;
+  frames.forEach((frame, index) => {
+    const rows = inView(frame);
+    for (let i = 1; i < rows.length && overlap === null; i += 1) {
+      const [aId, aTop, , aHeight, aLabel, aMotion] = rows[i - 1]!;
+      const [bId, bTop, , , bLabel, bMotion] = rows[i]!;
+      if (aTop + aHeight - bTop > 3) {
+        overlap = `frame ${index}: row ${aId} (${aLabel} ${aMotion}) ends ${Math.round(aTop + aHeight - bTop)}px below the top of row ${bId} (${bLabel} ${bMotion})\n    ${describeFrames(frames, index)}`;
+      }
+    }
+  });
+  const visible = (frame: MotionFrame, id: number) => frame.rows.some(([row, top, , height]) =>
+    row === id && top < frame.view[1] && top + height > frame.view[0]);
+  const sink = [...rowMoves(frames)].flatMap(([id, list]) => list.map((move) => ({ id, ...move })))
+    .filter((move) => move.delta > 0)
+    .find((move) => visible(frames[move.frame - 1]!, move.id) || visible(frames[move.frame]!, move.id));
+  const mounted = frames.map((frame) => frame.rows.length);
+  const longestGlide = await page.evaluate(() => (window as unknown as { __longestGlide: number }).__longestGlide);
+  console.log(`# motion phone open: ${describeFrames(frames)}; rows mounted ${mounted[0]} → ${Math.max(...mounted)}; longest glide ${Math.round(longestGlide)}px`);
+  assert.equal(overlap, null, `rows were drawn over each other: ${overlap}`);
+  assert.ok(longestGlide <= 844, `a row glided ${Math.round(longestGlide)}px, more than the screen: it started from a position nobody saw`);
+  // The live turn adds a row every second or two; the backfill adds none.
+  assert.ok(Math.max(...mounted) - mounted[0]! <= 20,
+    `history that landed above mounted ${Math.max(...mounted) - mounted[0]!} rows under the reader instead of waiting above the window`);
+  assert.equal(sink, undefined, `row ${sink?.id} sank ${sink?.delta}px while the chat opened:\n    ${describeFrames(frames, sink?.frame ?? -1)}`);
   assert.deepEqual(errors, []);
 });

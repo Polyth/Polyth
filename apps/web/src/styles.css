@@ -6799,6 +6799,10 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .timeline-earlier {
   display: flex; gap: 8px; justify-content: center; align-items: center;
   padding: 4px 0 8px; border-bottom: 1px dashed var(--border-soft); margin-bottom: 4px;
+  /* Only part of a longer chat is rendered: what is there rests on the
+     composer edge, and the history revealed above fills the blank over it
+     instead of pushing the rows the reader sees down the screen. */
+  margin-block-start: auto;
 }
 
 /* ---------- session organization ---------- */

@@ -227,6 +227,57 @@ const runTurn = (sess, promptText) => {
   // alone, one while the previous still shows, interim prose that reaches the
   // composer edge, a burst that queues, a late straggler, a streamed answer. The motion gate watches the block hold still.
   // Other prompts in the session get the ordinary reply, so it can be padded.
+  // "Marathon <cycles> <stepMs>: ..." in any session: a long agent turn of
+  // thought → actions → interim prose cycles, like a real hour-long turn. The
+  // open gate pads a chat with fast ones and opens it during a slow one.
+  const marathon = /^Marathon (\d+) (\d+):/.exec(promptText);
+  if (marathon) {
+    const cycles = Number(marathon[1]);
+    const step = Number(marathon[2]);
+    const n = ++counter;
+    const asId = `as_${n}`;
+    const started = Date.now();
+    const at = (ms, fn) => setTimeout(fn, ms);
+    const topics = ["the device names", "the host handshake", "the mobile tests", "the server logic", "the docs", "rustfmt and clippy"];
+    let t = 0;
+    for (let c = 1; c <= cycles; c++) {
+      let thought = "";
+      for (let s = 1; s <= 2; s++) {
+        t += step;
+        const done = s === 2;
+        at(t, () => {
+          thought += `Thought ${c}.${s}: ${topics[(c + s) % topics.length]} — deciding the next command.\n`;
+          emit("message.part.updated", { part: { id: `prt_rsn_${n}_${c}`, messageID: asId, sessionID: sess.id, type: "reasoning", text: thought, revision: s, time: done ? { start: started, end: Date.now() } : { start: started } } });
+        });
+      }
+      for (let k = 1; k <= 1 + (c % 3); k++) {
+        const command = k === 1 ? `rg "${topics[c % topics.length]}" apps/web/src` : k === 2 ? "node --test apps/web/test/timelineMotion.test.ts" : "git diff --stat";
+        const part = (status, extra = {}) => ({ part: { id: `prt_tool_${n}_${c}_${k}`, messageID: asId, sessionID: sess.id, type: "tool", callID: `call_m_${n}_${c}_${k}`, tool: "bash", state: { status, input: { command, description: `Step ${c}.${k}` }, ...extra } } });
+        t += step;
+        at(t, () => emit("message.part.updated", part("running")));
+        t += step * 2;
+        at(t, () => emit("message.part.updated", part("completed", { output: `${command}: ok`, title: command })));
+      }
+      let text = "";
+      const paragraphs = 1 + (c % 2);
+      for (let p = 1; p <= paragraphs; p++) {
+        t += step;
+        const done = p === paragraphs;
+        at(t, () => {
+          text += `Found ${c}.${p}: ${topics[(c * 3 + p) % topics.length]} — the control stream closed after the task ended, and the host could drop the connection before the refusal frame arrived. Fixing the test.\n\n`;
+          emit("message.part.updated", { part: { id: `prt_txt_${n}_${c}`, messageID: asId, sessionID: sess.id, type: "text", text, revision: p, time: done ? { start: started, end: Date.now() } : { start: started } } });
+        });
+      }
+    }
+    t += step;
+    at(t, () => {
+      emit("message.updated", { info: { id: asId, sessionID: sess.id, role: "assistant", time: { completed: Date.now() }, tokens: { input: 96, output: 120 }, cost: 0.004, providerID: "synthetic", modelID: "fable-mini" } });
+      sess.messages.push(wireMessage(sess.id, "assistant", `Marathon ${n} done.`, asId));
+      persistState();
+      emit("session.idle", { sessionID: sess.id });
+    });
+    return;
+  }
   if (sess.turnBehavior === "tools" && promptText.startsWith("Motion tools:")) {
     const n = ++counter;
     const asId = `as_${n}`;
