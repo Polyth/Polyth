@@ -7,6 +7,7 @@
 | First create races a transient runtime fence/readiness | Both | Acquire retries the fence briefly, then creates once; a terminal refusal keeps its real code and message | `packages/server/test/sessionCreateIdempotency.test.ts` | — |
 | SSE and pull observe the same fact | Legacy/V2 | One semantic claim and canonical append | `packages/backend-opencode/test/reconciliation.test.ts` | P3 |
 | Old-generation callback arrives after replacement | Both | Rejected before translation | `packages/backend-opencode/test/runtimeLifecycle.test.ts` | — |
+| Event stream rejects every connection while health answers | Both | Five consecutive attempts that never stayed connected replace the owned generation (at most once per ten minutes); a borrowed runtime keeps backing off and is never stopped | `packages/backend-opencode/test/streamRecovery.test.ts` | — |
 | Same owned-local runtime restarts | Both | Same authority, higher generation | `packages/backend-opencode/test/regressionOwnedAuthorityRestart.test.ts` | — |
 | Same SSH host/path restarts | Both | Same authority, higher generation | `packages/backend-opencode/test/regressionOwnedAuthorityRestart.test.ts` | — |
 | SSH host or remote path changes | Both | New authority; old backend binding rejected | `packages/backend-opencode/test/regressionOwnedAuthorityRestart.test.ts` | — |
