@@ -41,8 +41,11 @@ process.stdin.on("data", (chunk) => {
   while ((end = buffer.indexOf("\\n")) >= 0) {
     const message = JSON.parse(buffer.slice(0, end));
     buffer = buffer.slice(end + 1);
-    log({ command: message.type });
-    if (message.id) process.stdout.write(JSON.stringify({ type: "response", id: message.id, command: message.type, success: true, data: {} }) + "\\n");
+    log({ command: message.type, ...(message.images ? { images: message.images } : {}) });
+    const data = message.type === "get_state"
+      ? { sessionFile: process.cwd() + "/pi-session.jsonl", sessionId: "remote-session", isStreaming: false }
+      : {};
+    if (message.id) process.stdout.write(JSON.stringify({ type: "response", id: message.id, command: message.type, success: true, data }) + "\\n");
   }
 });
 process.stdin.on("end", () => process.exit(0));
@@ -52,8 +55,9 @@ writeFileSync(join(bin, "pi"), `#!/bin/sh\nexec "${process.execPath}" "${agent}"
 chmodSync(join(bin, "pi"), 0o755);
 
 const commands: Array<readonly string[]> = [];
-/** A fake host whose HOME is its own directory; `models` gives it a Pi login. */
-const fakeHost = (label: string, models: boolean): { remote: RemoteHost; home: string } => {
+/** A fake host whose HOME is its own directory; `models` gives it a Pi login.
+ *  `hostWorkspace` is the host's own copy of the project path. */
+const fakeHost = (label: string, models: boolean, hostWorkspace?: string): { remote: RemoteHost; home: string } => {
   const home = join(root, "homes", label);
   mkdirSync(home, { recursive: true });
   if (models) writeFileSync(join(home, "host-models"), "");
@@ -67,7 +71,8 @@ const fakeHost = (label: string, models: boolean): { remote: RemoteHost; home: s
       processCommand(argv, opts) {
         commands.push(argv);
         const env = Object.entries(opts?.env ?? {}).map(([name, value]) => `${name}=${value}`);
-        return { command: "env", args: ["-u", "PI_CODING_AGENT_DIR", `HOME=${home}`, `PATH=${bin}:${process.env.PATH}`, ...env, "sh", "-c", `cd "$0" 2>/dev/null || cd "$HOME"; exec "$@"`, opts?.cwd ?? "", ...argv] };
+        const cwd = hostWorkspace && opts?.cwd === workspace ? hostWorkspace : opts?.cwd ?? "";
+        return { command: "env", args: ["-u", "PI_CODING_AGENT_DIR", `HOME=${home}`, `PATH=${bin}:${process.env.PATH}`, ...env, "sh", "-c", `cd "$0" 2>/dev/null || cd "$HOME"; exec "$@"`, cwd, ...argv] };
       },
     },
   };
@@ -198,4 +203,30 @@ test("a connection set to the server's own Pi configuration never receives this 
     await runtime.dispose();
   }
   assert.equal(existsSync(join(home, ".local")), false);
+});
+
+test("a remote Pi turn reads its staged image on the host, byte for byte", async () => {
+  // The upload exists only in the host's copy of the project; this machine
+  // has no such file at the project path.
+  const hostCopy = join(root, "host-copy");
+  mkdirSync(join(hostCopy, "_inbox"), { recursive: true });
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0x0d, 0x0a, 0x80]);
+  writeFileSync(join(hostCopy, "_inbox", "a-image.png"), bytes);
+  const image = { id: "i1", name: "image.png", mime: "image/png", size: bytes.length, kind: "image" as const, path: "_inbox/a-image.png" };
+  assert.equal(existsSync(join(workspace, image.path)), false);
+  const { remote } = fakeHost("files@remote", true, hostCopy);
+  const runtime = await createPiProvider(hostFor(remote)).createRuntime(context);
+  try {
+    await runtime.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "Remote", cwd: workspace }, "create-op");
+    const admitted = await runtime.startTurnOperation!({ sessionId: "canonical", text: "look", attachments: [image] }, "turn-op");
+    assert.equal(admitted.kind, "confirmed");
+    assert.ok(commands.some((argv) => argv[0] === "sh" && argv.at(-1) === image.path), "the image is read through the host");
+    const log = join(hostCopy, "pi-log.jsonl");
+    const prompt = readFileSync(log, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { command?: string; images?: unknown })
+      .find((entry) => entry.command === "prompt");
+    assert.deepEqual(prompt?.images, [{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" }]);
+  } finally {
+    await runtime.dispose();
+  }
 });

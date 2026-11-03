@@ -4799,8 +4799,10 @@ export function createSessionService(deps: {
     beginAutomaticTitleResolution(sessionId, sessionRuntime.get(sessionId));
     const current = await store.projection(sessionId);
     if (current?.harnessTransition && !deps.isShuttingDown?.()) {
+      // A switch that cannot prove release is withdrawn; the dispatch below
+      // then runs the queue on the harness that kept the chat.
       void withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId))
-        .then(() => dispatchQueue(sessionId)).catch((error) => console.error("[polyth] harness switch remains pending", error));
+        .then(() => dispatchQueue(sessionId)).catch((error) => console.error(`[polyth] harness switch did not finish for ${sessionId}`, error));
     }
     // A keep-alive turn only refreshed the prompt cache: nobody is told it
     // finished and no completion consumer (goals, recap, memory, isolation,
@@ -7402,7 +7404,17 @@ export function createSessionService(deps: {
       await withSessionLock(sessionId, async () => {
         if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
         let proj = await store.projection(sessionId);
-        if (proj?.harnessTransition) proj = await finishHarnessSwitchUnderLock(sessionId);
+        if (proj?.harnessTransition) {
+          try {
+            proj = await finishHarnessSwitchUnderLock(sessionId);
+          } catch (error) {
+            // A withdrawn switch hands the queue back to the harness that kept
+            // the chat; only a transition that is still pending stops here.
+            proj = await store.projection(sessionId);
+            if (proj?.harnessTransition) throw error;
+            console.warn(`[polyth] harness switch withdrawn for ${sessionId}; queued work stays on the current harness`, error);
+          }
+        }
         if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
         if (lastTurnId.has(sessionId)) await releaseRecordedStoppedTurn(sessionId);
         if (turnActive(sessionId)) return;
@@ -9197,8 +9209,43 @@ export function createSessionService(deps: {
   };
 
   /** Called under the existing session lock. Release is idempotent against an
-   * exact binding; target creation uses the existing durable mutation journal. */
-  const finishHarnessSwitchUnderLock = async (sessionId: string, retryFailed = false): Promise<SessionProjection> => {
+   * exact binding; target creation uses the existing durable mutation journal.
+   * A requested transition that fails before its old execution is proven
+   * released is withdrawn at once (`harness/switch-cancelled` with `reason`):
+   * the old harness keeps the chat, its binding and generation, and nothing is
+   * started or replayed. A shutdown keeps the intent durable instead, and a
+   * transition already past release keeps its own failed/retry path. */
+  const finishHarnessSwitchUnderLock = async (
+    sessionId: string,
+    retryFailed = false,
+    reason = "release-unproven",
+  ): Promise<SessionProjection> => {
+    const requested = (await store.projection(sessionId))?.harnessTransition;
+    try {
+      return await advanceHarnessSwitchUnderLock(sessionId, retryFailed);
+    } catch (error) {
+      if (requested?.phase === "requested" && !deps.isShuttingDown?.()) {
+        await withdrawUnprovenSwitch(sessionId, requested.id, reason, error)
+          .catch((withdrawError) => console.error(`[polyth] could not withdraw harness switch ${requested.id}`, withdrawError));
+      }
+      throw error;
+    }
+  };
+
+  const withdrawUnprovenSwitch = async (sessionId: string, transitionId: string, reason: string, error: unknown) => {
+    const current = (await store.projection(sessionId))?.harnessTransition;
+    if (current?.id !== transitionId || current.phase !== "requested") return;
+    const code = (error as { code?: unknown }).code;
+    await commitHarnessIntent(sessionId, { harnessTransition: undefined }, "harness/switch-cancelled", {
+      transitionId,
+      targetHarnessId: current.targetHarnessId,
+      reason,
+      ...(typeof code === "string" ? { code } : {}),
+      message: error instanceof Error ? error.message : String(error),
+    });
+  };
+
+  const advanceHarnessSwitchUnderLock = async (sessionId: string, retryFailed: boolean): Promise<SessionProjection> => {
     let projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
     let transition = projection.harnessTransition;
@@ -9308,7 +9355,13 @@ export function createSessionService(deps: {
         ), transition.id);
         if (!released) return unreleasable();
       } else {
-        if (!old?.releaseExecution) throw Object.assign(new Error("This harness cannot yet prove execution has stopped"), { code: "unsupported" });
+        if (!old?.releaseExecution) {
+          const sourceHarnessId = projection.resolvedHarnessId ?? old?.harnessId;
+          const name = (sourceHarnessId && deps.harnesses?.displayName?.(sourceHarnessId)) || sourceHarnessId;
+          throw Object.assign(new Error(name
+            ? `${name} cannot prove its run has stopped here, so the chat stays on ${name}`
+            : "This harness cannot prove its run has stopped here, so the chat stays on it"), { code: "unsupported" });
+        }
         released = await boundedRuntimeAwait(old.releaseExecution(releaseBinding, transition.id), transition.id);
       }
       if (released.kind !== "confirmed") throw outcomeError(released);
@@ -9550,8 +9603,9 @@ export function createSessionService(deps: {
       selection: { ...selection },
     });
     try {
-      return await finishHarnessSwitchUnderLock(sessionId);
+      return await finishHarnessSwitchUnderLock(sessionId, false, "runtime-restart-unproven");
     } catch (error) {
+      // The shared withdrawal keeps a shutdown's intent; a restart never does.
       const current = (await store.projection(sessionId))?.harnessTransition;
       if (current?.id === transition.id && current.phase === "requested") {
         await commitHarnessIntent(sessionId, { harnessTransition: undefined }, "harness/switch-cancelled", {

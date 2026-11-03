@@ -7,7 +7,7 @@ import type { HarnessContext, HarnessProvider, HarnessRegistry, RuntimeSessionBi
 import { agentBetaEnabled, captureCapabilityLaunch, provisioningTarget, releaseHarnessProcessExecution } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { npmCliInstallCommand } from "@polyth/harness-runtime/installers";
-import { probeRemoteHarness, remoteHarnessConfigSource, remoteHarnessLaunch, resolveRemoteHarnessHost, type RemoteProcessHost } from "@polyth/harness-runtime/remote-host";
+import { probeRemoteHarness, readRemoteFileBytes, remoteHarnessConfigSource, remoteHarnessLaunch, resolveRemoteHarnessHost, type RemoteProcessHost } from "@polyth/harness-runtime/remote-host";
 import { createHarnessAccountFamily, harnessCommandLine, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createPiRpc } from "./rpc.ts";
@@ -59,6 +59,8 @@ const piAccountStatus = async (account?: ResolvedHarnessAccount): Promise<Harnes
 };
 
 const PI_REMOTE_BINARY = "pi";
+/** Polyth's upload cap: no prepared attachment is larger. */
+const PI_REMOTE_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 const writeGenerated = async (file: string, content: string): Promise<void> => {
   const current = await readFile(file, "utf8").catch(() => undefined);
@@ -241,8 +243,16 @@ export function createPiProvider(host: ServerPackageHost, account?: ResolvedHarn
         const { rpc } = await connectPi(context, { stateFile: stateFile(context), ephemeral: context.privateSession === true, harnessId, ...launch });
         // Print-mode title and utility runs are local CLI processes; the
         // remote leg keeps Polyth's emulated title. Release proof covers only
-        // this machine, so the runtime offers no release hook.
-        return createPiRuntime(context, rpc, { harnessId });
+        // this machine, so the runtime offers no release hook. Staged uploads
+        // and project images live on the host, so they are read there.
+        const remote = launch.remote;
+        return createPiRuntime(context, rpc, {
+          harnessId,
+          readAttachment: (path) => readRemoteFileBytes(remote, path, {
+            cwd: context.cwd,
+            maxBytes: PI_REMOTE_ATTACHMENT_MAX_BYTES,
+          }),
+        });
       }
       const generated = generatedPaths(context);
       await Promise.all([

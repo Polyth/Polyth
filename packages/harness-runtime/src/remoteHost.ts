@@ -9,7 +9,7 @@
 // local account directories and env never cross the boundary. The one
 // explicit exception is a backend's bounded configuration projection for a
 // host with none of its own (Pi: backend-pi/src/remoteConfig.ts).
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import type { HarnessContext, HarnessProbe, RemoteHost, SshHarnessConfigSource } from "@polyth/contracts";
 import { serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
@@ -160,6 +160,51 @@ export async function readRemoteFile(remote: RemoteProcessHost, path: string): P
   if (code === 3) return undefined;
   if (code !== 0) throw unreachable(remote, stderr);
   return stdout;
+}
+
+/** A file's exact bytes on the host. The program's stdout is a raw pipe
+ * (`processCommand` never allocates a TTY), so binary content crosses
+ * unchanged. A relative `path` resolves against `cwd`. A missing file is
+ * `not-found`; a file over `maxBytes` is `too-large` and stops at the cap. */
+export function readRemoteFileBytes(
+  remote: RemoteProcessHost,
+  path: string,
+  opts: { cwd?: string; maxBytes: number; timeoutMs?: number },
+): Promise<Uint8Array> {
+  const { command, args } = remote.processCommand(
+    ["sh", "-c", '[ -f "$1" ] || exit 3; exec cat -- "$1"', "sh", path],
+    opts.cwd ? { cwd: opts.cwd } : undefined,
+  );
+  return new Promise((resolve, reject) => {
+    // The cap counts file bytes only; ssh diagnostics on stderr never trip it.
+    const child = spawn(command, args, { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"] });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let stderr = "";
+    let settled = false;
+    const settle = (error: Error | undefined, data?: Uint8Array) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        child.kill("SIGKILL");
+        reject(error);
+      } else resolve(data!);
+    };
+    const timer = setTimeout(() => settle(unreachable(remote, "timed out")), opts.timeoutMs ?? 60_000);
+    child.stdout.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > opts.maxBytes) settle(failure("too-large", `File on ${remote.label} is over ${opts.maxBytes} bytes`));
+      else chunks.push(chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < 4_096) stderr += chunk.toString(); });
+    child.on("error", (error) => settle(unreachable(remote, error.message)));
+    child.on("close", (code) => {
+      if (code === 0) settle(undefined, Buffer.concat(chunks, size));
+      else if (code === 3) settle(failure("not-found", `File not found on ${remote.label}`));
+      else settle(unreachable(remote, stderr));
+    });
+  });
 }
 
 /** Atomically replace a private (0600) file on the host. With `ifAbsent`, an
