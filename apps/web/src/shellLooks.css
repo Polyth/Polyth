@@ -349,6 +349,13 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail 
   border-radius: 999px !important;
 }
 
+/* These looks separate the two segments by two pixels, so the running disc
+   already sits two pixels further from the divider: shift it one pixel less
+   than the standard phone inset to keep even space on both sides. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-mobile .composer-rail .composer-send-split > .composer-send-options::before {
+  inset-inline-start: calc((var(--tap) - var(--icon-sm)) / 4 - 2px);
+}
+
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-send-options {
   background: transparent !important;
   box-shadow: none !important;

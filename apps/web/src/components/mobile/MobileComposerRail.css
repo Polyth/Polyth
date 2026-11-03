@@ -59,7 +59,7 @@
   align-items: start;
   gap: var(--mobile-rail-gap);
   order: 2;
-  padding: 0 var(--space-3) var(--space-2);
+  padding: 0 var(--space-4) var(--space-2);
   /* The narrow-composer rule scrolls the desktop rail; here the leading run
      scrolls on its own, and the rail must not clip the Remove badges. */
   overflow: visible;

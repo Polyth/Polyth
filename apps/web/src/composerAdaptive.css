@@ -725,6 +725,36 @@ action off a narrow phone's composer. */
     color: var(--muted);
   }
 
+  /* The running primary is a 40px disc inside its 44px segment, so the
+     segment edge sits two pixels away from the contour while the chevron
+     keeps its wider 16px icon padding. Centre the divider in that visible
+     gap instead of leaving it flush with the disc: eight pixels on each
+     side at the default tokens. */
+  .composer-mobile .composer-rail .composer-send-split > .composer-send-options::before {
+    inset-inline-start: calc((var(--tap) - var(--icon-sm)) / 4 - 1px);
+  }
+
+  /* The running primary draws the same 40px centred disc as the solid Send it
+     replaces: a complete 40px contour inside the 44px tap box, two pixels
+     clear of its segment edge, so the fill and the gauge share one circle
+     and the chevron never cuts its outline. */
+  .composer-mobile .composer-rail .composer-send-split > .composer-running-send {
+    background: transparent;
+    /* Every look's split turns the running segment into a circle; a look that
+       fills the action solidly (paper, editorial) keeps its own fill. */
+    border-radius: 999px;
+  }
+
+  .composer-mobile .composer-rail .composer-send-split > .composer-running-send.context-liquid-host::after {
+    inset: 2px;
+    border-width: 1.5px;
+    border-inline-end-width: 1.5px;
+  }
+
+  .composer-mobile .composer-send-split > .composer-running-send > .context-liquid {
+    inset: 2px;
+  }
+
   /* A phone row scrolls rather than squeezing: each card keeps its width. */
   .composer-mobile .composer-tray .attachment-pill {
     flex: 0 0 auto;
@@ -1003,7 +1033,8 @@ action off a narrow phone's composer. */
 }
 
 /* The outline is its own layer so the shared focus ring keeps its box-shadow.
-   Inside the split it stays open toward the chevron segment. */
+   Inside the desktop split it stays open toward the chevron segment; phones
+   draw it as one centred disc instead (see the phone block below). */
 .composer-simple .composer-rail :is(.send, .stop).context-liquid-host::after {
   content: "";
   position: absolute;

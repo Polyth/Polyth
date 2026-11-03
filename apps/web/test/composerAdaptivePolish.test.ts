@@ -155,6 +155,49 @@ test("expanded phone composer uses one compact spacing and control rhythm", asyn
   );
 });
 
+test("the phone running primary keeps one inset contour, a look-owned fill and the 16px gutter", async () => {
+  const [adaptive, styles, rail] = await Promise.all([
+    read("../src/composerAdaptive.css"),
+    read("../src/styles.css"),
+    read("../src/components/mobile/MobileComposerRail.css"),
+  ]);
+  assert.match(
+    adaptive,
+    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-running-send\s*\{[^}]*background:\s*transparent;[^}]*border-radius:\s*999px;/s,
+    "the running primary drops the half-pill fill and keeps one round tap box",
+  );
+  assert.match(
+    adaptive,
+    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-running-send\.context-liquid-host::after\s*\{[^}]*inset:\s*2px;[^}]*border-inline-end-width:\s*1\.5px;/s,
+    "the phone contour closes as a 40px disc two pixels clear of the divider",
+  );
+  assert.match(
+    adaptive,
+    /\.composer-mobile \.composer-send-split > \.composer-running-send > \.context-liquid\s*\{\s*inset:\s*2px;\s*\}/s,
+    "the gauge fill is clipped to the same 40px disc",
+  );
+  assert.match(
+    adaptive,
+    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-send-options::before\s*\{[^}]*inset-inline-start:\s*calc\(\(var\(--tap\) - var\(--icon-sm\)\) \/ 4 - 1px\);/s,
+    "the phone divider is centred between the 40px disc and the chevron, not flush with the disc",
+  );
+  assert.match(
+    styles,
+    /body\[data-hide-borders="true"\] \.composer-simple \.composer-rail :is\(\.send, \.stop\)\.context-liquid-host::after\s*\{\s*border-color:\s*var\(--context-liquid-tone\) !important;/s,
+    "the state contour survives borderless appearance",
+  );
+  assert.match(
+    rail,
+    /\.composer-mobile\.composer-mobile-grid \.mobile-composer-rail \{[^}]*padding:\s*0 var\(--space-4\) var\(--space-2\);/s,
+    "the phone rail keeps the editor's 16px trailing gutter",
+  );
+  assert.match(
+    styles,
+    /\.composer-mobile\.composer-expanded \.composer-rail \{[^}]*padding:\s*var\(--space-2\) var\(--space-4\) var\(--space-3\);/s,
+    "the non-grid engaged rail uses the same 16px gutter",
+  );
+});
+
 test("the runtime cascade leaves the compact resting row to its canonical rules", async () => {
   const adaptive = await read("../src/composerAdaptive.css");
   const effective = await readWebStyles();

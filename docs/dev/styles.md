@@ -88,7 +88,9 @@ header and row lines are backgrounds or inset shadows from `--borderless-edge`,
 so a quote never degrades to a bare indent. Activity rings drawn as
 borders are signals, not outlines, and keep theirs the same way: `.ui-spinner`,
 a session row's running ring (`.session-lead-spinner`, also in the subagent
-branch) and the phone navigator's `.mobile-nav-running-ring`. Never draw an intentional line from
+branch), the phone navigator's `.mobile-nav-running-ring` and the composer's
+running context contour (`.context-liquid-host::after`, which is the context
+gauge described in [ui](ui.md)). Never draw an intentional line from
 `--hair*`/`--border-soft`; borderless mode sets them to transparent.
 
 **Wallpaper wash.** A wallpaper is painted under 76% of `--bg`, and chat chrome

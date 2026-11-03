@@ -12361,7 +12361,7 @@ display: none;
     align-items: center;
     flex-wrap: nowrap;
     gap: 7px;
-    padding: var(--space-2) var(--space-3) var(--space-3);
+    padding: var(--space-2) var(--space-4) var(--space-3);
   }
   /* Chips never shrink into overlapping glyphs: each keeps its truncated
      width and the config group itself scrolls sideways when space runs out.
@@ -20280,6 +20280,11 @@ body[data-hide-borders="true"] .ui-spinner {
 body[data-hide-borders="true"] .session-lead-spinner {
   border-color: color-mix(in srgb, currentColor 26%, transparent) !important;
   border-top-color: currentColor !important;
+}
+/* The running composer action's contour is its context gauge, not a surface
+   boundary: it keeps the action's tone when borders are hidden. */
+body[data-hide-borders="true"] .composer-simple .composer-rail :is(.send, .stop).context-liquid-host::after {
+  border-color: var(--context-liquid-tone) !important;
 }
 
 body[data-hide-borders="true"] :focus-visible {

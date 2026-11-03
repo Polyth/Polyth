@@ -1818,8 +1818,14 @@ the liquid switches the submerged part to the ink color along the wave, and
 any rule that sizes the host glyph through a child combinator must also size
 that copy. The level transitions through the registered `--context-fill`;
 reduced-motion and low-resource modes keep a still level. The idle Send stays
-solid. `contextLiquid.test.ts` measures glyph alignment and tones through the
-real cascade.
+solid. On phones the running primary draws its contour as one complete 40px
+disc centred in the 44px tap box, and the split's divider is centred in the
+visible gap between that disc and the chevron instead of sitting flush with
+the disc, so the fill, the gauge and the space around them stay balanced;
+desktop keeps the split's open edge. The contour is a state gauge, so
+*Hide interface borders* keeps it while surface outlines clear ([styles](styles.md)).
+`contextLiquid.test.ts` measures glyph alignment and tones through the real
+cascade.
 
 **Phone session menu (⋮):** the actions island holds a narrower ⋮,
 ✎ New session and ⧉ Open tools (`MobileSessionMenu.tsx`; a new chat has no ⋮).
@@ -1947,7 +1953,9 @@ running morph instead of snapping the card at the end. Engaged, the model/effort
 
 The rail is two runs of `--tap` launchers, not a grid of lanes: the leading
 run reads from the inline start (and scrolls horizontally when it overflows),
-and the run beside Send hugs Send/Stop, which cannot be removed. The space
+and the run beside Send hugs Send/Stop, which cannot be removed. Both rails
+keep the editor's 16px text gutter, so the leading tap cell and the primary
+action's trailing edge line up with the editor's text edges. The space
 between them is whatever the leading run leaves. Membership and order are what
 is saved, so a narrower screen, a wider Stop/split action or a launcher with
 nothing to show (`isAvailable` false, which gives up its place outside
