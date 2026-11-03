@@ -213,7 +213,7 @@ when the locale switches between LTR and RTL.
 | `--package-window-header-h` | Shared compact package-window header height. |
 | `--package-window-resize-hit` | In-frame resize hit area; host-owned, never package-overridden. |
 | `--hit-min` | Density seam: extra hit-area floor. 0px on fine pointers; core raises it to `--tap` under coarse pointers. Use in `max()` with the control's visual size. |
-| `--nav-tool-step` | Phone Navigator only (set on `.mobile-navigator`): pitch of the toolbar's trailing tools: the full `--tap` floor, so each tool keeps a 44px box. |
+| `--nav-tool-step` | Phone Navigator only (set on `.mobile-navigator`): width of the toolbar's inner tools: the full `--tap` floor, so each tool keeps a 44px box. Their glyphs are placed by ink (`--nav-tool-gap`), not centred in it. |
 
 Controls use the smallest visual height appropriate to their density while
 retaining a `--tap` hit area on phone/coarse-pointer surfaces. Do not enlarge
@@ -230,12 +230,12 @@ bounces it far past the overhang) and that `contentOwnsSwipe`
 (`swipeSurface.ts`) treats as owning horizontal swipes. The transcript and
 the phone new chat follow this (`heroSidewaysPan.test.ts`).
 
-One exception: a trailing cluster of icon tools set to a chat row's mark
-rhythm (the phone Navigator's project New chat and ⋮, `docs/dev/ui.md`; the
-Navigator's toolbar tools keep full 44px boxes) cannot give every glyph a 44px-wide box. Each target there
-is the full bar or row height and runs to its neighbours' targets, so no tap
-falls between them; the width is the room between neighbouring glyphs, never
-below WCAG 2.2's 24px (`mobileNavigatorLayout.test.ts` pins both).
+The phone Navigator's trailing icon clusters keep this floor too: its toolbar
+tools and a project's New chat and ⋮ are full 44px boxes with one glyph
+size, and both clusters are spaced by visible ink (the edge and every
+glyph, or the pills, stand one gap apart, `docs/dev/ui.md`). Edge
+controls never drop under 44px on the narrowest phone axis
+(`mobileNavigatorLayout.test.ts` pins both).
 
 An inline control inside prose owns the same floor, but its box must never
 claim less height than its own content: a `.resource-link.file-ref` is an

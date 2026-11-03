@@ -41,11 +41,11 @@
      - Rows and the toolbar reach --nav-edge (room for the current row's
        rounded wash). Controls on the end edge keep their whole 44px box but
        put their glyph on --nav-axis, 24px from the screen: a target may run
-       to the edge, the ink keeps a margin. Close, project ⋯ and session ⋯
-       share that column. The thumb aims at the glyph, and a phone's rounded
-       edge and case lip make the last few points hard to press, so the axis
-       keeps the glyph clear of the screen edge (close's ink lands on the
-       platform's 16pt margin) while the start side matches its ink.
+       to the edge, the ink keeps a margin. Project ⋯ and session ⋯ share
+       that column, and close's × ends where their dots do. The thumb aims
+       at the glyph, and a phone's rounded edge and case lip make the last
+       few points hard to press, so the axis keeps the glyph clear of the
+       screen edge while the start side matches its ink.
      - Project marks start on the --nav-gutter content edge, which is the
        ⋮ ink's own edge (the end axis less half a mark): the empty margin
        measures the same at both ends of the row, so the list does not read
@@ -56,9 +56,9 @@
        gutter + an icon-xl mark + one --space-2 step, 47px in. */
   --nav-edge: 6px;
   --nav-axis: 24px;
-  /* The press circle of the end column's small controls (New chat and every
-     ⋮), centred on the axis and a fixed size wherever the axis sits; the
-     inset is the room left between it and the row's end. */
+  /* The press circle of a chat row's ⋮, centred on the axis and a fixed
+     size wherever the axis sits; the inset is the room left between it and
+     the row's end. */
   --nav-dots-wash: calc(var(--icon-md) + var(--space-3) - 2px);
   --nav-dots-inset: calc(var(--nav-axis) - var(--nav-edge) - var(--nav-dots-wash) / 2);
   /* The start side's ink margin: the ⋮ glyph's edge, half an icon in from
@@ -68,15 +68,47 @@
   --nav-row-inset: calc(var(--nav-gutter) - var(--nav-edge));
   --nav-lead-gap: var(--space-2);
   --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
-  /* A row's trailing marks (and a title with none) pair with its ⋮: they end
-     12px clear of the dots' inner ink, which sits about 1px past the axis,
-     so the body runs this far into the ⋮ control's 44px box. */
-  --nav-mark-end: calc(var(--nav-axis) + var(--space-3) + 1px);
+  /* A row's trailing marks (the running clock, and a title with none) are
+     spaced by ink like a project's cluster: the dots, centred on the axis,
+     stand as far from the last mark as from the screen edge. That air is
+     the axis less half the dots' ink on both sides, so the marks end two
+     axes in, on the column where a project's New chat bubble ends. The body
+     runs this far into the ⋮ control's 44px box. */
+  --nav-mark-end: calc(2 * var(--nav-axis));
   --nav-mark-tuck: calc(var(--nav-edge) + var(--tap) - var(--nav-mark-end));
+  /* A project row's trailing cluster (status pills, New chat, ⋮) is spaced
+     by what the eye sees, not by its boxes: the screen edge, the ⋮ dots,
+     New chat's bubble and the pills stand one --nav-cluster-gap of air
+     apart. Spacing the 20px boxes evenly does not: on Lucide's 24-unit grid
+     the dots are r1 circles, about 3px of ink with 8px of empty box on each
+     side, and the bubble spans 2-22; both grow by half the stroke. The gap
+     is the air between the screen edge and ⋮ (⋮ stays on the axis) unless
+     two 44px targets need more room, which only happens on the narrowest
+     axis, where the two inner gaps share the extra. */
+  --nav-action-stroke: 1.8;
+  --nav-dots-ink: calc(var(--icon-lg) * (2 + var(--nav-action-stroke)) / 24);
+  --nav-bubble-inset: calc(var(--icon-lg) * (2 - var(--nav-action-stroke) / 2) / 24);
+  --nav-cluster-edge: calc(var(--nav-axis) - var(--nav-dots-ink) / 2);
+  --nav-cluster-ink: calc(var(--nav-dots-ink) + var(--icon-lg) - 2 * var(--nav-bubble-inset));
+  --nav-cluster-span: max(2 * var(--tap), 3 * var(--nav-cluster-edge) + var(--nav-cluster-ink));
+  --nav-cluster-gap: calc((var(--nav-cluster-span) - var(--nav-cluster-edge) - var(--nav-cluster-ink)) / 2);
   /* The toolbar's tools are the bar's primary controls: each keeps a full
-     tap-floor box, so neighbouring glyphs sit one tap step apart and a press
-     never lands on the tool beside it. */
+     tap-floor box, so a press never lands on the tool beside it. Their
+     glyphs are spaced by ink too: the bar's edge, Close's ×, the Settings
+     gear, Select's box and Search's lens stand one --nav-tool-gap apart.
+     That gap is the project cluster's edge air, so × ends where the ⋮ dots
+     below it do, unless four 44px targets need more room (the narrowest
+     axis). Ink on Lucide's 24-unit grid, each grown by half the stroke:
+     × 6-18, gear 1-23, select 3-22, lens 4-21. Select and the lens lean
+     toward the end, so their end-side insets swap in RTL (see the end). */
   --nav-tool-step: var(--tap);
+  --nav-unit: calc(var(--icon-lg) / 24);
+  --nav-close-ink: calc(var(--nav-unit) * (12 + var(--nav-action-stroke)));
+  --nav-gear-ink: calc(var(--nav-unit) * (22 + var(--nav-action-stroke)));
+  --nav-select-ink: calc(var(--nav-unit) * (19 + var(--nav-action-stroke)));
+  --nav-select-end: calc(var(--nav-unit) * (2 - var(--nav-action-stroke) / 2));
+  --nav-lens-end: calc(var(--nav-unit) * (3 - var(--nav-action-stroke) / 2));
+  --nav-tool-gap: max(var(--nav-cluster-edge), (3 * var(--tap) - var(--nav-close-ink) - var(--nav-gear-ink) - var(--nav-select-ink)) / 4);
   /* Default keeps the phone tap floor. A denser list is the user's explicit
      Interface density choice, never a silently shrunk touch target. */
   --nav-row-session: var(--tap);
@@ -294,6 +326,14 @@ html[data-appearance="light"] .mobile-navigator {
      column). The column is the rows' ⋮ axis; a look that floats the rows in
      from the edge moves it in with them. */
   --nav-bar-axis: var(--nav-axis);
+  /* Where each tool's ink starts, from the bar's end edge: the look's inset,
+     then one gap before every glyph. Close's target reaches half a gap past
+     its ×, never under the tap floor; the other targets are a tap wide. */
+  --nav-close-at: calc(var(--nav-bar-axis) - var(--nav-axis) + var(--nav-tool-gap));
+  --nav-gear-at: calc(var(--nav-close-at) + var(--nav-close-ink) + var(--nav-tool-gap));
+  --nav-select-at: calc(var(--nav-gear-at) + var(--nav-gear-ink) + var(--nav-tool-gap));
+  --nav-lens-at: calc(var(--nav-select-at) + var(--nav-select-ink) + var(--nav-tool-gap));
+  --nav-close-box: max(var(--tap), calc(var(--nav-close-at) + var(--nav-close-ink) + var(--nav-tool-gap) / 2));
   padding:
     calc(var(--space-1) + var(--safe-top))
     var(--safe-right)
@@ -334,9 +374,8 @@ html[data-appearance="light"] .mobile-navigator {
   --nav-search-open: var(--motion-stack);
   --nav-search-close: var(--motion-surface);
   --nav-search-ease: var(--motion-stack-ease);
-  /* The tool glyph's centre from the bar's end edge: close's half-step box,
-     two tool steps and half of the search tool's own. */
-  --nav-search-axis: calc(var(--nav-bar-axis) + 3 * var(--nav-tool-step));
+  /* The search glyph's centre from the bar's end edge. */
+  --nav-search-axis: calc(var(--nav-lens-at) - var(--nav-lens-end) + var(--icon-lg) / 2);
   --nav-search-seed: calc(var(--icon-lg) + var(--space-3));
 }
 
@@ -448,13 +487,13 @@ button.mobile-nav-place:active:where(:not(:disabled)) {
 }
 
 /* ---- trailing clusters ---------------------------------------------------
- * A project's New chat and ⋮ step the way a chat row's marks step toward its
- * ⋮: about one --space-3 of air between neighbouring glyphs. The toolbar's
- * tools step by the full tap floor (--nav-tool-step) instead. Close and ⋮
- * keep their glyph on the --nav-axis edge column. A target is the full bar
- * or row height and the room between its neighbours' glyphs; a project
- * action is narrower than the tap floor but never below the 24px of WCAG
- * 2.2 AA. The press wash is a circle round the glyph. */
+ * A chat row's marks step toward its ⋮ with about one --space-3 of air
+ * between neighbouring glyphs. The toolbar's tools and a project's New chat
+ * and ⋮ are 44px targets instead, with their glyphs spaced by visible ink
+ * (--nav-tool-gap, --nav-cluster-gap). Every ⋮ keeps its glyph on the
+ * --nav-axis edge column. A target is the full bar or row height and the
+ * room between its neighbours' glyphs. The press wash is a circle round the
+ * glyph. */
 .mobile-nav-tools {
   display: flex;
   align-items: center;
@@ -463,23 +502,41 @@ button.mobile-nav-place:active:where(:not(:disabled)) {
   margin-inline-start: auto;
 }
 
+/* A tool's glyph stands --nav-glyph-end from its box's end, wherever the
+   ink rhythm puts it; a margin, since the lens may overhang its box by the
+   empty edge of its 20px square on the narrowest axis. */
 .mobile-nav-tools > .mobile-nav-tool {
   --nav-wash: calc(var(--icon-lg) + var(--space-3));
-  --nav-wash-end: calc((var(--nav-tool-step) - var(--nav-wash)) / 2);
+  --nav-wash-end: calc(var(--nav-glyph-end) + (var(--icon-lg) - var(--nav-wash)) / 2);
   width: var(--nav-tool-step);
   height: 100%;
+  place-items: center end;
   border-radius: 0;
   isolation: isolate;
 }
 
-/* Close: the glyph on the bar's axis and the target out to the screen edge,
-   half a step wide on the inner side, so its glyph is one step from
-   Settings'. */
+.mobile-nav-tools > .mobile-nav-tool > svg {
+  margin-inline-end: var(--nav-glyph-end);
+  stroke-width: var(--nav-action-stroke);
+}
+
+.mobile-nav-tools > .mobile-nav-search-toggle {
+  --nav-glyph-end: calc(var(--nav-lens-at) - var(--nav-close-box) - 2 * var(--nav-tool-step) - var(--nav-lens-end));
+}
+
+.mobile-nav-tools > .mobile-nav-select-toggle {
+  --nav-glyph-end: calc(var(--nav-select-at) - var(--nav-close-box) - var(--nav-tool-step) - var(--nav-select-end));
+}
+
+/* Settings. */
+.mobile-nav-tools > .mobile-nav-tool:nth-last-child(2) {
+  --nav-glyph-end: calc(var(--nav-gear-at) - var(--nav-close-box) - (var(--icon-lg) - var(--nav-gear-ink)) / 2);
+}
+
+/* Close: the target out to the screen edge. */
 .mobile-nav-tools > .mobile-nav-tool:last-child {
-  --nav-wash-end: calc(var(--nav-bar-axis) - var(--nav-wash) / 2);
-  width: calc(var(--nav-bar-axis) + var(--nav-tool-step) / 2);
-  padding-inline-end: calc(var(--nav-bar-axis) - var(--icon-lg) / 2);
-  place-items: center end;
+  --nav-glyph-end: calc(var(--nav-close-at) - (var(--icon-lg) - var(--nav-close-ink)) / 2);
+  width: var(--nav-close-box);
 }
 
 .mobile-nav-tools > .mobile-nav-tool::before,
@@ -655,7 +712,7 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 /* On the search tool the dot marks the glyph's empty top-end corner. */
 .mobile-nav-search-toggle .mobile-nav-filter-dot {
   top: calc((100% - var(--icon-lg)) / 2 - 1px);
-  inset-inline-end: calc((var(--nav-tool-step) - var(--icon-lg)) / 2 - 1px);
+  inset-inline-end: calc(var(--nav-glyph-end) - 1px);
 }
 
 .mobile-nav-search-back:active:where(:not(:disabled)),
@@ -921,8 +978,9 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   min-width: 0;
   min-height: var(--tap);
   padding-block: 0;
-  /* Half the cluster gap; New chat's box brings the other half. */
-  padding-inline: var(--nav-lead-gap) calc(var(--space-3) / 2);
+  /* New chat's box carries the cluster gap before its bubble, so the name
+     or pills end where that box starts. */
+  padding-inline: var(--nav-lead-gap) 0;
   text-align: start;
   color: inherit;
   background: transparent;
@@ -972,36 +1030,41 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   margin-inline-end: calc(var(--nav-edge) * -1);
 }
 
-/* New chat's glyph ends where a chat row's marks end (--nav-mark-end), one
-   --space-3 clear of the dots, and the name or status pills stop one
-   --space-3 before it (the main button's end padding plus this box's start
-   padding): the same rhythm as a chat row's marks (see the trailing
-   clusters). The row's height is the target's height. */
+/* New chat and ⋮ are a project's primary controls, drawn like the toolbar's
+   tools (the same icon-lg glyph and press circle) and a full tap box each
+   (Apple HIG 44pt). Their glyphs are placed by the cluster's visible
+   rhythm (--nav-cluster-gap), so a glyph need not sit mid-box; its press
+   circle stays centred on it. The row's height is the target's height. */
 .mobile-nav-project-action {
-  --nav-new-chat-end: calc(var(--nav-mark-end) - var(--nav-axis) - var(--icon-md) / 2);
-  --nav-wash: var(--nav-dots-wash);
-  --nav-wash-end: calc(var(--nav-new-chat-end) + (var(--icon-md) - var(--nav-wash)) / 2);
+  --nav-wash: calc(var(--icon-lg) + var(--space-3));
+  --nav-glyph-start: calc(var(--nav-cluster-gap) - var(--nav-bubble-inset));
+  --nav-wash-end: calc(var(--tap) - var(--nav-glyph-start) - (var(--icon-lg) + var(--nav-wash)) / 2);
   position: relative;
-  width: calc(var(--space-3) / 2 + var(--icon-md) + var(--nav-new-chat-end));
+  width: var(--tap);
   height: var(--tap);
-  padding-block: 0;
-  padding-inline: calc(var(--space-3) / 2) var(--nav-new-chat-end);
+  padding: 0;
+  /* New chat's bubble one cluster gap past the pills, at the box's start. */
+  padding-inline-start: var(--nav-glyph-start);
+  place-items: center start;
   border-radius: 0;
   isolation: isolate;
 }
 
-/* ⋮: the glyph on the axis, the target out to the screen edge. */
+/* ⋮: the glyph on the axis, as Close's, and the target out to the screen
+   edge and in to New chat's box. */
 .mobile-navigator .mobile-nav-project-action[aria-haspopup] {
   --nav-wash-end: calc(var(--nav-axis) - var(--nav-wash) / 2);
-  width: calc(var(--nav-axis) + var(--icon-md) / 2);
+  width: calc(var(--nav-cluster-span) - var(--tap));
   padding: 0;
-  place-items: center start;
+  padding-inline-end: calc(var(--nav-axis) - var(--icon-lg) / 2);
+  place-items: center end;
 }
 
 .mobile-nav-project-action svg,
 .mobile-nav-project-action .ui-icon {
-  width: var(--icon-md);
-  height: var(--icon-md);
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  stroke-width: var(--nav-action-stroke);
 }
 
 /* Live work stays visible on the project line without stealing title space.
@@ -1495,7 +1558,8 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 }
 
 /* Each present mark brings its own lead-in, so an empty group costs no
-   width. */
+   width. The first is wider: it parts the marks from the title, the rest
+   only from each other. */
 .mobile-nav-session-trailing {
   display: flex;
   align-items: center;
@@ -1507,7 +1571,15 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   margin-inline-start: var(--space-2);
 }
 
+.mobile-nav-session-trailing > :first-child { margin-inline-start: var(--space-3); }
+
 .mobile-nav-session-trailing:empty { display: none; }
+
+/* In the Pinned group the pin is hidden; marks holding nothing else would
+   keep their lead-in and push the clock off the marks' edge. */
+.mobile-navigator .mobile-nav-pinned .mobile-nav-session-flags:not(:has(> :not(.mobile-nav-pin-icon))) {
+  display: none;
+}
 
 .mobile-nav-duration {
   color: var(--accent);
@@ -1764,4 +1836,11 @@ body[data-hide-borders="true"] .mobile-nav-running-ring {
    edge follows the axis, so the two margins stay equal. */
 @media (max-width: 360px) {
   .mobile-navigator { --nav-edge: 4px; --nav-axis: 20px; }
+}
+
+/* Glyphs are not mirrored, so in RTL the end side of Select's box and
+   Search's lens is their wider left inset. */
+html[dir="rtl"] .mobile-navigator {
+  --nav-select-end: calc(var(--nav-unit) * (3 - var(--nav-action-stroke) / 2));
+  --nav-lens-end: calc(var(--nav-unit) * (4 - var(--nav-action-stroke) / 2));
 }

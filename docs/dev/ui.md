@@ -3835,22 +3835,27 @@ content edge that is the ⋮ glyph's own edge (the end axis less half a glyph,
 same at both ends of a row; a session's state mark is centred in the same
 leading column, and search's Back glyph on that column's centre. Names,
 titles, pagination and the empty text share one start
-edge 47px in (gutter + mark + 8px). On the end side close, project ⋯ and session ⋯ glyphs share one
+edge 47px in (gutter + mark + 8px). On the end side project ⋯ and session ⋯ glyphs share one
 column 24px from the screen (`--nav-axis`): the thumb aims at the glyph and a
 phone's rounded edge and case lip make the last few points hard to press, so
-the axis sits clear of the screen's rounded edge (close's ink
-lands on the platform's 16pt margin) while every target still runs out to the
-edge. Close's column is the toolbar's `--nav-bar-axis`: `--nav-axis` unless an
+the axis sits clear of the screen's rounded edge while every target still
+runs out to the edge. Close's × ends where those ⋮ dots do (see the toolbar
+below). The toolbar's `--nav-bar-axis` is `--nav-axis` unless an
 interface style floats the rows in from the edge (Air insets it with its
-islands, so close stays on their ⋮; inside an island Air also gives the rows
+islands, so close moves in with their ⋮; inside an island Air also gives the rows
 their own `--nav-row-inset`, so a mark sits as far in from the island's side
-as from its top and names, chats, Add project and the title follow it). New chat and every ⋮ draw the same 28px press circle centred on that
-axis (`--nav-dots-wash`), whatever the axis. A row's trailing marks (isolation, merge,
-running clock, an agent's next wake) end 12px clear of the ⋮ dots
-(`--nav-mark-end`, 37px from the screen): the body runs `--nav-mark-tuck`
-into the ⋮ control's 44px target. A
-title with no marks runs to that same edge (the row grid has no column gap,
-each present mark brings its own 8px lead-in), so the last few pixels of a
+as from its top and names, chats, Add project and the title follow it). A chat row's ⋮ draws a 28px press circle centred on that
+axis (`--nav-dots-wash`), whatever the axis; a project's New chat and ⋮ use
+the toolbar tools' 32px circle. A row's trailing marks (isolation, merge,
+running clock, an agent's next wake) are spaced by ink like a project's
+cluster: the last mark stands as far from the ⋮ dots as the dots from the
+screen edge (22.6px on the 24px axis), so marks end two axes in
+(`--nav-mark-end`, 48px from the screen), on the column where a project's
+New chat bubble ends. The body runs `--nav-mark-tuck` into the ⋮ control's
+44px target. A title with no marks runs to that same edge (the row grid has
+no column gap; the first present mark brings a 12px lead-in from the title,
+the next ones 8px each, and in the Pinned group the hidden pin leaves none
+behind), so the last few pixels of a
 long title sit over the ⋮ target; only a subagent pill, a real control,
 stays clear of it. Rows keep a 6px edge for the current row's rounded wash.
 Small phones (≤360px) use an 11px content edge, a 20px end column and a 4px
@@ -3878,16 +3883,30 @@ focus), and the bar tools' keyboard ring is their round wash, not the slot.
 Sort and filter is a circle in the field's round end cap, and a choice
 away from the default puts a dot on the search tool as well. The field is
 the tools' 44px height and ends on the content edge.
+A project's New chat and ⋮ are the row's primary controls and are drawn
+like the toolbar's tools: a full 44px box each and the toolbar's 20px glyph
+(`--icon-lg`, stroke `--nav-action-stroke`), ⋮ on the axis. The cluster is
+spaced by visible ink, not by boxes: the screen edge, the ⋮ dots, New
+chat's bubble and the status pills (or the name) stand one
+`--nav-cluster-gap` apart, which is the air between the screen edge and the
+dots (22.4px on a 24px axis). Even 20px boxes do not give even air, because
+the dots are about 3px of ink with 8px of empty box on each side. On the
+narrowest 20px axis that gap would squeeze a target under 44px, so there
+the two inner gaps share the extra (about 24px each, 18.4px at the edge).
 The toolbar's tools are the bar's primary controls and each keeps a full
-44px box: their glyphs sit one tap step apart (`--nav-tool-step`, the tool
-pitch), and close's box runs from half a step inside its glyph out to the
-screen edge. A project's New chat and ⋮ step like a chat row's marks toward
-its ⋮: 12px of air between neighbouring glyphs, New chat ends on
-`--nav-mark-end`, and status pills stop 12px before New chat. Their press
-wash is a circle round the glyph. Project targets are the full row height
-and split the room between neighbouring glyphs, so a tap never lands
-between two actions, but they are narrower than 44px (never below WCAG
-2.2's 24px): the exception `styles.md` records for trailing icon clusters. Search's Back and a row's ⋮ keep a 44px target that runs out
+44px box (close's runs out to the screen edge and half a gap past its ×).
+Their glyphs are spaced by ink the same way: the bar's edge, close's ×,
+the Settings gear, Select's box and Search's lens stand one
+`--nav-tool-gap` apart. That gap is the project cluster's edge air, so the
+× ends where the ⋮ dots below it do and the whole end side shares one
+22.4px rhythm; its centre sits about 4px inside the ⋮ column because the ×
+is wider. On the narrowest axis four 44px targets need a wider gap, so the
+toolbar's gaps are all about 20.8px there. The glyphs' ink spans are
+recorded on Lucide's 24-unit grid in `MobileNavigator.css`; Select's box
+and the lens are not symmetric, so their end-side insets swap in RTL. The
+closed search pill and the filter dot follow the lens. Every phone ⋮ is the stroked vertical ellipsis
+(`MoreVerticalIcon`), whose dots stay legible at row size. Their press wash
+is a circle round the glyph and their targets are the full row height. Search's Back and a row's ⋮ keep a 44px target that runs out
 to the edge through a transparent `::after`; press rules set
 `background-color` only.
 Hierarchy is size and weight together: a project name uses the user's
