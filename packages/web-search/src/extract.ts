@@ -67,58 +67,218 @@ export function attribute(attrs: string, name: string): string | null {
 const hasAttribute = (attrs: string, name: string): boolean =>
   new RegExp(`(?:^|\\s)${name}(?:\\s*=|\\s|$)`, "i").test(attrs);
 
+// Character classes of the tokenizer. `isSpace` is exactly JavaScript's `\s`, which
+// the attribute regexes above also use.
+const isSpace = (code: number): boolean =>
+  code === 0x20 || (code >= 0x09 && code <= 0x0d) || code === 0xa0 || code === 0x1680
+  || (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 || code === 0x202f
+  || code === 0x205f || code === 0x3000 || code === 0xfeff;
+const isAsciiLetter = (code: number): boolean => (code | 0x20) >= 0x61 && (code | 0x20) <= 0x7a;
+const isWordChar = (code: number): boolean =>
+  isAsciiLetter(code) || (code >= 0x30 && code <= 0x39) || code === 0x5f;
+const isTagNameChar = (code: number): boolean => isWordChar(code) || code === 0x3a || code === 0x2d;
+/** Anything but whitespace, quotes, `>`, `/` and `=`. */
+const isAttributeNameChar = (code: number): boolean =>
+  !isSpace(code) && code !== 0x22 && code !== 0x27 && code !== 0x3e && code !== 0x2f && code !== 0x3d;
+
+/** `source` holds lower-case ASCII `name` at `at`, ignoring ASCII case only. */
+const asciiCaseEquals = (source: string, at: number, name: string): boolean => {
+  for (let index = 0; index < name.length; index += 1) {
+    const code = source.charCodeAt(at + index);
+    if ((code >= 0x41 && code <= 0x5a ? code | 0x20 : code) !== name.charCodeAt(index)) return false;
+  }
+  return true;
+};
+
+// Opening-tag scanner states: `<name` is followed by `( attr( = value)?)* /? >`.
+const AFTER_VALUE = 0; // after the tag name or a quoted value: whitespace, "/" or ">"
+const SPACE = 1; // whitespace that may start another attribute
+const NAME = 2; // inside an attribute name
+const NAME_SPACE = 3; // whitespace after an attribute name, where "=" may still follow
+const EQUALS = 4; // after "=", before the value
+const UNQUOTED = 5; // inside an unquoted value; "/" belongs to the value
+const SLASH = 6; // "/" that must close the tag
+
+const LIST_SCOPE: ReadonlySet<string> = new Set(["ul", "ol"]);
+const TABLE_SCOPE: ReadonlySet<string> = new Set(["table"]);
+const DL_SCOPE: ReadonlySet<string> = new Set(["dl"]);
+const P_GROUP: ReadonlySet<string> = new Set(["p"]);
+
+/**
+ * Builds the element tree in one linear pass. Markup that does not form a complete tag
+ * is text, as `<` followed by the rest. A failed tag is looked at only once: the opening
+ * tag scanner is deterministic, so a (position, state) pair a failed scan went through
+ * fails again for any later `<` that reaches it (`<div <div <div …` without a `>`).
+ */
 export function parseHtml(html: string): ElementNode {
   const source = html.length > MAX_HTML_CHARS ? html.slice(0, MAX_HTML_CHARS) : html;
+  const length = source.length;
   const root: ElementNode = { tag: "#root", attrs: "", children: [] };
   const stack: ElementNode[] = [root];
   const current = () => stack[stack.length - 1]!;
   const closeTo = (index: number) => { stack.length = Math.max(1, index); };
-  const findOpen = (names: ReadonlySet<string>, stopAt?: ReadonlySet<string>): number => {
+  const findOpen = (matches: (tag: string) => boolean, stopAt?: ReadonlySet<string>): number => {
     for (let index = stack.length - 1; index > 0; index -= 1) {
       const tag = stack[index]!.tag;
-      if (names.has(tag)) return index;
+      if (matches(tag)) return index;
       if (stopAt?.has(tag)) return -1;
     }
     return -1;
   };
-  const token = /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?(?:\]\]>|$)|<![^>]*>|<\?[^>]*>|<\/([a-zA-Z][\w:-]*)\s*>|<([a-zA-Z][\w:-]*)((?:\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"'][^\s>]*))?)*)\s*(\/?)>|[^<]+|</g;
-  let match: RegExpExecArray | null;
-  while ((match = token.exec(source))) {
-    const [text, closing, opening, attrs = "", selfClose] = match;
-    if (closing) {
-      const tag = closing.toLowerCase();
-      const index = findOpen(new Set([tag]), tag === "li" ? new Set(["ul", "ol"]) : tag === "td" || tag === "th" || tag === "tr" ? new Set(["table"]) : undefined);
+
+  // The next ">" at or after `from`; callers ask with growing `from`, so one search serves many.
+  let gtFrom = 0;
+  let gtAt = -2;
+  const nextGt = (from: number): number => {
+    if (gtAt === -1 && from >= gtFrom) return -1;
+    if (gtAt < from || from < gtFrom) gtAt = source.indexOf(">", from);
+    gtFrom = from;
+    return gtAt;
+  };
+
+  // One bit per scanner state for every position a failed opening-tag scan went through.
+  let doomed: Uint8Array | null = null;
+  let attrsEnd = 0;
+  let selfClose = false;
+  /** End of the opening tag whose attributes start at `from`, or -1. */
+  const scanAttributes = (from: number, mark: boolean): number => {
+    let state = AFTER_VALUE;
+    attrsEnd = from;
+    for (let pos = from; ; pos += 1) {
+      if (doomed) {
+        const bit = 1 << state;
+        if (doomed[pos]! & bit) return -1;
+        if (mark) doomed[pos] = doomed[pos]! | bit;
+      }
+      if (pos >= length) return -1;
+      const code = source.charCodeAt(pos);
+      switch (state) {
+        case EQUALS:
+          if (isSpace(code)) break;
+          if (code === 0x3e) return -1;
+          if (code === 0x22 || code === 0x27) {
+            const close = source.indexOf(code === 0x22 ? "\"" : "'", pos + 1);
+            if (close === -1) return -1;
+            pos = close;
+            attrsEnd = close + 1;
+            state = AFTER_VALUE;
+            break;
+          }
+          attrsEnd = pos + 1;
+          state = UNQUOTED;
+          break;
+        case UNQUOTED:
+          if (code === 0x3e) { selfClose = false; return pos + 1; }
+          if (isSpace(code)) state = SPACE;
+          else attrsEnd = pos + 1;
+          break;
+        case SLASH:
+          if (code === 0x3e) { selfClose = true; return pos + 1; }
+          return -1;
+        default: {
+          if (code === 0x3e) { selfClose = false; return pos + 1; }
+          if (code === 0x2f) { state = SLASH; break; }
+          const afterName = state === NAME || state === NAME_SPACE;
+          if (isSpace(code)) { state = afterName ? NAME_SPACE : SPACE; break; }
+          if (code === 0x3d && afterName) { state = EQUALS; break; }
+          if (state !== AFTER_VALUE && isAttributeNameChar(code)) { attrsEnd = pos + 1; state = NAME; break; }
+          return -1;
+        }
+      }
+    }
+  };
+
+  const openElement = (tag: string, attrs: string, end: number): number => {
+    const group = AUTO_CLOSE[tag];
+    if (group) {
+      const boundary = tag === "li" ? LIST_SCOPE : tag === "tr" || tag === "td" || tag === "th" ? TABLE_SCOPE : tag === "dt" || tag === "dd" ? DL_SCOPE : undefined;
+      const index = findOpen((open) => group.has(open), boundary);
       if (index > 0) closeTo(index);
-      continue;
     }
-    if (opening) {
-      const tag = opening.toLowerCase();
-      const group = AUTO_CLOSE[tag];
-      if (group) {
-        const boundary = tag === "li" ? new Set(["ul", "ol"]) : tag === "tr" || tag === "td" || tag === "th" ? new Set(["table"]) : tag === "dt" || tag === "dd" ? new Set(["dl"]) : undefined;
-        const index = findOpen(group, boundary);
-        if (index > 0) closeTo(index);
-      }
-      if (BLOCK_CLOSES_P.has(tag)) {
-        const index = findOpen(new Set(["p"]));
-        if (index > 0) closeTo(index);
-      }
-      const node: ElementNode = { tag, attrs, children: [] };
-      current().children.push(node);
-      if (VOID.has(tag) || selfClose) continue;
-      if (RAW_TEXT.has(tag)) {
-        const end = new RegExp(`</${tag}\\b[^>]*>`, "gi");
-        end.lastIndex = token.lastIndex;
-        const found = end.exec(source);
-        node.children.push(source.slice(token.lastIndex, found ? found.index : source.length));
-        token.lastIndex = found ? end.lastIndex : source.length;
-        continue;
-      }
-      if (stack.length < MAX_DEPTH) stack.push(node);
-      continue;
+    if (BLOCK_CLOSES_P.has(tag)) {
+      const index = findOpen((open) => P_GROUP.has(open));
+      if (index > 0) closeTo(index);
     }
-    if (text.startsWith("<!") || text.startsWith("<?")) continue;
-    current().children.push(text);
+    const node: ElementNode = { tag, attrs, children: [] };
+    current().children.push(node);
+    if (VOID.has(tag) || selfClose) return end;
+    if (RAW_TEXT.has(tag)) {
+      // Raw text runs to the first `</tag` (any case, then a non-word character) that a ">" follows.
+      let rawEnd = length;
+      let resume = length;
+      for (let at = source.indexOf("</", end); at !== -1; at = source.indexOf("</", at + 2)) {
+        const after = at + 2 + tag.length;
+        if (after > length || !asciiCaseEquals(source, at + 2, tag)) continue;
+        if (after < length && isWordChar(source.charCodeAt(after))) continue;
+        const close = nextGt(after);
+        if (close !== -1) { rawEnd = at; resume = close + 1; }
+        break;
+      }
+      node.children.push(source.slice(end, rawEnd));
+      return resume;
+    }
+    if (stack.length < MAX_DEPTH) stack.push(node);
+    return end;
+  };
+
+  /** End of the markup at `start` (a "<") after handling it, or -1 when it is text. */
+  const markup = (start: number): number => {
+    const next = source.charCodeAt(start + 1);
+    if (next === 0x21) { // "!"
+      if (source.startsWith("<!--", start)) {
+        const end = source.indexOf("-->", start + 4);
+        return end === -1 ? length : end + 3;
+      }
+      if (source.startsWith("<![CDATA[", start)) {
+        const end = source.indexOf("]]>", start + 9);
+        return end === -1 ? length : end + 3;
+      }
+      const end = nextGt(start + 2);
+      return end === -1 ? -1 : end + 1;
+    }
+    if (next === 0x3f) { // "?"
+      const end = nextGt(start + 2);
+      return end === -1 ? -1 : end + 1;
+    }
+    if (next === 0x2f) { // "/"
+      if (!isAsciiLetter(source.charCodeAt(start + 2))) return -1;
+      let pos = start + 3;
+      while (pos < length && isTagNameChar(source.charCodeAt(pos))) pos += 1;
+      const nameEnd = pos;
+      while (pos < length && isSpace(source.charCodeAt(pos))) pos += 1;
+      if (source.charCodeAt(pos) !== 0x3e) return -1;
+      const tag = source.slice(start + 2, nameEnd).toLowerCase();
+      const index = findOpen((open) => open === tag, tag === "li" ? LIST_SCOPE : tag === "td" || tag === "th" || tag === "tr" ? TABLE_SCOPE : undefined);
+      if (index > 0) closeTo(index);
+      return pos + 1;
+    }
+    if (!isAsciiLetter(next)) return -1;
+    let nameEnd = start + 2;
+    while (nameEnd < length && isTagNameChar(source.charCodeAt(nameEnd))) nameEnd += 1;
+    const end = scanAttributes(nameEnd, false);
+    if (end === -1) {
+      doomed ??= new Uint8Array(length + 1);
+      scanAttributes(nameEnd, true);
+      return -1;
+    }
+    return openElement(source.slice(start + 1, nameEnd).toLowerCase(), source.slice(nameEnd, attrsEnd), end);
+  };
+
+  let pos = 0;
+  while (pos < length) {
+    const lt = source.indexOf("<", pos);
+    if (lt === -1) {
+      current().children.push(source.slice(pos));
+      break;
+    }
+    if (lt > pos) current().children.push(source.slice(pos, lt));
+    const end = markup(lt);
+    if (end === -1) {
+      current().children.push("<");
+      pos = lt + 1;
+    } else {
+      pos = end;
+    }
   }
   return root;
 }
@@ -131,6 +291,13 @@ function find(node: ElementNode, predicate: (element: ElementNode) => boolean, o
     find(child, predicate, out);
   }
   return out;
+}
+
+function contains(node: ElementNode, predicate: (element: ElementNode) => boolean): boolean {
+  for (const child of elements(node)) {
+    if (predicate(child) || contains(child, predicate)) return true;
+  }
+  return false;
 }
 
 function textOf(node: Node): string {
@@ -197,7 +364,7 @@ function preText(node: Node): string {
 }
 
 function renderTable(node: ElementNode, context: RenderContext): string {
-  if (find(node, (element) => element.tag === "table").length > 0) return block(renderChildren(node, context));
+  if (contains(node, (element) => element.tag === "table")) return block(renderChildren(node, context));
   const rows = find(node, (element) => element.tag === "tr").map((row) =>
     elements(row)
       .filter((cell) => cell.tag === "td" || cell.tag === "th")
