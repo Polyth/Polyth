@@ -11,8 +11,13 @@
 //
 // Instead the docks and, while the reader follows the tail, the transcript
 // move by `transform` alone: animations the compositor (Core Animation on
-// iOS) runs without the main thread, on the keyboard's own curve. The layout
-// changes only where nothing is moving (mobileViewport.ts):
+// iOS) runs without the main thread, on the keyboard's own curve. The
+// transcript column's lower edge always rides with its dock, so the column
+// never reaches under the composer; a transcript that keeps its place (the
+// reader is away from the tail) is held there by its own children riding the
+// other way. A dock that slid over a still column relied on the two layers'
+// paint order, and iOS WebKit painted the transcript over the composer. The
+// layout changes only where nothing is moving (mobileViewport.ts):
 // - a keyboard that covers more (it opens, or grows) is ridden first, and the
 //   layout is committed once it has landed;
 // - a keyboard that covers less (it closes, or shrinks) is committed at once,
@@ -45,7 +50,7 @@ interface RiderState {
   /** The edge the ride keeps in place: a dock's composer card bottom (the
    *  dock's own height changes with the keyboard state — rows hide, the
    *  home-indicator clearance hands over — while the card is what the eye
-   *  follows), the transcript column's top. Visual: layout + ride offset. */
+   *  follows), the transcript's top. Visual: layout + ride offset. */
   edge: number;
   /** The content rider's scroll offset when captured. */
   scrollTop: number;
@@ -124,7 +129,11 @@ export function primeKeyboardRide(target: EventTarget | null): void {
   if (!dock || !visible(dock)) return;
   prime(dock);
   const content = contentFor(dock);
-  if (content) prime(content);
+  if (!content) return;
+  prime(content);
+  // The column and its children ride together (one of them may only hold the
+  // transcript in place): primed apart, one would start a frame after the other.
+  for (const child of innerOf(content)) prime(child);
 }
 
 function visible(el: HTMLElement): boolean {
@@ -145,6 +154,18 @@ function contentFor(dock: HTMLElement): HTMLElement | null {
 
 function scrollerOf(content: HTMLElement): HTMLElement | null {
   return content.querySelector<HTMLElement>(SCROLLER);
+}
+
+/** What the transcript column holds (the transcript, an import notice). They
+ *  ride the difference between the transcript's move and the column's. */
+function innerOf(content: HTMLElement): HTMLElement[] {
+  return Array.from(content.children) as HTMLElement[];
+}
+
+/** The transcript's visual top: the column's ride plus its children's. */
+function contentEdge(content: HTMLElement): number {
+  const inner = innerOf(content)[0];
+  return content.getBoundingClientRect().top + (inner ? currentOffset(inner) : 0);
 }
 
 /** The docks that would ride: the text entry the keyboard serves sits in one. */
@@ -176,7 +197,7 @@ export function captureRide(): RideSnapshot | null {
       scrollHeight = scroller.scrollHeight;
       clientHeight = scroller.clientHeight;
       following = scrollHeight - clientHeight - scroller.scrollTop <= TAIL_EPSILON;
-      riders.push({ el: content, role: "content", edge: content.getBoundingClientRect().top, scrollTop: scroller.scrollTop });
+      riders.push({ el: content, role: "content", edge: contentEdge(content), scrollTop: scroller.scrollTop });
     }
   }
   return riders.length ? { riders, following, scrollHeight, clientHeight } : null;
@@ -314,8 +335,12 @@ function play(el: HTMLElement, from: number, to: number, target: RideTarget): vo
 export function rideKeyboard(snapshot: RideSnapshot | null, target: RideTarget): void {
   if (!snapshot) return;
   residualObserver?.done();
-  const contents: Array<{ rider: RiderState; to: number }> = [];
+  const contents: ContentRide[] = [];
+  // The move of the dock a transcript column belongs to (captureRide lists
+  // each column right after its dock).
+  let column: Move = { from: 0, to: 0 };
   for (const rider of snapshot.riders) {
+    if (rider.role === "dock") column = { from: 0, to: 0 };
     if (!rider.el.isConnected) {
       animations.delete(rider.el);
       continue;
@@ -324,16 +349,28 @@ export function rideKeyboard(snapshot: RideSnapshot | null, target: RideTarget):
     stop(rider.el);
     if (rider.role === "dock") {
       const layoutEdge = dockAnchor(rider.el).getBoundingClientRect().bottom;
-      play(rider.el, rider.edge - layoutEdge, target.dockOffset, target);
+      column = { from: rider.edge - layoutEdge, to: target.dockOffset };
+      play(rider.el, column.from, column.to, target);
     } else {
-      const to = contentOffset(snapshot, rider, target.dockOffset);
-      contents.push({ rider, to });
-      startContent(rider, to, target);
+      for (const child of innerOf(rider.el)) stop(child);
+      const ride: ContentRide = { rider, column, content: { from: contentFrom(rider), to: contentOffset(snapshot, rider, target.dockOffset) } };
+      contents.push(ride);
+      startContent(ride, target);
     }
   }
   // Timeline's own follow re-scrolls the transcript after layout, in its
   // ResizeObserver; read the settled scroll offset after it and re-aim.
   if (contents.length && typeof ResizeObserver === "function") watchContent(contents, target);
+}
+
+interface Move { from: number; to: number }
+
+interface ContentRide {
+  rider: RiderState;
+  /** The dock's move: the column's lower edge stays on the dock's top. */
+  column: Move;
+  /** The transcript's move; the column's children ride what the column does not. */
+  content: Move;
 }
 
 function contentFrom(rider: RiderState): number {
@@ -343,27 +380,39 @@ function contentFrom(rider: RiderState): number {
   return rider.edge - layoutTop + scrolled;
 }
 
-function startContent(rider: RiderState, to: number, target: RideTarget): void {
-  play(rider.el, contentFrom(rider), to, target);
+function startContent({ rider, column, content }: ContentRide, target: RideTarget): void {
+  play(rider.el, column.from, column.to, target);
+  playInner(rider.el, content, column, target);
 }
 
-function watchContent(contents: Array<{ rider: RiderState; to: number }>, target: RideTarget): void {
+/** The column's children: the transcript's move less the column's, on the
+ *  same curve and clock, so a transcript that keeps its place stays still
+ *  while the column's lower edge rides up and down with the composer. */
+function playInner(column: HTMLElement, content: Move, columnMove: Move, target: RideTarget, startTime?: CSSNumberish | null): void {
+  const clock = typeof startTime === "number" ? startTime : animations.get(column)?.startTime;
+  for (const child of innerOf(column)) {
+    play(child, content.from - columnMove.from, content.to - columnMove.to, target);
+    const ride = animations.get(child);
+    if (ride && typeof clock === "number") ride.startTime = clock;
+  }
+}
+
+function watchContent(contents: ContentRide[], target: RideTarget): void {
   let finished = false;
   const observer = new ResizeObserver(() => {
     if (finished) return;
-    for (const { rider, to } of contents) {
+    for (const ride of contents) {
+      const { rider, column, content } = ride;
       if (!rider.el.isConnected) continue;
-      const animation = animations.get(rider.el);
       const from = contentFrom(rider);
       // Re-aim only when Timeline's follow moved the transcript under it.
-      const keyframesNow = (animation?.effect as KeyframeEffect | null)?.getKeyframes?.();
-      const plannedFrom = keyframesNow?.length ? Number(/translate3d\(0px?,\s*(-?[\d.]+)px/.exec(String(keyframesNow[0]!.transform))?.[1] ?? 0) : 0;
-      if (Math.abs(from - plannedFrom) < MIN_OFFSET) continue;
-      // The re-aimed ride keeps the clock the first one was set on.
-      const startTime = animation?.startTime;
-      play(rider.el, from, to, target);
-      const replaced = animations.get(rider.el);
-      if (replaced && typeof startTime === "number") replaced.startTime = startTime;
+      if (Math.abs(from - content.from) < MIN_OFFSET) continue;
+      ride.content = { from, to: content.to };
+      // The re-aimed ride keeps the clock the first one was set on; the
+      // column keeps riding with its dock.
+      const inner = innerOf(rider.el)[0];
+      const startTime = animations.get(rider.el)?.startTime ?? (inner ? animations.get(inner)?.startTime : null);
+      playInner(rider.el, ride.content, column, target, startTime);
     }
     done();
   });

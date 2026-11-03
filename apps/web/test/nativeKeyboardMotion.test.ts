@@ -263,6 +263,81 @@ test("a closing keyboard commits the frame at once and the composer glides down 
   assert.ok(glide.closed - glide.open > KEYBOARD - 40, "the closed composer sits at the bottom again");
 });
 
+// A composer that slid over a transcript that kept its place relied on the
+// two layers' paint order, and iOS WebKit painted the transcript over the
+// composer (device report 2026-11-02: an older chat scrolled up from its end).
+// The transcript column now ends at the composer on every frame, both ways.
+test("a transcript away from its tail keeps its place while its column ends at the riding composer", { skip: !CHROME }, async () => {
+  const page = await open("keyboard-away");
+  type Sample = { overlap: number; row: number };
+  // How far the transcript column reaches under the composer, and where one
+  // of the reader's rows is.
+  await page.evaluate(() => {
+    (window as unknown as { __sample: () => Sample }).__sample = () => {
+      const wrap = document.querySelector(".timeline-wrap")!;
+      const dock = document.querySelector(".conversation-composer-dock")!;
+      const row = document.querySelectorAll(".timeline > .msg")[30]!;
+      return {
+        overlap: Math.round(wrap.getBoundingClientRect().bottom - dock.getBoundingClientRect().top),
+        row: Math.round(row.getBoundingClientRect().top),
+      };
+    };
+  });
+  const opening = await page.evaluate(async (KEYBOARD) => {
+    const viewport = (window as unknown as { __viewport: ViewportProbe }).__viewport;
+    const sample = (window as unknown as { __sample: () => Sample }).__sample;
+    const timeline = document.querySelector<HTMLElement>(".timeline")!;
+    timeline.scrollTop -= 300;
+    timeline.dispatchEvent(new Event("scroll"));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const before = sample();
+    document.querySelector<HTMLTextAreaElement>("textarea")!.focus();
+    document.getElementById("keyboard")!.style.transform = "translate3d(0, 0, 0)";
+    viewport.setNativeKeyboardInset(KEYBOARD, { followKeyboard: true });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const animations = document.getAnimations();
+    for (const animation of animations) animation.pause();
+    const steps: Sample[] = [];
+    for (let step = 0; step <= 10; step++) {
+      for (const animation of animations) animation.currentTime = step * 25;
+      steps.push(sample());
+    }
+    for (const animation of animations) animation.finish();
+    return { before, steps };
+  }, KEYBOARD);
+  for (const [step, at] of opening.steps.entries()) {
+    assert.ok(at.overlap <= 0, `at ${step * 25}ms the transcript column ends at the composer (${at.overlap}px under it)`);
+    assert.equal(at.row, opening.before.row, `at ${step * 25}ms the reader's rows keep their place`);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 - KEYBOARD });
+  await page.waitForTimeout(600);
+  const closing = await page.evaluate(() => {
+    const viewport = (window as unknown as { __viewport: ViewportProbe }).__viewport;
+    const sample = (window as unknown as { __sample: () => Sample }).__sample;
+    const landed = sample();
+    const rides = document.getAnimations().filter((animation) => animation.id === "keyboard-ride-transform").length;
+    (document.activeElement as HTMLElement).blur();
+    viewport.setNativeKeyboardInset(0, { followKeyboard: true });
+    const animations = document.getAnimations();
+    for (const animation of animations) animation.pause();
+    const steps: Sample[] = [];
+    for (let step = 0; step <= 10; step++) {
+      for (const animation of animations) animation.currentTime = step * 25;
+      steps.push(sample());
+    }
+    for (const animation of animations) animation.finish();
+    return { landed, rides, steps };
+  });
+  assert.equal(closing.landed.row, opening.before.row, "the landing does not move the reader's rows");
+  assert.ok(closing.landed.overlap <= 0);
+  assert.equal(closing.rides, 0, "no transform is left once the layout holds the riders");
+  for (const [step, at] of closing.steps.entries()) {
+    assert.ok(at.overlap <= 0, `closing, at ${step * 25}ms the transcript column ends at the composer (${at.overlap}px under it)`);
+    assert.equal(at.row, opening.before.row, `closing, at ${step * 25}ms the reader's rows keep their place`);
+  }
+});
+
 test("a reported keyboard slide re-times the ride to the keyboard's real spring and catches up a late report", { skip: !CHROME }, async () => {
   const page = await open("keyboard-spring");
   // A keyboard slower than the 250 ms token, on a critically damped spring,

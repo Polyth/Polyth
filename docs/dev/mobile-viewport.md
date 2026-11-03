@@ -128,12 +128,22 @@ truth. Electron retains its original frame and transparent-window handling.
   - **A keyboard that covers more is ridden first, then committed.** When the
     text entry the keyboard serves sits in a composer dock (the conversation
     dock or the new-chat hero dock, `focusRidesKeyboard()`), the frame keeps
-    its keyboard-closed layout and `keyboardRide.ts` moves the dock — and, when
-    the reader is at the tail, the transcript column (`.timeline-wrap`) by
-    the amount Timeline's follow will scroll — with WAAPI `transform`
-    animations: keyframes sampled from the keyboard's curve, run by the
-    compositor (Core Animation on iOS), so no main-thread stall can make the
-    composer fall behind the keyboard. Each ride starts from where the rider
+    its keyboard-closed layout and `keyboardRide.ts` moves the dock and the
+    transcript with WAAPI `transform` animations: keyframes sampled from the
+    keyboard's curve, run by the compositor (Core Animation on iOS), so no
+    main-thread stall can make the composer fall behind the keyboard. The
+    transcript column (`.timeline-wrap`) always rides with its dock, so its
+    lower edge never reaches under the composer; its children ride the
+    difference to where the transcript itself goes — up by the amount
+    Timeline's follow will scroll when the reader is at the tail (the
+    difference is then ~0), nowhere when the reader is away from it (they
+    ride back and the rows keep their place). A dock that slid over a still
+    transcript left the two layers' paint order to the engine, and iOS WebKit
+    painted the transcript over the composer (device report 2026-11-02, an
+    older chat scrolled up from its end; pixel-sampled: the text kept full
+    brightness on the glass card). The column now ends at the composer on
+    every frame of the ride, the landing and the closing glide, so that
+    order is never on screen. Each ride starts from where the rider
     is (a FLIP of the state switch: the dock's anchor is the composer card's
     bottom, since rows and clearances change with the state) and is placed on
     the keyboard's clock with a start time, not a `currentTime` measured
@@ -162,9 +172,11 @@ truth. Electron retains its original frame and transparent-window handling.
     Reduced motion (OS or in-app) never rides.
   - **Layers are primed.** A layer created when its animation starts is
     painted first and shows the ride late, so a touch or focus on a docked
-    composer marks the dock and its transcript `data-keyboard-rider`
-    (`will-change: transform`) until no keyboard ride can follow (1.5 s idle,
-    not while the composer holds focus).
+    composer marks the dock, its transcript column and the column's children
+    `data-keyboard-rider` (`will-change: transform`) until no keyboard ride
+    can follow (1.5 s idle, not while the composer holds focus). The column
+    and its children are primed together: one promoted a frame after the
+    other would let the rows jump by the keyboard's first step.
 
   A long draft's editor is capped at 18% of the band while the native keyboard
   drives the frame: the Composer publishes the band the keyboard leaves on its
@@ -223,8 +235,10 @@ truth. Electron retains its original frame and transparent-window handling.
   report lands before or after the inset. Chromium-scrubbed in
   `nativeKeyboardMotion.test.ts` (the ride glued to a fake keyboard, the
   transcript's tail glued to the composer, no frame movement before the
-  commit, no jump at the commit, the closing glide, a 500 ms spring reported
-  40 ms late, a non-dock field), `hostComposerMorphKeyboard.test.ts` and
+  commit, no jump at the commit, the closing glide, a transcript away from
+  its tail that keeps its place while its column ends at the composer on
+  every frame both ways, a 500 ms spring reported 40 ms late, a non-dock
+  field), `hostComposerMorphKeyboard.test.ts` and
   `mobileViewportResume.test.ts`. `composerKeyboardMorphRide.test.ts` drives
   the real Composer through the whole path — the resting row, a tap that
   engages the card while it rides the keyboard, every frame of the WebView
