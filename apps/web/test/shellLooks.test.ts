@@ -320,3 +320,31 @@ test("Monolith column corners do not reference the rail radius Floating columns 
   assert.match(css, /\[data-shell-floating="true"\]:not\(#\\#\) \{[^}]*--look-rail-radius: var\(--look-column-radius/);
   assert.doesNotMatch(css, /--look-column-radius: var\(--look-rail-radius\)/);
 });
+
+test("on a look's card the agent status keeps the Tab and Capsule styles' inset", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const dock = stripComments(await read("../src/components/ui/AgentStatusDock.css"));
+  const island = stripComments(await read("../src/components/SubagentActivityDock.css"));
+  const look = String.raw`body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\):not\(#\\#\)`;
+  // The line alone is the card: its mark and time sit --space-3 off the edge.
+  assert.match(css, new RegExp(`${look} \\.agent-status-dock \\{\\s*padding-inline: var\\(--space-3\\);\\s*\\}`));
+  assert.match(dock, /body\[data-composer-status-style="tab"\] \.agent-status-dock \{[^}]*padding-inline: var\(--space-3\)/);
+  assert.match(dock, /body\[data-composer-status-style="capsule"\] \.agent-status-dock \{[^}]*padding-inline: var\(--space-3\)/);
+  // With subagents the island is the card: its --space-2 plus the line's
+  // own --space-1 make the same inset, and the branch thread moves with it.
+  assert.match(css, new RegExp(`${look} \\.subagent-island \\{\\s*padding-inline: var\\(--space-2\\);\\s*\\}`));
+  assert.match(css, new RegExp(`${look}:not\\(#\\\\#\\) \\.subagent-island \\.agent-status-dock \\{[^}]*padding-inline: var\\(--space-1\\);`));
+  assert.match(island, /\.subagent-island \.subagent-island-line > \.agent-status-dock \{[^}]*padding-inline: var\(--space-1\)/);
+  assert.match(island, /body\[data-composer-status-style="tab"\] \.subagent-island \{[^}]*padding-inline: var\(--space-2\)/);
+});
+
+test("on a look's card the Tab status spans the chat frame and leaves the composer its air", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const tab = String.raw`body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\)\[data-composer-status-style="tab"\]:not\(#\\#\)`;
+  // The card replaces the tab, so its inset would only squeeze it over the
+  // full-width queued messages and box.
+  assert.match(css, new RegExp(`${tab} :is\\(\\.agent-status-dock, \\.subagent-island, \\.pending-changes-bar\\) \\{[^}]*width: min\\([^}]*--conversation-frame-inline-start[^}]*margin-inline: var\\(--conversation-frame-inline-start, auto\\) var\\(--conversation-frame-inline-end, auto\\);`));
+  assert.match(css, new RegExp(`${tab} \\.conversation-composer-dock:has\\(\\.agent-status-dock, \\.pending-changes-bar\\) > \\.composer \\{\\s*padding-block-start: var\\(--space-2\\);\\s*\\}`));
+  // The line inside an island keeps the island's width.
+  assert.match(css, /:not\(#\\#\):not\(#\\#\) \.subagent-island \.agent-status-dock \{\s*width: auto;\s*margin: 0;/);
+});

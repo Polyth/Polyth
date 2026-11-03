@@ -240,7 +240,9 @@ test("AgentStatusDock is a passive live status unless a details action exists", 
     assert.ok(!dock.classList.contains("agent-status-dock--stacked"));
     assert.equal(dock.querySelector(".agent-status-dock-secondary"), null);
     assert.equal(dock.querySelector(".agent-status-dock-branch"), null);
-    assert.equal(dock.querySelector("strong")?.getAttribute("title"), "Grok 4.6");
+    // The mark names the agent; the line keeps its room for the action.
+    assert.equal(dock.querySelector(".agent-status-dock-icon")?.getAttribute("title"), "Grok 4.6");
+    assert.doesNotMatch(dock.textContent ?? "", /Grok/);
   } finally { await named.unmount(); }
 });
 

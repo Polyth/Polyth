@@ -574,7 +574,7 @@ test("projection working state shows live activity before turn-start hydration",
     await act(async () => { await delay(40); });
     const activity = view.container.querySelector(".agent-status-dock");
     assert.ok(activity, "projection working status keeps agent activity visible before turn/started arrives");
-    assert.match(activity.textContent ?? "", /Luna/);
+    assert.equal(activity.querySelector(".agent-status-dock-icon")?.getAttribute("title"), "Luna");
     assert.equal(view.container.querySelector(".pending-changes-bar"), null);
   } finally {
     await view.unmount();
@@ -694,7 +694,9 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     });
     const agentStatus = view.container.querySelector(".agent-status-dock");
     assert.ok(agentStatus, "active work replaces the compact change summary");
-    assert.match(agentStatus.textContent ?? "", /Luna/);
+    // The mark names the model; the line keeps its room for the action.
+    assert.equal(agentStatus.querySelector(".agent-status-dock-icon")?.getAttribute("title"), "Luna");
+    assert.doesNotMatch(agentStatus.textContent ?? "", /Luna/);
     assert.match(agentStatus.textContent ?? "", /Run focused checks and review the diff/);
     assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*−4/s);
     assert.doesNotMatch(agentStatus.textContent ?? "", /feature\/glass-ui/);
@@ -713,7 +715,9 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     });
     const cursorAutoStatus = view.container.querySelector(".agent-status-dock");
     assert.ok(cursorAutoStatus, "Cursor Auto work keeps the active status dock");
-    assert.match(cursorAutoStatus.textContent ?? "", /Auto/);
+    const cursorAutoName = cursorAutoStatus.querySelector(".agent-status-dock-icon")?.getAttribute("title") ?? "";
+    assert.match(cursorAutoName, /Auto/);
+    assert.doesNotMatch(cursorAutoName, /default|Polyth/i);
     assert.doesNotMatch(cursorAutoStatus.textContent ?? "", /default|Polyth/i);
 
     await act(async () => {

@@ -146,7 +146,9 @@ test("chat, context and agent activity share human model presentation", () => {
   // The status is a line of text: no glass, plate or shadow in any look.
   assert.doesNotMatch(statusDock, /ui-glass-dock/);
   assert.match(statusCss, /\.agent-status-dock \{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none/s);
-  assert.match(statusCss, /\.agent-status-dock-primary strong \{[^}]*max-width:\s*45%/s);
+  // The model is the mark's tooltip, never written out on the line.
+  assert.doesNotMatch(statusDock, /<strong/);
+  assert.doesNotMatch(statusCss, /\.agent-status-dock-primary strong/);
   assert.match(statusCss, /\.agent-status-dock-primary \{[^}]*line-height:\s*1\.2/s);
   assert.match(statusCss, /\.agent-status-dock-secondary \{[^}]*line-height:\s*1\.2/s);
   assert.match(statusCss, /body\[data-composer-status-style="tab"\] \.agent-status-dock \{/);

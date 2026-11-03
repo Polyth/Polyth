@@ -118,8 +118,12 @@ test("the agent status above the composer is a borderless line, not glass", () =
   assert.match(dock, /\.agent-status-dock \{[^}]*min-height:\s*var\(--agent-status-row\);[^}]*align-items:\s*center;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none/s);
   assert.match(dock, /\.agent-status-dock-icon \{[^}]*place-items:\s*center;[^}]*width:\s*var\(--icon-md\)/s);
   assert.match(dock, /\.agent-status-dock-content \{[^}]*display:\s*flex;[^}]*align-items:\s*baseline/s);
-  // The action outranks the model name, which gives way first.
+  // The action takes the line's room.
   assert.match(dock, /\.agent-status-dock-state \{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*6ch/s);
+  // The composer's stack keeps a step of air under the status, except under
+  // a Tab, which grows out of the composer's edge.
+  assert.match(css, /\.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar\) > \.composer \{\s*padding-block-start: var\(--space-2\);\s*\}/);
+  assert.match(css, /body\[data-composer-status-style="tab"\] \.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
   assert.match(dock, /@media \(max-width: 600px\) \{\s*\.agent-status-dock \.agent-status-dock-secondary \{ display: none; \}/);
   assert.match(dock, /@media \(prefers-reduced-motion: reduce\) \{\s*\.agent-status-dock-state \{ animation: none;/);
 });

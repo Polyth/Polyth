@@ -2395,23 +2395,33 @@ restyles every block already in the transcript without a re-render.
 **Status above the composer:** the live agent status (`AgentStatusDock`, also
 used for the spawn status and on the Agents page) and the git package's edited
 files (`PendingChangesBar`) are lines of text, not cards: no plate, shadow or
-glass. The status reads mark · model · action, then the files tally and the
-elapsed time. Light moving through the action's words and an accent dot on the
-mark say "live"; reduced motion and low-resource mode keep the words still.
-The action outranks the rest: the model name gives way first, and at 600 px or
-less the files tally steps aside. Folded, the edited files are one summary
-line whose title carries the count. Open, the files hang from the same thread
-as activity steps, and Undo / Review are text actions (Review in the
+glass. The status reads mark · action, then the files tally and the elapsed
+time. The mark (the harness logo) says which agent works; the model or harness
+name is never written out, only the mark's tooltip, so the short line keeps
+its room for the action. Light moving through the action's words and an accent
+dot on the mark say "live"; reduced motion and low-resource mode keep the
+words still. The action outranks the rest: at 600 px or less the files tally
+steps aside. A non-Standard interface look gives the line its in-flow card;
+there the mark and time sit `--space-3` off the card's edge, the inset of the
+Tab and Capsule styles (with subagents the island is the card: its
+`--space-2` plus the line's own `--space-1`). Under the status or edited
+files the composer's stack (queued messages, then the box) keeps `--space-2`
+of air, the gap the queued messages keep from the box. Folded, the edited
+files are one summary line whose title carries the count. Open, the files
+hang from the same thread as activity steps, and Undo / Review are text actions (Review in the
 text-safe `--chat-ink-accent`). Their quiet inks follow the wallpaper wash
 ([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset
 theme and wallpaper.
 Chat settings → *Status above the composer* (`composerStatusStyle`,
 `body[data-composer-status-style]`) picks `line` (the base), `tab` (a faint
 tab growing out of the composer's top edge, inset from its corners, further
-in on a phone's pill composer; the composer drops its top padding under it)
+in on a phone's pill composer; the composer drops its top padding under it.
+A non-Standard look's card replaces that tab, so there the card spans the chat
+frame like the queued messages and the box, and the composer keeps its air)
 or `capsule` (a centred hairline pill that hugs its words; the open file list
-sits in a hairline frame). Pinned in `apps/web/test/composerChatStyle.test.ts`
-and `packages/git/test/sourceControlVisualGrammar.test.ts`.
+sits in a hairline frame). Pinned in `apps/web/test/composerChatStyle.test.ts`,
+`apps/web/test/shellLooks.test.ts` and
+`packages/git/test/sourceControlVisualGrammar.test.ts`.
 
 **A watched pull request above the composer:** while the chat watches a pull
 request (see the `github` row in [architecture](architecture.md)), the GitHub
@@ -2547,7 +2557,8 @@ leaves the model out so its action and time stay readable. The agent's own
 logo wears its harness profile's color, as the composer's model chip does.
 In the Standard look the island is text on the canvas; the other looks
 give it their in-flow card (the line inside keeps none), and the Tab and
-Capsule status styles frame the whole island. State
+Capsule status styles frame the whole island (in such a look the card
+replaces the Tab's frame and spans the chat frame). State
 comes from the canonical child projections (`parentId`) rolled up through
 grandchildren (`apps/web/src/subagentActivity.ts`), the same source as the
 navigator's disclosure pill. Pinned in `apps/web/test/subagentBranch.test.ts`.

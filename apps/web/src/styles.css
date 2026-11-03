@@ -8723,6 +8723,12 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   position: relative; z-index: var(--z-shell); flex: none; min-width: 0; pointer-events: none;
 }
 .conversation-composer-dock > * { pointer-events: auto; }
+/* Under the status / edited-files line the composer's stack (queued
+   messages, then the box) keeps a step of air, the gap the queued messages
+   keep from the box, so a line on a look's card never touches it. */
+.conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar) > .composer {
+  padding-block-start: var(--space-2);
+}
 /* The Tab look grows the status / edited-files line out of the composer's
    top edge, so the composer drops the density's top padding under it. */
 body[data-composer-status-style="tab"] .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar) > .composer {

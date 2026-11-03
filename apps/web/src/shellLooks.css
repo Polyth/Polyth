@@ -763,9 +763,37 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.questio
   box-shadow: var(--look-card-shadow) !important;
 }
 
+/* On its card the agent status keeps its mark and time off the rounded
+   edge, by the inset the Tab and Capsule status styles give it. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .agent-status-dock {
+  padding-inline: var(--space-3);
+}
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .subagent-island {
+  padding-inline: var(--space-2);
+}
+
+/* The card replaces the Tab status style's faint tab, so nothing grows out
+   of the composer's edge any more: the card spans the chat frame like the
+   queued messages and the box under it, and the composer keeps its air. A
+   tab's inset made it a narrower block squeezed over them. */
+body[data-shell-look]:not([data-shell-look="standard"])[data-composer-status-style="tab"]:not(#\#) :is(.agent-status-dock, .subagent-island, .pending-changes-bar) {
+  width: min(
+    var(--chat-measure),
+    calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)))
+  );
+  margin-inline: var(--conversation-frame-inline-start, auto) var(--conversation-frame-inline-end, auto);
+}
+body[data-shell-look]:not([data-shell-look="standard"])[data-composer-status-style="tab"]:not(#\#) .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar) > .composer {
+  padding-block-start: var(--space-2);
+}
+
 /* The agent's line with its subagents is one card: the island takes the
-   look's plate and the line inside it keeps none (no card in a card). */
+   look's plate (and the inset) and the line inside it keeps none (no card
+   in a card). */
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .subagent-island .agent-status-dock {
+  width: auto;
+  margin: 0;
+  padding-inline: var(--space-1);
   background: transparent !important;
   backdrop-filter: none !important;
   border: 0 !important;
