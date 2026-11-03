@@ -97,11 +97,25 @@ jobs:
           import fs from 'node:fs';
           const env = process.env;
           const output = (line) => fs.appendFileSync(env.GITHUB_OUTPUT, `${line}\n`);
+          // GitHub's API sometimes answers a plain GET with a transient 5xx
+          // (nightly #10 died on one); retry those a few times before failing.
           const api = async (path) => {
-            const response = await fetch(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/${path}`,
-              { headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: 'application/vnd.github+json' } });
-            if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
-            return response.json();
+            for (let attempt = 1; ; attempt += 1) {
+              let failure;
+              try {
+                const response = await fetch(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/${path}`,
+                  { headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: 'application/vnd.github+json' } });
+                if (response.ok) return response.json();
+                failure = new Error(`GET ${path}: HTTP ${response.status}`);
+                if (response.status < 500 && response.status !== 429) throw failure;
+              } catch (error) {
+                if (error === failure) throw error;
+                failure = error; // network error: retry
+              }
+              if (attempt >= 4) throw failure;
+              console.log(`${failure.message}; retrying (${attempt}/3)`);
+              await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
+            }
           };
           const automatic = env.EVENT !== 'workflow_dispatch';
 
