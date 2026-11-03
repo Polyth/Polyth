@@ -1857,9 +1857,15 @@ already there (a restored draft, the hero → transcript remount), when a send
 takes the files, under reduced motion (the hook settles when there is no
 animation), or on a resting phone row: a file engages it and
 `useComposerMorph` grows the card, treating the tray like the model line.
-On phones the editor's cap leaves the tray its room.
+On phones the editor's cap leaves the tray its room. Once the row has opened
+or closed beside a focused editor, the Composer asks the field to redraw its
+caret (`TextInputHandle.refreshCaret`): iOS WebKit draws the caret above the
+page and re-measures it only on a selection change, so it stayed over the
+files until the next tap or keystroke. The field steps its selection away and
+back in one task (an empty field steps its value), only on an engine that
+supports `-webkit-touch-callout`, only while focused and not composing.
 `apps/web/test/composerAttachmentTray.test.ts` scrubs the real Composer
-through both changes.
+through both changes and counts the caret refresh.
 
 **Context pie:** an open session also shows its context-window share as a
 quiet pie on the model line, right after the thinking-effort chip (after the

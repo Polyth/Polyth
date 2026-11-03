@@ -94,10 +94,21 @@ type Probe = {
   __scrub: Animation[];
 };
 
-async function open(initial: unknown[] = [], options: { reducedMotion?: "reduce" } = {}): Promise<Page> {
+async function open(initial: unknown[] = [], options: { reducedMotion?: "reduce"; outsideCaret?: boolean } = {}): Promise<Page> {
   assert.ok(browser);
   const page = await browser.newPage({ viewport: { width: 1180, height: 760 } });
   if (options.reducedMotion) await page.emulateMedia({ reducedMotion: options.reducedMotion });
+  // Chromium paints its own caret; iOS WebKit, which draws it above the page,
+  // is the engine that supports -webkit-touch-callout. Every selection change
+  // the editor reports is counted: that is what makes WebKit measure again.
+  await page.addInitScript((outsideCaret) => {
+    const supports = CSS.supports.bind(CSS);
+    CSS.supports = ((property: string, value?: string) => property === "-webkit-touch-callout" ? outsideCaret
+      : value === undefined ? supports(property) : supports(property, value)) as typeof CSS.supports;
+    const probe = window as unknown as { __selectionChanges: number };
+    probe.__selectionChanges = 0;
+    document.addEventListener("selectionchange", () => { probe.__selectionChanges += 1; }, true);
+  }, options.outsideCaret ?? false);
   await page.route(`${ORIGIN}/**`, (route) => route.fulfill({ contentType: "text/html", body: html }));
   await page.goto(`${ORIGIN}/#${encodeURIComponent(JSON.stringify(initial))}`);
   await page.waitForSelector(".composer-card .composer-editor");
@@ -232,6 +243,79 @@ test("removing the last file closes the row over it; a send takes the files at o
   await page.waitForFunction(() => !document.querySelector(".composer-tray[data-motion]"));
   await page.evaluate(() => (window as unknown as Probe).__tray.clear());
   assert.equal(await page.locator(".composer-tray").count(), 0, "files a send takes leave with it, without a closing row");
+  await page.close();
+});
+
+type Caret = { changes: number; start: number; end: number; value: string; focused: boolean };
+
+const caret = (page: Page) => page.evaluate(async (): Promise<Caret> => {
+  // Two frames: the refresh waits one, selectionchange is a task after it.
+  for (let index = 0; index < 2; index += 1) await new Promise((resolve) => requestAnimationFrame(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const editor = document.querySelector<HTMLTextAreaElement>(".composer-editor[data-composer-input]")!;
+  const probe = window as unknown as { __selectionChanges: number };
+  const changes = probe.__selectionChanges;
+  probe.__selectionChanges = 0;
+  return { changes, start: editor.selectionStart, end: editor.selectionEnd, value: editor.value, focused: document.activeElement === editor };
+});
+
+test("on iOS the focused editor's caret is measured again once the row has opened or closed", { skip: !CHROME }, async () => {
+  const page = await open([], { outsideCaret: true });
+  const editor = page.locator(".composer-editor[data-composer-input]");
+  await editor.focus();
+  await editor.evaluate((field: HTMLTextAreaElement) => field.setSelectionRange(4, 4));
+  const draft = await caret(page);
+  assert.equal(draft.focused, true);
+
+  // The row is still opening: the caret is left alone until it stops.
+  await page.evaluate((ref) => (window as unknown as Probe).__tray.add(ref), TSX);
+  await page.waitForSelector(".composer-tray[data-motion=open]");
+  await page.evaluate(() => { for (const animation of document.getAnimations()) animation.pause(); });
+  assert.equal((await caret(page)).changes, 0, "nothing is reported while the row moves");
+  await page.evaluate(() => { for (const animation of document.getAnimations()) animation.finish(); });
+  await page.waitForFunction(() => !document.querySelector(".composer-tray[data-motion]"));
+  const opened = await caret(page);
+  assert.ok(opened.changes >= 1, "the opened row has the platform measure the caret again");
+  assert.deepEqual(opened, { changes: opened.changes, start: 4, end: 4, value: draft.value, focused: true },
+    "and the caret, the text and the focus are where they were");
+
+  // An empty draft has no other caret place: its value steps and comes back.
+  await editor.evaluate((field: HTMLTextAreaElement) => field.select());
+  await page.keyboard.press("Backspace");
+  assert.equal((await caret(page)).value, "");
+  await page.locator(".attachment-pill .att-remove").click({ force: true });
+  await page.waitForSelector(".composer-tray[data-motion=close]");
+  await page.evaluate(() => { for (const animation of document.getAnimations()) animation.pause(); });
+  await editor.focus();
+  await caret(page); // the remove tap's own focus moves are not the row's
+  await page.evaluate(() => { for (const animation of document.getAnimations()) animation.finish(); });
+  await page.waitForFunction(() => !document.querySelector(".composer-tray"));
+  const closed = await caret(page);
+  assert.ok(closed.changes >= 1, "the closed row has the platform measure the caret again");
+  assert.deepEqual(closed, { changes: closed.changes, start: 0, end: 0, value: "", focused: true }, "the empty draft stays empty");
+
+  // An editor without focus shows no caret: nothing is touched.
+  await editor.evaluate((field: HTMLTextAreaElement) => field.blur());
+  await caret(page);
+  await page.evaluate((ref) => (window as unknown as Probe).__tray.add(ref), TSX);
+  await page.evaluate(() => { for (const animation of document.getAnimations()) animation.finish(); });
+  await page.waitForFunction(() => !document.querySelector(".composer-tray[data-motion]"));
+  assert.equal((await caret(page)).changes, 0, "an unfocused editor is left alone");
+  await page.close();
+});
+
+test("an engine that paints its own caret is left alone when the row opens", { skip: !CHROME }, async () => {
+  const page = await open();
+  const editor = page.locator(".composer-editor[data-composer-input]");
+  await editor.focus();
+  await editor.evaluate((field: HTMLTextAreaElement) => field.setSelectionRange(4, 4));
+  await caret(page);
+  await page.evaluate((ref) => (window as unknown as Probe).__tray.add(ref), TSX);
+  await page.evaluate(() => { for (const animation of document.getAnimations()) animation.finish(); });
+  await page.waitForFunction(() => !document.querySelector(".composer-tray[data-motion]"));
+  const settled = await caret(page);
+  assert.equal(settled.changes, 0, "no selection step where the page paints the caret");
+  assert.deepEqual([settled.start, settled.end, settled.focused], [4, 4, true]);
   await page.close();
 });
 

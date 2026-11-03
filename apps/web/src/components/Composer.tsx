@@ -4192,6 +4192,21 @@ function ComposerBody({
   // the editor (composer/attachmentTray.ts): the first file opens it, the last
   // one's removal closes it over that card.
   const tray = useAttachmentTray(attachments, session?.id ?? `new:${activeProjectId ?? ""}`, expanded);
+  // Once the row has opened or closed beside a focused editor, the caret is
+  // measured again (iOS draws it above the page and left it on the files
+  // until the next tap or keystroke). A row that starts to move cancels the
+  // frame its first, unmoved commit queued, so the caret waits for the end.
+  const trayPresent = tray.shown.length > 0;
+  const trayLayoutSeen = useRef(false);
+  useLayoutEffect(() => {
+    if (!trayLayoutSeen.current) {
+      trayLayoutSeen.current = true;
+      return;
+    }
+    if (tray.motion) return;
+    const frame = requestAnimationFrame(() => inputRef.current?.refreshCaret());
+    return () => cancelAnimationFrame(frame);
+  }, [tray.motion, trayPresent]);
   const attachmentTray = tray.shown.length > 0 && (
     <div
       ref={tray.ref}

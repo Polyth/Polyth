@@ -39,7 +39,23 @@ export interface TextInputHandle {
   /** Commit an active IME composition now (a Send tap while a phone keyboard
    *  still holds the last word). No-op when nothing is being composed. */
   finishComposition(): void;
+  /** Have the platform redraw the caret where the text now is, after the
+   *  layout around the focused field changed without a selection change.
+   *  iOS draws the caret above the page and re-measures it only when the
+   *  selection moves, so a row that opened beside the field left the caret
+   *  over that row until the next tap or keystroke. No-op on other engines,
+   *  unfocused, or while composing. */
+  refreshCaret(): void;
   element(): HTMLTextAreaElement | null;
+}
+
+// iOS WebKit (Safari and the app's WebView) is the engine that supports
+// -webkit-touch-callout, and the one whose caret is drawn outside the page.
+let caretOutsidePage: boolean | null = null;
+function caretDrawnOutsidePage(): boolean {
+  caretOutsidePage ??= typeof CSS !== "undefined" && typeof CSS.supports === "function"
+    && CSS.supports("-webkit-touch-callout", "none");
+  return caretOutsidePage;
 }
 
 export interface AdaptiveTextInputProps {
@@ -182,6 +198,23 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
         }
       }
       if (gate.current.composing) closeComposition();
+    },
+    refreshCaret() {
+      const el = taRef.current;
+      if (!el || el.ownerDocument.activeElement !== el || gate.current.composing || !caretDrawnOutsidePage()) return;
+      const { selectionStart: start, selectionEnd: end, selectionDirection: direction, scrollTop } = el;
+      // Step the selection away and back in one task: the platform sees a
+      // change and measures the caret again, the page never paints the step.
+      // An empty field has no other caret place, so its value steps instead.
+      if (el.value) {
+        const away = start > 0 ? start - 1 : 1;
+        el.setSelectionRange(away, away);
+      } else {
+        el.value = " ";
+        el.value = "";
+      }
+      el.setSelectionRange(start, end, direction);
+      el.scrollTop = scrollTop;
     },
     element() {
       return taRef.current;
