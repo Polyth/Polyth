@@ -1131,6 +1131,11 @@ here are whole-app restyles, not the animations themselves. Measured on a
   with an inherited effect; scope it to the moving element, or do it in JS
   (`swipeSurface.ts` refuses `selectstart` instead of `user-select: none` on
   `<html>`; the Shift ring suppression names the focused element).
+  A root variable that only ever equals a viewport size is published once in
+  viewport units, not as pixels on every resize: a viewport resize restyles
+  only the boxes that use the unit. The native app's keyboard frame
+  (`100dvh`) went from 12,626 restyled elements per keyboard close to at most
+  11.
 - A selector whose rightmost compound has no class, id, tag or attribute
   (`body[data-x] :focus-visible`, `[data-x] *`) invalidates the whole subtree
   when the flag flips.

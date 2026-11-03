@@ -32,7 +32,8 @@
 // Published on <body>: data-keyboard="open" | "closed", and
 //   data-keyboard-source="native" while a native shell's keyboard plugin
 //   supplies the inset (its WebView already ends at the keyboard), otherwise
-//   "viewport"; data-band="short" | "tall".
+//   "viewport"; data-band="short" | "tall". data-keyboard-frame is "native"
+//   while the frame is the native WebView's dynamic viewport (below).
 //
 // Cost model (measured, docs/dev/mobile-viewport.md "Restyle cost"): any
 // style change of <html> or <body> — an inline write, a custom property, an
@@ -43,12 +44,18 @@
 // a native keyboard is being ridden (keyboardRide.ts) the state follows the
 // keyboard at once and the frame waits until the keyboard has landed.
 //
+// In a native shell the WebView itself ends at the keyboard, so the frame is
+// usually the dynamic viewport: the variables are then published once as
+// `100dvh`/`0px` (data-keyboard-frame="native") and a WebView resize restyles
+// only the boxes that use them. Pixels return only while the frame must
+// differ from the WebView (a field's keyboard projected before the resize).
+//
 // No persistence, no user-agent sniffing, no device categories: geometry only.
 import { useSyncExternalStore } from "react";
 import { revealFieldInScrollers } from "./mobileFieldReveal.ts";
 import { keyboardMotion, motionIsReduced } from "./motionPresence.ts";
 import { keyboardMoveElapsedMs, recordNativeKeyboardMotion, syncKeyboardRiders, type NativeKeyboardMotion } from "./keyboardMotion.ts";
-import { captureRide, focusRidesKeyboard, primeKeyboardRide, retimeKeyboardRide, rideKeyboard, type RideSnapshot } from "./keyboardRide.ts";
+import { captureRide, focusRidesKeyboard, holdRidesAcrossFrame, primeKeyboardRide, retimeKeyboardRide, rideKeyboard, type RideSnapshot } from "./keyboardRide.ts";
 
 export interface ViewportMetrics {
   /** Visible height in CSS px (visualViewport.height, layout height as fallback). */
@@ -147,9 +154,27 @@ const CLOSED_PROJECTION_MS = 1000;
 // The last opening keyboard was ridden by a dock, so its closing is too.
 let ridingDock = false;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
+// A native shell's WebView is the interaction frame: KeyboardResize.Native on
+// iOS and the window insets on Android end it at the keyboard. While the frame
+// the measurements describe is exactly that WebView, the variables are the
+// dynamic viewport itself, written once: a WebView resize then restyles only
+// the boxes that use them, where a pixel write restyled every element.
+let nativeFrame = false;
+/** `100dvh` in CSS px at the last measurement (0 unless nativeFrame). */
+let dynamicHeight = 0;
+/** The dynamic frame's height when the ride a settle will commit set off
+ *  (null when that ride did not start on a dynamic frame). */
+let rideFrameHeight: number | null = null;
+// A ridden dock's closing glide sets off before the WebView grows back: the
+// height it is growing from, and the cleanup after the keyboard has landed.
+let growthFrom: number | null = null;
+let growthTimer: ReturnType<typeof setTimeout> | null = null;
 /** Every value the frame variables were last written from: a value left out of
  *  the comparison is never rewritten while the others hold still. */
 let publishedFrame: { top: number; height: number; bottom: number; vh: number; inset: number } | null = null;
+/** How the frame variables were last written: measured pixels, or the
+ *  dynamic viewport that a native WebView resize moves by itself. */
+let publishedUnits: "px" | "dvh" | null = null;
 let publishedSource: "native" | "viewport" | null = null;
 let publishedBand: "short" | "tall" | null = null;
 const listeners = new Set<() => void>();
@@ -235,7 +260,7 @@ function publish(
   // the keyboard and hides WebKit's form accessory, so the WebKit accessory
   // band added to a Safari frame must not apply there: it pushed the composer
   // under the keyboard by exactly that band.
-  const frameNative = frame.covering && frameNativeInset >= KEYBOARD_MIN_INSET;
+  const frameNative = nativeFrame || (frame.covering && frameNativeInset >= KEYBOARD_MIN_INSET);
   const layerBottom = frameBottom + accessoryBand(frame.covering, frameNative);
   const source = state.covering && nativeKeyboardInset >= KEYBOARD_MIN_INSET ? "native" : "viewport";
   const band = state.height > 0 && state.height < SHORT_VISUAL_BAND ? "short" : "tall";
@@ -244,13 +269,26 @@ function publish(
     && state.keyboardInset === metrics.keyboardInset
     && state.offsetTop === metrics.offsetTop
     && state.covering === metrics.covering;
-  const frameEqual = publishedFrame?.top === frameTop
+  const geometryEqual = publishedFrame?.top === frameTop
     && publishedFrame.height === frameHeight
     && publishedFrame.bottom === layerBottom
     && publishedFrame.vh === frame.height
     && publishedFrame.inset === frame.keyboardInset
     && frameCovering === frame.covering;
-  if (metricsEqual && frameEqual && publishedSource === source && publishedBand === band) return;
+  // The native WebView's own viewport is the frame: `100dvh` describes it
+  // whatever the keyboard does, so it is written once and never rewritten.
+  // Checked against the measurement, so an engine whose dvh does not follow
+  // its WebView keeps pixels. Never in a browser: Safari's dvh ignores the
+  // keyboard, and there the pixels are the only description of the band.
+  const units = nativeFrame
+    && dynamicHeight > 0
+    && frameTop === 0
+    && layerBottom === frameBottom
+    && Math.abs(frameHeight - dynamicHeight) <= 1
+    && Math.abs(frame.height - dynamicHeight) <= 1
+    ? "dvh" : "px";
+  const frameEqual = publishedUnits === units && (units === "dvh" || geometryEqual);
+  if (metricsEqual && frameEqual && geometryEqual && publishedSource === source && publishedBand === band) return;
   // A frame that GROWS is always safe to publish immediately: more coverage
   // never exposes the canvas. A frame that SHRINKS while a text entry is
   // focused is the one case Safari's pan-to-reveal can still be mid-flight
@@ -265,19 +303,35 @@ function publish(
   // pan — mobileViewportResume.test.ts) still applies its shrink immediately.
   const shrinking = publishedFrame !== null && frameBottom < publishedFrame.top + publishedFrame.height;
   // A projected native frame is the keyboard's final geometry, not half of a
-  // Safari resize/pan pair: nothing else is coming, so it is never held.
-  if (!settlingFrame && !projected && frame.covering && textEntryFocused && shrinking) {
+  // Safari resize/pan pair: nothing else is coming, so it is never held; nor
+  // is a dynamic frame, which writes nothing a pan could undershoot.
+  if (!settlingFrame && !projected && units === "px" && frame.covering && textEntryFocused && shrinking) {
     scheduleFrameSettle();
     return;
   }
   metrics = state;
   publishedSource = source;
   publishedBand = band;
-  if (!frameEqual) {
+  publishedFrame = { top: frameTop, height: frameHeight, bottom: layerBottom, vh: frame.height, inset: frame.keyboardInset };
+  frameCovering = frame.covering;
+  if (!frameEqual && units === "dvh") {
+    // The same box as the pixels below, in the units the WebView moves.
+    // `--keyboard-inset` is 0: the WebView already ends at the keyboard.
+    publishedUnits = units;
+    const root = document.documentElement;
+    root.style.setProperty("--visual-vh", "100dvh");
+    root.style.setProperty("--visual-frame-top", "0px");
+    root.style.setProperty("--visual-frame-height", "100dvh");
+    root.style.setProperty("--visual-frame-bottom", "100dvh");
+    root.style.setProperty("--visual-bottom", "100dvh");
+    root.style.setProperty("--layer-frame-bottom", "100dvh");
+    root.style.setProperty("--keyboard-inset", "0px");
+    root.style.setProperty("--visual-offset", "0px");
+    root.dataset.keyboardFrame = "native";
+  } else if (!frameEqual) {
     // One batch, and only when the frame really moved: every write here
     // restyles the whole app (see the cost model at the top).
-    publishedFrame = { top: frameTop, height: frameHeight, bottom: layerBottom, vh: frame.height, inset: frame.keyboardInset };
-    frameCovering = frame.covering;
+    publishedUnits = units;
     const root = document.documentElement;
     root.style.setProperty("--visual-vh", `${frame.height}px`);
     root.style.setProperty("--visual-frame-top", `${frameTop}px`);
@@ -301,7 +355,7 @@ function publish(
   }
   // Layers fill this frame now, so a focused field may have fallen out of its
   // scroll container; Safari's own pan reveal already ran before this shrink.
-  if (!frameEqual && frame.covering && textEntryFocused) scheduleFieldReveal();
+  if (!geometryEqual && frame.covering && textEntryFocused) scheduleFieldReveal();
   if (metricsEqual) return;
   for (const listener of [...listeners]) listener();
 }
@@ -336,26 +390,38 @@ function layoutViewportHeight(innerHeight: number): number {
   return Math.max(layout, Number.isFinite(innerHeight) ? innerHeight : 0);
 }
 
-let largeViewportProbe: HTMLElement | null = null;
+const viewportProbes: Partial<Record<"100vh" | "100dvh", HTMLElement>> = {};
+
+/** The height of a viewport unit box in CSS px, from a detached, off-flow
+ *  probe. Returns 0 when a probe cannot be created (SSR, fake DOM). */
+function viewportUnitHeight(height: "100vh" | "100dvh"): number {
+  if (typeof document === "undefined" || typeof document.createElement !== "function") return 0;
+  const body = document.body;
+  if (!body || typeof body.appendChild !== "function") return 0;
+  let probe = viewportProbes[height];
+  if (!probe || !probe.isConnected) {
+    probe = document.createElement("div");
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.cssText = `position:absolute;top:0;left:-9999px;width:0;height:${height};visibility:hidden;pointer-events:none`;
+    body.appendChild(probe);
+    viewportProbes[height] = probe;
+  }
+  return probe.offsetHeight;
+}
 
 /** `100vh` is the large viewport, the only box that covers the physical screen
  *  when WebKit lets `innerHeight`/`clientHeight` stop above the Home-indicator
  *  canvas. It is never used as the frame itself on engines where it can exceed
- *  the WebView (Android Chrome); measuring it in a detached, off-flow probe
- *  only keeps the keyboard gap honest when an engine shrinks every reported
- *  viewport. Returns 0 when a probe cannot be created (SSR, fake DOM). */
+ *  the WebView (Android Chrome); measuring it only keeps the keyboard gap
+ *  honest when an engine shrinks every reported viewport. */
 function largeViewportHeight(): number {
-  if (typeof document === "undefined" || typeof document.createElement !== "function") return 0;
-  const body = document.body;
-  if (!body || typeof body.appendChild !== "function") return 0;
-  if (!largeViewportProbe || !largeViewportProbe.isConnected) {
-    const probe = document.createElement("div");
-    probe.setAttribute("aria-hidden", "true");
-    probe.style.cssText = "position:absolute;top:0;left:-9999px;width:0;height:100vh;visibility:hidden;pointer-events:none";
-    body.appendChild(probe);
-    largeViewportProbe = probe;
-  }
-  return largeViewportProbe.offsetHeight;
+  return viewportUnitHeight("100vh");
+}
+
+/** `100dvh`, measured only in a native shell: what the frame variables would
+ *  resolve to if they were published as the dynamic viewport. */
+function dynamicViewportHeight(): number {
+  return nativeFrame ? viewportUnitHeight("100dvh") : 0;
 }
 
 function measure(): void {
@@ -370,6 +436,7 @@ function measure(): void {
     // paint. The frame itself keeps using the measured layout height so 100vh
     // can never outgrow a WebView that does not include browser chrome.
     const layoutReference = Math.max(layoutHeight, largeViewportHeight());
+    dynamicHeight = dynamicViewportHeight();
     const visualHeight = visual?.height ?? layoutHeight;
     const offsetTop = visual?.offsetTop ?? 0;
     const textEntryFocused = document.activeElement?.matches?.(TEXT_ENTRY) ?? false;
@@ -476,18 +543,26 @@ function watchShortViewport(): void {
   publishShort();
 }
 
+export interface MobileViewportOptions {
+  /** The page runs in a native shell whose WebView ends at the keyboard (the
+   *  Capacitor app): the frame may be published as its dynamic viewport. */
+  nativeFrame?: boolean;
+}
+
 /**
  * Install the measurement listeners. Idempotent; safe to call before the
  * first paint and in environments without visualViewport (it falls back to
  * layout geometry and accepts a native keyboard inset when one is available).
  */
-export function startMobileViewport(): void {
+export function startMobileViewport(options: MobileViewportOptions = {}): void {
   if (started || typeof window === "undefined") return;
   started = true;
+  nativeFrame = options.nativeFrame === true;
   watchShortViewport();
   measure();
   const onChange = () => {
     if (!settleOnResize()) measure();
+    landGrowth();
   };
   window.addEventListener("resize", onChange);
   window.addEventListener("orientationchange", onChange);
@@ -580,12 +655,18 @@ function scheduleSettle(): void {
   settleTimer = setTimeout(settleRide, Math.max(keyboardMotion().duration + SETTLE_TAIL_MS, NATIVE_RESIZE_WAIT_MS));
 }
 
-/** The ridden keyboard has landed: commit its frame (the one restyle of the
- *  whole move, now that nothing is moving) and glide away any residual
- *  between where the riders ended and where the layout put them. */
+/** The ridden keyboard has landed: commit its frame (on a pixel frame the one
+ *  restyle of the whole move, now that nothing is moving) and glide away any
+ *  residual between where the riders ended and where the layout put them. */
 function settleRide(): void {
   cancelSettle();
   if (frameNativeInset === nativeKeyboardInset) return;
+  // A dynamic frame has already followed the WebView resize that lands the
+  // keyboard, under the docks' rides: they still hold where the keyboard
+  // carried them, so the move the layout made is taken out of them first and
+  // the snapshot reads where they are on screen.
+  if (rideFrameHeight !== null && publishedUnits === "dvh") holdRidesAcrossFrame(dynamicViewportHeight() - rideFrameHeight);
+  rideFrameHeight = null;
   const snapshot = captureRide();
   frameNativeInset = nativeKeyboardInset;
   // The landing is the keyboard's final geometry, never half of a Safari
@@ -611,6 +692,42 @@ function settleOnResize(): boolean {
   return true;
 }
 
+/** A closing keyboard's WebView is about to grow back under a dynamic frame:
+ *  by how much (from the keyboard-closed layout, 0 when unknown). Arms
+ *  landGrowth() for it and the cleanup once the keyboard has landed. */
+function awaitGrowth(): number {
+  cancelGrowth();
+  if (!closedLayout || closedLayout.width !== viewportWidth() || dynamicHeight <= 0) return 0;
+  const growth = Math.round(closedLayout.height - nativeKeyboardInset - dynamicHeight);
+  if (growth <= 1) return 0;
+  growthFrom = dynamicHeight;
+  growthTimer = setTimeout(finishGrowth, Math.max(keyboardMotion().duration + SETTLE_TAIL_MS, CLOSED_PROJECTION_MS));
+  return growth;
+}
+
+/** The WebView grew back under a closing dock's glide: the layout carries
+ *  that part of the move now, so the ride no longer does. */
+function landGrowth(): void {
+  if (growthFrom === null || dynamicHeight <= growthFrom + 1) return;
+  const grown = dynamicHeight - growthFrom;
+  growthFrom = null;
+  holdRidesAcrossFrame(grown);
+}
+
+/** The keyboard has landed: whatever the WebView did, the docks end on the
+ *  layout they are on (a WebView that never grew back leaves them a glide). */
+function finishGrowth(): void {
+  growthTimer = null;
+  growthFrom = null;
+  rideKeyboard(captureRide(), { dockOffset: 0, mode: "residual" });
+}
+
+function cancelGrowth(): void {
+  if (growthTimer) clearTimeout(growthTimer);
+  growthTimer = null;
+  growthFrom = null;
+}
+
 /** Native shell seam: map Capacitor's keyboard height onto the same CSS
  * contract used by mobile browsers. Passing zero returns ownership to
  * visualViewport measurement. */
@@ -623,6 +740,7 @@ export function setNativeKeyboardInset(height: number, options: NativeKeyboardOp
     measure();
     return;
   }
+  cancelGrowth();
   // Only a keyboard serving a docked composer is ridden; any other field
   // (Settings, the navigator search, a module layer) takes the band at once.
   const opening = next > frameNativeInset;
@@ -631,25 +749,35 @@ export function setNativeKeyboardInset(height: number, options: NativeKeyboardOp
   ridingDock = ride && next > 0;
   let snapshot: RideSnapshot | null = null;
   if (ride) snapshot = captureRide();
+  const dynamic = publishedUnits === "dvh";
   if (opening && snapshot) {
     // Covering more: ride now, commit the frame once the keyboard has landed.
     scheduleSettle();
+    rideFrameHeight = dynamic ? dynamicHeight : null;
   } else {
-    // Covering less (or not ridden): the frame takes it now.
+    // Covering less (or not ridden): the frame takes it now. A pixel frame
+    // is projected to the closed layout until the plugin grows the WebView
+    // back; a dynamic frame grows with the WebView, and nothing is written.
     cancelSettle();
+    rideFrameHeight = null;
     frameNativeInset = next;
-    closedProjectionUntil = followNativeKeyboard && next === 0 ? now() + CLOSED_PROJECTION_MS : 0;
+    closedProjectionUntil = followNativeKeyboard && next === 0 && !dynamic ? now() + CLOSED_PROJECTION_MS : 0;
   }
   measure();
   if (snapshot) {
+    // A dynamic frame committed nothing, so a closing glide sets off with the
+    // keyboard toward where the WebView about to grow back will put the
+    // docks; that growth leaves the ride when it lands (landGrowth).
+    const growth = !opening && dynamic ? awaitGrowth() : 0;
     rideKeyboard(snapshot, {
-      dockOffset: -(nativeKeyboardInset - frameNativeInset),
+      dockOffset: growth - (nativeKeyboardInset - frameNativeInset),
       mode: "keyboard",
-      // An opening ride starts from the frame the keyboard is already on;
-      // a closing glide starts after this commit's restyle, from where the
+      // An opening ride starts from the frame the keyboard is already on,
+      // and so does a closing one on a dynamic frame; on a pixel frame the
+      // closing glide starts after this commit's restyle, from where the
       // composer was — trailing the keyboard reads smoother than a jump.
-      elapsedMs: opening ? () => keyboardMoveElapsedMs() : undefined,
-      afterCommit: !opening,
+      elapsedMs: () => keyboardMoveElapsedMs(),
+      afterCommit: !opening && !dynamic,
     });
   }
   // The composer morph and the editor cap catch up with a moving keyboard —

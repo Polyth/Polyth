@@ -83,7 +83,9 @@ else {
 applySettingsToDom(getState().settings);
 applyUiSettings();
 applyBackgroundToDom();
-startMobileViewport();
+// The native app's WebView ends at the keyboard, so its frame can be the
+// WebView's own dynamic viewport (docs/dev/mobile-viewport.md).
+startMobileViewport({ nativeFrame: isNativeMobile() });
 exposeSlots();
 exposeSurfaces();
 exposeCapabilities();

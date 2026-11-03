@@ -125,6 +125,31 @@ truth. Electron retains its original frame and transparent-window handling.
     `html[data-keyboard-frame]` and the chain heights — restyles the whole app
     (*Restyle cost*), so `setNativeKeyboardInset` keeps two insets, where the
     keyboard is going and what the published frame reflects.
+  - **The native app's frame is its WebView's own dynamic viewport.** The
+    plugin (iOS) and the window insets (Android) end the WebView at the
+    keyboard, so the frame the measurements describe is normally the WebView
+    itself. `bootstrap.tsx` starts the viewport with
+    `nativeFrame: isNativeMobile()`, and while the published frame would be
+    exactly the WebView — top 0, no accessory band (never added in the native
+    app), its height and `--visual-vh` within 1px of a detached `100dvh`
+    probe — the variables are written once as `100dvh` (`--visual-frame-top`,
+    `--visual-offset`, `--keyboard-inset` as `0px`) with
+    `html[data-keyboard-frame="native"]`, and are not rewritten while that
+    holds. A WebView resize then moves the frame by itself and restyles only
+    the boxes that use the variables. Measured in Chromium on a 9,919-element
+    transcript with the real `main.css` (`UpdateLayoutTree` element counts,
+    emulated native keyboard): closing the keyboard restyled 12,626 elements
+    (~200 ms) on the pixel frame and at most 11 (~6 ms in all) on the
+    dynamic one. The check is a measurement, so an engine whose dvh does not
+    follow its WebView keeps pixels; a browser never takes this path
+    (Safari's dvh ignores the keyboard). Pixels return only while the frame
+    must differ from the WebView: a field's keyboard projected before the
+    deferred resize (below), which goes back to `100dvh` once the resize has
+    landed — a second whole-app restyle, paid while the keyboard stands
+    still. Per open/close cycle that moves the field's restyles from
+    *set-off + close* to *set-off + landing*, and removes both of a ridden
+    composer's (*commit + close*). Not device-verified: WebKit's dvh in a
+    resized WKWebView is checked by the probe at runtime, not measured here.
   - **A keyboard that covers more is ridden first, then committed.** When the
     text entry the keyboard serves sits in a composer dock (the conversation
     dock or the new-chat hero dock, `focusRidesKeyboard()`), the frame keeps
@@ -143,7 +168,11 @@ truth. Electron retains its original frame and transparent-window handling.
     older chat scrolled up from its end; pixel-sampled: the text kept full
     brightness on the glass card). The column now ends at the composer on
     every frame of the ride, the landing and the closing glide, so that
-    order is never on screen. Each ride starts from where the rider
+    order is never on screen. A finished ride still holds its end (`fill`),
+    and the landing's commit reads it as such: read as unmoved, the
+    children holding a reader's rows made the commit jump them up by the
+    keyboard's height and glide them back over 180 ms (Chromium, every
+    landing frame sampled). Each ride starts from where the rider
     is (a FLIP of the state switch: the dock's anchor is the composer card's
     bottom, since rows and clearances change with the state) and is placed on
     the keyboard's clock with a start time, not a `currentTime` measured
@@ -152,21 +181,61 @@ truth. Electron retains its original frame and transparent-window handling.
     layout minus the keyboard) or, at the latest, `max(slide + 80 ms, 700 ms)`
     later. The commit measures where the riders really are and glides any
     residual away (180 ms); a correct prediction leaves none. The commit's
-    whole-app restyle then costs nothing visible: the keyboard is still. The
-    commit is the keyboard's final geometry, so it bypasses the Safari
-    [settle window](#keyboard-open-settle-window): after the WebView resize
+    whole-app restyle then costs nothing visible: the keyboard is still. On
+    the dynamic frame there is nothing to write: the WebView resize has
+    already moved the layout under the docks before any script runs, so
+    `holdRidesAcrossFrame` (`keyboardRide.ts`) first shifts each ride by that
+    move on its own clock, and the commit's snapshot reads where the riders
+    are on screen. A dock and its column's lower edge hang from the frame's
+    lower edge and take the move out of their rides; the column's top does
+    not move, so its children ride the shift back, less whatever the resize
+    clamped out of the transcript's scroll offset. Without that shift the
+    composer jumped 336px on the landing frame. The commit is the keyboard's
+    final geometry, so it bypasses the Safari [settle window](#keyboard-open-settle-window): after the WebView resize
     the frame shrinks with the editor focused, and a commit held there for two
     frames let the residual start from the old layout — the composer dipped,
     then the frame landed under the glide and flung it ~290px up before it
     settled.
-  - **A keyboard that covers less commits at once.** Closing (or a shorter
-    keyboard) publishes the frame immediately — the closed layout is projected
-    from the largest keyboard-closed layout seen at this width while the
-    plugin still has the WebView at the keyboard's size (up to 1 s, released by
-    its resize) — and the riders glide from where they were. The restyle is
-    paid inside that event (the ride reads the new layout synchronously), so
-    the glide starts on the next frame and is never advanced into the stall:
-    it trails the keyboard by the stall rather than jumping.
+  - **A keyboard that covers less commits at once.** On a pixel frame,
+    closing (or a shorter keyboard) publishes the frame immediately — the
+    closed layout is projected from the largest keyboard-closed layout seen
+    at this width while the plugin still has the WebView at the keyboard's
+    size (up to 1 s, released by its resize) — and the riders glide from
+    where they were. The restyle is paid inside that event (the ride reads
+    the new layout synchronously), so the glide starts on the next frame and
+    is never advanced into the stall: it trails the keyboard by the stall
+    rather than jumping. The dynamic frame is never projected: it grows with
+    the WebView (10 ms after `keyboardWillHide`), and nothing is written.
+    A ridden dock sets off with the keyboard at once, on its clock, toward
+    where the grown WebView will put it (the keyboard-closed layout minus
+    the remaining keyboard, minus the WebView now); when the WebView has
+    grown, `landGrowth` takes the growth out of the rides with
+    `holdRidesAcrossFrame`, and a residual glide cleans up after
+    `max(slide + 80 ms, 1 s)` in case the WebView never grew back. The
+    column grows with the WebView at its tail, which clamps the scroll
+    offset of a transcript at (or near) its tail: those rows ride down with
+    the composer by that much from the start, as the projected pixel frame
+    glides them. Held only on the docks, the column was left the
+    keyboard's height under the composer until that cleanup.
+  - **The strip a closing keyboard uncovers shows the page's colour.** The
+    plugin grows the WebView back 10 ms after `keyboardWillHide`, and the
+    strip the keyboard slides off stays unpainted until the page commits a
+    frame at the new size: after the frame commit's whole-app restyle and
+    whatever the closing gesture rendered. WKWebView shows its scroll view's
+    background there, which Capacitor sets to the launch colour
+    (`backgroundColor` in `capacitor.config.ts`). Device report 2026-11-02
+    (navigator search closed, Midnight): a flat `#07091b` band exactly the
+    keyboard's height (345 pt on a Pro Max) for about a second.
+    `PolythRootBridgeViewController` (`SceneDelegate.swift`) keeps the
+    WebView's and its scroll view's background on the canvas colour WebKit
+    reports for the page (`underPageBackgroundColor`, observed without an
+    initial value, so the launch keeps the brand night until a page has
+    painted), so whatever wait remains reads as the page. On the dynamic
+    frame (above) the close writes nothing to `<html>`, so that frame costs
+    only the boxes that use the frame variables; on a pixel frame the
+    closed projection's whole-app restyle is still in front of it.
+    Source-checked in `apps/mobile/test/nativeBridgeLifecycle.test.ts`; the
+    Swift is compiled only in CI and is not device-verified.
   - **Only composer docks ride.** A Settings, navigator or module field takes
     the frame at once, as before: those layers anchor to the frame variables.
     Reduced motion (OS or in-app) never rides.
@@ -237,10 +306,15 @@ truth. Electron retains its original frame and transparent-window handling.
   transcript's tail glued to the composer, no frame movement before the
   commit, no jump at the commit, the closing glide, a transcript away from
   its tail that keeps its place while its column ends at the composer on
-  every frame both ways, a 500 ms spring reported 40 ms late, a non-dock
-  field), `hostComposerMorphKeyboard.test.ts` and
-  `mobileViewportResume.test.ts`. `composerKeyboardMorphRide.test.ts` drives
-  the real Composer through the whole path — the resting row, a tap that
+  every frame both ways and of the landing, a 500 ms spring reported 40 ms
+  late, a non-dock field; then the dock, a transcript at and away from its
+  tail, and the field again on the dynamic frame, every landing and growth
+  frame sampled and every write to `<html>` recorded — none),
+  `hostComposerMorphKeyboard.test.ts` and
+  `mobileViewportResume.test.ts` (also the dynamic frame's publish, its
+  measurement check, a field's pixels and their hand-back, a close without a
+  write). `composerKeyboardMorphRide.test.ts` drives the real Composer, on
+  both frames, through the whole path — the resting row, a tap that
   engages the card while it rides the keyboard, every frame of the WebView
   resize, and a tap on the transcript that rests it as a row again where it
   started: the card keeping its rows while it shrinks, the model line gone
@@ -326,7 +400,11 @@ state, the root variables, `html[data-keyboard-frame]` and the chain heights
 are the expensive frame, written in one batch and only when the frame moved.
 "Moved" compares every value the batch writes (top, height, layer edge,
 `--visual-vh`, `--keyboard-inset`): a value left out of the comparison is never
-rewritten while the others hold still. `--visual-offset`, the `top` of every
+rewritten while the others hold still. In the native app the batch is usually
+the dynamic viewport instead (*The native app's frame is its WebView's own
+dynamic viewport*): written once, it is rewritten only when the frame switches
+between pixels and `100dvh`, and a WebView resize restyles only the boxes that
+use the variables. `--visual-offset`, the `top` of every
 sheet and dialog, is therefore the frame's own top (an alias of
 `--visual-frame-top`), not the raw `visualViewport.offsetTop`. iOS can report a
 closing keyboard's full height while its pan is still at the old offset and
@@ -541,7 +619,8 @@ Settings stages, the phone navigator, main module view, fullscreen rail pane,
 panel sheet, narrow drawer), plus the bottom-anchored widget catalog sheet and
 Settings as a centred tablet modal, with the real cascade and the variables
 `publish()` writes for a Safari pan (partway, to the layout bottom, none), a
-native-resize WebView and a closed keyboard. It crosses that with the WebKit
+native-resize WebView (in pixels and as the dynamic frame) and a closed
+keyboard. It crosses that with the WebKit
 accessory guard and the contained `.app-shell`. For each family it asserts that the
 layer starts at the band top, ends where `#root` ends, answers hit tests at both
 ends of the band, keeps its header and a usable scroll area inside the band,

@@ -142,6 +142,11 @@ loading is shown in between.
   - Android's re-show is an inset legacy window, so Android skips the curtain.
     There the WebView's brand background and the bootstrap page's own veil
     carry the swap.
+  - On iOS the WebView's own background is the brand night only until a page
+    has painted; then it follows that page's canvas colour, so a strip the
+    page has not painted yet (under a closing keyboard) reads as the page
+    ([mobile viewport](../dev/mobile-viewport.md), *Following the native
+    keyboard*).
   - `launchAutoHide` with 10 s is only the safety net for a page that never
     lifts the splash.
 - **Connection Hub.** When the hub opens a trusted server by itself (warm
@@ -237,7 +242,12 @@ Capacitor uses native keyboard resize. Keyboard show/hide events also publish
 the reported height through `apps/web/src/mobileViewport.ts`, which remains the
 single owner of `--visual-vh`, `--visual-bottom`, `--visual-offset`, and
 `--keyboard-inset`. This covers Android WebViews where visual viewport geometry
-reports only the already-resized content box.
+reports only the already-resized content box. Because the resized WebView is
+itself the frame, the native app publishes those variables once as the
+WebView's `100dvh` (`html[data-keyboard-frame="native"]`) wherever a probe
+measures the two as equal, so a keyboard resize no longer restyles every
+element ([mobile viewport](../dev/mobile-viewport.md), *Following the native
+keyboard*).
 
 ## Files and attachments
 

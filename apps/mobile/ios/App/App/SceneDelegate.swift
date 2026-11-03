@@ -1,5 +1,6 @@
 import UIKit
 import Foundation
+import WebKit
 import Capacitor
 
 private final class PolythPendingNavigation {
@@ -144,6 +145,8 @@ final class PolythKeyboardMotionPlugin: CAPPlugin, CAPBridgedPlugin {
 }
 
 final class PolythRootBridgeViewController: CAPBridgeViewController {
+    private var pageCanvasObservation: NSKeyValueObservation?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         // The web app owns safe-area spacing. Clear any UIKit/plug-in inset so
@@ -153,6 +156,20 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
         webView?.scrollView.contentInsetAdjustmentBehavior = .never
         webView?.scrollView.contentInset = .zero
         webView?.scrollView.scrollIndicatorInsets = .zero
+        // Wherever the page has not painted yet, WKWebView shows its scroll
+        // view's background. The keyboard plugin (KeyboardResize.Native) grows
+        // the WebView back to full height 10 ms after keyboardWillHide, and the
+        // strip the keyboard uncovers stays empty until the page commits a
+        // frame at the new size: Capacitor's launch colour (`backgroundColor`,
+        // the brand night) showed there as a navy band the keyboard's height,
+        // after the keyboard had gone. The background takes the colour the page
+        // paints under itself (its canvas), so a late frame reads as the page;
+        // until the first page reports one, the launch colour stays.
+        pageCanvasObservation = webView?.observe(\.underPageBackgroundColor, options: [.new]) { observed, _ in
+            guard let canvas = observed.underPageBackgroundColor, canvas.cgColor.alpha > 0 else { return }
+            observed.backgroundColor = canvas
+            observed.scrollView.backgroundColor = canvas
+        }
     }
 
     override func capacitorDidLoad() {

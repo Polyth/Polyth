@@ -70,3 +70,19 @@ test("native shell leaves safe-area painting to the web app", async () => {
   assert.match(index, /viewport-fit=cover/,
     "the web viewport must remain edge-to-edge so CSS safe-area tokens can position controls");
 });
+
+test("the iOS WebView's own background follows the page canvas, not the launch colour", async () => {
+  const [config, scene] = await Promise.all([
+    readFile(new URL("../capacitor.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../ios/App/App/SceneDelegate.swift", import.meta.url), "utf8"),
+  ]);
+  // The plugin grows the WebView before the page has painted the strip the
+  // closing keyboard uncovers; the WebView's background shows there meanwhile.
+  assert.match(config, /Keyboard:\s*\{[\s\S]*?resize:\s*KeyboardResize\.Native/);
+  assert.match(config, /backgroundColor:\s*"#07091c"/, "the brand night stays the launch colour");
+  assert.match(scene, /webView\?\.observe\(\\\.underPageBackgroundColor, options: \[\.new\]\)/,
+    "no .initial: before the first page paints, the launch colour stays");
+  assert.match(scene, /observed\.backgroundColor = canvas/);
+  assert.match(scene, /observed\.scrollView\.backgroundColor = canvas/,
+    "the scroll view's background is what WKWebView shows beyond the painted page");
+});
