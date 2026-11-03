@@ -1,0 +1,24 @@
+{
+  "name": "@polyth/computer-use",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Computer Use",
+      "description": "Lets agents see and operate the desktop of the computer running Polyth: screenshots, mouse, keyboard and windows, with your approval.",
+      "core": false,
+      "enabled": false,
+      "icon": "monitor",
+      "hasSettings": false,
+      "category": "workspace"
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0"
+  }
+}

@@ -543,6 +543,7 @@
         "packages/judgment-jev/**",
         "packages/judgment-local/**",
         "packages/share-chat/**",
+        "packages/computer-use/**",
         "packages/glance/**"
       ],
       "entrypoints": [
@@ -561,6 +562,7 @@
         "packages/judgment-jev/README.md",
         "packages/judgment-local/README.md",
         "packages/share-chat/README.md",
+        "packages/computer-use/README.md",
         "packages/glance/README.md",
         "packages/task-trackers/README.md"
       ],
