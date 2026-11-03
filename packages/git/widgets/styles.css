@@ -3,8 +3,9 @@
    no plate, border, shadow or glass. Folded it is one summary line; open,
    the files hang from the same thread as activity steps and the actions are
    text. Chat settings pick the look (body[data-composer-status-style]):
-   `line` is this base, `tab` sets it in a faint tab on the composer's top
-   edge, `capsule` gives it a hairline outline. */
+   `line` is this base, `tab` makes it a row of the composer's header stack,
+   `capsule` gives it a hairline outline. It shares the chat frame with the
+   agent status line it replaces, so the two never jump in width or start. */
 .pending-changes-bar {
   --pending-changes-row: max(32px, var(--hit-min));
   --pending-changes-mark: var(--icon-md);
@@ -13,11 +14,22 @@
   display: flex;
   flex-direction: column;
   gap: 0;
+  box-sizing: border-box;
   min-width: 0;
-  width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
-  margin-inline: auto;
+  width: min(
+    var(--chat-measure),
+    calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)))
+  );
+  margin-inline-start: var(--conversation-frame-inline-start, auto);
+  margin-inline-end: var(--conversation-frame-inline-end, auto);
   padding: 0 var(--space-1) var(--space-2);
   color: var(--text);
+}
+/* Placed inside the composer (Above the message box) it already sits in the
+   composer's frame. */
+.composer .pending-changes-bar {
+  width: auto;
+  margin-inline: 0;
 }
 .pending-changes-head {
   display: flex;
@@ -220,15 +232,56 @@
   }
 }
 
-/* Tab: a faint tab growing out of the composer's top edge, inset from its
-   rounded corners. It abuts the composer, never tucks under its glass. */
-body[data-composer-status-style="tab"] .pending-changes-bar {
-  width: calc(min(var(--chat-measure), 100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset))) - 2 * var(--composer-status-tab-inset, var(--space-4)));
-  padding-inline: var(--space-3);
-  border-radius: calc(var(--radius-card) + 4px) calc(var(--radius-card) + 4px) 0 0;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+/* Tab: a status row of the composer's header stack (styles.css, "Tab: the
+   composer's header stack"): the card's width, the queued prompt's chip
+   material, and the stack's grid: the mark on the mark column, the title
+   on the text column, the chevron ending on the end column, folded or
+   open. */
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .pending-changes-bar {
+  width: calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)));
+  margin-inline-start: var(--conversation-frame-inline-start, var(--conversation-chrome-inset));
+  margin-inline-end: var(--conversation-frame-inline-end, var(--conversation-chrome-inset));
 }
-body[data-composer-status-style="tab"] .pending-changes-bar--collapsed { padding-inline: var(--space-2); }
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget, .composer-chat > .placed-mini-widget) > .pending-changes-bar {
+  --pending-changes-row: calc(var(--composer-stack-row) - 2px);
+  margin-block: 0 var(--composer-stack-gap);
+  padding: 0 calc(var(--composer-stack-end) - 1px - (var(--composer-stack-control) - var(--icon-sm)) / 2) var(--space-2) calc(var(--composer-stack-mark) - 1px - var(--pending-changes-mark) / 2);
+  border: 1px solid var(--composer-tray-edge);
+  border-radius: var(--radius-composer-tray);
+  background: var(--composer-tray-fill);
+  background-clip: padding-box;
+  -webkit-backdrop-filter: var(--composer-tray-filter);
+  backdrop-filter: var(--composer-tray-filter);
+  box-shadow: none;
+}
+body[data-composer-status-style="tab"] .pending-changes-bar .pending-changes-lead {
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--pending-changes-mark) / 2);
+}
+body[data-composer-status-style="tab"] .pending-changes-bar .pending-changes-actions .ui-icon-btn {
+  width: var(--composer-stack-control);
+  min-width: var(--composer-stack-control);
+  height: var(--composer-stack-control);
+  min-height: var(--composer-stack-control);
+}
+/* Open, the files hang from the mark's thread with their names on the text
+   column and their counts ending on the end column. */
+body[data-composer-status-style="tab"] .pending-changes-bar .pending-changes-list {
+  padding-inline-start: calc(var(--pending-changes-mark) / 2 + var(--composer-stack-text) - var(--composer-stack-mark));
+  margin-inline-end: calc((var(--composer-stack-control) - var(--icon-sm)) / 2 - var(--space-2));
+}
+body[data-composer-status-style="tab"] .pending-changes-bar .pending-changes-more {
+  margin-inline-start: calc(var(--pending-changes-mark) / 2 + var(--composer-stack-text) - var(--composer-stack-mark) - var(--space-1));
+}
+/* Folded, the summary itself is the row: it takes the padding. */
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget, .composer-chat > .placed-mini-widget) > .pending-changes-bar--collapsed {
+  padding: 0;
+}
+body[data-composer-status-style="tab"] .pending-changes-bar--collapsed > .ui-run-summary {
+  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--pending-changes-mark) / 2) calc(var(--composer-stack-end) - 1px);
+}
+body[data-composer-status-style="tab"] .pending-changes-bar--collapsed .ui-run-summary-mark {
+  margin-inline-end: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--pending-changes-mark) / 2 - var(--space-2));
+}
 
 /* Capsule: folded it is a centred pill that hugs its words; open, the list
    sits in a hairline frame. Outlines are shadows so Borderless keeps them. */

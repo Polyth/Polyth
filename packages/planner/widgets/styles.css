@@ -1306,12 +1306,17 @@ button.planner-chat-foot-open:focus-visible { outline: 2px solid var(--focus-rin
   .planner-chat-foot > span { display: none; }
 }
 
-/* Status above the composer → Tab: the open list rises from the composer's
-   edge in the tab's own tint. */
-body[data-composer-status-style="tab"] .planner-chat { padding-inline: var(--composer-status-tab-inset, var(--space-4)); }
+/* Status above the composer → Tab: the open list spans the composer's
+   width in the material of its header stack (the host's --composer-tray-*
+   tokens: the composer's fill, blur, contour and corner in every look and
+   style). */
 body[data-composer-status-style="tab"] .planner-chat-panel {
-  border-radius: calc(var(--radius-card) + 4px);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border: 1px solid var(--composer-tray-edge, transparent);
+  border-radius: var(--radius-composer-tray, var(--radius-card));
+  background: var(--composer-tray-fill, color-mix(in srgb, var(--text) 5%, transparent));
+  background-clip: padding-box;
+  -webkit-backdrop-filter: var(--composer-tray-filter, none);
+  backdrop-filter: var(--composer-tray-filter, none);
 }
 /* Capsule: folded, a centred pill that hugs its words; open, the list sits
    in a hairline frame. */

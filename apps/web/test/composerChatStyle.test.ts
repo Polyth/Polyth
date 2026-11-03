@@ -121,9 +121,9 @@ test("the agent status above the composer is a borderless line, not glass", () =
   // The action takes the line's room.
   assert.match(dock, /\.agent-status-dock-state \{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*6ch/s);
   // The composer's stack keeps a step of air under the status, except under
-  // a Tab, which grows out of the composer's edge.
+  // a Tab, whose rows keep their own gap.
   assert.match(css, /\.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar\) > \.composer \{\s*padding-block-start: var\(--space-2\);\s*\}/);
-  assert.match(css, /body\[data-composer-status-style="tab"\] \.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
+  assert.match(css, /body\[data-composer-status-style="tab"\] \.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar, \.subagent-island\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
   assert.match(dock, /@media \(max-width: 600px\) \{\s*\.agent-status-dock \.agent-status-dock-secondary \{ display: none; \}/);
   assert.match(dock, /@media \(prefers-reduced-motion: reduce\) \{\s*\.agent-status-dock-state \{ animation: none;/);
 });
@@ -568,4 +568,33 @@ test("queued message rows follow the composer's material, type and corner roles"
     css,
     /@supports \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)[\s\S]*?body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.queue-chip:not\(\.drag-over\)[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/,
   );
+});
+
+test("Tab status style: one grid from the card's edge, the suggestion as the card's header row", () => {
+  const css = read("../src/styles.css");
+  const stack = css.slice(css.indexOf("/* Tab: the composer's header stack."), css.indexOf('/* Full widgets placed "Above the composer"'));
+  assert.ok(stack.length > 0, "header stack section");
+  // The grid is derived from the card: the model logo's column, the model
+  // name's column, and the mirrored end; one row height and one gap.
+  assert.match(stack, /--composer-stack-mark:\s*calc\(var\(--space-4\) \+ 2px \+ var\(--icon-sm\) \/ 2\);/);
+  assert.match(stack, /--composer-stack-text:\s*calc\(var\(--composer-stack-mark\) \+ var\(--icon-sm\) \/ 2 \+ 6px\);/);
+  assert.match(stack, /--composer-stack-end:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-sm\) \/ 2\);/);
+  assert.match(stack, /--composer-stack-row:\s*calc\(max\(38px, var\(--hit-min\)\) \+ 2px\);/);
+  // Every row pads by the column less its own edge and half its mark.
+  assert.match(stack, /> \.agent-status-dock \{[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - 1px - var\(--icon-md\) \/ 2\) calc\(var\(--composer-stack-end\) - 1px\)/s);
+  assert.match(stack, /> \.queue-chip \{[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - 1px - var\(--icon-md\) \/ 2\)/s);
+  assert.match(stack, /\.queue-chip:not\(\.queue-chip-leaving\) \{[^}]*min-height:\s*var\(--composer-stack-row\)/s);
+  // A touch grip keeps its full target as an invisible extension.
+  assert.match(stack, /\.queue-grip::before \{[^}]*inset:\s*calc\(\(var\(--icon-md\) - max\(var\(--icon-md\), var\(--hit-min\)\)\) \/ 2\)/s);
+  // The suggestion is the card's first row with no surface of its own.
+  assert.match(stack, /\.composer-card > \.composer-suggestion \{[^}]*order:\s*-1;[^}]*border:\s*0;[^}]*background:\s*none;[^}]*box-shadow:\s*none;/s);
+  // Its hairline: content-wide, fading at its ends, one device pixel.
+  assert.match(stack, /\.composer-card > \.composer-suggestion::after \{[^}]*inset-inline:\s*var\(--composer-header-rule-inset\);[^}]*linear-gradient\(90deg, transparent, var\(--composer-header-rule\) var\(--composer-header-rule-fade\)/s);
+  assert.match(stack, /@media \(min-resolution: 2dppx\) \{[^}]*\.composer-suggestion::after \{[^}]*scaleY\(0\.5\)/s);
+  // The model line sits as far below the hairline as the header's content above.
+  assert.match(stack, /:has\(> \.composer-suggestion\) > \.composer-config-row \{[^}]*padding-block-start:\s*calc\(\(var\(--composer-stack-row\) - 2px - max\(30px, var\(--hit-min\)\)\) \/ 2\)/s);
+  // The phone's resting row keeps its height under the header.
+  assert.match(stack, /\.composer-mobile\.composer-collapsed \.composer-card:has\(> \.composer-suggestion\) \{[^}]*flex-wrap:\s*wrap;/s);
+  // No header imitation is left: the card itself frames it.
+  assert.doesNotMatch(stack, /composer-tray-header|composer-tray-divider|border-start-start-radius:\s*0/);
 });

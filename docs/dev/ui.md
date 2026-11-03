@@ -2449,25 +2449,50 @@ name is never written out, only the mark's tooltip, so the short line keeps
 its room for the action. Light moving through the action's words and an accent
 dot on the mark say "live"; reduced motion and low-resource mode keep the
 words still. The action outranks the rest: at 600 px or less the files tally
-steps aside. A non-Standard interface look gives the line its in-flow card;
-there the mark and time sit `--space-3` off the card's edge, the inset of the
-Tab and Capsule styles (with subagents the island is the card: its
-`--space-2` plus the line's own `--space-1`). Under the status or edited
-files the composer's stack (queued messages, then the box) keeps `--space-2`
-of air, the gap the queued messages keep from the box. Folded, the edited
+steps aside. No interface look turns the line into a card or re-pads it:
+its shape and inset come from the status style below (Tab and Capsule keep
+the mark and time off their rounded edge). Under the status or edited files
+the composer's stack (queued messages, then the box) keeps `--space-2` of
+air, the gap the queued messages keep from the box (in Tab the row's own gap
+stands in for it). Folded, the edited
 files are one summary line whose title carries the count. Open, the files
 hang from the same thread as activity steps, and Undo / Review are text actions (Review in the
 text-safe `--chat-ink-accent`). Their quiet inks follow the wallpaper wash
 ([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset
 theme and wallpaper.
+The edited-files bar shares the status line's chat frame (start edge and
+width), so nothing jumps when a turn ends and both line up with the composer
+at every width.
 Chat settings → *Status above the composer* (`composerStatusStyle`,
-`body[data-composer-status-style]`) picks `line` (the base), `tab` (a faint
-tab growing out of the composer's top edge, inset from its corners, further
-in on a phone's pill composer; the composer drops its top padding under it.
-A non-Standard look's card replaces that tab, so there the card spans the chat
-frame like the queued messages and the box, and the composer keeps its air)
-or `capsule` (a centred hairline pill that hugs its words; the open file list
-sits in a hairline frame). Pinned in `apps/web/test/composerChatStyle.test.ts`,
+`body[data-composer-status-style]`) picks `line` (the base), `tab` or
+`capsule` (a centred hairline pill that hugs its words; the open file list
+sits in a hairline frame). `tab` is the composer's **header stack**: bottom
+to top, the suggested next prompt is the card's own first row (Composer
+renders it inside `.composer-card` only in this style), queued prompts stand
+above the card, and the status or edited-files line and the subagent island
+on top. The header has no surface: the card's edge, highlight, corners,
+shadow and focus wrap it in every platform style and look, and a hairline
+parts it from the model line (`--composer-header-rule`, content-wide via
+`--composer-header-rule-inset`, fading over `--composer-header-rule-fade`,
+one device pixel; Line draws it edge to edge like its other rules). The model
+line sits as far below the hairline as the header's content above it. The
+rows above the card are chips of the pending stack: the queued prompt's
+material, edge and corner (`--composer-tray-fill` / `-filter` / `-edge`,
+`--radius-composer-tray`; each non-Standard look sets them to its option chip,
+`shellLooks.css` 3c), the card's width, one height (`--composer-stack-row`,
+40px, a touch target plus edges on touch) and one gap (`--composer-stack-gap`).
+Everything sits on one grid measured from the card's outer edge: marks are
+centred on the model logo's column (`--composer-stack-mark`), labels start at
+the model name (`--composer-stack-text`), trailing glyphs and text end where
+the marks start (`--composer-stack-end`), and trailing controls share one size
+(`--composer-stack-control`). A touch grip keeps its 44px target as an
+invisible extension over the prompt's first letters. On the phone's resting
+row the header takes its own line and the row keeps its height. Known limit:
+the phone card's own Add control sits a few pixels off the model logo's
+column (its resting and engaged rails pad differently), so the header lines
+up with the model line, not with Add. The
+status style, not the look, owns the shape of these lines: no look turns them
+into in-flow cards. Pinned in `apps/web/test/composerChatStyle.test.ts`,
 `apps/web/test/shellLooks.test.ts` and
 `packages/git/test/sourceControlVisualGrammar.test.ts`.
 
@@ -2603,10 +2628,9 @@ named by the same `liveAction.ts` as the agent's own line. In a container of
 own, rows drop the chevron (the row itself opens the chat) and a running row
 leaves the model out so its action and time stay readable. The agent's own
 logo wears its harness profile's color, as the composer's model chip does.
-In the Standard look the island is text on the canvas; the other looks
-give it their in-flow card (the line inside keeps none), and the Tab and
-Capsule status styles frame the whole island (in such a look the card
-replaces the Tab's frame and spans the chat frame). State
+The island is text on the canvas in every look (the line inside keeps no
+plate); the Capsule status style frames the whole island and Tab makes it a
+row of the composer's header stack. State
 comes from the canonical child projections (`parentId`) rolled up through
 grandchildren (`apps/web/src/subagentActivity.ts`), the same source as the
 navigator's disclosure pill. Pinned in `apps/web/test/subagentBranch.test.ts`.

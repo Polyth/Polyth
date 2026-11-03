@@ -2,8 +2,9 @@
    One island holds the agent's own line (the AgentStatusDock primitive, live
    or idle) and the branch: a row per active subagent on a thread dropped from
    that line's mark like the activity block's. In the Standard look the island is
-   text on the canvas; the other looks give it their in-flow card
-   (shellLooks.css) and the line inside drops its own. The thread is an inset
+   text on the canvas, and so it is in the other looks: the status style
+   shapes it (a framed capsule, or a row of the composer's Tab header stack) and
+   the line inside drops its own. The thread is an inset
    shadow or background (never a border), so Borderless keeps it; it takes the
    accent while subagents work, amber while one waits for a person and a
    quiet neutral when only paused ones are left. The island shares the chat
@@ -323,15 +324,10 @@
 }
 
 /* ---- Composer status styles (Chat settings) ---- */
-/* Tab: the island is the faint tab growing out of the composer's top edge. */
-body[data-composer-status-style="tab"] .subagent-island {
-  width: calc(min(var(--chat-measure), 100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset))) - 2 * var(--composer-status-tab-inset, var(--space-4)));
-  margin-inline: auto;
-  padding-inline: var(--space-2);
-  border-radius: calc(var(--radius-card) + 4px) calc(var(--radius-card) + 4px) 0 0;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 35%, transparent);
-}
+/* Tab: the island is a row of the composer's header stack, which owns its
+   material, edges and geometry (styles.css, "Tab: the composer's header
+   stack"). */
+body[data-composer-status-style="tab"] .subagent-island { padding-inline: var(--space-2); }
 /* Capsule: two lines no longer hug as a pill; the outline rounds the card. */
 body[data-composer-status-style="capsule"] .subagent-island {
   margin-block-end: var(--space-2);

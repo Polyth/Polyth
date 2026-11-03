@@ -624,8 +624,10 @@ the pre-boot map in `index.html`. `backgrounds.test.ts` pins the variants,
 tones, edges and that map.
 
 Every look covers the header, navigator, rails, conversation and composer,
-in-flow cards (agent question, isolated-changes card, edited files, agent
-status, empty states) and floating surfaces (toasts, menus, tooltips,
+in-flow cards (agent question, isolated-changes card, empty states; the
+agent status, subagent and edited-files lines keep the shape *Status above the
+composer* gives them, and a look only restates the Tab header stack's chip
+material and header rule, [ui](ui.md)) and floating surfaces (toasts, menus, tooltips,
 dialogs, Settings, the workspace customize panel). The shared block is
 organised by role, not by component, so a control a platform style paints at
 class strength joins a role instead of getting a rule of its own:

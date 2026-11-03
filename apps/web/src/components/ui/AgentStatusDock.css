@@ -4,8 +4,8 @@
    keeps its room for the action. It has no plate, border, shadow or glass;
    what says "live" is light moving through the action's words and the
    accent dot on the mark. The look is chosen in Chat settings
-   (body[data-composer-status-style]): `line` is this base, `tab` sets it in
-   a faint tab on the composer's top edge, `capsule` hugs it in a centred
+   (body[data-composer-status-style]): `line` is this base, `tab` makes it
+   a row of the composer's header stack, `capsule` hugs it in a centred
    outlined pill. The chat frame in styles.css owns the width. */
 .agent-status-dock {
   --agent-status-row: max(32px, var(--hit-min));
@@ -136,17 +136,10 @@ body[data-desktop-low-resource="true"] .agent-status-dock-state { animation: non
    line holds still: no dot on the mark, no light through the words. */
 .agent-status-dock--idle .agent-status-dock-state { animation: none; background: none; color: var(--muted); }
 
-/* Tab: the same line in a faint tab growing out of the composer's top edge,
-   inset from its rounded corners. It abuts the composer and never tucks
-   under it: the composer's glass would show it through. */
-body[data-composer-status-style="tab"] .agent-status-dock {
-  width: calc(min(var(--chat-measure), 100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset))) - 2 * var(--composer-status-tab-inset, var(--space-4)));
-  margin-inline: auto;
-  padding-inline: var(--space-3);
-  border-radius: calc(var(--radius-card) + 4px) calc(var(--radius-card) + 4px) 0 0;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 35%, transparent);
-}
+/* Tab: the line is a row of the composer's header stack, which owns its
+   material, edges and geometry (styles.css, "Tab: the composer's header
+   stack"). */
+body[data-composer-status-style="tab"] .agent-status-dock { padding-inline: var(--space-3); }
 
 /* Capsule: a centred pill that hugs its words, outlined in accent while the
    agent works. The outline is a shadow so Borderless keeps it. */

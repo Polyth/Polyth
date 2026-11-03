@@ -4233,6 +4233,37 @@ function ComposerBody({
     </div>
   );
 
+  // The suggested next prompt (harness or Session Assist) is never text in the
+  // editor: the whole chip takes it as an editable draft, × (or Esc) dismisses
+  // it, Tab is the shortcut. It sits on the composer's pending writing stack
+  // above the card, or, in the Tab status style, is the card's own header row
+  // (styles.css, "Tab: the composer's header stack").
+  const suggestionInCard = uiPrefs.composerStatusStyle === "tab";
+  const suggestionChip = promptSuggestion ? (
+    <div className="composer-suggestion" role="group" aria-label={tr("composer.promptSuggestionLabel")}>
+      <button
+        type="button"
+        className="composer-suggestion-use"
+        title={tr("composer.promptSuggestionHint")}
+        aria-label={`${tr("composer.promptSuggestionAccept")}: ${promptSuggestion}`}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={acceptPromptSuggestion}
+      >
+        <UiIcon icon={AssistIcon} size="sm" className="composer-suggestion-icon" />
+        <span className="composer-suggestion-text">{promptSuggestion}</span>
+        <kbd className="composer-suggestion-key" aria-hidden="true">Tab</kbd>
+      </button>
+      <IconButton
+        className="composer-suggestion-dismiss"
+        icon={CloseIcon}
+        label={tr("composer.promptSuggestionDismiss")}
+        size="sm"
+        variant="ghost"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setDismissedSuggestion(promptSuggestion)}
+      />
+    </div>
+  ) : null;
   return (
     <div
       ref={rootRef}
@@ -4279,34 +4310,7 @@ function ComposerBody({
           chat whatever the rail shows, so hiding a rail button never turns
           suggestions off. They draw nothing and offer through composerDraft. */}
       {session && !peopleOnly && <SlotHost slot="composer.suggestion" context={slotContext} />}
-      {/* The suggested next prompt (harness or Session Assist) sits on the composer's pending
-          writing stack, never inside the editor: the whole chip takes it as
-          an editable draft, × (or Esc) dismisses it, Tab is the shortcut. */}
-      {promptSuggestion && (
-        <div className="composer-suggestion" role="group" aria-label={tr("composer.promptSuggestionLabel")}>
-          <button
-            type="button"
-            className="composer-suggestion-use"
-            title={tr("composer.promptSuggestionHint")}
-            aria-label={`${tr("composer.promptSuggestionAccept")}: ${promptSuggestion}`}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={acceptPromptSuggestion}
-          >
-            <UiIcon icon={AssistIcon} size="sm" className="composer-suggestion-icon" />
-            <span className="composer-suggestion-text">{promptSuggestion}</span>
-            <kbd className="composer-suggestion-key" aria-hidden="true">Tab</kbd>
-          </button>
-          <IconButton
-            className="composer-suggestion-dismiss"
-            icon={CloseIcon}
-            label={tr("composer.promptSuggestionDismiss")}
-            size="sm"
-            variant="ghost"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => setDismissedSuggestion(promptSuggestion)}
-          />
-        </div>
-      )}
+      {!suggestionInCard && suggestionChip}
       <GlassDock
         className={`composer-card${selectingConversation ? " is-choosing-messages" : ""}${activeMode ? " is-composer-mode" : ""}`}
         {...(activeMode ? { "data-composer-mode": activeMode.id } : {})}
@@ -4321,6 +4325,7 @@ function ComposerBody({
             (reason) => setUiError(tr("composer.couldNotAttach", { reason })));
         }}
       >
+      {suggestionInCard && suggestionChip}
       {dropHint && (
         <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
       )}

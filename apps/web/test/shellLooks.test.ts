@@ -321,30 +321,25 @@ test("Monolith column corners do not reference the rail radius Floating columns 
   assert.doesNotMatch(css, /--look-column-radius: var\(--look-rail-radius\)/);
 });
 
-test("on a look's card the agent status keeps the Tab and Capsule styles' inset", async () => {
+test("the lines above the composer take their shape from the status style, and the Tab header stack takes each look's chip and rule", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
-  const dock = stripComments(await read("../src/components/ui/AgentStatusDock.css"));
-  const island = stripComments(await read("../src/components/SubagentActivityDock.css"));
-  const look = String.raw`body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\):not\(#\\#\)`;
-  // The line alone is the card: its mark and time sit --space-3 off the edge.
-  assert.match(css, new RegExp(`${look} \\.agent-status-dock \\{\\s*padding-inline: var\\(--space-3\\);\\s*\\}`));
-  assert.match(dock, /body\[data-composer-status-style="tab"\] \.agent-status-dock \{[^}]*padding-inline: var\(--space-3\)/);
-  assert.match(dock, /body\[data-composer-status-style="capsule"\] \.agent-status-dock \{[^}]*padding-inline: var\(--space-3\)/);
-  // With subagents the island is the card: its --space-2 plus the line's
-  // own --space-1 make the same inset, and the branch thread moves with it.
-  assert.match(css, new RegExp(`${look} \\.subagent-island \\{\\s*padding-inline: var\\(--space-2\\);\\s*\\}`));
-  assert.match(css, new RegExp(`${look}:not\\(#\\\\#\\) \\.subagent-island \\.agent-status-dock \\{[^}]*padding-inline: var\\(--space-1\\);`));
-  assert.match(island, /\.subagent-island \.subagent-island-line > \.agent-status-dock \{[^}]*padding-inline: var\(--space-1\)/);
-  assert.match(island, /body\[data-composer-status-style="tab"\] \.subagent-island \{[^}]*padding-inline: var\(--space-2\)/);
-});
-
-test("on a look's card the Tab status spans the chat frame and leaves the composer its air", async () => {
-  const css = stripComments(await read("../src/shellLooks.css"));
-  const tab = String.raw`body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\)\[data-composer-status-style="tab"\]:not\(#\\#\)`;
-  // The card replaces the tab, so its inset would only squeeze it over the
-  // full-width queued messages and box.
-  assert.match(css, new RegExp(`${tab} :is\\(\\.agent-status-dock, \\.subagent-island, \\.pending-changes-bar\\) \\{[^}]*width: min\\([^}]*--conversation-frame-inline-start[^}]*margin-inline: var\\(--conversation-frame-inline-start, auto\\) var\\(--conversation-frame-inline-end, auto\\);`));
-  assert.match(css, new RegExp(`${tab} \\.conversation-composer-dock:has\\(\\.agent-status-dock, \\.pending-changes-bar\\) > \\.composer \\{\\s*padding-block-start: var\\(--space-2\\);\\s*\\}`));
-  // The line inside an island keeps the island's width.
-  assert.match(css, /:not\(#\\#\):not\(#\\#\) \.subagent-island \.agent-status-dock \{\s*width: auto;\s*margin: 0;/);
+  // No look turns the status / edited-files line into a card: a capsule got
+  // a second, empty frame around its pill and a tab floated as a card.
+  const cards = css.match(/:where\(\.question-card[^)]*\)/)?.[0] ?? "";
+  assert.ok(cards, "in-flow card rule");
+  for (const line of [".pending-changes-bar", ".agent-status-dock", ".subagent-island"]) {
+    assert.doesNotMatch(cards, new RegExp(line.replace(".", "\\.")), `${line} is shaped by Status above the composer`);
+  }
+  assert.doesNotMatch(css, /body\[data-shell-look="obsidian"\][^{]*\.pending-changes-bar/);
+  // The rows above the card are the look's queued-prompt chip.
+  assert.match(css, /body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\)\[data-composer-status-style="tab"\]:not\(#\\#\) \{[^}]*--composer-tray-fill:\s*var\(--look-option\);[^}]*--composer-tray-edge:\s*var\(--look-option-edge\);[^}]*--radius-composer-tray:\s*var\(--look-card-radius\);/s);
+  // The header leaves the option chip and its hover to the card.
+  assert.match(css, /\[data-composer-status-style="tab"\][^{]*\.composer-card > \.composer-suggestion,[^{]*\.composer-card > \.composer-suggestion:hover \{[^}]*background:\s*none !important;[^}]*border:\s*0 !important;/s);
+  // Line draws its header rule edge to edge, like its other composer rules.
+  assert.match(css, /body\[data-shell-look="line"\]\[data-composer-status-style="tab"\]:not\(#\\#\) \{[^}]*--composer-header-rule-inset:\s*0px;/s);
+  // No look re-pads the lines either: their mark and time keep the status
+  // style's inset (Tab's grid sets them on the card's own columns), so a
+  // look can neither crowd them against a rounded edge nor pull them off
+  // the column the composer's model line shares.
+  assert.doesNotMatch(css, /\.(?:agent-status-dock|subagent-island|pending-changes-bar)[^,{]*\{[^}]*padding-inline/);
 });

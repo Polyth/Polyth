@@ -760,9 +760,13 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.scrim.s
   backdrop-filter: var(--look-scrim-blur) !important;
 }
 
-/* 3b. In-flow cards: agent question, isolated-changes card, edited files, agent status. */
+/* 3b. In-flow cards: agent question, isolated-changes card. The lines above
+   the composer (agent status, its subagents, edited files) take their shape
+   from Chat settings → Status above the composer, not from the look: a line
+   stays a line, a capsule one pill, and the tab a row of the composer's
+   header stack in the look's composer material (3c). */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .pending-changes-bar, .agent-status-dock, .subagent-island, .empty-state--compact, .empty-state--panel) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .empty-state--compact, .empty-state--panel) {
   background: var(--look-card) !important;
   backdrop-filter: var(--look-card-blur, none) !important;
   border: 1px solid var(--look-card-edge) !important;
@@ -770,42 +774,55 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.questio
   box-shadow: var(--look-card-shadow) !important;
 }
 
-/* On its card the agent status keeps its mark and time off the rounded
-   edge, by the inset the Tab and Capsule status styles give it. */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .agent-status-dock {
-  padding-inline: var(--space-3);
-}
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .subagent-island {
-  padding-inline: var(--space-2);
+/* 3c. The Tab status style's header stack (styles.css). Its rows above the
+   composer are chips of the pending stack, so they take the look's queued
+   prompt chip (option fill and edge, card corner) through the tray tokens.
+   The suggestion is the card's header row: it leaves the option chip and
+   its hover to the card, and its hairline takes the look's rule. */
+
+body[data-shell-look]:not([data-shell-look="standard"])[data-composer-status-style="tab"]:not(#\#) {
+  --composer-tray-fill: var(--look-option);
+  --composer-tray-filter: none;
+  --composer-tray-edge: var(--look-option-edge);
+  --radius-composer-tray: var(--look-card-radius);
 }
 
-/* The card replaces the Tab status style's faint tab, so nothing grows out
-   of the composer's edge any more: the card spans the chat frame like the
-   queued messages and the box under it, and the composer keeps its air. A
-   tab's inset made it a narrower block squeezed over them. */
-body[data-shell-look]:not([data-shell-look="standard"])[data-composer-status-style="tab"]:not(#\#) :is(.agent-status-dock, .subagent-island, .pending-changes-bar) {
-  width: min(
-    var(--chat-measure),
-    calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)))
-  );
-  margin-inline: var(--conversation-frame-inline-start, auto) var(--conversation-frame-inline-end, auto);
-}
-body[data-shell-look]:not([data-shell-look="standard"])[data-composer-status-style="tab"]:not(#\#) .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar) > .composer {
-  padding-block-start: var(--space-2);
+body[data-shell-look="paper"][data-composer-status-style="tab"]:not(#\#),
+body[data-shell-look="editorial"][data-composer-status-style="tab"]:not(#\#) {
+  --composer-header-rule: var(--look-line);
 }
 
-/* The agent's line with its subagents is one card: the island takes the
-   look's plate (and the inset) and the line inside it keeps none (no card
-   in a card). */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .subagent-island .agent-status-dock {
-  width: auto;
-  margin: 0;
-  padding-inline: var(--space-1);
-  background: transparent !important;
+/* Line draws every rule of its composer edge to edge; so does the header. */
+body[data-shell-look="line"][data-composer-status-style="tab"]:not(#\#) {
+  --composer-header-rule: var(--look-line);
+  --composer-header-rule-inset: 0px;
+  --composer-header-rule-fade: 0px;
+}
+
+body[data-shell-look="monolith"][data-composer-status-style="tab"]:not(#\#),
+body[data-shell-look="monolith-reverse"][data-composer-status-style="tab"]:not(#\#) {
+  --composer-header-rule: var(--look-edge);
+}
+
+body[data-shell-look="obsidian"][data-composer-status-style="tab"]:not(#\#) {
+  --composer-header-rule: color-mix(in srgb, var(--accent) 26%, color-mix(in srgb, var(--text) 12%, transparent));
+}
+
+body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion,
+body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion:hover {
+  background: none !important;
   backdrop-filter: none !important;
   border: 0 !important;
-  border-radius: var(--radius-control) !important;
+  border-radius: 0 !important;
   box-shadow: none !important;
+}
+
+body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion > :is(.composer-suggestion-use, .composer-suggestion-dismiss) {
+  border-radius: var(--look-select-radius) !important;
+}
+
+body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active) {
+  background: none !important;
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-option) {
@@ -2251,7 +2268,7 @@ html:not([data-background="none"]) body[data-shell-look="obsidian"][data-glass="
 
 /* Rimmed glass: shell surfaces, floating surfaces and in-flow cards share it. */
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card, .pending-changes-bar, .agent-status-dock, .subagent-island) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card) {
   border: 1px solid transparent !important;
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
@@ -2270,7 +2287,7 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.dialog-panel, .modal.settings-she
   background: linear-gradient(var(--look-fill-overlay), var(--look-fill-overlay)) padding-box, var(--look-rim) border-box !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card, .pending-changes-bar) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card) {
   border-radius: calc(18px * var(--look-round)) !important;
 }
 

@@ -8729,20 +8729,217 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .conversation-composer-dock > * { pointer-events: auto; }
 /* Under the status / edited-files line the composer's stack (queued
    messages, then the box) keeps a step of air, the gap the queued messages
-   keep from the box, so a line on a look's card never touches it. */
+   keep from the box, so the line never touches it. */
 .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar) > .composer {
   padding-block-start: var(--space-2);
 }
-/* The Tab look grows the status / edited-files line out of the composer's
-   top edge, so the composer drops the density's top padding under it. */
-body[data-composer-status-style="tab"] .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar) > .composer {
+/* Tab: the composer's header stack. Bottom to top: the suggested next prompt
+   is the card's own header row (Composer renders it inside the card), queued
+   prompts stand above the card, and the agent's status, its subagents or the
+   edited files on top. The header has no surface of its own: the card's
+   edge, highlight, corners, shadow and focus wrap it in every style and
+   look, and a hairline parts it from the model line. Above the card every
+   row is a chip of the composer's pending stack: the queued prompt's
+   material, edge and corner, the card's width, one row height and one gap.
+
+   One grid, measured from the card's outer edge, so nothing drifts from row
+   to row: every leading mark is centred on the model logo's column
+   (--composer-stack-mark: the card's 1px edge, its 16px inset, the trigger's
+   1px edge and half the 16px logo), every label starts where the model name
+   does (--composer-stack-text: the trigger's 6px gap after the logo), and
+   the trailing glyphs end where the leading ones start (--composer-stack-end).
+   A row's padding is that column less the row's own 1px edge and half its
+   mark or control. Looks restate the chip material through the tray tokens
+   (shellLooks.css 3c); the edited-files bar takes the grid in the git
+   package's styles. */
+body[data-composer-status-style="tab"] {
+  --composer-stack-mark: calc(var(--space-4) + 2px + var(--icon-sm) / 2);
+  --composer-stack-text: calc(var(--composer-stack-mark) + var(--icon-sm) / 2 + 6px);
+  --composer-stack-end: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  --composer-stack-row: calc(max(38px, var(--hit-min)) + 2px);
+  --composer-stack-control: max(28px, var(--hit-min));
+  --composer-stack-gap: var(--space-2);
+  --composer-tray-fill: var(--material-glass-strong);
+  --composer-tray-filter: none;
+  --composer-tray-edge: var(--material-glass-border);
+  --radius-composer-tray: var(--radius-composer);
+  /* The header's hairline: the content's width (glyph column to glyph
+     column), fading in and out over its ends. */
+  --composer-header-rule: color-mix(in srgb, var(--text) 18%, transparent);
+  --composer-header-rule-inset: calc(var(--composer-stack-end) - 1px);
+  --composer-header-rule-fade: var(--space-6);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  body[data-composer-status-style="tab"]:not([data-glass="off"]):not([data-desktop-low-resource="true"]) {
+    --composer-tray-fill: radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent) 0%,
+      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-edge), transparent) 100%);
+    --composer-tray-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  }
+}
+/* The composer drops the density's top padding under a status row; the
+   row's own gap stands in for it. */
+body[data-composer-status-style="tab"] .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar, .subagent-island) > .composer {
   padding-block-start: 0;
 }
-/* The tab stays on the straight part of the composer's top edge: the phone
-   composer is a pill, so its tab sits further in from the corners. */
-body[data-composer-status-style="tab"] { --composer-status-tab-inset: var(--space-4); }
-@media (max-width: 620px) {
-  body[data-composer-status-style="tab"] { --composer-status-tab-inset: calc(var(--space-6) + var(--space-2)); }
+
+/* Status rows: the agent's line and its subagent island. */
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > :is(.agent-status-dock, .subagent-island) {
+  box-sizing: border-box;
+  width: calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)));
+  margin-block: 0 var(--composer-stack-gap);
+  margin-inline-start: var(--conversation-frame-inline-start, var(--conversation-chrome-inset));
+  margin-inline-end: var(--conversation-frame-inline-end, var(--conversation-chrome-inset));
+  border: 1px solid var(--composer-tray-edge);
+  border-radius: var(--radius-composer-tray);
+  background: var(--composer-tray-fill);
+  background-clip: padding-box;
+  -webkit-backdrop-filter: var(--composer-tray-filter);
+  backdrop-filter: var(--composer-tray-filter);
+  box-shadow: none;
+}
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .agent-status-dock {
+  min-height: var(--composer-stack-row);
+  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
+  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--icon-md) / 2) calc(var(--composer-stack-end) - 1px);
+}
+/* The island's own line keeps the same columns: the island pads by the
+   column less the line's inset, and its rows start where the line's words
+   do. */
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .subagent-island {
+  --branch-line-row: calc(var(--composer-stack-row) - 2px);
+  --branch-inset: calc(var(--space-1) + var(--icon-md) + var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
+  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--space-1) - var(--icon-md) / 2) calc(var(--composer-stack-end) - 1px - var(--space-1));
+}
+body[data-composer-status-style="tab"] .subagent-island .subagent-island-line > .agent-status-dock {
+  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
+}
+/* While the agent works its row's top edge takes the accent. */
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .agent-status-dock:not(.agent-status-dock--idle),
+body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .subagent-island:has(.agent-status-dock:not(.agent-status-dock--idle)) {
+  border-block-start-color: color-mix(in srgb, var(--accent) 45%, var(--composer-tray-edge));
+}
+
+/* Queued prompts: chips of the same row, the grip on the mark column, the
+   prompt on the text column, the last action on the end column. A touch
+   grip keeps its full target as an invisible extension over the chip's
+   padding and the prompt's first letters, which take no tap of their own. */
+body[data-composer-status-style="tab"] .composer-chat > .queue-list {
+  gap: var(--composer-stack-gap);
+  margin-block-end: var(--composer-stack-gap);
+}
+body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip {
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
+  padding-block: 0;
+  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--icon-md) / 2) calc(var(--composer-stack-end) - 1px - (var(--composer-stack-control) - var(--icon-sm)) / 2);
+  border-radius: var(--radius-composer-tray);
+}
+body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip:not(.queue-chip-leaving) {
+  min-height: var(--composer-stack-row);
+}
+body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-grip {
+  position: relative;
+  align-self: center;
+  width: var(--icon-md);
+  min-width: var(--icon-md);
+  height: var(--icon-md);
+  min-height: var(--icon-md);
+  margin: 0;
+}
+body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-grip::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: calc((var(--icon-md) - max(var(--icon-md), var(--hit-min))) / 2);
+}
+body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-actions {
+  gap: var(--space-1);
+}
+body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-actions :is(button, .ui-icon-btn) {
+  width: var(--composer-stack-control);
+  min-width: var(--composer-stack-control);
+  height: var(--composer-stack-control);
+  min-height: var(--composer-stack-control);
+  margin-block: 0;
+  padding: 0;
+}
+
+/* The suggested next prompt: the card's header row. The use target runs
+   from the mark column to the dismiss control; × ends on the end column. */
+body[data-composer-status-style="tab"] .composer-card > .composer-suggestion {
+  position: relative;
+  order: -1;
+  flex: none;
+  box-sizing: border-box;
+  inline-size: auto;
+  max-inline-size: none;
+  min-block-size: calc(var(--composer-stack-row) - 1px);
+  margin: 0;
+  padding-block: 0 1px;
+  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--icon-sm) / 2 - var(--space-2)) calc(var(--composer-stack-end) - 1px - (var(--composer-stack-control) - var(--icon-sm)) / 2);
+  gap: var(--space-1);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use {
+  flex: 1 1 auto;
+  min-block-size: var(--composer-stack-control);
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
+}
+/* A row of the card, not a button on it: hover and press brighten the
+   prompt instead of laying a plate across the card's top. */
+body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active) {
+  background: none;
+}
+body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use > .composer-suggestion-key {
+  margin-inline-start: calc(var(--space-2) - (var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2));
+}
+body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-dismiss {
+  inline-size: var(--composer-stack-control);
+  block-size: var(--composer-stack-control);
+  border-radius: var(--radius-control);
+}
+/* The model line under the header stands as far below the hairline as the
+   header's content stands above it (the model trigger is 30px tall, or a
+   touch target). */
+body[data-composer-status-style="tab"] .composer-card:has(> .composer-suggestion) > .composer-config-row {
+  padding-block-start: calc((var(--composer-stack-row) - 2px - max(30px, var(--hit-min))) / 2);
+}
+/* The hairline under the header: one device pixel, inset to the content's
+   width and fading in and out at its ends. */
+body[data-composer-status-style="tab"] .composer-card > .composer-suggestion::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--composer-header-rule-inset);
+  inset-block-end: 0;
+  block-size: 1px;
+  background: linear-gradient(90deg, transparent, var(--composer-header-rule) var(--composer-header-rule-fade), var(--composer-header-rule) calc(100% - var(--composer-header-rule-fade)), transparent);
+  pointer-events: none;
+}
+@media (min-resolution: 2dppx) {
+  body[data-composer-status-style="tab"] .composer-card > .composer-suggestion::after {
+    transform: scaleY(0.5);
+    transform-origin: 50% 100%;
+  }
+}
+/* The phone's resting row lays its controls out in one line: the header
+   takes a line of its own above them, edge to edge, and the row keeps its
+   resting height under it. */
+body[data-composer-status-style="tab"] .composer-mobile.composer-collapsed .composer-card:has(> .composer-suggestion) {
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding-block-end: calc((var(--composer-height) - 2px - var(--tap)) / 2);
+}
+body[data-composer-status-style="tab"] .composer-mobile.composer-collapsed .composer-card > .composer-suggestion {
+  flex: 0 0 calc(100% + 2 * var(--space-2));
+  margin-inline: calc(-1 * var(--space-2));
+  margin-block-end: calc((var(--composer-height) - 2px - var(--tap)) / 2);
 }
 /* Full widgets placed "Above the composer" share the composer's column. */
 .conversation-composer-dock > .placed-slot-widget {
