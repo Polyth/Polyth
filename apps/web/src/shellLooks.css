@@ -142,6 +142,11 @@
   --look-tile-ink: var(--accent);
   --look-tile-press: var(--look-hover);
   --look-tile-press-edge: var(--look-tile-edge);
+  /* A pressed navigator line (a project's head): a plate in the look's row
+     corner (--look-select-radius), a step firmer than hover so a quick tap
+     still reads, and never the selection itself. */
+  --look-row-press: color-mix(in srgb, var(--text) 7%, transparent);
+  --look-row-press-edge: none;
   --look-widget: var(--look-card);
   --look-widget-edge: var(--look-card-edge);
   /* The widget's top edge alone: the looks built on rules part it from the
@@ -643,6 +648,13 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-ses
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-date-divider {
   --date-rule: var(--look-line);
   color: var(--look-ink-quiet);
+}
+
+/* A pressed project line (MobileNavigator.css draws the plate). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-project-head {
+  --nav-press: var(--look-row-press);
+  --nav-press-edge: var(--look-row-press-edge);
+  --nav-press-radius: var(--look-select-radius);
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
@@ -1149,6 +1161,10 @@ body[data-shell-look="line"]:not(#\#) {
   --look-tile-edge: inset 0 0 0 1px var(--look-line);
   --look-tile-radius: var(--look-r);
   --look-tile-press-edge: inset 0 0 0 1px var(--look-line-strong);
+  /* A pressed line is a hairline cell, as a pressed launcher is; its fill a
+     step over hover so the cell still reads on the lightest palettes. */
+  --look-row-press: color-mix(in srgb, var(--text) 6%, transparent);
+  --look-row-press-edge: inset 0 0 0 1px var(--look-line-strong);
   --look-widget-radius: var(--look-r);
 }
 
@@ -1424,6 +1440,9 @@ body[data-shell-look="air"]:not(#\#) {
   --look-tile-radius: calc(18px * var(--look-round));
   --look-tile-press: color-mix(in srgb, var(--look-island-solid) 90%, var(--accent));
   --look-tile-press-edge: var(--look-shadow-lift);
+  /* A pressed project tints its island the way a pressed launcher does, a
+     step under the current chat's accent wash (12–13%). */
+  --look-row-press: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 html:not(.light) body[data-shell-look="air"]:not(#\#) {
@@ -1573,6 +1592,19 @@ body[data-shell-look="air"]:not(#\#) .mobile-nav-project {
   border-radius: calc(22px * var(--look-round));
   background: var(--look-island);
   box-shadow: var(--look-shadow);
+}
+
+/* A press lights the island, out to its edges and in its corners: a closed
+   project is all head, so the whole island; an open one its head, square
+   where the chats begin. */
+body[data-shell-look="air"]:not(#\#) .mobile-nav-project > .mobile-nav-project-head {
+  --nav-press-inset: calc(var(--space-1) * -1) 0;
+  --nav-press-radius: calc(22px * var(--look-round));
+}
+
+body[data-shell-look="air"]:not(#\#) .mobile-nav-project.is-expanded > .mobile-nav-project-head {
+  --nav-press-inset: calc(var(--space-1) * -1) 0 0;
+  --nav-press-radius: calc(22px * var(--look-round)) calc(22px * var(--look-round)) 0 0;
 }
 
 /* Inside an island the mark sits as far in from its side as from its top,
@@ -1911,6 +1943,11 @@ body[data-shell-look="monolith-reverse"]:not(#\#) {
   --look-tile-radius: calc(11px * var(--look-round));
   --look-tile-press: var(--look-well-solid);
   --look-tile-press-edge: inset 0 2px 5px rgba(0, 0, 0, 0.3);
+  /* A pressed line starts to sink: the well's carve at half its depth, so
+     it never reads as the current chat (the full well) and stays as quiet
+     on a dark plane as the other looks' presses. */
+  --look-row-press: color-mix(in srgb, var(--look-well-solid) 50%, transparent);
+  --look-row-press-edge: var(--look-carve);
   --look-widget: var(--look-well-solid);
   --look-widget-edge: transparent;
   --look-widget-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 6px -2px rgba(0, 0, 0, 0.3);
@@ -2132,6 +2169,9 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-tile-ink: var(--accent-hi);
   --look-tile-press: linear-gradient(var(--look-fill-strong), var(--look-fill-strong)) padding-box, var(--look-rim-accent) border-box;
   --look-tile-press-edge: 0 8px 22px -8px var(--accent);
+  /* A pressed line is the selection's accent glass, a step lighter. */
+  --look-row-press: color-mix(in srgb, var(--accent) 9%, transparent);
+  --look-row-press-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
   --look-widget: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box;
   --look-widget-edge: transparent;
   --look-widget-shadow: var(--look-glass-shadow);

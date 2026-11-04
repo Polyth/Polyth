@@ -407,3 +407,51 @@ test("phone navigator grid mirrors in RTL", { skip: !CHROME }, async () => {
   assert.equal(rtl.pillClearOfMenu, true);
   assert.deepEqual(rtl.edgeTargets, ltr.edgeTargets, "edge targets mirror");
 });
+
+// Opening a project is the whole line. A press lights one plate from the
+// mark to ⋮ in the row's corner; the shared button press (the .98 settle and
+// inset washes) and the system tap highlight never paint the button's own
+// box, which drew a patch between the mark and New chat.
+test("a pressed project lights its whole line, not the button's box", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  await measure(390);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("DOM.enable");
+  await cdp.send("CSS.enable");
+  const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#busy .mobile-nav-project-main" });
+  const read = () => page!.evaluate(() => {
+    const head = document.querySelector("#busy .mobile-nav-project-head")!;
+    const main = head.querySelector(".mobile-nav-project-main")!;
+    const glyph = head.querySelector(".project-glyph")!;
+    const box = head.getBoundingClientRect();
+    const own = getComputedStyle(main);
+    const plate = getComputedStyle(main, "::before");
+    // The mark passes taps through, so the plate (the button) takes them.
+    const g = glyph.getBoundingClientRect();
+    const hit = document.elementFromPoint(g.left + g.width / 2, g.top + g.height / 2);
+    return {
+      headWidth: box.width, headHeight: box.height,
+      plateWidth: parseFloat(plate.width), plateHeight: parseFloat(plate.height),
+      plate: plate.backgroundColor, ownShadow: own.boxShadow, ownTransform: own.transform,
+      tap: own.getPropertyValue("-webkit-tap-highlight-color"),
+      markOpens: hit === main,
+    };
+  });
+  const rest = await read();
+  assert.equal(rest.plate, "rgba(0, 0, 0, 0)", "the plate is clear at rest");
+  assert.equal(rest.tap, "rgba(0, 0, 0, 0)", "no system highlight on the button's own box");
+  assert.equal(rest.markOpens, true, "a tap on the mark opens the project too");
+  await cdp.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: ["active"] });
+  try {
+    const pressed = await read();
+    near(pressed.plateWidth, pressed.headWidth, "the plate spans the whole line");
+    near(pressed.plateHeight, pressed.headHeight, "and its full height");
+    assert.notEqual(pressed.plate, "rgba(0, 0, 0, 0)", "the plate lights under the finger");
+    assert.equal(pressed.ownShadow, "none", "no inset wash on the button's own box");
+    assert.equal(pressed.ownTransform, "none", "no settle that shrinks the button's box");
+  } finally {
+    await cdp.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [] });
+    await cdp.detach();
+  }
+});

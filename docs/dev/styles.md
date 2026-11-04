@@ -677,7 +677,7 @@ class strength joins a role instead of getting a rule of its own:
 | 1c Options and buttons | Quiet chips; the default (quiet) button is an option and the destructive one its red wash; a disabled button keeps the base's neutral look | queue chips, attachments, New-session Shortcuts, prompt suggestion, add-menu tiles, `.ui-btn--quiet`, `.ui-btn--danger` | `--look-option*` |
 | 1f Fields | Every text field and select; a field well is the field and its input stays bare | navigator search, picker filter well, `.ui-field-well`, `.ui-input`, `.ui-textarea`, `.sel select`, the theme picker | `--look-field`, `--look-field-edge`, `--look-field-rule`, `--look-field-radius`, `--look-focus-ring` |
 | 1g Corners | One radius role per control | rows, menu items, icon buttons, segments → `--look-select-radius`; push buttons, chips, wells → `--look-control-radius` | — |
-| 1h Phone layers | The phone navigator and Workspace panel are one full-screen material; the navigator's current chat, titles and date captions speak the look's selection and quiet inks; launchers are the look's tile (Edit mode's tiles too, but not the drag hole or lifted copy); a widget is the look's panel card | `.mobile-navigator`, `.mobile-nav-session-row.is-active`, `.mobile-nav-date-divider`, `.workspace-panel-sheet`, `.workspace-panel-launcher`, `.workspace-editor-item--launcher`, `.workspace-panel-item--widget` (all panel rules sit in the panel's phone media query) | `--look-phone-layer*`, `--look-phone-select*`, `--look-select-mark`, `--look-tile*`, `--look-widget*` |
+| 1h Phone layers | The phone navigator and Workspace panel are one full-screen material; the navigator's current chat, titles and date captions speak the look's selection and quiet inks; launchers are the look's tile (Edit mode's tiles too, but not the drag hole or lifted copy); a widget is the look's panel card | `.mobile-navigator`, `.mobile-nav-session-row.is-active`, `.mobile-nav-date-divider`, `.mobile-nav-project-head` (its press plate), `.workspace-panel-sheet`, `.workspace-panel-launcher`, `.workspace-editor-item--launcher`, `.workspace-panel-item--widget` (all panel rules sit in the panel's phone media query) | `--look-phone-layer*`, `--look-phone-select*`, `--look-select-mark`, `--look-row-press*`, `--look-tile*`, `--look-widget*` |
 
 Role rules use `:is()` where the shared block owns the element; the button
 rules use `:where()` so a look that draws its own button (Line's hairline,
@@ -693,6 +693,17 @@ On the phone each look also carries its own character past the 1h tokens: a
 phone navigator row runs the screen's width, so `--look-phone-select*`
 (default: the look's `--look-select*`) lets the current chat differ from the
 desktop plate, and `--look-select-mark` adds a bar on its leading edge.
+A pressed project line is `--look-row-press` / `--look-row-press-edge` in
+the look's `--look-select-radius`: by default `--text` at 7% (the
+navigator's own press wash), Line a 6% fill with its strong hairline, Air
+`--accent` at 8% (a step under the current chat's 12–13% accent wash, over
+the island out to its edges), Monolith Reverse the well at half depth with
+its carve (the full well is the current chat), Obsidian `--accent` at 9%
+with an 18% accent ring. Measured on every bundled palette in both
+appearances, the press moves the surface by 2.5–9 OKLab ΔE (×100; more only
+on the near-black OLED and High Contrast canvases, where OKLab overstates
+the step) against 8–13 for the old accent tap highlight, and keeps `--text`
+at ≥ 6.6:1.
 
 | Look | Phone navigator | Workspace panel |
 | --- | --- | --- |

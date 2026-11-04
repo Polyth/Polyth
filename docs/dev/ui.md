@@ -4005,6 +4005,17 @@ paused, finished); when a narrow phone cannot fit them all, the name keeps a
 readable stub and the pills that do not fit drop whole from the end (the
 group's label still lists every count). An expanded project with nothing to
 list says "No sessions".
+A project header opens and closes on the whole line: its open button's plate
+(`.mobile-nav-project-main::before`) spans the header from the mark to ⋮ and
+the mark lets taps through to it, while New chat and ⋮ keep their own press
+circles above it. A press lights that plate at once in the row's corner and
+fades it on release; the button opts out of the system tap highlight and the
+shared button press (the .98 settle and inset washes), which painted only
+the button's own box, a patch between the mark and New chat. The plate's
+material, edge, corner and reach are `--nav-press*`; an interface style sets
+them from its `--look-row-press*` (Air lights the whole island of a closed
+project and the head of an open one, square where its chats begin). The
+keyboard ring is the same plate.
 The phone Navigator is one grid (`MobileNavigator.css`, pinned by
 `mobileNavigatorLayout.test.ts` at 320–430px, every density and RTL). Most
 rows leave the leading column empty and every row ends in ⋮, so both edge
