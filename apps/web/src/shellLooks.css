@@ -2659,3 +2659,21 @@ body[data-shell-look="editorial"]:not(#\#) .mobile-nav-date-divider:not(.is-pinn
     letter-spacing: 0;
   }
 }
+
+/* ---- compact shell: a package window fills the screen ------------------------
+   In the compact shell the railbar is only the host of a full-screen layer
+   (styles.css), never the floating launcher strip the looks above dress. Their
+   `!important` margins and frames would otherwise inset every package window. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> :is(.rail-fullscreen, .panel-sheet)) {
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    background: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+}

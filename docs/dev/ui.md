@@ -3604,8 +3604,8 @@ empty or error markup.
   Space or a click chooses) and the risky option confirms first.
   A number → `NumberField({ unit, min, max })` (commits on blur/Enter, clamps,
   Escape reverts); a visual size/scale → `SizeStepper`.
-- **Sub-pages and states.** A page with sub-views (harness detail, Monitoring,
-  Source control) uses `SettingsTabs({ tabs, value, onChange, label })` (wraps
+- **Sub-pages and states.** A page with sub-views (harness detail, Source
+  control) uses `SettingsTabs({ tabs, value, onChange, label })` (wraps
   `ui/Tabs` + `TabPanel` with the settings spacing) — never a `Seg` or custom
   CSS as a tab strip — and every panel starts with `Section`s, except where its
   only heading would repeat the tab label: then rows or a one-line lede open the

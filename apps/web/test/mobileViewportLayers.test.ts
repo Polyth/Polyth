@@ -354,6 +354,48 @@ test("revealing never scrolls an overflow: hidden box and does nothing for a fie
   }
 });
 
+// A look dresses the railbar as a floating strip with `!important` margins. In the
+// compact shell that same element only hosts the package window, which then stopped
+// 11px short of the right and bottom screen edges (Obsidian, Air).
+test("a package window fills the phone screen in every interface look", { skip: !available }, async () => {
+  const looks = (await read("shellLooks.css")).replace(/@import[^;]+;/g, "");
+  const context = await browser.newContext({ viewport: { width: WIDTH, height: 844 } });
+  const page = await context.newPage();
+  try {
+    await page.setContent(`<!doctype html><meta name="viewport" content="width=device-width"><style>${css}\n${looks}</style><body>${FAMILIES["fullscreen rail pane"]!.html}</body>`);
+    for (const look of ["standard", "paper", "line", "air", "monolith", "monolith-reverse", "obsidian", "editorial"]) {
+      const rect = await page.evaluate((name) => {
+        document.body.dataset.shellLook = name;
+        document.getAnimations().forEach((animation) => animation.finish());
+        const box = document.querySelector(".rail-fullscreen")!.getBoundingClientRect();
+        return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+      }, look);
+      assert.deepEqual(rect, { left: 0, top: 0, right: WIDTH, bottom: 844 }, look);
+    }
+  } finally { await context.close(); }
+});
+
+// The page pads its own end, so it can scroll under the home bar; an edge-to-edge
+// workspace has no such padding and keeps the layer's inset.
+test("a page scrolls to the screen's bottom edge and still ends above the home bar", { skip: !available }, async () => {
+  const context = await browser.newContext({ viewport: { width: WIDTH, height: 844 } });
+  const page = await context.newPage();
+  try {
+    await page.setContent(`<!doctype html><meta name="viewport" content="width=device-width"><style>${css}\n:root { --safe-bottom: 34px; --keyboard-inset: 0px; }</style><body>${FAMILIES["fullscreen rail pane"]!.html}</body>`);
+    const measure = (mode: string) => page.evaluate((contentMode) => {
+      document.querySelector(".module-view")!.setAttribute("data-content-mode", contentMode);
+      const scroller = document.querySelector<HTMLElement>(".module-view-content")!;
+      scroller.scrollTop = scroller.scrollHeight;
+      const last = scroller.lastElementChild!.getBoundingClientRect();
+      return { scrollerBottom: scroller.getBoundingClientRect().bottom, lastBottom: last.bottom };
+    }, mode);
+    const pageMode = await measure("page");
+    assert.equal(pageMode.scrollerBottom, 844, "nothing is cut flat above the screen's edge");
+    assert.ok(pageMode.lastBottom <= 844 - 34, "the last line still clears the home bar");
+    assert.equal((await measure("workspace")).scrollerBottom, 844 - 34, "a workspace keeps the layer's inset");
+  } finally { await context.close(); }
+});
+
 test("the band block keeps the layers' own top clearance: the notch, not a shell header", () => {
   // Phone module layers cover the shell header, so with the keyboard open the
   // top clearance is the same status-bar/notch inset as in the closed state.

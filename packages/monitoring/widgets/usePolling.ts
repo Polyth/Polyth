@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** One request at a time, keyed results, and no polling while hidden/inactive. */
-export function usePolling<T>(key: string, load: (signal: AbortSignal) => Promise<T>, active: boolean, live: boolean) {
+export function usePolling<T>(key: string, load: (signal: AbortSignal) => Promise<T>, active: boolean, live: boolean, intervalMs = 5_000) {
   const [state, setState] = useState<{ key: string; value?: T; error?: string; busy: boolean }>({ key, busy: false });
   const [refresh, setRefresh] = useState(0);
   const sequence = useRef(0);
@@ -26,7 +26,7 @@ export function usePolling<T>(key: string, load: (signal: AbortSignal) => Promis
       } finally {
         controller = undefined;
         if (resumeWhenSettled && !disposed && !document.hidden) { resumeWhenSettled = false; void run(); }
-        else if (!disposed && live && !document.hidden) timer = setTimeout(() => void run(), 5_000);
+        else if (!disposed && live && !document.hidden) timer = setTimeout(() => void run(), intervalMs);
       }
     };
     const visible = () => {
@@ -36,6 +36,6 @@ export function usePolling<T>(key: string, load: (signal: AbortSignal) => Promis
     document.addEventListener("visibilitychange", visible);
     void run();
     return () => { disposed = true; controller?.abort(); clearTimeout(timer); document.removeEventListener("visibilitychange", visible); };
-  }, [key, load, active, live, refresh]);
+  }, [key, load, active, live, intervalMs, refresh]);
   return { ...(state.key === key ? state : { key, busy: false }), refresh: useCallback(() => setRefresh((value) => value + 1), []) };
 }

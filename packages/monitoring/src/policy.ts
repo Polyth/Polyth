@@ -4,10 +4,11 @@ import type { SpaceStorage } from "@polyth/contracts";
 import type { MonitoringOperation, MonitoringPolicy } from "./contracts.ts";
 
 export const failure = (code: string, message: string): Error => Object.assign(new Error(message), { code });
+export const DEFAULT_DISK_WARNING_PERCENT = 90;
 export const defaultPolicy = (): MonitoringPolicy => ({
   revision: 0,
-  agentAccess: { metrics: false, services: false, logs: false },
-  serviceUnits: [], logPaths: [], memoryWarningPercent: 85, loadWarningRatio: 1,
+  agentAccess: { metrics: false, services: false, logs: false, processes: false },
+  serviceUnits: [], logPaths: [], memoryWarningPercent: 85, loadWarningRatio: 1, diskWarningPercent: DEFAULT_DISK_WARNING_PERCENT,
 });
 export const validUnit = (value: unknown): value is string =>
   typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,119}\.service$/.test(value);
@@ -33,13 +34,16 @@ export const validLogSource = (value: unknown): value is string =>
   validLogPath(value) || validHostLogPath(value) || validJournalSource(value);
 export const LOG_SOURCE_LIMIT = 24;
 
-export function parsePolicy(value: unknown, revision: number): MonitoringPolicy {
+/** `keepDisk` answers a writer that predates the disk limit, so it cannot reset it. */
+export function parsePolicy(value: unknown, revision: number, keepDisk = DEFAULT_DISK_WARNING_PERCENT): MonitoringPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("invalid-input", "Monitoring policy must be an object");
   const input = value as Record<string, unknown>;
   const access = input.agentAccess as Record<string, unknown> | undefined;
   if (!access || ["metrics", "services", "logs"].some((op) => typeof access[op] !== "boolean")) {
     throw failure("invalid-input", "Explicit agent permissions are required");
   }
+  // Newer than the other three: absent is denied, anything else must be explicit.
+  if (access.processes !== undefined && typeof access.processes !== "boolean") throw failure("invalid-input", "Explicit agent permissions are required");
   const list = (key: string, valid: (value: unknown) => value is string, limit = 12): string[] => {
     const values = input[key];
     if (!Array.isArray(values) || values.length > limit || !values.every(valid)) throw failure("invalid-input", `Invalid ${key}: use up to ${limit} approved entries`);
@@ -47,15 +51,17 @@ export function parsePolicy(value: unknown, revision: number): MonitoringPolicy 
   };
   const memory = input.memoryWarningPercent;
   const load = input.loadWarningRatio;
+  const disk = input.diskWarningPercent ?? keepDisk;
   if (typeof memory !== "number" || !Number.isFinite(memory) || memory < 1 || memory > 100
-    || typeof load !== "number" || !Number.isFinite(load) || load < 0.1 || load > 10) {
+    || typeof load !== "number" || !Number.isFinite(load) || load < 0.1 || load > 10
+    || typeof disk !== "number" || !Number.isFinite(disk) || disk < 1 || disk > 100) {
     throw failure("invalid-input", "Invalid warning thresholds");
   }
   return {
     revision,
-    agentAccess: { metrics: access.metrics as boolean, services: access.services as boolean, logs: access.logs as boolean },
+    agentAccess: { metrics: access.metrics as boolean, services: access.services as boolean, logs: access.logs as boolean, processes: access.processes === true },
     serviceUnits: list("serviceUnits", validUnit), logPaths: list("logPaths", validLogSource, LOG_SOURCE_LIMIT),
-    memoryWarningPercent: memory, loadWarningRatio: load,
+    memoryWarningPercent: memory, loadWarningRatio: load, diskWarningPercent: disk,
   };
 }
 
@@ -85,7 +91,7 @@ export function policyStore(storage: SpaceStorage) {
     put(projectId: string, value: unknown, expectedRevision: unknown): MonitoringPolicy {
       const current = get(projectId);
       if (expectedRevision !== current.revision) throw failure("conflict", "Monitoring policy changed; reload before saving");
-      const next = parsePolicy(value, current.revision + 1);
+      const next = parsePolicy(value, current.revision + 1, current.diskWarningPercent);
       const records = read();
       Object.defineProperty(records, projectId, { value: next, enumerable: true, configurable: true, writable: true });
       atomicWriteSync(path(), `${JSON.stringify(records, null, 2)}\n`);

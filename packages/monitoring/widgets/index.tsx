@@ -8,14 +8,14 @@ export default defineWebPackage((host) => () => {
   const title = t("Monitoring", "Моніторинг");
   const off = [
     host.surfaces.register({
-      id: "monitoring", title, description: t("Hosts, service health and log tails", "Хости, стан служб і останні рядки логів"),
+      id: "monitoring", title, description: t("Is the machine OK, and if not, why", "Чи все гаразд із комп’ютером, а якщо ні, то чому"),
       capabilityId: "monitoring", order: 56,
       component: (props) => <MonitoringView {...props} host={host} />,
       presentation: { kind: "workspace", defaultRatio: 0.6, minWidth: 320, preferredMaxWidth: 1100, keepAlive: false, escape: "close" },
     }),
     host.settings.registerPage({
       id: "monitoring", label: title, group: "Engineering", icon: "activity", order: 56,
-      component: () => <MonitoringView host={host} initialTab="access" presentation="settings" />,
+      component: () => <MonitoringView host={host} presentation="settings" />,
       settingsItems: [{ id: "monitoring.access", pageId: "monitoring", label: t("What agents can read", "Що можуть читати агенти"),
         focusTarget: "monitoring.access", keywords: ["monitoring", "sysadmin", "hosts", "logs", "permissions", "моніторинг", "дозволи"] }],
     }),
