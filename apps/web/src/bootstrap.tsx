@@ -7,7 +7,7 @@ import { Button } from "./components/ui/index.ts";
 import { POLYTH_MARK_SRC } from "./brandAsset.ts";
 import { tr } from "./i18n/index.ts";
 import { consumeAuthPrefetch } from "./authPrefetch.ts";
-import { init, navigateBackInApp, openNativeAppPath, setSyncForeground } from "./init.ts";
+import { firstScreenRestored, init, navigateBackInApp, openNativeAppPath, setSyncForeground } from "./init.ts";
 import { flushClientPersistence } from "./clientPersistence.ts";
 import { clientAccountPersistenceScope, initializeClientReliabilityContext } from "./reliabilityContext.ts";
 import { hydrateNavigatorState } from "./navigatorState.ts";
@@ -57,12 +57,14 @@ import { installNativeMobileIntegration } from "@polyth/mobile/native";
 import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
 import { handleNativeBack } from "./nativeMobile.ts";
 import { applyBackgroundToDom } from "./backgrounds.ts";
+import { restoreCustomWallpaper } from "./customWallpaperMemory.ts";
 import { autoEnableNativePush, openPendingNativePushAfterHydration, reconcileNativePushForeground } from "./nativePush.ts";
 import { installLiveActivity } from "./nativeLiveActivity.ts";
-import { isClientSettingsSettled, subscribeClientSettingsSettled } from "./settingsSync.ts";
+import { isClientSettingsSettled, restoreRememberedLook, subscribeClientSettingsSettled } from "./settingsSync.ts";
 import { launchVeil, reloadBehindVeil } from "./launchVeil.ts";
 import {
   noteLaunchHydrated,
+  noteLaunchLookRestored,
   noteLaunchPackagesSettled,
   noteLaunchPhase,
   noteLaunchSettingsSettled,
@@ -160,7 +162,11 @@ const bootOnce = (): void => {
   booted = true;
   void bootPackages().catch((error: unknown) =>
     console.error("[polyth] web package boot failed", error)).finally(noteLaunchPackagesSettled);
-  void init().then(openPendingNativePushAfterHydration).catch(() => undefined).finally(() => {
+  const hydrated = init();
+  // The veil lifts on the first restored screen, the remembered navigator's
+  // included; what follows waits for the server's own answer.
+  void firstScreenRestored().catch(() => undefined).finally(noteLaunchHydrated);
+  void hydrated.then(openPendingNativePushAfterHydration).catch(() => undefined).finally(() => {
     noteLaunchHydrated();
     // After hydration, so the first Live Activity snapshot sees real
     // projections instead of ending one a previous process left for the same work.
@@ -199,7 +205,11 @@ function Root() {
           if (cancelled || invalidated) return;
           // The mobile app's shell origin starts empty on every launch: put
           // back what the navigators had open before they first read it.
+          // The same goes for the look: theme and wallpaper of the last launch,
+          // so the first frame is not the default one (settingsSync.ts).
+          const lookRestored = restoreCustomWallpaper().then(() => restoreRememberedLook()).catch(() => false);
           await hydrateNavigatorState(clientAccountPersistenceScope());
+          if (await lookRestored) noteLaunchLookRestored();
           if (cancelled || invalidated) return;
           await reconcileNativePushForeground(true).catch(() => undefined);
         }

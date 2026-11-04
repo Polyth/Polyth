@@ -162,12 +162,20 @@ loading is shown in between.
   The decision is `hubPresentation` in `apps/mobile/src/connectionUi.ts`.
 - **Workspace reveal.** `apps/web/src/launchReveal.ts` lifts the veil once,
   when all of these hold:
-  - the projects and the restored session or fresh chat are in place;
-  - the synced settings (theme, wallpaper) are applied;
-  - the web packages have booted (they get up to 1.8 s after hydration);
+  - the projects and the restored session or fresh chat are in place —
+    painted from the remembered navigator when there is one (see
+    [Connecting and reconnecting](../architecture/session-reading.md#connecting-and-reconnecting)),
+    otherwise from the server's answer;
+  - the synced settings (theme, wallpaper) are applied. When the last launch's
+    look was restored (below), they get up to 0.6 s after hydration, so a slow
+    link shows the workspace in the person's look instead of holding the veil,
+    and an ordinary link still reveals with the server's answer in place;
+  - the web packages have booted (they get up to 0.6 s after hydration; a
+    composer launcher that arrives later fades in);
   - first-screen reads have landed: the branch label, the composer's
     worktrees and recent chats (`holdLaunchReveal`, up to 1.6 s after
-    hydration);
+    hydration). A read whose answer is already on screen from the last
+    launch (the remembered branch label, remembered rows) does not hold;
   - the DOM has been still for 160 ms.
 
   Sign-in, setup and the unreachable-server card show as soon as they stop
@@ -186,15 +194,37 @@ loading is shown in between.
 - Desktop browsers (fine pointer, wider than 620 px) remove the veil before
   their first paint.
 - Each app launch opens the Link loopback proxy on a new port, so the shell's
-  origin storage starts empty. Theme, wallpaper and the other synced settings
-  (the default number of sessions a project shows among them) arrive from the
-  server, behind the veil. The navigators' open projects, shown-session
-  counts, project sort and custom project order are device-local, so they are
-  restored from the app-owned client-context store before the first render
-  (`apps/web/src/navigatorState.ts`, see `docs/dev/ui.md`). Usage limit
-  alerts remember what they announced on the server, per person, so a launch
-  does not repeat them (`packages/usage/README.md`, "Usage notifications").
-  Other localStorage-only state still starts empty on every launch.
+  origin storage starts empty. The synced settings arrive from the server, and
+  the first render does not wait for them: the look of the last launch is
+  restored from the app-owned client-context store before it
+  (`apps/web/src/settingsSnapshot.ts`, record `settings-look-v1`, per
+  connection and account).
+  - It holds the settings that shape the first screen: theme, accent, text
+    sizes, the wallpaper preset, the shell and message chrome, the phone
+    composer's buttons and the new-chat hero widgets. It holds no secrets,
+    model picks, notification templates or MCP servers. A browser, whose
+    origin storage works, does not use it.
+  - The server's answer replaces it through the ordinary merge. Restoring
+    never pushes, an edit made meanwhile wins for its own field, and a part the
+    server has no word on goes back to what the client had, so the memory never
+    seeds the account.
+- A custom wallpaper image has its own record in that store
+  (`apps/web/src/customWallpaperMemory.ts`, `custom-wallpaper-v1`, per connection
+  and account). The uploaded image lives in origin storage and can reach about
+  1.9 MB as a data URL, against a Link store of 256 KB per record and 4 MB in
+  total. So when the person picks an image the app also keeps a JPEG copy of at
+  most 200 KB (longest edge up to 1600 px), which the next launch restores before
+  the first render, as the wallpaper or only as the picker's custom tile. The
+  running document keeps the uploaded image until then. The image never reaches
+  the server. Replacing it clears the old copy first, so a reduction that fails
+  or is cut short leaves no image rather than an older one.
+- The navigators' open projects, shown-session counts, project sort and custom
+  project order are device-local, so they are restored from the same store
+  before the first render (`apps/web/src/navigatorState.ts`, see
+  `docs/dev/ui.md`). Usage limit alerts remember what they announced on the
+  server, per person, so a launch does not repeat them
+  (`packages/usage/README.md`, "Usage notifications"). Other localStorage-only
+  state still starts empty on every launch.
 
 Verification status: the web veil, the reveal and the hub transitions are
 checked in Chromium filmstrips, and the veil matches the generated iOS launch

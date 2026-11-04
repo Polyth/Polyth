@@ -20,6 +20,7 @@ import {
 } from "../../store.ts";
 import {
   deleteSession,
+  ensureSessionsListed,
   openSession,
   refreshSessions,
   removeProject,
@@ -956,7 +957,7 @@ export default function MobileNavigator() {
 
   useEffect(() => {
     if (!drawerOpen || !activeProjectId) return;
-    void refreshSessions(activeProjectId);
+    void ensureSessionsListed(activeProjectId);
   }, [drawerOpen, activeProjectId]);
 
   useEffect(() => {

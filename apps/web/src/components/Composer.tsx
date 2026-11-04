@@ -462,7 +462,9 @@ function useComposerLocation(session: SessionProjection | null, readLiveText?: (
     branchReadInFlight.current = true;
     // The branch chip is part of a launch's first screen: hold the
     // veil until its label is final instead of letting it change width later.
-    const releaseLaunch = holdLaunchReveal();
+    // A label already known (the last launch's, shown while git answers) is
+    // what the chip reads meanwhile, so it needs no hold.
+    const releaseLaunch = branchRef.current ? () => undefined : holdLaunchReveal();
     let cancelRetry = (): void => undefined;
     void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, sessionId)])
       .then(([nextWorktrees, nextBranches]) => {

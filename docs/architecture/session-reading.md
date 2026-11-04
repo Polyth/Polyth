@@ -100,6 +100,54 @@ answer's chunk events), then backfills 2,000-event `beforeSeq` pages up to
 rendered window until the reader scrolls toward it (see
 [UI: Opening a long chat](../dev/ui.md)).
 
+## Connecting and reconnecting
+
+The web client treats the socket as the critical path and everything else as
+catch-up (`apps/web/src/sync.ts`, `syncPreconnect.ts`, `init.ts`):
+
+- **Early dial.** As soon as the inlined auth status says the installation is
+  ready and authorized, `main.tsx` opens `/ws` while the app graph still loads
+  and evaluates; `init()`'s `SyncClient` adopts that socket. Nothing is sent on
+  it before adoption, and frames that arrived early are replayed to the
+  client's handlers in order. A failed early socket is never handed over, so
+  the client dials at once instead of starting on a backoff. The gateway
+  registers a socket for broadcasts at the handshake, so when the adopted
+  socket was open before boot read settings, project presentation and the
+  inbox, the first `open` skips re-reading them.
+- **Early subscription.** Until the store restores its selection, the client
+  subscribes to the navigator of the project it will most likely open (URL,
+  then last active). The rows arrive with the socket instead of after the
+  project list and summary reads; a stale hint returns no rows.
+- **Background grace.** A hidden page keeps its open socket (15 min on a
+  desktop, 30 s on a phone or coarse-pointer browser, whose WebView is frozen
+  soon after). Coming back inside the grace re-sends the same subscription on
+  that socket: freshness goes stale until its receipt arrives (well inside the
+  700 ms "Updating…" delay on a live socket) and any frame clears a 2 s probe;
+  silence replaces the socket. A wall-clock check covers a frozen page whose
+  grace timer never ran. Past the grace the socket is suspended as before.
+- **Stalled and dropped sockets.** A handshake not open after 8 s is abandoned
+  for a fresh one. The first retry after a connection that had settled (5 s)
+  goes at once; the jittered backoff ladder starts from its base after that.
+- **Remembered navigator.** The project list, the open project's newest 50
+  rows plus pinned rows (summary fields only, `summary: true`, never archived
+  rows, transcripts or detail) and the checkout's branch label are kept per
+  connection and account (`navigatorSnapshot.ts`, under 192 KB for the Link
+  store's 256 KB record cap). Boot paints them while the same reads are out:
+  the project registry adopts the list as a `provisional` ready state under
+  the boot request's own id, so that request's answer still publishes over it
+  and a failure keeps it with a refresh error. The boot selection is restored
+  from it; the server's list then waits for that restore and only revalidates
+  the choice. The first complete summary answer for the project retires
+  remembered rows it did not name, unless something newer (a socket
+  projection) updated them or the chat is open. A deep link the snapshot does
+  not know, a known different Space, or a registry that already answered skips
+  it. The snapshot is saved only after the server's own list answered, a few
+  seconds behind changes and at once on `pagehide`/hidden.
+- **Single reads.** A navigator that shows a project joins a summaries read
+  already on its way (`ensureSessionsListed`); post-mutation callers still
+  read again. Guardrails and limits come from one `/api/auth/me`; header and
+  dock avatars share one passive GitHub status read.
+
 ## Navigator and client state
 
 `GET /api/sessions/summaries` defaults to 50 rows, at most 100, ordered by

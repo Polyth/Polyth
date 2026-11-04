@@ -37,6 +37,8 @@ async function startStaticServer(
   const fontsDist = join(webDist, "assets", "fonts");
   mkdirSync(fontsDist, { recursive: true });
   writeFileSync(join(fontsDist, "inter-normal.woff2"), Buffer.from("wOF2-dummy"));
+  writeFileSync(join(fontsDist, "inter-normal-ABCDEF1234567890.woff2"), Buffer.from("wOF2-dummy-hashed"));
+  copyFileSync(join(SHIPPED_WEB, "icon-512.png"), join(webDist, "icon-512-ABCDEF1234567890.png"));
 
   const server = createHttpServer({
     spaces: tenancy.gateway,
@@ -183,6 +185,31 @@ test("assets of the published build are immutable; stale or unversioned ones rev
     const again = await fetch(`${base}/assets/fonts/inter-normal.woff2`, { headers: { "if-none-match": etag! } });
     assert.equal(again.status, 304);
     assert.equal((await again.arrayBuffer()).byteLength, 0);
+  } finally {
+    server.close();
+  }
+});
+
+test("content-addressed fonts and launch icons stay immutable without a build query", async () => {
+  const { server, base } = await startStaticServer();
+  try {
+    for (const path of [
+      "/assets/fonts/inter-normal-ABCDEF1234567890.woff2",
+      "/icon-512-ABCDEF1234567890.png",
+    ]) {
+      const response = await fetch(`${base}${path}`);
+      assert.equal(response.status, 200, path);
+      assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable", path);
+      assert.equal(response.headers.get("etag"), null, `${path} never needs revalidation`);
+    }
+    // The plain names keep working for a page (or native shell) from before the
+    // content-addressed rename, but their bytes can change, so they revalidate.
+    for (const path of ["/assets/fonts/inter-normal.woff2", "/icon-512.png"]) {
+      const response = await fetch(`${base}${path}`);
+      assert.equal(response.status, 200, path);
+      assert.equal(response.headers.get("cache-control"), "no-cache", path);
+      assert.ok(response.headers.get("etag"), `${path} carries a validator`);
+    }
   } finally {
     server.close();
   }

@@ -460,3 +460,73 @@ test("factory throw after a registration leaves no contributions or styles", asy
   assert.equal(host.widgetsList.length, 0);
   assert.equal(dom.document.querySelectorAll("link[data-polyth-web-package-style]").length, 0);
 });
+
+test("a scheduled activation runs factory and installer only when its install runs", async () => {
+  let install: (() => void) | undefined;
+  let factories = 0;
+  let installers = 0;
+  const loading = activate(sampleAsset({ styles: [] }), {
+    importModule: async () => ({
+      default: () => {
+        factories++;
+        return () => {
+          installers++;
+          return () => {};
+        };
+      },
+    }),
+    scheduleInstall: (run) => { install = run; },
+  });
+  while (!install) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(factories, 0);
+  assert.equal(installers, 0);
+  install();
+  assert.equal(factories, 1, "install is synchronous, so a batch shares one task");
+  assert.equal(installers, 1);
+  const { handle, host } = await loading;
+  assert.equal(host.widgetsList.length, 0);
+  handle.dispose();
+});
+
+test("an activation cancelled while it waits for its install publishes nothing and drops its styles", async () => {
+  const window = new Window({ url: "http://localhost/" });
+  const documentRef = window.document as unknown as Document;
+  const current = { value: true };
+  let install: (() => void) | undefined;
+  let factories = 0;
+  const loading = activate(sampleAsset({ styles: ["/packages/sample/entry.css"] }), {
+    current,
+    document: documentRef,
+    importModule: async () => ({ default: () => { factories++; return () => () => {}; } }),
+    scheduleInstall: (run) => { install = run; },
+  });
+  while (!install) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(documentRef.querySelectorAll("link[data-polyth-web-package-style]").length, 1);
+  current.value = false;
+  install();
+  await loading;
+  assert.equal(factories, 0);
+  assert.equal(documentRef.querySelectorAll("link[data-polyth-web-package-style]").length, 0);
+});
+
+test("a factory that throws inside a scheduled install rejects only its own activation", async () => {
+  const window = new Window({ url: "http://localhost/" });
+  const documentRef = window.document as unknown as Document;
+  const installs: Array<() => void> = [];
+  const failing = activate(sampleAsset({ styles: ["/packages/sample/entry.css"] }), {
+    document: documentRef,
+    importModule: async () => ({ default: () => { throw new Error("boom"); } }),
+    scheduleInstall: (run) => { installs.push(run); },
+  });
+  let installed = 0;
+  const healthy = activate(sampleAsset({ id: "other", module: "/packages/other/entry.js" }), {
+    importModule: async () => ({ default: () => () => { installed++; return () => {}; } }),
+    scheduleInstall: (run) => { installs.push(run); },
+  });
+  while (installs.length < 2) await new Promise((resolve) => setTimeout(resolve, 0));
+  for (const run of installs) run();
+  await assert.rejects(failing, /boom/);
+  await healthy;
+  assert.equal(installed, 1);
+  assert.equal(documentRef.querySelectorAll("link[data-polyth-web-package-style]").length, 0);
+});

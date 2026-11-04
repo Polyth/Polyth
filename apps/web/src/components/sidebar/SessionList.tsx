@@ -13,7 +13,7 @@ import {
 import { canManageSession, sharingMarkerLabel } from "../../sessionSharing.ts";
 import { conversationUnread, hasMentionAttention, setSessionMuted, unreadBadgeText } from "../../sessionPeople.ts";
 import { useHasArchivedSessions } from "../../useHasArchivedSessions.ts";
-import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, refreshSessions, withOptimisticSessionChange } from "../../init.ts";
+import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, ensureSessionsListed, refreshSessions, withOptimisticSessionChange } from "../../init.ts";
 import { markSessionPerformance } from "../../sessionPerformance.ts";
 import { collectSessionSummaries } from "../../sessionSummaryPages.ts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
@@ -858,7 +858,7 @@ export default function SessionList({
   useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
-    if (projectSessions.length === 0) void refreshSessions(projectId);
+    if (projectSessions.length === 0) void ensureSessionsListed(projectId);
   }, [projectId]);
   // Worktrees appear and disappear outside this sidebar — created by the Git
   // UI, by an agent, by a shell. The server bumps this project's topology

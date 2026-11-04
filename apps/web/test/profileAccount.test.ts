@@ -238,3 +238,25 @@ test("a picture that fails to load falls back to the account icon, and a new pic
     container.remove();
   }
 });
+
+test("the header and the dock asking at once share one passive read", async () => {
+  reset();
+  let release: (answer: Answer) => void = () => {};
+  script.answer = () => new Promise<Answer>((resolve) => { release = resolve; });
+  const header = await mount("shared");
+  const dock = await mount("shared");
+  try {
+    assert.equal(asked.length, 1, "the second view joins the read in flight");
+    release(signedIn("kat"));
+    await until(() => header.picture() !== null && dock.picture() !== null, "both pictures");
+    assert.equal(dock.picture(), person("kat").avatarUrl);
+    script.answer = () => signedIn("kat");
+    clock.now += 5_000;
+    foreground();
+    await settle();
+    assert.equal(asked.length, 2, "a later ask is a new read, not a stale shared one");
+  } finally {
+    await header.unmount();
+    await dock.unmount();
+  }
+});

@@ -33,7 +33,7 @@ export interface SyncFreshness {
   sessions: boolean;
 }
 
-interface WebSocketLike {
+export interface WebSocketLike {
   readyState: number;
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;
@@ -63,6 +63,20 @@ export interface SyncClientOptions {
    *  snapshot re-reads them: what ended while the link was down is in no
    *  other part of the catch-up. */
   refreshSessionIds?: () => readonly string[];
+  /** How long an open socket outlives the page going to the background (0:
+   *  closed at once). A tab switch or a quick look at another app then comes
+   *  back to the same live connection instead of a new handshake and catch-up. */
+  backgroundGraceMs?: number;
+  /** Back within the grace, the kept socket must answer a fresh subscribe this
+   *  soon or it is replaced: a frozen page's socket can still read as open. */
+  resumeProbeMs?: number;
+  /** A handshake still not open after this long is dropped and tried again (0:
+   *  never). A half-open path after a network handoff can stall it for ~30 s. */
+  connectTimeoutMs?: number;
+  /** First retry after a connection that had settled (stableConnectionMs).
+   *  Unset: the ordinary jittered base delay. Such a drop is usually a network
+   *  handoff or a replaced Link path, not a server that is down. */
+  settledRetryDelayMs?: number;
 }
 
 /** Legacy test seam only. SyncClient deliberately does not use this: its
@@ -198,6 +212,15 @@ export class SyncClient {
   private readonly maxDelay: number;
   private readonly stableConnectionMs: number;
   private readonly maxSessionCursors: number;
+  private readonly backgroundGraceMs: number;
+  private readonly resumeProbeMs: number;
+  private readonly connectTimeoutMs: number;
+  private readonly settledRetryDelayMs: number | undefined;
+  /** When the page went to the background with its socket kept open. */
+  private hiddenAt: number | null = null;
+  private graceTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private probeTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 
   constructor(options: SyncClientOptions = {}) {
     this.manualAcknowledgement = options.manualAcknowledgement ?? false;
@@ -213,6 +236,12 @@ export class SyncClient {
     this.syncReceipts = options.syncReceipts ?? false;
     this.receiptFallbackMs = options.receiptFallbackMs ?? 8_000;
     this.refreshSessionIds = options.refreshSessionIds;
+    this.backgroundGraceMs = Math.max(0, options.backgroundGraceMs ?? 0);
+    this.resumeProbeMs = Math.max(1, options.resumeProbeMs ?? 2_000);
+    this.connectTimeoutMs = Math.max(0, options.connectTimeoutMs ?? 0);
+    this.settledRetryDelayMs = options.settledRetryDelayMs === undefined
+      ? undefined
+      : Math.max(0, options.settledRetryDelayMs);
     this.backoff = this.baseDelay;
   }
 
@@ -258,11 +287,81 @@ export class SyncClient {
     if (hints.foreground !== undefined) this.foregroundHint = hints.foreground;
     if (!this.canRetry()) {
       this.clearTimer();
-      if (wasForeground && !this.foregroundHint) this.suspendSocket();
+      if (wasForeground && !this.foregroundHint) {
+        if (this.backgroundGraceMs > 0 && this.ws?.readyState === WS_OPEN) this.keepThroughBackground(this.ws);
+        else this.suspendSocket();
+      }
       if (this.ws === null) this.publishStatus(this.inactiveStatus());
       return;
     }
+    if (!wasForeground && this.foregroundHint && this.hiddenAt !== null) {
+      if (this.resumeKeptSocket()) return;
+      if (this.url !== null) {
+        this.startConnect(this.url, true);
+        return;
+      }
+    }
     if (this.ws === null && this.url !== null) this.startConnect(this.url, true);
+  }
+
+  /** The page went to the background: keep the open socket for the grace,
+   *  still delivering, then let it go as an immediate suspension would. */
+  private keepThroughBackground(ws: WebSocketLike): void {
+    this.clearGrace();
+    this.clearProbe();
+    this.hiddenAt = this.now();
+    const generation = this.socketGeneration;
+    this.graceTimer = this.schedule(() => {
+      this.graceTimer = null;
+      if (!this.isCurrent(ws, generation) || this.foregroundHint) return;
+      this.suspendSocket();
+      this.publishStatus(this.inactiveStatus());
+    }, this.backgroundGraceMs);
+  }
+
+  /** Back in the foreground within the grace: reuse the socket once it proves
+   *  it is still carrying traffic. False when it has to be replaced. */
+  private resumeKeptSocket(): boolean {
+    const hiddenAt = this.hiddenAt;
+    this.hiddenAt = null;
+    this.clearGrace();
+    const ws = this.ws;
+    if (hiddenAt === null || ws === null || ws.readyState !== WS_OPEN) return false;
+    // A frozen page may never have run the grace timer: the clock decides.
+    if (this.now() - hiddenAt >= this.backgroundGraceMs) return false;
+    const generation = this.socketGeneration;
+    if (!this.sub) return true;
+    // What is on screen is unconfirmed until the same subscription answers
+    // again. A live socket replies within a round trip — well before the
+    // "Updating…" delay — so a quick return shows nothing at all.
+    this.markStale();
+    this.armReceiptFallback(ws, generation);
+    this.sendSubscribe(ws, generation);
+    this.probeTimer = this.schedule(() => {
+      this.probeTimer = null;
+      if (!this.isCurrent(ws, generation)) return;
+      // Nothing came back: the socket only looked open.
+      this.startConnect(this.url ?? "", true);
+    }, this.resumeProbeMs);
+    return true;
+  }
+
+  private clearGrace(): void {
+    if (this.graceTimer === null) return;
+    this.cancel(this.graceTimer);
+    this.graceTimer = null;
+  }
+
+  private clearProbe(): void {
+    if (this.probeTimer === null) return;
+    this.cancel(this.probeTimer);
+    this.probeTimer = null;
+  }
+
+  private clearConnectTimeout(): void {
+    if (this.connectTimer === null) return;
+    this.cancel(this.connectTimer);
+    this.connectTimer = null;
   }
 
   setSubscription(sessionId: string | undefined, afterSeq = 0, projectId?: string): void {
@@ -303,6 +402,10 @@ export class SyncClient {
     if (this.closed) return;
     this.closed = true;
     this.clearTimer();
+    this.clearGrace();
+    this.clearProbe();
+    this.clearConnectTimeout();
+    this.hiddenAt = null;
     this.socketGeneration += 1;
     const ws = this.ws;
     this.ws = null;
@@ -333,6 +436,9 @@ export class SyncClient {
   }
 
   private suspendSocket(): void {
+    this.clearGrace();
+    this.clearProbe();
+    this.clearConnectTimeout();
     const ws = this.ws;
     this.ws = null;
     this.socketGeneration += 1;
@@ -389,6 +495,10 @@ export class SyncClient {
 
   private startConnect(url: string, retry: boolean): void {
     this.clearTimer();
+    this.clearGrace();
+    this.clearProbe();
+    this.clearConnectTimeout();
+    this.hiddenAt = null;
     if (this.manualAcknowledgement) {
       for (const [id, seq] of this.appliedSeq) this.setCursor(id, seq);
     }
@@ -413,8 +523,21 @@ export class SyncClient {
       return;
     }
     this.ws = ws;
+    if (this.connectTimeoutMs > 0) {
+      this.connectTimer = this.schedule(() => {
+        this.connectTimer = null;
+        if (!this.isCurrent(ws, generation) || ws.readyState === WS_OPEN) return;
+        // Stalled handshake: a fresh attempt beats waiting out the OS timeout.
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        this.startConnect(url, true);
+      }, this.connectTimeoutMs);
+    }
     ws.onopen = () => {
       if (!this.isCurrent(ws, generation)) return;
+      this.clearConnectTimeout();
       this.openedAt = this.now();
       this.publishStatus("connected");
       if (!this.sub) this.setFreshness({ session: true, sessions: true });
@@ -427,6 +550,8 @@ export class SyncClient {
     };
     ws.onmessage = (event) => {
       if (!this.isCurrent(ws, generation)) return;
+      // Any frame proves a kept socket still carries traffic.
+      this.clearProbe();
       this.handle(String(event.data), ws, generation);
     };
     ws.onerror = () => {
@@ -441,6 +566,9 @@ export class SyncClient {
     ws.onclose = (event) => {
       if (!this.isCurrent(ws, generation)) return;
       this.ws = null;
+      this.clearConnectTimeout();
+      this.clearProbe();
+      this.clearGrace();
       this.markStale();
       // The gateway uses 1009 when a durable record exceeds its canonical
       // frame ceiling. Retrying that same cursor would be a permanent loop;
@@ -504,11 +632,16 @@ export class SyncClient {
   private scheduleReconnect(url: string, generation: number): void {
     if (!this.canRetry() || generation !== this.socketGeneration || this.ws !== null) return;
     this.clearTimer();
-    if (this.openedAt !== null && this.now() - this.openedAt >= this.stableConnectionMs) this.backoff = this.baseDelay;
+    const settled = this.openedAt !== null && this.now() - this.openedAt >= this.stableConnectionMs;
+    if (settled) this.backoff = this.baseDelay;
     this.openedAt = null;
     const reconnectGeneration = ++this.reconnectGeneration;
-    const delay = Math.min(this.maxDelay, Math.max(0, Math.floor(this.backoff * (0.5 + this.random()))));
-    this.backoff = Math.min(this.maxDelay, this.backoff * 2);
+    const quick = settled && this.settledRetryDelayMs !== undefined;
+    const delay = quick
+      ? this.settledRetryDelayMs!
+      : Math.min(this.maxDelay, Math.max(0, Math.floor(this.backoff * (0.5 + this.random()))));
+    // A quick retry leaves the ladder at its first rung for the next attempt.
+    if (!quick) this.backoff = Math.min(this.maxDelay, this.backoff * 2);
     this.timer = this.schedule(() => {
       if (reconnectGeneration !== this.reconnectGeneration) return;
       this.timer = null;

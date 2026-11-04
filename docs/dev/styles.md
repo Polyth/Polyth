@@ -641,6 +641,16 @@ the standard tinted root (`--bg` at 76% over the art). They are mirrored in
 the pre-boot map in `index.html`. `backgrounds.test.ts` pins the variants,
 tones, edges and that map.
 
+A custom image reaches the page through the `--app-background-image` custom
+property, and Chromium silently refuses a custom property of 2 MiB or more
+(checked in desktop Chromium 156; 1.9 MiB of characters passes, 2.0 does not):
+the page kept its old wallpaper with no error, and had none after a reload. So
+`readBackgroundFile` re-encodes an upload whose data URL exceeds 1,900,000
+characters, about 1.42 MB of file, as a JPEG within that limit (`imageShrink.ts`,
+transparency flattened onto `--bg`). A smaller file stays byte for byte as
+chosen. An oversized image a browser saved before this stays unpainted until it
+is uploaded again.
+
 Every look covers the header, navigator, rails, conversation and composer,
 in-flow cards (agent question, isolated-changes card, empty states; the
 agent status, subagent and edited-files lines keep the shape *Status above the

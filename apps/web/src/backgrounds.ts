@@ -1,12 +1,15 @@
 // Background presets are account preferences. A custom image stays on this
 // device so unrelated settings changes never resend a multi-megabyte data URL.
-// localStorage is the synchronous cache for both choices.
+// localStorage is the synchronous cache for both choices. The native app's
+// origin storage starts empty on every launch, so it also keeps a reduced copy
+// of the image in its own store (customWallpaperMemory.ts).
 // `edge` is the raw image's average colour along the bottom 120px of a
 // 430×932 phone frame (cover, as painted). The keyboard band below the page
 // can only take a flat colour, so it mixes this with the theme tint the same
 // way the root wallpaper does (docs/dev/mobile-viewport.md). Re-measure it
 // whenever an image changes, together with `tone`.
 import { tr, type TranslationKey } from "./i18n/index.ts";
+import { shrinkImage } from "./imageShrink.ts";
 
 export type BackgroundAppearance = "dark" | "light";
 
@@ -448,6 +451,18 @@ export function setCustomBackground(customImage: string): boolean {
   return commit({ id: "custom", customImage });
 }
 
+/** A device's kept copy comes back on launch, either as the wallpaper or only
+ *  offered in the picker. An image this document already holds stays. */
+export function restoreCustomBackground(customImage: string, active: boolean): boolean {
+  if (state.customImage || !isCustomImage(customImage)) return false;
+  return commit({ id: active ? "custom" : state.id, customImage });
+}
+
+/** Test seam: the state of a launch with nothing in origin storage. */
+export function resetBackgroundForTest(): void {
+  state = parseBackgroundState(null);
+}
+
 export function validateBackgroundFile(file: Pick<File, "size" | "type">): string | null {
   if (!/^image\/(?:png|jpeg|webp|avif)$/i.test(file.type)) {
     return tr("backgrounds.chooseFormat");
@@ -456,10 +471,17 @@ export function validateBackgroundFile(file: Pick<File, "size" | "type">): strin
   return null;
 }
 
-export function readBackgroundFile(file: File): Promise<string> {
+/** The wallpaper reaches the page through a CSS custom property, and Chromium
+ *  silently refuses one of 2 MiB or more: the page keeps its old wallpaper with
+ *  no error. So an image above this, the largest size checked to pass, is
+ *  re-encoded on upload. Smaller files stay byte for byte as chosen. */
+export const MAX_PAINTABLE_IMAGE_CHARS = 1_900_000;
+const PAINTABLE_LADDER = { edges: [3840, 2880, 2560, 1920, 1600, 1280], qualities: [0.85, 0.72] };
+
+export async function readBackgroundFile(file: File, shrink = shrinkImage): Promise<string> {
   const invalid = validateBackgroundFile(file);
-  if (invalid) return Promise.reject(new Error(invalid));
-  return new Promise((resolve, reject) => {
+  if (invalid) throw new Error(invalid);
+  const image = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error(tr("backgrounds.couldNotRead")));
     reader.onload = () => {
@@ -468,6 +490,11 @@ export function readBackgroundFile(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+  const paintable = await shrink(image, MAX_PAINTABLE_IMAGE_CHARS, PAINTABLE_LADDER).catch(() => null);
+  if (paintable === null || paintable.length > MAX_PAINTABLE_IMAGE_CHARS || !isCustomImage(paintable)) {
+    throw new Error(tr("backgrounds.couldNotUse"));
+  }
+  return paintable;
 }
 
 

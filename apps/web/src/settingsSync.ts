@@ -29,6 +29,16 @@ import {
   subscribeThinkingPrefs,
 } from "@polyth/models/web-prefs";
 import { normalizeSettings } from "./settings.ts";
+import { hasClientPersistenceBackend } from "./clientPersistence.ts";
+import {
+  encodeSettingsLook,
+  LOOK_PREFERENCE_IDS,
+  pickLookProduct,
+  pickLookUi,
+  readSettingsLook,
+  writeSettingsLook,
+  type SettingsLook,
+} from "./settingsSnapshot.ts";
 import { getState, subscribeStore, updateSettings } from "./store.ts";
 import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings } from "./uiPrefs.ts";
 import {
@@ -40,6 +50,7 @@ import {
 import {
   DEFAULT_BACKGROUND_ID,
   getBackground,
+  type BackgroundId,
   parseBackgroundState,
   setBackground,
   subscribeBackground,
@@ -268,6 +279,191 @@ function normalizeRemotePreferences(value: unknown): { preferences: unknown; cha
   return { preferences, changed };
 }
 
+// ---- remembered look ------------------------------------------------------------
+// The native shell's origin storage is empty on every launch, so the account's
+// theme and wallpaper would otherwise arrive only with the server's answer. The
+// last launch's look (settingsSnapshot.ts) is applied to the local stores
+// before the first render, strictly *before* initSettingsSync() snapshots its
+// baseline: from then on it is just the local state the client started with,
+// so the server's answer replaces it through the ordinary merge, an edit made
+// meanwhile still wins for its own field, and nothing is pushed because of it
+// (pushes need a server revision, and the baseline already equals the blob).
+
+const LOOK_WRITE_DELAY_MS = 2_000;
+
+interface RememberedLook {
+  /** What the stores held before the remembered look went in. */
+  previous: SettingsLook;
+  /** What the stores held right after it did. */
+  applied: SettingsLook;
+}
+
+let remembered: RememberedLook | null = null;
+let lookTimer: ReturnType<typeof setTimeout> | undefined;
+let lastLookJson = "";
+
+function currentLook(): SettingsLook {
+  const background = getBackground().id;
+  const product = pickLookProduct(getState().settings);
+  return {
+    product,
+    ui: pickLookUi(getUiSettings()),
+    background: background === "custom" ? sharedBackgroundIdFallback() : background,
+    customTheme: loadCustomThemes().find((theme) => theme.id === product.theme) ?? null,
+    preferences: currentLookPreferences(),
+  };
+}
+
+function currentLookPreferences(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const id of LOOK_PREFERENCE_IDS) {
+    const adapter = preferenceAdapters.get(id);
+    if (!adapter) continue;
+    try {
+      const value = adapter.read();
+      if (isJsonValue(value)) out[id] = value;
+    } catch { /* an unreadable store is simply not remembered */ }
+  }
+  return out;
+}
+
+/** Write remembered preference values through their registered adapters, which
+ *  validate them, and keep the captured values (the sync baseline) in step. */
+function applyLookPreferences(values: Record<string, unknown>): void {
+  for (const [id, value] of Object.entries(values)) {
+    const adapter = preferenceAdapters.get(id);
+    if (!adapter || !isJsonValue(value)) continue;
+    try {
+      if (!sameJson(adapter.read(), value)) adapter.write(value);
+      capturePreference(id, adapter.read());
+    } catch { /* a broken store keeps what it had */ }
+  }
+}
+
+/** The wallpaper preset the account shares while a device image is in use. */
+function sharedBackgroundIdFallback(): string {
+  const shared = preferenceValues.get("core.background");
+  const id = isObject(shared) ? shared.id : undefined;
+  return typeof id === "string" && id !== "custom" ? id : DEFAULT_BACKGROUND_ID;
+}
+
+/** `dropThemeId`: a custom theme this client added on the remembered look's
+ *  behalf and that is to leave again. Other custom themes are never touched. */
+function applyLook(look: SettingsLook, dropThemeId: string | null = null): void {
+  const wasApplying = applying;
+  applying = true;
+  try {
+    // Palette first: a custom theme must exist before the setting names it.
+    const themes = loadCustomThemes();
+    const wanted = look.customTheme;
+    if (wanted && !sameJson(themes.find((theme) => theme.id === wanted.id), wanted)) {
+      replaceCustomThemes([...themes.filter((theme) => theme.id !== wanted.id), wanted]);
+    } else if (!wanted && dropThemeId && themes.some((theme) => theme.id === dropThemeId)) {
+      replaceCustomThemes(themes.filter((theme) => theme.id !== dropThemeId));
+    }
+    updateSettings(look.product);
+    setUiSettings(look.ui);
+    applyLookPreferences(look.preferences);
+    // Last, so the system bar colour follows the palette and the wallpaper. An
+    // empty id is a preset this build does not know: keep the current one.
+    if (look.background && getBackground().id !== "custom" && getBackground().id !== look.background) {
+      setBackground(look.background as BackgroundId);
+    }
+  } finally {
+    applying = wasApplying;
+  }
+}
+
+/** Put the last launch's look on screen before the first render. Returns true
+ *  when one was applied. Does nothing in a browser (localStorage already works
+ *  there) or once sync started: the caller runs it before anything renders, so
+ *  nothing the person did can be older than it. */
+export async function restoreRememberedLook(): Promise<boolean> {
+  if (started || remembered !== null || !hasClientPersistenceBackend()) return false;
+  const record = await readSettingsLook();
+  if (record === null || started || remembered !== null) return false;
+  // The adapters exist before the first render (registration is idempotent),
+  // so the remembered preferences land in their stores now and in the sync
+  // baseline taken at start.
+  registerCorePreferences();
+  const previous = currentLook();
+  try {
+    applyLook(record);
+  } catch {
+    applyLook(previous);
+    return false;
+  }
+  remembered = { previous, applied: currentLook() };
+  return true;
+}
+
+/** The first server answer is in (`remote`; null = the server holds no record).
+ *  A part of the remembered look the person did not touch and the server has
+ *  no word on goes back to what the client had, so it is never pushed up as
+ *  though it were the account's choice. */
+function settleRememberedLook(remote: { product?: unknown; ui?: unknown; preferences?: unknown } | null): void {
+  const mine = remembered;
+  remembered = null;
+  if (mine === null) return;
+  const now = currentLook();
+  const preferences = remote && isObject(remote.preferences) ? remote.preferences : {};
+  const next: SettingsLook = { ...now, preferences: { ...now.preferences } };
+  let changed = false;
+  if (!(remote && isObject(remote.product)) && sameJson(now.product, mine.applied.product) && !sameJson(now.product, mine.previous.product)) {
+    next.product = mine.previous.product; changed = true;
+  }
+  if (!(remote && isObject(remote.ui)) && sameJson(now.ui, mine.applied.ui) && !sameJson(now.ui, mine.previous.ui)) {
+    next.ui = mine.previous.ui; changed = true;
+  }
+  if (!("core.background" in preferences) && now.background === mine.applied.background && now.background !== mine.previous.background) {
+    next.background = mine.previous.background; changed = true;
+  }
+  if (!("core.custom-themes" in preferences) && sameJson(now.customTheme, mine.applied.customTheme) && !sameJson(now.customTheme, mine.previous.customTheme)) {
+    next.customTheme = mine.previous.customTheme; changed = true;
+  }
+  for (const id of LOOK_PREFERENCE_IDS) {
+    if (id in preferences) continue;
+    if (!sameJson(now.preferences[id], mine.applied.preferences[id]) || sameJson(now.preferences[id], mine.previous.preferences[id])) continue;
+    if (id in mine.previous.preferences) next.preferences[id] = mine.previous.preferences[id];
+    changed = true;
+  }
+  if (!changed) return;
+  applyLook(next, mine.applied.customTheme?.id ?? null);
+  for (const id of ["core.background", "core.custom-themes"]) {
+    const adapter = preferenceAdapters.get(id);
+    if (adapter) { try { capturePreference(id, adapter.read()); } catch { /* unavailable */ } }
+  }
+  initialBaseline = currentBlob();
+  lastSyncedJson = JSON.stringify(initialBaseline);
+}
+
+function writeLookNow(): void {
+  if (lookTimer !== undefined) { clearTimeout(lookTimer); lookTimer = undefined; }
+  // Only a look the server has answered for: a launch must never re-save its
+  // own remembered copy (or a fetch that failed) as if it were current.
+  if (localRevision < 0 || remembered !== null || !hasClientPersistenceBackend()) return;
+  const encoded = encodeSettingsLook(currentLook(), Date.now());
+  if (encoded === null) return;
+  const content = JSON.stringify(currentLook());
+  if (content === lastLookJson) return;
+  lastLookJson = content;
+  writeSettingsLook(encoded);
+}
+
+function rememberLook(): void {
+  if (lookTimer !== undefined || !hasClientPersistenceBackend()) return;
+  lookTimer = setTimeout(writeLookNow, LOOK_WRITE_DELAY_MS);
+  (lookTimer as unknown as { unref?: () => void }).unref?.();
+}
+
+/** Test seam: forget this document's remembered-look state. */
+export function resetRememberedLookForTest(): void {
+  remembered = null;
+  lastLookJson = "";
+  if (lookTimer !== undefined) clearTimeout(lookTimer);
+  lookTimer = undefined;
+}
+
 /** Apply a newer server snapshot locally without bouncing it straight back. */
 function applyRemote(dto: ClientSettingsDto): void {
   if (dto.revision <= localRevision) return;
@@ -281,6 +477,7 @@ function applyRemote(dto: ClientSettingsDto): void {
   };
   const normalizedPreferences = normalizeRemotePreferences(rawIncoming.preferences);
   const incoming = { ...rawIncoming, preferences: normalizedPreferences.preferences };
+  settleRememberedLook(incoming);
   const before = currentBlob();
   const base = lastServerSettings ?? initialBaseline ?? before;
   const mergeSection = (key: keyof SettingsBlob): unknown => {
@@ -346,9 +543,13 @@ function applyRemote(dto: ClientSettingsDto): void {
     ui: incoming.ui,
     sessionDefaults: incoming.sessionDefaults,
     modelPrefs: incoming.modelPrefs,
-    modelVisibility: incoming.modelVisibility,
+    // Server-owned: a PUT never changes it, and a record that has none (an
+    // account that never toggled a model) says nothing about it. Counting that
+    // as a difference re-pushed the same blob on every echo of our own write.
+    modelVisibility: mergedVisibility,
     preferences: incoming.preferences,
   });
+  rememberLook();
 }
 
 /** Reconcile a server snapshot and preserve two important migration/retry cases:
@@ -378,6 +579,7 @@ function push(opts?: { keepalive?: boolean }): void {
         lastSyncedJson = json;
         lastServerSettings = blob as unknown as Record<string, unknown>;
         localRevision = dto.revision;
+        rememberLook();
       } else if (dto.revision === localRevision && lastSyncedJson === json) {
         // Our WS echo can arrive before the PUT response.
         mayContinue = true;
@@ -409,6 +611,7 @@ export function flushSettingsSync(): void {
     timer = undefined;
   }
   push({ keepalive: true });
+  writeLookNow();
 }
 
 function markSettled(): void {
@@ -541,6 +744,24 @@ function registerCorePreferences(): void {
   register(SHARED_PROJECT_INTERFACE_PREFERENCE_ID, sharedProjectPresentationPreference);
 }
 
+/** Test seam: forget this document's sync state so one test file can run
+ *  several launches. Subscriptions stay (they only schedule a push). */
+export function resetSettingsSyncForTest(): void {
+  if (timer !== undefined) clearTimeout(timer);
+  timer = undefined;
+  localRevision = -1;
+  lastSyncedJson = "";
+  lastServerSettings = null;
+  initialBaseline = null;
+  pushInFlight = null;
+  applying = false;
+  started = false;
+  settled = false;
+  preferenceValues.clear();
+  for (const [id, adapter] of preferenceAdapters) capturePreference(id, adapter.read());
+  resetRememberedLookForTest();
+}
+
 /** Pull the server copy once, then keep it in step with local edits. Safe to
  *  call again on reconnect — it only wires the subscriptions the first time. */
 export function initSettingsSync(): void {
@@ -570,6 +791,7 @@ export function initSettingsSync(): void {
       // including any pre-server model preference state.
       else {
         if (localRevision < 0) {
+          settleRememberedLook(null);
           localRevision = 0;
           lastSyncedJson = "";
           schedulePush();

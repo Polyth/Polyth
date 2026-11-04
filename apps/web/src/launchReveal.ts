@@ -20,6 +20,12 @@ export interface LaunchProgress {
   /** When projects and the initial selection (session or fresh chat) were restored. */
   hydratedAt: number | null;
   settingsSettled: boolean;
+  /** The last launch's look was put on screen before the first render
+   *  (settingsSync.restoreRememberedLook). Settings still decide more than the
+   *  look (composer buttons, hero widgets), so the veil holds for them, but
+   *  only for settingsGraceMs after hydration instead of up to settledCapMs;
+   *  the server's answer replaces the remembered look when it arrives. */
+  lookRestored?: boolean;
   packagesSettled: boolean;
   /** Critical first-screen reads still in flight (e.g. the composer's branch). */
   holds: number;
@@ -33,8 +39,12 @@ export const LAUNCH_REVEAL_TIMING = {
   /** Sign-in, setup and error screens show at the latest this long after they commit. */
   phaseCapMs: 600,
   /** Packages may add composer buttons and hero widgets this long after
-   *  hydration; a later one fades in on its own (MobileComposerRail). */
-  packagesGraceMs: 1_800,
+   *  hydration; a later one fades in on its own (MobileComposerRail). Kept
+   *  short: a workspace on screen beats waiting for its last launcher. */
+  packagesGraceMs: 600,
+  /** With a remembered look on screen, how long after hydration the settings
+   *  answer may still hold the veil. Without one the hold runs to settledCapMs. */
+  settingsGraceMs: 600,
   /** Critical first-screen reads may finish this long after hydration. */
   holdsGraceMs: 1_600,
   /** After hydration, show whatever is there by now. */
@@ -72,7 +82,14 @@ export function decideLaunchReveal(
   const sinceHydrated = now - progress.hydratedAt;
   if (sinceHydrated >= timing.settledCapMs) return { reveal: true, reason: "settle-cap" };
   const wakes = [progress.hydratedAt + timing.settledCapMs];
-  let blocked = !progress.settingsSettled;
+  let blocked = false;
+  if (!progress.settingsSettled) {
+    if (!progress.lookRestored) blocked = true;
+    else if (sinceHydrated < timing.settingsGraceMs) {
+      blocked = true;
+      wakes.push(progress.hydratedAt + timing.settingsGraceMs);
+    }
+  }
   if (!progress.packagesSettled && sinceHydrated < timing.packagesGraceMs) {
     blocked = true;
     wakes.push(progress.hydratedAt + timing.packagesGraceMs);
@@ -227,6 +244,12 @@ export function noteLaunchSettingsSettled(): void {
   evaluate();
 }
 
+export function noteLaunchLookRestored(): void {
+  if (progress.lookRestored) return;
+  progress.lookRestored = true;
+  evaluate();
+}
+
 export function noteLaunchPackagesSettled(): void {
   if (progress.packagesSettled) return;
   progress.packagesSettled = true;
@@ -261,6 +284,7 @@ export function resetLaunchRevealForTest(): void {
     committedAt: null,
     hydratedAt: null,
     settingsSettled: false,
+    lookRestored: false,
     packagesSettled: false,
     holds: 0,
     lastChangeAt: 0,

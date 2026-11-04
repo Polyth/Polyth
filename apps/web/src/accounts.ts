@@ -376,6 +376,17 @@ export async function setAccountPermissions(
   return result.body as unknown as AccountPermissionsDto;
 }
 
+/** Guardrails and limits from one `/api/auth/me` answer (null = none): both
+ *  ride on it, and boot needs both. Unreachable or older server → both null. */
+export async function currentAccountRestrictions(): Promise<{ guardrails: AccountGuardrails | null; limits: AccountLimits | null }> {
+  try {
+    const me = await request<{ guardrails?: AccountGuardrails | null; limits?: AccountLimits | null }>("/api/auth/me");
+    return { guardrails: me.guardrails ?? null, limits: me.limits ?? null };
+  } catch {
+    return { guardrails: null, limits: null };
+  }
+}
+
 /** The signed-in account's own limits (null = none). */
 export async function currentAccountLimits(): Promise<AccountLimits | null> {
   try {

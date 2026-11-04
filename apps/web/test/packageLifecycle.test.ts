@@ -34,6 +34,7 @@ const installerCounts = new Map<string, number>();
 const held = new Set<string>();
 const pending = new Map<string, { resolve: (value: unknown) => void; promise: Promise<unknown> }>();
 const shouldFail = new Set<string>();
+let onInstall: ((id: string) => void) | null = null;
 
 function hold(id: string): Promise<unknown> {
   const existing = pending.get(id);
@@ -152,6 +153,7 @@ function factoryFor(id: string) {
     }
     return () => {
       installerCounts.set(id, (installerCounts.get(id) ?? 0) + 1);
+      onInstall?.(id);
       return () => {};
     };
   };
@@ -182,7 +184,7 @@ Object.defineProperty(globalThis, "fetch", {
   },
 });
 
-const { bootPackages, configurePackageRecovery, configureWebPackageLoader, isPackageEnabled, reconcilePackage, whenPackagesSettled } =
+const { bootPackages, configureInstallBatches, configurePackageRecovery, configureWebPackageLoader, isPackageEnabled, reconcilePackage, whenPackagesSettled } =
   await import("../src/packages/registry.ts");
 const { listWidgets } = await import("../src/widgets/catalog.ts");
 const { listSlots } = await import("../src/slots.ts");
@@ -381,4 +383,164 @@ test("project context composes, recommends per project, and updates live", async
   assert.deepEqual(listProjectContextSnapshots("project-a").map((entry) => entry.id), ["beta.context"]);
   assert.equal(listProjectContextRecommendedWidgetIds("project-a").includes("alpha.widget"), false);
   assert.equal(listWidgets().some((widget) => widget.id === "beta.widget"), true);
+});
+
+// Counts the microtask checkpoints installs ran in: React commits a store
+// update at the end of one, so one checkpoint means one shell re-render.
+function trackInstallBatches(): { batches: () => number; stop: () => void } {
+  let batches = 0;
+  let open = false;
+  onInstall = () => {
+    if (open) return;
+    open = true;
+    batches += 1;
+    queueMicrotask(() => { open = false; });
+  };
+  return { batches: () => batches, stop: () => { onInstall = null; } };
+}
+
+async function withBothDisabled(): Promise<void> {
+  packages.get("alpha")!.enabled = false;
+  packages.get("beta")!.enabled = false;
+  packages.get("samplevoice")!.enabled = false;
+  await bootPackages();
+  installerCounts.clear();
+  factoryCounts.clear();
+}
+
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+async function untilImportHeld(id: string): Promise<void> {
+  for (let tick = 0; tick < 200 && !pending.has(id); tick += 1) await nextTask();
+  assert.equal(pending.has(id), true, `${id} import should be held`);
+}
+
+function releaseImport(id: string): void {
+  pending.get(id)?.resolve({ default: factoryFor(id) });
+  pending.delete(id);
+}
+
+test("packages arriving together install in one task, as soon as the last import lands", async () => {
+  await withBothDisabled();
+  configureInstallBatches({ sliceMs: 60_000 });
+  const tracked = trackInstallBatches();
+  try {
+    held.add("alpha");
+    held.add("beta");
+    packages.get("alpha")!.enabled = true;
+    packages.get("beta")!.enabled = true;
+    const booting = bootPackages();
+    await untilImportHeld("alpha");
+    await untilImportHeld("beta");
+    releaseImport("alpha");
+    await nextTask();
+    assert.equal(installerCounts.get("alpha") ?? 0, 0, "the first arrival waits for its batch");
+    releaseImport("beta");
+    await booting;
+    assert.equal(installerCounts.get("alpha"), 1);
+    assert.equal(installerCounts.get("beta"), 1);
+    assert.equal(tracked.batches(), 1);
+    assert.equal(listWidgets().some((widget) => widget.id === "alpha.widget"), true);
+    assert.equal(listWidgets().some((widget) => widget.id === "beta.widget"), true);
+  } finally {
+    tracked.stop();
+    configureInstallBatches({ sliceMs: 16 });
+  }
+});
+
+test("a batch that outruns its slice yields, and still installs everything", async () => {
+  await withBothDisabled();
+  configureInstallBatches({ sliceMs: 0 });
+  const tracked = trackInstallBatches();
+  try {
+    packages.get("alpha")!.enabled = true;
+    packages.get("beta")!.enabled = true;
+    await bootPackages();
+    assert.equal(installerCounts.get("alpha"), 1);
+    assert.equal(installerCounts.get("beta"), 1);
+    assert.equal(tracked.batches(), 2);
+  } finally {
+    tracked.stop();
+    configureInstallBatches({ sliceMs: 16 });
+  }
+});
+
+test("a slow import holds the others back only for the batch window", async () => {
+  await withBothDisabled();
+  const tracked = trackInstallBatches();
+  try {
+    held.add("beta");
+    packages.get("alpha")!.enabled = true;
+    packages.get("beta")!.enabled = true;
+    const booting = bootPackages();
+    await untilImportHeld("beta");
+    for (let tick = 0; tick < 100 && !installerCounts.get("alpha"); tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(installerCounts.get("alpha"), 1, "alpha installs while beta is still loading");
+    assert.equal(installerCounts.get("beta") ?? 0, 0);
+    releaseImport("beta");
+    await booting;
+    assert.equal(installerCounts.get("beta"), 1);
+    assert.equal(tracked.batches(), 2);
+  } finally {
+    tracked.stop();
+  }
+});
+
+test("a hidden tab installs at once, without the window or the yield", async () => {
+  await withBothDisabled();
+  configureInstallBatches({ sliceMs: 0 });
+  const hidden = { configurable: true, get: () => "hidden" };
+  Object.defineProperty(document, "visibilityState", hidden);
+  try {
+    held.add("beta");
+    packages.get("alpha")!.enabled = true;
+    packages.get("beta")!.enabled = true;
+    const booting = bootPackages();
+    await untilImportHeld("beta");
+    for (let tick = 0; tick < 5 && !installerCounts.get("alpha"); tick += 1) await nextTask();
+    assert.equal(installerCounts.get("alpha"), 1, "alpha does not wait out the 100 ms window");
+    releaseImport("beta");
+    await booting;
+    assert.equal(installerCounts.get("beta"), 1);
+  } finally {
+    delete (document as unknown as { visibilityState?: string }).visibilityState;
+    configureInstallBatches({ sliceMs: 16 });
+  }
+});
+
+test("a failed import does not strand a package waiting in the batch", async () => {
+  configurePackageRecovery({ delaysMs: [60_000] });
+  try {
+    await withBothDisabled();
+    shouldFail.add("beta");
+    packages.get("alpha")!.enabled = true;
+    packages.get("beta")!.enabled = true;
+    await bootPackages();
+    assert.equal(installerCounts.get("alpha"), 1);
+    assert.equal(installerCounts.get("beta") ?? 0, 0);
+    assert.equal(listWidgets().some((widget) => widget.id === "alpha.widget"), true);
+  } finally {
+    configurePackageRecovery({ delaysMs: [1_000, 3_000, 10_000, 30_000, 60_000] });
+  }
+});
+
+test("a package disabled while waiting in the batch never installs", async () => {
+  await withBothDisabled();
+  held.add("beta");
+  packages.get("alpha")!.enabled = true;
+  packages.get("beta")!.enabled = true;
+  const booting = bootPackages();
+  await untilImportHeld("beta");
+  await nextTask();
+  packages.get("alpha")!.enabled = false;
+  reconcilePackage(descriptor("alpha", false));
+  releaseImport("beta");
+  await booting;
+  await whenPackagesSettled();
+  assert.equal(factoryCounts.get("alpha") ?? 0, 0);
+  assert.equal(listWidgets().some((widget) => widget.id === "alpha.widget"), false);
+  assert.equal(styleCount("alpha"), 0);
+  assert.equal(installerCounts.get("beta"), 1);
 });

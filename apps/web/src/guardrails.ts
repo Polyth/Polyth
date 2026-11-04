@@ -6,7 +6,7 @@
 // without the feature, so an unguarded owner never sees a flash of removal.
 import { useEffect, useSyncExternalStore } from "react";
 import type { AccountGuardrails, AccountLimits } from "@polyth/contracts";
-import { currentAccountGuardrails, currentAccountLimits } from "./accounts.ts";
+import { currentAccountRestrictions } from "./accounts.ts";
 
 let current: AccountGuardrails | null = null;
 // Owner-set limits (projects, assistants, daily counts) travel with the same
@@ -26,7 +26,7 @@ export function loadGuardrails(): Promise<void> {
   if (loaded) return Promise.resolve();
   if (inflight) return inflight;
   const mine = epoch;
-  inflight = Promise.all([currentAccountGuardrails(), currentAccountLimits()]).then(([next, limits]) => {
+  inflight = currentAccountRestrictions().then(({ guardrails: next, limits }) => {
     if (mine !== epoch) return; // account switched mid-flight
     current = next;
     currentLimits = limits;

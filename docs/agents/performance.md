@@ -36,6 +36,20 @@ Invariants that keep it there:
   URL whose `?b=` names the published build (`build-id.json`, written last)
   is immutable too; `index.html` and the generation markers stay `no-store`;
   everything else is `no-cache` with a weak ETag and answers 304.
+- Fonts and the launch mark are addressed by their bytes
+  (`/assets/fonts/inter-normal-<HASH>.woff2`, `/icon-512-<HASH>.png`, written by
+  `apps/web/build.ts` into `dist/main.css` and `dist/index.html`), so a warm
+  launch requests neither and a redeploy with unchanged bytes keeps the URL.
+  The plain names stay in `dist` for a page from before a rebuild and for the
+  native hub. Measured through a proxy at RTT ≈ 300 ms, warm reload: static
+  requests went from 4 (shell, `packages-manifest.json`, launch mark, font) to
+  the 2 that are `no-store` by design. The OS-fetched manifest and
+  apple-touch icons keep stable URLs.
+- Settings sync: a client that changes nothing sends no `PUT
+  /api/settings/client`. `modelVisibility` is server-owned, so its absence from
+  an account's record does not count as a local difference; counting it
+  re-pushed the same blob on every echo of the client's own write, 7–11 times
+  per launch on any account with no stored section.
 - Boot round trips: the HTML shell inlines this request's auth status
   (`<script id="polyth-auth-status" type="application/json">`, no CSRF
   token, `no-store, private`; read once by `takeEmbeddedAuthStatus`), so a
@@ -53,6 +67,90 @@ Invariants that keep it there:
   between client and host ([Polyth Link](../architecture/polyth-link.md));
   measured boot API set 364 KB raw → 118 KB gzip, a 500-event page
   182 KB → 31 KB. Needs both a new host and a new app; not device-verified.
+
+## Package boot
+
+Warm module evaluate and compile are small (about 54 ms and 13 ms across all
+modules, shell included; package frames about 71 ms). The cost was one shell
+re-render per package install: 45–46 of about 80 React commits and about 9,800
+of 15,100 component renders fell inside the install window. So
+`apps/web/src/packages/registry.ts` runs installs that arrive together
+synchronously in one task. A slow import holds the others back for at most
+100 ms, the last import flushes at once, and a batch yields after 16 ms. A hidden
+tab, which paints nothing and throttles timers, installs at once. Nothing is
+deferred: every package still installs before `bootPackages` resolves.
+
+Workload (2026-11-04): agent-beta, warm reloads in one context, builds
+interleaved on one server, n=9, 4-CPU ARM host at load 6–9, medians [range] over
+a fixed 5 s window from navigation:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Scripting CPU | 643 ms [598–697] | 458 ms [424–522] |
+| All main-thread CPU | 1178 ms [1111–1303] | 984 ms [851–1133] |
+| React commits in the install window (at load about 16) | 47 [45–50] | 11 [6–15] |
+| Long tasks, count and sum | 8, 826 ms [339–1353] | 7, 642 ms [397–1268] |
+
+Long tasks are not clearly better: the ranges overlap. Measure over a fixed
+window: stopping at "packages settled" flatters the build that settles earlier.
+Not removed yet: `SessionSplitView.tsx` measures layout on every commit (about
+70 ms of forced layout per boot), about 25 commits land before the first package
+import, and a package import costs about 84 small browser tasks (about 95 ms CPU
+in total; attributed to walking each package's module graph, unproven).
+
+## Connect and reconnect
+
+Contract: [Connecting and reconnecting](../architecture/session-reading.md#connecting-and-reconnecting).
+Workload (2026-11-03): agent-beta with 30 empty titled sessions, headless
+Chromium, warm reloads in one context, a node TCP proxy adding 150 ms each way
+(RTT ≈ 300 ms, so the HTTP cache keeps working — CDP
+`Network.emulateNetworkConditions` made cached package chunks refetch and
+inflated every boot), builds A/B-interleaved on the same server, loaded 4-CPU
+ARM host. Desktop 1280×860, medians of n=9 (range):
+
+| Milestone | Before | After |
+| --- | --- | --- |
+| Composer usable | 1467 ms (1277–2332) | 1053 ms (980–2134) |
+| Session list painted | 2008 ms (1746–2957) | 1053 ms (981–2134) |
+| `/ws` open | 1485 ms (1293–2372) | 1044 ms (995–1306) |
+| Navigator `synced` receipt | 1974 ms (1701–3066) | 1427 ms (1335–2381) |
+
+The first paint is now the complete screen (before: an empty shell at
+~1.0 s, rows ~1 s later). Tab hidden 3 s → visible (CDP 300 ms, n=4): before a
+new socket and 327–443 ms to `synced`; after no new socket, 6–14 ms (CDP does
+not delay frames on an open socket; on a real link this is one round trip).
+Phone 390×844 launch veil via the proxy: 3.06–3.94 s → 2.79–2.81 s (n=4 each,
+before the branch-label and package-grace changes; the remaining wait was the
+package grace and git-backed holds, which those changes address). Not
+device-verified; the native app also bundles the shell, so it needs an app
+build to carry the web changes.
+
+The fonts, package batching and settings fix on top of that (2026-11-04), same
+proxy and server, builds interleaved, host at load 7–10, medians [range]:
+
+| Milestone | Before | After |
+| --- | --- | --- |
+| Desktop composer and rows (n=9) | 1834 ms [1483–2280] | 1539 ms [1302–1724] |
+| Desktop `/ws` open (n=9) | 1070 ms [902–1107] | 847 ms [773–1021] |
+| Desktop `synced` (n=9) | 1985 ms [1662–2492] | 1753 ms [1517–1877] |
+| Desktop fonts loaded (n=9) | 2429 ms [1971–3032] | 1614 ms [1366–1878] |
+| Desktop scripting CPU, 5 s window (n=9) | 1178 ms [832–1706] | 878 ms [670–1477] |
+| Phone veil starts lifting (n=11) | 2155 ms [1878–3118] | 2011 ms [1853–2448] |
+| Phone fonts loaded (n=11) | 1989 ms [1669–2837] | 1252 ms [1192–1708] |
+| Phone scripting CPU, 5 s window (n=11) | 836 ms [728–1800] | 654 ms [546–1069] |
+
+A first phone batch at higher load (n=9) had composer 1537 → 1717 ms and `/ws`
+994 → 1099 ms, against 1349 → 1220 ms and 829 → 774 ms in the batch above, so
+those two phone figures are not clearly changed. Screenshots after 5 s are
+byte-identical between the builds. In a native-style launch (fresh origin, the
+store's route stubbed, settings answer delayed 2 s, single runs) the veil starts
+lifting at 2230 ms with the remembered look instead of 3423 ms. Not
+device-verified.
+
+Traps: Playwright contexts keep the HTTP cache in memory and drop entries for
+responses still loading when a page closes — let the warm-up load finish
+(≥ 12 s through the proxy). The Resource Timing buffer holds 250 entries, so a
+boot list read from it silently misses late requests.
 
 ## Session spawn timing
 

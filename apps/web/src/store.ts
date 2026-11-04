@@ -45,6 +45,7 @@ import {
   workbenchTogglePin,
 } from "./workbench/store.ts";
 import {
+  adoptProvisionalList,
   beginListRequest,
   initialProjectRegistry,
   mutationVersionOf,
@@ -934,6 +935,16 @@ export function publishProjectList(ticket: ProjectListTicket, projects: Project[
     reconcileWorkspaceProjectFromSession();
   }
   return result.outcome;
+}
+
+/** Show a remembered project list while the boot request is still out (see
+ *  adoptProvisionalList). False when the registry already holds an answer. */
+export function adoptProvisionalProjectList(projects: Project[]): boolean {
+  const next = adoptProvisionalList(state.projectRegistry, projects);
+  if (next === state.projectRegistry) return false;
+  set({ projectRegistry: next });
+  reconcileWorkspaceProjectFromSession();
+  return true;
 }
 
 export function failProjectList(ticket: ProjectListTicket, error: string): void {

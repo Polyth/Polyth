@@ -525,3 +525,155 @@ test("every subscribe carries the rows the client still shows as active", () => 
   assert.deepEqual(JSON.parse(sockets[1]!.sent[0]!).refreshSessionIds, ["a", "b"]);
   client.close();
 });
+
+function keptClient(options: { graceMs?: number; probeMs?: number } = {}) {
+  const sockets: FakeSocket[] = [];
+  const timers: Array<{ callback: () => void; ms: number; cleared: boolean }> = [];
+  let now = 0;
+  const client = new SyncClient({
+    syncReceipts: true,
+    backgroundGraceMs: options.graceMs ?? 60_000,
+    resumeProbeMs: options.probeMs ?? 2_000,
+    webSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    setTimeout: (callback, ms) => { timers.push({ callback, ms, cleared: false }); return timers.length as never; },
+    clearTimeout: (id) => { const timer = timers[(id as unknown as number) - 1]; if (timer) timer.cleared = true; },
+    now: () => now,
+  });
+  const live = (ms: number) => timers.filter((timer) => timer.ms === ms && !timer.cleared);
+  const token = (socket: FakeSocket) => (JSON.parse(socket.sent.at(-1)!) as { syncToken: number }).syncToken;
+  return { client, sockets, timers, live, token, advance: (ms: number) => { now += ms; } };
+}
+
+test("a quick trip to the background keeps the live socket: the return re-asks on it and opens nothing new", () => {
+  const { client, sockets, live, token, advance } = keptClient();
+  const statuses: string[] = [];
+  client.onStatus((status) => statuses.push(status));
+  client.setSubscription("s1", 4, "p1");
+  client.connect("ws://test/ws");
+  sockets[0]!.open();
+  sockets[0]!.message({ type: "synced", phase: "sessions", token: token(sockets[0]!) });
+  client.setRetryHints({ foreground: false });
+  assert.equal(sockets[0]!.closed, false, "hidden within the grace: still open");
+  assert.equal(client.getStatus(), "connected");
+  assert.equal(live(60_000).length, 1, "the grace is armed");
+  advance(10_000);
+  client.setRetryHints({ foreground: true });
+  assert.equal(sockets.length, 1, "no new handshake");
+  assert.equal(live(60_000).length, 0, "the grace is cancelled");
+  const probe = JSON.parse(sockets[0]!.sent.at(-1)!);
+  assert.equal(probe.type, "subscribe");
+  assert.equal(probe.sessionId, "s1");
+  assert.deepEqual(client.getFreshness(), { session: false, sessions: false }, "unconfirmed until the same subscription answers");
+  assert.equal(live(2_000).length, 1, "the probe deadline is armed");
+  sockets[0]!.message({ type: "synced", phase: "sessions", token: token(sockets[0]!) });
+  assert.deepEqual(client.getFreshness(), { session: true, sessions: true });
+  assert.equal(live(2_000).length, 0, "any answer proves the socket");
+  assert.deepEqual(statuses, ["disconnected", "connecting", "connected"], "the person never saw a reconnect");
+  client.close();
+});
+
+test("a kept socket that does not answer the return is replaced", () => {
+  const { client, sockets, live, advance } = keptClient();
+  client.setSubscription("s1", 0, "p1");
+  client.connect("ws://test/ws");
+  sockets[0]!.open();
+  client.setRetryHints({ foreground: false });
+  advance(5_000);
+  client.setRetryHints({ foreground: true });
+  live(2_000)[0]!.callback();
+  assert.equal(sockets.length, 2, "a fresh handshake");
+  assert.equal(sockets[0]!.closed, true, "the silent socket is let go");
+  assert.equal(client.getStatus(), "reconnecting");
+  client.close();
+});
+
+test("the grace ends in an ordinary suspension, and a frozen page's late return reconnects", () => {
+  const expired = keptClient({ graceMs: 30_000 });
+  expired.client.setSubscription("s1", 0);
+  expired.client.connect("ws://test/ws");
+  expired.sockets[0]!.open();
+  expired.client.setRetryHints({ foreground: false });
+  expired.live(30_000)[0]!.callback();
+  assert.equal(expired.sockets[0]!.closed, true);
+  assert.equal(expired.client.getStatus(), "suspended");
+  expired.client.setRetryHints({ foreground: true });
+  assert.equal(expired.sockets.length, 2, "foreground dials again, as before the grace existed");
+  expired.client.close();
+
+  // The timer never ran (the page was frozen), but the clock moved past it.
+  const frozen = keptClient({ graceMs: 30_000 });
+  frozen.client.setSubscription("s1", 0);
+  frozen.client.connect("ws://test/ws");
+  frozen.sockets[0]!.open();
+  frozen.client.setRetryHints({ foreground: false });
+  frozen.advance(45_000);
+  frozen.client.setRetryHints({ foreground: true });
+  assert.equal(frozen.sockets.length, 2, "an old socket is not trusted");
+  assert.equal(frozen.sockets[0]!.closed, true);
+  frozen.client.close();
+});
+
+test("a kept socket that closes while hidden is redialled on return", () => {
+  const { client, sockets, timers } = keptClient();
+  client.setSubscription("s1", 0);
+  client.connect("ws://test/ws");
+  sockets[0]!.open();
+  client.setRetryHints({ foreground: false });
+  sockets[0]!.ended();
+  assert.equal(client.getStatus(), "suspended");
+  assert.equal(timers.filter((timer) => !timer.cleared && timer.ms !== 8_000).length, 0, "no retry work while hidden");
+  client.setRetryHints({ foreground: true });
+  assert.equal(sockets.length, 2);
+  client.close();
+});
+
+test("a handshake that never opens is abandoned for a fresh one", () => {
+  const sockets: FakeSocket[] = [];
+  const timers: Array<{ callback: () => void; ms: number; cleared: boolean }> = [];
+  const client = new SyncClient({
+    connectTimeoutMs: 8_000,
+    webSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    setTimeout: (callback, ms) => { timers.push({ callback, ms, cleared: false }); return timers.length as never; },
+    clearTimeout: (id) => { const timer = timers[(id as unknown as number) - 1]; if (timer) timer.cleared = true; },
+  });
+  client.connect("ws://test/ws");
+  const stall = timers.find((timer) => timer.ms === 8_000)!;
+  stall.callback();
+  assert.equal(sockets.length, 2);
+  assert.equal(sockets[0]!.closed, true);
+  sockets[0]!.ended();
+  assert.equal(sockets.length, 2, "the abandoned socket's late close schedules nothing");
+  sockets[1]!.open();
+  assert.equal(client.getStatus(), "connected");
+  assert.equal(timers.filter((timer) => timer !== stall && timer.ms === 8_000 && !timer.cleared).length, 0, "an open socket clears its deadline");
+  client.close();
+});
+
+test("the first retry after a settled connection can go at once; the ladder then starts from its base", () => {
+  const sockets: FakeSocket[] = [];
+  const timers: Array<{ callback: () => void; delay: number }> = [];
+  let now = 0;
+  const client = new SyncClient({
+    webSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length as never; },
+    clearTimeout: () => {},
+    random: () => 0,
+    now: () => now,
+    baseDelayMs: 10,
+    maxDelayMs: 80,
+    stableConnectionMs: 50,
+    settledRetryDelayMs: 0,
+  });
+  client.connect("ws://test/ws");
+  sockets[0]!.open();
+  now = 100;
+  sockets[0]!.ended();
+  assert.equal(timers[0]!.delay, 0, "a drop after a settled connection retries at once");
+  timers[0]!.callback();
+  sockets[1]!.ended();
+  assert.equal(timers[1]!.delay, 5, "a failed quick retry backs off from the base");
+  timers[1]!.callback();
+  sockets[2]!.ended();
+  assert.equal(timers[2]!.delay, 10);
+  client.close();
+});

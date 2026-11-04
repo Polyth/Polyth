@@ -1,6 +1,7 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
 import { api, errorCodeOf } from "@polyth/session/web-api";
 import { SyncClient, type SyncFreshness, type SyncStatus } from "./sync.ts";
+import { adoptPreconnectedSync, adoptedSocketOpenBefore, syncSocketUrl } from "./syncPreconnect.ts";
 import { sessionIdsToRefresh } from "./sessionStatus.ts";
 import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
@@ -41,6 +42,14 @@ import { createSessionWithRecovery } from "./sessionCreateRecovery.ts";
 import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
 import { loadScopedDraftRecord, scopedDraftCacheKey, updateScopedDraftRecord, type ScopedDraftRecord } from "./draftRecord.ts";
 import { clientPersistenceScope, persistenceScopeIsCurrent } from "./reliabilityContext.ts";
+import {
+  forgetRememberedBranch,
+  markProjectListAnswered,
+  paintNavigatorSnapshot,
+  rememberedBranchLabel,
+  retireProvisionalRows,
+  watchNavigatorSnapshot,
+} from "./navigatorSnapshotBoot.ts";
 import { applyRemoteProjectPresentation, initProjectPresentationSync } from "./projectPresentationSync.ts";
 import {
   peekPersistedRuntimeAgents,
@@ -658,6 +667,9 @@ function retireConsumedDraft(sessionId: string): void {
   requestComposerCompareReplace({ scopeKey: scopedDraftCacheKey(sessionId), expectedText: draft, text: "" });
 }
 
+/** The checkout whose git read set the store's branch label. */
+let branchLabelOwner: { projectId: string; scope: string } | null = null;
+
 function fetchBranch(projectId: string, sessionId: string | null): void {
   const key = branchKey(projectId, branchScope(sessionId));
   branchFetchedFor = key;
@@ -670,11 +682,21 @@ function fetchBranch(projectId: string, sessionId: string | null): void {
       && branchKey(projectId, branchScope(current.activeSessionId)) === key;
   };
   // The branch label is part of the first screen: a launch keeps its veil
-  // until it is known (bounded by launchReveal's grace).
-  const releaseLaunch = holdLaunchReveal();
+  // until it is known (bounded by launchReveal's grace) — unless the last
+  // launch's label for this checkout is shown meanwhile; the read corrects it.
+  const owner = { projectId, scope: branchScope(sessionId) };
+  const remembered = rememberedBranchLabel(owner.projectId, owner.scope);
+  if (remembered) {
+    store.setGitBranch(remembered);
+    branchLabelOwner = owner;
+  }
+  const releaseLaunch = remembered ? () => undefined : holdLaunchReveal();
   void api.gitStatus(projectId, sessionId ?? undefined)
     .then((st) => {
-      if (stillCurrent()) store.setGitBranch(st.branch ?? "");
+      forgetRememberedBranch(owner.projectId, owner.scope);
+      if (!stillCurrent()) return;
+      store.setGitBranch(st.branch ?? "");
+      branchLabelOwner = owner;
     })
     .catch(() => {
       if (stillCurrent()) store.setGitBranch("");
@@ -803,7 +825,20 @@ export function subscribeSyncScope(client: SyncScopeClient): () => void {
   });
 }
 
+/** When init() started its boot reads (performance.now() clock). */
+let bootReadsAt: number | null = null;
+let firstScreen: Promise<void> | null = null;
+
+/** Settles once the first screen is restored — from the remembered navigator
+ *  when there is one, else from the server's answer. init()'s own promise still
+ *  waits for that answer (Live Activity and push must not start from a
+ *  remembered copy). */
+export function firstScreenRestored(): Promise<void> {
+  return firstScreen ?? Promise.resolve();
+}
+
 export function init(): Promise<void> {
+  bootReadsAt ??= typeof performance !== "undefined" ? performance.now() : Date.now();
   // A capability dragged out of a window (a Custom actions tile) turns the
   // icon rails into drop targets; the host owns that bridge, not the package.
   if (!externalCapabilityDragInstalled) {
@@ -835,6 +870,17 @@ export function init(): Promise<void> {
   // Promise.all/allSettled before publishing any result is forbidden — a slow
   // or failed catalog request can never delay, erase, or roll back projects.
   const initialHydration = refreshProjects("initial");
+  // The navigator the last launch showed paints while that list is out; the
+  // first screen is restored from it, and the answer then validates it.
+  // A remembered list that could not restore the selection (it lacked the
+  // saved project) leaves the first screen to the server's answer.
+  firstScreen = paintNavigatorSnapshot()
+    .then(async (painted) => {
+      if (painted) await restoreSelectionAfterReady();
+      if (!bootRestored) await initialHydration;
+    })
+    .catch(() => initialHydration);
+  watchNavigatorSnapshot(() => branchLabelOwner);
   const desktop = desktopBridge();
   if (desktop) {
     runtimeCatalogPolicy = "pending";
@@ -960,6 +1006,7 @@ export async function refreshProjects(reason: ProjectRefreshReason = "manual"): 
       return;
     }
     if (outcome !== "published") return;
+    markProjectListAnswered();
     await restoreSelectionAfterReady();
   } catch (err) {
     console.error("project list failed", err);
@@ -989,75 +1036,96 @@ async function startPersonalProject(): Promise<Project[]> {
   }
 }
 
+let bootRestoreInFlight: Promise<void> | null = null;
+
 /** URL/session restoration begins once projects are ready — never delayed by
  *  model/agent catalogs. Selection order: valid session deep link, valid
  *  project deep link, valid saved id, then the first server project. An
  *  invalid link reports a recoverable error and falls through; it never
  *  manufactures an empty first run. */
 async function restoreSelectionAfterReady(): Promise<void> {
+  // A remembered snapshot can start the boot restore before the server's list
+  // lands; that list then waits for it and only validates what it chose.
+  if (bootRestoreInFlight) await bootRestoreInFlight;
+  if (bootRestored) {
+    revalidateSelection();
+    return;
+  }
+  if (store.getState().projectRegistry.status !== "ready") return;
+  const run = restoreBootSelection();
+  bootRestoreInFlight = run;
+  try { await run; } finally { if (bootRestoreInFlight === run) bootRestoreInFlight = null; }
+}
+
+async function restoreBootSelection(): Promise<void> {
   const registry = store.getState().projectRegistry;
   if (registry.status !== "ready") return;
   const projects = registry.projects;
 
-  if (!bootRestored) {
-    const fromUrl = parseAppUrl(location.pathname, location.search);
-    const localSavedProjectId = (() => {
-      try { return localStorage.getItem("polyth.activeProjectId") || null; }
-      catch { return null; }
-    })();
+  const fromUrl = parseAppUrl(location.pathname, location.search);
+  const localSavedProjectId = (() => {
+    try { return localStorage.getItem("polyth.activeProjectId") || null; }
+    catch { return null; }
+  })();
 
-    // Do not leave a ready project registry project-less while waiting for
-    // native/account-scoped persistence. The URL/local synchronous selection
-    // is already authoritative enough to mount Git/Terminal/Files/Browser;
-    // account-scoped navigation can refine the choice when it arrives.
-    const immediate = resolveActiveProjectId(projects, {
-      urlProjectId: fromUrl.projectId ?? null,
-      localSavedProjectId,
-    });
-    if (immediate) store.activateProject(immediate);
+  // Do not leave a ready project registry project-less while waiting for
+  // native/account-scoped persistence. The URL/local synchronous selection
+  // is already authoritative enough to mount Git/Terminal/Files/Browser;
+  // account-scoped navigation can refine the choice when it arrives.
+  const immediate = resolveActiveProjectId(projects, {
+    urlProjectId: fromUrl.projectId ?? null,
+    localSavedProjectId,
+  });
+  if (immediate) store.activateProject(immediate);
 
-    const restoredNavigation = await store.hydrateClientNavigation();
-    const expectedProjectId = fromUrl.projectId
-      ?? restoredNavigation?.projectId
-      ?? localSavedProjectId;
-    if (projects.length === 0 && expectedProjectId && scheduleProjectRecovery()) return;
-    bootRestored = true;
+  const restoredNavigation = await store.hydrateClientNavigation();
+  const expectedProjectId = fromUrl.projectId
+    ?? restoredNavigation?.projectId
+    ?? localSavedProjectId;
+  if (projects.length === 0 && expectedProjectId && scheduleProjectRecovery()) return;
+  // A remembered list without the remembered selection cannot restore it; the
+  // server's list, a round trip away, runs the boot restore instead.
+  if (registry.provisional && expectedProjectId && !projects.some((p) => p.id === expectedProjectId)) return;
+  bootRestored = true;
 
-    const initial = resolveActiveProjectId(projects, {
-      urlProjectId: fromUrl.projectId ?? null,
-      savedProjectId: restoredNavigation?.projectId ?? null,
-      localSavedProjectId,
-    });
-    if (initial && initial !== store.getState().activeProjectId) store.activateProject(initial);
-    if (fromUrl.sessionId) {
-      // A valid session deep link resolves its owning project and wins.
-      // Boot restoration must not close the restored workspace pane.
-      try {
-        await openSession(fromUrl.sessionId, { showChat: false });
-      } catch (err) {
-        console.warn("session from URL not found, falling back", err);
-        store.setUiError(tr("init.sessionLinkCouldNotOpen"));
-      }
-    } else if (initial) {
-      const project = projects.find((candidate) => candidate.id === initial);
-      const savedSession = restoredNavigation?.projectId === initial
-        && restoredNavigation.spaceId === (project?.spaceId ?? "default")
-        ? restoredNavigation.sessionId
-        : undefined;
-      if (savedSession) {
-        await openSession(savedSession, { showChat: false }).catch(() => {});
-      } else {
-        const restored = await store.hydrateNewSessionDraft(initial);
-        if (restored) store.startNewSession(initial, restored);
-      }
+  const initial = resolveActiveProjectId(projects, {
+    urlProjectId: fromUrl.projectId ?? null,
+    savedProjectId: restoredNavigation?.projectId ?? null,
+    localSavedProjectId,
+  });
+  if (initial && initial !== store.getState().activeProjectId) store.activateProject(initial);
+  if (fromUrl.sessionId) {
+    // A valid session deep link resolves its owning project and wins.
+    // Boot restoration must not close the restored workspace pane.
+    try {
+      await openSession(fromUrl.sessionId, { showChat: false });
+    } catch (err) {
+      console.warn("session from URL not found, falling back", err);
+      store.setUiError(tr("init.sessionLinkCouldNotOpen"));
     }
-    store.reconcileWorkspaceProjectFromSession();
-    startUrlSync();
-    return;
+  } else if (initial) {
+    const project = projects.find((candidate) => candidate.id === initial);
+    const savedSession = restoredNavigation?.projectId === initial
+      && restoredNavigation.spaceId === (project?.spaceId ?? "default")
+      ? restoredNavigation.sessionId
+      : undefined;
+    if (savedSession) {
+      await openSession(savedSession, { showChat: false }).catch(() => {});
+    } else {
+      const restored = await store.hydrateNewSessionDraft(initial);
+      if (restored) store.startNewSession(initial, restored);
+    }
   }
+  store.reconcileWorkspaceProjectFromSession();
+  startUrlSync();
+}
 
-  // Later refresh: keep the current active project when it still exists,
-  // otherwise resolve a replacement (or none when the registry emptied).
+/** Later refresh: keep the current active project when it still exists,
+ *  otherwise resolve a replacement (or none when the registry emptied). */
+function revalidateSelection(): void {
+  const registry = store.getState().projectRegistry;
+  if (registry.status !== "ready") return;
+  const projects = registry.projects;
   const snapshot = store.getState();
   const active = store.workspaceProjectId(snapshot);
   if (active && !projects.some((p) => p.id === active)) {
@@ -1197,12 +1265,26 @@ async function refreshAgents(projectId = store.getState().activeProjectId ?? und
   }
 }
 
+/** How long the socket outlives a hidden page. A phone's WebView is frozen
+ *  soon after it leaves the screen, so only a quick app switch is bridged
+ *  there; a desktop tab keeps receiving the whole time. */
+function backgroundGraceMs(): number {
+  const phoneLike = isNativeMobile()
+    || (typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches);
+  return phoneLike ? 30_000 : 15 * 60_000;
+}
+
 function startSync(): void {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
   sync = new SyncClient({
     manualAcknowledgement: true,
     syncReceipts: true,
     refreshSessionIds: () => sessionIdsToRefresh(store.getState().sessions),
+    // main.tsx may already have dialed /ws while the app graph evaluated.
+    webSocket: (url) => adoptPreconnectedSync(url) ?? new WebSocket(url),
+    backgroundGraceMs: backgroundGraceMs(),
+    resumeProbeMs: 2_000,
+    connectTimeoutMs: 8_000,
+    settledRetryDelayMs: 0,
   });
   sync.setRetryHints({
     online: typeof navigator === "undefined" || navigator.onLine !== false,
@@ -1284,11 +1366,18 @@ function startSync(): void {
   });
   // Gap-fill on every successful (re)connect; merge-by-id makes the race with
   // the initial bootstrap fetch safe. No polling.
+  let openedBefore = false;
   sync.onOpen(() => {
+    // The first socket of a document that main.tsx dialed early was already
+    // receiving broadcasts when boot read settings, presentation and the inbox:
+    // nothing those reads returned can have been missed, so asking again would
+    // only queue duplicates ahead of the screen's own reads.
+    const coveredByBoot = !openedBefore && bootReadsAt !== null && adoptedSocketOpenBefore(bootReadsAt);
+    openedBefore = true;
     // Priority: the screen first. The socket is already replaying the open
     // session; background reads join once it is current (bounded wait).
     afterSessionCatchUp(() => {
-      void notificationCentre.catchUp();
+      if (!coveredByBoot) void notificationCentre.catchUp();
       // A request that overlapped server drain is not an authoritative empty
       // profile list. Rehydrate the account cache when transport is healthy.
       void refreshProfiles().catch(() => undefined);
@@ -1299,8 +1388,10 @@ function startSync(): void {
     });
     // Re-pull shared settings: a broadcast may have been missed while the
     // socket was down. Immediate — it can change how the screen looks.
-    initSettingsSync();
-    initProjectPresentationSync(store.subscribeStore, () => store.workspaceProjectId(store.getState()));
+    if (!coveredByBoot) {
+      initSettingsSync();
+      initProjectPresentationSync(store.subscribeStore, () => store.workspaceProjectId(store.getState()));
+    }
     store.reconcileWorkspaceProjectFromSession();
     const snapshot = store.getState();
     if (shouldRefreshProjectsOnSyncOpen(
@@ -1327,7 +1418,14 @@ function startSync(): void {
   }).catch((error) => {
     console.error("plugin bridge initialization failed", error);
   });
-  sync.connect(`${proto}://${location.host}/ws`);
+  // Until the store restores its selection (a projects round trip away), ask
+  // for the navigator of the project this page will most likely open: its rows
+  // then arrive with the socket rather than after the list reads. The server
+  // scopes the rows to this person; a stale hint just returns none.
+  const boot = store.getState();
+  const projectHint = boot.activeProjectId ?? projectRecoveryHint();
+  if (!boot.activeSessionId && projectHint) sync.setSubscription(undefined, 0, projectHint);
+  sync.connect(syncSocketUrl());
   void notificationCentre.bootstrap();
 }
 
@@ -1756,10 +1854,31 @@ function maybeSeedFromReplay(sessionId: string): void {
   }
 }
 
-export async function refreshSessions(projectId: string): Promise<void> {
+const sessionListReads = new Map<string, Promise<void>>();
+
+/** Show a project's rows: joins a read already on its way instead of sending
+ *  the same pair again (boot opens the navigator while init lists the project).
+ *  After a mutation, call refreshSessions — a read that started before the
+ *  change could still return the old rows. */
+export function ensureSessionsListed(projectId: string): Promise<void> {
+  return sessionListReads.get(projectId) ?? refreshSessions(projectId);
+}
+
+export function refreshSessions(projectId: string): Promise<void> {
+  const read = readSessionList(projectId);
+  sessionListReads.set(projectId, read);
+  void read.finally(() => {
+    if (sessionListReads.get(projectId) === read) sessionListReads.delete(projectId);
+  });
+  return read;
+}
+
+async function readSessionList(projectId: string): Promise<void> {
   // Recent chats on the fresh-chat screen come from this page; a launch
-  // waits for it instead of showing the list grow in.
-  const releaseLaunch = holdLaunchReveal();
+  // waits for it instead of showing the list grow in — unless rows are on
+  // screen already (the remembered navigator), which the answer then updates.
+  const rowsShown = store.getState().sessions.some((session) => session.projectId === projectId);
+  const releaseLaunch = rowsShown ? () => undefined : holdLaunchReveal();
   try {
     // Pinned chats are read on their own: the recency page holds only the
     // newest fifty, and an old pinned chat must not vanish from the list.
@@ -1771,7 +1890,10 @@ export async function refreshSessions(projectId: string): Promise<void> {
       }),
     ]);
     // A partial page cannot delete known sessions, folders, or active details.
-    store.upsertSessions(pinned ? [...page.sessions, ...pinned.sessions] : page.sessions);
+    const listed = pinned ? [...page.sessions, ...pinned.sessions] : page.sessions;
+    store.upsertSessions(listed);
+    // Remembered rows are the exception: this answer is what they stood for.
+    if (pinned) retireProvisionalRows(projectId, new Set(listed.map((session) => session.id)));
   } catch (err) {
     console.error("list sessions failed", err);
   } finally {
