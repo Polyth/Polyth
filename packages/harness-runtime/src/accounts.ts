@@ -60,6 +60,9 @@ export interface HarnessAccountStatus {
     loggedIn: boolean | "unknown";
     email?: string;
     plan?: string;
+    /** When this login's stored sign-in ends (epoch ms), from the CLI's own
+     *  report; signed-in logins only, absent when the CLI does not say. */
+    expiresAt?: number;
 }
 
 const ID = /^[a-z0-9][a-z0-9-]{0,31}$/;

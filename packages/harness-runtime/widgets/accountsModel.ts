@@ -22,7 +22,7 @@ export type AccountRow = {
   allowedUserIds?: string[];
   allowedSpaceIds?: string[];
   signInCommand?: string;
-  status: { loggedIn: boolean | "unknown"; email?: string; plan?: string };
+  status: { loggedIn: boolean | "unknown"; email?: string; plan?: string; expiresAt?: number };
 };
 
 /** `manageable`: this caller may add its own accounts here. `canAddShared`:

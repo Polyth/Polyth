@@ -159,6 +159,14 @@
 .pkg-harnesses-hero-account-plan { flex: none; }
 .pkg-harnesses-hero-account-plan::before { content: "·"; margin-inline: var(--space-1); color: var(--faint); }
 .pkg-harnesses-hero-account[data-signed-in="false"] { background: var(--amber-wash); color: var(--amber-on-wash); }
+/* The CLI's own sign-in end: a quiet date, amber within 10 days, red once ended. */
+.pkg-harnesses-hero-expiry { display: inline-flex; align-items: center; gap: var(--space-1); justify-self: start; max-width: 100%; min-width: 0; margin: var(--space-1) 0 0; padding: 2px var(--space-2); border-radius: var(--radius-round); background: var(--surface-overlay); color: var(--text-dim); font-size: var(--font-meta); }
+.pkg-harnesses-hero-expiry > svg { flex: none; }
+.pkg-harnesses-hero-expiry > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkg-harnesses-hero-expiry:is([data-level="soon"], [data-level="imminent"]) { background: var(--amber-wash); color: var(--amber-on-wash); }
+.pkg-harnesses-hero-expiry[data-level="ended"] { background: var(--red-wash); color: var(--red); }
+.pkg-harnesses-expiry:is([data-level="soon"], [data-level="imminent"]) { color: var(--amber-on-wash); }
+.pkg-harnesses-expiry[data-level="ended"] { color: var(--red); }
 .pkg-harnesses-hero-message { margin: 0; max-width: 68ch; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
 .pkg-harnesses-hero-actions, .pkg-harnesses-hero-primary, .pkg-harnesses-hero-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: var(--space-2); }
 .pkg-harnesses-hero-actions a { text-decoration: none; }

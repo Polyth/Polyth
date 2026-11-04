@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { HarnessSnapshot } from "@polyth/contracts";
-import { availabilityLabel, configurationSections, displayVersion, HARNESS_COLORS, harnessDisplayName, harnessProfileName, harnessSummary, harnessTint, needsReadinessCheck, statusTone } from "../widgets/presentation.ts";
+import { availabilityLabel, configurationSections, displayVersion, HARNESS_COLORS, harnessDisplayName, harnessProfileName, harnessSummary, harnessTint, needsReadinessCheck, signInEndsSoon, signInExpiryNote, statusTone } from "../widgets/presentation.ts";
 
 test("harness display names keep known brands readable and format unknown ids", () => {
   assert.equal(harnessDisplayName("claude"), "Claude");
@@ -87,7 +87,7 @@ test("only a state someone can act on needs attention; unverified and checking r
     snapshot("off", {}, { policy: { enabled: false, priority: 0, autoSelect: true } }),
   ];
   assert.deepEqual(harnessSummary(rows, { checking: new Set(["checking"]), updates: new Set(["ready", "missing"]) }), {
-    ready: 1, attention: 2, signIn: 1, off: 1, missing: 1, checking: 1, unverified: 1, updates: 1,
+    ready: 1, attention: 2, signIn: 1, off: 1, missing: 1, checking: 1, unverified: 1, updates: 1, signInEnding: 0,
   });
   assert.equal(availabilityLabel(rows[1]!), "Not verified");
   assert.equal(availabilityLabel(rows[2]!, { checking: true }), "Checking…");
@@ -126,4 +126,38 @@ test("a harness's own section can replace a shared one", () => {
   ];
   assert.deepEqual(configurationSections(items, "opencode").map((section) => section.id), ["providers-models"]);
   assert.deepEqual(configurationSections(items, "codex").map((section) => section.id), ["models"]);
+});
+
+test("a reported sign-in end reads as a date, then days, then hours, then ended", () => {
+  const now = Date.UTC(2026, 10, 4, 12);
+  const day = 24 * 60 * 60 * 1000;
+  assert.equal(signInExpiryNote(undefined, undefined, "en-US", now), undefined);
+  const later = signInExpiryNote(Date.UTC(2026, 10, 26, 12), undefined, "en-US", now)!;
+  assert.equal(later.level, "none");
+  assert.match(later.text, /^Sign-in ends Nov 2[67]$/);
+  assert.match(later.date, /2026/);
+  assert.deepEqual(signInExpiryNote(now + 9.5 * day, undefined, "en-US", now)?.text, "Sign-in ends in 9 days");
+  assert.deepEqual(signInExpiryNote(now + 47.2 * 60 * 60 * 1000, undefined, "en-US", now)?.text, "Sign-in ends in 48 hours");
+  assert.deepEqual(signInExpiryNote(now + 20 * 60 * 1000, undefined, "en-US", now)?.text, "Sign-in ends in 1 hour");
+  const ended = signInExpiryNote(now - day, undefined, "en-US", now)!;
+  assert.equal(ended.level, "ended");
+  assert.match(ended.text, /^Sign-in ended Nov [34]$/);
+  // Another year names the year.
+  assert.match(signInExpiryNote(Date.UTC(2027, 0, 15, 12), undefined, "en-US", now)!.text, /2027/);
+});
+
+test("only a signed-in login within 10 days of its end needs renewing", () => {
+  const now = Date.UTC(2026, 10, 4, 12);
+  const soon = now + 3 * 24 * 60 * 60 * 1000;
+  assert.equal(signInEndsSoon(snapshot("a", { authExpiresAt: soon }), now), true);
+  assert.equal(signInEndsSoon(snapshot("a", { authExpiresAt: now - 1 }), now), true);
+  assert.equal(signInEndsSoon(snapshot("a", { authExpiresAt: now + 20 * 24 * 60 * 60 * 1000 }), now), false);
+  assert.equal(signInEndsSoon(snapshot("a", {}), now), false);
+  assert.equal(signInEndsSoon(snapshot("a", { authExpiresAt: soon, state: "auth-required", authenticated: false }), now), false);
+  const rows = [
+    snapshot("ending", { authExpiresAt: soon }),
+    snapshot("off-ending", { authExpiresAt: soon }, { policy: { enabled: false, priority: 0, autoSelect: true } }),
+    snapshot("fine", { authExpiresAt: now + 30 * 24 * 60 * 60 * 1000 }),
+  ];
+  assert.equal(harnessSummary(rows, { now }).signInEnding, 1);
 });

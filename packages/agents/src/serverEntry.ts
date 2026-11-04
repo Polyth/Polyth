@@ -7,6 +7,7 @@ import {
   roleAtLeast,
   type AgentCapabilityContributionRegistry,
   type Disposable,
+  type HarnessRegistry,
   type RouteHandler,
   type SessionService,
   type SpaceContext,
@@ -51,6 +52,7 @@ import {
   isAgentContinuation,
   rollingKeyOf,
   scanLoopsDir,
+  harnessSignInRefusal,
   isRouteFailure,
   scheduleExecutionRoutes,
   scheduleExecutionSelection,
@@ -1010,6 +1012,28 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     return projection;
   };
 
+  /** A route pinned to a signed-out or ended login is refused up front, from
+   *  the registry's latest check of that harness (the same cached evidence
+   *  the runtime resolver itself trusts), so the run says which login to
+   *  sign in again instead of a generic "unavailable". Without a registry or
+   *  an answer the route is attempted as before. */
+  const assertRouteSignedIn = async (task: ScheduleTask, execution: ScheduleExecutionSelection): Promise<void> => {
+    const harnessId = execution.harness?.mode === "pinned" ? execution.harness.harnessId : undefined;
+    const registry = harnessId ? host.services.get(serverServiceKey<HarnessRegistry>("harnesses")) : undefined;
+    if (!harnessId || !registry) return;
+    const project = await host.projects.get(task.projectId);
+    if (!project) return;
+    const rows = await registry.snapshots({
+      spaceId: project.spaceId ?? task.spaceId ?? "",
+      projectId: task.projectId,
+      cwd: project.path,
+      ...(project.remote ? { remote: true } : {}),
+    }, { harnessId }).catch(() => []);
+    const row = rows.find((candidate) => candidate.identity.id === harnessId);
+    const refusal = row ? harnessSignInRefusal(row) : undefined;
+    if (refusal) throw refusal;
+  };
+
   const runner: ScheduleRunner = {
     thread: (task, continuation, at) => messageThread(task, continuation, threadSessionOf, at),
     run: async (task, runId, wake) => {
@@ -1095,16 +1119,19 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const ownSession = !sessionId || mode !== "existing-session";
       if (!sessionId) {
         const creator = sessions;
-        const created = await withRouteFailover(routes, route, (execution) => creator.create({
-          projectId: task.projectId,
-          title: task.title ?? `Scheduled: ${task.prompt.slice(0, 48)}`,
-          // The agent's own session: its page lists it, the session list does not.
-          purpose: AGENT_SESSION_PURPOSE,
-          // Lists draw it as the agent's work, not as a person's chat.
-          origin: { source: AGENTS_PACKAGE_ID, wake: wake.trigger, label: task.title?.trim() || "Agent" },
-          ...execution,
-          ...profileOf(task),
-        }));
+        const created = await withRouteFailover(routes, route, async (execution) => {
+          await assertRouteSignedIn(task, execution);
+          return creator.create({
+            projectId: task.projectId,
+            title: task.title ?? `Scheduled: ${task.prompt.slice(0, 48)}`,
+            // The agent's own session: its page lists it, the session list does not.
+            purpose: AGENT_SESSION_PURPOSE,
+            // Lists draw it as the agent's work, not as a person's chat.
+            origin: { source: AGENTS_PACKAGE_ID, wake: wake.trigger, label: task.title?.trim() || "Agent" },
+            ...execution,
+            ...profileOf(task),
+          });
+        });
         route = created.route;
         sessionId = created.value.id;
         sessions = asOwner ?? await systemSessionsForSession(host, sessionId);
@@ -1131,8 +1158,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const target = sessionId;
       // The session validates the files again and hands them to the model.
       const attachments = wake.attachments?.length ? { attachments: wake.attachments } : {};
-      const delivered = await withRouteFailover(routes, route, (execution) =>
-        sender.send(target, { text, ...attachments, ...execution, ...profileOf(task) }, scheduleTurnAdmission(task)));
+      const delivered = await withRouteFailover(routes, route, async (execution) => {
+        await assertRouteSignedIn(task, execution);
+        return sender.send(target, { text, ...attachments, ...execution, ...profileOf(task) }, scheduleTurnAdmission(task));
+      });
       route = delivered.route;
       const sent = delivered.value;
       return {

@@ -1223,6 +1223,8 @@
   background: var(--accent);
 }
 .agents-page .agent-notices {
+  display: grid;
+  gap: var(--space-2);
   width: var(--agents-column);
   margin: var(--space-3) auto 0;
 }

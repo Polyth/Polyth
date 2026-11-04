@@ -4134,12 +4134,33 @@ export interface HarnessProbe {
   harnessId: string;
   installed: boolean;
   authenticated: boolean | "unknown";
+  /** When the harness's stored sign-in ends (epoch ms), as its CLI's own
+   *  local report states it. Only for a signed-in login; absent when the CLI
+   *  does not report one. Never derived from credential files. */
+  authExpiresAt?: number;
   healthy: boolean;
   version?: string;
   message?: string;
   /** Legacy providers may omit this; the registry derives it conservatively. */
   state?: HarnessAvailabilityState;
 }
+/** How close a harness sign-in is to its end. `soon` starts 10 days ahead,
+ *  as Claude Code's own warning does; `imminent` in the last 48 hours. */
+export type HarnessSignInExpiryLevel = "none" | "soon" | "imminent" | "ended";
+export const HARNESS_SIGN_IN_SOON_MS = 10 * 24 * 60 * 60 * 1000;
+export const HARNESS_SIGN_IN_IMMINENT_MS = 48 * 60 * 60 * 1000;
+export const harnessSignInExpiry = (
+  expiresAt: number | undefined,
+  now: number = Date.now(),
+): { level: HarnessSignInExpiryLevel; remainingMs?: number } => {
+  if (expiresAt === undefined || !Number.isFinite(expiresAt)) return { level: "none" };
+  const remainingMs = expiresAt - now;
+  const level = remainingMs <= 0 ? "ended"
+    : remainingMs <= HARNESS_SIGN_IN_IMMINENT_MS ? "imminent"
+      : remainingMs <= HARNESS_SIGN_IN_SOON_MS ? "soon"
+        : "none";
+  return { level, remainingMs };
+};
 export type HarnessControlKind = "toggle" | "select" | "text" | "action";
 export type HarnessControlScope = "draft" | "session" | "project" | "harness";
 export type HarnessControlPlacement =

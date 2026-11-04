@@ -106,6 +106,7 @@ test("native compaction is registered as a full timeline message", async () => {
       },
       registerItems: () => () => {},
     },
+    preferences: { register: () => () => {} },
     ui: {
       locale: {
         get: () => "en",

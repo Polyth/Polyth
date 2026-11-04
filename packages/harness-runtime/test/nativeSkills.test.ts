@@ -90,7 +90,7 @@ test("setup steps lead with install or sign-in and keep re-sign-in for ready har
   assert.equal(statusTone(snapshot({ state: "offline" })), "danger");
   assert.deepEqual(harnessSummary([
     snapshot({}), snapshot({ state: "auth-required" }), snapshot({ state: "not-installed", installed: false }), snapshot({}, undefined, false),
-  ]), { ready: 1, attention: 1, signIn: 1, off: 1, missing: 1, checking: 0, unverified: 0, updates: 0 });
+  ]), { ready: 1, attention: 1, signIn: 1, off: 1, missing: 1, checking: 0, unverified: 0, updates: 0, signInEnding: 0 });
 });
 
 test("the Skills section appears only on harnesses that can list native skills", () => {

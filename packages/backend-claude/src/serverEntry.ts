@@ -10,6 +10,7 @@ import { execRemoteHarness, probeRemoteHarness, remoteHarnessLaunch, resolveRemo
 import { createHarnessAccountFamily, harnessCommandLine, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { vendorScriptInstallCommand } from "@polyth/harness-runtime/installers";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
+import { readClaudeAuthReport } from "./authStatus.ts";
 import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
 import { gateClaudeAgentTools, hasPolythAgentToolsMcp } from "./mcpReadiness.ts";
 import { createClaudeNativePlugins } from "./nativePlugins.ts";
@@ -179,19 +180,13 @@ const accountEnv = (account?: ResolvedHarnessAccount): Record<string, string> =>
     account ? { CLAUDE_CONFIG_DIR: account.dir } : {};
 
 /** `claude auth status` is a local report; it never runs a model turn. */
+const claudeAuthReport = (command: string, env: NodeJS.ProcessEnv) =>
+    readClaudeAuthReport(() => execCli(command, ["auth", "status", "--json"], { timeout: 5000, maxBuffer: 8192, env }));
+
 const claudeAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
     const { command, env } = await resolveClaudeBinary();
-    const { stdout } = await execCli(command, ["auth", "status", "--json"], {
-        timeout: 5000,
-        maxBuffer: 8192,
-        env: { ...env, ...accountEnv(account) },
-    }).catch((error: { stdout?: string }) => ({ stdout: error.stdout ?? "" }));
-    const report = JSON.parse(stdout) as { loggedIn?: unknown; email?: unknown; subscriptionType?: unknown };
-    return {
-        loggedIn: report.loggedIn === true,
-        ...(typeof report.email === "string" && report.email ? { email: report.email } : {}),
-        ...(typeof report.subscriptionType === "string" && report.subscriptionType ? { plan: report.subscriptionType } : {}),
-    };
+    const { reason: _reason, ...status } = await claudeAuthReport(command, { ...env, ...accountEnv(account) });
+    return status;
 };
 
 /** One Claude Code harness. The default serves the user's own `~/.claude`;
@@ -207,6 +202,14 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
     };
     const fingerprint = () => claudeAuthFingerprint({ ...process.env, ...accountEnv(account) });
     let lastAuthenticated: boolean | undefined;
+    // Why the last sign-in report never arrived; logged once per new reason.
+    let lastUnknownReason: string | undefined;
+    const unanswered = (reason: string | undefined) => {
+        const message = `Could not check the Claude Code sign-in: ${reason ?? "the CLI gave no report"}`;
+        if (reason !== lastUnknownReason) console.warn(`[polyth] ${harnessId}: ${message}`);
+        lastUnknownReason = reason;
+        return message;
+    };
     // Late-bound: preferences discover plugin skills, plugins report whether
     // their skills are inherited.
     let preferences: ReturnType<typeof createClaudePreferences> | undefined;
@@ -269,14 +272,20 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
             try {
                 const { command, env } = await resolveBinary();
                 const version = (await execCli(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
-                const authenticated = await execCli(command, ["auth", "status", "--json"], { timeout: 5000, maxBuffer: 8192, env }).then(({ stdout }) => JSON.parse(stdout).loggedIn === true).catch(() => false);
+                const auth = await claudeAuthReport(command, env);
+                const authenticated = auth.loggedIn;
+                if (authenticated === "unknown") {
+                    return { harnessId, installed: true, healthy: true, authenticated, version, message: unanswered(auth.reason) };
+                }
+                lastUnknownReason = undefined;
                 // A sign-in/out flips what the account can list, so the cached
-                // cold catalog must not survive it.
+                // cold catalog must not survive it. A report that never
+                // arrived proves neither.
                 if (lastAuthenticated !== undefined && lastAuthenticated !== authenticated) {
                     invalidateClaudeModelCache({ executable: command, authFingerprint: fingerprint() });
                 }
                 lastAuthenticated = authenticated;
-                return { harnessId, installed: true, healthy: true, authenticated, version };
+                return { harnessId, installed: true, healthy: true, authenticated, ...(auth.expiresAt !== undefined ? { authExpiresAt: auth.expiresAt } : {}), version };
             }
             catch (error) {
                 // The reason reaches Providers & Models; without it a CLI
@@ -310,11 +319,13 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
             // The SDK answers `initialize` with a model list even for a login
             // that is signed out, so that list alone is no sign-in evidence.
             // With only native credentials (no key in the environment), the
-            // CLI's own local report decides.
+            // CLI's own local report decides. One that never arrived does not
+            // prove a sign-out: the models are listed and the readiness stays
+            // unverified, so the first turn shows whether the login works.
+            let unverified: string | undefined;
             if (fingerprint().startsWith("native")) {
-                const signedIn = await execCli(command, ["auth", "status", "--json"], { timeout: 5000, maxBuffer: 8192, env })
-                    .then(({ stdout }) => JSON.parse(stdout).loggedIn === true, () => false);
-                if (!signedIn) {
+                const auth = await claudeAuthReport(command, env);
+                if (auth.loggedIn === false) {
                     return {
                         state: "auth-required" as const,
                         authenticated: false as const,
@@ -322,6 +333,7 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
                         message: account ? `Sign in to the Claude Code account “${account.name}” to list its models` : "Sign in to Claude Code to list its models",
                     };
                 }
+                if (auth.loggedIn === "unknown") unverified = unanswered(auth.reason);
             }
             const sdk = await loadTitleSafeClaudeSdk(sdkCommand, env);
             const models = await discoverClaudeModels({
@@ -330,6 +342,16 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
                 executable: command,
                 authFingerprint: fingerprint(),
             });
+            if (unverified) {
+                return {
+                    state: "unknown" as const,
+                    authenticated: "unknown" as const,
+                    message: unverified,
+                    capabilities: { ...CLAUDE_CAPABILITIES, title: "emulated" as const },
+                    catalog: { models, agents: [] },
+                    controls: await settings.controls(context),
+                };
+            }
             return {
                 state: "ready" as const,
                 authenticated: true,

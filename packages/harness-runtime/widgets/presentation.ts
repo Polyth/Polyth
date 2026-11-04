@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { englishTranslate, pluralKey, type Translate } from "./englishTranslate.ts";
-import type { AgentCapabilityKind, CapabilityMutability, CapabilityProjectionMode, HarnessSnapshot, RuntimeCapabilities } from "@polyth/contracts";
-import { effectiveAttachmentDelivery } from "@polyth/contracts";
+import type { AgentCapabilityKind, CapabilityMutability, CapabilityProjectionMode, HarnessSignInExpiryLevel, HarnessSnapshot, RuntimeCapabilities } from "@polyth/contracts";
+import { effectiveAttachmentDelivery, harnessSignInExpiry } from "@polyth/contracts";
 import { harnessColor } from "@polyth/models/harness-color";
 
 export { HARNESS_COLORS } from "@polyth/models/harness-color";
@@ -21,6 +21,40 @@ export const harnessProfileName = (identity: { name: string; accountLabel?: stri
     ? `${identity.name} · ${label}`
     : identity.name;
 };
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+/** What a reported sign-in end reads as. `level` "none" means the end is
+ *  known but more than 10 days away: worth a quiet date, not a warning. */
+export type SignInExpiryNote = { level: HarnessSignInExpiryLevel; text: string; date: string };
+export function signInExpiryNote(
+  expiresAt: number | undefined,
+  t: Translate = englishTranslate,
+  locale?: string,
+  now: number = Date.now(),
+): SignInExpiryNote | undefined {
+  if (expiresAt === undefined || !Number.isFinite(expiresAt)) return undefined;
+  const { level, remainingMs = 0 } = harnessSignInExpiry(expiresAt, now);
+  const end = new Date(expiresAt);
+  const sameYear = end.getFullYear() === new Date(now).getFullYear();
+  const day = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) }).format(end);
+  const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(end);
+  if (level === "ended") return { level, text: t("signInExpiry.ended", { date: day }), date };
+  if (level === "imminent") {
+    const count = Math.max(1, Math.ceil(remainingMs / HOUR_MS));
+    return { level, text: t(pluralKey("signInExpiry.hours", count), { count }), date };
+  }
+  if (level === "soon") {
+    const count = Math.floor(remainingMs / DAY_MS);
+    return { level, text: t(pluralKey("signInExpiry.days", count), { count }), date };
+  }
+  return { level, text: t("signInExpiry.on", { date: day }), date };
+}
+/** A sign-in that needs renewing now: within 10 days of its end, or past it. */
+export const signInEndsSoon = (row: Pick<HarnessSnapshot, "availability">, now: number = Date.now()): boolean =>
+  row.availability.authenticated !== false && row.availability.state !== "auth-required"
+  && harnessSignInExpiry(row.availability.authExpiresAt, now).level !== "none";
 
 /** A row whose readiness Settings is still checking natively. */
 export type HarnessCheckState = { checking?: boolean };
@@ -110,10 +144,11 @@ export function setupStep(row: HarnessSnapshot): HarnessSetupStep {
  *  person can act on needs attention: a harness whose sign-in simply could
  *  not be confirmed is "not verified", and one still being checked is
  *  "checking", never a warning. */
-export function harnessSummary(rows: HarnessSnapshot[], options: { checking?: ReadonlySet<string>; updates?: ReadonlySet<string> } = {}) {
-  let ready = 0; let attention = 0; let signIn = 0; let off = 0; let missing = 0; let checking = 0; let unverified = 0; let updates = 0;
+export function harnessSummary(rows: HarnessSnapshot[], options: { checking?: ReadonlySet<string>; updates?: ReadonlySet<string>; now?: number } = {}) {
+  let ready = 0; let attention = 0; let signIn = 0; let off = 0; let missing = 0; let checking = 0; let unverified = 0; let updates = 0; let signInEnding = 0;
   for (const row of rows) {
     if (options.updates?.has(row.identity.id) && row.availability.installed) updates += 1;
+    if (row.policy.enabled && signInEndsSoon(row, options.now)) signInEnding += 1;
     const state = row.availability.state;
     if (!row.policy.enabled) off += 1;
     else if (state === "not-installed" || state === "incompatible") missing += 1;
@@ -127,7 +162,7 @@ export function harnessSummary(rows: HarnessSnapshot[], options: { checking?: Re
       if (state === "auth-required") signIn += 1;
     }
   }
-  return { ready, attention, signIn, off, missing, checking, unverified, updates };
+  return { ready, attention, signIn, off, missing, checking, unverified, updates, signInEnding };
 }
 
 export const orderedHarnesses = (rows: HarnessSnapshot[]) => rows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.id.localeCompare(b.identity.id));
