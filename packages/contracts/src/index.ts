@@ -4,6 +4,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HarnessNativePluginManager, HarnessNativeSkillManager } from "./capabilityInstallations.ts";
 import type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext } from "./workspace.ts";
 export type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext, WorkspaceRepository } from "./workspace.ts";
+import type { CompactionPreference } from "./compactionPolicy.ts";
+export type { CompactionMode, CompactionPreference } from "./compactionPolicy.ts";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 export { readErrorDiagnostics, type ErrorDiagnostics } from "./errorDiagnostics.ts";
@@ -666,6 +668,9 @@ export type RuntimeErrorCode =
   /** The provider refused the selected model for this account/plan. Recoverable
    * by picking another model; never by waiting or by silently substituting one. */
   | "model-unavailable"
+  /** The conversation no longer fits and the harness refuses every message until
+   * it is compacted. Neither waiting nor resending can clear it. */
+  | "context-full"
   | "unsupported" | "unknown";
 
 /**
@@ -2400,6 +2405,8 @@ export interface SessionProjection {
   autoAcceptSetting?: "on" | "off" | "all";
   /** Session-owned memory narrowing. Omitted fields inherit project policy. */
   memoryPolicy?: MemoryNarrowing;
+  /** This chat's own "Chat memory" choice; absent follows the person's default. */
+  compactionPreference?: CompactionPreference;
   /** Per-session composer draft text, persisted server-side so it syncs
    *  across clients. Cleared on send. */
   draft?: string;
@@ -2759,6 +2766,8 @@ export interface SessionService {
   /** Read/set session-owned memory narrowing; empty means inherit project policy. */
   memoryPolicyGet?(sessionId: string): Promise<{ setting: MemoryNarrowing }>;
   memoryPolicySet?(sessionId: string, setting: MemoryNarrowing): Promise<{ setting: MemoryNarrowing }>;
+  /** Set this chat's "Chat memory" choice; null returns it to the person's default. */
+  setCompactionPreference?(sessionId: string, preference: CompactionPreference | null): Promise<{ preference: CompactionPreference | null }>;
   /** User-confirmed borrowed/external runtime replacement. Never auto-epochs. */
   confirmBorrowedRuntimeEpoch?(sessionId: string): Promise<SessionProjection>;
   /** Persist a per-session composer draft server-side (synced via projection).
@@ -3982,6 +3991,9 @@ export interface RuntimeCapabilities {
   permissions: boolean;
   questions: boolean;
   compaction: boolean;
+  /** The harness's own automatic compaction can be turned off for one session
+   *  (`AgentRuntime.setAutoCompaction`). */
+  autoCompactionSwitch?: boolean;
   subagents: boolean;
   steering?: boolean;
   resume?: boolean;
@@ -5006,6 +5018,10 @@ export interface AgentRuntime {
   onEvent(cb: (sessionId: string, ev: RuntimeEvent) => void): Disposable;
   /** Native slash-command catalog for this session, when discovery is supported. */
   commands?(sessionId: string): Promise<RuntimeCommandDescriptor[]>;
+  /** Turn the harness's own automatic compaction on or off for this session.
+   *  Called before every turn and when the person changes their choice, so it
+   *  must be cheap when nothing changes. Declared by `autoCompactionSwitch`. */
+  setAutoCompaction?(sessionId: string, enabled: boolean): Promise<void>;
   /** Request context compaction when the runtime exposes a real API. */
   compact?(sessionId: string, model?: ModelRef): Promise<void>;
   /** `completion: "pending"`: the runtime accepted the compaction and finishes

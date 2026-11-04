@@ -28,7 +28,7 @@ const METHOD_ACCESS: Readonly<Record<string, SessionAccessLevel>> = {
 
   send: "collaborate", abort: "collaborate", pause: "collaborate", continuePaused: "collaborate", replyPermission: "collaborate", replyQuestion: "collaborate",
   replySecret: "collaborate", delegatePermission: "collaborate", cancelResume: "collaborate",
-  setResumeCompact: "collaborate", resumeNow: "collaborate", rewind: "collaborate", clearRewind: "collaborate",
+  setResumeCompact: "collaborate", setCompactionPreference: "collaborate", resumeNow: "collaborate", rewind: "collaborate", clearRewind: "collaborate",
   runShell: "collaborate", compact: "collaborate", queueEditStart: "collaborate", queueEdit: "collaborate",
   queueSendNow: "collaborate", queueEditCancel: "collaborate", queueReorder: "collaborate",
   queueRemove: "collaborate", pinContext: "collaborate", unpinContext: "collaborate",

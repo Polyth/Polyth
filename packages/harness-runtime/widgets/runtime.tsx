@@ -388,6 +388,15 @@ function SwitchMarker({ event, host }: { event: SessionEvent; host: WebPackageHo
  * expands to what carried over — the harness's own summary when it shared
  * one, never shown as assistant prose — and can seed a fresh chat with it.
  * The expanded body mounts only while open. */
+/** How full the chat's memory was when it was compacted, for a marker that
+ *  says why. Older markers and unmeasured windows have no such figure. */
+export function compactionAtPercent(event: Pick<SessionEvent, "data">): number | undefined {
+  const fraction = (event.data as { contextFraction?: unknown } | undefined)?.contextFraction;
+  return typeof fraction === "number" && Number.isFinite(fraction) && fraction > 0
+    ? Math.min(100, Math.round(fraction * 100))
+    : undefined;
+}
+
 export function CompactionMarker({ event, host, sessionId, projectId }: { event: SessionEvent; host: WebPackageHost; sessionId?: string; projectId?: string }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
@@ -395,6 +404,7 @@ export function CompactionMarker({ event, host, sessionId, projectId }: { event:
   const time = new Date(event.time);
   const translate = host.ui.locale.translate;
   const source = sessionId ?? event.sessionId;
+  const atPercent = compactionAtPercent(event);
   const targetProject = open ? projectId ?? host.sessions.get(source)?.projectId : undefined;
   const context = open ? compactionContext(host.sessions.events(source), event) : undefined;
   const roleLabel = (message: CompactionMessage) =>
@@ -423,7 +433,7 @@ export function CompactionMarker({ event, host, sessionId, projectId }: { event:
         <span className="pkg-harnesses-compaction-icon" aria-hidden="true"><Icon icon={RefreshIcon} size="sm" /></span>
         <span className="pkg-harnesses-compaction-copy">
           <span className="pkg-harnesses-compaction-heading">
-            <strong>{translate("harnessruntime.compaction.heading")}</strong>
+            <strong>{atPercent === undefined ? translate("harnessruntime.compaction.heading") : translate("harnessruntime.compaction.headingAt", { percent: `${atPercent}%` })}</strong>
             <time dateTime={time.toISOString()}>{formatDate(time, { timeStyle: "short" })}</time>
           </span>
           <span className="pkg-harnesses-compaction-description">{translate("harnessruntime.compaction.description")}</span>

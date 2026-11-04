@@ -51,6 +51,7 @@ function fixture(path = ":memory:", options: {
   const registry = createHarnessRegistry();
   type FakeEngine = AgentRuntime & {
     complete(): void;
+    report(event: RuntimeEvent): void;
     rateLimit(): void;
     requestPermission(requestId: string): void;
     requests: CanonicalTurnRequest[];
@@ -189,6 +190,7 @@ function fixture(path = ":memory:", options: {
           emit({ type: "permission/requested", requestId, permission: "bash", patterns: ["git status"] });
         },
         complete() { emit({ type: "assistant/message", partId: randomUUID(), text: `confirmed answer from ${id}` }); executing.delete(authorityId); order++; emit({ type: "turn/stopped", reason: "completed" }); },
+        report(event: RuntimeEvent) { emit(event); },
         rateLimit() {
           executing.delete(authorityId);
           order++;
@@ -2370,6 +2372,36 @@ test("a stale owned runtimeControl does not restart a runtime whose live endpoin
   assert.equal(await countEvents(f, id, "harness/execution-released"), 0);
 });
 
+test("a chosen earlier compaction runs a summary and a fresh leg before the next message", async () => {
+  const f = fixture(":memory:", { compactionSummary: async () => "## Goal\nEARLIER-SUMMARY" });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    await f.sessions.setCompactionPreference!(id, { mode: "earlier" });
+    await f.sessions.send(id, { text: "first request" });
+    const first = f.engines.at(-1)!;
+    first.report({ type: "context/updated", source: "native", updatedAt: Date.now(), usedTokens: 140_000, limitTokens: 200_000, fraction: 0.7 });
+    first.complete();
+    await f.idle(id);
+    await until(async () => (await f.sessions.runtimeFeatures!(id)).contextWindow?.fraction === 0.7);
+
+    const sent = await f.sessions.send(id, { text: "next message" });
+    assert.equal(sent.queued, true);
+    await until(async () => (await f.store.events(id)).some((event) => event.type === "session/compacted"));
+    await until(async () => (f.engines.at(-1)?.requests.length ?? 0) > 0);
+    const compacted = (await f.store.events(id)).findLast((event) => event.type === "session/compacted")!;
+    assert.equal(compacted.data.source, "polyth");
+    assert.equal(compacted.data.contextFraction, 0.7);
+    const request = f.engines.at(-1)!.requests.at(-1)!;
+    assert.notEqual(f.engines.at(-1), first, "the full context stays behind on the old leg");
+    assert.match(request.text, /EARLIER-SUMMARY/);
+    assert.ok(request.text.endsWith("next message"));
+    f.engines.at(-1)!.complete();
+    await f.idle(id);
+  } finally {
+    await f.close();
+  }
+});
+
 test("a runtime without native compaction compacts through a summary and a fresh leg", async () => {
   const prompts: string[] = [];
   const summaryRuntimes: unknown[] = [];
@@ -2454,6 +2486,43 @@ for (const nativeCompaction of ["refused", "failed"] as const) {
       await until(async () => (f.engines.at(-1)?.requests.length ?? 0) > 0);
       assert.match(f.engines.at(-1)!.requests.at(-1)!.text, /FALLBACK-SUMMARY/);
       f.engines.at(-1)!.complete();
+      await f.idle(id);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+for (const nativeCompaction of ["refused", "failed"] as const) {
+  test(`a chosen earlier compaction the harness ${nativeCompaction === "refused" ? "refuses" : "fails"} stands, with no Polyth summary`, async () => {
+    let summaries = 0;
+    const f = fixture(":memory:", {
+      nativeCompaction,
+      compactionSummary: async () => { summaries += 1; return "## Goal\nUNWANTED-SUMMARY"; },
+    });
+    try {
+      const { id } = await f.sessions.create({ projectId: "p" });
+      await f.sessions.setCompactionPreference!(id, { mode: "earlier" });
+      await f.sessions.send(id, { text: "first request" });
+      const engine = f.engines.at(-1)!;
+      engine.report({ type: "context/updated", source: "native", updatedAt: Date.now(), usedTokens: 140_000, limitTokens: 200_000, fraction: 0.7 });
+      engine.complete();
+      await f.idle(id);
+      await until(async () => (await f.sessions.runtimeFeatures!(id)).contextWindow?.fraction === 0.7);
+      const before = (await f.store.projection(id))!;
+
+      await f.sessions.send(id, { text: "second request" });
+      await until(async () => engine.requests.some((request) => request.text.endsWith("second request")));
+
+      assert.deepEqual(f.nativeCompactions, ["fake-a"]);
+      assert.equal(summaries, 0);
+      const events = await f.store.events(id);
+      const failures = events.filter((event) => event.type === "session/compaction-failed");
+      assert.deepEqual(failures.map((event) => event.data.strategy), [nativeCompaction === "refused" ? "native" : "runtime"]);
+      assert.equal(failures[0]!.data.fallback, undefined);
+      assert.equal(events.some((event) => event.type === "session/compacted"), false);
+      assert.equal((await f.store.projection(id))!.backendSessionId, before.backendSessionId);
+      engine.complete();
       await f.idle(id);
     } finally {
       await f.close();

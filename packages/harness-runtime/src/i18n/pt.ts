@@ -1,9 +1,10 @@
 import type { HarnessRuntimeMessages } from "./en.ts";
 
 export const pt: HarnessRuntimeMessages = {
-  "harnessruntime.compaction.ariaLabel": "Contexto compactado",
-  "harnessruntime.compaction.heading": "Contexto compactado",
-  "harnessruntime.compaction.description": "O contexto anterior foi condensado para que esta conversa possa continuar.",
+  "harnessruntime.compaction.ariaLabel": "Conversa compactada",
+  "harnessruntime.compaction.heading": "Conversa compactada",
+  "harnessruntime.compaction.headingAt": "Conversa compactada com {percent} de ocupação",
+  "harnessruntime.compaction.description": "As mensagens antigas passaram a um resumo curto para o chat continuar. Veja o que o agente guardou.",
   "harnessruntime.compaction.roleUser": "Tu",
   "harnessruntime.compaction.roleAssistant": "Agente",
   "harnessruntime.compaction.draftUser": "Utilizador",

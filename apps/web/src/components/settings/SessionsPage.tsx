@@ -9,6 +9,7 @@ import {
 } from "../../settings.ts";
 import { setGlobalDefaultModel, setSessionDefaults, useSessionDefaults } from "../../sessionDefaults.ts";
 import { NumberField, PageHead, Row, Section, Seg, Toggle } from "./parts.tsx";
+import ChatMemorySection from "./ChatMemorySection.tsx";
 import { type CatalogState, harnessModelCatalog, modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
 import ModelPicker from "@polyth/models/model-picker";
@@ -386,6 +387,8 @@ export default function SessionsPage() {
           />
         </Row>
       </Section>
+
+      <ChatMemorySection />
 
       <Section title={tr("settings.sessionspage.sessionBehavior")}>
         <Row

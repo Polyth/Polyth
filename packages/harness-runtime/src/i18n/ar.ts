@@ -1,9 +1,10 @@
 import type { HarnessRuntimeMessages } from "./en.ts";
 
 export const ar: HarnessRuntimeMessages = {
-  "harnessruntime.compaction.ariaLabel": "تم ضغط السياق",
-  "harnessruntime.compaction.heading": "تم ضغط السياق",
-  "harnessruntime.compaction.description": "تم تكثيف السياق السابق حتى تستمر هذه المحادثة.",
+  "harnessruntime.compaction.ariaLabel": "تم ضغط المحادثة",
+  "harnessruntime.compaction.heading": "تم ضغط المحادثة",
+  "harnessruntime.compaction.headingAt": "تم ضغط المحادثة عند امتلاء {percent}",
+  "harnessruntime.compaction.description": "أصبحت الرسائل الأقدم ملخصًا قصيرًا لتستمر المحادثة. اطّلع على ما تذكّره الوكيل.",
   "harnessruntime.compaction.roleUser": "أنت",
   "harnessruntime.compaction.roleAssistant": "الوكيل",
   "harnessruntime.compaction.draftUser": "المستخدم",

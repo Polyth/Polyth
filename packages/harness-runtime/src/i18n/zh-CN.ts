@@ -1,9 +1,10 @@
 import type { HarnessRuntimeMessages } from "./en.ts";
 
 export const zhCN: HarnessRuntimeMessages = {
-  "harnessruntime.compaction.ariaLabel": "上下文已压缩",
-  "harnessruntime.compaction.heading": "上下文已压缩",
-  "harnessruntime.compaction.description": "先前的上下文已压缩，以便继续此对话。",
+  "harnessruntime.compaction.ariaLabel": "对话已压缩",
+  "harnessruntime.compaction.heading": "对话已压缩",
+  "harnessruntime.compaction.headingAt": "对话在记忆用到 {percent} 时已压缩",
+  "harnessruntime.compaction.description": "较早的消息已变成简短摘要，聊天得以继续。看看智能体记住了什么。",
   "harnessruntime.compaction.roleUser": "你",
   "harnessruntime.compaction.roleAssistant": "代理",
   "harnessruntime.compaction.draftUser": "用户",

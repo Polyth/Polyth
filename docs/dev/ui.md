@@ -1920,15 +1920,27 @@ window): the pie never leaves an open session, because its card is also the
 way to the cache controls and compaction. It is dimmed while the last known
 value of the same context awaits fresh telemetry. A new unsent chat has no
 pie. Its accessible name and tooltip carry
-percent and tokens; activation opens the shared `ContextUsageCard` (also used
-by the session overview) in an anchored `Popover`, which is the only way to
-read the numbers on touch. Below the card it says when the agent was asked to
+percent and tokens; activation opens `ChatMemoryCard` ("Chat memory") in an
+anchored `Popover`, which is the only way to read the numbers on touch. It speaks
+in plain words: the share, a meter with a mark where Polyth itself will compact or
+remind (Auto has none, because no harness says when it really compacts), one
+sentence on what will happen, the Earlier / Auto / Manual switch for this chat, a
+hint, a Compact now button that runs the same path as `/compact` (disabled while
+the session works), a "How does this work?" disclosure, and whether the chat
+follows the person's default (link to Settings → Sessions → Long conversations)
+or has its own choice (link back to the default). A harness that cannot switch its
+own compaction off keeps Manual tappable, marked `aria-disabled`, so a touch can
+still read why. The rules live in [architecture](architecture.md) under Chat
+memory. Without a session it falls back to the shared `ContextUsageCard` (also
+used by the session overview). Below the card it says when the agent was asked to
 delegate (the model's `contextPressureLevel`, from the server's context-pressure
-stamp), mounts the `composer.context.details` slot (Usage fills it with the
+stamp) and mounts the `composer.context.details` slot (Usage fills it with the
 session's cache warmth, the re-write a cooled cache costs and **Keep warm** for
-30 min–8 h; see the Usage README) and, when the
-harness supports compaction, a Compact button that runs the same path as
-`/compact` (disabled while the session works). Focus returns to the pie on close only when the pie
+30 min–8 h; see the Usage README). A manual chat from 75% gets one
+`ChatMemoryReminder` row above the composer (Compact now, Continue in a new chat),
+never a toast. A turn stopped with code `context-full` opens the same row in any mode
+with its own sentence, and suppresses the generic failure notice, whose Retry could
+not help. Focus returns to the pie on close only when the pie
 held focus, so a tap while the phone editor is focused keeps the keyboard and
 the engaged composer. The resting phone row keeps the pie right after Add
 (the model line dissolves with `display: contents` and only the pie stays).

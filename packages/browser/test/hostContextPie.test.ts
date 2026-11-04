@@ -81,11 +81,11 @@ test("a held value of the same context is dimmed, not hidden", () => {
 });
 
 test("the accessible name and tooltip carry percent and tokens", () => {
-  assert.equal(contextPieLabel(gauge(42)), "Context 42% · 42.0k / 100.0k");
-  assert.equal(contextPieLabel(gauge(42, "estimated")), "Context ~42% · ~42.0k / 100.0k");
-  assert.equal(contextPieLabel(gauge(30, "fraction")), "Context 30%");
+  assert.equal(contextPieLabel(gauge(42)), "Chat memory 42% · 42.0k / 100.0k");
+  assert.equal(contextPieLabel(gauge(42, "estimated")), "Chat memory ~42% · ~42.0k / 100.0k");
+  assert.equal(contextPieLabel(gauge(30, "fraction")), "Chat memory 30%");
   assert.equal(contextPieLabel(observedOnly), "12.5k tokens observed; window limit unavailable");
-  assert.match(pie(gauge(42)), /title="Context 42% · 42.0k \/ 100.0k" aria-label="Context 42% · 42.0k \/ 100.0k"/);
+  assert.match(pie(gauge(42)), /title="Chat memory 42% · 42.0k \/ 100.0k" aria-label="Chat memory 42% · 42.0k \/ 100.0k"/);
 });
 
 test("the composer places the pie right after effort and only for an open session", async () => {

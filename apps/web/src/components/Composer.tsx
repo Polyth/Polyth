@@ -151,6 +151,8 @@ import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import ContextLiquid, { contextLiquidLabel, useActiveContextGauge } from "./ContextLiquid.tsx";
 import ContextPie, { contextPieVisible } from "./ContextPie.tsx";
+import ChatMemoryReminder from "./ChatMemoryReminder.tsx";
+import { chatMemoryState } from "../chatMemory.ts";
 import QueuedMessageList, { latestSteerableQueuedItem } from "./QueuedMessageList.tsx";
 import {
   composerContributionsVersion,
@@ -2017,6 +2019,7 @@ function ComposerBody({
   const [catalog, setCatalog] = useState<ComposerCatalogResult | null>(null);
   const catalogSeq = useRef(0);
   const runtimeFeatures = useStore((s) => session?.id ? s.runtimeFeatures[session.id] : undefined);
+  const compactionDefault = useStore((s) => s.settings.compactionDefault);
   const nativeCommandsRevision = session?.nativeCommandsRevision ?? 0;
   const selectedCommandRef = useRef<ComposerCommand | undefined>(undefined);
 
@@ -2386,7 +2389,10 @@ function ComposerBody({
       sendPeopleMessage((override ?? inputRef.current?.getText() ?? "").trim());
       return;
     }
-    if (creatingSession || sendPending || compactPending) return;
+    // The latch is the synchronous witness, not this render's values: a
+    // repeat that reaches the same `send` before React re-renders must not
+    // create a second chat (the cleared field alone does not stop pills).
+    if (creatingSession || sendPending || sendPendingRef.current || isActiveSessionSpawning(getState()) || compactPending) return;
     if (!parkAsDraft && session?.status === "epoch-pending" && session.runtimeControl === "borrowed") return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const target = sessionIdRef.current;
@@ -3875,6 +3881,9 @@ function ComposerBody({
   ) : null;
   // The context pie follows effort on the same quiet line. On a resting phone
   // the line itself is hidden and only the pie stays, right after Add.
+  const chatMemory = session
+    ? chatMemoryState(session, compactionDefault, runtimeFeatures?.capabilities.autoCompactionSwitch === true)
+    : null;
   const contextPie = session && contextPieVisible(contextGauge)
     ? <ContextPie
         key={session.id}
@@ -3883,6 +3892,12 @@ function ComposerBody({
         sessionId={session.id}
         projectId={session.projectId}
         pressureLevel={model.contextPressureLevel}
+        {...(chatMemory ? {
+          memory: {
+            state: chatMemory,
+            personDefault: compactionDefault,
+          },
+        } : {})}
         {...(runtimeFeatures ? {
           compact: {
             pending: compactionRunning,
@@ -4292,6 +4307,18 @@ function ComposerBody({
           role="alert"
           actions={<Button size="sm" onClick={retryFailedSend}>{tr("common.retry")}</Button>}
         >{tr("composer.sendUnavailableDraftPreserved")}</Notice>
+      )}
+      {session && chatMemory && (
+        <ChatMemoryReminder
+          sessionId={session.id}
+          projectId={session.projectId}
+          title={session.title}
+          gauge={contextGauge}
+          state={chatMemory}
+          idle={session.status === "idle"}
+          full={model.turn?.contextFull === true}
+          compact={{ pending: compactionRunning, run: () => { startCompact(session.id); } }}
+        />
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
       <SlotHost slot="composer.pending" context={slotContext} customizable />

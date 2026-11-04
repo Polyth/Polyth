@@ -1,0 +1,131 @@
+/* The context pie's card. Hierarchy comes from type and spacing; the meter and
+   the mode switch are the only shapes. */
+.chat-memory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.chat-memory-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.chat-memory-head h3 {
+  margin: 0;
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+.chat-memory-percent {
+  font-size: var(--font-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-memory-track { position: relative; margin-block: var(--space-1); }
+
+.chat-memory-mark {
+  position: absolute;
+  inset-block: -3px;
+  inline-size: 2px;
+  margin-inline-start: -1px;
+  border-radius: var(--radius-round);
+  background: var(--text);
+  transition: inset-inline-start var(--motion-normal) var(--motion-ease);
+}
+
+.chat-memory-mark[data-reminder="true"] { background: var(--amber); }
+
+.chat-memory-scale {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-memory-say,
+.chat-memory-hint { margin: 0; }
+
+.chat-memory-say { font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+.chat-memory-hint {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.chat-memory-modes.seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  justify-content: stretch;
+}
+
+.chat-memory-modes.seg button { padding-inline: var(--space-1); }
+.chat-memory-modes.seg button[data-refused="true"] { color: var(--faint); }
+
+.chat-memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+
+.chat-memory-link {
+  min-height: var(--hit-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--font-meta);
+  text-align: start;
+  cursor: pointer;
+}
+
+.chat-memory-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.chat-memory-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--space-2);
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--surface-divider);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* Above the composer while a person who compacts by hand is nearly out of room. */
+.chat-memory-reminder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-meta);
+}
+
+.chat-memory-reminder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}

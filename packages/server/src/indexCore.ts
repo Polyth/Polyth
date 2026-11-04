@@ -135,6 +135,7 @@ import { registerDiscoveredPackages, registerServerPackage } from "./packageDisc
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
+import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
 import { createFailedStartupCleanupPolicy } from "./failedStartupCleanup.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig, PERSONAL_MCP_PACKAGE } from "./mcp.ts";
 import { createCapabilityProvisioningController, reconcilePinnedHarness } from "./capabilityProvisioning.ts";
@@ -2990,6 +2991,9 @@ export async function boot(opts: BootOptions = {}) {
         return false;
       }
     },
+    compactionDefault: (userId) => userId
+      ? parseCompactionPreference((clientSettings.get(userId).settings as { product?: { compactionDefault?: unknown } } | null | undefined)?.product?.compactionDefault)
+      : undefined,
     // The hint points at agent.spawn, so it follows the subagent-routing policy.
     contextPressureEnabled: async () => {
       try {

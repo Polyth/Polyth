@@ -6,7 +6,7 @@ import type { TurnState } from "./reduce.ts";
  *  (or is switching) away from is no longer the session's last turn to retry. */
 export function transientTurnNoticeKey(
   sessionId: string | null,
-  turn: Pick<TurnState, "turnId" | "status" | "harnessId" | "limit" | "providerLimited"> | null,
+  turn: Pick<TurnState, "turnId" | "status" | "harnessId" | "limit" | "providerLimited" | "contextFull"> | null,
   currentHarnessId?: string | null,
 ): string | null {
   if (
@@ -15,6 +15,8 @@ export function transientTurnNoticeKey(
     || turn.status !== "failed"
     || turn.limit
     || turn.providerLimited
+    // The composer's row says why and offers the way out; "Retry" could not help.
+    || turn.contextFull
     || (turn.harnessId && currentHarnessId && turn.harnessId !== currentHarnessId)
   ) return null;
   return `${sessionId}:${turn.turnId}:${turn.status}`;

@@ -20,11 +20,18 @@ export function isAgentMessageEvent(event: SessionEvent): boolean {
     || event.type === "assistant/message";
 }
 
+function isContextFullRefusal(event: SessionEvent): boolean {
+  const data = event.data;
+  return data !== null && typeof data === "object" && (data as { code?: unknown }).code === "context-full";
+}
+
 /** Only durable terminal failures qualify. Transport uncertainty and an
- * aborted/completed turn must never trigger destructive cleanup. */
+ * aborted/completed turn must never trigger destructive cleanup. A chat refused
+ * for being full is no failed startup: it holds what the person wrote, and
+ * compacting gets it going. */
 export function isConfirmedStartupFailureEvent(event: SessionEvent): boolean {
   return event.type === "turn/failed"
-    || (event.type === "turn/stopped" && eventReason(event) === "error" && !hasRetryPlan(event));
+    || (event.type === "turn/stopped" && eventReason(event) === "error" && !hasRetryPlan(event) && !isContextFullRefusal(event));
 }
 
 /** The caller supplies the event window for one newly-created session. The

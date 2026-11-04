@@ -393,6 +393,7 @@ function scopeSessions(
   }
   assign("memoryPolicyGet", bySession(base.memoryPolicyGet));
   assign("memoryPolicySet", bySession(base.memoryPolicySet));
+  assign("setCompactionPreference", bySession(base.setCompactionPreference));
   // Isolation and worktree lifecycle methods are required by the governed
   // package host (see packageHostAuthority SESSION_METHODS). Dropping them
   // here made every package-owned isolation merge fail closed as

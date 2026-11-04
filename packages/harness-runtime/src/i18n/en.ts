@@ -1,8 +1,9 @@
 /** Canonical English messages owned by the harness runtime package. */
 export const en = {
-  "harnessruntime.compaction.ariaLabel": "Context compacted",
-  "harnessruntime.compaction.heading": "Context compacted",
-  "harnessruntime.compaction.description": "Earlier context was condensed so this conversation can continue.",
+  "harnessruntime.compaction.ariaLabel": "Conversation compacted",
+  "harnessruntime.compaction.heading": "Conversation compacted",
+  "harnessruntime.compaction.headingAt": "Conversation compacted at {percent} full",
+  "harnessruntime.compaction.description": "Older messages became a short summary so the chat can go on. See what the agent remembered.",
   "harnessruntime.compaction.roleUser": "You",
   "harnessruntime.compaction.roleAssistant": "Agent",
   "harnessruntime.compaction.draftUser": "User",

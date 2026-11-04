@@ -544,6 +544,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
     let nativeId = "";
     let nativeModel: ModelRef | undefined;
     let activeTurn = "";
+    /** `thread/compact/start` was accepted and its item has not completed yet. */
+    let compactionPending = false;
     // `turn/plan/updated` carries Codex's complete update_plan list.
     const todos = createTodoSnapshotTracker({ revisionClock: Date.now });
     let connected = true;
@@ -694,6 +696,11 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             lastUsageDigest = "";
             lastUsageTurnId = "";
             order++;
+            if (compactionPending) {
+                // The compaction's own turn ended without its item.
+                compactionPending = false;
+                emit({ type: "session/compaction-failed" }, `${params.turn.id}:compaction-failed`);
+            }
             const resetAt = resetAtFromSnapshot(lastRateLimits, Date.now());
             const pending = pendingFailure && pendingFailure.turnId === params.turn.id
                 ? pendingFailure.failure
@@ -708,6 +715,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             emit({ type: "assistant/reasoning-chunk", partId: params.itemId, text: params.delta }, params.itemId + ":reasoning:" + (++order));
         if (method === "item/completed" || (method === "item/started" && params.item?.type !== "agentMessage")) {
             if (method === "item/completed" && params.item?.type === "contextCompaction") {
+                compactionPending = false;
                 emit({ type: "session/compacted" }, `${params.item.id}:compacted`);
                 emit({
                     type: "context/updated",
@@ -1139,9 +1147,17 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
         async compact() {
             await rpc.request("thread/compact/start", { threadId: nativeId });
         },
+        // The request returns as soon as the compaction starts; a message sent
+        // meanwhile would land inside it, so it waits for the end like Claude's.
         compactOperation: (_id, operationId) => mutate(operationId, async () => {
-            await rpc.request("thread/compact/start", { threadId: nativeId });
-            return {};
+            compactionPending = true;
+            try {
+                await rpc.request("thread/compact/start", { threadId: nativeId });
+            } catch (error) {
+                compactionPending = false;
+                throw error;
+            }
+            return { completion: "pending" as const };
         }),
         async replyPermission(_id, requestId, reply) { const request = pending.get(requestId); if (!request)
             throw Object.assign(new Error("permission is no longer pending"), { code: "not-found" }); pending.delete(requestId); request.resolve({ decision: reply === "reject" ? "decline" : reply === "always" ? "acceptForSession" : "accept" }); },

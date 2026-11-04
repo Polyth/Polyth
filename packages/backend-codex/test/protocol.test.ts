@@ -841,6 +841,27 @@ test("Codex maps native titles, per-response usage, occupancy, attachments, comp
     assert.equal(stopped?.retry?.resetAt, 2_000_000_000_000);
 });
 
+test("Codex keeps a compaction pending until its item completes, and reports one whose turn ends without it", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "thread/start" ? { thread: { id: "native" } } : {});
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+
+    const accepted = await rt.compactOperation!("canonical", "compact-1");
+    assert.equal(accepted.kind, "confirmed");
+    assert.deepEqual(accepted.kind === "confirmed" && accepted.value, { completion: "pending" });
+    f.emit("item/completed", { threadId: "native", item: { type: "contextCompaction", id: "item-1" } });
+    f.emit("turn/completed", { threadId: "native", turn: { id: "compaction-1", status: "completed" } });
+    assert.ok(events.some((event) => event.type === "session/compacted"));
+    assert.ok(!events.some((event) => event.type === "session/compaction-failed"), "a finished compaction reports no failure");
+
+    assert.equal((await rt.compactOperation!("canonical", "compact-2")).kind, "confirmed");
+    f.emit("turn/completed", { threadId: "native", turn: { id: "compaction-2", status: "failed", error: { message: "too long" } } });
+    assert.ok(events.some((event) => event.type === "session/compaction-failed"));
+});
+
 test("Codex maps string Unauthorized discriminant to auth-expired without regex", async () => {
     const f = fakeRpc();
     f.handle(async (method) => {

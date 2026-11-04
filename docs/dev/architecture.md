@@ -580,7 +580,7 @@ view and new-chat draft, and never becomes dialogue.
 Manual compaction (`SessionService.compact`: `/compact`, the context gauge,
 "Compact before proceeding", agents' `whenFull: "compact"`) uses the runtime's
 native compaction when it declares one. A runtime that finishes in the
-background (Claude Code) confirms `compactOperation` with
+background (Claude Code, Codex) confirms `compactOperation` with
 `completion: "pending"`; sends then queue (reason `compaction`) until it
 reports `session/compacted` or the `session/compaction-failed` runtime event
 (persisted with `strategy: "runtime"`), with a 10-minute backstop. A
@@ -617,6 +617,47 @@ recovery cap). A failure before the switch changes nothing and records
 `session/compaction-failed`. The HTTP request returns once the compaction is
 under way; the summary runs in the next flight of the session lock, and the
 timeline's "Compacting…" row (harness package) carries progress and failure.
+Chat memory (`packages/contracts/src/compactionPolicy.ts`, `compactionPreferenceOf`
+in `sessions.ts`) is the person's choice of when this happens: `auto` (default,
+changes nothing and spends nothing), `earlier` (60%), `custom` (40–95%) or
+`manual`. `SessionProjection.compactionPreference` holds a chat's own choice
+(`PUT /api/sessions/:id/compaction-preference`, null clears it, `updatedAt` stays);
+otherwise the acting person's synced `product.compactionDefault` applies, to their
+ordinary chats only: a delegated child or a `purpose` session follows only a choice
+made on it. A target never moves past `compactionLatestTokens`, the window minus a
+reserve of 10% clamped to 4k–50k tokens. `earlier` and `custom` work the same on
+every harness: before the next message (`send`, and queue dispatch for what waited
+behind a turn) a measured, quiet session over the target starts the ordinary
+compaction and the message waits in the queue with reason `compaction`. It happens
+before a message rather than after an answer so an abandoned chat costs nothing, it
+does not act inside one long turn, and a failure is recorded and never blocks the
+message. It has no Polyth fallback (`compact`'s, above): a native refusal or failure
+stands, because an automatic compaction only saves tokens and must not spend a second
+request after the harness declined. An attempt is not repeated for 10 minutes unless the window grew 5 points
+(process memory). `manual` needs `RuntimeCapabilities.autoCompactionSwitch`
+(`AgentRuntime.setAutoCompaction`, called before every turn and on a change; only
+Claude Code today, through `autoCompactEnabled`). Elsewhere the web card refuses it
+and the harness keeps compacting; the composer reminds a manual chat from 75%.
+What Claude Code really does was measured with real turns on Haiku 4.5 (200k window,
+synthetic messages, 2026-11-04). On its default it does not compact at the threshold
+`getContextUsage` reports (`autoCompactThreshold`, 83.5%): it answered at 87%, 92%
+and 96%, and compacted only when the next message no longer fit. So Polyth carries
+no such number and the card marks nothing for `auto`. With `autoCompactEnabled: false`
+it stops earlier: the last answer came at 87.7%, the next message (91.4% by the CLI's
+estimate) was refused with "Prompt is too long", and so was every later one until a
+compaction, which works from there. Hence the early reminder. The adapter reports
+that refusal as `turn/stopped` code `context-full` instead of answer text. The session
+stays `idle`, because nothing failed and compacting needs an idle session; the web
+keeps it out of failed-startup cleanup, replaces Retry with the composer's row, and
+clears it on `session/compacted`. A refused message is not resent for the person.
+There is deliberately no "later": `auto` already compacts at the last moment on
+Claude Code, whose `autoCompactWindow` only lowers the threshold
+(`min(value, window) − 33k`), applies only at launch and shrinks the reported window
+too, and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` moves nothing it reports.
+Codex's `model_auto_compact_token_limit` is absolute and read at thread start or
+resume (whether it can exceed its default is unverified), and OpenCode's
+`compaction.*` config is process-wide, so it cannot serve one chat.
+`session/compacted` records `contextFraction` for the marker's heading.
 The first turn after an unrestored `session/compacted` re-delivers the durable
 context a native summary may have dropped — the active goal, user pins and, when
 workspace instructions are enabled, the workspace `AGENTS.md` (otherwise sent

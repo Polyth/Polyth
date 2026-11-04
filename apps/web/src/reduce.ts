@@ -370,6 +370,9 @@ export interface TurnState {
   profileId?: string;
   reason?: string;
   error?: string;
+  /** The harness refused this turn because the conversation no longer fits;
+   *  cleared by a compaction, since only that lets the chat continue. */
+  contextFull?: true;
   /** Set when `status === "failed"` because the provider is rate-limited. */
   limit?: TurnLimitState;
   /** The stop was a provider limit/refusal. Outlives `limit` (a cancelled
@@ -1505,6 +1508,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       model.contextEstimateAfterSeq = ev.seq;
       model.contextResetAt = ev.time;
       delete model.contextPressureLevel;
+      if (model.turn) delete model.turn.contextFull;
       break;
     }
     case "turn/started": {
@@ -1563,6 +1567,8 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         t.stoppedAt = ev.time;
         const error = str(d, "error");
         if (error !== undefined) t.error = error;
+        if (str(d, "code") === "context-full") t.contextFull = true;
+        else delete t.contextFull;
         if (limit) {
           t.limit = limit;
           t.providerLimited = true;
@@ -1576,6 +1582,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.turn = {
           turnId: str(d, "turnId") ?? "", status, reason, error: str(d, "error"), stoppedAt: ev.time,
           ...(limit ? { limit, providerLimited: true as const } : {}),
+          ...(str(d, "code") === "context-full" ? { contextFull: true as const } : {}),
         };
       }
       finalizeOrphanedTools(model, status, ev.time);

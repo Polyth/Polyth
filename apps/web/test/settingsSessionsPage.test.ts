@@ -126,7 +126,7 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     // rows and their copy-pasted hints are gone.
     assert.doesNotMatch(text, /Manual Cleanup/i);
     const headings = [...container.querySelectorAll(".settings-section-title")].map((node) => node.textContent);
-    assert.deepEqual(headings, ["New sessions", "Behavior", "Cleanup", "Archive"]);
+    assert.deepEqual(headings, ["New sessions", "Long conversations", "Behavior", "Cleanup", "Archive"]);
     assert.doesNotMatch(text, /__default__|When sessions expire/);
     assert.doesNotMatch(text, /Fix the flaky test|Ship the release|Other project session/);
     assert.equal(container.querySelectorAll(".model-picker").length, 3);

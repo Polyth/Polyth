@@ -1,9 +1,10 @@
 import type { HarnessRuntimeMessages } from "./en.ts";
 
 export const bg: HarnessRuntimeMessages = {
-  "harnessruntime.compaction.ariaLabel": "Контекстът е компресиран",
-  "harnessruntime.compaction.heading": "Контекстът е компресиран",
-  "harnessruntime.compaction.description": "Предишният контекст беше съкратен, за да може разговорът да продължи.",
+  "harnessruntime.compaction.ariaLabel": "Разговорът е свит",
+  "harnessruntime.compaction.heading": "Разговорът е свит",
+  "harnessruntime.compaction.headingAt": "Разговорът е свит при запълване {percent}",
+  "harnessruntime.compaction.description": "Старите съобщения станаха кратко резюме, за да продължи чатът. Вижте какво запомни агентът.",
   "harnessruntime.compaction.roleUser": "Вие",
   "harnessruntime.compaction.roleAssistant": "Агент",
   "harnessruntime.compaction.draftUser": "Потребител",

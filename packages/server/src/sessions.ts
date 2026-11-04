@@ -60,6 +60,7 @@ import {
 import { sessionMentionCandidates, sessionAudience } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
+import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
@@ -806,6 +807,8 @@ export function createSessionService(deps: {
   /** Server-owned gate for the context-pressure delegation hint. Omitted
    * means disabled. */
   contextPressureEnabled?: () => Promise<boolean>;
+  /** A person's default "Chat memory" choice. Omitted means `auto`. */
+  compactionDefault?: (userId: string | undefined) => CompactionPreference | undefined;
   /** Package-owned context for a `purpose` session. It is persisted on every
    * user/message with the rest of the turn context before runtime delivery,
    * so the model sees it on each turn while chat rows show only the prompt. */
@@ -1844,6 +1847,9 @@ export function createSessionService(deps: {
           const reason = data.reason;
           facts.lastStopReason =
             reason === "completed" || reason === "aborted" || reason === "error" ? reason : null;
+          // The harness answered by refusing a conversation that no longer fits.
+          // Nothing failed and compacting needs an idle session, so it stays one.
+          if (data.code === "context-full") facts.turnAnswered = true;
           facts.turnOpen = false;
           facts.turnBoundarySeq = ev.seq;
           facts.openTurnId = undefined;
@@ -3593,6 +3599,7 @@ export function createSessionService(deps: {
 
   const clearRuntimeFeatureState = (sessionId: string): void => {
     runtimeFeatureState.delete(sessionId);
+    compactionAttempts.delete(sessionId);
     clearAutomaticTitleTracking(sessionId);
   };
 
@@ -4370,9 +4377,10 @@ export function createSessionService(deps: {
    *  be finishing in the background (see `compactionSettled`). */
   const compactLocked = async (
     sessionId: string,
-    options: { forResume?: boolean; model?: ModelRef; background?: boolean; fallback?: boolean } = {},
+    options: { forResume?: boolean; model?: ModelRef; background?: boolean; fallback?: boolean; beforeQueuedTurn?: boolean } = {},
   ): Promise<"native" | "polyth" | "fresh-epoch"> => {
-    const { proj } = await assertMutable(sessionId);
+    // The queue a compaction runs for is exactly what it may run in front of.
+    const { proj } = await assertMutable(sessionId, options.beforeQueuedTurn ? { allowQueued: true } : {});
     // A replaced runtime has no native context left to compact. Recovering the
     // fresh epoch, as a send would, already gives the next turn a small one.
     if (proj.status === "epoch-pending" && !proj.harnessTransition) {
@@ -4543,6 +4551,7 @@ export function createSessionService(deps: {
       throw error;
     }
     const summarizer = deps.compactionSummary;
+    const contextFraction = projectionContextWindow(sessionId, proj)?.fraction;
     const finish = async (): Promise<void> => {
       try {
         // A background summary runs in the next lock flight; anything that
@@ -4608,6 +4617,7 @@ export function createSessionService(deps: {
           summary,
           epochMarkerSeq: marker.seq,
           ...(confirmed.length ? { compactedThroughSeq: confirmed.at(-1)!.seq } : {}),
+          ...(contextFraction !== undefined ? { contextFraction } : {}),
         }, { ignorable: true, producerPlugin: "polyth" });
         await publishCompactionState(sessionId, { active: false, lastAt: Date.now() });
       } catch (error) {
@@ -4673,6 +4683,70 @@ export function createSessionService(deps: {
     } catch (error) {
       console.error(`[polyth] compaction before rate-limit resume failed for ${sessionId}`, error);
     }
+  };
+
+  // Chat memory: the person's choice of when a long conversation is compacted.
+  // A delegated worker or an Agent's thread has nobody watching its memory and
+  // keeps its own rules, so only a choice made on that very chat applies there.
+  const compactionPreferenceOf = (proj: SessionProjection): CompactionPreference => effectiveCompactionPreference(
+    proj.compactionPreference,
+    proj.parentId || proj.purpose ? undefined : deps.compactionDefault?.(proj.actor?.userId),
+  );
+
+  /** Tells the harness whether its own compaction stays on. Never awaited on a
+   *  turn's path: the runtime records the choice and applies it itself. */
+  const syncAutoCompaction = (sessionId: string, proj: SessionProjection, runtime: AgentRuntime): void => {
+    if (!runtime.setAutoCompaction) return;
+    void runtime.setAutoCompaction(sessionId, compactionPreferenceOf(proj).mode !== "manual").catch((error: unknown) => {
+      console.warn(`[polyth] could not apply the compaction choice of ${sessionId}`, error);
+    });
+  };
+
+  // A summary is a paid request, so one that failed or left the conversation
+  // over the line is not repeated on every message: it waits a while, or until
+  // the conversation has clearly grown. Process memory; a restart allows one more.
+  const COMPACTION_RETRY_MS = 10 * 60_000;
+  const COMPACTION_RETRY_GROWTH = 0.05;
+  const compactionAttempts = new Map<string, { at: number; fraction: number }>();
+
+  /** The person asked to compact before this conversation grows further. Done
+   *  before a message rather than after an answer, so an abandoned chat costs
+   *  nothing. Only a quiet, measured session qualifies. */
+  const compactionDueBeforeTurn = (sessionId: string, proj: SessionProjection): boolean => {
+    if (!deps.queue || proj.status !== "idle" || proj.paused || proj.harnessTransition || !proj.backendSessionId) return false;
+    if (turnActive(sessionId) || compactions.has(sessionId)) return false;
+    const window = projectionContextWindow(sessionId, proj);
+    if (!window || window.source === "unknown" || window.compaction?.active) return false;
+    if (!compactionDue(compactionPreferenceOf(proj), window)) return false;
+    const last = compactionAttempts.get(sessionId);
+    return !last
+      || Date.now() - last.at >= COMPACTION_RETRY_MS
+      || (window.fraction ?? 0) >= last.fraction + COMPACTION_RETRY_GROWTH;
+  };
+
+  /** Starts it and returns at once: a summary can outlast a proxy's read
+   *  timeout, and the message that triggered it waits in the queue like any
+   *  other sent during a compaction. Compaction only saves tokens, so a failure
+   *  is recorded and the queue still runs. */
+  const startCompactionBeforeTurn = (sessionId: string, proj: SessionProjection): void => {
+    compactionAttempts.set(sessionId, {
+      at: Date.now(),
+      fraction: projectionContextWindow(sessionId, proj)?.fraction ?? 0,
+    });
+    beginCompaction(sessionId);
+    void withSessionLock(sessionId, () => compactLocked(sessionId, { background: true, beforeQueuedTurn: true })).then(
+      (strategy) => {
+        // A Polyth summary ends itself; so does a native one the runtime
+        // finishes in the background, which leaves its backstop timer here.
+        if (strategy === "polyth") return;
+        if (strategy === "native" && compactions.get(sessionId) !== undefined) return;
+        endCompaction(sessionId);
+      },
+      (error: unknown) => {
+        console.warn(`[polyth] compaction before the next message failed for ${sessionId}`, error);
+        endCompaction(sessionId);
+      },
+    );
   };
 
   /** Boot: re-arm timers for sessions that stopped rate-limited before a
@@ -5505,10 +5579,11 @@ export function createSessionService(deps: {
       }
       case "session/compacted": {
         const { type: _t, ...data } = ev;
+        const contextFraction = runtimeFeatureState.get(sessionId)?.contextWindow?.fraction;
         await persist(
           sessionId,
           "session/compacted",
-          data as unknown as JsonObject,
+          { ...data, ...(contextFraction !== undefined ? { contextFraction } : {}) } as unknown as JsonObject,
           { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         if (sideEffects) {
@@ -6629,7 +6704,7 @@ export function createSessionService(deps: {
    *  offered action into a deterministic 409. */
   const assertMutable = async (
     sessionId: string,
-    opts: { allowActiveTurn?: boolean } = {},
+    opts: { allowActiveTurn?: boolean; allowQueued?: boolean } = {},
   ): Promise<{ proj: SessionProjection; events: SessionEvent[] }> => {
     const proj = await store.projection(sessionId);
     if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -6669,7 +6744,7 @@ export function createSessionService(deps: {
     if (openRequestCount(events) > 0) {
       throw Object.assign(new Error("unavailable while a request is waiting"), { code: "conflict" });
     }
-    if (deps.queue && (await deps.queue.queueList(sessionId)).length > 0) {
+    if (!opts.allowQueued && deps.queue && (await deps.queue.queueList(sessionId)).length > 0) {
       throw Object.assign(new Error("unavailable while messages are queued"), { code: "conflict" });
     }
     return { proj, events };
@@ -7492,6 +7567,11 @@ export function createSessionService(deps: {
         if (reconciliation?.state === "reconciling"
           || reconciliation?.state === "blocked"
           || reconciliation?.state === "unknown") return;
+        // Ending the compaction runs this dispatcher again.
+        if (!queued[0].command && compactionDueBeforeTurn(sessionId, proj)) {
+          startCompactionBeforeTurn(sessionId, proj);
+          return;
+        }
         // A replacement submitted while the old turn was running is queued
         // ahead of its abort. Only after the confirmed stop reaches this idle
         // dispatcher do we replace the runtime leg and resolve the soft rewind.
@@ -8164,6 +8244,7 @@ export function createSessionService(deps: {
           ...(model ? { model } : {}),
           ...(agent ? { agent } : {}),
         };
+        syncAutoCompaction(sessionId, proj, rt);
         return rt.startTurnOperation
           ? rt.startTurnOperation(request, operationId)
           : rt.startTurn(request);
@@ -11614,6 +11695,9 @@ export function createSessionService(deps: {
         await compactionSettled(sessionId);
         proj = (await store.projection(sessionId)) ?? proj;
       }
+      if (input.keepAlive !== true && input.autoResume !== true && !input.command && compactionDueBeforeTurn(sessionId, proj)) {
+        startCompactionBeforeTurn(sessionId, proj);
+      }
       // A compaction is replacing the context: the message waits for the
       // compacted context, then dispatches from the queue.
       if (compactions.has(sessionId) && deps.queue) {
@@ -14177,6 +14261,24 @@ export function createSessionService(deps: {
           return next;
         });
         return { setting: validated ?? {} };
+      });
+    },
+
+    async setCompactionPreference(sessionId, input) {
+      const preference = input === null ? undefined : parseCompactionPreference(input);
+      if (input !== null && !preference) {
+        throw Object.assign(new Error("invalid compaction preference"), { code: "invalid-input" });
+      }
+      return withSessionLock(sessionId, async () => {
+        // A setting, not activity: the chat keeps its place in the recent list.
+        const updated = await applyProjection(sessionId, (projection) => {
+          const { compactionPreference: _previous, ...rest } = projection;
+          return preference ? { ...rest, compactionPreference: preference } : rest;
+        });
+        if (!updated) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const runtime = sessionRuntime.get(sessionId);
+        if (runtime) syncAutoCompaction(sessionId, updated, runtime);
+        return { preference: preference ?? null };
       });
     },
 

@@ -23,6 +23,7 @@ import {
   type RouteRequest
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
+import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
 import type { RuntimePool } from "./sessions.ts";
 import { parseTurnCommand } from "./turnCommand.ts";
 import {
@@ -1033,6 +1034,13 @@ async function dispatchHttp(
         const rawSetting = body.memory !== undefined ? body.memory : body.setting;
         const setting = memoryNarrowingInput(rawSetting) ?? {};
         return json(res, 200, await memoryPolicySet(m[1]!, setting));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/compaction-preference$/);
+      if (m && method === "PUT") {
+        const setCompactionPreference = space().sessions.setCompactionPreference;
+        if (!setCompactionPreference) throw Object.assign(new Error("compaction preference unavailable"), { code: "not-supported" });
+        const body = await loadBody();
+        return json(res, 200, await setCompactionPreference(m[1]!, (body.preference ?? null) as CompactionPreference | null));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/client-mutations\/([^/]+)$/);
       if (m && method === "GET") {

@@ -192,6 +192,34 @@ test("the first model and variant are applied together at query creation", async
   assert.deepEqual(state.setModels, [], "the initial model is not deferred to the first turn");
 });
 
+test("Chat memory's manual turns Claude Code's own compaction off at launch and live", async () => {
+  invalidateClaudeModelCache();
+  const { sdk, state } = fakeSdk();
+  const rt = await createClaudeRuntime(context, sdk, fakeAuthority());
+  await rt.setAutoCompaction!("canonical", false);
+  assert.deepEqual(state.flagSettings, [], "nothing to change before the query exists");
+  await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, randomUUID());
+  assert.equal((state.options!.settings as { autoCompactEnabled?: boolean }).autoCompactEnabled, false);
+
+  await rt.setAutoCompaction!("canonical", false);
+  assert.deepEqual(state.flagSettings, [], "an unchanged choice costs nothing");
+  await rt.setAutoCompaction!("canonical", true);
+  assert.deepEqual(state.flagSettings, [{ autoCompactEnabled: null }], "null hands it back to the person's own Claude Code setting");
+  await rt.setAutoCompaction!("canonical", false);
+  assert.deepEqual(state.flagSettings.at(-1), { autoCompactEnabled: false });
+});
+
+test("the default leaves Claude Code's compaction settings untouched", async () => {
+  invalidateClaudeModelCache();
+  const { sdk, state } = fakeSdk();
+  const rt = await createClaudeRuntime(context, sdk, fakeAuthority());
+  await rt.setAutoCompaction!("canonical", true);
+  await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, randomUUID());
+  assert.equal("autoCompactEnabled" in ((state.options!.settings ?? {}) as object), false);
+  await rt.setAutoCompaction!("canonical", true);
+  assert.deepEqual(state.flagSettings, []);
+});
+
 test("ultracode is a picker variant that launches as xhigh with the session flag", async () => {
   invalidateClaudeModelCache();
   const { sdk, state } = fakeSdk();

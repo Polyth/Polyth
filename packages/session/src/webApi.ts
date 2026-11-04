@@ -87,6 +87,7 @@ import type {
 } from "@polyth/contracts";
 import { errorBodyText, readErrorDiagnostics } from "@polyth/contracts";
 import { fetchWithReadRetry } from "@polyth/contracts/transport-retry";
+import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
 import type { SourceControlProfileState } from "@polyth/contracts/source-control";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import type { ChangeRequest, ChangeRequestComment, ChangeRequestDetail, ChangeRequestFile, HostingIssue, HostingIssueComment, HostingIssueDetail, HostingRepository, HostingResult, HostingStatus } from "@polyth/code-hosting/types";
@@ -1089,6 +1090,8 @@ export const api = {
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   memoryPolicyGet: (id: string) =>
     jfetch<{ setting: MemoryNarrowing }>(`/api/sessions/${id}/memory-policy`),
+  setCompactionPreference: (id: string, preference: CompactionPreference | null) =>
+    jfetch<{ preference: CompactionPreference | null }>(`/api/sessions/${encodeURIComponent(id)}/compaction-preference`, json("PUT", { preference })),
   memoryPolicySet: (id: string, setting: MemoryNarrowing) =>
     jfetch<{ setting: MemoryNarrowing }>(`/api/sessions/${id}/memory-policy`, json("PUT", { memory: setting })),
   runtimeFeatures: (id: string) =>

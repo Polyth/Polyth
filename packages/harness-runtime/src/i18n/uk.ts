@@ -1,9 +1,10 @@
 import type { HarnessRuntimeMessages } from "./en.ts";
 
 export const uk: HarnessRuntimeMessages = {
-  "harnessruntime.compaction.ariaLabel": "Контекст стиснено",
-  "harnessruntime.compaction.heading": "Контекст стиснено",
-  "harnessruntime.compaction.description": "Попередній контекст стиснуто, щоб продовжити цю розмову.",
+  "harnessruntime.compaction.ariaLabel": "Розмову стиснуто",
+  "harnessruntime.compaction.heading": "Розмову стиснуто",
+  "harnessruntime.compaction.headingAt": "Розмову стиснуто при заповненні {percent}",
+  "harnessruntime.compaction.description": "Старі повідомлення стали коротким підсумком, щоб чат міг тривати. Подивіться, що агент запам’ятав.",
   "harnessruntime.compaction.roleUser": "Ви",
   "harnessruntime.compaction.roleAssistant": "Агент",
   "harnessruntime.compaction.draftUser": "Користувач",
