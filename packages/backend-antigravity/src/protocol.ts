@@ -119,6 +119,7 @@ export function parseAgyModels(output: string, harnessId = "antigravity"): Model
       rows.set(baseSlug, {
         harnessId, providerID: "antigravity", modelID: baseSlug,
         name: baseName, providerName: "Google Antigravity",
+        context: 1_048_576,
         capabilities: ["input:text", ...agyModelInputs(baseSlug), "output:text", "toolcall"],
         ...(effort ? { variants: [effort], defaultVariant: effort } : {}),
       });

@@ -86,6 +86,14 @@ test("an unknown lifetime is never invented, but observed misses still count", (
   assert.deepEqual(sessionCacheHealth([other(0, 0, 9_000), other(6, 0, 9_000)])?.burn, { rewrites: 1, tokens: 9_000 });
 });
 
+test("anthropic, google and antigravity default prompt-cache lifetime is 5 minutes", () => {
+  for (const providerId of ["anthropic", "google", "gemini", "antigravity"]) {
+    const health = sessionCacheHealth([obs(0, 0, 10_000, { providerId, harnessId: providerId })]);
+    assert.equal(health?.ttlMs, 5 * MIN, `expected 5 min TTL for ${providerId}`);
+    assert.equal(health?.ttlBasis, "provider-default", `expected provider-default basis for ${providerId}`);
+  }
+});
+
 test("sessions without cache telemetry have no cache health", () => {
   assert.equal(sessionCacheHealth([obs(0, null, null), obs(1, 0, 0)]), null);
   assert.equal(scanCacheHealth([obs(0, null, null)]).health.size, 0);
