@@ -432,7 +432,11 @@ grid scrolls sideways (with `overscroll-behavior-inline: contain` and a
 collapsing. Cells break only between words (`word-break: normal`,
 `overflow-wrap: break-word`, `hyphens: none`, `min-width: 6ch`), so a word such
 as `Модель` is never split one letter per line the way a squeezed auto table
-does; an inline code token in a cell stays whole (`white-space: nowrap`). The
+does; an inline code token in a cell stays whole (`white-space: nowrap`).
+Each cell's content sits in a block `.md-cell` capped at `min(24em, 70vw)`
+(cells ignore `max-width`): a long header or value wraps at a reading measure
+instead of making its column as wide as the phone, so the next column peeks
+in at the edge and shows that the table scrolls. The
 region is focusable and labelled (`role="region"`, `aria-label` from
 `markdown.table`) so keyboard and screen-reader users reach the overflow. A
 consumer must not make the table itself `display: block` to scroll it — that

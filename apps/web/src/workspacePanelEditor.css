@@ -533,13 +533,17 @@
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
-/* Narrow phones: three tiles to a line; a widget row gives its name the whole
-   width and puts the size pill on a second line in place of the purpose. */
-@container workspace-panel (max-width: 340px) {
+/* Three tiles to a line wherever the Workspace itself shows three
+   (workspacePanelPremium.css), so editing never reflows the grid. */
+@container workspace-panel (max-width: 420px) {
   .workspace-panel-sheet .workspace-editor-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
 
+/* Narrow phones: a widget row gives its name the whole width and puts the
+   size pill on a second line in place of the purpose. */
+@container workspace-panel (max-width: 340px) {
   .workspace-panel-sheet .workspace-editor-item--widget {
     grid-template-columns: calc(var(--icon-xl) + var(--space-3)) minmax(0, 1fr) auto;
     row-gap: var(--space-1);

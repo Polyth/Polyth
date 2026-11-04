@@ -444,6 +444,9 @@ input, select, textarea {
   transition: border-color var(--motion-fast) var(--motion-ease);
 }
 select { background-color: var(--elevated); }
+/* A long hint in a narrow phone field ends with an ellipsis instead of a cut
+   letter ("Фільтрувати за гілкою або", "Пошук за назвою, призначенн"). */
+input:placeholder-shown { text-overflow: ellipsis; }
 /* A11y contract: focus is visible with at least a 2px outline and
    2px offset on every surface. */
 /* Keep focus indication on the accent instead of the text/black ink. */
@@ -2013,10 +2016,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .ui-notice {
   --notice-tone: var(--blue);
   --notice-wash: var(--blue-wash);
-  /* Wrap, never squeeze: the copy's flex basis is 0, so a row wraps only when
-     the actions would leave the copy no room at all (a full-width phone action
-     row). Without it the copy folds to one character per line and the notice
-     grows taller than the screen. */
+  /* Wrap, never squeeze: the copy keeps a readable basis (14rem), so the
+     actions move to their own line before they fold the copy. A zero basis
+     wrapped only once the copy was down to its longest word, which on a phone
+     left a sentence one or two words per line beside the button. */
   display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border: 1px solid color-mix(in srgb, var(--notice-tone) 34%, var(--border));
@@ -2027,10 +2030,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .ui-notice--warning { --notice-tone: var(--amber); --notice-wash: var(--amber-wash); }
 .ui-notice--success { --notice-tone: var(--green); --notice-wash: var(--green-wash); }
 .ui-notice-icon { flex: none; margin-top: 1px; color: var(--notice-tone); }
-.ui-notice-copy { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.ui-notice-copy { min-width: 0; flex: 1 1 min(14rem, 100%); overflow-wrap: anywhere; }
 .ui-notice-heading { display: block; margin-bottom: var(--space-1); color: var(--text); font-size: var(--font-label); }
 .ui-notice-body { min-width: 0; }
-.ui-notice-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); margin-left: auto; }
+.ui-notice-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); margin-inline-start: auto; }
 .form-error,
 .form-warning,
 .form-success,
@@ -5926,6 +5929,16 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
   hyphens: none;
   min-width: 6ch;
 }
+/* A cell is a line of prose with a reading measure, not a sentence on one
+   line: its text wraps at the cap, so one long header or value no longer
+   sets its column to the whole phone width — where the next column started
+   off-screen with nothing hinting that the table scrolls. On a phone the
+   cap leaves the next column peeking in, which is the scroll cue. The cap
+   sits on a block wrapper because table cells ignore `max-width`. */
+.md-table .md-cell {
+  display: block;
+  max-width: min(24em, 70vw);
+}
 /* A code span inside a cell is one token the reader scans, not a wrapped
    paragraph: it stays whole and scrolls with the table instead of forcing
    the column wider than its content. */
@@ -8894,7 +8907,7 @@ body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .
 }
 /* A row of the card, not a button on it: hover and press brighten the
    prompt instead of laying a plate across the card's top. */
-body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active) {
+body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active):where(:not(:disabled)) {
   background: none;
 }
 body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use > .composer-suggestion-key {
@@ -9684,7 +9697,9 @@ html[dir="rtl"] input[type="number"] {
   margin-inline-start: 6px; color: var(--faint); font-style: normal; font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
-.seg button.on .seg-count { color: var(--muted); }
+/* The count follows its option's ink: muted grey on a filled (accent) "on"
+   option vanished in light themes. */
+.seg button.on .seg-count { color: color-mix(in srgb, currentColor 72%, transparent); }
 
 .packages-list { display: flex; flex-direction: column; min-width: 0; }
 .packages-list > .settings-empty.is-compact { margin-top: var(--space-3); }
@@ -9698,6 +9713,15 @@ html[dir="rtl"] input[type="number"] {
   color: var(--faint); font-size: var(--font-meta); white-space: nowrap;
 }
 .package-tour-btn.ui-icon-btn { color: var(--faint); }
+/* On a phone the "Always on" words took 158px of a 286px row and broke the
+   package name into two letters per line ("Ap/pe/ar/an/ce"). The lock alone
+   carries the state there; the words stay for screen readers. */
+@container settings-list (max-width: 420px) {
+  .package-locked-label {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+}
 @media (hover: hover) {
   .package-tour-btn.ui-icon-btn:hover:not(:disabled) { color: var(--text-dim); }
 }
@@ -9730,6 +9754,15 @@ html[dir="rtl"] input[type="number"] {
   .packages-filters > .seg { flex: 1 1 auto; }
   .packages-filters > .seg button { flex: 1 0 auto; }
   .packages-bulk-actions { flex: 1 1 100%; }
+}
+/* A 320–390px phone: the three status options share one row and the
+   category Select takes the next, instead of the options wrapping into two
+   uneven rows beside a squeezed "Усі к…" Select. */
+@container packages-page (max-width: 420px) {
+  .packages-filters { flex-wrap: wrap; }
+  .packages-filters > .seg { flex: 1 1 100%; flex-wrap: nowrap; }
+  .packages-filters > .seg button { flex: 1 1 0; min-width: 0; padding-inline: var(--space-1); }
+  .packages-filters > .packages-category { flex: 1 1 100%; }
   .packages-bulk-actions .ui-btn { flex: 1; }
 }
 
@@ -10485,6 +10518,10 @@ width: 44px;
 .projects-settings-page {
   container-type: inline-size;
   display: grid;
+  /* An implicit `auto` column grows to its widest unwrapped child (the
+     segmented "Same for all / Separate for each" pair), which pushed the
+     whole page past a 320px phone. */
+  grid-template-columns: minmax(0, 1fr);
   /* Sections carry their own top margin; a grid gap here would double it. */
   gap: 0;
   width: 100%;
@@ -11604,6 +11641,19 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .hero-widget[data-size="compact"] { grid-column: span 1; }
 .hero-widget[data-size="standard"] { grid-column: span 2; }
 .hero-widget[data-size="large"] { min-height: calc(5 * var(--control-h-lg)); }
+/* Board items (the ones with a size) sit in one card the board draws, so
+   every package's tile shares the frame; the package draws content only.
+   Built-ins keep their own looks. */
+.hero-widget[data-size] {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+  color: var(--text);
+}
+.hero-widget[data-size] > :not(.hero-widget-edit) { flex: 1 1 auto; min-height: 0; }
 @container hero-body (max-width: 479px) {
   .hero-widget-host { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-widget[data-size="standard"] { grid-column: 1 / -1; }
@@ -11636,6 +11686,8 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     outline: 1px dashed var(--accent-line);
     outline-offset: var(--space-1);
   }
+  body[data-shift-held] .hero-body:hover .hero-widget[data-size],
+  body[data-ui-editing] .hero-body .hero-widget[data-size] { border-radius: var(--radius-card); }
 }
 /* Touch edit mode (HeroEditMode.tsx): a long press enters it, so the hold
    must not raise the text callout; the tiles wobble, their content stops
@@ -11653,6 +11705,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   -webkit-user-select: none;
   user-select: none;
 }
+.hero-widget[data-size][data-editing="true"] { border-radius: var(--radius-card); }
 .hero-widget[data-editing="true"]:nth-child(2n) { animation-delay: -150ms; }
 .hero-widget[data-editing="true"] > :not(.hero-widget-edit) { pointer-events: none; }
 .hero-widget[data-dragging="true"] {
@@ -12315,6 +12368,29 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   /* An explanation or a short repository list: size to the content. */
   .context-picker-pop.context-picker-note,
   .context-picker-pop.context-repos-pop { height: auto; }
+  /* A checkout row puts its hint ("Працювати ізольовано", "Основний робочий
+     простір") under the branch name: beside it the hint took half of a
+     320–390px row and cut every branch to "automation/ch…". */
+  .context-branch-pop .picker-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 6px;
+    padding-block: var(--space-1);
+  }
+  .context-branch-pop .picker-item > .picker-check { grid-row: 1 / span 2; align-self: center; }
+  .context-branch-pop .picker-item > .palette-label {
+    grid-column: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .context-branch-pop .picker-item > .palette-meta {
+    grid-column: 2;
+    max-width: 100%;
+    color: var(--muted);
+    line-height: var(--font-meta-lh);
+  }
 }
 .context-isolation-control {
   flex: none;
@@ -13076,8 +13152,20 @@ min-height: var(--tap);
     padding-inline: 5px;
     font-size: 13px;
   }
+  /* A 320–390px phone cannot fit "Назад", a long page title and two icon
+     buttons: the title truncated to "Голосовий реж…". The arrow alone reads
+     as Back (the button keeps its accessible name), so the title gets the
+     room. */
+  @media (max-width: 399px) {
+    .settings-mobile-back .ui-btn-label { display: none; }
+    .settings-mobile-back { min-width: var(--tap); justify-content: center; }
+  }
   .settings-mobile-page .settings-pane-body {
     padding: 10px 16px max(24px, var(--safe-bottom));
+    /* A phone page scrolls vertically only. A decorative bleed (a sticky
+       toolbar's backdrop) or one over-wide row must not let the whole page
+       pan sideways under the thumb. */
+    overflow-x: hidden;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
@@ -17261,6 +17349,36 @@ html[dir="rtl"] .reasoning-preview {
   white-space: nowrap;
 }
 .ui-tabs--md .ui-tab { font-size: var(--font-label); }
+/* Tabs that do not fit scroll sideways; the edge that hides tabs fades out
+   (Tabs.tsx marks it), so a phone shows there is more than the cut tab. */
+.ui-tabs:not(.ui-scroll-tabs)[data-overflow-end="true"] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.ui-tabs:not(.ui-scroll-tabs)[data-overflow-start="true"] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.ui-tabs:not(.ui-scroll-tabs)[data-overflow-end="true"]:dir(rtl) {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.ui-tabs:not(.ui-scroll-tabs)[data-overflow-start="true"]:dir(rtl) {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+/* Both edges hide tabs: fade both, in either direction (after the RTL rules
+   on purpose — same specificity, so order decides). */
+.ui-tabs:not(.ui-scroll-tabs)[data-overflow-start="true"][data-overflow-end="true"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+@media (forced-colors: active) {
+  .ui-tabs:not(.ui-scroll-tabs)[data-overflow-start][data-overflow-end] {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
 @media (hover: hover) {
   .ui-tab:hover:not(:disabled) { color: var(--text); background: var(--surface-overlay-hover); border-color: transparent; }
 }
@@ -20215,6 +20333,12 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
 /* Header: fixed action slots so × never shifts between pages. */
 .settings-pane-head-actions { flex: none; margin-inline-start: auto; }
 .settings-pane-head-actions .dialog-hint { margin-inline-start: 0; }
+/* A touch-only device (a phone in landscape gets the two-pane settings) has
+   no Esc key or ⌘K to press: the keyboard hints are noise there. */
+@media (hover: none) and (pointer: coarse) {
+  .settings-pane-head-actions .dialog-hint,
+  .settings-nav-search-kbd { display: none; }
+}
 .settings-head-help-slot {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: var(--control-h-sm); min-height: var(--control-h-sm);
@@ -20275,12 +20399,15 @@ html[data-reduce-animations="true"] :is(.settings-page-stage, .settings-nav-skel
 }
 
 /* Phone: a row whose only control is a switch stays inline, switch at the
-   end beside its label (C7); other controls keep the stacked layout. */
+   end beside its label (C7); other controls keep the stacked layout. A switch
+   alone in an inline-controls group (desktop notifications, before it asks
+   for the browser permission) is the same row; it used to drop under the
+   label on the left while its neighbours' switches sat at the end. */
 @media (max-width: 700px) {
-  .settings-pane-body .set-row:not(.is-stacked):has(> .set-row-control > .switch:only-child) {
+  .settings-pane-body .set-row:not(.is-stacked):has(> .set-row-control > .switch:only-child, > .set-row-control > .settings-inline-controls:only-child > .switch:only-child) {
     flex-direction: row; align-items: center;
   }
-  .settings-pane-body .set-row:not(.is-stacked):has(> .set-row-control > .switch:only-child) > .set-row-control {
+  .settings-pane-body .set-row:not(.is-stacked):has(> .set-row-control > .switch:only-child, > .set-row-control > .settings-inline-controls:only-child > .switch:only-child) > .set-row-control {
     width: auto; flex: none; justify-content: flex-end;
   }
 }

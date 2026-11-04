@@ -399,6 +399,14 @@
     padding-inline: 0;
     line-height: var(--font-response-lh);
   }
+  /* On a 320–360px phone the hint does not fit beside Add, the context pie,
+     approval and Send; the textarea clipped it mid-letter ("Напишіть F").
+     The hint itself ellipsizes instead (the draft text is unaffected). */
+  .composer-mobile.composer-collapsed .composer-card textarea::placeholder {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   /* The rail is one optical baseline. It is two blocks with one rhythm: Add
      leads the first block and every contributed control follows at the same

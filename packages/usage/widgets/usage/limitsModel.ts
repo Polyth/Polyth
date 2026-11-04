@@ -319,6 +319,24 @@ export function limitsWidgetPreferences(config: Readonly<JsonObject>): LimitsWid
   };
 }
 
+/** What `current` reads limits for: a session, or on the new-chat board the
+ *  composer's model before any session exists. `title` names it when empty. */
+export type LimitsSubject = LimitsSession & { title?: string };
+
+/**
+ * The subject of a `current` widget. The new-chat board passes the composer's
+ * model, which wins: a session left active behind that screen is not the one
+ * about to start.
+ */
+export function limitsSubject(
+  composerModel: { harnessId: string; providerID: string; modelID: string } | undefined,
+  session: LimitsSubject | null,
+): LimitsSubject | null {
+  if (!composerModel) return session;
+  const { harnessId, providerID, modelID } = composerModel;
+  return { resolvedHarnessId: harnessId, model: { providerID, modelID } };
+}
+
 type LimitSourceRef = Pick<UsageLimitSnapshotDto, "providerId" | "account">;
 
 /** A source's display name; one account of a multi-account harness reads `<source> · <account>`. */

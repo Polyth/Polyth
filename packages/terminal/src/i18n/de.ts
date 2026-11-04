@@ -75,6 +75,7 @@ export const de: TerminalMessages = {
   "terminalview.swipeUpFor": "Nach oben wischen für {key}",
   "terminalview.terminalTabName": "Name der Terminal-Registerkarte",
   "terminalview.terminalValue": "Terminal {title}",
+  "terminalview.title": "Terminal",
   "terminalview.textInput": "Texteingabe",
   "terminalview.textInputPlaceholder": "Befehl eingeben, Enter sendet ihn",
   "terminalview.toggleKeyboard": "Tastatur ein- oder ausblenden",

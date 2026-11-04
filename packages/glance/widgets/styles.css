@@ -1,13 +1,11 @@
-/* Glance tiles: a quiet card that fills its board/canvas cell. */
+/* Glance tiles fill their cell; the card around them is the host's (the
+   new-chat board's tile, the Canvas card). */
 .glance-tile {
   container: glance-tile / inline-size;
   box-sizing: border-box;
   block-size: 100%;
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-card);
-  background: var(--surface-1);
   color: var(--text);
 }
 .glance-meta {

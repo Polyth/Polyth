@@ -457,7 +457,12 @@ Themed thin scrollbars are global. Height caps for overlay bodies derive from
 visible band already excludes the keyboard. A Markdown table is a scroll area
 of its own: the renderer wraps it in `.md-table-scroll`, whose `overflow-x:
 auto; overflow-y: hidden` keeps the grid at `width: max-content` so a narrow
-column scrolls the table instead of crushing its cells.
+column scrolls the table instead of crushing its cells. A `Tabs` strip that
+does not fit scrolls sideways the same way: the primitive marks the edge that
+hides tabs (`data-overflow-start` / `data-overflow-end`), CSS fades that edge,
+and the selected tab is scrolled into the visible part, so a phone never shows
+a tab cut at the border with nothing hinting at more. Strips that opt into
+`.ui-scroll-tabs` keep that class's own edge fade.
 
 ## 12. Mobile rules
 
@@ -490,6 +495,19 @@ column scrolls the table instead of crushing its cells.
   rules. Both surfaces run the same commands (`selectionCommands.ts`).
 - Package/panel content adapts with container queries; viewport media queries
   are shell-only.
+- Narrow phones (320–375px) are first-class: check every surface at 320, 360
+  and 393px. Recurring causes of broken layouts there, with the fix to reach
+  for: an implicit `auto` grid column or a flex child without `min-width: 0`
+  grows to its widest unwrapped child and pushes the page past the screen
+  (use `grid-template-columns: minmax(0, 1fr)`); a trailing control or badge
+  beside text squeezes the text to one word per line (move it below the text
+  in a narrow container query); a hint beside a name truncates the name (put
+  the hint on a second line). A phone settings page scrolls vertically only
+  (`overflow-x: hidden` on `.settings-mobile-page .settings-pane-body`), its
+  header drops the "Back" word below 400px so the page title fits, and the
+  Workspace launcher grid uses three columns up to a 420px container so tile
+  labels are not broken mid-word. Placeholders ellipsize (`input:placeholder-shown`
+  and the collapsed composer's `::placeholder`) instead of being cut mid-letter.
 
 ## 13. Desktop density
 

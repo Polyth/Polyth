@@ -82,7 +82,10 @@ export const USAGE_WIDGETS: readonly WidgetContributionDescriptor[] = [
     description: "Provider rate limits, quotas, pace forecasts, and resets.",
     kind: "widget",
     defaultSlot: "workspace.right",
+    // `session.empty.widgets` is the new-chat board: there "current" means the
+    // model the composer is about to start on (`composerModel`).
     supportedSlots: [
+      "session.empty.widgets",
       "session.composer.before",
       "workspace.left",
       "workspace.main",

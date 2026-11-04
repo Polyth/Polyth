@@ -47,6 +47,13 @@
   flex: 0 0 auto;
 }
 
+/* The tab strip scrolls inside its own box (Tabs owns that overflow); the
+   header only has to let it shrink so the icon buttons beside it stay on
+   screen. */
+.usage-clean-scope-tabs {
+  min-width: 0;
+}
+
 /* The project picker is the only flexible control in the strip. A fixed width
    with the default min-width: 0 let the fixed tabs/freshness squeeze it to an
    empty pill; it now keeps a readable floor and the strip wraps instead. */
@@ -68,6 +75,7 @@
 
 .usage-clean-toolbar-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-1);
 }
@@ -1156,11 +1164,14 @@
 
   .usage-clean-scope-tabs {
     grid-column: 1;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .usage-clean-toolbar-actions {
     grid-column: 2;
     grid-row: 1;
+    flex: none;
   }
 
   .usage-clean-project,
@@ -1278,11 +1289,62 @@
   }
 }
 
-@container usage-clean (max-width: 380px) {
+/* Phones: a pair of compact readings per row instead of one tall card per
+   number. The pane is only ~288px at 320px, so the single column below waits
+   until two cards can no longer hold a label and its value. */
+@container usage-clean (max-width: 520px) {
+  .usage-clean-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .usage-clean-kpi {
+    min-height: 88px;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .usage-clean-kpi-head > span:first-child {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .usage-clean-kpi-value > strong {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .usage-clean-kpi .usage-clean-ring {
+    inline-size: 32px;
+  }
+}
+
+/* Two cards on a 320px screen leave ~112px of text per card. The longest
+   reading ("0,0046 USD") must stay whole, so the figure steps down once and
+   the card trims its inline padding instead of ellipsizing the number. */
+@container usage-clean (max-width: 360px) {
+  .usage-clean-kpi {
+    padding: var(--space-2);
+  }
+
+  .usage-clean-kpi-value > strong,
+  .usage-clean-kpi[data-primary] .usage-clean-kpi-value > strong {
+    font-size: calc(var(--font-label) * 1.3);
+  }
+}
+
+@container usage-clean (max-width: 280px) {
   .usage-clean-overview {
     grid-template-columns: minmax(0, 1fr);
   }
+}
 
+@container usage-clean (max-width: 380px) {
   .usage-clean-section > header {
     flex-direction: column;
   }

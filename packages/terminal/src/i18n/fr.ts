@@ -75,6 +75,7 @@ export const fr: TerminalMessages = {
   "terminalview.swipeUpFor": "Balayez vers le haut pour {key}",
   "terminalview.terminalTabName": "Nom de l'onglet du terminal",
   "terminalview.terminalValue": "Terminal {title}",
+  "terminalview.title": "Terminal",
   "terminalview.textInput": "Saisie de texte",
   "terminalview.textInputPlaceholder": "Tapez une commande, Entrée l'envoie",
   "terminalview.toggleKeyboard": "Afficher ou masquer le clavier",

@@ -821,7 +821,7 @@ body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="st
   border-radius: var(--look-select-radius) !important;
 }
 
-body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active) {
+body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active):where(:not(:disabled)) {
   background: none !important;
 }
 

@@ -88,6 +88,15 @@ test("full-row actions wrap under the copy instead of squeezing it to nothing", 
   assert.ok(phone.noticeHeight < 300, `the notice stays a short card (${phone.noticeHeight}px tall)`);
 });
 
+test("on a phone the actions move under the copy before they fold it", { skip: !CHROME }, async () => {
+  // No consumer rule: a 288px settings card on a 320px phone. The copy used to
+  // keep the row until it was down to its longest word (one or two words per
+  // line beside the button).
+  const phone = await measure(288, false);
+  assert.ok(phone.copyWidth > 200, `copy keeps a readable measure (${phone.copyWidth}px of ${phone.noticeWidth}px)`);
+  assert.ok(phone.actionsTop >= phone.copyBottom, "the actions start below the copy");
+});
+
 test("actions that fit stay on the copy's row", { skip: !CHROME }, async () => {
   const wide = await measure(652, false);
   assert.ok(wide.actionsTop < wide.copyBottom, "the actions share the copy's row");

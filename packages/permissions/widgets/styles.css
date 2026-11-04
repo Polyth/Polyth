@@ -633,6 +633,23 @@ body[data-glass="off"] .perm-banner .permission-scroll-edge[data-edge="end"] { m
   height: var(--tap);
 }
 
+/* Phones only: the three segments are bare glyphs, so the switch names the
+   level it shows in one line under the track. Decorative for assistive
+   technology (the options carry the same names). */
+.approval-level-caption {
+  display: block;
+  max-width: 100%;
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Narrow cards (phones): two columns, so every full label has room in any
    language. Deny and Allow share the first row; the policy action takes the
    second (two rows of two on a subagent card). Short labels remain only for

@@ -182,7 +182,7 @@ function PackageRow({
           {descriptor.core ? (
             <span className="package-locked">
               <Icon icon={LockIcon} size="sm" />
-              {tr("settings.packagespage.alwaysOn")}
+              <span className="package-locked-label">{tr("settings.packagespage.alwaysOn")}</span>
             </span>
           ) : (
             <>

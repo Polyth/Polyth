@@ -1977,6 +1977,7 @@
 /* Height animates through grid rows so content never needs a fixed size. */
 .tt-collapse {
   display: grid;
+  min-width: 0;
   grid-template-rows: 1fr;
   transition: grid-template-rows var(--motion-surface) var(--motion-ease);
 }
@@ -1987,6 +1988,7 @@
 
 .tt-collapse-inner {
   display: grid;
+  min-width: 0;
   min-height: 0;
   gap: var(--space-3);
   padding-top: var(--space-3);
@@ -2002,9 +2004,18 @@
 
 .tt-service-status {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* A long state badge (the demo sandbox label) wraps inside the card instead of
+   forcing the collapse body wider than the card on a phone. */
+.tt-collapse-inner .ui-badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .tt-service-hint {

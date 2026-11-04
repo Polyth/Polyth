@@ -350,6 +350,19 @@ test("the current harness shows only its source and the current model's windows,
   } finally { await sonnet.dispose(); }
 });
 
+test("on the new-chat board the composer's model is the current one, over a session left active", async () => {
+  const composer = { harnessId: "codex", providerID: "openai", modelID: "gpt-5.5" };
+  assert.equal(model.limitsSubject(undefined, claudeOpus), claudeOpus, "without a composer model the session stays the subject");
+  const subject = model.limitsSubject(composer, claudeOpus);
+  assert.deepEqual(subject, { resolvedHarnessId: "codex", model: { providerID: "openai", modelID: "gpt-5.5" } });
+  const card = await mount(createElement(LimitsWidget, { session: subject, config: {}, editing: false, panelSize: "compact" }));
+  try {
+    assert.match(card.element.querySelector(".usage-widget-heading strong")!.textContent!, /^Codex · gpt-5\.5$/);
+    assert.match(card.text(), /5h limit/);
+    assert.doesNotMatch(card.text(), /Claude|Opus/);
+  } finally { await card.dispose(); }
+});
+
 test("the current harness states why nothing is shown: no session, no matching source", async () => {
   const none = await mount(widget({}, null));
   try {

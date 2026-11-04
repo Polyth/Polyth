@@ -75,6 +75,7 @@ export const pt: TerminalMessages = {
   "terminalview.swipeUpFor": "Deslize para cima para {key}",
   "terminalview.terminalTabName": "Nome do separador do terminal",
   "terminalview.terminalValue": "Terminal {title}",
+  "terminalview.title": "Terminal",
   "terminalview.textInput": "Entrada de texto",
   "terminalview.textInputPlaceholder": "Escreva um comando, Enter envia",
   "terminalview.toggleKeyboard": "Mostrar ou ocultar o teclado",

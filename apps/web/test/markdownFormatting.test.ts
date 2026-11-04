@@ -148,8 +148,8 @@ test("tables keep GFM column alignment, escaped pipes and a regular grid", () =>
   assert.deepEqual(table.rows[0]![1], [{ kind: "text", text: "a | b" }]);
   assert.equal(table.rows[1]!.length, 3);
   const out = html("| A | B |\n| :-: | --: |\n| 1 | 2 |");
-  assert.match(out, /<th style="text-align:center"><span>A<\/span><\/th><th style="text-align:end"><span>B<\/span><\/th>/);
-  assert.match(out, /<td style="text-align:center"><span>1<\/span><\/td>/);
+  assert.match(out, /<th style="text-align:center"><span class="md-cell"><span>A<\/span><\/span><\/th><th style="text-align:end"><span class="md-cell"><span>B<\/span><\/span><\/th>/);
+  assert.match(out, /<td style="text-align:center"><span class="md-cell"><span>1<\/span><\/span><\/td>/);
 });
 
 test("a one-column table parses; a lone rule stays a rule", () => {
@@ -159,7 +159,7 @@ test("a one-column table parses; a lone rule stays a rule", () => {
 
 test("<br> in a cell is a line break", () => {
   assert.deepEqual(parseInline("one<br>two").map((n) => n.kind), ["text", "break", "text"]);
-  assert.match(html("| A |\n| - |\n| one<br/>two |"), /<td><span>one<\/span><br\/><span>two<\/span><\/td>/);
+  assert.match(html("| A |\n| - |\n| one<br/>two |"), /<td><span class="md-cell"><span>one<\/span><br\/><span>two<\/span><\/span><\/td>/);
 });
 
 // ------------------------------------------------------------------ inline

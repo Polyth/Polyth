@@ -187,7 +187,7 @@ export default function JudgesSettings({ projectId, openJudgment, confirm = (tex
   return <div className="judges-settings" aria-busy={busy}>
     {blurb}
     {!snapshot.judgmentAvailable && <Notice tone="warning" heading={tr("judgesui.notRunning")}>{tr("judgesui.notRunningBody")}</Notice>}
-    <Notice tone="info" actions={<Button size="sm" variant="quiet" onClick={openJudgment}>{tr("judgesui.openJudgment")}</Button>}>
+    <Notice className="judges-intro-notice" tone="info" actions={<Button size="sm" variant="quiet" onClick={openJudgment}>{tr("judgesui.openJudgment")}</Button>}>
       {tr("judgesui.builtinNote")}
     </Notice>
     {error !== undefined && <ErrorState compact title={tr("judgesui.wentWrong")} error={error} onRetry={() => setReload((value) => value + 1)} />}

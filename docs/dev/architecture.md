@@ -834,9 +834,13 @@ and user aborts remain recoverable.
   colour and glyph (empty shield = Ask, shield-check = Auto-Approve, shield-alert =
   Full access). A click or tap opens the same anchored icon-only segmented
   switch on desktop and phone (`Popover`, `compact` on phones); level names
-  and meanings live only in each segment's label/tooltip so the switch never
+  and meanings live in each segment's label/tooltip so the switch never
   resizes while switching, arrows move within the radio group, a choice
-  closes it (Full access asks first), and the new-chat composer holds the choice until the chat exists
+  closes it on desktop (Full access asks first). A phone has no tooltips, so
+  there the switch adds one `aria-hidden` caption under the track naming the
+  level it shows (or the level a pending tap asks for) and stays open after a
+  tap so the caption confirms the choice; tapping the current level or
+  outside closes it. The new-chat composer holds the choice until the chat exists
   (`setDraftAutoApprove`); until a level is picked it shows, and the chat
   inherits, its project's approval default (else the Space's). The trigger's
   tooltip says whether the level was chosen for the chat or follows a

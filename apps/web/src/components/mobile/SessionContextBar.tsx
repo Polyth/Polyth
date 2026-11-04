@@ -72,7 +72,7 @@ function ContextSelector({
       className={`context-selector context-selector-branch${lockedReason ? " is-locked" : ""}`}
       label={label}
       items={lockedReason ? [] : choices.map((choice) => ({ ...choice, group: "" }))}
-      popoverClassName={`context-picker-pop${lockedReason ? " context-picker-note" : ""}`}
+      popoverClassName={`context-picker-pop context-branch-pop${lockedReason ? " context-picker-note" : ""}`}
       value={current}
       onPick={onPick}
       {...(onOpen ? { onOpen } : {})}

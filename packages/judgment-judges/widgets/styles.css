@@ -79,6 +79,16 @@
 .judges-table .judges-table-quiet { color: var(--muted); }
 .judges-table .judges-table-title { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
+/* Narrow panes: the intro notice's action moves under its copy so the text
+   keeps the full card width instead of being squeezed into a column. */
+@container judges-settings (max-width: 30rem) {
+  .judges-settings .judges-intro-notice .ui-notice-actions {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+    justify-content: flex-start;
+  }
+}
+
 /* Narrow panes: each turn becomes two lines (chat title, then answer · chance · result), no sideways scroll. */
 @container judges-settings (max-width: 32rem) {
   .judges-item { padding-inline: var(--space-3); }

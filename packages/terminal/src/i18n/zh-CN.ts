@@ -75,6 +75,7 @@ export const zhCN: TerminalMessages = {
   "terminalview.swipeUpFor": "上滑输入 {key}",
   "terminalview.terminalTabName": "终端标签页名称",
   "terminalview.terminalValue": "终端 {title}",
+  "terminalview.title": "终端",
   "terminalview.textInput": "文本输入",
   "terminalview.textInputPlaceholder": "输入命令，按 Enter 发送",
   "terminalview.toggleKeyboard": "显示或隐藏键盘",
