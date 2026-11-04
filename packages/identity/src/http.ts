@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { controlError, digest } from '@polyth/control-plane';
 import { newToken, validToken } from './validation.ts';
-import type { IdentitySession } from './types.ts';
+import type { IdentitySession, IdentityUser } from './types.ts';
 import type { IdentityService } from './index.ts';
 
 const loopback = (address?: string): boolean => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '');
@@ -203,9 +203,64 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
       csrfToken: csrfFor(nonce),
     };
   };
+  const accountsBody = (actorId: string, accounts: readonly IdentityUser[], canManage: boolean) => ({
+    currentAccountId: actorId,
+    canManage,
+    accounts: accounts.map(account => ({
+      ...account, name: account.displayName, current: account.id === actorId,
+      ...(canManage && identity.guardrails.forUser(account.id).guardrails !== null ? { guarded: true } : {}),
+      // The owner's list shows each account's limits and today's use
+      // without one request per account.
+      ...(canManage ? {
+        limits: identity.limits.forUser(account.id).limits,
+        usage: identity.limits.usage(account.id),
+        permissions: identity.permissions.forUser(account.id).permissions,
+      } : {}),
+    })),
+  });
+  const meBody = (user: IdentityUser) => ({
+    ...user,
+    guardrails: identity.guardrails.forUser(user.id).guardrails,
+    limits: identity.limits.forUser(user.id).limits,
+    usage: identity.limits.usage(user.id),
+    permissions: identity.permissions.forUser(user.id).permissions,
+  });
   return {
     cookieName,
     requireHuman,
+    /**
+     * `GET /api/auth/accounts` and `GET /api/auth/me` for an account the host
+     * authenticated without a browser session: a full-access paired device.
+     * Only reads. Management and self-service need a browser identity session
+     * (same origin, CSRF, owner re-authentication), so `canManage` stays false
+     * and `readOnly` tells the UI to send those changes to a browser. Answers
+     * false for any other request.
+     */
+    handlePairedRead(req: IncomingMessage, res: ServerResponse, userId: string): boolean {
+      const path = req.url;
+      if (req.method !== 'GET' || (path !== '/api/auth/accounts' && path !== '/api/auth/me')) return false;
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      let status = 200, body: unknown;
+      try {
+        body = path === '/api/auth/me'
+          ? meBody(identity.accounts.byUser.current(userId))
+          : {
+              ...accountsBody(userId, identity.accounts.byUser.list(userId), false),
+              readOnly: true,
+              ...(identity.accounts.byUser.isOwner(userId) ? { canManageInBrowser: true } : {}),
+            };
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        const safeCode = typeof code === 'string' && Object.hasOwn(statusFor, code) ? code : 'internal-error';
+        status = statusFor[safeCode] ?? 500;
+        body = { error: safeCode };
+      }
+      res.statusCode = status;
+      res.end(JSON.stringify(body));
+      return true;
+    },
     /** The auth status embedded in the served HTML shell, so boot needs no
      *  status round trip. Null when this transport could not ask for it. The
      *  CSRF token stays out: the page is HTML and the nonce is fetched lazily
@@ -249,32 +304,10 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           }
           const actor = requireHuman(req);
           if (path === '/api/auth/accounts') {
-            const accounts = identity.accounts.list(token!);
-            const canManage = identity.accounts.canManage(token!);
-            send(200, {
-              currentAccountId: actor.userId,
-              canManage,
-              accounts: accounts.map(account => ({
-                ...account, name: account.displayName, current: account.id === actor.userId,
-                ...(canManage && identity.guardrails.forUser(account.id).guardrails !== null ? { guarded: true } : {}),
-                // The owner's list shows each account's limits and today's use
-                // without one request per account.
-                ...(canManage ? {
-                  limits: identity.limits.forUser(account.id).limits,
-                  usage: identity.limits.usage(account.id),
-                  permissions: identity.permissions.forUser(account.id).permissions,
-                } : {}),
-              })),
-            });
+            send(200, accountsBody(actor.userId, identity.accounts.list(token!), identity.accounts.canManage(token!)));
           } else if (path === '/api/auth/sessions') send(200, { sessions: identity.sessions.list(token!) });
           else if (path === '/api/auth/me') {
-            send(200, {
-              ...identity.accounts.current(token!),
-              guardrails: identity.guardrails.forUser(actor.userId).guardrails,
-              limits: identity.limits.forUser(actor.userId).limits,
-              usage: identity.limits.usage(actor.userId),
-              permissions: identity.permissions.forUser(actor.userId).permissions,
-            });
+            send(200, meBody(identity.accounts.current(token!)));
           } else if (accountGuardrailsPath.test(path)) {
             send(200, identity.guardrails.get(token!, accountGuardrailsPath.exec(path)![1]!));
           } else if (accountLimitsPath.test(path)) {

@@ -3657,6 +3657,8 @@ export const en = {
   "settings.users.secureReason": "Before you add people, set a password for your own account. Polyth has none yet, so it opens only in this app.",
   "settings.users.securedNotice": "Your account is protected; you sign in as @{login}. Now add the first person.",
   "settings.users.selfHint": "Name, password, passkeys and signed-in devices",
+  "settings.users.selfHintBrowser": "Change your name, password and passkeys in a browser signed in to this server",
+  "settings.users.manageInBrowser": "Add or change users in a browser signed in to this server.",
   "settings.users.unavailable": "Users unavailable",
   "settings.users.unnamedAccount": "Unnamed account",
   "settings.users.you": "You",

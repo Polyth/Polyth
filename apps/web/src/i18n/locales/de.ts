@@ -3654,6 +3654,8 @@ export const de: AppMessages = {
   "settings.users.secureReason": "Bevor Sie Personen hinzufügen, legen Sie ein Passwort für Ihr eigenes Konto fest. Polyth hat noch keins und öffnet sich daher nur in dieser App.",
   "settings.users.securedNotice": "Ihr Konto ist geschützt; Sie melden sich als @{login} an. Fügen Sie jetzt die erste Person hinzu.",
   "settings.users.selfHint": "Name, Passwort, Passkeys und angemeldete Geräte",
+  "settings.users.selfHintBrowser": "Name, Passwort und Passkeys lassen sich in einem Browser ändern, der bei diesem Server angemeldet ist",
+  "settings.users.manageInBrowser": "Benutzer lassen sich in einem Browser hinzufügen oder ändern, der bei diesem Server angemeldet ist.",
   "settings.users.unavailable": "Benutzer nicht verfügbar",
   "settings.users.unnamedAccount": "Unbenanntes Konto",
   "settings.users.you": "Sie",

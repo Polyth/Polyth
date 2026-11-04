@@ -3654,6 +3654,8 @@ export const bg: AppMessages = {
   "settings.users.secureReason": "Преди да добавяте хора, задайте парола за собствения си профил. Polyth все още няма такава, затова се отваря само в това приложение.",
   "settings.users.securedNotice": "Вашият профил е защитен; влизате като @{login}. Сега добавете първия човек.",
   "settings.users.selfHint": "Име, парола, ключове за достъп и устройства с вход",
+  "settings.users.selfHintBrowser": "Името, паролата и ключовете за достъп се променят в браузър с вход в този сървър",
+  "settings.users.manageInBrowser": "Добавяйте или променяйте потребители в браузър с вход в този сървър.",
   "settings.users.unavailable": "Потребителите не са налични",
   "settings.users.unnamedAccount": "Профил без име",
   "settings.users.you": "Вие",

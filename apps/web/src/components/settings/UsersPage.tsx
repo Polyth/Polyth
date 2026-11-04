@@ -54,6 +54,8 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
   const [currentAccountId, setCurrentAccountId] = useState("");
   const [loadError, setLoadError] = useState<unknown>(null);
   const [canManageAccounts, setCanManageAccounts] = useState(false);
+  // A paired phone reads accounts; changes happen in a signed-in browser.
+  const [readOnly, setReadOnly] = useState<{ owner: boolean } | null>(null);
   const [spaceAccess, setSpaceAccess] = useState<CurrentSpaceAccess | null>(null);
   const [harnessNames, setHarnessNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -83,6 +85,7 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
       setAccounts(state.accounts);
       setCurrentAccountId(state.currentAccountId);
       setCanManageAccounts(state.canManage);
+      setReadOnly(state.readOnly ? { owner: state.canManageInBrowser } : null);
       setSpaceAccess(access);
       setLoadError(null);
     } catch (cause) {
@@ -161,7 +164,7 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
     );
   }
 
-  if (ownOpen && self) {
+  if (ownOpen && self && !readOnly) {
     return (
       <div className="users-page">
         <AccountDetail
@@ -200,6 +203,25 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
     );
   }
 
+  const selfCard = self && (
+    <>
+      <span className="user-avatar is-large is-self" aria-hidden="true">{initials(displayName(self))}</span>
+      <span className="user-row-copy">
+        <span className="user-row-name">
+          <strong>{displayName(self)}</strong>
+          <Badge tone="accent">{tr("settings.users.you")}</Badge>
+        </span>
+        <span className="user-row-meta">
+          {[
+            self.login ? `@${self.login}` : null,
+            spaceAccess ? tr("settings.users.roleIn", { role: roleText(spaceAccess.role).label, space: spaceAccess.name }) : null,
+          ].filter(Boolean).join(" · ")}
+        </span>
+        <span className="users-self-hint">{tr(readOnly ? "settings.users.selfHintBrowser" : "settings.users.selfHint")}</span>
+      </span>
+    </>
+  );
+
   const openAdd = () => {
     setFeedback(null);
     if (localAccess) setSecuring(true);
@@ -217,7 +239,10 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
       )}
       {loadError !== null && <ErrorState compact error={loadError} onRetry={() => void refresh()} />}
 
-      {self && (
+      {self && (readOnly ? (
+        // Name, password and passkeys change only in a signed-in browser.
+        <div className="users-self-card is-readonly" data-settings-item="users.account">{selfCard}</div>
+      ) : (
         <button
           type="button"
           className="users-self-card"
@@ -225,23 +250,10 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
           data-settings-item="users.account"
           onClick={() => { setFeedback(null); setOwnOpen(true); }}
         >
-          <span className="user-avatar is-large is-self" aria-hidden="true">{initials(displayName(self))}</span>
-          <span className="user-row-copy">
-            <span className="user-row-name">
-              <strong>{displayName(self)}</strong>
-              <Badge tone="accent">{tr("settings.users.you")}</Badge>
-            </span>
-            <span className="user-row-meta">
-              {[
-                self.login ? `@${self.login}` : null,
-                spaceAccess ? tr("settings.users.roleIn", { role: roleText(spaceAccess.role).label, space: spaceAccess.name }) : null,
-              ].filter(Boolean).join(" · ")}
-            </span>
-            <span className="users-self-hint">{tr("settings.users.selfHint")}</span>
-          </span>
+          {selfCard}
           <ChevronRightIcon className="user-row-chevron" aria-hidden="true" />
         </button>
-      )}
+      ))}
 
       <Section
         title={tr("settings.users.people")}
@@ -252,7 +264,7 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
             : tr(new Intl.PluralRules(getLocale()).select(others.length) === "one"
               ? "settings.users.peopleHintOne"
               : "settings.users.peopleHintOther", { count: others.length })
-          : tr("settings.users.peopleHintReadonly")}
+          : readOnly?.owner ? tr("settings.users.manageInBrowser") : tr("settings.users.peopleHintReadonly")}
         action={canManageAccounts ? (
           <Button variant="primary" size="sm" iconStart={AddIcon} onClick={openAdd}>{tr("settings.users.addUser")}</Button>
         ) : undefined}
@@ -277,7 +289,9 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
                 compact
                 icon="user"
                 title={tr("settings.users.onlyYou")}
-                body={canManageAccounts ? tr("settings.users.onlyYouBody") : tr("settings.users.onlyYouBodyReadonly")}
+                body={canManageAccounts
+                  ? tr("settings.users.onlyYouBody")
+                  : readOnly?.owner ? tr("settings.users.manageInBrowser") : tr("settings.users.onlyYouBodyReadonly")}
                 {...(canManageAccounts ? { action: { label: tr("settings.users.addUser"), onClick: openAdd } } : {})}
               />
             )

@@ -5389,8 +5389,10 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
   color: var(--text); font: inherit; text-align: start; cursor: pointer;
   transition: border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
+/* A paired phone shows the card without the AccountDetail drill-in. */
+.users-self-card.is-readonly { cursor: default; }
 @media (hover: hover) {
-  .users-self-card:hover:where(:not(:disabled)) { border-color: var(--border); box-shadow: var(--shadow-md); }
+  .users-self-card:hover:where(:not(:disabled, .is-readonly)) { border-color: var(--border); box-shadow: var(--shadow-md); }
 }
 .users-self-card .user-row-name strong { font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.01em; }
 .users-self-hint { margin-top: 2px; font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--text-dim); }

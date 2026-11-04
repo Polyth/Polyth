@@ -3654,6 +3654,8 @@ export const uk: AppMessages = {
   "settings.users.secureReason": "Перш ніж додавати людей, встановіть пароль для власного облікового запису. Пароля ще немає, тому Polyth відкривається лише в цьому застосунку.",
   "settings.users.securedNotice": "Ваш обліковий запис захищено; ви входите як @{login}. Тепер додайте першу людину.",
   "settings.users.selfHint": "Ім’я, пароль, ключі доступу й пристрої, на яких виконано вхід",
+  "settings.users.selfHintBrowser": "Ім’я, пароль і ключі доступу змінюються в браузері, де виконано вхід на цей сервер",
+  "settings.users.manageInBrowser": "Додавати або змінювати користувачів можна в браузері, де виконано вхід на цей сервер.",
   "settings.users.unavailable": "Користувачі недоступні",
   "settings.users.unnamedAccount": "Обліковий запис без імені",
   "settings.users.you": "Ви",

@@ -33,8 +33,10 @@ or unauthenticated share link.
 5. **Remote policy.** Paired devices without `device.full-access` are
    default-deny (see Route matrix). Packages declare
    `remoteAccess` manifests. Unknown routes are rejected before handlers.
-   Of `/api/auth/*`, a paired device reaches only `GET /api/auth/status`
-   (core route, `core.health.read`); browser identity HTTP stays public-only.
+   Of `/api/auth/*`, a paired device reaches `GET /api/auth/status` (core
+   route, `core.health.read`); a full-access device also reads its own
+   account through `GET /api/auth/accounts` and `GET /api/auth/me` (see
+   Route matrix). All other browser identity HTTP stays public-only.
 6. **Compression.** HTTP is relayed byte-for-byte, so the request
    allowlist forwards `Accept-Encoding` and the server's gzip (JSON above
    1 KiB, static text) crosses the link; `Content-Encoding` was already on
@@ -210,8 +212,16 @@ remote-safe is listed in `CORE_REMOTE_ACCESS`. Packages without `remoteAccess`
 are local-only. Privileged capabilities (full access, pairing, grants, identity
 rotate, password, package install, secure-safe export, shutdown) are never
 grantable to guarded accounts or CLI tokens; the owner may grant them to a
-paired device. Link ingress still answers only `GET /api/auth/status` from the
-`/api/auth/*` tree — browser identity stays public-HTTP-only.
+paired device. From the `/api/auth/*` tree, Link ingress answers
+`GET /api/auth/status`, and for a full-access device (an unguarded account)
+also `GET /api/auth/accounts` and `GET /api/auth/me` for the device's own
+account (`handlePairedRead` in `@polyth/identity`, gated in
+`packages/server/src/http.ts`). That account list is read-only: `canManage` is
+false and `readOnly: true` (`canManageInBrowser` for an owner) tells Settings →
+Users to send changes to a browser signed in to the server. Account changes,
+passkeys, sessions and every other identity route need a browser identity
+session (same origin, CSRF, owner re-authentication) and stay
+public-HTTP-only.
 
 See `packages/server/src/remotePolicy.ts` and each package `serverEntry`.
 

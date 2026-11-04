@@ -295,6 +295,43 @@ test('HTTP owner account management: limits, rename and password reset need an e
   assert.equal((await member.request('/api/auth/me')).status, 401);
 });
 
+test('paired reads answer only the account views, read-only, for the account the host resolved', async t => {
+  const f = await httpFixture(t), owner = f.browser();
+  await f.setup(owner);
+  const created = await owner.request('/api/auth/accounts', { login: 'olena', name: 'Olena', password: 'member test passphrase' });
+  const memberId = created.value.id as string;
+  const ownerId = (await owner.request('/api/auth/me')).value.id as string;
+  const read = (url: string, userId: string, method = 'GET') => {
+    const headers = new Map<string, unknown>();
+    const res = { statusCode: 0, body: '', setHeader(name: string, value: unknown) { headers.set(name.toLowerCase(), value); }, end(chunk: string) { this.body = chunk; } };
+    const handled = f.adapter.handlePairedRead({ method, url } as never, res as never, userId);
+    return { handled, status: res.statusCode, value: res.body ? JSON.parse(res.body) as Record<string, any> : null, headers };
+  };
+
+  const ownerView = read('/api/auth/accounts', ownerId);
+  assert.equal(ownerView.handled, true); assert.equal(ownerView.status, 200);
+  assert.equal(ownerView.headers.get('cache-control'), 'no-store');
+  assert.equal(ownerView.value!.currentAccountId, ownerId);
+  assert.equal(ownerView.value!.canManage, false);
+  assert.equal(ownerView.value!.readOnly, true);
+  assert.equal(ownerView.value!.canManageInBrowser, true);
+  assert.deepEqual(ownerView.value!.accounts.map((a: { id: string }) => a.id).sort(), [ownerId, memberId].sort());
+  // Owner-only columns stay with a browser that can manage.
+  for (const account of ownerView.value!.accounts) assert.equal(account.limits, undefined);
+
+  const memberView = read('/api/auth/accounts', memberId);
+  assert.equal(memberView.value!.canManageInBrowser, undefined);
+  assert.deepEqual(memberView.value!.accounts.map((a: { id: string }) => a.id), [memberId]);
+  const me = read('/api/auth/me', memberId);
+  assert.equal(me.value!.id, memberId); assert.equal(me.value!.login, 'olena'); assert.equal(me.value!.guardrails, null);
+  assert.equal(read('/api/auth/accounts', 'usr_missing').status, 404);
+
+  for (const [url, method] of [['/api/auth/me', 'POST'], ['/api/auth/accounts', 'POST'], ['/api/auth/sessions', 'GET'], ['/api/auth/passkeys', 'GET'], ['/api/auth/accounts?x=1', 'GET']] as const) {
+    const refused = read(url, ownerId, method);
+    assert.equal(refused.handled, false, `${method} ${url}`); assert.equal(refused.status, 0);
+  }
+});
+
 test('HTTP account permissions: only an elevated instance owner grants them, and the account reads its own', async t => {
   const f = await httpFixture(t), owner = f.browser();
   await f.setup(owner);

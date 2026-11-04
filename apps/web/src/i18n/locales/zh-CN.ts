@@ -3654,6 +3654,8 @@ export const zhCN: AppMessages = {
   "settings.users.secureReason": "添加其他人之前，请先为你自己的账户设置密码。Polyth 目前还没有密码，因此只能在此应用中打开。",
   "settings.users.securedNotice": "你的账户已受保护；你将以 @{login} 身份登录。现在添加第一位成员吧。",
   "settings.users.selfHint": "姓名、密码、通行密钥和已登录的设备",
+  "settings.users.selfHintBrowser": "姓名、密码和通行密钥需在已登录此服务器的浏览器中更改",
+  "settings.users.manageInBrowser": "请在已登录此服务器的浏览器中添加或更改用户。",
   "settings.users.unavailable": "无法获取用户",
   "settings.users.unnamedAccount": "未命名账户",
   "settings.users.you": "你",

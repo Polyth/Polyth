@@ -36,16 +36,24 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
     `SELECT r.user_id FROM instance_roles r JOIN principals p ON p.id=r.user_id
       WHERE r.role='owner' AND p.status='active' AND p.kind='user' ORDER BY r.user_id LIMIT 1`,
   )?.user_id;
+  /** Owners see every account; anyone else only their own. */
+  const listFor = (userId: string): IdentityUser[] => {
+    if (!hasOwnerRole(userId)) return [get(userId)];
+    return control.all<{ id: string }>(
+      'SELECT u.id FROM users u JOIN principals p ON p.id=u.id ORDER BY u.created_at_ms,u.id',
+    ).map(row => get(row.id));
+  };
   return {
     activeOwnerUserId,
     current(token: string): IdentityUser { return get(sessions.require(token).userId); },
     canManage(token: string): boolean { return hasOwnerRole(sessions.require(token).userId); },
-    list(token: string): IdentityUser[] {
-      const actor = sessions.require(token);
-      if (!hasOwnerRole(actor.userId)) return [get(actor.userId)];
-      return control.all<{ id: string }>(
-        'SELECT u.id FROM users u JOIN principals p ON p.id=u.id ORDER BY u.created_at_ms,u.id',
-      ).map(row => get(row.id));
+    list(token: string): IdentityUser[] { return listFor(sessions.require(token).userId); },
+    /** Reads for an account the host authenticated without a browser session
+     *  (a full-access paired device). They grant no administration. */
+    byUser: {
+      current: get,
+      isOwner: hasOwnerRole,
+      list: listFor,
     },
     async createLocal(token: string, input: { login: string; name: string; password: string }) {
       // A credential-less owner protects their own account before anyone else

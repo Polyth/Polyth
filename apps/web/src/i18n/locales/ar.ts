@@ -3654,6 +3654,8 @@ export const ar: AppMessages = {
   "settings.users.secureReason": "قبل إضافة أشخاص، عيّن كلمة مرور لحسابك. لا توجد كلمة مرور بعد، لذا لا يُفتح Polyth إلا في هذا التطبيق.",
   "settings.users.securedNotice": "حسابك محمي؛ تسجّل الدخول باسم @{login}. أضف الآن أول شخص.",
   "settings.users.selfHint": "الاسم وكلمة المرور ومفاتيح المرور والأجهزة المسجّل الدخول عليها",
+  "settings.users.selfHintBrowser": "يمكن تغيير الاسم وكلمة المرور ومفاتيح المرور من متصفح مسجّل الدخول إلى هذا الخادم",
+  "settings.users.manageInBrowser": "أضف المستخدمين أو غيّرهم من متصفح مسجّل الدخول إلى هذا الخادم.",
   "settings.users.unavailable": "المستخدمون غير متاحين",
   "settings.users.unnamedAccount": "حساب بلا اسم",
   "settings.users.you": "أنت",
