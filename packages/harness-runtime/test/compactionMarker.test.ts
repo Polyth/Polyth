@@ -160,6 +160,11 @@ test("a compaction request is pending until its marker, failure, or the next tur
     compactionRequestState([request, ev("session/compaction-failed", { strategy: "native", error: "nope" })], request, now),
     { kind: "settled" },
   );
+  // The harness gave up and a Polyth compaction took over: still compacting.
+  assert.deepEqual(
+    compactionRequestState([request, ev("session/compaction-failed", { strategy: "runtime", error: "Not enough messages to compact.", fallback: "polyth" })], request, now),
+    { kind: "pending" },
+  );
 });
 
 test("the progress row follows the log from compacting to failed to gone", () => {

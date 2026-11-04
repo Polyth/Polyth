@@ -192,6 +192,9 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
     { methods: ["POST"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
     { methods: ["DELETE"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
+    // The phone's Live Activity: its relay claim and the chat its island shows.
+    { methods: ["GET"], path: "/api/native-push/live-activity", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
+    { methods: ["POST", "PUT", "DELETE"], path: "/api/native-push/live-activity", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
     { methods: ["GET"], path: "/api/packages", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     // The native app's mirror of /packages-manifest.json and /packages/<id>/<file>
     // (its bundled shell cannot serve the host's package bundles). Same read

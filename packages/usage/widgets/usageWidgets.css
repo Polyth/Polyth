@@ -836,6 +836,51 @@
 .usage-limits-widget[data-compact] .usage-limits-hero > div > span { display: flex; align-items: center; gap: var(--space-2); color: var(--text-dim); font-weight: 550; }
 .usage-limits-widget[data-compact] .usage-limits-hero > div > small { overflow-wrap: anywhere; }
 
+/* Phones: the widget is narrower than three columns can share. Each row puts
+   its window name and reading on the first line and the meter across the full
+   second line, so no label truncates and the bar keeps a usable length. */
+@container usage-limits-widget (max-width: 360px) {
+  .usage-limits-rows {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-2);
+  }
+
+  .usage-limits-rows :is(.usage-limits-group, .usage-limits-group > ul) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usage-limits-rows .usage-limits-group > ul > li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-1);
+  }
+
+  .usage-limits-rows .usage-limits-row-label {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .usage-limits-widget[data-compact] .usage-limits-rows .usage-limits-group li > strong {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .usage-limits-rows .usage-limits-group li > :is(.usage-limits-meter, .usage-limits-meter-gap) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* A quarter tile of the new-chat board (~150px): the headline keeps the
+   line (the plan badge steps aside), the hero stacks its figure over its
+   window, and words break between words rather than letters. */
+@container usage-limits-widget (max-width: 239px) {
+  .usage-limits-widget .usage-limits-plan { display: none; }
+  .usage-limits-widget .usage-widget-heading > div { flex: 1 1 auto; }
+  .usage-limits-widget[data-compact] .usage-limits-hero { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
+  .usage-limits-widget[data-compact] .usage-limits-hero > div > small { overflow-wrap: normal; }
+  .usage-limits-widget[data-compact] .usage-limits-chips > li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
 /* Cache warmth in the composer context card (composer.context.details). */
 .usage-context-cache {
   display: grid;

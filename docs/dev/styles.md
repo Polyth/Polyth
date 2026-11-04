@@ -46,7 +46,7 @@ list — other docs link here instead of restating it.
 | `--border` | Structural boundary. |
 | `--border-soft` | Decorative separator that does not identify a control. |
 | `--contour` | The theme's one contour: the edge every glass surface and shell control draws (both rails, the top rail card, header capsules and glyph buttons, the session title, the composer, menus, popovers, help tags, dialogs, sheets and the sessions peek). Resolved on the root, so *Hide interface borders* cannot thin it; each style recipe sets it to its own stroke, and `--material-glass-border` is this token. |
-| `--borderless-edge` | Subtle 12% ink line for intentional lines inside content that survive *Hide interface borders*: the chat activity thread, the outlines of the activity and composer-status looks, the lock screen's fields and a file drop target. Not a surface contour; use `--contour` for those. |
+| `--borderless-edge` | Subtle 12% ink line for intentional lines inside content that survive *Hide interface borders*: the chat activity thread, the outlines of the activity looks, the lock screen's fields and a file drop target. Not a surface contour; use `--contour` for those. |
 | `--control-border` | Recognizable input, button, and interactive-card boundary; stronger on light themes. |
 | `--surface-divider` | Divider between adjacent surfaces. |
 | `--hair` | Lowest-emphasis hairline. |
@@ -77,8 +77,8 @@ glass would otherwise paint under a translucent contour sets
 of its own bright fill and every contour reads at the same weight.
 Affordances keep their edge: a checkbox keeps its outline and a file drop target
 its dashed `--borderless-edge`. The few intentional contours in a transcript keep
-theirs too: the agent activity thread, the Ledger hairlines, the Chip and
-Capsule outlines, the edited-files thread and the subagent branch's thread
+theirs too: the agent activity thread, the Ledger hairlines, the Chip
+outline, the edited-files thread and the subagent branch's thread
 (mixed toward the accent or amber) are backgrounds or inset shadows drawn from
 `--borderless-edge`, and the inline command Stop keeps its red
 outline through an explicit `!important` exception. Markdown structure is
@@ -88,7 +88,9 @@ header and row lines are backgrounds or inset shadows from `--borderless-edge`,
 so a quote never degrades to a bare indent. Activity rings drawn as
 borders are signals, not outlines, and keep theirs the same way: `.ui-spinner`,
 a session row's running ring (`.session-lead-spinner`, also in the subagent
-branch) and the phone navigator's `.mobile-nav-running-ring`. Never draw an intentional line from
+branch), the phone navigator's `.mobile-nav-running-ring` and the composer's
+running context contour (`.context-liquid-host::after`, which is the context
+gauge described in [ui](ui.md)). Never draw an intentional line from
 `--hair*`/`--border-soft`; borderless mode sets them to transparent.
 
 **Wallpaper wash.** A wallpaper is painted under 76% of `--bg`, and chat chrome
@@ -208,12 +210,15 @@ when the locale switches between LTR and RTL.
 | `--activity-row-height` | Density-scaled compact activity/tool row height. |
 | `--agent-dock-height` | Density-scaled expanded active-agent dock height. |
 | `--composer-height` | Density-scaled resting conversation composer height. |
-| `--composer-action-size` | Density-scaled visible send/stop action size. |
+| `--composer-action-size` | Density-scaled visible send/stop action size. The disc reads this size on every pointer; a touch target grows past its edge through `::after`. |
+| `--composer-stack-mark`, `--composer-stack-text`, `--composer-stack-end` | The columns of the pending stack above the composer, measured from the composer card's outer edge: marks are centred on the model logo's column, labels start at the model name, trailing glyphs end where the marks start. Packages that draw a line there (planner, code hosting, git) use them with a fallback. |
+| `--composer-stack-row`, `--composer-stack-control` | One line's height in that stack and the size of a control on it. |
+| `--composer-stack-reach` | How far a line that opens something reaches up into the timeline's bottom space to keep its full touch target while it reads one row tall: 0 on fine pointers. |
 | `--composer-max-input-height` | Font-scaled five-line composer input ceiling. |
 | `--package-window-header-h` | Shared compact package-window header height. |
 | `--package-window-resize-hit` | In-frame resize hit area; host-owned, never package-overridden. |
 | `--hit-min` | Density seam: extra hit-area floor. 0px on fine pointers; core raises it to `--tap` under coarse pointers. Use in `max()` with the control's visual size. |
-| `--nav-tool-step` | Phone Navigator only (set on `.mobile-navigator`): pitch of the toolbar's trailing tools: the full `--tap` floor, so each tool keeps a 44px box. |
+| `--nav-tool-step` | Phone Navigator only (set on `.mobile-navigator`): width of the toolbar's inner tools: the full `--tap` floor, so each tool keeps a 44px box. Their glyphs are placed by ink (`--nav-tool-gap`), not centred in it. |
 
 Controls use the smallest visual height appropriate to their density while
 retaining a `--tap` hit area on phone/coarse-pointer surfaces. Do not enlarge
@@ -230,12 +235,12 @@ bounces it far past the overhang) and that `contentOwnsSwipe`
 (`swipeSurface.ts`) treats as owning horizontal swipes. The transcript and
 the phone new chat follow this (`heroSidewaysPan.test.ts`).
 
-One exception: a trailing cluster of icon tools set to a chat row's mark
-rhythm (the phone Navigator's project New chat and ⋮, `docs/dev/ui.md`; the
-Navigator's toolbar tools keep full 44px boxes) cannot give every glyph a 44px-wide box. Each target there
-is the full bar or row height and runs to its neighbours' targets, so no tap
-falls between them; the width is the room between neighbouring glyphs, never
-below WCAG 2.2's 24px (`mobileNavigatorLayout.test.ts` pins both).
+The phone Navigator's trailing icon clusters keep this floor too: its toolbar
+tools and a project's New chat and ⋮ are full 44px boxes with one glyph
+size, and both clusters are spaced by visible ink (the edge and every
+glyph, or the pills, stand one gap apart, `docs/dev/ui.md`). Edge
+controls never drop under 44px on the narrowest phone axis
+(`mobileNavigatorLayout.test.ts` pins both).
 
 An inline control inside prose owns the same floor, but its box must never
 claim less height than its own content: a `.resource-link.file-ref` is an
@@ -293,6 +298,14 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | Token | Purpose |
 | --- | --- |
 | `--corner-radius-scale` | User-selected multiplier applied to scalable geometry: `cornerRadiusScale(rounding)` in `uiPrefs.ts` — rounding ÷ 5 for 0–9 (the default 9 = 1.8), 2.7 at 10, so the last notch is a visible 1.5× step. Platform styles and interface styles divide it by 1.8 (`--lg-round`, `--fluent-round`, `--macos-round`, `--look-round`) so the default draws their native radii. |
+| `--corner-max` | `1` only at the last rounding notch, else `0`. Opens the `--radius-max-*` floors below: each platform style's roles are `max(native × round, --radius-max-*)`, so maximum is one shared rounded geometry instead of 1.5× a style's native radii (Fluent's 8px composer would stop at 12px beside a full pill). Interface styles have no such floors, so `--look-round` stays the same divisor (`--corner-radius-scale / 1.8`) and reaches 1.5× at the last notch; adding `1.5 × --corner-max` on top would double that step to 3× and make an already large look radius absurd. |
+| `--radius-max-control` | 22px, controls at the last notch, `0` otherwise. |
+| `--radius-max-card` | 22px, cards, activity and bubbles at the last notch, `0` otherwise. |
+| `--radius-max-surface` | 26px, panels at the last notch, `0` otherwise. |
+| `--radius-max-sheet` | 32px, sheets and dialogs at the last notch, `0` otherwise. |
+| `--radius-max-float` | 28px, composer, islands and docks at the last notch, `0` otherwise. |
+| `--radius-max-menu` | 20px, menus at the last notch, `0` otherwise. |
+| `--radius-max-pill` | 999px, pills at the last notch, `0` otherwise. |
 | `--radius-control` | Buttons, fields, chips, and compact controls. |
 | `--radius-card` | Cards and bounded empty states. |
 | `--radius-surface` | Panels and substantial surfaces. |
@@ -302,7 +315,10 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | `--radius-dock` | Active status docks and floating persistent layers. |
 | `--radius-composer` | Composer-specific radius when its geometry needs an independent role. |
 | `--radius-bubble` | Chat bubbles of people talking in a session. |
-| `--radius-round` | Fully rounded pill; stays circular at every corner-radius setting. |
+| `--radius-round` | A pill: chips, tags, tracks, capsule and icon buttons. Full at the default rounding on macOS 27, squares with the setting, and each platform style sets its reach (Fluent 8px, Big Sur 12px, macOS 27 25px), so a pill keeps its neighbours' corner. Fully round at the last notch. |
+| `--radius-circle` | A shape that carries meaning and stays round at every setting: spinners, avatars, radios, status dots, swatches. Not for anything a person reads as a button. |
+| `--radius-switch` | A switch's track and thumb: full at the default rounding on every platform style, and they square together. |
+| `--look-pill-radius` | An interface style's pill (Air, Obsidian). Squares with the setting the same way. |
 | `--radius` | Deprecated alias of `--radius-control`. |
 | `--radius-sm` | Deprecated alias of `--radius-control`. |
 | `--radius-md` | Deprecated alias of `--radius-card`. |
@@ -310,7 +326,10 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | `--radius-xl` | Deprecated alias of `--radius-surface`. |
 
 Use only the semantic radius roles in new CSS. `50%` and `999px` are reserved
-for circles and pills. General controls retain the 8/10/12/16px calm scale;
+for true circles; a pill is `--radius-round`. Neighbours in one row share a role
+(the phone's navigation island takes `--radius-island`, like the action island
+beside it), and a child inside a track or card is never rounder than its parent
+(`.source-segmented`). General controls retain the 8/10/12/16px calm scale;
 conversation activity, floating islands/docks, and the composer use their
 dedicated semantic roles. A surface pinned inside the transcript (the
 permissions request card) is a transcript card and takes `--radius-card`, not
@@ -355,6 +374,7 @@ interior-facing corners and seams.
 | `--font-tool-label-lh` | Compact tool label line height. |
 | `--font-technical` | File path, command, and technical value role. |
 | `--font-technical-lh` | Technical value line height. |
+| `--font-composer-stack` | Lines of the pending stack above the composer: status, queued prompts, edited files, suggested prompt. |
 | `--font-response-meta` | Response and activity metadata role. |
 | `--font-response-meta-lh` | Response metadata line height. |
 | `--font-code` | Code-surface role for blocks, diffs and the editor (follows `--editor-font-size` and pairs with `--mono`). Inline code inside conversation prose keeps the sentence's own caliber. |
@@ -430,7 +450,11 @@ grid scrolls sideways (with `overscroll-behavior-inline: contain` and a
 collapsing. Cells break only between words (`word-break: normal`,
 `overflow-wrap: break-word`, `hyphens: none`, `min-width: 6ch`), so a word such
 as `Модель` is never split one letter per line the way a squeezed auto table
-does; an inline code token in a cell stays whole (`white-space: nowrap`). The
+does; an inline code token in a cell stays whole (`white-space: nowrap`).
+Each cell's content sits in a block `.md-cell` capped at `min(24em, 70vw)`
+(cells ignore `max-width`): a long header or value wraps at a reading measure
+instead of making its column as wide as the phone, so the next column peeks
+in at the edge and shows that the table scrolls. The
 region is focusable and labelled (`role="region"`, `aria-label` from
 `markdown.table`) so keyboard and screen-reader users reach the overflow. A
 consumer must not make the table itself `display: block` to scroll it — that
@@ -621,9 +645,20 @@ the standard tinted root (`--bg` at 76% over the art). They are mirrored in
 the pre-boot map in `index.html`. `backgrounds.test.ts` pins the variants,
 tones, edges and that map.
 
+A custom image reaches the page through the `--app-background-image` custom
+property, and Chromium silently refuses a custom property of 2 MiB or more
+(checked in desktop Chromium 156; 1.9 MiB of characters passes, 2.0 does not):
+the page kept its old wallpaper with no error, and had none after a reload. So
+`readBackgroundFile` re-encodes an upload whose data URL exceeds 1,900,000
+characters, about 1.42 MB of file, as a JPEG within that limit (`imageShrink.ts`,
+transparency flattened onto `--bg`). A smaller file stays byte for byte as
+chosen. An oversized image a browser saved before this stays unpainted until it
+is uploaded again.
+
 Every look covers the header, navigator, rails, conversation and composer,
-in-flow cards (agent question, isolated-changes card, edited files, agent
-status, empty states) and floating surfaces (toasts, menus, tooltips,
+in-flow cards (agent question, isolated-changes card, empty states; the
+lines of the pending stack above the composer stay text in every look,
+[ui](ui.md)) and floating surfaces (toasts, menus, tooltips,
 dialogs, Settings, the workspace customize panel). The shared block is
 organised by role, not by component, so a control a platform style paints at
 class strength joins a role instead of getting a rule of its own:
@@ -636,6 +671,7 @@ class strength joins a role instead of getting a rule of its own:
 | 1c Options and buttons | Quiet chips; the default (quiet) button is an option and the destructive one its red wash; a disabled button keeps the base's neutral look | queue chips, attachments, New-session Shortcuts, prompt suggestion, add-menu tiles, `.ui-btn--quiet`, `.ui-btn--danger` | `--look-option*` |
 | 1f Fields | Every text field and select; a field well is the field and its input stays bare | navigator search, picker filter well, `.ui-field-well`, `.ui-input`, `.ui-textarea`, `.sel select`, the theme picker | `--look-field`, `--look-field-edge`, `--look-field-rule`, `--look-field-radius`, `--look-focus-ring` |
 | 1g Corners | One radius role per control | rows, menu items, icon buttons, segments → `--look-select-radius`; push buttons, chips, wells → `--look-control-radius` | — |
+| 1h Phone layers | The phone navigator and Workspace panel are one full-screen material; the navigator's current chat, titles and date captions speak the look's selection and quiet inks; launchers are the look's tile (Edit mode's tiles too, but not the drag hole or lifted copy); a widget is the look's panel card | `.mobile-navigator`, `.mobile-nav-session-row.is-active`, `.mobile-nav-date-divider`, `.workspace-panel-sheet`, `.workspace-panel-launcher`, `.workspace-editor-item--launcher`, `.workspace-panel-item--widget` (all panel rules sit in the panel's phone media query) | `--look-phone-layer*`, `--look-phone-select*`, `--look-select-mark`, `--look-tile*`, `--look-widget*` |
 
 Role rules use `:is()` where the shared block owns the element; the button
 rules use `:where()` so a look that draws its own button (Line's hairline,
@@ -644,7 +680,23 @@ as inset shadows, so it keeps its box; focus adds the `--look-focus-ring`
 ring, and an invalid field keeps a red edge. A floating full-height column takes `--look-column-radius`; a flush one
 rounds its inner corners with `--look-rail-radius` (`shellLayout.css`).
 Package content (a package's own panes and cards inside its window) is the
-package's: it follows the theme tokens, not the look.
+package's: it follows the theme tokens, not the look. In the Workspace panel
+that means a look styles the widget's frame and head, never the widget body.
+
+On the phone each look also carries its own character past the 1h tokens: a
+phone navigator row runs the screen's width, so `--look-phone-select*`
+(default: the look's `--look-select*`) lets the current chat differ from the
+desktop plate, and `--look-select-mark` adds a bar on its leading edge.
+
+| Look | Phone navigator | Workspace panel |
+| --- | --- | --- |
+| `paper` | Sheet; projects parted by a rule; current chat in ink, weight and an ink bar; bare project marks | Bare ink glyphs on the sheet; the widget is a ruled passage |
+| `line` | A ruled column: a hairline over every chat and project, mono dates heading their rule; current chat = accent bar, no box | Hairline cells; the widget is framed, its head a mono label |
+| `air` | Each project is an island, its mark as far in from the island's side as from its top (names, chats and Add project keep those columns); the toolbar steps in with them (title on the marks' edge, close on their ⋮ column); current chat an accent pill; marks are accent discs | Islands with the glyph in an accent disc; the widget is an island |
+| `monolith` | The backdrop; current chat is a raised piece of the sheet; heavier project names | Raised sheet tiles and widget on the backdrop |
+| `monolith-reverse` | The lit plane; current chat and marks carved into it | Keys carved into the plane (a press sinks deeper); the widget a recessed window |
+| `obsidian` | Dark glass (the light canvas in pearl); accent pill; polished accent discs | Glass tiles with the gradient rim; only a pressed tile takes the accent rim and glow |
+| `editorial` | A contents page: a rule under the toolbar and between chapters, serif entries, the open one in italic, small-capital dates | A two-column index in serif with warm glyphs and a rule under each entry; the widget a ruled section |
 
 **Contract:**
 - Look-scoped tokens are `--look-*`. Their shared defaults sit in
@@ -687,7 +739,7 @@ package's: it follows the theme tokens, not the look.
 - Corners follow **Corner rounding**: every look radius is written at the
   default rounding as `calc(<n>px * var(--look-round))` (`--look-round` =
   `--corner-radius-scale / 1.8`, like the platform styles' divisors), never as
-  a literal length; pills (`999px`) and square corners (`0`) stay as they are.
+  a literal length; square corners (`0`) stay as they are, and pills take `--look-pill-radius`, which follows the setting too.
 - The base glass is set with `!important` and borderless mode clears every
   border with `!important`, so look overrides are `!important`. Lines a look
   draws on purpose restate their colour.
@@ -832,15 +884,15 @@ and the absence of colour literals.
   navigator takes `--look-column-radius` (every look sets one: Paper and
   Editorial their float corner, the Monoliths their rail corner, Line 6px, Air
   22px, Obsidian 18px, all at default rounding), else `--radius-surface`; a
-  floating launcher strip takes `--look-strip-radius` (Obsidian's 999px
-  capsule), then the column radius, then `--radius-surface`, so both floating
+  floating launcher strip takes `--look-strip-radius` (Obsidian's
+  pill), then the column radius, then `--radius-surface`, so both floating
   columns share one corner. A flush column squares its window-side corners
   and rounds both inner ones with `--look-rail-radius` (square in Line and
   Editorial), the slab bar between the columns with the
   column radius. Line and Editorial columns have no fill, so when they float the
   look closes their hairline on every side.
 - Under a look the island is painted by `shellLooks.css` in the look's float
-  material (`--look-float*`, like a menu) as a 999px capsule, and the controls
+  material (`--look-float*`, like a menu) as a pill, and the controls
   inside drop the look's control plates. On any style the controls inside the
   capsule also drop borderless mode's restored contour, so the capsule is the
   only surface.
@@ -940,6 +992,20 @@ and its style when it names one.
 A style recipe must read the colour roles (`--accent`, `--accent-ink`,
 `--bg`…), never a hard-coded palette colour, so it draws any scheme; neutral
 ink alphas (black/white strokes, fills, shadows) are part of the style.
+
+**The transcript's inline Stop** (`.execution-stop`, a running command's Stop
+beside the live activity line or in a step row) is a transcript control, not a
+push button. Under every style it is a capsule at `--control-h-sm` (the
+style's compact height) with red ink: a red outline with no fill or drop
+under Classic, macOS and Fluent (the variant class `.ui-btn--danger` lifts
+its rule over their push-button plates, bevels and corners, and Fluent's
+Borderless edge rule exempts it), the kit's tinted red capsule without a line
+under Liquid Glass, and the interface style's red wash in its control corner
+under an interface style. Beside a drawn pill (the Chip activity style under
+the Standard interface style, and Air's pill) it takes the pill's full height
+and side room, so the two read as one strip. A style that draws it its own way
+names `.execution-stop.ui-btn.ui-btn--danger` and sets `--execution-stop-line`
+(the outline Borderless keeps) instead of repainting `.ui-btn--danger`.
 
 ## Liquid Glass theme style
 
@@ -1112,6 +1178,11 @@ here are whole-app restyles, not the animations themselves. Measured on a
   with an inherited effect; scope it to the moving element, or do it in JS
   (`swipeSurface.ts` refuses `selectstart` instead of `user-select: none` on
   `<html>`; the Shift ring suppression names the focused element).
+  A root variable that only ever equals a viewport size is published once in
+  viewport units, not as pixels on every resize: a viewport resize restyles
+  only the boxes that use the unit. The native app's keyboard frame
+  (`100dvh`) went from 12,626 restyled elements per keyboard close to at most
+  11.
 - A selector whose rightmost compound has no class, id, tag or attribute
   (`body[data-x] :focus-visible`, `[data-x] *`) invalidates the whole subtree
   when the flag flips.

@@ -118,8 +118,10 @@ test("the agent status above the composer is a borderless line, not glass", () =
   assert.match(dock, /\.agent-status-dock \{[^}]*min-height:\s*var\(--agent-status-row\);[^}]*align-items:\s*center;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none/s);
   assert.match(dock, /\.agent-status-dock-icon \{[^}]*place-items:\s*center;[^}]*width:\s*var\(--icon-md\)/s);
   assert.match(dock, /\.agent-status-dock-content \{[^}]*display:\s*flex;[^}]*align-items:\s*baseline/s);
-  // The action outranks the model name, which gives way first.
+  // The action takes the line's room.
   assert.match(dock, /\.agent-status-dock-state \{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*6ch/s);
+  // Under a status line the composer drops its top padding: the line's own row is the air.
+  assert.match(css, /\.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar, \.subagent-island\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
   assert.match(dock, /@media \(max-width: 600px\) \{\s*\.agent-status-dock \.agent-status-dock-secondary \{ display: none; \}/);
   assert.match(dock, /@media \(prefers-reduced-motion: reduce\) \{\s*\.agent-status-dock-state \{ animation: none;/);
 });
@@ -325,16 +327,20 @@ test("assistant identity panel renders once per turn, after the turn completes",
   // While a turn is in progress (working, waiting on a request, or a sent
   // prompt not yet admitted) no answer shows its metadata. The terminal answer
   // of the live turn mounts its panel only after the turn completes; answers
-  // already closed by a later prompt keep the panel's box but render it
-  // dormant, so the transcript above the live turn never reflows.
+  // already closed by a later prompt keep their panel in place, so the
+  // transcript above the live turn never reflows.
   assert.match(timeline, /const sessionActive = sessionStatus === "working" \|\| sessionStatus === "waiting" \|\| pendingSends\.length > 0;/);
-  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}\s*dormant=\{turnInProgress\}/);
+  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}/);
+  // Only the working turn's own answers are dormant: a closed turn's footer
+  // (its quick actions) stays visible while the next turn works; invisible, it
+  // was a blank band above the block under it.
+  assert.match(timeline, /dormant=\{turnInProgress && pendingSends\.length === 0 && r\.eventSeq > terminalAnswers\.openSeq\}/);
+  assert.match(timeline, /\{m\.finalized && hasAnswer && \(terminal \|\| settled\) && \(/);
   assert.match(timeline, /if \(lastAssistant !== null\) terminal\.set\(lastAssistant\.eventSeq, openAt\);/);
   // Interim answers keep quick actions (no identity panel). In a live turn an
   // interim answer takes its dormant footer's box as soon as a row lands under
   // it, so the turn's end only reveals footers and moves no row below them.
   assert.match(timeline, /settled=\{r\.kind === "assistant"\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq < terminalAnswers\.openSeq\s*\|\| r\.id !== latestRowId\)\}/);
-  assert.match(timeline, /\{m\.finalized && hasAnswer && \(terminal \|\| settled\) && \(/);
   assert.match(footer, /data-actions-only=\{identity \? undefined : "true"\}/);
   assert.match(footer, /data-dormant=\{dormant \|\| undefined\}/);
   assert.match(chrome, /\.chat-response-footer\[data-dormant\] \{ visibility: hidden; \}/);
@@ -355,6 +361,14 @@ test("assistant identity panel renders once per turn, after the turn completes",
   assert.match(css, /--activity-row-trim: max\(0px, calc\(\(var\(--hit-min\) - 36px\) \/ 2\)\);/);
   assert.match(css, /\.timeline > \.msg\.activity-group \{ margin-block-end: calc\(-1 \* var\(--activity-row-trim\)\); \}/);
   assert.match(css, /\.timeline > \.msg\.activity-group \+ \.msg\.activity-group \{\s*margin-block-start: calc\(max\(var\(--space-1\), 2 \* var\(--activity-row-trim\)\) - var\(--timeline-gap\) - var\(--activity-row-trim\)\);/);
+  // The trim only reaches into a row's empty padding. A look that draws the
+  // summary's box (chip outline, Air's pill and open island, Line's rule) has
+  // none: trimmed, a prompt under the pill sat 8px from it on phones.
+  const looks = read("../src/shellLooks.css");
+  assert.match(css, /body\[data-activity-style="chip"\] \.activity-group \{[^}]*--activity-row-trim: 0px;/);
+  for (const look of ["air", "line"]) {
+    assert.match(looks, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\.activity-group \\{ --activity-row-trim: 0px; \\}`), look);
+  }
   const progress = read("../src/components/ConversationProgress.css");
   // A progress update only quiets its ink: new type metrics would reflow the
   // lines right above the block that just arrived under it.
@@ -435,14 +449,13 @@ test("thinking uses a compact one-or-two-line separator, while tools keep the ac
 });
 
 test("chat settings expose grouped actions and constrained thinking modes", () => {
-  const settings = read("../src/components/settings/pages.tsx");
+  const settings = read("../src/components/settings/ChatSettingsPage.tsx");
   const prefs = read("../src/uiPrefs.ts");
 
   assert.match(settings, /itemId="chat\.actionBlocks"/);
   assert.ok(settings.indexOf('itemId="chat.actionBlocks"') < settings.indexOf('itemId="chat.thinking"'),
     "action grouping stays before its thinking-mode constraint");
-  assert.match(settings, /\["grouped", tr\("settings\.pages\.groupedActions"\)\]/);
-  assert.match(settings, /\["ungrouped", tr\("settings\.pages\.ungroupedActions"\)\]/);
+  assert.match(settings, /setUiSettings\(\{ actionGrouping: on \? "grouped" : "ungrouped" \}\)/);
   assert.match(settings, /itemId="chat\.thinking"/);
   assert.match(settings, /\["collapsed", tr\("settings\.pages\.collapsibleThinking"\)\]/);
   assert.match(settings, /\["expanded", tr\("settings\.pages\.expandedThinking"\)\]/);
@@ -532,24 +545,50 @@ test("timeline vertical runway is represented by flex spacers instead of scroll-
 });
 
 
-test("queued message rows follow the composer's material, type and corner roles", () => {
+test("queued prompts are quiet lines: no plate, and their actions wait for hover or focus", () => {
   const css = read("../src/styles.css");
+  const looks = read("../src/shellLooks.css");
+  const section = css.slice(css.indexOf("/* ---------- queued prompts ---------- */"), css.indexOf("/* ---------- shared Markdown renderer ---------- */"));
+  assert.ok(section.length > 0, "queued prompts section");
+  const chip = section.slice(section.indexOf(".queue-chip {"), section.indexOf("}", section.indexOf(".queue-chip {")));
+  assert.match(chip, /min-block-size:\s*var\(--composer-stack-row\)/);
+  assert.match(chip, /padding-inline:\s*var\(--composer-stack-text\) var\(--composer-stack-end\)/);
+  assert.doesNotMatch(section, /material-glass|backdrop-filter/, "a row has no glass of its own");
+  assert.doesNotMatch(chip, /background|border:/, "a row has no plate or edge at rest");
+  assert.doesNotMatch(looks, /\.queue-chip[^{]*\{[^}]*(?:--look-option|look-card-radius)/s, "no look turns a row back into a chip");
+  // A prompt's actions stand over its row, so its text keeps the width at rest,
+  // and they are reachable by keyboard.
+  assert.match(section, /\.queue-chip\[role="listitem"\] \.queue-actions \{[^}]*position:\s*absolute;/s);
+  assert.match(section, /\.queue-chip\[role="listitem"\]:not\(:hover, :focus-within\) \.queue-actions \{ opacity: 0; pointer-events: none; \}/);
+  // A service row's way forward is always there, and on touch it is a word, not a clipped icon button.
+  assert.doesNotMatch(css, /\.queue-chip button\s*\{/);
+  assert.match(section, /\.queue-action-word::after \{[^}]*block-size:\s*max\(100%, var\(--hit-min\)\)/s);
+  // The drop target is a line, not a wash.
+  assert.match(section, /\.queue-chip\[data-drop\]::after \{[^}]*background:\s*var\(--accent\)/s);
+  // Touch: one target for the block, however short.
+  assert.match(section, /\.queue-list\[data-touch\] \.queue-block \{[^}]*min-block-size:\s*var\(--hit-min\)/s);
+});
 
-  const chipStart = css.indexOf(".queue-chip {");
-  const chip = css.slice(chipStart, css.indexOf("}", chipStart));
-  assert.match(chip, /background:\s*var\(--material-glass-strong\)/);
-  assert.match(chip, /border:\s*1px solid var\(--material-glass-border\)/);
-  assert.match(chip, /border-radius:\s*var\(--radius-composer\)/);
-
-  const textStart = css.indexOf(".queue-chip .queue-text {");
-  const text = css.slice(textStart, css.indexOf("}", textStart));
-  assert.match(text, /font-size:\s*var\(--font-response\)/);
-  assert.match(text, /line-height:\s*var\(--font-response-lh\)/);
-
-  // The opaque material above is the fallback; the live glass pass is guarded
-  // so transparency, low-resource and reduced-motion settings stay readable.
-  assert.match(
-    css,
-    /@supports \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)[\s\S]*?body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.queue-chip:not\(\.drag-over\)[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/,
-  );
+test("the pending stack above the composer: one grid and no surface but the card", () => {
+  const css = read("../src/styles.css");
+  const tokens = read("../src/tokens.css");
+  const looks = read("../src/shellLooks.css");
+  // The grid is derived from the card: the model logo's column, the model
+  // name's column, and the mirrored end; one row height.
+  assert.match(tokens, /--composer-stack-mark:\s*calc\(var\(--space-4\) \+ 2px \+ var\(--icon-sm\) \/ 2\);/);
+  assert.match(tokens, /--composer-stack-text:\s*calc\(var\(--composer-stack-mark\) \+ var\(--icon-sm\) \/ 2 \+ 6px\);/);
+  assert.match(tokens, /--composer-stack-end:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-sm\) \/ 2\);/);
+  assert.match(tokens, /--composer-stack-reach:\s*calc\(max\(var\(--composer-stack-row\), var\(--hit-min\)\) - var\(--composer-stack-row\)\);/);
+  const stack = css.slice(css.indexOf("/* The pending stack above the composer"), css.indexOf('/* Full widgets placed "Above the composer"'));
+  assert.ok(stack.length > 0, "pending stack section");
+  // The status line sits on the grid and reaches up to its touch target.
+  assert.match(stack, /> \.agent-status-dock \{[^}]*margin-block-start:\s*calc\(-1 \* var\(--composer-stack-reach\)\);[^}]*padding-block:\s*var\(--composer-stack-reach\) 0;[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-md\) \/ 2\) var\(--composer-stack-end\);/s);
+  assert.doesNotMatch(stack, /composer-tray|background|border:|backdrop-filter/, "no line paints a surface");
+  // The status styles are gone, along with their material and rules.
+  for (const source of [css, looks]) {
+    assert.doesNotMatch(source, /data-composer-status-style|--composer-tray-(?:fill|filter|edge)|--radius-composer-tray|--composer-header-rule/);
+  }
+  // The suggestion is a line of the stack, not a chip.
+  const suggestion = css.slice(css.indexOf(".composer-suggestion {"), css.indexOf("}", css.indexOf(".composer-suggestion {")));
+  assert.doesNotMatch(suggestion, /background|border:|backdrop-filter/);
 });

@@ -1,8 +1,9 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { OPAQUE_NATIVE_PUSH_ID, parseNativePushOpen, type NativePushOpen } from "./nativePushPayload.ts";
 
-/** Values which may cross the WebView bridge. Provider and relay credentials
- * deliberately do not have a TypeScript representation in web code. The
+/** Values which may cross the WebView bridge. The page carries the device's
+ * APNs or FCM token to its own server over Polyth Link; that server sends
+ * through Polyth's push service. The private content key stays native. The
  * account id is a binding input from the currently authenticated connection;
  * native obtains Link identities and the server independently verifies it. */
 export type NativePushState = "unavailable" | "disabled" | "enabling" | "enabled" | "denied" | "failed";
@@ -11,6 +12,9 @@ export interface NativePushStatus {
   state: NativePushState;
   reason?: "firebase-not-configured" | "permission-denied" | "relay-not-configured" | "registration-failed";
   subscriptionId?: string;
+  /** The current registration, re-sent on foreground so a rotated APNs/FCM
+   *  token reaches the server. */
+  registration?: NativePushClaim;
 }
 
 export interface NativePushEnableInput {
@@ -18,10 +22,13 @@ export interface NativePushEnableInput {
   accountId: string;
 }
 
+/** The device's APNs token (with its environment) or FCM token, filed under a device-made id. */
 export interface NativePushClaim {
   subscriptionId: string;
-  claimToken: string;
-  claimExpiresAt: number;
+  providerToken: string;
+  /** Absent means iOS. */
+  platform?: "android";
+  environment?: "sandbox" | "production";
   /** Public half of the sealed-content key (docs/mobile/native-push-content.md).
    * The private half stays in native secure storage and never reaches JS. */
   contentKey?: NativePushContentKey;
@@ -44,9 +51,10 @@ interface NativePushPlugin {
 
 const NativePush = registerPlugin<NativePushPlugin>("PolythPush");
 const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9_-]{22}$/u;
-const CLAIM_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
 const P256DH = /^[A-Za-z0-9_-]{87}$/u;
 const AUTH_SECRET = /^[A-Za-z0-9_-]{22}$/u;
+const PROVIDER_TOKEN = /^[0-9a-f]{64,512}$/u;
+const FCM_TOKEN = /^[!-~]{10,4096}$/u;
 
 function decodeBase64Url(value: string): Uint8Array | undefined {
   try {
@@ -67,17 +75,22 @@ function assertOpaque(value: string, name: string): void {
   if (!OPAQUE_NATIVE_PUSH_ID.test(value)) throw new Error(`Invalid native push ${name}.`);
 }
 
-function assertClaim(value: NativePushClaim): NativePushClaim {
-  if (!SUBSCRIPTION_ID.test(value.subscriptionId)
-    || !CLAIM_TOKEN.test(value.claimToken)
-    || !Number.isSafeInteger(value.claimExpiresAt)
-    || value.claimExpiresAt <= Date.now()) {
-    throw new Error("Native push registration returned an invalid claim.");
-  }
-  // An invalid content key is dropped, not fatal: the claim still enables push
-  // and notifications simply show the generic text.
-  const { contentKey, ...rest } = value;
-  return validContentKey(contentKey) ? { ...rest, contentKey: { p256dh: contentKey.p256dh, auth: contentKey.auth } } : rest;
+/** The registration in `value`, or undefined. An invalid content key is
+ *  dropped, not fatal: push still works and shows the generic text. */
+export function parseNativePushClaim(value: unknown): NativePushClaim | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { subscriptionId, providerToken, platform, environment, contentKey } = value as Record<string, unknown>;
+  if (typeof subscriptionId !== "string" || !SUBSCRIPTION_ID.test(subscriptionId) || typeof providerToken !== "string") return undefined;
+  const key = validContentKey(contentKey) ? { contentKey: { p256dh: contentKey.p256dh, auth: contentKey.auth } } : {};
+  if (platform === "android") return FCM_TOKEN.test(providerToken) ? { subscriptionId, providerToken, platform, ...key } : undefined;
+  if (platform !== undefined || !PROVIDER_TOKEN.test(providerToken) || (environment !== "sandbox" && environment !== "production")) return undefined;
+  return { subscriptionId, providerToken, environment, ...key };
+}
+
+function assertClaim(value: unknown): NativePushClaim {
+  const claim = parseNativePushClaim(value);
+  if (!claim) throw new Error("Native push registration returned an invalid token.");
+  return claim;
 }
 
 /** Native push only replaces the local projection when the native controller
@@ -104,11 +117,13 @@ export async function refreshNativePushStatus(): Promise<NativePushStatus> {
     nativeProjectionEnabled = false;
     return { state: "unavailable" };
   }
-  const status = await NativePush.getStatus();
+  const raw = await NativePush.getStatus();
   // Native state is only half of the authorization decision. Clear any prior
   // projection until the authenticated server confirms the same subscription.
   nativeProjectionEnabled = false;
-  return status;
+  const registration = parseNativePushClaim(raw);
+  const { providerToken: _token, environment: _environment, platform: _platform, ...status } = raw as NativePushStatus & { providerToken?: unknown; environment?: unknown; platform?: unknown };
+  return registration && status.state === "enabled" ? { ...status, registration } : status;
 }
 
 export async function enableNativePush(input: NativePushEnableInput): Promise<NativePushClaim> {

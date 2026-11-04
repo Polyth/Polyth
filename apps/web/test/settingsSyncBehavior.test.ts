@@ -185,7 +185,7 @@ test("account sync merges pending edits and keeps device navigation and images l
     // Composer buttons: an arrangement built on this client reaches the server
     // blob, and one built on another client is applied here verbatim.
     const railKey = mobileRailKey("space-sync", "project-sync");
-    writeMobileRail(railKey, ["host:add", "widget:local", null]);
+    writeMobileRail(railKey, { start: ["host:add", "widget:local"], end: [] });
     sync.flushSettingsSync();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const railPrefs = (saves.at(-1)!.settings.preferences as Record<string, unknown>)["core.mobile-composer-rail"] as Record<string, unknown>;

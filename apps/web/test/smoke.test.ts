@@ -904,11 +904,11 @@ test("setUiSettings persists and applies visual data attributes", () => {
     quickActions: "true",
     mobileSessionTitle: UI_DEFAULTS.mobileSessionTitle,
     activityStyle: UI_DEFAULTS.activityBlockStyle,
-    composerStatusStyle: UI_DEFAULTS.composerStatusStyle,
     topRailSurface: UI_DEFAULTS.topRailSurface,
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
   assert.equal(styles.get("--corner-radius-scale"), "2.7");
+  assert.equal(styles.get("--corner-max"), "1", "the last notch opens the shared rounded geometry");
   assert.equal(styles.has("--radius-control"), false, "semantic radii derive from the shared scale");
 
   setUiSettings({ actionGrouping: "ungrouped", thinkingDisplayMode: "activity" });
@@ -917,6 +917,7 @@ test("setUiSettings persists and applies visual data attributes", () => {
 
   setUiSettings({ rounding: 0 });
   assert.equal(styles.get("--corner-radius-scale"), "0");
+  assert.equal(styles.get("--corner-max"), "0");
   assert.equal(styles.has("--radius-control"), false);
 
   Object.defineProperty(globalThis, "document", { configurable: true, value: undefined });

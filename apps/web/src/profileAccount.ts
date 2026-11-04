@@ -14,6 +14,20 @@ export interface ProfileAccountTiming {
 
 export const PROFILE_ACCOUNT_TIMING: ProfileAccountTiming = { refreshMs: 5 * 60_000, retryMs: 45_000, now: Date.now };
 
+/** The header and the dock both show the avatar: one passive read per
+ *  project serves every instance asking at the same moment. */
+const statusReads = new Map<string, Promise<GithubStatusDto>>();
+
+function readGithubStatus(projectId: string): Promise<GithubStatusDto> {
+  const pending = statusReads.get(projectId);
+  if (pending) return pending;
+  const read = api.githubStatus(projectId, true);
+  statusReads.set(projectId, read);
+  const settle = () => { if (statusReads.get(projectId) === read) statusReads.delete(projectId); };
+  void read.then(settle, settle);
+  return read;
+}
+
 /**
  * Who is signed in to GitHub for this project's header avatar. The server
  * answers from its per-account memory without a repository lookup, so asking is
@@ -45,7 +59,7 @@ export function useProfileAccount(projectId: string | null, timing: ProfileAccou
       if (asking) return;
       asking = true;
       askedAt = timing.now();
-      void api.githubStatus(projectId, true).then((status) => {
+      void readGithubStatus(projectId).then((status) => {
         asking = false;
         if (stale) return;
         const next = status.authenticated ? status.user : null;

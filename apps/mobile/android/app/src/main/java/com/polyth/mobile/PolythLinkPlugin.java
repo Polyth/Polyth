@@ -349,6 +349,27 @@ public final class PolythLinkPlugin extends Plugin {
         file.delete();
     }
 
+    /** This phone's name on the server's Link page: the name its owner gave
+     *  it in Settings when there is one, else maker and model. The server
+     *  numbers phones that share a name. */
+    private String deviceLabel() {
+        String name = null;
+        if (Build.VERSION.SDK_INT >= 25) {
+            name = android.provider.Settings.Global.getString(getContext().getContentResolver(), android.provider.Settings.Global.DEVICE_NAME);
+        }
+        if (name == null || name.trim().isEmpty()) {
+            String maker = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim();
+            String model = Build.MODEL == null ? "" : Build.MODEL.trim();
+            if (!maker.isEmpty() && !model.toLowerCase().startsWith(maker.toLowerCase())) {
+                model = Character.toUpperCase(maker.charAt(0)) + maker.substring(1) + " " + model;
+            }
+            name = model;
+        }
+        name = name.trim();
+        if (name.isEmpty()) return "Android";
+        return name.length() > 80 ? name.substring(0, 80) : name;
+    }
+
     private String hostId(String ticket) throws LinkFailure {
         requireNative();
         String hostId = PolythLinkRust.ticketHostId(ticket);
@@ -679,7 +700,7 @@ public final class PolythLinkPlugin extends Plugin {
         if (!trusted(call)) return;
         String raw = require(call, "raw", "pairing-invalid");
         if (raw == null) return;
-        String label = call.getString("label", "This phone");
+        String label = call.getString("label", deviceLabel());
         executor.execute(() -> {
             String hostKey = null;
             byte[] secret = null;
@@ -713,7 +734,7 @@ public final class PolythLinkPlugin extends Plugin {
         String hostKey = require(call, "hostEndpointId", "pairing-invalid");
         String code = require(call, "code", "pairing-invalid");
         if (hostKey == null || code == null) return;
-        String label = call.getString("label", "This phone");
+        String label = call.getString("label", deviceLabel());
         JSArray addresses = call.getArray("addresses", new JSArray());
         Integer port = call.getInt("port");
         executor.execute(() -> {
@@ -905,6 +926,22 @@ public final class PolythLinkPlugin extends Plugin {
                 secureStore.delete(connectionId);
                 invoke("forget", new JSObject().put("connectionId", connectionId), null);
                 forgetTransport(connectionId);
+                call.resolve(new JSObject().put("ok", true));
+            } catch (Exception error) { reject(call, error); }
+        });
+    }
+
+    /** The hub's name for a saved server, kept with its metadata so the server
+     *  menu shows it too. An empty name goes back to the server's own. */
+    @PluginMethod
+    public void renameConnection(PluginCall call) {
+        if (!trusted(call)) return;
+        String connectionId = require(call, "connectionId", "device-unknown");
+        if (connectionId == null) return;
+        String label = call.getString("label", "");
+        executor.execute(() -> {
+            try {
+                invoke("connections.rename", new JSObject().put("connectionId", connectionId).put("label", label), null);
                 call.resolve(new JSObject().put("ok", true));
             } catch (Exception error) { reject(call, error); }
         });

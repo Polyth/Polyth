@@ -62,6 +62,9 @@ pub(crate) struct HostState {
     pub(crate) connections: HashMap<String, LiveConnection>,
     pub(crate) ingress_socket: Option<PathBuf>,
     pub(crate) ingress_secret: Option<String>,
+    /// The server name the owner chose (`host.set_label`), sent to paired
+    /// devices when they connect. Pairing tickets carry their own label.
+    pub(crate) label: Option<String>,
     pub(crate) events: broadcast::Sender<Value>,
 }
 
@@ -147,6 +150,7 @@ async fn serve(data_dir: PathBuf, socket: PathBuf) -> Result<(), String> {
         connections: HashMap::new(),
         ingress_socket: None,
         ingress_secret: None,
+        label: None,
         events,
     }));
     loop {
@@ -404,6 +408,14 @@ async fn dispatch(
             }));
             Ok(json!({ "ok": true }))
         }
+        "host.set_label" => {
+            let label = params
+                .get("label")
+                .and_then(Value::as_str)
+                .and_then(polyth_link_core::clean_label);
+            state.lock().await.label = label.clone();
+            Ok(json!({ "ok": true, "label": label }))
+        }
         "ingress.configure" => {
             let mut state = state.lock().await;
             let socket = params
@@ -432,7 +444,11 @@ async fn dispatch(
                 return Err("pairing-invalid");
             }
             let policy = "direct-preferred";
-            let label = params.get("label").and_then(Value::as_str);
+            let label = params
+                .get("label")
+                .and_then(Value::as_str)
+                .and_then(polyth_link_core::clean_label)
+                .or_else(|| state.label.clone());
             let grants: Vec<String> = params
                 .get("grants")
                 .and_then(Value::as_array)
@@ -469,7 +485,7 @@ async fn dispatch(
                 .pairing
                 .create(
                     &host_endpoint,
-                    label,
+                    label.as_deref(),
                     profile,
                     grants,
                     relays,
@@ -854,6 +870,7 @@ mod tests {
             connections: HashMap::new(),
             ingress_socket: None,
             ingress_secret: None,
+            label: None,
             events,
         }));
 

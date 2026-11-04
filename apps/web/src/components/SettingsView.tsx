@@ -20,10 +20,11 @@ import {
   type SettingsSearchHit, type SettingsSearchItem,
 } from "../settings/registry.ts";
 import {
-  AboutPage, AppearancePage, BehaviorPage, ChatPage, GeneralPage,
+  AboutPage, AppearancePage, BehaviorPage, GeneralPage,
   NotificationsPage, ProjectsPage,
 } from "./settings/pages.tsx";
 import ViewErrorBoundary from "./ViewErrorBoundary.ts";
+import { ChatPage } from "./settings/ChatSettingsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import UsersPage from "./settings/UsersPage.tsx";
 import CommandLinePage from "./settings/CommandLinePage.tsx";
@@ -148,7 +149,7 @@ function placePage(id: string, declared: DeclaredGroup): { group: NavGroup; orde
 const BUILTIN: PageDef[] = ([
   { id: "general", label: tr("settingsview.general"), declared: "Workspace", render: () => <GeneralPage /> },
   { id: "appearance", label: tr("settingsview.appearance"), declared: "Workspace", render: (target) => <AppearancePage {...(target ? { settingsTarget: target } : {})} /> },
-  { id: "chat", label: tr("settingsview.chat"), declared: "Workspace", render: () => <ChatPage /> },
+  { id: "chat", label: tr("settingsview.chat"), declared: "Workspace", render: (target) => <ChatPage {...(target ? { settingsTarget: target } : {})} /> },
   { id: "notifications", label: tr("settingsview.notifications"), declared: "Workspace", render: () => <NotificationsPage /> },
   { id: "sessions", label: tr("settingsview.sessions"), declared: "Workspace", render: () => <SessionsPage /> },
   { id: "projects", label: tr("settingsview.projects"), declared: "Engineering", render: () => <ProjectsPage /> },

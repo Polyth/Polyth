@@ -60,6 +60,9 @@ test("only a docked composer's editor rides the keyboard, and a touch on it prim
   primeKeyboardRide(document.querySelector("textarea"));
   assert.ok(document.querySelector(".conversation-composer-dock")!.hasAttribute(KEYBOARD_RIDER_ATTRIBUTE));
   assert.ok(document.querySelector(".timeline-wrap")!.hasAttribute(KEYBOARD_RIDER_ATTRIBUTE));
+  // The column's lower edge rides with the dock while what it holds may ride
+  // back: primed apart, one would start a frame late.
+  assert.ok(document.querySelector(".timeline")!.hasAttribute(KEYBOARD_RIDER_ATTRIBUTE));
   cancelKeyboardRide();
   assert.equal(document.querySelectorAll(`[${KEYBOARD_RIDER_ATTRIBUTE}]`).length, 0);
 });

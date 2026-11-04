@@ -13,21 +13,22 @@ html[data-theme-style="liquid-glass"] {
   /* macOS 27 rounds by size: small controls 6–8px, grouped cards 12px,
      windows and popovers 16px, alerts and sheets 22px; large controls,
      search fields and toolbar items are capsules. Rounding is measured from its default (9 → scale 1.8, uiPrefs.ts),
-     which draws these radii exactly; lower squares them, higher rounds a
-     little past macOS. */
+     which draws these radii exactly; lower squares them, and the last notch
+     takes the shared rounded geometry (--radius-max-*, tokens.css). */
   --lg-round: calc(var(--corner-radius-scale) / 1.8);
-  --radius-control: calc(8px * var(--lg-round));
-  --radius-card: calc(12px * var(--lg-round));
-  --radius-surface: calc(16px * var(--lg-round));
-  --radius-sheet: calc(22px * var(--lg-round));
-  --radius-activity: calc(10px * var(--lg-round));
-  --radius-island: calc(26px * var(--lg-round));
-  --radius-dock: calc(22px * var(--lg-round));
-  --radius-composer: calc(22px * var(--lg-round));
-  --radius-bubble: calc(18px * var(--lg-round));
+  --radius-control: max(calc(8px * var(--lg-round)), var(--radius-max-control));
+  --radius-card: max(calc(12px * var(--lg-round)), var(--radius-max-card));
+  --radius-surface: max(calc(16px * var(--lg-round)), var(--radius-max-surface));
+  --radius-sheet: max(calc(22px * var(--lg-round)), var(--radius-max-sheet));
+  --radius-activity: max(calc(10px * var(--lg-round)), var(--radius-max-card));
+  --radius-island: max(calc(26px * var(--lg-round)), var(--radius-max-float));
+  --radius-dock: max(calc(22px * var(--lg-round)), var(--radius-max-float));
+  --radius-composer: max(calc(22px * var(--lg-round)), var(--radius-max-float));
+  --radius-round: max(calc(25px * var(--lg-round)), var(--radius-max-pill));
+  --radius-bubble: max(calc(18px * var(--lg-round)), var(--radius-max-card));
   /* A capsule for every control up to 44px tall; it squares with Rounding. */
-  --lg-radius-capsule: calc(22px * var(--lg-round));
-  --lg-radius-menu: calc(12px * var(--lg-round));
+  --lg-radius-capsule: max(calc(22px * var(--lg-round)), var(--radius-max-control));
+  --lg-radius-menu: max(calc(12px * var(--lg-round)), var(--radius-max-menu));
   --lg-radius-tooltip: calc(6px * var(--lg-round));
 
   /* The kit's large controls are 28px; fields and list rows sit one step up.
@@ -301,6 +302,28 @@ html[data-theme-style="liquid-glass"] .ui-btn--danger {
 html[data-theme-style="liquid-glass"] .ui-btn--danger:active:not(:disabled) {
   background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 12%), transparent);
 }
+/* The transcript's inline Stop is the same tinted capsule: this style draws
+   no outlines, so it gives up the red line the other styles keep (in
+   Borderless too). Its size and corner stay the shared Stop's. */
+html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger {
+  --execution-stop-line: transparent;
+  background: color-mix(in srgb, var(--red) var(--lg-tint), transparent);
+  color: var(--red);
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger:hover:not(:disabled) {
+    --execution-stop-line: transparent;
+    background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 6%), transparent);
+  }
+}
+html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger:focus-visible:not(:disabled) {
+  --execution-stop-line: transparent;
+  background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 6%), transparent);
+}
+html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger:active:not(:disabled) {
+  --execution-stop-line: transparent;
+  background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 12%), transparent);
+}
 /* Default button: the flat accent capsule; pressing darkens it. */
 html[data-theme-style="liquid-glass"] .ui-btn--primary {
   background: var(--accent);
@@ -378,7 +401,7 @@ html[data-theme-style="liquid-glass"] .switch-track {
 html[data-theme-style="liquid-glass"] .switch i {
   width: 22px;
   height: 18px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-switch);
   background: var(--lg-knob);
   box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
 }

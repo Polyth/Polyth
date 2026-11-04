@@ -167,7 +167,7 @@
 }
 .todos-agents__open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
-.todos-agents__dot { flex: none; width: 8px; height: 8px; border-radius: var(--radius-round); background: var(--muted); }
+.todos-agents__dot { flex: none; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--muted); }
 .todos-agents__row[data-state="running"] .todos-agents__dot { background: var(--accent); }
 .todos-agents__row[data-state="done"] .todos-agents__dot { background: var(--success, var(--muted)); }
 .todos-agents__row[data-state="failed"] .todos-agents__dot { background: var(--danger); }

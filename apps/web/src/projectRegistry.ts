@@ -28,6 +28,8 @@ export type ProjectRegistryState =
       mutationVersion: number;
       refreshing: boolean;
       refreshError: string | null;
+      /** Remembered, not yet answered by the server (adoptProvisionalList). */
+      provisional?: true;
     };
 
 export function initialProjectRegistry(): ProjectRegistryState {
@@ -96,6 +98,29 @@ export function publishListSuccess(
       refreshing: false,
       refreshError: null,
     },
+  };
+}
+
+/** A remembered list (the navigator snapshot) shown while the boot request is
+ *  in flight. Only a `loading` registry with a request out adopts it, under
+ *  that request's id and mutation version: the request's own answer still
+ *  publishes over it, a failure keeps it as a stale snapshot with an error,
+ *  and a mutation meanwhile supersedes the answer as usual. Never empty. */
+export function adoptProvisionalList(
+  state: ProjectRegistryState,
+  projects: readonly Project[],
+): ProjectRegistryState {
+  if (state.status !== "loading" || state.requestId === 0) return state;
+  const normalized = normalizeProjects(projects);
+  if (normalized.length === 0) return state;
+  return {
+    status: "ready",
+    requestId: state.requestId,
+    projects: normalized,
+    mutationVersion: 0,
+    refreshing: true,
+    refreshError: null,
+    provisional: true,
   };
 }
 
@@ -181,6 +206,9 @@ export function shouldRefreshProjectsOnSyncOpen(
 ): boolean {
   if (state.status === "failed") return true;
   if (state.status !== "ready") return false;
+  // A remembered snapshot: while the boot request is out it owns publication
+  // exactly as it does while `loading`; once it failed, retry as `failed` does.
+  if (state.provisional) return !state.refreshing;
   if (state.projects.length === 0) return expectedProjectId !== null;
   return activeProjectId === null;
 }

@@ -16,16 +16,20 @@ test("adaptive composer polish loads after the shared style layers", async () =>
     "adaptive composer rules are the final shell-level style layer");
 });
 
-test("composer attachments live outside the writing surface", async () => {
+test("composer attachments are a row of the card between the model line and the editor", async () => {
   const css = await read("../src/composerAdaptive.css");
   const composer = await read("../src/components/Composer.tsx");
   const pills = await read("../src/components/AttachmentPills.tsx");
 
-  assert.match(composer, /\{!session && attachmentStrip\}[\s\S]*?<SessionContextBar/);
-  assert.match(composer, /<QueuedMessageList[\s\S]*?\{session && attachmentStrip\}[\s\S]*?<GlassDock/);
-  assert.match(css, /\.composer-simple > \.attachment-pills\s*\{/);
-  assert.match(css, /flex-wrap:\s*nowrap;/);
-  assert.match(css, /overflow-x:\s*auto;/);
+  // One place in a new chat and an open one: never above the project row.
+  assert.doesNotMatch(composer, /attachmentStrip/);
+  const config = composer.indexOf('className="composer-config composer-config-row"');
+  const tray = composer.indexOf("{attachmentTray}");
+  const editor = composer.indexOf('<div className="composer-input">');
+  const card = composer.indexOf("<GlassDock");
+  assert.ok(card > -1 && card < config && config < tray && tray < editor, "the tray is rendered inside the card, after the model line, before the editor");
+  assert.match(css, /\.composer-tray > \.attachment-pills\s*\{[^}]*align-self:\s*end;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;/s);
+  assert.match(css, /@keyframes composer-tray-open\s*\{\s*from\s*\{\s*grid-template-rows:\s*minmax\(0, 0fr\);/);
   assert.match(pills, /imagePreview \? <img className="att-thumb"/, "a previewable image is a bare tile");
 });
 
@@ -88,7 +92,11 @@ test("running send and contributed composer actions stay compact and borderless"
     /\.composer-mobile\.composer-collapsed \.composer-actions > \.composer-extensions\s*\{\s*display:\s*none;\s*\}/s,
     "the resting row carries no contributed trailing control beside Send",
   );
-  assert.match(css, /\.composer-mobile \.composer-send-split > \.composer-running-send[\s\S]*?width:\s*var\(--tap\)/);
+  assert.match(
+    css,
+    /\.composer-simple \.composer-send-split > \.send \{\s*margin:\s*calc\(\(max\(var\(--composer-action-size\), var\(--hit-min\)\) - var\(--composer-action-size\)\) \/ 2\);/,
+    "the running primary reads one disc inside its touch box",
+  );
   assert.match(css, /\.composer-simple \.composer-rail \.send,[\s\S]*?border:\s*0;/);
 });
 
@@ -148,6 +156,38 @@ test("expanded phone composer uses one compact spacing and control rhythm", asyn
     css,
     /\.composer-mobile \.composer-config-row \.model-picker-trigger\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*none;/s,
     "the model trigger uses the width granted by its row",
+  );
+});
+
+test("the running primary is one solid disc beside a bare chevron, with no ring and a touch target past its edge", async () => {
+  const [adaptive, styles, rail, looks] = await Promise.all([
+    read("../src/composerAdaptive.css"),
+    read("../src/styles.css"),
+    read("../src/components/mobile/MobileComposerRail.css"),
+    read("../src/shellLooks.css"),
+  ]);
+  const split = adaptive.slice(adaptive.indexOf("/* A running turn with a draft"), adaptive.indexOf("/* The send menu stays anchored"));
+  assert.ok(split.length > 0, "split section");
+  assert.doesNotMatch(split, /box-shadow:(?!\s*none)|::before|surface-overlay|material-glass/, "no plate, contour or divider around the pair");
+  assert.match(split, /\.composer-send-options \{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
+  // No outline layer is left, on any look or in Borderless.
+  assert.doesNotMatch(adaptive, /context-liquid-host::after/);
+  assert.doesNotMatch(styles, /context-liquid-host::after/);
+  assert.doesNotMatch(looks, /composer-send-split|send:not\(:disabled\) \{[^}]*box-shadow:[^;]*var\(--accent\)/s, "no look brings a plate or a glow back");
+  assert.match(
+    styles,
+    /\.composer-simple \.composer-rail :is\(\.send, \.stop\)::after \{[^}]*inset:\s*calc\(\(var\(--composer-action-size\) - max\(var\(--composer-action-size\), var\(--hit-min\)\)\) \/ 2\);/s,
+    "the action reads one size and its target grows past the edge",
+  );
+  assert.match(
+    rail,
+    /\.composer-mobile\.composer-mobile-grid \.mobile-composer-rail \{[^}]*padding:\s*0 var\(--space-4\) var\(--space-2\);/s,
+    "the phone rail keeps the editor's 16px trailing gutter",
+  );
+  assert.match(
+    styles,
+    /\.composer-mobile\.composer-expanded \.composer-rail \{[^}]*padding:\s*var\(--space-2\) var\(--space-4\) var\(--space-3\);/s,
+    "the non-grid engaged rail uses the same 16px gutter",
   );
 });
 

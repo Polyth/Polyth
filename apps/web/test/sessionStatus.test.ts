@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ExecutionReleaseProof, HarnessTransition, SessionProjection } from "@polyth/contracts";
 import { SESSION_SUMMARY_FIELDS } from "@polyth/contracts";
-import { resolveSessionStatus } from "../src/sessionStatus.ts";
+import { resolveSessionStatus, sessionIdsToRefresh } from "../src/sessionStatus.ts";
 import { setLocale } from "../src/i18n/index.ts";
 
 const NOW = 1_000_000_000;
@@ -323,4 +323,22 @@ test("a planned harness handoff explains its own epoch without flashing Runtime 
     }), NOW).kind,
     "unread",
   );
+});
+
+test("a reconnect re-reads every row still shown as working or waiting, most urgent first", () => {
+  const ids = sessionIdsToRefresh([
+    session({ id: "idle" }),
+    session({ id: "read-old", attention: { questions: 0, permissions: 0, unread: 2 }, updatedAt: NOW - 50 }),
+    session({ id: "working", status: "working", updatedAt: NOW - 10 }),
+    session({ id: "asks", status: "idle", attention: { questions: 1, permissions: 0, unread: 0 }, updatedAt: NOW - 5 }),
+    session({ id: "approval", status: "waiting", updatedAt: NOW - 1 }),
+    session({ id: "workflow", backgroundWork: { workflow: 1, startedAt: NOW - 100 }, updatedAt: NOW - 200 }),
+    session({ id: "archived", status: "archived", attention: { questions: 1, permissions: 0, unread: 1 } }),
+    session({ id: "failed", status: "failed" }),
+  ]);
+  assert.deepEqual(ids, ["approval", "asks", "working", "workflow", "read-old"]);
+  assert.deepEqual(sessionIdsToRefresh([
+    session({ id: "a", status: "working", updatedAt: 3 }),
+    session({ id: "b", status: "working", updatedAt: 2 }),
+  ], 1), ["a"], "bounded");
 });

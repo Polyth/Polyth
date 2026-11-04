@@ -6,7 +6,7 @@ import {
   ApnsProvider, type ApnsRequest, type ApnsTransport, FcmProvider, type FcmRequest, type FcmTransport,
   FetchFcmTransport, ProviderTransportError, ServiceAccountAccessTokenProvider,
 } from "../src/index.ts";
-import type { DeliveryInput, Destination, ProviderReply } from "../src/types.ts";
+import type { ActivityInput, DeliveryInput, Destination, ProviderReply } from "../src/types.ts";
 
 const message: DeliveryInput = { version: 1, subscriptionId: "sub_abcdefghijklmnopqrstuv", notificationId: "bbbeeeee-1111-4222-8333-444444444444", kind: "permission", tag: "tag_opaque" };
 const iosDestination: Destination = { subscriptionId: message.subscriptionId, version: 1, platform: "ios", environment: "sandbox", providerToken: "a".repeat(64) };
@@ -193,4 +193,39 @@ test("FCM sends data-only high-priority with sealed, and the unchanged notificat
   });
   await provider.deliver(android, { ...message, sealed: "A".repeat(4200) });
   assert.equal(fake.calls[2]!.body, fake.calls[0]!.body, "oversize falls back to the generic message");
+});
+
+test("APNs sends a Live Activity as liveactivity on its own topic, by urgency, with reference-date times and no words", async () => {
+  const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const fake = new ApnsFake();
+  const provider = new ApnsProvider({ teamId: "TEAM123", keyId: "KEY123", p8: pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), topic: "com.polyth.app", transport: fake, nowSeconds: () => 1_700_000_000 });
+  const activity: Destination = { ...ios, channel: "liveactivity" };
+  const update: ActivityInput = {
+    event: "update", state: "working", startedAt: 1_699_999_900, waiting: 1, working: 0, staleAt: 1_700_000_600, urgent: false,
+  };
+  assert.equal(await provider.deliverActivity(activity, update), "success");
+  const request = fake.calls[0]!;
+  assert.equal(request.path, `/3/device/${ios.providerToken}`);
+  assert.equal(request.headers["apns-topic"], "com.polyth.app.push-type.liveactivity");
+  assert.equal(request.headers["apns-push-type"], "liveactivity");
+  assert.equal(request.headers["apns-priority"], "5", "a heartbeat stays outside the update budget");
+  assert.equal(request.headers["apns-collapse-id"], undefined);
+  assert.deepEqual(JSON.parse(request.body), {
+    aps: {
+      timestamp: 1_700_000_000,
+      event: "update",
+      "content-state": { state: "working", waiting: 1, working: 0, startedAt: 1_699_999_900 - 978_307_200 },
+      "stale-date": 1_700_000_600,
+    },
+  });
+  const { startedAt: _startedAt, ...unstarted } = update;
+  await provider.deliverActivity(activity, { ...unstarted, event: "end", state: "done", dismissAt: 1_700_000_600, urgent: true });
+  const end = fake.calls[1]!;
+  assert.equal(end.headers["apns-priority"], "10");
+  assert.equal(end.headers["apns-expiration"], String(1_700_000_000 + 3600));
+  assert.deepEqual(JSON.parse(end.body).aps["content-state"], { state: "done", waiting: 1, working: 0 });
+  assert.equal(JSON.parse(end.body).aps["dismissal-date"], 1_700_000_600);
+  // An alert token never receives an activity.
+  assert.equal(await provider.deliverActivity(ios, update), "config");
+  assert.equal(fake.calls.length, 2);
 });

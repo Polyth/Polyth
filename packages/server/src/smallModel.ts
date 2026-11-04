@@ -62,6 +62,13 @@ export function smallModelPreference(settings: unknown): SmallModelRef | undefin
   };
 }
 
+/** Which model writes a Polyth-owned compaction summary, from the account's
+ *  Settings → Sessions → Compaction model. The other one stays the fallback. */
+export function compactionModelPreference(settings: unknown): "session" | "small" {
+  return (settings as { sessionDefaults?: { compactionModel?: unknown } } | null | undefined)
+    ?.sessionDefaults?.compactionModel === "small" ? "small" : "session";
+}
+
 /** Keep a fallback session model on the runtime that actually owns it. */
 export function smallModelExecutionRoute(
   configured: SmallModelRef | undefined,

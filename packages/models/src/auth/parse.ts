@@ -50,7 +50,7 @@ export interface ExtractedDeviceFlow {
   expiresIn?: number;
 }
 
-const USER_CODE_IN_TEXT = /\b(?:user[_ ]?code|device[_ ]?code|enter(?:\s+the)?\s+code)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{3,31})\b/i;
+const USER_CODE_IN_TEXT = /\b(?:user[_ ]?code|device[_ ]?code|enter(?:\s+the)?\s+code)\s*(?:[:#-]\s*)?([A-Z0-9][A-Z0-9-]{3,31})\b/i;
 const STANDALONE_CODE = /\b([A-Z0-9]{4,8}(?:-[A-Z0-9]{3,8}){1,3})\b/;
 const URL_IN_TEXT = /https?:\/\/[^\s)\]>'"]+/gi;
 

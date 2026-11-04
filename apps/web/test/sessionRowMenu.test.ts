@@ -8,7 +8,8 @@
 // buttons mount while a touch swipe is in progress or while Shift is held on
 // a desktop shell (shift-quick mode); Shift-quick delete skips confirmation
 // for background rows and keeps it for sessions with live agent activity or
-// a package-owned isolation workspace.
+// a package-owned isolation workspace, and Shift-quick archive likewise skips
+// the soft archive preference prompt for idle rows only.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -944,7 +945,7 @@ test("pointer intent wires the bounded session-tail prefetch once", async () => 
     });
     assert.deepEqual(
       fetchCalls.slice(before).filter((call) => call.url.includes("/api/sessions/s-idle/events")),
-      [{ url: "/api/sessions/s-idle/events?afterSeq=0&limit=40&prefetch=1", method: "GET" }],
+      [{ url: "/api/sessions/s-idle/events?afterSeq=0&limit=400&prefetch=1", method: "GET" }],
     );
   } finally {
     await unmount();
@@ -1045,6 +1046,72 @@ test("holding Shift skips confirmation only for non-isolated background rows", a
     assert.equal(isolatedRow.querySelector(".session-quick"), null, "quick layer unmounts on release");
     assert.ok(!isolatedRow.classList.contains("shift-quick"));
   } finally {
+    await releaseShift();
+    await unmount();
+  }
+});
+
+test("Shift-quick archive skips the preference prompt but still asks for live work", async () => {
+  const { setUiSettings } = await import("../src/uiPrefs.ts");
+  setUiSettings({ confirmSessionArchive: true });
+  const { container, unmount } = await mountList();
+  const pressShift = () => act(async () => {
+    (dom as unknown as EventTarget).dispatchEvent(
+      new KeyboardEventCtor("keydown", { key: "Shift", shiftKey: true }) as unknown as Event,
+    );
+  });
+  const releaseShift = () => act(async () => {
+    (dom as unknown as EventTarget).dispatchEvent(
+      new KeyboardEventCtor("keyup", { key: "Shift" }) as unknown as Event,
+    );
+  });
+  try {
+    await pressShift();
+    // The preference prompt exists for ordinary menu clicks; a deliberate
+    // Shift-hover click on an idle row skips it.
+    const idleRow = rowOf(container, "Idle session");
+    const idleArchive = idleRow.querySelector<HTMLButtonElement>(".session-quick .session-quick-btn:not(.danger)");
+    assert.ok(idleArchive, "idle row mounts the Shift quick archive");
+    fetchCalls.length = 0;
+    await act(async () => {
+      idleArchive!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(
+      document.querySelector('[role="dialog"][aria-label="Archive session"]'),
+      null,
+      "idle Shift-quick archive does not ask",
+    );
+    assert.ok(
+      fetchCalls.some((c) => c.method === "POST" && c.url === "/api/sessions/s-idle/archive"),
+      `archive request issued (got: ${JSON.stringify(fetchCalls)})`,
+    );
+
+    // Live work keeps its confirmation even in shift-quick mode.
+    await releaseShift();
+    await act(async () => {
+      setSessions("p1", [
+        session({ id: "s-run", title: "Running session", status: "working", lastTurnAt: Date.now() - 10_000 }),
+      ]);
+    });
+    await pressShift();
+    const runRow = rowOf(container, "Running session");
+    fetchCalls.length = 0;
+    const runArchive = runRow.querySelector<HTMLButtonElement>(".session-quick .session-quick-btn:not(.danger)");
+    assert.ok(runArchive, "running row mounts the Shift quick archive");
+    await act(async () => { runArchive!.click(); });
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Archive active session"]');
+    assert.ok(dialog, "active work keeps the archive confirmation");
+    await act(async () => {
+      dialog!.querySelector<HTMLButtonElement>(".ui-btn--quiet")!.click();
+    });
+    assert.equal(
+      fetchCalls.filter((c) => c.method === "POST" && c.url.endsWith("/archive")).length,
+      0,
+      "declined confirm archives nothing",
+    );
+  } finally {
+    setUiSettings({ confirmSessionArchive: false });
     await releaseShift();
     await unmount();
   }

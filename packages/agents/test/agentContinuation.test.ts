@@ -816,6 +816,7 @@ async function host(t: { after(fn: () => void): void }) {
   const sent: Array<{ sessionId: string; text: string; attachments?: unknown[] }> = [];
   const replies: string[] = [];
   const purposes = new Map<string, string>();
+  const origins = new Map<string, unknown>();
   // While `hold.on`, a sent turn starts and waits for `release`.
   const hold = { on: false };
   const holding: Array<(text: string) => void> = [];
@@ -827,10 +828,11 @@ async function host(t: { after(fn: () => void): void }) {
     return event;
   };
   const sessions = {
-    async create(input: { purpose?: string }) {
+    async create(input: { purpose?: string; origin?: unknown }) {
       const id = `ses${logs.size + 1}`;
       logs.set(id, []);
       if (input.purpose) purposes.set(id, input.purpose);
+      if (input.origin) origins.set(id, input.origin);
       return { id };
     },
     async snapshot(id: string) { return { id, projectId: "prj", status: states.get(id)?.status ?? "idle", purpose: purposes.get(id) }; },
@@ -919,7 +921,7 @@ async function host(t: { after(fn: () => void): void }) {
   const release = (text: string) => holding.shift()!(text);
   /** An ordinary chat in the project, not one of an agent's sessions. */
   const chat = (id: string) => { logs.set(id, []); };
-  return { agents, sent, states, replies, call, say, followUp, settled, hold, release, until, chat };
+  return { agents, sent, states, replies, call, say, followUp, settled, hold, release, until, chat, origins };
 }
 
 const fresh = (agents: ScheduleService, over: Record<string, unknown> = {}) => agents.create({
@@ -934,13 +936,15 @@ const age = (run: ScheduleRunRecord, hours: number) => {
 };
 
 test("a fresh agent's report can be answered in its own conversation", async (t) => {
-  const { agents, sent, say, followUp } = await host(t);
-  const agent = fresh(agents, { notebook: "Prefers short reports." });
+  const { agents, sent, say, followUp, origins } = await host(t);
+  const agent = fresh(agents, { notebook: "Prefers short reports.", title: "Reviewer" });
   assert.deepEqual(await followUp(agent.id), { reason: "none" });
 
   await say(agent.id);
   const report = agents.runsOf(agent.id)[0]!;
   assert.equal(report.sessionId, "ses1");
+  assert.deepEqual(origins.get("ses1"), { source: "agents", wake: "manual", label: "Reviewer" },
+    "lists can tell the agent's own session from a person's chat");
   assert.equal(report.key, rollingKeyOf(agents.get(agent.id)!));
   assert.equal(report.fresh, undefined, "a run nobody wrote to has nothing to explain");
   assert.deepEqual(await followUp(agent.id), { sessionId: "ses1", at: report.finishedAt, until: report.finishedAt! + FOLLOW_UP_WINDOW_MS });

@@ -55,7 +55,8 @@ const parseDuration = (raw: string): number => {
   if (Number.isFinite(plain)) return plain;
   let total = 0;
   let matched = false;
-  const re = /(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)/g;
+  // (?<!\d) keeps a long digit run from being rescanned from every digit.
+  const re = /(?<!\d)(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)/g;
   for (let m = re.exec(t); m; m = re.exec(t)) {
     matched = true;
     const value = Number(m[1]);
@@ -120,13 +121,13 @@ export const parseRetryAfterSec = (
 
   // 2. Free text — the shapes the big providers actually emit.
   const patterns: RegExp[] = [
-    /try again in\s+([0-9dhms.:\s]+?)(?:[.,()\]]|$)/i,
+    /try again in\s([0-9dhms.:\s]+?)(?:[.,()\]]|$)/i,
     /retry(?:ing)?(?: again)?(?: after| in)?\s+([0-9]+(?:\.[0-9]+)?\s*(?:ms|s|sec|seconds|m|min|minutes|h|hours|d|days)\b)/i,
     /retry[-\s]?after[:\s]+([0-9]+(?:\.[0-9]+)?)/i,
     /"?retryDelay"?[:\s]+"?([0-9dhms.]+)"?/i,
     /wait\s+([0-9]+(?:\.[0-9]+)?\s*(?:ms|s|sec|seconds|m|min|minutes|h|hours|d|days)\b)/i,
-    /available again in\s+([0-9dhms.:\s]+?)(?:[.,()\]]|$)/i,
-    /resets?\s+in\s+([0-9dhms.:\s]+?)(?:[.,()\]]|$)/i,
+    /available again in\s([0-9dhms.:\s]+?)(?:[.,()\]]|$)/i,
+    /resets?\s+in\s([0-9dhms.:\s]+?)(?:[.,()\]]|$)/i,
   ];
   for (const re of patterns) {
     const m = message.match(re);

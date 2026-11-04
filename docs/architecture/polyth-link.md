@@ -16,6 +16,15 @@ or unauthenticated share link.
 3. **Device grants.** Persistent trust is SQLite in
    `<dataDir>/tunnel/tunnel.db`. Revoke is targeted per `deviceId` and awaited
    through host RPC; a host failure returns HTTP 503 `state: "partial"`.
+   Removing a server account revokes and disconnects every device it paired
+   (`SERVER_ACCOUNT_REMOVAL_BUS`, awaited before the credential goes; an
+   unreachable host gets the revoke on its next trust sync). A phone keeps one
+   identity per host, so a revoked device presents the same EndpointId when it
+   pairs again: the host routes a `PairingHello` from an unknown *or revoked*
+   peer to pairing, and holds only an active device to `ConnectionHello`.
+   Paired under another account, it becomes that account's new device record
+   (the old one is deleted); an active device of another account is still
+   refused.
 4. **Ingress.** Tunnel requests do not enter the public HTTP listener.
    They use a unix-domain internal listener plus a per-boot secret. Loopback
    is not an identity. `RequestIngress.kind = "polyth-link"` is built by
@@ -24,8 +33,11 @@ or unauthenticated share link.
 5. **Remote policy.** Paired devices without `device.full-access` are
    default-deny (see Route matrix). Packages declare
    `remoteAccess` manifests. Unknown routes are rejected before handlers.
-   Of `/api/auth/*`, a paired device reaches only `GET /api/auth/status`
-   (core route, `core.health.read`); browser identity HTTP stays public-only.
+   Of `/api/auth/*`, a paired device reaches `GET /api/auth/status` (core
+   route, `core.health.read`); a full-access device also reads its own
+   account through `GET /api/auth/accounts`, `GET /api/auth/me` and
+   `GET /api/auth/cli` (see Route matrix). All other browser identity HTTP
+   stays public-only.
 6. **Compression.** HTTP is relayed byte-for-byte, so the request
    allowlist forwards `Accept-Encoding` and the server's gzip (JSON above
    1 KiB, static text) crosses the link; `Content-Encoding` was already on
@@ -166,7 +178,7 @@ events, malformed matrices and outgoing requests retain the normal limit.
 ## Canonical API
 
 Remote clients use the same `/api/*` and `/ws` (plus declared `/ws/<package>`)
-surface as the local web UI. Tunnel-only routes are pairing, devices,
+surface as the local web UI. Tunnel-only routes are pairing, devices, server name,
 diagnostics, and transport status. There is no `/mobile-api`.
 
 Static mobile assets are served by the local proxy, not tunneled from the host.
@@ -201,8 +213,23 @@ remote-safe is listed in `CORE_REMOTE_ACCESS`. Packages without `remoteAccess`
 are local-only. Privileged capabilities (full access, pairing, grants, identity
 rotate, password, package install, secure-safe export, shutdown) are never
 grantable to guarded accounts or CLI tokens; the owner may grant them to a
-paired device. Link ingress still answers only `GET /api/auth/status` from the
-`/api/auth/*` tree — browser identity stays public-HTTP-only.
+paired device. From the `/api/auth/*` tree, Link ingress answers
+`GET /api/auth/status`, and for a full-access device (an unguarded account)
+also `GET /api/auth/accounts`, `GET /api/auth/me` and `GET /api/auth/cli` for
+the device's own account (`handlePairedRead` in `@polyth/identity`, gated in
+`packages/server/src/http.ts`). These answers are read-only: `readOnly: true`
+(with `canManage` and `canManageTrust` false, and `canManageInBrowser` for an
+owner on the account list) tells Settings → Users and Command line to send
+changes to a browser signed in to the server. Account and token changes,
+terminal sign-in approval, passkeys, sessions and every other identity route
+need a browser identity session (same origin, CSRF, owner re-authentication)
+and stay public-HTTP-only.
+
+A route that refuses paired devices itself must let a full-access device
+through (`principalHasFullAccess`), as `/api/system/info` and
+`/api/system/releases` (Settings → About) do; `principal.kind` alone does not
+say what the device may do. Its data directory stays a generic label off
+loopback.
 
 See `packages/server/src/remotePolicy.ts` and each package `serverEntry`.
 
@@ -215,7 +242,39 @@ disclosure picks a narrower preset, which reissues the invitation. Each device's
 Permissions disclosure holds the Full access switch; switching it off keeps the
 device's other grants and reveals presets plus per-capability toggles
 (`widgets/permissions.ts` names every capability, pinned by test). Fingerprint,
-diagnostics and identity reset live under Advanced. The phone connection screen
+diagnostics and identity reset live under Advanced. The host card's **Name on
+phones** field sets the server name (see below). The phone connection screen
 has one primary action (Scan QR code, or tapping a known computer). Nearby/code
 pairing are quiet links, network failures render on the affected server card,
 and manual/insecure URLs stay under Advanced. Phones cannot edit grants.
+
+## Device names
+
+Each phone names itself when it pairs: iOS sends `UIDevice.current.name`
+(the model, "iPhone"/"iPad", on iOS 16+ without the user-assigned-name
+entitlement), Android the name set in Settings (`Settings.Global.DEVICE_NAME`)
+or maker and model. Older apps sent the placeholder "This phone"; the tunnel
+package shows a placeholder as the platform ("iPhone", "Android",
+`src/deviceLabel.ts`). One account's devices never share a name: a new pairing
+stores the first free numbered form ("iPhone 2"), and device rows of older
+same-named pairings are numbered by pairing time when listed.
+
+## Server name
+
+Phones show a server by the name its owner gives it. The tunnel package keeps
+it in `tunnel.db` (`tunnel_setting` key `server-name`; empty means the short OS
+host name). `GET /api/tunnel/server-name` returns `{ name, fallback, editable }`
+to a local tunnel admin; `PUT` with `{ name }` is the server owner's only
+(`usr_owner`), because every member's phones see it, and emits
+`tunnel/server-name-changed`. Names are one printable line of at most 80
+characters (`cleanServerName` in `src/serverName.ts`, `clean_label` in
+`polyth-link-core`).
+
+The name reaches phones two ways. New pairing tickets carry it as
+`host.label` (QR and six-digit code alike). The host also holds it
+(`host.set_label`, sent after trust sync and before `endpoint.start`, and on
+every change) and returns it in `ConnectionAccepted.host_label`, so a phone
+that paired earlier stores the current name on its next connection. The field
+is optional in both directions: older hosts send none, older clients ignore it.
+A name the person gave the server on their phone always wins (see
+`docs/mobile/polyth-link.md`, "Server names").

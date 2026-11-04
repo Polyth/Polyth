@@ -649,6 +649,38 @@ test("Pi delivers text-file attachments through Polyth's projection and keeps bi
   assert.equal(refused.kind, "unsupported");
 });
 
+test("Pi reads project images through its attachment reader, byte for byte", async () => {
+  // A remote project's staged uploads live on its host; the runtime must not
+  // look for them on this machine.
+  const fake = fakePi();
+  const bytes = Uint8Array.from([0x89, 0x50, 0x00, 0xff, 0x80, 0x0a]);
+  const reads: string[] = [];
+  const runtime = createPiRuntime(context, fake.rpc, {
+    readAttachment: async (path) => {
+      reads.push(path);
+      if (path !== "_inbox/a-image.png") throw Object.assign(new Error("missing"), { code: "not-found" });
+      return bytes;
+    },
+  });
+  await runtime.createSessionOperation!({ projectId: "project", sessionId: "canonical", title: "Pi", cwd: "/tmp" }, "create-op");
+  const image = { id: "a1", name: "image.png", mime: "image/png", size: bytes.length, kind: "image" as const, path: "_inbox/a-image.png" };
+  const admitted = await runtime.startTurnOperation!({ sessionId: "canonical", text: "look", attachments: [image, image] }, "turn-op");
+  assert.equal(admitted.kind, "confirmed");
+  assert.deepEqual(reads, ["_inbox/a-image.png"]);
+  assert.deepEqual(fake.calls.findLast((call) => call.type === "prompt")?.images, [
+    { type: "image", data: Buffer.from(bytes).toString("base64"), mimeType: "image/png" },
+  ]);
+  fake.emit({ type: "agent_settled" });
+
+  const missing = await runtime.startTurnOperation!({
+    sessionId: "canonical",
+    text: "look again",
+    attachments: [{ ...image, id: "a2", path: "_inbox/gone.png" }],
+  }, "turn-op-2");
+  assert.deepEqual(missing, { kind: "rejected", code: "invalid-attachment", message: "Pi image attachment could not be read" });
+  await runtime.dispose();
+});
+
 test("Pi reports emulated title support and surfaces an explicit native session name", async () => {
   // Pi RPC can carry a client/extension-set display name, but the agent does
   // not generate a semantic title. Claiming native would make the canonical

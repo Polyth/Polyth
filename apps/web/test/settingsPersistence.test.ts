@@ -214,16 +214,17 @@ test("saving either settings domain preserves the other domain byte-for-byte", (
   assert.equal(stored.get("polyth.settings")?.includes("Legacy name"), true, "migration source remains read-only");
 });
 
-test("header metric and response action layouts preserve order and reject unknown ids", () => {
+test("response action layouts preserve order and reject unknown ids", () => {
   const parsed = ui.parseUiSettings(JSON.stringify({
-    headerMetrics: ["cost", "tokens", "bogus", "cost"],
+    // Retired setting from older records: it must not survive a read.
+    headerMetrics: ["cost", "tokens"],
     assistantMessageActions: {
       items: [{ id: "pin", placement: "menu" }, { id: "copy", placement: "bar" }, { id: "unknown", placement: "bar" }],
       reveal: "always",
       touch: "bogus",
     },
   }));
-  assert.deepEqual(parsed.headerMetrics, ["cost", "tokens"]);
+  assert.equal("headerMetrics" in parsed, false);
   assert.deepEqual(parsed.assistantMessageActions.items.slice(0, 2), [
     { id: "pin", placement: "menu" },
     { id: "copy", placement: "bar" },
@@ -232,7 +233,6 @@ test("header metric and response action layouts preserve order and reject unknow
   assert.equal(parsed.assistantMessageActions.reveal, "always");
   assert.equal(parsed.assistantMessageActions.touch, "menu");
   const defaults = ui.parseUiSettings(null);
-  assert.deepEqual(defaults.headerMetrics, [...ui.HEADER_METRIC_IDS]);
   assert.deepEqual(defaults.assistantMessageActions, ui.UI_DEFAULTS.assistantMessageActions);
   assert.deepEqual(defaults.userMessageActions, ui.UI_DEFAULTS.userMessageActions);
 });
@@ -264,25 +264,20 @@ test("session activity details default to the combined view and accept tabs", ()
   assert.equal(ui.parseUiSettings(JSON.stringify({ sessionActivityDetails: "split" })).sessionActivityDetails, "tabs");
 });
 
-test("activity block and composer status looks default to thread/line and survive storage", () => {
-  for (const raw of [null, "{}"]) {
-    assert.equal(ui.parseUiSettings(raw).activityBlockStyle, "thread");
-    assert.equal(ui.parseUiSettings(raw).composerStatusStyle, "line");
-  }
+test("the activity block look defaults to thread and survives storage; the retired status style is dropped", () => {
+  for (const raw of [null, "{}"]) assert.equal(ui.parseUiSettings(raw).activityBlockStyle, "thread");
   for (const invalid of ["card", "glass", false, 0, null]) {
-    const parsed = ui.parseUiSettings(JSON.stringify({ activityBlockStyle: invalid, composerStatusStyle: invalid }));
-    assert.equal(parsed.activityBlockStyle, "thread");
-    assert.equal(parsed.composerStatusStyle, "line");
+    assert.equal(ui.parseUiSettings(JSON.stringify({ activityBlockStyle: invalid })).activityBlockStyle, "thread");
+  }
+  // A record saved while the setting existed reads cleanly and forgets it.
+  for (const old of ["line", "tab", "capsule"]) {
+    assert.equal("composerStatusStyle" in ui.parseUiSettings(JSON.stringify({ composerStatusStyle: old })), false);
   }
   const before = ui.getUiSettings();
   try {
     for (const activityBlockStyle of ui.ACTIVITY_BLOCK_STYLES) {
       ui.setUiSettings({ activityBlockStyle });
       assert.equal(ui.parseUiSettings(stored.get(ui.UI_SETTINGS_KEY) ?? null).activityBlockStyle, activityBlockStyle);
-    }
-    for (const composerStatusStyle of ui.COMPOSER_STATUS_STYLES) {
-      ui.setUiSettings({ composerStatusStyle });
-      assert.equal(ui.parseUiSettings(stored.get(ui.UI_SETTINGS_KEY) ?? null).composerStatusStyle, composerStatusStyle);
     }
   } finally {
     ui.setUiSettings(before);

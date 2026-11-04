@@ -6,22 +6,45 @@ export interface NewsProviderOptions {
   fetch?: FetchLike;
 }
 
+/** A numeric character reference outside Unicode (or a surrogate) decodes to U+FFFD instead of throwing. */
+function codePointChar(code: number): string {
+  return Number.isInteger(code) && code >= 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : "\uFFFD";
+}
+
 function decodeXml(value: string): string {
   return value
     .replace(/^<!\[CDATA\[|\]\]>$/g, "")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replace(/&amp;/g, "&")
+    .replace(/&#(\d+);/g, (_, code: string) => codePointChar(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => codePointChar(Number.parseInt(code, 16)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
+    // Last, so `&amp;lt;` decodes once to `&lt;` rather than twice to `<`.
+    .replace(/&amp;/g, "&")
     .trim();
 }
 
+/** The first `<name …>…</name>` element at or after `from`. Found by index
+ * (open tag, first `>`, first closer) so unterminated tags cannot make the
+ * scan quadratic; if one has no `>` or no closer, no later one does either. */
+function element(xml: string, name: string, from = 0): { inner: string; start: number; end: number } | undefined {
+  const open = new RegExp(`<${name}(?=[\\s>])`, "gi");
+  open.lastIndex = from;
+  const found = open.exec(xml);
+  if (!found) return undefined;
+  const gt = xml.indexOf(">", found.index + name.length + 1);
+  if (gt < 0) return undefined;
+  const closer = new RegExp(`<\\/${name}>`, "gi");
+  closer.lastIndex = gt + 1;
+  const close = closer.exec(xml);
+  if (!close) return undefined;
+  return { inner: xml.slice(gt + 1, close.index), start: found.index, end: close.index + close[0].length };
+}
+
 function tag(block: string, name: string): string | undefined {
-  const match = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${name}>`, "i").exec(block);
-  return match?.[1] ? decodeXml(match[1]) : undefined;
+  const inner = element(block, name)?.inner;
+  return inner ? decodeXml(inner) : undefined;
 }
 
 function safeUrl(value: string | undefined): string | undefined {
@@ -35,7 +58,10 @@ function safeUrl(value: string | undefined): string | undefined {
 }
 
 export function parseMarketRss(xml: string, symbol: string, source: string, fallbackPublisher: string): MarketNewsItem[] {
-  const items = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) ?? [];
+  const items: string[] = [];
+  for (let found = element(xml, "item"); found && items.length < 50; found = element(xml, "item", found.end)) {
+    items.push(xml.slice(found.start, found.end));
+  }
   const out: MarketNewsItem[] = [];
   for (const item of items.slice(0, 50)) {
     const title = tag(item, "title");

@@ -515,7 +515,7 @@ test("in-page click to unapproved public origin auto-follows and records approva
   const s = await svc.create({ projectId: "p1", url: HOME });
   const { session: after } = await svc.action(s.id, { kind: "click", target: { selector: "a#ext" } }, "user");
   assert.equal(after.url, EXAMPLE);
-  assert.ok(svc.approvals(s.id).includes("https://example.com"));
+  assert.ok(svc.approvals(s.id).some((origin) => origin === "https://example.com"));
   await svc.close(s.id);
 });
 
@@ -526,7 +526,7 @@ test("navigate() to a new public origin still requires explicit approval", async
     () => svc.navigate(s.id, EXAMPLE, "user"),
     (e: Error & { code?: string }) => e.code === "approval-required",
   );
-  assert.ok(!svc.approvals(s.id).includes("https://example.com"));
+  assert.ok(!svc.approvals(s.id).some((origin) => origin === "https://example.com"));
   await svc.close(s.id);
 });
 

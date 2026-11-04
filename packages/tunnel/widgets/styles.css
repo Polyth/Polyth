@@ -98,6 +98,18 @@
   white-space: nowrap;
 }
 
+/* The name paired phones show; the placeholder is the host name. */
+.pkg-tunnel-name {
+  inline-size: min(18rem, 100%);
+  min-inline-size: 0;
+}
+
+.pkg-tunnel-name-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pkg-tunnel-hero-pair {
   align-self: flex-end;
 }
@@ -136,7 +148,7 @@
   flex: 0 0 auto;
   width: var(--space-2);
   height: var(--space-2);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--faint);
 }
 
@@ -336,6 +348,36 @@
 
   .pkg-tunnel-hero-pair {
     align-self: stretch;
+  }
+
+  /* The status badge takes its own line so the title and description keep the
+     card width instead of being squeezed beside it. */
+  .pkg-tunnel-hero-head {
+    flex-wrap: wrap;
+  }
+
+  .pkg-tunnel-hero-head > .ui-badge {
+    /* Content width: the copy grows to fill its own line, so the badge wraps
+       under it as a pill rather than a full-width bar. */
+    flex: 0 1 auto;
+    max-width: 100%;
+    align-self: flex-start;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* Facts stack label over value: a long value wraps at the card's full width
+     instead of being right-aligned into a narrow column. */
+  .pkg-tunnel-fact {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .pkg-tunnel-fact dd {
+    justify-content: flex-start;
+    width: 100%;
+    text-align: start;
   }
 }
 

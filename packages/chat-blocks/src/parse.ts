@@ -156,7 +156,7 @@ const TRAILING_OPTION_RE = /\s+([a-z][a-z-]{0,23})=(\S{1,160})$/;
 const ROW_RE = /^\s*(?:[-*•+]|\d{1,3}[.)])\s+(?:\[( |x|X)\]\s+)?(.*)$/;
 // A bare `>` is a button line with no label (reported), not a caption.
 const ACTION_RE = /^\s*>(?:\s+(.*))?$/;
-const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|avif|svg)(?:[?#].*)?$/i;
+const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|avif|svg)(?:[?#]|$)/i;
 const SOURCE_EXT_RE = /\.(?:json|jsonl|ndjson|csv|tsv)$/i;
 
 const clamp = (text: string): string => (text.length > CHAT_BLOCK_MAX_TEXT ? `${text.slice(0, CHAT_BLOCK_MAX_TEXT - 1)}…` : text);
@@ -438,7 +438,13 @@ function formItem(index: number, raw: string[], report: Report): ChatBlockItem |
   return { index, selected: false, title: label, cells: raw, field };
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** `local@domain.tld` with no whitespace; a linear scan rather than a backtracking pattern. */
+const isEmail = (text: string): boolean => {
+  const at = text.indexOf("@");
+  if (at < 1 || at !== text.lastIndexOf("@") || /\s/.test(text)) return false;
+  const dot = text.indexOf(".", at + 2);
+  return dot !== -1 && dot < text.length - 1;
+};
 
 /** Why a form value cannot be sent yet, or null when it can. */
 export function fieldError(field: FormField, value: string): "missing" | "invalid" | null {
@@ -446,7 +452,7 @@ export function fieldError(field: FormField, value: string): "missing" | "invali
   if (field.type === "toggle" || field.type === "select") return field.required && field.type === "select" && !text ? "missing" : null;
   if (!text) return field.required ? "missing" : null;
   switch (field.type) {
-    case "email": return EMAIL_RE.test(text) ? null : "invalid";
+    case "email": return isEmail(text) ? null : "invalid";
     case "url": return isUrl(text) ? null : "invalid";
     case "number": {
       const n = Number(text);
@@ -469,7 +475,7 @@ export function fieldError(field: FormField, value: string): "missing" | "invali
 
 // A number with an optional currency, sign, grouping and a short unit:
 // "9,5", "$1,199", "−12%", "18 h", "1.24 kg". Not "{\"a\":1}" or "v2".
-const NUMBER_CELL_RE = /^[$€£₴¥]?\s*[-+\u2212]?\d[\d\s.,\u00a0\u202f]*\s*(?:%|[\p{L}$€£₴¥.]{1,6})?$/u;
+const NUMBER_CELL_RE = /^[$€£₴¥]?\s*[-+\u2212]?\d[\d\s.,\u00a0\u202f]*(?:%|[\p{L}$€£₴¥.]{1,6})?$/u;
 const isNumeric = (cell: string | undefined): boolean =>
   cell !== undefined && NUMBER_CELL_RE.test(cell.trim()) && numericValue(cell) !== null;
 
@@ -1093,7 +1099,7 @@ const STEP_MARK: Readonly<Record<StepStatus, string>> = { done: "[x]", doing: "[
 export function chatBlockMarkdown(doc: ChatBlockDoc): string {
   const out: string[] = [];
   if (doc.title) out.push(`**${doc.title}**`, "");
-  const escape = (cell: string) => cell.replace(/\|/g, "\\|");
+  const escape = (cell: string) => cell.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
   const table = (columns: string[], rows: string[][]) => {
     if (columns.length === 0) return;
     out.push(`| ${columns.map(escape).join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`);

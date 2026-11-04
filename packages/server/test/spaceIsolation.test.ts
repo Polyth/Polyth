@@ -507,6 +507,17 @@ test("a socket bound to one Space receives neither projections nor events from a
     assert.equal(homeClient.messages.filter((m) => m.type === "notification/added").length, 0);
     assert.equal(workClient.messages.filter((m) => m.type === "notification/added").length, 1);
 
+    // A row from a project the recipient cannot open (another Space's, or one
+    // that no longer exists) is not shown live, as on `/api/notifications`.
+    for (const projectId of [inHome.projectId, "removed-project"]) {
+      gateway.notification({
+        id: `n-${projectId}`, key: "k", kind: "completed", sessionId: inWork.sessionId,
+        projectId, title: "done", body: "", ts: Date.now(), read: false,
+      }, { userId: h.work.userId, spaceId: h.work.spaceId });
+    }
+    await quietPeriod();
+    assert.equal(workClient.messages.filter((m) => m.type === "notification/added").length, 1);
+
     // Login/grants can remain valid after membership is removed. Live fan-out
     // must recheck the original Space, close, and discard buffered content.
     const replacementOwner = h.gateway.store.createUser("Replacement owner");

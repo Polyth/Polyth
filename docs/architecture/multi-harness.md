@@ -127,7 +127,7 @@ A synchronized native leg can be reattached where the adapter supports verified 
 1. Under the existing session lock, persist a switch intent containing the target, timing and transition ID. Fence new turn admission; new messages can queue.
 2. Default to finishing the active turn. “Stop and switch now” records explicit stop intent and uses existing abort machinery.
 3. Reconcile the old runtime. A local idle marker, abort acknowledgement, timeout, disconnected channel or missing PID is not a release proof. Unresolved operations remain unresolved.
-4. Require `releaseExecution` to confirm the exact old authority and generation. OpenCode's shared runtime barrier also rejects release while a neighbouring session on that authority is busy or unresolved.
+4. Require `releaseExecution` to confirm the exact old authority and generation. OpenCode's shared runtime barrier also rejects release while a neighbouring session on that authority is busy or unresolved. A requested transition that fails before this proof (no release hook, as on a remote Pi leg; a rejected, `unknown` or mismatched release; an abort acknowledgement alone; an unresolved operation; an unreachable runtime) is withdrawn at once with `harness/switch-cancelled` (`reason: "release-unproven"`, plus the error `code` and `message`) and the error reaches the caller. The old harness keeps the chat, its binding and generation; no target is created and nothing is replayed. Waiting for a running turn under `after-turn` timing is not a failure, and a server shutdown keeps the intent durable for the next start (`finishHarnessSwitchUnderLock`, `packages/server/src/sessions.ts`).
 5. Persist `harness/execution-released` before constructing the target runtime. Unwire the old runtime and evict its pool entry.
 6. Prepare target native creation through the existing durable operation journal. A different harness is constructed without the source harness's model identity; same-harness fresh legs retain compatible launch settings. Persist the provider's exact native receipt. A missing response is never retried speculatively; recovery requires a matching operation receipt, not a title or timestamp guess.
 7. Atomically publish the runtime epoch, target route, fresh leg, and closed prior leg. Clear transition state and stale model/profile routing in the same transaction.
@@ -139,7 +139,11 @@ that operation, and it is never replayed. If the old epoch cannot reattach,
 the provider's durable authority release path can supply that proof without
 loading native history, provided no other canonical session references the
 authority or the same workspace route. Missing, uncertain or mismatched proof
-leaves the requested target and queued intent intact and does not start it.
+withdraws the requested switch (step 4) and does not start the target.
+Messages queued behind it stay queued and run on the harness that kept the
+chat; a send that itself finishes the switch fails with the release error, and
+the next send runs normally. A transition an older server left `requested` is
+withdrawn the same way the first time a send or the queue dispatcher meets it.
 A same-harness transition (stale-history refresh or runtime restart) with
 unchanged launch settings and no active rewind is the exception when that
 release path is unavailable or shared on an owned runtime: it withdraws the
@@ -1278,7 +1282,11 @@ project (`resolveRemoteHarnessHost`), builds the launch, and probes
 `ssh` under its normal process authority, so the Polyth-owned process is the
 local client; closing it closes the remote CLI's stdin, which ends the stdio
 harness. Pi runs plain `pi --mode rpc` there (its local tool-bridge worker is
-not projected). Command Code uploads its content-addressed worker and bridge
+not projected). Its project images, staged `_inbox/*` uploads included, are on
+the host, so the adapter reads them there with `readRemoteFileBytes` (raw
+stdout bytes over the same connection, capped at the 20 MiB upload limit) and
+sends them as RPC image blocks; browser captures stay Polyth artifacts on this
+machine and are read locally. Command Code uploads its content-addressed worker and bridge
 Mod (0600) under `~/.local/share/polyth/runtimes/commandcode/` on the host and
 runs the worker with the host's `node`, so the CLI, bridge, steering socket and
 binding receipts stay together; the local runtime reads and writes that
@@ -1294,8 +1302,9 @@ Extra accounts of a multi-account family stay local-only. Limits
 live-verified against a real SSH server): no Polyth capability delivery
 (MCP bridge, instructions) to these legs, no local print-mode utility
 completion, no native-history import for Claude/Cursor/Pi, no Command Code attachments, no cross-harness
-release proof (switching away is refused rather than guessed), and a remote CLI
-that ignores stdin EOF can outlive a killed local client.
+release proof (a switch away is withdrawn at once with that error rather than
+guessed, and the chat stays on the remote leg), and a remote CLI that ignores
+stdin EOF can outlive a killed local client.
 
 Each connection stores per-harness configuration exceptions
 (`SshConnectionDto.harnessConfig`); a harness that is not listed uses `local`.

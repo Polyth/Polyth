@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Project } from "@polyth/contracts";
 import {
+  adoptProvisionalList,
   beginListRequest,
   initialProjectRegistry,
   normalizeProjects,
@@ -144,4 +145,36 @@ test("sync reconnect retries a failed or unselected registry, not an in-flight b
     true,
     "ready-empty contradicts an explicit project selection and must retry",
   );
+});
+
+test("a remembered list shows while the boot request is out, and that request's answer still publishes over it", () => {
+  const idle = initialProjectRegistry();
+  assert.equal(adoptProvisionalList(idle, [project("one")]), idle, "no request out: nothing to stand in for");
+  const loading = beginListRequest(idle, 1);
+  assert.equal(adoptProvisionalList(loading, []), loading, "an empty memory is not project data");
+  const remembered = adoptProvisionalList(loading, [project("one"), project("one"), project("two")]);
+  assert.equal(remembered.status, "ready");
+  assert.deepEqual(remembered.projects.map((entry) => entry.id), ["one", "two"]);
+  assert.equal(remembered.status === "ready" && remembered.provisional, true);
+  assert.equal(adoptProvisionalList(remembered, [project("three")]), remembered, "only a loading registry adopts");
+
+  const answered = publishListSuccess(remembered, 1, 0, [project("two"), project("new")]);
+  assert.equal(answered.outcome, "published");
+  assert.deepEqual(answered.state.projects.map((entry) => entry.id), ["two", "new"]);
+  assert.equal(answered.state.status === "ready" && answered.state.provisional, undefined, "the answer is the server's");
+
+  const failed = publishListFailure(remembered, 1, "offline");
+  assert.equal(failed.status, "ready", "a failed answer keeps the remembered list on screen");
+  assert.equal(failed.status === "ready" && failed.refreshError, "offline");
+
+  const mutated = upsertProject(remembered, project("added"));
+  assert.equal(publishListSuccess(mutated, 1, 0, [project("one")]).outcome, "superseded-by-mutation",
+    "a mutation meanwhile still supersedes the boot answer");
+});
+
+test("socket open neither races the boot answer under a remembered list nor gives up after it failed", () => {
+  const remembered = adoptProvisionalList(beginListRequest(initialProjectRegistry(), 1), [project("one")]);
+  assert.equal(shouldRefreshProjectsOnSyncOpen(remembered, null), false, "the boot request owns publication");
+  const failed = publishListFailure(remembered, 1, "offline");
+  assert.equal(shouldRefreshProjectsOnSyncOpen(failed, "one"), true, "a failed boot answer is asked again");
 });

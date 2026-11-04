@@ -51,8 +51,12 @@ import ConversationStartDialog from "./ConversationStartDialog.tsx";
 import "./ConversationStart.css";
 import {
   LOW_RESOURCE_TIMELINE_WINDOW,
+  TIMELINE_AUTO_CHUNK,
   TIMELINE_CHUNK,
+  TIMELINE_HEAD_KEYS,
   grownLimit,
+  heldWindowStart,
+  locateWindowHead,
   initialTimelineWindow,
   limitToInclude,
   windowStart,
@@ -65,8 +69,11 @@ import {
   promptRailInset,
   promptRowLabel,
   railWindow,
+  scrollbarRailBox,
+  scrollbarThickness,
   tickWidth,
   type PromptRailSide,
+  type RailBox,
 } from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import { useTimelineCompanion, useTimelineSessionId } from "../timelineSession.ts";
@@ -1338,19 +1345,44 @@ function PromptNavigator({ prompts, side, onJump, containerRef, canLoadOlder, ol
   // (full-height strip, floating cluster, pinned pane beside the chat), and
   // the navigator collapses/expands, so the inset is measured, never a
   // constant. Every one of those changes resizes the viewport or the chrome.
+  // A classic scrollbar is drawn on the scroller's inline-end edge, where the
+  // rail would otherwise sit on top of it, so the measured thickness of a
+  // visible scrollbar is added for a rail on that same edge only.
   useLayoutEffect(() => {
     const nav = navRef.current;
     const viewport = nav?.parentElement;
     if (!nav || !viewport) return;
+    const scroller = containerRef.current;
     const shell = nav.closest(".app-shell") ?? nav.ownerDocument;
     const obstacles = Array.from(shell.querySelectorAll<HTMLElement>(".railbar, .sidebar"))
       .filter((element) => !element.contains(nav));
     const measure = () => {
-      setInset(promptRailInset(viewport.getBoundingClientRect(), obstacles.map((element) => element.getBoundingClientRect()), side));
+      const view = nav.ownerDocument.defaultView;
+      const style = scroller && view ? view.getComputedStyle(scroller) : null;
+      const viewportBox = viewport.getBoundingClientRect();
+      const boxes: RailBox[] = obstacles.map((element) => element.getBoundingClientRect());
+      const scrollbar = scroller && style
+        ? scrollbarRailBox(
+          viewportBox,
+          scrollbarThickness(
+            scroller.offsetWidth,
+            scroller.clientWidth,
+            Number.parseFloat(style.borderLeftWidth),
+            Number.parseFloat(style.borderRightWidth),
+          ),
+          style.direction,
+          side,
+          Number.parseFloat(style.borderLeftWidth),
+          Number.parseFloat(style.borderRightWidth),
+        )
+        : null;
+      if (scrollbar) boxes.push(scrollbar);
+      setInset(promptRailInset(viewportBox, boxes, side));
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(viewport);
+    if (scroller) observer?.observe(scroller);
     for (const element of obstacles) observer?.observe(element);
     const view = nav.ownerDocument.defaultView;
     view?.addEventListener("resize", measure);
@@ -1358,7 +1390,7 @@ function PromptNavigator({ prompts, side, onJump, containerRef, canLoadOlder, ol
       observer?.disconnect();
       view?.removeEventListener("resize", measure);
     };
-  }, [side]);
+  }, [side, containerRef]);
 
   // Scroll-spy: the active turn is the last prompt at/above the viewport
   // midline; at the very bottom the newest rendered prompt always wins (its
@@ -2038,6 +2070,23 @@ export default function Timeline({
     typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true",
   );
   const [limit, setLimit] = useState(initialLimit);
+  // The last committed window — its first rows, where it started and whether
+  // it held history that landed above it — read by the next render
+  // (heldWindowStart). A reveal rewrites it and bumps the revision.
+  const committedWindow = useRef<{ sessionId: string | null; ids: string[]; start: number; held: boolean } | null>(null);
+  const [windowRevision, setWindowRevision] = useState(0);
+  // Reveals the next earlier rows once the reader nears the window's first
+  // row (assigned each render below, next to the window), one task after the
+  // scroll or commit that asked, so a burst of scroll events asks once.
+  const revealEarlierStep = useRef<() => void>(() => {});
+  const revealEarlierTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealEarlierSoon = useCallback(() => {
+    if (revealEarlierTimer.current !== null) return;
+    revealEarlierTimer.current = setTimeout(() => {
+      revealEarlierTimer.current = null;
+      revealEarlierStep.current();
+    }, 0);
+  }, []);
   useEffect(() => {
     // Desktop settings arrive over IPC and can race the first React render.
     // Re-read the DOM marker after subscribing so low-resource startup always
@@ -2161,6 +2210,10 @@ export default function Timeline({
     sessionId,
     seq: latestUserMessage?.eventSeq ?? 0,
   });
+  // The newest event of the last committed render: a prompt at or below it
+  // was already in the log when that tail was on screen (see below).
+  const committedTail = useRef<{ sessionId: string | null; seq: number }>({ sessionId: null, seq: 0 });
+  const newestEventSeq = sessionEvents.length > 0 ? sessionEvents[sessionEvents.length - 1]!.seq : 0;
   // Hidden replays (regenerate/retry/auto-resume) intentionally append no
   // visible user row. Track the false -> true edge so a live hidden replay
   // can release geometry owned by the preceding visible prompt without
@@ -2403,12 +2456,7 @@ export default function Timeline({
   // the painted layout. Otherwise the floor kept the removed history as blank
   // under the tail, which lifted the live tail out of the reading area until
   // enough new rows filled it. Returns the shift; the caller owns the scroll.
-  const foldLayoutShift = useCallback((el: HTMLElement): number => {
-    const anchor = readerAnchor.current;
-    if (anchor === null || anchor.row.parentElement !== el || anchor.row.offsetHeight <= 0) return 0;
-    const shift = anchor.row.offsetTop - anchor.offset;
-    if (Math.abs(shift) < 0.5) return 0;
-    anchor.offset = anchor.row.offsetTop;
+  const absorbLayoutAbove = useCallback((shift: number) => {
     timelineExtentHighWater.current = Math.max(0, timelineExtentHighWater.current + shift);
     if (heldTailScroll.current !== null) {
       heldTailScroll.current = Math.max(0, heldTailScroll.current + shift);
@@ -2418,8 +2466,16 @@ export default function Timeline({
       painted.scroll += shift;
       painted.shift += shift;
     }
-    return shift;
   }, []);
+  const foldLayoutShift = useCallback((el: HTMLElement): number => {
+    const anchor = readerAnchor.current;
+    if (anchor === null || anchor.row.parentElement !== el || anchor.row.offsetHeight <= 0) return 0;
+    const shift = anchor.row.offsetTop - anchor.offset;
+    if (Math.abs(shift) < 0.5) return 0;
+    anchor.offset = anchor.row.offsetTop;
+    absorbLayoutAbove(shift);
+    return shift;
+  }, [absorbLayoutAbove]);
 
   const setTurnSheetPadding = useCallback((value: number) => {
     const el = ref.current;
@@ -2814,6 +2870,14 @@ export default function Timeline({
     }
     if (!latestUserMessage || latestSeq <= observedPrompt.current.seq) return;
     observedPrompt.current = { sessionId, seq: latestSeq };
+    // History, not a send: the session opened on its newest events and the
+    // turn's prompt arrived with older history (the background backfill). It
+    // was in the log before the tail already on screen, so it neither aligns
+    // the view on the focus line nor takes a reader who scrolled away back to
+    // the tail. Treating it as a send scrolled the transcript to an unpainted
+    // position and lifted every row from there across the others.
+    const tail = committedTail.current;
+    if (tail.sessionId === sessionId && latestSeq <= tail.seq) return;
     // The DOM identity changes at admission, but the first streamed row
     // must still lift from the echo's last painted position.
     const painted = paintedLayout.current;
@@ -2856,6 +2920,10 @@ export default function Timeline({
     turnSheetPromptId.current = latestUserMessage.id;
     syncTurnSheet(true);
   }, [sessionId, latestUserMessage?.id, latestUserMessage?.eventSeq, cancelTurnEndMotion, resetTimelineExtent, setTurnSheetPadding, syncTurnSheet, scrollToTail]);
+  // After the prompt effect above, so it reads the previous commit's tail.
+  useLayoutEffect(() => {
+    committedTail.current = { sessionId, seq: newestEventSeq };
+  });
 
   // A session that opens mid-turn lands in the live layout in its first frame:
   // its prompt owns the reserve, so a fold at the tail never clamps the view,
@@ -3329,9 +3397,11 @@ export default function Timeline({
       else paintedLayout.current.scroll = el.scrollTop;
     }
     lastScrollTop.current = el.scrollTop;
-    // Scroll-up lazy loading: nearing the top with every cached row already
-    // rendered pulls the next page of older history from the server.
-    if (el.scrollTop < 160 && canLoadOlder && start === 0 && !olderBusy) void loadOlder();
+    // Scroll-up lazy loading: nearing the window's first row reveals the rows
+    // held above it; at the top with every cached row rendered, the next page
+    // of older history is pulled and lands held, to be revealed the same way.
+    if (start > 0) revealEarlierSoon();
+    else if (el.scrollTop < 160 && canLoadOlder && !olderBusy) void loadOlder(false).catch(() => undefined);
     if (sessionId === null) return;
     if (saveTimer.current !== null) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -3356,7 +3426,9 @@ export default function Timeline({
     if (turnSettleDue.current) handOverTurnTail();
     else if (atBottom.current) scrollToTail();
     if (atBottom.current) setShowJump(false);
-  }, [handOverTurnTail, scrollToTail, setTurnSheetPadding, syncTurnSheet]);
+    // Earlier rows the gesture scrolled toward are revealed at its rest.
+    revealEarlierSoon();
+  }, [handOverTurnTail, revealEarlierSoon, scrollToTail, setTurnSheetPadding, syncTurnSheet]);
   const armTouchRest = useCallback(() => {
     if (touchRestTimer.current !== null) clearTimeout(touchRestTimer.current);
     touchRestTimer.current = setTimeout(releaseTouch, TOUCH_SCROLL_REST_MS);
@@ -3570,11 +3642,11 @@ export default function Timeline({
   // panel's duration stays truthful when the turn state is no longer in the
   // store. While the session is actively working no answer shows any metadata
   // row; panels appear once the turn completes.
-  // Answers closed by a later prompt keep their footer's box through the next
-  // turn (dormant: invisible while it works). Removing every completed footer
-  // while a turn ran reflowed the whole transcript at each send and again at
-  // each turn end. Only the trailing answer waits, unless a sent prompt
-  // already closes it.
+  // Answers closed by a later prompt keep their footer, visible, through the
+  // next turn: removing every completed footer while a turn ran reflowed the
+  // whole transcript at each send and again at each turn end, and an invisible
+  // one left a blank band above the block under it. Only the working turn's
+  // answers wait (dormant), unless a sent prompt already closes the turn.
   const terminalAnswers = useMemo(() => {
     const terminal = new Map<number, number>();
     let openAt = 0;
@@ -3727,13 +3799,39 @@ export default function Timeline({
       observer?.disconnect();
       publishPromptVisibility(false);
     };
-  }, [companion, sessionId, latestPromptId, limit]);
+  }, [companion, sessionId, latestPromptId, limit, windowRevision]);
 
   // Timeline windowing: rows render as a suffix; revealing earlier rows keeps the
   // viewport anchored (scrollTop compensates for the height that appeared
-  // above), and a jump to a hidden prompt grows the window first.
-  const start = windowStart(rows.length, limit);
+  // above), and a jump to a hidden prompt grows the window first. History that
+  // lands above the window — the background backfill after an open on the
+  // newest events, a page loaded from the server — is held there: the window
+  // keeps its first row, and those rows mount a chunk at a time as the reader
+  // scrolls up to them (revealEarlierStep).
+  const naturalStart = windowStart(rows.length, limit);
+  const committedHead = committedWindow.current?.sessionId === sessionId ? committedWindow.current : null;
+  const start = committedHead === null ? naturalStart : heldWindowStart({
+    naturalStart,
+    // Streaming renders find the head where it stood; only a change above it
+    // scans the rows.
+    headIndex: rows[committedHead.start]?.id === committedHead.ids[0]
+      ? committedHead.start
+      : locateWindowHead(rows.map((row) => row.id), committedHead.ids),
+    committedStart: committedHead.start,
+    held: committedHead.held,
+  });
+  const windowHeld = start > naturalStart;
+  // The window as rendered, held or not: growth and jumps measure from it.
+  const windowLimit = rows.length - start;
   const shownRows = start > 0 ? rows.slice(start) : rows;
+  useLayoutEffect(() => {
+    committedWindow.current = {
+      sessionId,
+      ids: shownRows.slice(0, TIMELINE_HEAD_KEYS).map((row) => row.id),
+      start,
+      held: windowHeld,
+    };
+  });
   const timelineEventTypes = new Set(listSlots("session.timeline.event").flatMap((item) => {
     const value = item.meta?.eventTypes;
     return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
@@ -3803,19 +3901,44 @@ export default function Timeline({
   const revealHadFocus = useRef(false);
   // The first row before a reveal: rows mounted above it are the prepend.
   const revealFirstRow = useRef<Element | null>(null);
+  // Render the last `next` rows (never fewer than now): the window's new first
+  // row is held, so history that lands later cannot pull more rows in.
+  const growWindow = (next: number) => {
+    const nextStart = Math.max(0, Math.min(start, rows.length - next));
+    committedWindow.current = {
+      sessionId,
+      ids: rows.slice(nextStart, nextStart + TIMELINE_HEAD_KEYS).map((row) => row.id),
+      start: nextStart,
+      held: true,
+    };
+    setLimit((current) => Math.max(current, rows.length - nextStart));
+    setWindowRevision((revision) => revision + 1);
+  };
   const reveal = (next: number) => {
     const el = ref.current;
     if (el) anchor.current = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
     revealFirstRow.current = el?.querySelector(`:scope > :is(${TIMELINE_LIFT_ROW_SELECTOR})`) ?? null;
     const active = document.activeElement;
     revealHadFocus.current = active instanceof Element && active.closest(".timeline-earlier") !== null;
-    setLimit(next);
+    growWindow(next);
   };
   useLayoutEffect(() => {
     const el = ref.current;
     const a = anchor.current;
     anchor.current = null;
-    if (el && a) el.scrollTop = a.scrollTop + (el.scrollHeight - a.scrollHeight);
+    if (el && a) {
+      // The rows above the reader grew by what was revealed. The reader's
+      // anchor row measures it (the extent, when there is none, may include
+      // a row that arrived at the tail in the same commit); the follow
+      // engine's held geometry moves with it, so a later lift starts from the
+      // pixels the reader saw rather than from this unpainted layout.
+      const folded = foldLayoutShift(el);
+      const grown = folded !== 0 ? folded : el.scrollHeight - a.scrollHeight;
+      if (folded === 0) absorbLayoutAbove(grown);
+      el.scrollTop = a.scrollTop + grown;
+      expectedScrollTop.current = el.scrollTop;
+      lastScrollTop.current = el.scrollTop;
+    }
     // Visible rows never move on a prepend; the revealed rows that land in
     // view fade in together, opacity only.
     const firstBefore = revealFirstRow.current;
@@ -3856,16 +3979,17 @@ export default function Timeline({
       }
     }
     if (el) captureReaderAnchor(el);
-    // captureReaderAnchor is stable.
+    // captureReaderAnchor, foldLayoutShift and absorbLayoutAbove are stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit]);
+  }, [limit, windowRevision]);
 
   // Scroll-up lazy loading: once every cached row is rendered (start === 0)
   // but older history remains on the server, fetch the next page backward.
-  // The prepended events first land WITHOUT changing the visible suffix
-  // (windowStart absorbs them); the effect below then grows the window over
-  // the new rows via reveal(), whose anchor keeps the viewport pinned to the
-  // previously-visible content.
+  // The prepended events land WITHOUT changing the rendered rows (the window
+  // holds its first row); an explicit load then grows the window over all of
+  // them via reveal(), whose anchor keeps the viewport pinned to the
+  // previously-visible content, while scrolling up reveals them a chunk at a
+  // time.
   const [olderBusy, setOlderBusy] = useState(false);
   const revealAfterLoad = useRef(false);
   useEffect(() => {
@@ -3873,17 +3997,34 @@ export default function Timeline({
     revealAfterLoad.current = false;
     reveal(rows.length);
   });
-  const loadOlder = useCallback(async () => {
+  const loadOlder = useCallback(async (revealAll = true) => {
     if (sessionId === null) return;
     setOlderBusy(true);
     try {
-      revealAfterLoad.current = true;
+      revealAfterLoad.current = revealAll;
       const loaded = await loadOlderEvents(sessionId);
       if (!loaded) revealAfterLoad.current = false;
     } finally {
       setOlderBusy(false);
     }
   }, [sessionId]);
+  // Scrolling up toward the window's first row reveals the rows held above
+  // it a chunk at a time, about a screen before the reader reaches them (a
+  // page the server sent lands held too, see onScroll). Never while a finger
+  // owns the scroll — the anchoring write would stop touch WebKit's momentum
+  // dead — the gesture's rest runs it (releaseTouch).
+  revealEarlierStep.current = () => {
+    const el = ref.current;
+    if (!el || start === 0 || el.clientHeight <= 0 || el.scrollTop > el.clientHeight) return;
+    if (touchActive.current || anchor.current !== null || rewindMotionActive.current) return;
+    reveal(grownLimit(rows.length, windowLimit, TIMELINE_AUTO_CHUNK));
+  };
+  useEffect(() => {
+    if (start > 0) revealEarlierSoon();
+  });
+  useEffect(() => () => {
+    if (revealEarlierTimer.current !== null) clearTimeout(revealEarlierTimer.current);
+  }, []);
 
   // Reapply the stored stable anchor once its row exists: grow the window to
   // include it if needed, then align the row to the remembered usable-edge
@@ -3897,9 +4038,9 @@ export default function Timeline({
     if (node === null) {
       const index = rows.findIndex((r) => r.kind !== "activity" && r.id === a.id);
       if (index >= 0) {
-        const next = limitToInclude(rows.length, limit, index);
-        if (next !== limit) {
-          setLimit(next);
+        const next = limitToInclude(rows.length, windowLimit, index);
+        if (next !== windowLimit) {
+          growWindow(next);
           return; // retry after the window grows
         }
       }
@@ -3916,12 +4057,12 @@ export default function Timeline({
   const jump = (id: string, opts?: { focus?: boolean; smooth?: boolean }) => {
     stopFollowing();
     const index = rows.findIndex((r) => r.kind !== "activity" && r.id === id);
-    const next = limitToInclude(rows.length, limit, index);
-    if (next !== limit) {
+    const next = limitToInclude(rows.length, windowLimit, index);
+    if (next !== windowLimit) {
       pendingJump.current = id;
       pendingJumpFocus.current = opts?.focus === true;
       pendingJumpSmooth.current = opts?.smooth === true;
-      setLimit(next);
+      growWindow(next);
       return;
     }
     const node = promptRowNode(ref.current, id);
@@ -3951,15 +4092,17 @@ export default function Timeline({
       if (!canLoadOlder) { request.finish(false); setExternalReveal(null); }
       return;
     }
-    const next = limitToInclude(rows.length, limit, revealTargetIndex);
-    if (next !== limit) { setLimit(next); return; }
+    const next = limitToInclude(rows.length, windowLimit, revealTargetIndex);
+    if (next !== windowLimit) { growWindow(next); return; }
     const target = rows[revealTargetIndex]!;
     const node = promptRowNode(ref.current, target.id);
     if (!node) { request.finish(false); setExternalReveal(null); return; }
     jumpRef.current?.(target.id, { focus: request.focus });
     request.finish(true);
     setExternalReveal(null);
-  }, [externalReveal, revealTargetIndex, canLoadOlder, sessionId, rows.length, limit]);
+    // growWindow reads this render's window; the deps above change with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalReveal, revealTargetIndex, canLoadOlder, sessionId, rows.length, windowLimit]);
   useEffect(() => {
     const request = externalReveal;
     if (!request || !request.current() || request.sessionId !== sessionId
@@ -4333,7 +4476,7 @@ export default function Timeline({
         {(start > 0 || canLoadOlder) && (
           <div className="timeline-earlier">
             {start > 0 ? (
-              <Button size="sm" onClick={() => reveal(grownLimit(rows.length, limit))}>
+              <Button size="sm" onClick={() => reveal(grownLimit(rows.length, windowLimit))}>
                 {tr("timeline.show")}{" "}{Math.min(TIMELINE_CHUNK, start)} {tr("timeline.earlier")}</Button>
             ) : (
               <Button size="sm" busy={olderBusy} onClick={() => void loadOlder()}>
@@ -4385,7 +4528,9 @@ export default function Timeline({
                 entering={r.id === latestRowId}
                 terminal={r.kind === "assistant" && terminalAnswers.terminal.has(r.eventSeq)
                   && (!turnInProgress || pendingSends.length > 0 || r.eventSeq !== terminalAnswers.trailing)}
-                dormant={turnInProgress}
+                // Only the working turn's own answers wait: an answer a later
+                // prompt closed keeps its footer (actions, identity) in view.
+                dormant={turnInProgress && pendingSends.length === 0 && r.eventSeq > terminalAnswers.openSeq}
                 progress={r.kind === "assistant" && nextRowIsActivity(chronologicalRows, index)}
                 // An interim answer of a live turn takes its (still invisible)
                 // footer's box the moment a row lands under it, while it is

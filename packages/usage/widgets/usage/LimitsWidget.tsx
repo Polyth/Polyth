@@ -1,5 +1,4 @@
 import type { CSSProperties } from "react";
-import type { SessionProjection } from "@polyth/contracts";
 import type { WidgetRenderContext, WidgetSettingsContext } from "@polyth/web-sdk";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
 import { Checkbox, EmptyState, IconButton, RefreshIcon, Select } from "../../../../apps/web/src/components/ui/index.ts";
@@ -17,6 +16,7 @@ import {
   limitsWidgetPreferences,
   type LimitGroupView,
   type LimitRowView,
+  type LimitsSubject,
   type LimitsWidgetStyle,
 } from "./limitsModel.ts";
 import { usageWidgetCompact } from "./widgetPresentation.ts";
@@ -241,7 +241,7 @@ function LimitsBody({ style, groups, showReset, merged, compact }: {
 }
 
 export function LimitsWidget({ session, config, editing, panelSize }: Pick<WidgetRenderContext, "config" | "editing" | "panelSize"> & {
-  session: SessionProjection | null;
+  session: LimitsSubject | null;
 }) {
   const limits = useUsageLimits();
   const limitsPrefs = useUsageLimitsPrefs();
@@ -264,7 +264,7 @@ export function LimitsWidget({ session, config, editing, panelSize }: Pick<Widge
     : groups.length > 0 ? null
     : current
       ? session
-        ? { title: tr("usage.limitsNoCurrent", { name: headline || session.title }) }
+        ? { title: tr("usage.limitsNoCurrent", { name: headline || session.title || "" }) }
         : { title: tr("usage.noActiveSession"), description: tr("usage.openSessionToInspect") }
       : { title: tr("usage.limitsNoSources"), description: tr(prefs.source === "selected" ? "usage.limitsChooseSources" : "usage.limitsNoSourcesDescription") };
 

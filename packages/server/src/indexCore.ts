@@ -70,6 +70,7 @@ import {
   SERVER_TURN_COMPLETION_BUS,
   SERVER_TURN_STOPPED_BUS,
   SERVER_PERMISSION_WAITING_BUS,
+  SERVER_ACCOUNT_REMOVAL_BUS,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
   SERVER_BEHAVIOR_SECTIONS,
@@ -129,7 +130,7 @@ import { createPushNotifier, createPushService, plainTextExcerpt, type PushPaylo
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
-import { createNativePushService, nativePushRoutes } from "./nativePush.ts";
+import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
@@ -149,7 +150,8 @@ import {
 import { assistRoutes } from "./routes/assist.ts";
 import { promptHistoryRoutes } from "./routes/promptHistory.ts";
 import { sharingRoutes } from "./routes/sharing.ts";
-import { createSessionSharingService, privateSessionOwner, sessionAccess } from "./sessionSharing.ts";
+import { createSessionSharingService, privateSessionOwner, rowForReader, sessionAccess } from "./sessionSharing.ts";
+import { projectVisibleToUser } from "./accountLimits.ts";
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -157,6 +159,7 @@ import { oneShot } from "./oneshot.ts";
 import {
   createSmallModelService,
   smallModelExecutionRoute,
+  compactionModelPreference,
   smallModelPreference,
   summarizeSessionFirst,
 } from "./smallModel.ts";
@@ -675,10 +678,18 @@ export async function boot(opts: BootOptions = {}) {
   // Sessions and package transitions can emit before WS attaches. This box
   // starts forwarding as soon as the live broadcaster is installed.
   let live: WsGateway | null = null;
+  // Phone Live Activities that show a chat re-evaluate when it changes; set
+  // once the native push service exists (sessions may emit before that).
+  let liveActivityTouched: ((sessionId: string) => void) | null = null;
   const eventWaiters = createSessionEventWaiters();
   const broadcast: Broadcaster = {
-    event: (e: SessionEvent) => { live?.event(e); eventWaiters.event(e.sessionId); },
-    projection: (p: SessionProjection) => { live?.projection(p); eventWaiters.projection(); personalMcpReprovision?.projectionChanged(p); },
+    event: (e: SessionEvent) => { live?.event(e); eventWaiters.event(e.sessionId); liveActivityTouched?.(e.sessionId); },
+    projection: (p: SessionProjection) => {
+      live?.projection(p);
+      eventWaiters.projection();
+      personalMcpReprovision?.projectionChanged(p);
+      liveActivityTouched?.(p.id);
+    },
     notification: (n, recipient) => live?.notification?.(n, recipient),
     pluginChanged: (packageId) => live?.pluginChanged?.(packageId),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
@@ -2310,9 +2321,28 @@ export async function boot(opts: BootOptions = {}) {
   });
   const nativePush = createNativePushService({
     file: `${dataDir}/native-push.json`,
-    relayOrigin: process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN,
+    // Phones register over Polyth Link; pushes go out through Polyth's push
+    // service, or straight to APNs when this server's owner placed the app's key.
+    relay: relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
+    apns: apnsFromDir(`${dataDir}/native-push`),
     authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
+    // A Live Activity only ever reflects chats this person could open in the
+    // navigator: same Space, visible project, readable row (as the WS fan-out).
+    activityViews: async ({ userId, spaceId }, sessionIds) => {
+      const views = new Map<string, import("./nativePush.ts").LiveActivityView>();
+      const attention = await store.attentionFor(sessionIds, userId);
+      for (const id of sessionIds) {
+        const row = await store.projection(id);
+        if (!row || row.spaceId !== spaceId || !projectVisibleToUser(userId, row.projectId) || !rowForReader(row, userId, spaceId)) continue;
+        views.set(id, {
+          status: row.status, backgroundWork: row.backgroundWork, resume: row.resume, lastTurnAt: row.lastTurnAt, updatedAt: row.updatedAt,
+          ...(attention[id] ? { attention: attention[id] } : {}),
+        });
+      }
+      return views;
+    },
   });
+  liveActivityTouched = nativePush.sessionTouched;
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
@@ -2584,6 +2614,13 @@ export async function boot(opts: BootOptions = {}) {
     guardedSpace: spaceHasGuardedMember,
   });
   services.provide(SERVER_PERMISSION_WAITING_BUS, permissionWaiting.service);
+  const accountRemovedListeners = new Set<(event: { userId: string }) => void | Promise<void>>();
+  services.provide(SERVER_ACCOUNT_REMOVAL_BUS, {
+    subscribe(listener) {
+      accountRemovedListeners.add(listener);
+      return { dispose: () => { accountRemovedListeners.delete(listener); } };
+    },
+  });
   const purposeContexts = new Map<string, (session: SessionProjection) => string>();
   services.provide(SESSION_PURPOSES, {
     register(purpose, context) {
@@ -2809,13 +2846,15 @@ export async function boot(opts: BootOptions = {}) {
     modelCatalogStale: (signal) => { runtimeCatalog.modelsStale(signal); },
     // Polyth-owned compaction summarizes with the session's own model, as a
     // harness compaction would; the owning account's small model (else
-    // POLYTH_SMALL_MODEL) is the fallback (or goes first, when the session's
-    // model is out of quota).
+    // POLYTH_SMALL_MODEL) is the fallback. The small model goes first when
+    // the account chose it in Settings → Sessions → Compaction model, or when
+    // the session's model is out of quota.
     compactionSummary: async ({ projection, runtime: sessionRuntime, model, systemPrompt, prompt, maxOutputTokens, smallModelFirst }) => {
       const project = await projects.get(projection.projectId);
       const userId = await sessionAccountId(projection, "compaction small model");
+      const preferSmall = userId ? compactionModelPreference(clientSettings.get(userId).settings) === "small" : false;
       return summarizeSessionFirst({
-        ...(smallModelFirst ? { smallModelFirst: true } : {}),
+        ...(smallModelFirst || preferSmall ? { smallModelFirst: true } : {}),
         ...(sessionRuntime ? { sessionRuntime } : {}),
         sessionRoute: { ...(model ? { model } : {}), ...(projection.resolvedHarnessId ? { harnessId: projection.resolvedHarnessId } : {}) },
         fallbackRoute: smallModelExecutionRoute(resolveSmallModel(userId), projection),
@@ -3252,6 +3291,11 @@ export async function boot(opts: BootOptions = {}) {
         await nativePush.removeAccount(userId);
         // The person's connected accounts, secrets and enablement go with them.
         people.removePerson(userId);
+        // Package-granted access (paired phones…) ends with the account.
+        await Promise.all([...accountRemovedListeners].map((listener) =>
+          Promise.resolve()
+            .then(() => listener({ userId }))
+            .catch((error) => console.error("[polyth] package account removal listener failed", error))));
       },
     }),
     spaceRoutes({
@@ -3357,7 +3401,7 @@ export async function boot(opts: BootOptions = {}) {
     runtimeDiagnosticsRoutes(runtimeDiagnostics),
     pushRoutes(push),
     nativePushRoutes(nativePush),
-    notificationRoutes(notifications),
+    notificationRoutes(notifications, async (space) => new Set((await spaceServices(space).projects.list()).map((p) => p.id))),
     browseRoutes(),
     iconifyRoutes(),
     releasesRoutes(),
@@ -3488,6 +3532,8 @@ export async function boot(opts: BootOptions = {}) {
       // Destroying a TCP socket is not handler completion: admission tracks
       // request JS and fences leftovers before services go away.
       live?.close();
+      liveActivityTouched = null;
+      nativePush.close();
       await runtimeStorageMaintenance.dispose();
       await packageLifecycle.stopIngress();
       httpAdmission.stop();

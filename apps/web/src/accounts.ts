@@ -33,6 +33,11 @@ export interface AccountChoice {
 export interface AccountState {
   currentAccountId: string;
   canManage: boolean;
+  /** A full-access paired device's answer: it can read accounts, while
+   *  account changes need a browser signed in to the server. */
+  readOnly: boolean;
+  /** With `readOnly`: this account is an owner who manages people there. */
+  canManageInBrowser: boolean;
   accounts: AccountChoice[];
 }
 
@@ -133,6 +138,8 @@ export async function accountState(): Promise<AccountState> {
   const raw = await request<{
     currentAccountId: string;
     canManage?: boolean;
+    readOnly?: boolean;
+    canManageInBrowser?: boolean;
     accounts: Array<{
       id: string; name?: string; displayName?: string; login?: string; current?: boolean;
       status?: string; revision?: number; managed?: boolean; guarded?: boolean;
@@ -142,6 +149,8 @@ export async function accountState(): Promise<AccountState> {
   return {
     currentAccountId: raw.currentAccountId,
     canManage: raw.canManage === true,
+    readOnly: raw.readOnly === true,
+    canManageInBrowser: raw.readOnly === true && raw.canManageInBrowser === true,
     accounts: raw.accounts.map((account) => ({
       id: account.id,
       name: account.name ?? account.displayName ?? account.id,
@@ -365,6 +374,17 @@ export async function setAccountPermissions(
   });
   if (!result.response.ok) throw authFailure(result.response, result.body);
   return result.body as unknown as AccountPermissionsDto;
+}
+
+/** Guardrails and limits from one `/api/auth/me` answer (null = none): both
+ *  ride on it, and boot needs both. Unreachable or older server → both null. */
+export async function currentAccountRestrictions(): Promise<{ guardrails: AccountGuardrails | null; limits: AccountLimits | null }> {
+  try {
+    const me = await request<{ guardrails?: AccountGuardrails | null; limits?: AccountLimits | null }>("/api/auth/me");
+    return { guardrails: me.guardrails ?? null, limits: me.limits ?? null };
+  } catch {
+    return { guardrails: null, limits: null };
+  }
 }
 
 /** The signed-in account's own limits (null = none). */

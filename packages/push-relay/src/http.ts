@@ -10,6 +10,9 @@ export interface RelayHttpOptions {
   testMode?: boolean;
   /** Explicit only: a reverse proxy is responsible for TLS before this HTTP listener. */
   tlsTerminated?: boolean;
+  /** The proxy's address as this listener sees it: only its `X-Forwarded-For`
+   *  names the sender for the per-source limit. */
+  trustedProxy?: string;
 }
 
 export interface RelayListenOptions extends RelayHttpOptions {
@@ -19,10 +22,12 @@ export interface RelayListenOptions extends RelayHttpOptions {
 
 export function createRelayHttpServer(relay: PushRelay, options: RelayHttpOptions = {}): Server {
   if (!options.testMode && !options.tlsTerminated) throw new Error("relay requires TLS termination");
-  const server = createServer((request, response) => { void route(relay, request, response); });
+  const server = createServer((request, response) => { void route(relay, options, request, response); });
   server.headersTimeout = 5_000;
-  server.requestTimeout = 5_000;
+  server.requestTimeout = 10_000;
   server.keepAliveTimeout = 5_000;
+  server.maxConnections = 512;
+  server.maxHeadersCount = 32;
   return server;
 }
 
@@ -39,67 +44,31 @@ export async function startRelayHttpServer(relay: PushRelay, options: RelayListe
   return server;
 }
 
-async function route(relay: PushRelay, request: IncomingMessage, response: ServerResponse): Promise<void> {
-  const sourceIp = request.socket.remoteAddress ?? "unknown";
+/** The proxy appends the address it accepted the connection from, so only the last entry is trusted. */
+function sourceOf(request: IncomingMessage, trustedProxy: string | undefined): string {
+  const peer = request.socket.remoteAddress ?? "unknown";
+  const forwarded = request.headers["x-forwarded-for"];
+  if (!trustedProxy || peer.replace(/^::ffff:/, "") !== trustedProxy || typeof forwarded !== "string") return peer;
+  const last = forwarded.split(",").at(-1)?.trim() ?? "";
+  return /^[0-9A-Fa-f.:]{2,45}$/.test(last) ? last : peer;
+}
+
+async function route(relay: PushRelay, options: RelayHttpOptions, request: IncomingMessage, response: ServerResponse): Promise<void> {
   const abort = new AbortController();
   request.once("aborted", () => abort.abort());
   response.once("close", () => { if (!response.writableEnded) abort.abort(); });
   try {
-    const url = new URL(request.url ?? "/", "http://relay.invalid");
-    if (url.search) throw new RelayFault("invalid");
-    const parts = url.pathname.split("/").filter(Boolean);
-    if (request.method === "POST" && url.pathname === "/v1/registrations") {
-      respond(response, 201, relay.register(await json(request), sourceIp));
-      return;
-    }
-    if (parts.length === 3 && parts[0] === "v1" && parts[1] === "registrations") {
-      const subscriptionId = parts[2]!;
-      const manage = bearer(request);
-      if (request.method === "PUT") {
-        await relay.rotate(subscriptionId, manage, await json(request));
-        respond(response, 204);
-        return;
-      }
-      if (request.method === "DELETE") {
-        await relay.revoke(subscriptionId, manage);
-        respond(response, 204);
-        return;
-      }
-    }
-    if (request.method === "POST" && url.pathname === "/v1/claims/redeem") {
-      respond(response, 200, relay.redeem(await json(request), sourceIp));
-      return;
-    }
-    if (request.method === "POST" && url.pathname === "/v1/deliver") {
-      respond(response, 202, await relay.deliver(bearer(request), await json(request), sourceIp, abort.signal));
-      return;
-    }
-    if (parts.length === 3 && parts[0] === "v1" && parts[1] === "senders" && request.method === "DELETE") {
-      await relay.revokeSender(parts[2]!, bearer(request));
-      respond(response, 204);
-      return;
-    }
-    throw new RelayFault("not-found");
+    if (request.method === "GET" && request.url === "/v1/health") { respond(response, 200, { ok: true }); return; }
+    if (request.method !== "POST" || request.url !== "/v1/send") throw new RelayFault("not-found");
+    respond(response, 200, await relay.send(await json(request), sourceOf(request, options.trustedProxy), abort.signal));
   } catch (error) {
     // IncomingMessage may already report destroyed after a fully consumed body;
     // only the outgoing socket determines whether an error can still be sent.
     if (response.destroyed || response.writableEnded) return;
     const fault = error instanceof RelayFault ? error : new RelayFault("unavailable");
-    const status = fault.code === "invalid" ? 400
-      : fault.code === "unauthorized" ? 401
-        : fault.code === "not-found" ? 404
-          : fault.code === "rate" ? 429
-            : fault.code === "storage" ? 503 : 503;
-    respond(response, status, { error: errorCode(fault) });
+    const status = fault.code === "invalid" ? 400 : fault.code === "not-found" ? 404 : fault.code === "rate" ? 429 : 503;
+    respond(response, status, { error: fault.code === "invalid" ? "invalid-request" : fault.code === "rate" ? "rate-limited" : fault.code });
   }
-}
-
-function bearer(request: IncomingMessage): string {
-  const value = request.headers.authorization;
-  if (typeof value !== "string") throw new RelayFault("unauthorized");
-  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(value);
-  if (!match) throw new RelayFault("unauthorized");
-  return match[1]!;
 }
 
 async function json(request: IncomingMessage): Promise<unknown> {
@@ -124,23 +93,11 @@ async function json(request: IncomingMessage): Promise<unknown> {
   catch { throw new RelayFault("invalid"); }
 }
 
-function respond(response: ServerResponse, status: number, body?: unknown): void {
+function respond(response: ServerResponse, status: number, body: unknown): void {
+  const json = JSON.stringify(body);
   response.statusCode = status;
   response.setHeader("cache-control", "no-store");
-  if (body === undefined) { response.end(); return; }
-  const json = JSON.stringify(body);
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.setHeader("content-length", Buffer.byteLength(json));
   response.end(json);
 }
-
-const errorCode = (fault: RelayFault): string => {
-  switch (fault.code) {
-    case "invalid": return "invalid-request";
-    case "unauthorized": return "unauthorized";
-    case "not-found": return "not-found";
-    case "rate": return "rate-limited";
-    case "storage": return "unavailable";
-    case "unavailable": return "unavailable";
-  }
-};

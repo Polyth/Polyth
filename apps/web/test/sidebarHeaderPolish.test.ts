@@ -90,11 +90,10 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
 });
 
 test("header and composer controls are configurable and purpose-specific", async () => {
-  const [header, composer, settings, metrics] = await Promise.all([
+  const [header, composer, settings] = await Promise.all([
     source("../src/components/Header.tsx"),
     source("../src/components/Composer.tsx"),
-    source("../src/components/settings/pages.tsx"),
-    source("../src/components/ChatMetrics.tsx"),
+    source("../src/components/settings/ChatSettingsPage.tsx"),
   ]);
   // Default top-rail pins live in the pure rail placement model.
   const placement = await source("../src/railPlacement.ts");
@@ -110,10 +109,8 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.match(composer, /onUpload=\{\(\) => openAttachmentPicker\("files"\)\}/);
   assert.match(composer, /pickNativeFiles\(source\)\.then/);
   assert.match(settings, /itemId="chat\.responseActions"/);
-  assert.match(settings, /itemId="chat\.headerMetrics"/);
   // Canvas is an explicit per-project toggle; chat settings never route to widgets.
   assert.doesNotMatch(settings, /openSettingsPage\("widgets"\)/);
-  assert.match(metrics, /headerMetrics\.map/);
 });
 
 test("assistant response header carries identity, timing, and configured actions", async () => {

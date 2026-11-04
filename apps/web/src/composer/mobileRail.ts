@@ -10,7 +10,21 @@ import { accountStorageGet } from "../accountStorage.ts";
 import { presentationScopeId } from "../projectInterfaceScope.ts";
 import { MOBILE_RAIL_MAP_KEY, readNavigatorState, subscribeNavigatorStateHydrated, writeNavigatorState } from "../navigatorState.ts";
 
+/** The rail is two runs of launchers: `start` reads from the leading edge, and
+ *  `end` hugs Send. Membership, not a lane index, is what is saved, so a
+ *  narrower screen, a wider Stop button or a launcher with nothing to show
+ *  never moves another launcher away from where it was put. */
+export interface MobileRailArrangement {
+  start: string[];
+  end: string[];
+}
+/** Older records were positional (`null` = an empty lane). They are read as an
+ *  arrangement; new writes are a dense list. */
 export type MobileRailSlots = (string | null)[];
+/** Stored between the two runs. It reads as an ordinary unknown launcher to
+ *  a client that predates it, which keeps it instead of stripping the record,
+ *  and can never name a real slot item (`slot:<slot>:<item>`). */
+export const MOBILE_RAIL_GAP = "slot:gap";
 const MAX_SLOTS = 32;
 const CHANGE_EVENT = "polyth:mobile-composer-rail";
 /** Bound the synced record: one arrangement per Space + project the user has
@@ -31,9 +45,9 @@ function parseArrangement(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.length > 8_192) return null;
   // Normalize through the slot parser so a synced value from another client
   // cannot smuggle malformed ids past this boundary.
-  const slots = parseMobileRail(raw);
-  if (slots === null) return null;
-  return serializeArrangement(slots);
+  const arrangement = parseMobileRail(raw);
+  if (arrangement === null) return null;
+  return serializeArrangement(arrangement);
 }
 
 /** Tolerant reader: an unknown or malformed value is dropped, never fatal. */
@@ -53,10 +67,9 @@ export function parseMobileRailMap(value: unknown): MobileRailMap {
   return map;
 }
 
-function serializeArrangement(slots: readonly (string | null)[]): string {
-  const next = slots.slice(0, MAX_SLOTS);
-  while (next.at(-1) === null) next.pop();
-  return JSON.stringify({ v: 1, slots: next });
+function serializeArrangement({ start, end }: MobileRailArrangement): string {
+  const slots = end.length ? [...start, MOBILE_RAIL_GAP, ...end] : [...start];
+  return JSON.stringify({ v: 1, slots: slots.slice(0, MAX_SLOTS) });
 }
 
 /** Blocked/quota-limited storage still allows editing for this page lifetime. */
@@ -95,37 +108,65 @@ export function mobileRailColumns(width: number, tap = 44, primaryWidth = tap, g
   return Math.max(2, Math.min(12, Math.floor(available / (tap + gap)) + 1));
 }
 
+/** A positional record becomes two runs: the last empty lane before a
+ *  launcher is where the run beside Send began. Trailing empty lanes and
+ *  repeated empty lanes say nothing more. */
+export function mobileRailFromSlots(slots: readonly (string | null)[]): MobileRailArrangement {
+  const gap = slots.indexOf(MOBILE_RAIL_GAP);
+  if (gap >= 0) {
+    const ids = (from: number, to?: number) => slots.slice(from, to).filter((id): id is string => id !== null && id !== MOBILE_RAIL_GAP);
+    return { start: ids(0, gap), end: ids(gap + 1) };
+  }
+  let last = slots.length - 1;
+  while (last >= 0 && slots[last] === null) last--;
+  const split = slots.slice(0, last + 1).lastIndexOf(null);
+  const ids = (from: number, to?: number) => slots.slice(from, to).filter((id): id is string => id !== null);
+  return split < 0 ? { start: ids(0), end: [] } : { start: ids(0, split), end: ids(split + 1, last + 1) };
+}
+
 /** Unknown ids survive package disable/re-enable; duplicate and malformed ids do not. */
-export function parseMobileRail(raw: string | null): MobileRailSlots | null {
+export function parseMobileRail(raw: string | null): MobileRailArrangement | null {
   if (!raw) return null;
   try {
     const value = JSON.parse(raw);
     if (value?.v !== 1 || !Array.isArray(value.slots)) return null;
     const seen = new Set<string>();
-    return value.slots.slice(0, MAX_SLOTS).map((id: unknown) => {
-      if (typeof id !== "string" || id.length > 256 || !/^(?:host:add|widget:[\w.:-]+|slot:[\w.:-]+)$/.test(id) || seen.has(id)) return null;
+    // Only a real empty lane (`null`) is position; an invalid or repeated id is
+    // dropped, so it cannot pass for the space before Send.
+    return mobileRailFromSlots(value.slots.slice(0, MAX_SLOTS).flatMap((id: unknown) => {
+      if (id === null) return [null];
+      if (typeof id !== "string" || id.length > 256 || !/^(?:host:add|widget:[\w.:-]+|slot:[\w.:-]+)$/.test(id) || seen.has(id)) return [];
       seen.add(id);
-      return id;
-    });
+      return [id];
+    }));
   } catch { return null; }
 }
 
-/** Resize only changes presentation; it never truncates a saved arrangement. */
-export function mobileRailCells(slots: readonly (string | null)[], lanes: number, editing: boolean): MobileRailSlots {
-  const next = [...slots];
-  if (editing && !next.includes(null) && next.length < MAX_SLOTS) next.push(null);
-  const count = Math.min(MAX_SLOTS, Math.max(lanes, Math.ceil(next.length / lanes) * lanes));
-  while (next.length < count) next.push(null);
+/** Every launcher of an arrangement, in reading order. */
+export function mobileRailIds({ start, end }: MobileRailArrangement): string[] {
+  return [...start, ...end];
+}
+
+/** Move one launcher to `index` of a run (`index` counts without it). */
+export function moveMobileRailLauncher(arrangement: MobileRailArrangement, id: string, run: "start" | "end", index: number): MobileRailArrangement {
+  const next = {
+    start: arrangement.start.filter((value) => value !== id),
+    end: arrangement.end.filter((value) => value !== id),
+  };
+  const target = next[run];
+  target.splice(Math.max(0, Math.min(index, target.length)), 0, id);
   return next;
 }
 
-export function swapMobileRailSlots(slots: readonly (string | null)[], from: number, to: number): MobileRailSlots {
-  const next = [...slots];
-  if (from < 0 || to < 0 || from >= slots.length || to >= slots.length) return next;
-  [next[from], next[to]] = [next[to] ?? null, next[from] ?? null];
-  return next;
+export function removeMobileRailLauncher(arrangement: MobileRailArrangement, id: string): MobileRailArrangement {
+  return { start: arrangement.start.filter((value) => value !== id), end: arrangement.end.filter((value) => value !== id) };
 }
 
+export function sameMobileRail(a: MobileRailArrangement, b: MobileRailArrangement): boolean {
+  return a.start.join("\n") === b.start.join("\n") && a.end.join("\n") === b.end.join("\n");
+}
+
+/** This scope's own record, exactly (no inheritance). */
 export function readMobileRail(key: string): string | null {
   const saved = readMap()[key];
   if (saved !== undefined) return saved;
@@ -135,14 +176,33 @@ export function readMobileRail(key: string): string | null {
   return legacyArrangement(key);
 }
 
-export function writeMobileRail(key: string, slots: MobileRailSlots | null): void {
+/** What the rail shows: the scope's own record, else the arrangement most
+ *  recently edited in the same Space. A project the user has not arranged yet
+ *  starts from their latest arrangement instead of the package defaults, and
+ *  gets its own record only once it is edited. */
+export function readEffectiveMobileRail(key: string): string | null {
+  const own = readMobileRail(key);
+  if (own !== null) return own;
+  if (!key.startsWith(LEGACY_PREFIX)) return null;
+  // Space ids carry no "." (`spc_[A-Za-z0-9_-]+`), so the first one after the
+  // prefix ends the Space part and the prefix names exactly one Space.
+  const rest = key.slice(LEGACY_PREFIX.length);
+  const dot = rest.indexOf(".");
+  if (dot < 0) return null;
+  const space = `${LEGACY_PREFIX}${rest.slice(0, dot + 1)}`;
+  const map = readMap();
+  const latest = Object.keys(map).findLast((other) => other.startsWith(space));
+  return latest === undefined ? null : map[latest] ?? null;
+}
+
+export function writeMobileRail(key: string, arrangement: MobileRailArrangement | null): void {
   const map = { ...readMap() };
-  if (slots === null) delete map[key];
+  if (arrangement === null) delete map[key];
   else {
     // Re-insert at the end so the cap evicts the least recently edited
     // arrangement, then store exactly that arrangement.
     delete map[key];
-    map[key] = serializeArrangement(slots);
+    map[key] = serializeArrangement(arrangement);
   }
   const keys = Object.keys(map);
   const bounded: MobileRailMap = keys.length > MAX_ARRANGEMENTS
@@ -189,7 +249,7 @@ export function subscribeMobileRail(listener: () => void): () => void {
 /** React binding for a single rail key: the current arrangement, re-read when
  *  the store changes, another client syncs, or the durable app copy lands. */
 export function useMobileRail(key: string): string | null {
-  return useSyncExternalStore(subscribeMobileRail, () => readMobileRail(key), () => null);
+  return useSyncExternalStore(subscribeMobileRail, () => readEffectiveMobileRail(key), () => null);
 }
 
 /** Account-sync adapter: this store owns validation and its synchronous cache;

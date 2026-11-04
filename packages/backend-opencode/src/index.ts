@@ -308,6 +308,12 @@ export interface OpenCodeRuntimeExtras {
    * leave SSE live without a terminal event. After this quiet grace period,
    * synthesize the normal retryable terminal event. Test seam only. */
   rateLimitStallMs?: number;
+  /** Consecutive event-stream attempts that never stayed connected before an
+   *  owned runtime generation is replaced. Test seam; production uses
+   *  STREAM_RESTART_AFTER_FAILURES. */
+  streamRestartAfterFailures?: number;
+  /** Minimum gap between such replacements. Test seam. */
+  streamRestartCooldownMs?: number;
   /** Free-model auto-pick state. One per facade unless a test injects it. */
   freeModelPicker?: FreeModelPicker;
   /** Evidence store for the facade's own picker; the process-wide one by default. */
@@ -317,6 +323,18 @@ export interface OpenCodeRuntimeExtras {
 /** A turn on a free auto-pick re-reads the live catalog when the remembered
  *  one is older than this, so a model OpenCode just retired is not routed. */
 const FREE_PICK_CATALOG_MAX_AGE_MS = 60_000;
+/** A runtime can answer health while its event stream rejects every connection
+ *  (`GET /event → 5xx`), which leaves turn output undeliverable. Reconnecting
+ *  forever hides that: nothing ever drains live events, and the harness looks
+ *  idle. After this many consecutive attempts that never stayed connected, the
+ *  owned generation is replaced inside its release-proof boundary instead. */
+const STREAM_RESTART_AFTER_FAILURES = 5;
+/** Never replace the same runtime in a tighter loop than this, so a runtime
+ *  that is genuinely broken cannot turn recovery into a restart storm. */
+const STREAM_RESTART_COOLDOWN_MS = 10 * 60_000;
+/** A connection that lived this long counts as healthy and resets the failure
+ *  streak even if it ends afterwards. */
+const STREAM_HEALTHY_CONNECTION_MS = 10_000;
 /** A turn on a pick waits at most this long for missing evidence it ranks by
  *  (the leaderboard, test responses). Whatever is measured by then ranks
  *  first; the rest keeps measuring in the background for later turns. */
@@ -764,6 +782,8 @@ export const createOpenCodeRuntimeFacade = (
   const connectSse = async () => {
     let delay = 500;
     let lastEndpointUnavailableLog = 0;
+    let failedStreamAttempts = 0;
+    let lastStreamRestart = 0;
     while (!disposed) {
       sseAbort = new AbortController();
       let stalled = false;
@@ -840,8 +860,46 @@ export const createOpenCodeRuntimeFacade = (
         if (stallTimer) clearTimeout(stallTimer);
       }
       if (disposed) return;
-      if (connectedAt !== undefined && Date.now() - connectedAt >= 10_000) delay = 500;
+      const keptAlive = connectedAt !== undefined
+        && Date.now() - connectedAt >= STREAM_HEALTHY_CONNECTION_MS;
+      if (keptAlive) {
+        delay = 500;
+        failedStreamAttempts = 0;
+      } else {
+        failedStreamAttempts += 1;
+      }
       emitLifecycle({ type: "stream-disconnected", ...endpointFields, reason });
+      const restartAfter = extras.streamRestartAfterFailures ?? STREAM_RESTART_AFTER_FAILURES;
+      if (
+        !keptAlive
+        && failedStreamAttempts >= restartAfter
+        && lifecycle.control.kind === "owned"
+        && "restart" in lifecycle
+        && Date.now() - lastStreamRestart >= (extras.streamRestartCooldownMs ?? STREAM_RESTART_COOLDOWN_MS)
+      ) {
+        // The endpoint answers health, so refresh alone would keep this broken
+        // stream reconnecting forever. Replace the generation Polyth owns; the
+        // lease terminates its exact containment boundary, advances the
+        // generation and the endpoint-replaced lifecycle event reconciles every
+        // canonical session from durable history.
+        lastStreamRestart = Date.now();
+        failedStreamAttempts = 0;
+        log("warn", "opencode event stream keeps failing; replacing the owned runtime", {
+          attempts: restartAfter,
+          reason,
+          ...endpointFields,
+        });
+        try {
+          await lifecycle.restart("crash");
+          delay = 500;
+          continue;
+        } catch (error) {
+          log("warn", "opencode runtime replacement after stream failures failed", {
+            error: String(error),
+            ...endpointFields,
+          });
+        }
+      }
       try {
         await lifecycle.refresh("disconnect");
       } catch (error) {

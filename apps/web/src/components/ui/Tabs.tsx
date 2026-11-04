@@ -1,6 +1,6 @@
 // Accessible tab strip: roving tabindex, arrow/Home/End navigation with
 // automatic activation. Panels are caller-owned; TabPanel wires the ids.
-import { useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 export interface TabItem {
   id: string;
@@ -59,6 +59,43 @@ export default function Tabs({ tabs, value, onChange, label, idBase, size = "md"
   // holds it so the tablist never drops out of the keyboard order.
   const selectedIndex = tabs.findIndex((tab) => tab.id === value && !tab.disabled);
   const entryIndex = selectedIndex >= 0 ? selectedIndex : tabs.findIndex((tab) => !tab.disabled);
+
+  // A strip wider than its box scrolls sideways. On a phone nothing showed
+  // that: the last tab was simply cut at the edge. Mark which edges hide tabs
+  // so CSS fades them, and keep the selected tab inside the visible part.
+  const tabCount = tabs.length;
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const update = () => {
+      const max = list.scrollWidth - list.clientWidth;
+      const offset = Math.abs(list.scrollLeft);
+      const start = max > 1 && offset > 1 ? "true" : "false";
+      const end = max > 1 && offset < max - 1 ? "true" : "false";
+      if (list.dataset.overflowStart !== start) list.dataset.overflowStart = start;
+      if (list.dataset.overflowEnd !== end) list.dataset.overflowEnd = end;
+    };
+    update();
+    list.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(list);
+    return () => {
+      list.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [tabCount]);
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || list.scrollWidth <= list.clientWidth + 1) return;
+    const tab = list.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!tab) return;
+    const box = list.getBoundingClientRect();
+    const rect = tab.getBoundingClientRect();
+    // Room for the edge fade, so the selected tab never sits under it.
+    const fade = 24;
+    if (rect.left < box.left + fade) list.scrollLeft -= box.left + fade - rect.left;
+    else if (rect.right > box.right - fade) list.scrollLeft += rect.right - (box.right - fade);
+  }, [value, tabCount]);
 
   return (
     <div

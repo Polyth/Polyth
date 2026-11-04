@@ -4,7 +4,7 @@
 // than the Polyth server (phone, remote desktop, container), where the
 // loopback redirect cannot reach the server. Those users paste the final
 // redirected URL instead; it is validated exactly like a loopback callback.
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { GoogleError, googleError, type FetchLike } from "./http.ts";
 import { parseScopes } from "./scopes.ts";
@@ -449,7 +449,7 @@ export function createOAuthFlows(deps: {
       try {
         // Without a listener the redirect still targets a loopback address the
         // user's browser cannot load; the pasted URL completes the flow.
-        flow.redirectUri = listen ? await startListener(flow) : `http://127.0.0.1:${40_000 + (randomBytes(2).readUInt16BE() % 20_000)}/`;
+        flow.redirectUri = listen ? await startListener(flow) : `http://127.0.0.1:${randomInt(40_000, 60_000)}/`;
       } catch {
         return googleError("google-unavailable", "Polyth could not open a local sign-in listener.");
       }

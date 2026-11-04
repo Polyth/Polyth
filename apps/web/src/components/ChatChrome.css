@@ -160,9 +160,9 @@
   line-height: var(--font-response-meta-lh);
 }
 
-/* While a turn works no answer shows its metadata, but a completed answer's
-   footer keeps its box: hiding it would reflow the whole transcript at every
-   send and again when the turn ends. */
+/* While a turn works its own answers show no metadata yet, but keep the
+   footer's box: adding it at turn end would push the rows below down.
+   Answers of closed turns are never dormant. */
 .chat-response-footer[data-dormant] { visibility: hidden; }
 
 /* An answer followed by more of its turn keeps only the quick actions; a

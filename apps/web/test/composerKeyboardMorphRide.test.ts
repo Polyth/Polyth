@@ -96,7 +96,7 @@ async function fixture(): Promise<string> {
 }
 
 type Probe = {
-  __viewport: { setNativeKeyboardInset(height: number, options?: { followKeyboard?: boolean }): void; startMobileViewport(): void };
+  __viewport: { setNativeKeyboardInset(height: number, options?: { followKeyboard?: boolean }): void; startMobileViewport(options?: { nativeFrame?: boolean }): void };
   __hold: boolean;
   __release(): void;
   __scrub: Animation[];
@@ -183,11 +183,23 @@ async function scrub(target: Page): Promise<Sample[]> {
 }
 
 test("the phone composer rests as a row, engages into a card that rides the keyboard, and rests again where it started", { skip: !CHROME }, async () => {
+  await composerPath("composer-keyboard", false);
+});
+
+test("on the native app's dynamic frame the composer takes the same path", { skip: !CHROME }, async () => {
+  await composerPath("composer-keyboard-dynamic", true);
+});
+
+/** `nativeFrame`: the frame is the WebView's dynamic viewport, as in the
+ *  native app; otherwise the pixel frame. The path must not differ. */
+async function composerPath(host: string, nativeFrame: boolean): Promise<void> {
   assert.ok(page);
+  await page.setViewportSize({ width: 390, height: HEIGHT });
   const html = await fixture();
-  await page.route("http://composer-keyboard.test/**", (route) => route.fulfill({ contentType: "text/html", body: html }));
-  await page.goto("http://composer-keyboard.test/");
-  await page.evaluate(() => (window as unknown as Probe).__viewport.startMobileViewport());
+  await page.route(`http://${host}.test/**`, (route) => route.fulfill({ contentType: "text/html", body: html }));
+  await page.goto(`http://${host}.test/`);
+  await page.evaluate((nativeFrame) => (window as unknown as Probe).__viewport.startMobileViewport({ nativeFrame }), nativeFrame);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.keyboardFrame), nativeFrame ? "native" : "closed");
   await page.waitForTimeout(300);
   await page.evaluate(() => { for (const animation of document.getAnimations()) animation.finish(); });
 
@@ -345,4 +357,4 @@ test("the phone composer rests as a row, engages into a card that rides the keyb
       `and ${control} from its place (${JSON.stringify(cut[control])} → ${JSON.stringify(resumed[control])})`);
   }
   await page.evaluate(() => { for (const animation of document.getAnimations()) animation.finish(); });
-});
+}

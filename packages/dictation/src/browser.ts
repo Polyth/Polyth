@@ -174,7 +174,7 @@ export function mergeTranscript(current: string, chunk: string): string {
   const next = chunk.trim();
   if (!next) return current;
   if (!current) return next;
-  return `${current.replace(/\s+$/, "")} ${next}`;
+  return `${current.trimEnd()} ${next}`;
 }
 
 /** Strip markdown noise so read-aloud doesn't spell out syntax. */

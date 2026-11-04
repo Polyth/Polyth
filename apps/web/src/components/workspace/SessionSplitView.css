@@ -75,7 +75,7 @@
   flex: none;
   inline-size: 7px;
   block-size: 7px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: color-mix(in srgb, var(--text-dim) 45%, transparent);
   transition: background-color var(--motion-normal) var(--motion-ease);
 }

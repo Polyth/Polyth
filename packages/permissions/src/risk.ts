@@ -1232,7 +1232,9 @@ const ASSIGNED_SECRET = /\b(password|passwd|token|secret|api[_-]?key)\s*[=:]\s*\
 function displayTarget(value: string): string {
   let text = value.trim().replace(/\s+/g, " ");
   if (/^[a-z][\w+.-]*:\/\//i.test(text)) {
-    text = text.replace(/^([a-z][\w+.-]*:\/\/)[^/@\s]*@/i, "$1").replace(/[?#].*$/, "");
+    text = text.replace(/^([a-z][\w+.-]*:\/\/)[^/@\s]*@/i, "$1");
+    const cut = text.search(/[?#]/);
+    if (cut >= 0) text = text.slice(0, cut);
   }
   text = text.replace(TOKEN_LIKE, "[redacted]").replace(ASSIGNED_SECRET, "$1=[redacted]");
   return text.length > MAX_TARGET ? `${text.slice(0, MAX_TARGET - 1)}…` : text;

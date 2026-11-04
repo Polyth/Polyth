@@ -43,6 +43,45 @@ export function promptRailInset(viewport: RailBox, obstacles: readonly RailBox[]
   return Math.round(covered) + RAIL_EDGE_GAP;
 }
 
+/** Thickness of the classic vertical scrollbar drawn inside a scroller, or 0
+ *  for an overlay scrollbar (macOS, mobile) and for content that does not
+ *  overflow. `offsetWidth - clientWidth` also contains the scroller's borders
+ *  (the transcript's transparent launcher-strip lane among them), so the
+ *  measured physical borders are removed. */
+export function scrollbarThickness(
+  offsetWidth: number,
+  clientWidth: number,
+  borderLeft: number,
+  borderRight: number,
+): number {
+  const thickness = offsetWidth - clientWidth - (borderLeft || 0) - (borderRight || 0);
+  return thickness > 0 ? Math.round(thickness) : 0;
+}
+
+/** Extra inset a rail needs to clear an in-flow vertical scrollbar. A classic
+ *  scrollbar sits on the inline-end edge (right in LTR, left in RTL), inside
+ *  the scroller's inline-end border, so only the rail on that same edge moves;
+ *  a rail on the free edge keeps its gap and an overlay scrollbar costs
+ *  nothing. Returns the box such a scrollbar occupies (viewport px), to be
+ *  treated exactly like chrome drawn over that edge, so the rail never sits on
+ *  top of the scrollbar and an already-measured overlay is not counted twice. */
+export function scrollbarRailBox(
+  viewport: RailBox,
+  thickness: number,
+  direction: string | undefined,
+  side: PromptRailSide,
+  borderLeft: number,
+  borderRight: number,
+): RailBox | null {
+  if (!(thickness > 0)) return null;
+  if ((direction === "rtl" ? "left" : "right") !== side) return null;
+  const border = (side === "right" ? borderRight : borderLeft) || 0;
+  const depth = thickness + border;
+  return side === "right"
+    ? { left: viewport.right - depth, right: viewport.right, top: viewport.top, bottom: viewport.bottom }
+    : { left: viewport.left, right: viewport.left + depth, top: viewport.top, bottom: viewport.bottom };
+}
+
 /** Slice of prompt indexes shown as ticks: the whole list when it fits,
  *  otherwise a MAX_TICKS window centered on the active prompt. */
 export function railWindow(

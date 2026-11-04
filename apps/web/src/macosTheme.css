@@ -11,18 +11,19 @@ html[data-theme-style="macos"] {
   /* Big Sur rounds controls at 6px, windows, popovers and cards at 10px and
      menus at 6px; the composer, islands and docks take the 12px of the
      notification and Control Center modules. Rounding is measured from its default (9 → scale 1.8, uiPrefs.ts),
-     which draws these radii exactly; lower squares them, higher rounds a
-     little past Big Sur. */
+     which draws these radii exactly; lower squares them, and the last notch
+     takes the shared rounded geometry (--radius-max-*, tokens.css). */
   --macos-round: calc(var(--corner-radius-scale) / 1.8);
-  --radius-control: calc(6px * var(--macos-round));
-  --radius-card: calc(10px * var(--macos-round));
-  --radius-surface: calc(10px * var(--macos-round));
-  --radius-sheet: calc(10px * var(--macos-round));
-  --radius-activity: calc(6px * var(--macos-round));
-  --radius-island: calc(12px * var(--macos-round));
-  --radius-dock: calc(12px * var(--macos-round));
-  --radius-composer: calc(12px * var(--macos-round));
-  --macos-radius-menu: calc(6px * var(--macos-round));
+  --radius-control: max(calc(6px * var(--macos-round)), var(--radius-max-control));
+  --radius-card: max(calc(10px * var(--macos-round)), var(--radius-max-card));
+  --radius-surface: max(calc(10px * var(--macos-round)), var(--radius-max-surface));
+  --radius-sheet: max(calc(10px * var(--macos-round)), var(--radius-max-sheet));
+  --radius-activity: max(calc(6px * var(--macos-round)), var(--radius-max-card));
+  --radius-island: max(calc(12px * var(--macos-round)), var(--radius-max-float));
+  --radius-dock: max(calc(12px * var(--macos-round)), var(--radius-max-float));
+  --radius-composer: max(calc(12px * var(--macos-round)), var(--radius-max-float));
+  --radius-round: max(calc(12px * var(--macos-round)), var(--radius-max-pill));
+  --macos-radius-menu: max(calc(6px * var(--macos-round)), var(--radius-max-menu));
 
   /* The kit's large push button is 28px; fields and list rows sit one step
      up. Compact controls keep their --hit-min floor on coarse pointers. */

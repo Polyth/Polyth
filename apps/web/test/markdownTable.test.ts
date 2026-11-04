@@ -62,6 +62,16 @@ test("table cells break between words, never inside one", () => {
   assert.match(cell, /min-width:\s*6ch/);
 });
 
+test("a long cell wraps at a reading measure so the next column peeks in on a phone", () => {
+  const md = "| A very long first header | B |\n| --- | --- |\n| x | y |\n";
+  const html = renderToStaticMarkup(createElement(Fragment, null, ...renderBlocks(parseMarkdown(md), "t")));
+  assert.match(html, /<th[^>]*><span class="md-cell"><span>A very long first header<\/span><\/span><\/th>/);
+  assert.match(html, /<td[^>]*><span class="md-cell"><span>x<\/span><\/span><\/td>/);
+  const cell = css.match(/\.md-table \.md-cell\s*\{[^}]*\}/s)?.[0] ?? "";
+  assert.match(cell, /display:\s*block/);
+  assert.match(cell, /max-width:\s*min\(24em,\s*70vw\)/);
+});
+
 test("an inline code token in a cell stays whole and scrolls with the table", () => {
   const code = css.match(/\.md-table :is\(th, td\) code\s*\{[^}]*\}/s)?.[0] ?? "";
   assert.match(code, /white-space:\s*nowrap/);

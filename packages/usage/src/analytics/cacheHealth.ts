@@ -16,11 +16,16 @@ export const MIN_DOCUMENTED_CACHE_TTL_MS = 5 * MINUTE;
 
 /**
  * Documented fixed defaults only. Anthropic caches for 5 minutes unless a
- * request opts into its 1-hour lifetime. OpenAI documents its automatic cache
+ * request opts into its 1-hour lifetime. Google / Antigravity implicit prompt
+ * cache default lifetime is 5 minutes. OpenAI documents its automatic cache
  * as 5–10 minutes, up to an hour off-peak, so it stays unknown, like every
  * provider absent here.
  */
-const PROVIDER_DEFAULT_TTL_MS: Readonly<Record<string, number>> = { anthropic: 5 * MINUTE };
+const PROVIDER_DEFAULT_TTL_MS: Readonly<Record<string, number>> = {
+  anthropic: 5 * MINUTE,
+  google: 5 * MINUTE,
+  antigravity: 5 * MINUTE,
+};
 
 /** Documented default prompt-cache lifetime of `providerId`, or null when the
  *  provider documents none (its cache may still exist; its lifetime is unknown). */

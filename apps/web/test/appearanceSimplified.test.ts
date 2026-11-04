@@ -200,8 +200,9 @@ test("composer buttons and swipe navigation live on the pages that own them", as
     return pages.slice(start, end < 0 ? undefined : end);
   };
   assert.match(body("GeneralPage"), /itemId="general\.swipeNavigation"/);
-  assert.match(body("ChatPage"), /itemId="chat\.showDictate"/);
-  assert.match(body("ChatPage"), /itemId="chat\.showQuickActions"/);
+  const chatPage = await read("../src/components/settings/ChatSettingsPage.tsx");
+  assert.match(chatPage, /itemId="chat\.showDictate"/);
+  assert.match(chatPage, /itemId="chat\.showQuickActions"/);
   assert.doesNotMatch(body("AppearancePage"), /swipeNavigation|showDictate|showQuickActions/);
 
   const labels = { general: "General", appearance: "Appearance", chat: "Chat" };

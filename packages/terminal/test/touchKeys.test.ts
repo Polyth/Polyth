@@ -65,7 +65,7 @@ test("invalid layouts report where they fail and stored garbage falls back", () 
   ] as const) {
     const parsed = parseExtraKeys(source);
     assert.equal(parsed.ok, false, source);
-    if (!parsed.ok) assert.match(parsed.error, new RegExp(fragment.replace(/[[\]]/g, "\\$&")), source);
+    if (!parsed.ok) assert.match(parsed.error, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), source);
   }
   assert.equal(layoutFor("not a layout")[0]![0]!.label, "ESC");
   assert.deepEqual(parseLenientJson(`{a: 'it\\'s', "b": [1, true, null]}`), { a: "it's", b: [1, true, null] });

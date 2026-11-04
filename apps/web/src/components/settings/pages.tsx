@@ -8,19 +8,18 @@ import {
   useStore,
 } from "../../store.ts";
 import { useOrderedProjects } from "../../sidebarPrefs.ts";
-import { HEADER_METRIC_IDS, RAIL_SIZE_MAX, RAIL_SIZE_MIN, RAIL_SIZE_STEP, RAIL_SPACING_MAX, RAIL_SPACING_MIN, RAIL_SPACING_STEP, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type HeaderMetricId, type StatusBarMode, type SwipeNavigationMode } from "../../uiPrefs.ts";
-import { clampPromptHistoryLimit, projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
+import { RAIL_SIZE_MAX, RAIL_SIZE_MIN, RAIL_SIZE_STEP, RAIL_SPACING_MAX, RAIL_SPACING_MIN, RAIL_SPACING_STEP, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type StatusBarMode, type SwipeNavigationMode } from "../../uiPrefs.ts";
+import { projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS, interfaceFontLabel, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { DEFAULT_NOTIFY_TEMPLATE, renderTemplate } from "../../notifications.ts";
-import { isPromptBookmarkHome, usePromptBookmarkPosition, writePromptBookmarkPosition } from "../../promptBookmarkPosition.ts";
 import {
   describePushTest, disablePush, enablePush, reconcilePushSubscription, pushUnsupportedReason, sendTestPush,
 } from "../../push.ts";
 import { api } from "@polyth/session/web-api";
 import { desktopBridge } from "../../desktopBridge.ts";
 import { confirmAlert } from "../../alerts.ts";
-import { CheckGroup, EmptyState, ErrorState, NumberField, PageHead, ResetLink, Row, SaveBar, Section, Seg, SizeStepper, Toggle } from "./parts.tsx";
+import { CheckGroup, EmptyState, ErrorState, PageHead, ResetLink, Row, SaveBar, Section, Seg, SizeStepper, Toggle } from "./parts.tsx";
 import CompactShortcutsEditor, { CompactShortcutsReset } from "./CompactShortcutsEditor.tsx";
 import { ShellLayoutSection } from "./ShellLayoutSection.tsx";
 import {
@@ -30,7 +29,6 @@ import {
 import { COMPACT_SHORTCUTS_SETTINGS_ITEM } from "../../compactHeaderFit.ts";
 import { removeProject, saveProjectDefaultsOptimistic } from "../../init.ts";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
-import MessageActionsEditor from "./MessageActionsEditor.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
 import {
   ACCENT_SWATCHES, PRESET_THEMES, THEME_STYLE_CHOICES, accentRoles, addCustomTheme, applyTheme, effectiveThemeStyle, exportThemeJson,
@@ -1085,256 +1083,6 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
   );
 }
 
-export function ChatPage() {
-  const ui = useUiSettings();
-  const settings = useStore((s) => s.settings);
-  const bookmarkPosition = usePromptBookmarkPosition();
-  const thinkingOptions: Array<[typeof ui.thinkingDisplayMode, string]> = [
-    ["collapsed", tr("settings.pages.collapsibleThinking")],
-    ["expanded", tr("settings.pages.expandedThinking")],
-    ...(ui.actionGrouping === "grouped"
-      ? [["activity", tr("settings.pages.hideThinkingInActivity")] as [typeof ui.thinkingDisplayMode, string]]
-      : []),
-  ];
-  const metricLabels: Record<HeaderMetricId, string> = {
-    tokens: tr("chatmetrics.tokens"),
-    messages: tr("chatmetrics.messages"),
-    duration: tr("chatmetrics.duration"),
-    cost: tr("chatmetrics.cost"),
-  };
-  const toggleOrdered = <T extends string>(current: readonly T[], id: T, update: (value: T[]) => void) => {
-    update(current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  };
-  // CheckGroup reports the whole selection; apply only the one toggled id so
-  // hidden ids (disabled packages) survive and new picks keep append order.
-  const toggleChecked = <T extends string>(current: readonly T[], next: readonly T[], ids: readonly T[], update: (value: T[]) => void) => {
-    const id = ids.find((candidate) => current.includes(candidate) !== next.includes(candidate));
-    if (id) toggleOrdered(current, id, update);
-  };
-  return (
-    <>
-      <PageHead title={tr("settings.pages.chat")} blurb={tr("settings.pages.conversationLayoutAndDeliveryPreferences")} />
-      <Section title={tr("settings.pages.messagesGroup")}>
-        <Row
-          label={tr("settings.pages.actionBlocks")}
-          hint={tr("settings.pages.groupActionsIntoActivityBlocksOrKeepThemUngrouped")}
-          itemId="chat.actionBlocks"
-        >
-          <Seg
-            value={ui.actionGrouping}
-            options={[
-              ["grouped", tr("settings.pages.groupedActions")],
-              ["ungrouped", tr("settings.pages.ungroupedActions")],
-            ]}
-            onChange={(actionGrouping) => setUiSettings({ actionGrouping })}
-          />
-        </Row>
-        {ui.actionGrouping === "grouped" && (
-          <Row label={tr("settings.pages.activityBlockStyle")} hint={tr("settings.pages.activityBlockStyleHint")} itemId="chat.activityStyle">
-            <Seg
-              value={ui.activityBlockStyle}
-              options={[
-                ["thread", tr("settings.pages.activityStyleThread")],
-                ["ledger", tr("settings.pages.activityStyleLedger")],
-                ["chip", tr("settings.pages.activityStyleChip")],
-                ["margin", tr("settings.pages.activityStyleMargin")],
-              ]}
-              onChange={(activityBlockStyle) => setUiSettings({ activityBlockStyle })}
-            />
-          </Row>
-        )}
-        <Row label={tr("settings.pages.thinkingBlocks")} hint={tr("settings.pages.thinkingBlocksHint")} itemId="chat.thinking">
-          <Seg
-            value={ui.thinkingDisplayMode}
-            options={thinkingOptions}
-            onChange={(thinkingDisplayMode) => setUiSettings({ thinkingDisplayMode })}
-          />
-        </Row>
-        <Row
-          label={tr("settings.pages.sessionActivityDetails")}
-          hint={tr("settings.pages.sessionActivityDetailsHint")}
-          itemId="chat.activityDetails"
-        >
-          <Seg
-            value={ui.sessionActivityDetails}
-            options={[
-              ["tabs", tr("settings.pages.sessionActivityTabs")],
-              ["all", tr("settings.pages.sessionActivityAll")],
-            ]}
-            onChange={(sessionActivityDetails) => setUiSettings({ sessionActivityDetails })}
-          />
-        </Row>
-        <Row label={tr("settings.pages.conversationWidth")} hint={tr("settings.pages.wideUsesMoreOfTheWindowFor")} itemId="chat.width">
-          <Seg value={ui.chatWidth} options={[
-            ["normal", tr("settings.pages.normal")],
-            ["wide", tr("settings.pages.wide")],
-          ]} onChange={(v) => setUiSettings({ chatWidth: v })} />
-        </Row>
-        <Row label={tr("settings.pages.copyFormat")} hint={tr("settings.pages.chooseThePayloadUsedByTheSingle")} itemId="chat.copyFormat">
-          <Seg
-            value={ui.messageCopyFormat}
-            options={[["markdown", tr("common.markdown")], ["json", tr("common.json")]]}
-            onChange={(messageCopyFormat) => setUiSettings({ messageCopyFormat })}
-          />
-        </Row>
-      </Section>
-      {/* Both roles use one editor so their quick actions configure identically. */}
-      <MessageActionsEditor role="user" itemId="chat.messageActions" />
-      <MessageActionsEditor role="assistant" itemId="chat.responseActions" />
-      <Section title={tr("settings.pages.composerGroup")}>
-        <Row label={tr("settings.pages.composerStatusStyle")} hint={tr("settings.pages.composerStatusStyleHint")} itemId="chat.composerStatusStyle">
-          <Seg
-            value={ui.composerStatusStyle}
-            options={[
-              ["line", tr("settings.pages.composerStatusLine")],
-              ["tab", tr("settings.pages.composerStatusTab")],
-              ["capsule", tr("settings.pages.composerStatusCapsule")],
-            ]}
-            onChange={(composerStatusStyle) => setUiSettings({ composerStatusStyle })}
-          />
-        </Row>
-        <Row label={tr("settings.pages.whileTheAgentIsWorking")} hint={tr("settings.pages.whatEnterDoesDuringAnActiveTurn")} itemId="chat.followUp">
-          <Seg value={ui.followUpBehavior} options={[
-            ["steer", tr("settings.pages.steer")],
-            ["queue", tr("composer.queue")],
-            ["interrupt", tr("settings.pages.interrupt")],
-          ]} onChange={(v) => setUiSettings({ followUpBehavior: v })} />
-        </Row>
-        <Row
-          label={tr("composer.largePasteBanner")}
-          hint={tr("settings.pages.largePasteHint")}
-          itemId="chat.largePaste"
-        >
-          <Seg value={ui.largeTextPasteBehavior} options={[
-            ["ask", tr("settings.pages.largePasteAsk")],
-            ["attach", tr("composer.largePasteAttach")],
-            ["inline", tr("composer.largePasteInline")],
-          ]} onChange={(largeTextPasteBehavior) => setUiSettings({ largeTextPasteBehavior })} />
-        </Row>
-        <Row label={tr("settings.pages.desktopSendShortcut")} hint={tr("settings.pages.sendShortcutHint")} itemId="chat.sendOnEnter">
-          <Seg value={settings.desktopSendShortcut} options={[["enter", "Enter"], ["shift-enter", "Shift+Enter"]]} onChange={(desktopSendShortcut) => updateSettings({ desktopSendShortcut, sendOnEnter: desktopSendShortcut === "enter" })} />
-        </Row>
-        <Row label={tr("settings.pages.mobileSendShortcut")} hint={tr("settings.pages.mobileSendShortcutHint")} itemId="chat.mobileSendShortcut">
-          <Seg value={settings.mobileSendShortcut} options={[["none", tr("settings.pages.sendButtonOnly")], ["enter", "Enter"], ["shift-enter", "Shift+Enter"]]} onChange={(mobileSendShortcut) => updateSettings({ mobileSendShortcut })} />
-        </Row>
-        <Row
-          label={tr("settings.pages.promptHistory")}
-          hint={tr("settings.pages.promptHistoryHint")}
-          itemId="chat.promptHistory"
-        >
-          <Seg
-            value={ui.promptHistoryScope}
-            options={[
-              ["session", tr("settings.pages.promptHistoryScopeSession")],
-              ["space", tr("settings.pages.promptHistoryScopeSpace")],
-            ]}
-            onChange={(promptHistoryScope) => setUiSettings({ promptHistoryScope })}
-          />
-        </Row>
-        <Row
-          label={tr("settings.pages.promptHistoryLimit")}
-          hint={tr("settings.pages.promptHistoryLimitHint")}
-          itemId="chat.promptHistoryLimit"
-        >
-          <NumberField
-            value={ui.promptHistoryLimit}
-            min={1}
-            max={200}
-            label={tr("settings.pages.promptHistoryLimit")}
-            onCommit={(next) => setUiSettings({ promptHistoryLimit: clampPromptHistoryLimit(next, ui.promptHistoryLimit) })}
-          />
-        </Row>
-        <Row label={tr("settings.pages.dictationButton")} hint={tr("settings.pages.dictationButtonHint")} itemId="chat.showDictate">
-          <Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label={tr("settings.pages.dictationButton")} />
-        </Row>
-        <Row label={tr("settings.pages.composerQuickActions")} hint={tr("settings.pages.composerQuickActionsHint")} itemId="chat.showQuickActions">
-          <Toggle on={ui.showQuickActions} onChange={(showQuickActions) => setUiSettings({ showQuickActions })} label={tr("settings.pages.composerQuickActions")} />
-        </Row>
-      </Section>
-      <Section title={tr("settings.pages.promptNavigatorGroup")}>
-        <Row label={tr("settings.pages.promptRail")} hint={tr("settings.pages.promptRailHint")} itemId="chat.promptNavigator">
-          <Toggle
-            on={ui.promptNavigator !== "off"}
-            onChange={(on) => setUiSettings({ promptNavigator: on ? "auto" : "off" })}
-            label={tr("settings.pages.promptRail")}
-          />
-        </Row>
-        {ui.promptNavigator !== "off" && (
-          <Row label={tr("settings.pages.promptRailSide")} hint={tr("settings.pages.promptRailSideHint")} itemId="chat.promptNavigatorSide">
-            <Seg value={ui.promptNavigatorSide} options={[
-              ["left", tr("settings.pages.promptNavigatorSideLeft")],
-              ["right", tr("settings.pages.promptNavigatorSideRight")],
-            ]} onChange={(promptNavigatorSide) => setUiSettings({ promptNavigatorSide })} />
-          </Row>
-        )}
-        <Row
-          label={tr("settings.pages.promptBookmarkMobile")}
-          hint={tr("settings.pages.promptBookmarkMobileHint")}
-          itemId="chat.pinLatestPrompt"
-        >
-          <Toggle
-            on={ui.pinLatestPrompt}
-            onChange={(pinLatestPrompt) => setUiSettings({ pinLatestPrompt })}
-            label={tr("settings.pages.promptBookmarkMobile")}
-          />
-        </Row>
-        <Row
-          label={tr("settings.pages.promptBookmarkDesktop")}
-          hint={tr("settings.pages.promptBookmarkDesktopHint")}
-          itemId="chat.promptBookmarkDesktop"
-        >
-          <Toggle
-            on={ui.promptBookmarkDesktop}
-            onChange={(promptBookmarkDesktop) => setUiSettings({ promptBookmarkDesktop })}
-            label={tr("settings.pages.promptBookmarkDesktop")}
-          />
-        </Row>
-        {(ui.pinLatestPrompt || ui.promptBookmarkDesktop) && (
-          <Row
-            label={tr("settings.pages.pinLatestPromptPosition")}
-            hint={tr("settings.pages.bookmarkPositionPlainHint")}
-            itemId="chat.pinLatestPromptPosition"
-          >
-            <Button
-              size="sm"
-              disabled={isPromptBookmarkHome(bookmarkPosition)}
-              title={tr("timeline.promptBookmarkMoveHint")}
-              onClick={() => writePromptBookmarkPosition(null)}
-            >{tr("settings.pages.pinLatestPromptPositionReset")}</Button>
-          </Row>
-        )}
-      </Section>
-      <Section title={tr("settings.pages.headerGroup")}>
-        <Row
-          label={tr("settings.pages.mobileSessionTitle")}
-          hint={tr("settings.pages.mobileSessionTitleHint")}
-          itemId="chat.mobileSessionTitle"
-        >
-          <Select
-            label={tr("settings.pages.mobileSessionTitle")}
-            value={ui.mobileSessionTitle}
-            options={[
-              { value: "hidden", label: tr("settings.pages.mobileSessionTitleHidden") },
-              { value: "title", label: tr("settings.pages.mobileSessionTitleOnly") },
-              { value: "button", label: tr("settings.pages.mobileSessionTitleButton") },
-            ]}
-            onChange={(mobileSessionTitle) => setUiSettings({ mobileSessionTitle: mobileSessionTitle as typeof ui.mobileSessionTitle })}
-          />
-        </Row>
-        <Row label={tr("settings.pages.chatMetrics")} hint={tr("settings.pages.chatMetricsHint")} itemId="chat.headerMetrics">
-          <CheckGroup<HeaderMetricId>
-            label={tr("settings.pages.chatMetrics")}
-            value={ui.headerMetrics}
-            options={HEADER_METRIC_IDS.map((id) => ({ id, label: metricLabels[id] }))}
-            columns={2}
-            onChange={(next) => toggleChecked(ui.headerMetrics, next, HEADER_METRIC_IDS, (headerMetrics) => setUiSettings({ headerMetrics }))}
-          />
-        </Row>
-      </Section>
-    </>
-  );
-}
-
 type NotifyKindId = "completed" | "failed" | "question" | "permission" | "subagent" | "mention" | "message";
 
 // Resolved per render: a module-level tr() would freeze the labels in the
@@ -1502,7 +1250,8 @@ export function NotificationsPage() {
 }
 
 /** Capacitor-native delivery is separate from browser Web Push. It is shown
- * only inside the actual native client and asks the OS only after user intent. */
+ * only inside the actual native client; the app turns it on by itself after
+ * connecting (autoEnableNativePush), and this row turns it off or back on. */
 function NativePushRow() {
   const available = nativePushSettingsAvailable();
   const [status, setStatus] = useState<"loading" | "unavailable" | "disabled" | "enabling" | "enabled" | "denied" | "failed">("loading");

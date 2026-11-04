@@ -7,7 +7,7 @@ import PermissionsSettingsPage from "./PermissionsSettingsPage.tsx";
 import ProjectApprovals from "./ProjectApprovals.tsx";
 import { confirmFullAccess } from "./fullAccess.ts";
 import { defaultApprovalLevel, useApprovalDefaults, type ApprovalLevel } from "./approvalDefaults.ts";
-import { APPROVAL_LEVEL_OPTIONS, approvalLevelTitle, moveRadioFocus } from "./levels.tsx";
+import { APPROVAL_LEVEL_OPTIONS, approvalLevelOption, approvalLevelTitle, moveRadioFocus } from "./levels.tsx";
 import { IconButton, Popover, UndoIcon } from "../../../apps/web/src/components/ui/index.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import { dismissKeyboard, getViewportMetrics } from "../../../apps/web/src/mobileViewport.ts";
@@ -32,15 +32,19 @@ const LEVELS = APPROVAL_LEVEL_OPTIONS;
 /** The control shows the current level; a click (or tap) opens a tiny
  * icon-only segmented switch that jumps straight to any level. Names and
  * meanings live in tooltips/aria labels, so the switch never resizes while
- * switching. A chat with a level of its own also gets "Use default", which
- * hands it back to its parent chat or its project's approval default. Full
- * access always asks for confirmation first. */
+ * switching; a phone adds one visible line under the track naming the level it
+ * shows, because a touch screen has no tooltips. A chat with a level of its own
+ * also gets "Use default", which hands it back to its parent chat or its
+ * project's approval default. Full access always asks for confirmation first. */
 export function AutoApproveAction({ context, side = "up" }: { context: WidgetRenderContext; side?: "up" | "down" }) {
   const sessionId = typeof context.sessionId === "string" ? context.sessionId : null;
   // The composer supplies its draft-aware state; other placements (the
   // session header) read the canonical session projection.
   const session = useStore((state) => sessionId ? state.sessions.find((row) => row.id === sessionId) : undefined);
   const [pending, setPending] = useState(false);
+  // The level a tap is working toward, while the server answers or a Full
+  // access confirmation waits: the phone caption names that level already.
+  const [pendingLevel, setPendingLevel] = useState<ApprovalLevel | null>(null);
   // Protected mode: Auto-Approve is refused server-side, so offer no toggle.
   const autoApproveAllowed = guardedAutoApproveAllowed(useGuardrails());
   const [open, setOpen] = useState(false);
@@ -82,7 +86,10 @@ export function AutoApproveAction({ context, side = "up" }: { context: WidgetRen
       else setDraft?.(setting);
     })()
       .catch((error: unknown) => setUiError(friendlyError(tr("common.error"), error)))
-      .finally(() => setPending(false));
+      .finally(() => {
+        setPending(false);
+        setPendingLevel(null);
+      });
   };
   if (!autoApproveAllowed) return null;
   const close = () => {
@@ -113,8 +120,17 @@ export function AutoApproveAction({ context, side = "up" }: { context: WidgetRen
   };
   const choose = (index: number) => {
     const entry = LEVELS[index]!;
-    close();
-    if (entry.level !== level) set(entry.setting);
+    if (pending) return;
+    // A phone keeps the switch open after a tap: the caption under it names the
+    // level it just moved to, and a second tap is the correction. Desktop keeps
+    // closing it, as before.
+    if (!phone) close();
+    if (entry.level !== level) {
+      setPendingLevel(entry.level);
+      set(entry.setting);
+    } else if (phone) {
+      close();
+    }
   };
   const followDefault = () => {
     close();
@@ -122,6 +138,9 @@ export function AutoApproveAction({ context, side = "up" }: { context: WidgetRen
   };
   const current = LEVELS.find((entry) => entry.level === level)!;
   const currentIndex = LEVELS.indexOf(current);
+  // Phones draw the three levels as bare glyphs: one line under the track
+  // names the level the switch shows (or the one a pending tap is asking for).
+  const shownLevel = pendingLevel ?? level;
   const label = `${tr("permissionbanner.approvalLevel")}: ${tr(current.title)}`;
   const origin = tr(ownLevel ? "permissionbanner.levelOwn"
     : followsParent ? "permissionbanner.levelFollowsParent" : "permissionbanner.levelFollowsDefault");
@@ -157,7 +176,8 @@ export function AutoApproveAction({ context, side = "up" }: { context: WidgetRen
       ariaLabel: tr("permissionbanner.approvalLevel"),
       initialFocus: `.approval-level-option[data-level="${level}"]`,
       restoreFocusRef: triggerRef,
-      children: createElement("div", { className: "approval-level-row" },
+      children: createElement(Fragment, null,
+        createElement("div", { className: "approval-level-row" },
         createElement("div", {
           role: "radiogroup",
           "aria-label": tr("permissionbanner.approvalLevel"),
@@ -186,6 +206,11 @@ export function AutoApproveAction({ context, side = "up" }: { context: WidgetRen
             title: resetLabel,
             onClick: followDefault,
           }, createElement(UndoIcon, { "aria-hidden": true })))),
+        phone && createElement("span", {
+          className: "approval-level-caption",
+          // The options already carry the same names for assistive technology.
+          "aria-hidden": "true",
+        }, tr(approvalLevelOption(shownLevel).title))),
     }));
 }
 

@@ -126,20 +126,17 @@ test("the activity details render a localized context sample", async () => {
   }
 });
 
-test("both running primaries are the context gauge; idle Send is not", async () => {
+test("Stop is the context gauge; a Send never is", async () => {
   const composer = await read("../../../apps/web/src/components/Composer.tsx");
   assert.match(composer, /const contextGauge = useActiveContextGauge\(model\);/);
   const running = composer.slice(composer.indexOf("{canStop ? ("), composer.indexOf('<button className="send" onPointerDown={onPrimaryPointerDown}'));
   assert.match(
     running,
-    /className=\{`send composer-delivery\$\{queueEdit \? "" : " composer-running-send"\} context-liquid-host`\}[\s\S]*?\{runningPrimaryGlyph\}[\s\S]*?<ContextLiquid key=\{session\?\.id\} gauge=\{contextGauge\}>\{runningPrimaryGlyph\}<\/ContextLiquid>/,
-    "Send now / queued save fills behind the same glyph",
-  );
-  assert.match(
-    running,
     /className="stop composer-stop-primary context-liquid-host"[\s\S]*?<Icon\.stop \/>[\s\S]*?<ContextLiquid key=\{session\?\.id\} gauge=\{contextGauge\}><Icon\.stop \/><\/ContextLiquid>/,
     "Stop fills behind its own glyph",
   );
+  const split = running.slice(0, running.indexOf('className="stop composer-stop-primary'));
+  assert.doesNotMatch(split, /ContextLiquid|context-liquid/, "the running Send is solid: the context pie reports the level there");
   assert.match(running, /title=\{withContextLabel\(tr\("composer\.stopTheCurrentResponse"\)\)\}/);
   assert.match(running, /title=\{withContextLabel\(runningPrimaryTitle\)\}/);
   const idle = composer.slice(composer.indexOf('<button className="send" onPointerDown={onPrimaryPointerDown}'));
@@ -160,11 +157,13 @@ test("session titles carry no provider logo or context donut", async () => {
   assert.doesNotMatch(styles, /\.context-indicator/);
 });
 
-test("the liquid follows the action's solid colors and leaves motion to the global rules", async () => {
-  const [styles, adaptive] = await Promise.all([read("../../../apps/web/src/styles.css"), read("../../../apps/web/src/composerAdaptive.css")]);
-  assert.match(styles, /\.composer-simple \.composer-rail \.send \{[^}]*background: var\(--composer-green\);[^}]*--context-liquid-tone: var\(--composer-green\);[^}]*--context-liquid-ink: var\(--accent-ink\);/s);
-  assert.match(styles, /\.composer-rail \.composer-stop-primary \{[^}]*color: var\(--red\);[^}]*--context-liquid-tone: var\(--red\);[^}]*--context-liquid-ink: var\(--red-ink\);/s);
-  assert.match(styles, /\.composer-mobile \.composer-rail \.stop \{[^}]*background: var\(--text\);[^}]*--context-liquid-tone: var\(--text\);[^}]*--context-liquid-ink: var\(--bg\);/s);
+test("the liquid is a soft tone inside a calm disc and leaves motion to the global rules", async () => {
+  const adaptive = await read("../../../apps/web/src/composerAdaptive.css");
+  assert.match(adaptive, /\.stop\.context-liquid-host \{[^}]*--context-liquid-tone: var\(--text\);[^}]*--context-liquid-ink: var\(--text\);[^}]*background: color-mix\(in srgb, var\(--text\) 7%, transparent\);[^}]*color: var\(--text-dim\);/s);
+  assert.match(adaptive, /\.context-liquid-wave \{[^}]*background: color-mix\(in srgb, var\(--context-liquid-tone\) 13%, transparent\);/s);
+  assert.doesNotMatch(adaptive, /context-liquid-host::after/, "no ring around the gauge");
+  // Stop turns red only when it is about to act.
+  assert.match(adaptive, /\.stop\.context-liquid-host:hover:not\(:disabled\) \{[^}]*background: var\(--red-wash\);[^}]*color: var\(--red\);/s);
   assert.match(adaptive, /@property --context-fill \{\s*syntax: "<percentage>";\s*inherits: true;\s*initial-value: 0%;\s*\}/);
   assert.match(adaptive, /\.context-liquid \{[^}]*transition: --context-fill [^;]*var\(--motion-ease\);/s);
   const section = adaptive.slice(adaptive.indexOf("/* Context liquid"));
@@ -269,10 +268,9 @@ function railFixture(phone: boolean, percent: number): string {
     createElement("span", { className: "composer-action-label" }, "Stop"),
     createElement(ContextLiquid, { gauge: gauge(percent), children: stop })));
   const split = markup(createElement("div", { className: "composer-send-split" },
-    createElement("button", { className: "send composer-delivery composer-running-send context-liquid-host", "aria-label": "Send now" },
+    createElement("button", { className: "send composer-delivery composer-running-send", "aria-label": "Send now" },
       send,
-      createElement("span", { className: "composer-action-label" }, "Send now"),
-      createElement(ContextLiquid, { gauge: gauge(percent), children: send })),
+      createElement("span", { className: "composer-action-label" }, "Send now")),
     createElement("button", { className: "composer-send-options", "aria-label": "More" }, createElement(ChevronDownIcon))));
   const composer = (primary: string) => `<div class="composer composer-simple composer-chat${phone ? " composer-mobile composer-expanded composer-has-draft" : ""}"><div class="composer-card"><div class="composer-rail"><div class="composer-actions"><span class="composer-primary">${primary}</span></div></div></div></div>`;
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head>
@@ -281,40 +279,45 @@ function railFixture(phone: boolean, percent: number): string {
 }
 
 for (const phone of [false, true]) {
-  test(`${phone ? "phone" : "desktop"}: the glyph copy sits exactly on the host glyph in the action's own color`, { skip: !CHROME }, async () => {
+  test(`${phone ? "phone" : "desktop"}: the glyph copy sits exactly on Stop's glyph, in a soft tone with no ring`, { skip: !CHROME }, async () => {
     const page = await browser!.newPage({
       viewport: { width: phone ? 390 : 1280, height: 600 },
       ...(phone ? { isMobile: true, hasTouch: true } : {}),
     });
     try {
       await page.setContent(railFixture(phone, 42));
-      // Phones fill with the solid text-colored action; desktop keeps red Stop
-      // and the accent Send.
-      const tones = phone ? { stop: "text", split: "text" } : { stop: "red", split: "accent" };
-      const measured = await page.evaluate((tones) => {
+      const measured = await page.evaluate(() => {
         const box = (element: Element | null) => {
           const rect = element!.getBoundingClientRect();
           return [rect.x, rect.y, rect.width, rect.height].map((value) => Math.round(value * 100) / 100);
         };
-        return (["stop", "split"] as const).map((id) => {
-          const host = document.querySelector(`#${id} .context-liquid-host`)!;
-          const front = host.querySelector(".context-liquid-front")!;
-          return {
-            id,
-            glyph: box(host.querySelector(":scope > svg")),
-            copy: box(front.querySelector("svg")),
-            liquid: getComputedStyle(front).backgroundColor,
-            outline: getComputedStyle(host, "::after").borderTopColor,
-            expected: getComputedStyle(document.getElementById(tones[id])!).color,
-          };
-        });
-      }, tones);
-      for (const item of measured) {
-        assert.deepEqual(item.copy, item.glyph, `${item.id}: the submerged glyph copy is pixel-aligned with the host glyph`);
-        assert.ok(item.glyph[2]! > 0, `${item.id}: the glyph is laid out`);
-        assert.equal(item.liquid, item.expected, `${item.id}: the liquid is the action's solid color`);
-        assert.equal(item.outline, item.expected, `${item.id}: the outline shares that color`);
-      }
+        const host = document.querySelector("#stop .context-liquid-host")!;
+        const front = host.querySelector(".context-liquid-front")!;
+        const probe = document.createElement("span");
+        probe.style.color = "var(--text)";
+        document.body.append(probe);
+        const text = getComputedStyle(probe).color;
+        probe.remove();
+        const rect = host.getBoundingClientRect();
+        const after = getComputedStyle(host, "::after");
+        return {
+          glyph: box(host.querySelector(":scope > svg")),
+          copy: box(front.querySelector("svg")),
+          liquid: getComputedStyle(front).backgroundColor,
+          ink: getComputedStyle(front).color,
+          text,
+          size: [rect.width, rect.height],
+          ring: after.borderTopWidth,
+          target: [Number.parseFloat(after.width), Number.parseFloat(after.height)],
+        };
+      });
+      assert.deepEqual(measured.copy, measured.glyph, "the submerged glyph copy is pixel-aligned with the host glyph");
+      assert.ok(measured.glyph[2]! > 0, "the glyph is laid out");
+      assert.equal(measured.ink, measured.text, "the submerged glyph takes full ink");
+      assert.notEqual(measured.liquid, measured.text, "the liquid is a tone, not the solid ink");
+      assert.equal(measured.ring, "0px", "no ring");
+      assert.equal(measured.size[0], measured.size[1], "a true disc");
+      if (phone) assert.ok(measured.target[0]! >= 44 && measured.target[1]! >= 44, "a full touch target past the disc");
     } finally {
       await page.close();
     }

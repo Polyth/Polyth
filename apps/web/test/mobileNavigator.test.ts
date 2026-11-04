@@ -136,8 +136,8 @@ test("phone navigator keeps the tap floor while compacting its rhythm", async ()
       `${match} must be the tap floor or a density opt-in`,
     );
   }
-  // New chat and ⋮ split the room between their glyphs (mobileNavigatorLayout
-  // pins the widths at or above 24px); the row height stays the tap floor.
+  // New chat and ⋮ are full tap boxes (mobileNavigatorLayout pins the
+  // 44px widths); the row height stays the tap floor.
   assert.match(css, /\.mobile-nav-project-action\s*\{[^}]*height:\s*var\(--tap\);/s);
   // Type comes from the shared role scale, so the interface-size setting works.
   assert.doesNotMatch(css, /font-size:\s*\d\d(?:\.\d+)?px/,

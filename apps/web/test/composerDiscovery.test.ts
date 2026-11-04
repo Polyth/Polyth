@@ -69,7 +69,6 @@ test("@ / # insert at the caret with required whitespace and an active token", (
   assert.equal(mid.caret, 9);
   // caret touching following prose never absorbs it into the token
   const split = planSigilInsert("beforeafter", 6, "#");
-  assert.equal(split.text, "before # after".replace(" # ", " # ")); // literal check below
   assert.equal(split.text, "before # after");
   assert.equal(split.text[split.caret - 1], "#");
   // the grammar recognizes the inserted sigil as an active token at the caret
@@ -88,7 +87,6 @@ test("/ inserts only at a valid line start, never an inert mid-line slash", () =
   assert.equal(after.caret, 16);
   // caret splitting a line: newline on both sides
   const middle = planCommandInsert("one two", 3);
-  assert.equal(middle.text, "one\n/\n two".replace("\n/\n two", "\n/\n two"));
   assert.equal(middle.text, "one\n/\n two");
   // every plan yields a recognized command token at the caret
   for (const [textIn, caretIn] of [["", 0], ["draft", 5], ["a\nb", 1]] as const) {

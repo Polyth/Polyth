@@ -761,6 +761,15 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
   const runtime: AgentRuntime = {
     harnessId,
     capabilities: async () => ANTIGRAVITY_CAPABILITIES,
+    // The CLI freezes model/effort/agent in its launch flags. Publish exactly
+    // what this leg started with so the server restarts it when the next turn
+    // asks for another selection instead of letting the turn be rejected.
+    launchSelection: () => nativeId
+      ? {
+        ...(selectedModel ? { model: { ...selectedModel } } : {}),
+        ...(selectedAgent ? { agent: selectedAgent } : {}),
+      }
+      : undefined,
     models: options.models,
     agents: async () => [],
     createSessionOperation: create,

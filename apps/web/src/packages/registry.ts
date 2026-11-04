@@ -51,6 +51,48 @@ let harnessTopologySynced = false;
 let catalogByCanonical = new Map<string, WebPackageAsset>();
 let loaderOptions: WebEntryLoaderOptions = {};
 
+// An installer publishes to stores the shell renders from, and React commits at
+// the end of the task that did it. Installing each package in the task its
+// import resolved in re-rendered the shell once per package, which costs far
+// more than the modules themselves. So installs that arrive together run
+// synchronously in one task and commit once. A slow import holds the others
+// back for at most the window, and a batch that outruns its slice yields so
+// the commit that follows does not make one long task of it. A hidden tab paints
+// nothing and throttles its timers, so there installs simply run.
+const INSTALL_BATCH_WINDOW_MS = 100;
+let installSliceMs = 16;
+let pendingInstalls: Array<() => void> = [];
+let installTimer: ReturnType<typeof setTimeout> | null = null;
+let importsInFlight = 0;
+
+const pageHidden = (): boolean =>
+  typeof document !== "undefined" && document.visibilityState === "hidden";
+
+function flushInstalls(): void {
+  if (installTimer !== null) clearTimeout(installTimer);
+  installTimer = null;
+  const deadline = performance.now() + installSliceMs;
+  while (pendingInstalls.length > 0) {
+    pendingInstalls.shift()!();
+    if (pendingInstalls.length > 0 && performance.now() >= deadline && !pageHidden()) {
+      installTimer = setTimeout(flushInstalls, 0);
+      return;
+    }
+  }
+}
+
+function scheduleInstall(install: () => void): void {
+  pendingInstalls.push(install);
+  if (pageHidden()) flushInstalls();
+  else installTimer ??= setTimeout(flushInstalls, INSTALL_BATCH_WINDOW_MS);
+}
+
+/** One import no longer outstanding. The last one needs no window to wait out. */
+function noteImportFinished(): void {
+  importsInFlight -= 1;
+  if (importsInFlight === 0 && pendingInstalls.length > 0) flushInstalls();
+}
+
 const canonicalId = (id: string): string => aliases.get(id) ?? id;
 const isHarnessTopologyPackage = (id: string): boolean =>
   id === "harness-runtime" || id.startsWith("backend-");
@@ -132,11 +174,28 @@ async function applyCanonicalState(id: string): Promise<void> {
       const loading = rec.hadFailure
         ? { ...asset, module: `${asset.module}?retry=${gen}` }
         : asset;
-      const handle = await activateWebPackage(loading, {
-        ...loaderOptions,
-        createActivation: (ownerPackageId) => createPackageActivation(ownerPackageId, webPackageHost),
-        isCurrent,
-      });
+      let importFinished = false;
+      const finishImport = (): void => {
+        if (importFinished) return;
+        importFinished = true;
+        noteImportFinished();
+      };
+      importsInFlight += 1;
+      let handle: Awaited<ReturnType<typeof activateWebPackage>>;
+      try {
+        handle = await activateWebPackage(loading, {
+          ...loaderOptions,
+          createActivation: (ownerPackageId) => createPackageActivation(ownerPackageId, webPackageHost),
+          isCurrent,
+          scheduleInstall: (install) => {
+            scheduleInstall(install);
+            finishImport();
+          },
+        });
+      } finally {
+        // A cancelled or failed import never reaches scheduleInstall.
+        finishImport();
+      }
       if (!isCurrent()) {
         handle.dispose();
         if (rec.generation === gen) rec.state = "inactive";
@@ -276,9 +335,6 @@ let recoveryAttempt = 0;
 let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let bootFailed = false;
 
-const pageHidden = (): boolean =>
-  typeof document !== "undefined" && document.visibilityState === "hidden";
-
 const failedCanonicalIds = (): string[] =>
   [...runtimes].filter(([, rec]) => rec.desired && rec.state === "failed").map(([id]) => id);
 
@@ -320,6 +376,11 @@ if (typeof document !== "undefined" && typeof document.addEventListener === "fun
   document.addEventListener("visibilitychange", () => {
     if (!pageHidden()) recoverNow();
   });
+}
+
+/** Test seam: how long one batch of installs runs before it yields. */
+export function configureInstallBatches(options: { sliceMs: number }): void {
+  installSliceMs = options.sliceMs;
 }
 
 /** Test seam: the backoff schedule for failed package work. */

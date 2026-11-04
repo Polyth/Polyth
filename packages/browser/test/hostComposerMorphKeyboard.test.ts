@@ -69,7 +69,7 @@ function Composer() {
       h("div", { className: "composer-config composer-config-row" },
         h("span", { className: "picker picker-model model-picker" },
           h("button", { className: "config-chip model-picker-trigger" }, h("span", { className: "model-trigger-name" }, "Opus 5.5"))),
-        h("button", { className: "ui-icon-btn ui-icon-btn--ghost ui-icon-btn--sm mobile-composer-edit", "aria-label": "Edit" })),
+        h("button", { className: "mobile-composer-edit-entry" }, "Edit composer buttons")),
       h("div", { className: "composer-input" },
         h("textarea", { ref: input, className: "composer-editor", rows: 3, defaultValue: draft, placeholder: "Message Polyth…", onFocus: () => setFocused(true) })),
       h("div", { className: "composer-rail mobile-composer-rail", "data-resting": focused ? undefined : "true", style: { "--mobile-rail-lanes": 5 } },

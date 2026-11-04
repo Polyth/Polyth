@@ -10,6 +10,7 @@ import {
   isGrantBoundPrincipal,
   principalAccountGrants,
   type AgentRuntime,
+  type AuthPrincipal,
   type AuthResolution,
   type HarnessSelection,
   type MemoryNarrowing,
@@ -388,6 +389,8 @@ export type HttpHandler = (
 export interface HttpAuth {
   resolve(req: AuthRequestLike, ingress: RequestIngress): AuthResolution;
   gate(req: AuthRequestLike, ingress: RequestIngress): GateDenial | null;
+  /** Account carried by a resolved principal (see `AuthService`). */
+  userIdForPrincipal?(principal: AuthPrincipal): string | undefined;
 }
 
 export interface HttpDeps {

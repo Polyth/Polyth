@@ -70,9 +70,9 @@ export function prefetchAuthStatus(): Promise<BrowserAuthStatus> {
       // A local-user status proves trusted loopback reachability, and a
       // paired-device status a Link device grant, not a human UI session.
       // Resolve their identity only through the authorized Space gateway,
-      // which returns the user bound to the validated SpaceContext (paired
-      // devices may not reach /api/auth/accounts at all). Cookie-backed UI
-      // sessions retain the account-management endpoint.
+      // which returns the user bound to the validated SpaceContext (only a
+      // full-access paired device reads /api/auth/accounts, read-only).
+      // Cookie-backed UI sessions retain the account-management endpoint.
       const viaSpaces = status.scope === "local-user" || status.scope === "paired-device";
       // A current server names the UI session's own account in the status
       // answer: the account-management read would only repeat it.

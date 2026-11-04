@@ -44,11 +44,12 @@
   --look-blur: none;
   --look-float-blur: none;
   /* Corner rounding reaches every look: its radii are drawn at the default
-     rounding (9, scale 1.8) and follow the slider from square to the last,
-     rounder notch, as the platform styles' own radii do. Pills stay pills.
+     rounding (9, scale 1.8) and follow the slider from square to the last
+     notch, as the platform styles' own radii do. A look's pill squares with it.
      (Declared after --look-veil: shellLooks.test.ts pins the block's first
      token as the veil ladder's entry point.) */
   --look-round: calc(var(--corner-radius-scale) / 1.8);
+  --look-pill-radius: calc(25px * var(--look-round));
   --look-line: color-mix(in srgb, var(--text) 13%, transparent);
   /* Quiet text uses the theme's own contrast-checked inks, never an alpha of
      --text: an alpha mix loses contrast over every lighter backdrop. */
@@ -124,6 +125,31 @@
   --look-dock-blur: none;
   --look-dock-shadow: none;
   --look-dock-edge: transparent;
+  /* Phone layers (1h). The navigator and the Workspace panel are one
+     full-screen material over the conversation. A phone navigator row runs
+     the screen's width, so its current chat may differ from the desktop
+     plate (--look-phone-select*, the look's selection by default) and carry
+     a bar on its leading edge (--look-select-mark). Launchers are the look's
+     tile, widgets its panel card. */
+  --look-phone-layer: color-mix(in srgb, var(--look-float) var(--look-overlay-a), transparent);
+  --look-phone-layer-blur: var(--look-float-blur);
+  --look-phone-select: var(--look-select);
+  --look-phone-select-edge: var(--look-select-edge);
+  --look-select-mark: transparent;
+  --look-tile: var(--look-option);
+  --look-tile-edge: inset 0 0 0 1px var(--look-option-edge);
+  --look-tile-radius: var(--look-card-radius);
+  --look-tile-ink: var(--accent);
+  --look-tile-press: var(--look-hover);
+  --look-tile-press-edge: var(--look-tile-edge);
+  --look-widget: var(--look-card);
+  --look-widget-edge: var(--look-card-edge);
+  /* The widget's top edge alone: the looks built on rules part it from the
+     tiles above with their line instead of a frame. */
+  --look-widget-rule: var(--look-widget-edge);
+  --look-widget-shadow: var(--look-card-shadow);
+  --look-widget-radius: var(--look-card-radius);
+  --look-widget-pad: var(--space-2);
 }
 
 /* 1. Flatten. The base glass and every slab a platform style paints at class
@@ -314,26 +340,14 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-card:
   border-inline-color: var(--look-focus-side) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail .composer-send-split {
-  background: transparent !important;
-  box-shadow: none !important;
-  gap: 2px;
-}
-
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail .composer-send-split > .send {
-  border-radius: 999px !important;
-}
-
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-send-options {
-  background: transparent !important;
-  box-shadow: none !important;
   color: var(--look-ink-dim) !important;
 }
 
-/* Option chips: queued prompts, attachments, the New-session shortcuts and
-   their customize trigger, the harness's prompt suggestion and the add
-   menu's tiles are one quiet chip, not the base's elevated or glass pill. */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.queue-chip:not(.drag-over), .attachment-pill, .starter-chip, .hero-customize-trigger, .composer-suggestion, .add-menu-tile) {
+/* Option chips: attachments, the New-session shortcuts and their customize
+   trigger and the add menu's tiles are one quiet chip, not the base's elevated
+   or glass pill. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.attachment-pill, .starter-chip, .hero-customize-trigger, .add-menu-tile) {
   background: var(--look-option) !important;
   backdrop-filter: none !important;
   border: 1px solid var(--look-option-edge) !important;
@@ -363,14 +377,17 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.msg .bubbl
   background: var(--look-hover) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .queue-chip {
-  border-radius: var(--look-card-radius) !important;
+/* The pending stack above the composer stays lines of text in every look: a
+   queued prompt hovers in the look's hover, and the suggested prompt takes the
+   look's quiet ink and hovers and presses the same way. Focus stays visible
+   through the base outline, so its ink returns to the normal text colour with
+   hover. */
+@media (hover: hover) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .queue-chip[role="listitem"]:hover:where(:not(.queue-chip-leaving)) {
+    background: var(--look-hover) !important;
+  }
 }
 
-/* The suggested prompt is the same pending writing stack as a queued prompt:
-   its text takes the look's quiet ink, and the use target hovers and presses
-   in the look's hover, not the base overlay. Focus stays visible through the
-   base outline, so its ink returns to the normal text colour with hover. */
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-text {
   color: var(--look-ink-dim) !important;
 }
@@ -566,6 +583,109 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-
   border-radius: var(--look-control-radius) !important;
 }
 
+/* 1h. Phone layers. The navigator and the Workspace panel cover the
+   conversation in one material (--look-phone-layer). The navigator speaks
+   the look's selection language and quiet inks; the panel's launchers are
+   the look's tile and its widgets the look's panel card. */
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-navigator {
+  background: var(--look-phone-layer) !important;
+  backdrop-filter: var(--look-phone-layer-blur) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active:not(.is-selected) {
+  background: var(--look-phone-select);
+  box-shadow: var(--look-phone-select-edge);
+  border-radius: var(--look-select-radius);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  width: 3px;
+  height: calc(var(--icon-md) + 2px);
+  margin-block-start: calc((var(--icon-md) + 2px) / -2);
+  border-radius: var(--look-pill-radius);
+  background: var(--look-select-mark);
+  pointer-events: none;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-title {
+  color: var(--look-ink-dim);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-subagent-children .mobile-nav-session-row:not(.is-active, .is-unread) .mobile-nav-session-title {
+  color: var(--look-ink-quiet);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row:is(.is-active, .is-unread) .mobile-nav-session-title {
+  color: var(--look-select-ink);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active .mobile-nav-session-title {
+  font-weight: var(--look-select-weight);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-date-divider {
+  --date-rule: var(--look-line);
+  color: var(--look-ink-quiet);
+}
+
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet.sheet {
+    background: var(--look-phone-layer) !important;
+    backdrop-filter: var(--look-phone-layer-blur) !important;
+  }
+
+  /* Edit draws the same tiles (workspacePanelEditor.css); its travelling
+     hole and lifted copy keep their own drag states. */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet :is(.workspace-panel-launcher, .workspace-editor-item--launcher:not(.is-hole, .workspace-arrange-ghost-body.is-lifted > *)) {
+    border-color: transparent;
+    border-radius: var(--look-tile-radius);
+    color: var(--look-ink-dim);
+    background: var(--look-tile);
+    box-shadow: var(--look-tile-edge);
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet :is(:is(.workspace-panel-launcher, .workspace-panel-widget-head) > svg:not(.workspace-panel-disclosure), .workspace-editor-tile-icon) {
+    color: var(--look-tile-ink);
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-editor-tile-label {
+    color: var(--look-ink-dim);
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-panel-launcher:not(:disabled):active {
+    color: var(--text);
+    background: var(--look-tile-press);
+    box-shadow: var(--look-tile-press-edge);
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-panel-item--widget {
+    margin-block-start: var(--space-2);
+    padding: var(--look-widget-pad);
+    border: 1px solid var(--look-widget-edge) !important;
+    border-block-start-color: var(--look-widget-rule) !important;
+    border-radius: var(--look-widget-radius);
+    background: var(--look-widget);
+    box-shadow: var(--look-widget-shadow);
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-panel-labeled-divider {
+    color: var(--look-ink-quiet);
+  }
+}
+
+@media (max-width: 480px) and (hover: hover), (max-height: 480px) and (pointer: coarse) and (hover: hover) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-panel-launcher:not(:disabled):hover {
+    color: var(--text);
+    background: var(--look-tile-press);
+    box-shadow: var(--look-tile-press-edge);
+  }
+}
+
 /* 3a. Floating surfaces: toasts, menus, tooltips, dialogs, settings. */
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner, .workspace-customize-panel) {
@@ -584,7 +704,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .app > .header 
   backdrop-filter: var(--look-float-blur) !important;
   border: 1px solid var(--look-float-edge) !important;
   box-shadow: var(--look-float-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .app > .header > .shell-island :is(.view-switcher-pill, .header-control, .ui-icon-btn, .capability-launcher, .desktop-session-status-trigger) {
@@ -625,24 +745,18 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.scrim.s
   backdrop-filter: var(--look-scrim-blur) !important;
 }
 
-/* 3b. In-flow cards: agent question, isolated-changes card, edited files, agent status. */
+/* 3b. In-flow cards: agent question, isolated-changes card. The lines above
+   the composer (agent status, its subagents, edited files) take their shape
+   from Chat settings → Status above the composer, not from the look: a line
+   stays a line, a capsule one pill, and the tab a row of the composer's
+   header stack in the look's composer material (3c). */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .pending-changes-bar, .agent-status-dock, .subagent-island, .empty-state--compact, .empty-state--panel) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .empty-state--compact, .empty-state--panel) {
   background: var(--look-card) !important;
   backdrop-filter: var(--look-card-blur, none) !important;
   border: 1px solid var(--look-card-edge) !important;
   border-radius: var(--look-card-radius) !important;
   box-shadow: var(--look-card-shadow) !important;
-}
-
-/* The agent's line with its subagents is one card: the island takes the
-   look's plate and the line inside it keeps none (no card in a card). */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .subagent-island .agent-status-dock {
-  background: transparent !important;
-  backdrop-filter: none !important;
-  border: 0 !important;
-  border-radius: var(--radius-control) !important;
-  box-shadow: none !important;
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-option) {
@@ -803,6 +917,15 @@ body[data-shell-look="paper"]:not(#\#) {
   --look-rail-radius: var(--look-float-radius);
   /* A floating full-height column (shellLayout.css) takes the sheet corner. */
   --look-column-radius: var(--look-float-radius);
+  /* Phone (1h): the sheet; the current chat is ink, weight and an ink bar;
+     launchers are ink glyphs on the sheet and a widget a ruled passage. */
+  --look-phone-layer: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent);
+  --look-select-mark: var(--text);
+  --look-tile: transparent;
+  --look-tile-edge: none;
+  --look-tile-ink: var(--text);
+  --look-widget-rule: var(--look-line);
+  --look-widget-pad: var(--space-2) 0;
 }
 
 body[data-shell-look="paper"]:not(#\#) .app {
@@ -928,35 +1051,48 @@ body[data-shell-look="paper"]:not(#\#) :is(.composer-rail .chip, .composer-rail 
 }
 
 /* The send button keeps the control corner in every state, idle included. */
-body[data-shell-look="paper"]:not(#\#) .send {
+body[data-shell-look="paper"]:not(#\#) :is(.send, .stop) {
   border-radius: var(--look-control-radius) !important;
 }
 
 body[data-shell-look="paper"]:not(#\#) .send:not(:disabled) {
   background: var(--text) !important;
   color: var(--bg) !important;
-  box-shadow: none !important;
-  transform: scale(0.82);
 }
 
 /* Phone. */
-
-body[data-shell-look="paper"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent) !important;
-  backdrop-filter: var(--look-float-blur) !important;
-}
 
 body[data-shell-look="paper"]:not(#\#) .mobile-nav-search {
   border-bottom: 1px solid var(--look-line) !important;
   border-radius: 0 !important;
 }
 
-body[data-shell-look="paper"]:not(#\#) .mobile-nav-session-title {
-  color: var(--look-ink-dim);
+/* At rest only: pressed and open islands keep the shared accent glyph. */
+body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
+  color: var(--text-dim);
 }
 
-body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn {
-  color: var(--text-dim);
+/* Projects are sections of the sheet: a rule over each one after the first,
+   and the mark is the glyph alone, without its tile. */
+body[data-shell-look="paper"]:not(#\#) .mobile-nav-project + .mobile-nav-project {
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--look-line) !important;
+  border-radius: 0;
+}
+
+body[data-shell-look="paper"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look="paper"]:not(#\#) .workspace-panel-sheet .workspace-panel-items {
+    gap: var(--space-3) var(--space-1);
+  }
+
+  body[data-shell-look="paper"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher > svg {
+    stroke-width: 1.5;
+  }
 }
 
 /*
@@ -996,6 +1132,16 @@ body[data-shell-look="line"]:not(#\#) {
   --look-card-radius: calc(6px * var(--look-round));
   --look-option-edge: transparent;
   --look-scrim: color-mix(in srgb, var(--bg) 60%, transparent);
+  /* Phone (1h): chats are cells of one ruled column, so the current one is
+     the accent bar, not a box over the rules; launchers are hairline cells. */
+  --look-phone-layer: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent);
+  --look-phone-select-edge: none;
+  --look-select-mark: var(--accent);
+  --look-tile: transparent;
+  --look-tile-edge: inset 0 0 0 1px var(--look-line);
+  --look-tile-radius: var(--look-r);
+  --look-tile-press-edge: inset 0 0 0 1px var(--look-line-strong);
+  --look-widget-radius: var(--look-r);
 }
 
 body[data-shell-look="line"]:not(#\#) .app {
@@ -1071,6 +1217,9 @@ body[data-shell-look="line"]:not(#\#) .md-code-block {
   border-radius: var(--look-r) !important;
 }
 
+/* The rule sits on the touch box's bottom edge: no touch trim under it. */
+body[data-shell-look="line"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+
 body[data-shell-look="line"]:not(#\#) .activity-group > .ui-run-summary {
   border-radius: 0 !important;
   border-bottom: 1px solid var(--look-line-strong) !important;
@@ -1136,25 +1285,70 @@ body[data-shell-look="line"]:not(#\#) .composer-rail {
   border-top: 1px solid var(--look-line) !important;
 }
 
-body[data-shell-look="line"]:not(#\#) .send {
+body[data-shell-look="line"]:not(#\#) :is(.send, .stop) {
   border-radius: var(--look-r) !important;
-  box-shadow: none !important;
 }
 
 /* Phone. */
-
-body[data-shell-look="line"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent) !important;
-  backdrop-filter: var(--look-float-blur) !important;
-}
 
 body[data-shell-look="line"]:not(#\#) .mobile-nav-search {
   border: 1px solid var(--look-line) !important;
   border-radius: var(--look-r) !important;
 }
 
-body[data-shell-look="line"]:not(#\#) .mobile-nav-session-row + .mobile-nav-session-row {
-  border-top: 1px solid var(--look-line) !important;
+/* One ruled column: a hairline over every chat and every project after the
+   first, square cells, mono dates that start the rule they head. */
+body[data-shell-look="line"]:not(#\#) .mobile-nav-project-body .mobile-nav-session-row {
+  border-block-start: 1px solid var(--look-line) !important;
+  border-radius: 0;
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-nav-project + .mobile-nav-project {
+  border-block-start: 1px solid var(--look-line) !important;
+  border-radius: 0;
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+  border-radius: var(--look-r);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--look-line-strong);
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-nav-date-divider:not(.is-pinned) {
+  justify-content: flex-start;
+  padding-inline: var(--nav-title-start) 0;
+  font-family: var(--mono);
+  font-weight: 500;
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-nav-date-divider:not(.is-pinned)::before {
+  content: none;
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-nav-date-divider:not(.is-pinned)::after {
+  flex: 1 1 auto;
+  background: var(--look-line);
+}
+
+body[data-shell-look="line"]:not(#\#) .mobile-nav-duration {
+  font-family: var(--mono);
+  font-weight: 500;
+}
+
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look="line"]:not(#\#) .workspace-panel-sheet .workspace-panel-items {
+    gap: var(--space-1);
+  }
+
+  /* A widget's head is the grid's label: mono, upper case, quiet. */
+  body[data-shell-look="line"]:not(#\#) .workspace-panel-sheet .workspace-panel-widget-head strong {
+    color: var(--look-ink-dim);
+    font-family: var(--mono);
+    font-size: var(--font-meta);
+    font-weight: 500;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
 }
 
 body[data-shell-look="line"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
@@ -1173,7 +1367,7 @@ body[data-shell-look="line"]:not(#\#) :is(.mobile-float-navigation, .mobile-floa
 body[data-shell-look="air"]:not(#\#) {
   /* Fields (1f): every input takes Air's field (--look-field, below, the
      composer's) in its pill. */
-  --look-field-radius: 999px;
+  --look-field-radius: var(--look-pill-radius);
   /* The corner of floating full-height columns (shellLayout.css). */
   --look-column-radius: calc(22px * var(--look-round));
   --look-island-solid: var(--elevated);
@@ -1198,11 +1392,11 @@ body[data-shell-look="air"]:not(#\#) {
   --look-scrim-blur: blur(8px);
   --look-shell-blur: var(--look-blur);
   --look-select: var(--accent-wash);
-  --look-select-radius: 999px;
+  --look-select-radius: var(--look-pill-radius);
   --look-control: var(--look-island);
   --look-control-edge: var(--look-shadow);
   --look-control-blur: var(--look-blur);
-  --look-control-radius: 999px;
+  --look-control-radius: var(--look-pill-radius);
   --look-rail-edge: transparent;
   --look-rail-seam: color-mix(in srgb, var(--text) 6%, transparent);
   --look-rail-shadow: var(--look-shadow);
@@ -1211,6 +1405,13 @@ body[data-shell-look="air"]:not(#\#) {
   --look-dock: var(--look-island);
   --look-dock-blur: var(--look-blur);
   --look-dock-shadow: var(--look-shadow);
+  /* Phone (1h): the pale field; projects, launchers and widgets are islands. */
+  --look-phone-layer: color-mix(in srgb, var(--look-field) var(--look-overlay-a), transparent);
+  --look-tile: var(--look-island);
+  --look-tile-edge: var(--look-shadow);
+  --look-tile-radius: calc(18px * var(--look-round));
+  --look-tile-press: color-mix(in srgb, var(--look-island-solid) 90%, var(--accent));
+  --look-tile-press-edge: var(--look-shadow-lift);
 }
 
 html:not(.light) body[data-shell-look="air"]:not(#\#) {
@@ -1275,13 +1476,17 @@ body[data-shell-look="air"]:not(#\#) .md-code-block {
   border-radius: calc(18px * var(--look-round)) !important;
 }
 
+/* The pill (and the open block's island) fill the row's whole touch box:
+   no touch trim, so they keep the full gap to the rows around them. */
+body[data-shell-look="air"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+
 body[data-shell-look="air"]:not(#\#) .activity-group > .ui-run-summary {
   width: auto !important;
   display: inline-flex !important;
   max-width: 100%;
   background: var(--look-island) !important;
   box-shadow: var(--look-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   padding-inline: 12px 14px !important;
 }
 
@@ -1290,7 +1495,19 @@ body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop {
   grid-template-columns: minmax(0, max-content) auto;
   justify-content: start;
 }
-body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop > .activity-live-stop { margin-inline-start: 8px; }
+body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop > .activity-live-stop {
+  align-self: stretch;
+  margin-inline-start: 8px;
+}
+/* The pill's twin: its height and side room, lifted with it, in the red
+   wash. */
+body[data-shell-look="air"]:not(#\#) .activity-live-stop > .execution-stop.ui-btn {
+  padding-inline: 14px;
+}
+body[data-shell-look="air"]:not(#\#) .activity-live-stop > .execution-stop.ui-btn:not(:disabled) {
+  box-shadow: var(--look-shadow) !important;
+}
+body[data-shell-look="air"]:not(#\#) .activity-live-stop > .execution-stop.ui-btn::after { inset-block: 0; }
 
 body[data-shell-look="air"]:not(#\#) .activity-group.open {
   background: var(--look-island) !important;
@@ -1327,28 +1544,80 @@ body[data-shell-look="air"]:not(#\#) .composer-card {
   border-radius: calc(28px * var(--look-round)) !important;
 }
 
-body[data-shell-look="air"]:not(#\#) .send:not(:disabled) {
-  box-shadow: 0 8px 18px -8px var(--accent) !important;
-}
-
 /* Phone. */
 
-body[data-shell-look="air"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, var(--look-field) var(--look-overlay-a), transparent) !important;
-  backdrop-filter: var(--look-float-blur) !important;
+/* Every project is an island on the field; its mark is a soft accent disc. */
+body[data-shell-look="air"]:not(#\#) .mobile-nav-project {
+  margin: 0 var(--space-2) var(--space-3);
+  padding-block: var(--space-1);
+  border-radius: calc(22px * var(--look-round));
+  background: var(--look-island);
+  box-shadow: var(--look-shadow);
+}
+
+/* Inside an island the mark sits as far in from its side as from its top,
+   and names and chats keep their edge after it; a current chat's pill still
+   spans the island. The lifted copy of a project keeps the same inset. */
+body[data-shell-look="air"]:not(#\#) :is(.mobile-nav-project, .mobile-navigator .workspace-arrange-ghost-body) {
+  --nav-row-inset: var(--space-4);
+  --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
+}
+
+/* Rows on the field after the islands (Add project, the next remote page)
+   keep the islands' mark and name columns. */
+body[data-shell-look="air"]:not(#\#) .mobile-nav-scroll > :is(.mobile-nav-add-project, .mobile-nav-more-sessions) {
+  --nav-row-inset: calc(var(--space-2) + var(--space-4));
+  --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
+}
+
+/* The toolbar steps in with the islands: the title starts where their marks
+   do (the islands' edge plus that inset) and close sits on their ⋮ column. */
+body[data-shell-look="air"]:not(#\#) .mobile-nav-toolbar {
+  --nav-bar-axis: calc(var(--nav-axis) + var(--space-2));
+}
+
+body[data-shell-look="air"]:not(#\#) .mobile-nav-place {
+  padding-inline-start: calc(var(--nav-edge) + var(--space-2) + var(--space-4));
+}
+
+body[data-shell-look="air"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+  border-radius: var(--look-pill-radius);
+  background: var(--accent-wash);
+  color: var(--accent);
+  box-shadow: none;
 }
 
 body[data-shell-look="air"]:not(#\#) .mobile-nav-search {
   background: var(--look-island) !important;
   box-shadow: var(--look-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
 }
 
 body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
   background: var(--look-island) !important;
   box-shadow: var(--look-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   backdrop-filter: var(--look-blur) !important;
+}
+
+/* Launchers are roomier islands with the glyph in a soft accent disc. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-items {
+    gap: var(--space-3) var(--space-2);
+  }
+
+  body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher {
+    grid-template-rows: calc(var(--icon-xl) + var(--space-3)) calc(2em * var(--font-meta-lh));
+  }
+
+  body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher > svg {
+    box-sizing: border-box;
+    width: calc(var(--icon-xl) + var(--space-3));
+    height: calc(var(--icon-xl) + var(--space-3));
+    padding: calc(var(--space-2) - 1px);
+    border-radius: var(--look-pill-radius);
+    background: var(--accent-wash);
+  }
 }
 
 /*
@@ -1386,6 +1655,20 @@ body[data-shell-look="monolith"]:not(#\#) {
   /* A floating column takes the rail's corner (stated, not var(--look-rail-radius):
      Floating columns derive the rail radius from this one). */
   --look-column-radius: calc(14px * var(--look-round));
+  /* Phone (1h): the phone layers are the backdrop, and the work on them is
+     the sheet: the current chat, every launcher and every widget are raised
+     pieces of it. */
+  --look-phone-layer: color-mix(in srgb, var(--look-backdrop) var(--look-overlay-a), transparent);
+  --look-phone-select: var(--look-sheet-solid);
+  --look-phone-select-edge: var(--look-sheet-shadow);
+  --look-tile: var(--look-sheet-solid);
+  --look-tile-edge: var(--look-sheet-shadow);
+  --look-tile-radius: calc(12px * var(--look-round));
+  --look-tile-press: color-mix(in srgb, var(--look-sheet-solid) 94%, var(--text));
+  --look-tile-press-edge: 0 0 0 1px var(--look-edge);
+  --look-widget: var(--look-sheet-solid);
+  --look-widget-edge: transparent;
+  --look-widget-shadow: var(--look-sheet-shadow);
 }
 
 html.light body[data-shell-look="monolith"]:not(#\#) {
@@ -1534,15 +1817,17 @@ body[data-shell-look="monolith"]:not(#\#) .composer-card {
   border-radius: calc(16px * var(--look-round)) !important;
 }
 
-body[data-shell-look="monolith"]:not(#\#) .send:not(:disabled) {
-  box-shadow: none !important;
-}
-
 /* Phone. */
 
-body[data-shell-look="monolith"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, var(--look-backdrop) var(--look-overlay-a), transparent) !important;
-  backdrop-filter: var(--look-float-blur) !important;
+/* Project names are the backdrop's labels: denser, heavier, on a flat mark. */
+body[data-shell-look="monolith"]:not(#\#) .mobile-nav-project-name {
+  font-weight: 750;
+  letter-spacing: -.025em;
+}
+
+body[data-shell-look="monolith"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  box-shadow: none;
 }
 
 body[data-shell-look="monolith"]:not(#\#) .mobile-nav-search {
@@ -1615,6 +1900,18 @@ body[data-shell-look="monolith-reverse"]:not(#\#) {
   /* A floating column takes the rail's corner (stated, not var(--look-rail-radius):
      Floating columns derive the rail radius from this one). */
   --look-column-radius: calc(14px * var(--look-round));
+  /* Phone (1h): the phone layers are the lit plane; the current chat (the
+     look's selection), launchers and widgets are cut into it, and a pressed
+     launcher sinks deeper. */
+  --look-phone-layer: color-mix(in srgb, var(--look-plane-solid) var(--look-overlay-a), transparent);
+  --look-tile: var(--look-well-solid);
+  --look-tile-edge: var(--look-carve);
+  --look-tile-radius: calc(11px * var(--look-round));
+  --look-tile-press: var(--look-well-solid);
+  --look-tile-press-edge: inset 0 2px 5px rgba(0, 0, 0, 0.3);
+  --look-widget: var(--look-well-solid);
+  --look-widget-edge: transparent;
+  --look-widget-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 6px -2px rgba(0, 0, 0, 0.3);
 }
 
 html.light body[data-shell-look="monolith-reverse"]:not(#\#) {
@@ -1759,15 +2056,11 @@ body[data-shell-look="monolith-reverse"]:not(#\#) .composer-card {
   border-radius: calc(18px * var(--look-round)) !important;
 }
 
-body[data-shell-look="monolith-reverse"]:not(#\#) .send:not(:disabled) {
-  box-shadow: none !important;
-}
-
 /* Phone. */
 
-body[data-shell-look="monolith-reverse"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, var(--look-plane-solid) var(--look-overlay-a), transparent) !important;
-  backdrop-filter: var(--look-float-blur) !important;
+body[data-shell-look="monolith-reverse"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+  background: var(--look-well-solid);
+  box-shadow: var(--look-carve);
 }
 
 body[data-shell-look="monolith-reverse"]:not(#\#) .mobile-nav-search {
@@ -1803,10 +2096,10 @@ body[data-shell-look="obsidian"]:not(#\#) {
   /* Fields (1f): the navigator's search sets the field for every input. */
   --look-field: color-mix(in srgb, var(--text) 5%, transparent);
   --look-field-edge: inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
-  --look-field-radius: 999px;
+  --look-field-radius: var(--look-pill-radius);
   /* The corner of floating full-height columns (shellLayout.css). */
   --look-column-radius: calc(18px * var(--look-round));
-  --look-strip-radius: 999px;
+  --look-strip-radius: var(--look-pill-radius);
   --look-fill-a: calc(var(--look-a) * 0.86);
   --look-fill: color-mix(in srgb, var(--panel) 74%, transparent);
   --look-fill-strong: color-mix(in srgb, var(--panel) 88%, transparent);
@@ -1832,8 +2125,8 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-option-edge: color-mix(in srgb, var(--text) 8%, transparent);
   --look-select: color-mix(in srgb, var(--accent) 13%, transparent);
   --look-select-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
-  --look-select-radius: 999px;
-  --look-control-radius: 999px;
+  --look-select-radius: var(--look-pill-radius);
+  --look-control-radius: var(--look-pill-radius);
   --look-rail: var(--look-fill-overlay);
   --look-rail-blur: var(--look-glass-blur);
   --look-rail-edge: color-mix(in srgb, var(--text) 12%, transparent);
@@ -1845,6 +2138,26 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-dock-blur: var(--look-glass-blur);
   --look-dock-shadow: var(--look-glass-shadow);
   --look-dock-edge: color-mix(in srgb, var(--text) 12%, transparent);
+  /* Phone (1h): dark glass; launchers and widgets are glass with the rim, and
+     only the launcher under a finger takes the accent rim and the glow. */
+  --look-phone-layer: color-mix(in srgb, color-mix(in srgb, var(--bg) 70%, black) var(--look-overlay-a), transparent);
+  --look-phone-layer-blur: var(--look-glass-blur);
+  --look-tile: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box;
+  --look-tile-edge: 0 1px 0 0 color-mix(in srgb, white 6%, transparent) inset;
+  --look-tile-radius: calc(16px * var(--look-round));
+  --look-tile-ink: var(--accent-hi);
+  --look-tile-press: linear-gradient(var(--look-fill-strong), var(--look-fill-strong)) padding-box, var(--look-rim-accent) border-box;
+  --look-tile-press-edge: 0 8px 22px -8px var(--accent);
+  --look-widget: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box;
+  --look-widget-edge: transparent;
+  --look-widget-shadow: var(--look-glass-shadow);
+  --look-widget-radius: calc(18px * var(--look-round));
+}
+
+/* Pearl: the phone layers are the light canvas. */
+html.light body[data-shell-look="obsidian"]:not(#\#) {
+  --look-phone-layer: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent);
+  --look-widget-shadow: 0 1px 0 0 color-mix(in srgb, white 60%, transparent) inset, 0 14px 30px -22px rgba(0, 0, 0, 0.3);
 }
 
 body[data-shell-look="obsidian"]:not(#\#) .app {
@@ -1886,7 +2199,7 @@ html:not([data-background="none"]) body[data-shell-look="obsidian"][data-glass="
 
 /* Rimmed glass: shell surfaces, floating surfaces and in-flow cards share it. */
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card, .pending-changes-bar, .agent-status-dock, .subagent-island) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card) {
   border: 1px solid transparent !important;
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
@@ -1905,7 +2218,7 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.dialog-panel, .modal.settings-she
   background: linear-gradient(var(--look-fill-overlay), var(--look-fill-overlay)) padding-box, var(--look-rim) border-box !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card, .pending-changes-bar) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card) {
   border-radius: calc(18px * var(--look-round)) !important;
 }
 
@@ -1919,7 +2232,7 @@ body[data-shell-look="obsidian"]:not(#\#) .sidebar {
 body[data-shell-look="obsidian"]:not(#\#) .railbar {
   --rail-strip-gutter-start: calc(var(--space-3) / 2);
   --rail-strip-gutter-end: calc(var(--space-3) / 2);
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   margin-block: 0 10px !important;
   margin-inline: 0 10px !important;
   height: auto !important;
@@ -2001,25 +2314,27 @@ body[data-shell-look="obsidian"]:not(#\#) .composer-card {
 
 body[data-shell-look="obsidian"]:not(#\#) :is(.send:not(:disabled), .ui-btn--primary:not(:disabled)) {
   background: linear-gradient(135deg, var(--accent-hi), var(--accent)) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .ui-btn--primary:not(:disabled) {
   box-shadow: 0 0 0 1px color-mix(in srgb, white 18%, transparent) inset, 0 8px 22px -6px var(--accent) !important;
 }
 
 /* Phone. */
 
-body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, color-mix(in srgb, var(--bg) 70%, black) var(--look-overlay-a), transparent) !important;
-  backdrop-filter: var(--look-glass-blur) !important;
-}
-
-html.light body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent) !important;
-}
-
 body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions, .mobile-nav-search) {
   border: 1px solid transparent !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
+}
+
+/* A project's mark is a polished accent disc. */
+body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+  border-radius: var(--look-pill-radius);
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent));
+  color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 28%, transparent), 0 4px 12px -6px var(--accent);
 }
 
 /*
@@ -2059,6 +2374,15 @@ body[data-shell-look="editorial"]:not(#\#) {
   /* A floating column takes the paper's corner; regions are parted by rules. */
   --look-column-radius: var(--look-float-radius);
   --look-rule: var(--look-line);
+  /* Phone (1h): the page; the navigator is a contents page, the launchers an
+     index in warm ink, a widget a ruled section. */
+  --look-phone-layer: color-mix(in srgb, var(--look-paper-solid) var(--look-overlay-a), transparent);
+  --look-tile: transparent;
+  --look-tile-edge: none;
+  --look-tile-radius: 0px;
+  --look-tile-ink: color-mix(in srgb, var(--amber) 70%, var(--text));
+  --look-widget-rule: var(--look-line);
+  --look-widget-pad: var(--space-2) 0;
 }
 
 html:not(.light) body[data-shell-look="editorial"]:not(#\#) {
@@ -2258,22 +2582,16 @@ body[data-shell-look="editorial"]:not(#\#) .composer-config .config-chip {
 }
 
 /* The send button keeps the control corner in every state, idle included. */
-body[data-shell-look="editorial"]:not(#\#) .send {
+body[data-shell-look="editorial"]:not(#\#) :is(.send, .stop) {
   border-radius: var(--look-control-radius) !important;
 }
 
 body[data-shell-look="editorial"]:not(#\#) .send:not(:disabled) {
   background: var(--text) !important;
   color: var(--look-paper-solid) !important;
-  box-shadow: none !important;
 }
 
 /* Phone. */
-
-body[data-shell-look="editorial"]:not(#\#) .mobile-navigator {
-  background: color-mix(in srgb, var(--look-paper-solid) var(--look-overlay-a), transparent) !important;
-  backdrop-filter: var(--look-float-blur) !important;
-}
 
 body[data-shell-look="editorial"]:not(#\#) .mobile-nav-search {
   border-bottom: 1px solid var(--look-line) !important;
@@ -2287,10 +2605,95 @@ body[data-shell-look="editorial"]:not(#\#) .mobile-nav-project-name {
   font-weight: 600;
 }
 
-body[data-shell-look="editorial"]:not(#\#) .mobile-nav-session-title {
-  color: var(--look-ink-dim);
+/* At rest only: pressed and open islands keep the shared accent glyph. */
+body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
+  color: var(--text-dim);
 }
 
-body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn {
-  color: var(--text-dim);
+/* A contents page: chapters (projects) under a rule with a bare mark, entries
+   in the serif, the open one in italic, dates as small-capital running heads. */
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-toolbar {
+  border-block-end: 1px solid var(--look-line) !important;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-project + .mobile-nav-project {
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--look-line) !important;
+  border-radius: 0;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+  background: transparent;
+  color: var(--look-tile-ink);
+  box-shadow: none;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-session-title {
+  font-family: var(--look-serif);
+  font-size: calc(var(--nav-session-size) + 1px);
+  letter-spacing: 0;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-session-row.is-active .mobile-nav-session-title {
+  font-style: italic;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-date-divider:not(.is-pinned) {
+  justify-content: flex-start;
+  padding-inline: var(--nav-title-start) 0;
+  font-family: var(--look-serif);
+  font-size: var(--nav-session-size);
+  font-variant: small-caps;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: lowercase;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-date-divider:not(.is-pinned)::before,
+body[data-shell-look="editorial"]:not(#\#) .mobile-nav-date-divider:not(.is-pinned)::after {
+  content: none;
+}
+
+/* The launchers are an index in two columns: a small warm glyph and the
+   entry in the serif, a rule under each line. */
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look="editorial"]:not(#\#) .workspace-panel-sheet .workspace-panel-items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 var(--space-4);
+  }
+
+  body[data-shell-look="editorial"]:not(#\#) .workspace-panel-sheet .workspace-panel-item--launcher,
+  body[data-shell-look="editorial"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher {
+    min-height: var(--tap);
+  }
+
+  body[data-shell-look="editorial"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    padding: 0 var(--space-1);
+    border-block-end: 1px solid var(--look-line) !important;
+    font-family: var(--look-serif);
+    font-size: var(--font-body);
+    text-align: start;
+  }
+
+  body[data-shell-look="editorial"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher > svg {
+    width: var(--icon-md);
+    height: var(--icon-md);
+    stroke-width: 1.6;
+  }
+
+  body[data-shell-look="editorial"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher > span {
+    -webkit-line-clamp: 1;
+  }
+
+  body[data-shell-look="editorial"]:not(#\#) .workspace-panel-sheet .workspace-panel-widget-head strong {
+    font-family: var(--look-serif);
+    font-size: calc(var(--subheader-font-size) + 3px);
+    font-weight: 600;
+    letter-spacing: 0;
+  }
 }

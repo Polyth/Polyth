@@ -74,7 +74,9 @@ export function parseSynthesis(
   raw: string,
   models: string[],
 ): { answer: string; weights: FusionWeightDto[]; disagreements: string[] } {
-  const match = raw.match(/\{[\s\S]*\}/);
+  const open = raw.indexOf("{");
+  const close = raw.lastIndexOf("}");
+  const match = open !== -1 && close > open ? [raw.slice(open, close + 1)] as [string] : null;
   if (match) {
     try {
       const obj = JSON.parse(match[0]) as { answer?: unknown; weights?: unknown; disagreements?: unknown };

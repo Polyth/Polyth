@@ -574,7 +574,7 @@ test("projection working state shows live activity before turn-start hydration",
     await act(async () => { await delay(40); });
     const activity = view.container.querySelector(".agent-status-dock");
     assert.ok(activity, "projection working status keeps agent activity visible before turn/started arrives");
-    assert.match(activity.textContent ?? "", /Luna/);
+    assert.equal(activity.querySelector(".agent-status-dock-icon")?.getAttribute("title"), "Luna");
     assert.equal(view.container.querySelector(".pending-changes-bar"), null);
   } finally {
     await view.unmount();
@@ -694,7 +694,9 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     });
     const agentStatus = view.container.querySelector(".agent-status-dock");
     assert.ok(agentStatus, "active work replaces the compact change summary");
-    assert.match(agentStatus.textContent ?? "", /Luna/);
+    // The mark names the model; the line keeps its room for the action.
+    assert.equal(agentStatus.querySelector(".agent-status-dock-icon")?.getAttribute("title"), "Luna");
+    assert.doesNotMatch(agentStatus.textContent ?? "", /Luna/);
     assert.match(agentStatus.textContent ?? "", /Run focused checks and review the diff/);
     assert.match(agentStatus.textContent ?? "", /4 files.*\+10.*−4/s);
     assert.doesNotMatch(agentStatus.textContent ?? "", /feature\/glass-ui/);
@@ -713,7 +715,9 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     });
     const cursorAutoStatus = view.container.querySelector(".agent-status-dock");
     assert.ok(cursorAutoStatus, "Cursor Auto work keeps the active status dock");
-    assert.match(cursorAutoStatus.textContent ?? "", /Auto/);
+    const cursorAutoName = cursorAutoStatus.querySelector(".agent-status-dock-icon")?.getAttribute("title") ?? "";
+    assert.match(cursorAutoName, /Auto/);
+    assert.doesNotMatch(cursorAutoName, /default|Polyth/i);
     assert.doesNotMatch(cursorAutoStatus.textContent ?? "", /default|Polyth/i);
 
     await act(async () => {
@@ -736,7 +740,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.equal(view.container.textContent?.includes(leftover), false);
     const more = view.container.querySelector<HTMLButtonElement>(".pending-changes-more");
     assert.ok(more, "show-more control is available");
-    assert.match(more.textContent ?? "", /Show 1 more file/);
+    assert.match(more.textContent ?? "", /1 more/);
     assert.equal(more.getAttribute("aria-expanded"), "false");
     await act(async () => { more.click(); });
     assert.deepEqual(
@@ -751,7 +755,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
       ["src/a.ts", "src/b.ts", "src/c.ts"],
     );
     assert.equal(more.getAttribute("aria-expanded"), "false");
-    assert.match(more.textContent ?? "", /Show 1 more file/);
+    assert.match(more.textContent ?? "", /1 more/);
 
     const firstFile = view.container.querySelector<HTMLButtonElement>(".pending-changes-file");
     assert.ok(firstFile);

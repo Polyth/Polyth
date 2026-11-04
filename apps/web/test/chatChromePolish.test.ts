@@ -59,7 +59,7 @@ test("chat chrome does not expose a header overflow pin menu", () => {
 });
 
 test("prompt bookmark opens bounded conversation history using the desktop prompt styles", () => {
-  const settings = read("../src/components/settings/pages.tsx");
+  const settings = read("../src/components/settings/ChatSettingsPage.tsx");
   const prefs = read("../src/uiPrefs.ts");
   const timeline = read("../src/components/Timeline.tsx");
   const bookmark = read("../src/components/PromptBookmark.tsx");
@@ -146,11 +146,12 @@ test("chat, context and agent activity share human model presentation", () => {
   // The status is a line of text: no glass, plate or shadow in any look.
   assert.doesNotMatch(statusDock, /ui-glass-dock/);
   assert.match(statusCss, /\.agent-status-dock \{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none/s);
-  assert.match(statusCss, /\.agent-status-dock-primary strong \{[^}]*max-width:\s*45%/s);
+  // The model is the mark's tooltip, never written out on the line.
+  assert.doesNotMatch(statusDock, /<strong/);
+  assert.doesNotMatch(statusCss, /\.agent-status-dock-primary strong/);
   assert.match(statusCss, /\.agent-status-dock-primary \{[^}]*line-height:\s*1\.2/s);
   assert.match(statusCss, /\.agent-status-dock-secondary \{[^}]*line-height:\s*1\.2/s);
-  assert.match(statusCss, /body\[data-composer-status-style="tab"\] \.agent-status-dock \{/);
-  assert.match(statusCss, /body\[data-composer-status-style="capsule"\] \.agent-status-dock \{[^}]*width:\s*fit-content/s);
+  assert.doesNotMatch(statusCss, /data-composer-status-style/, "the status line has one look");
   assert.match(statusDock, /title=\{model\}/);
 });
 

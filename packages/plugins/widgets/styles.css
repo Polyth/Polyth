@@ -213,7 +213,7 @@ html[dir="rtl"] .plugin-shot-dialog .ui-dialog-foot .ui-icon {
 .pkg-plugins .plugin-tab-dot {
   width: 6px;
   height: 6px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--amber);
 }
 
@@ -468,7 +468,7 @@ html[dir="rtl"] .plugin-shot-dialog .ui-dialog-foot .ui-icon {
   place-items: center;
   width: var(--control-h-sm);
   height: var(--control-h-sm);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--amber-wash);
   color: var(--amber-on-wash);
 }
@@ -707,7 +707,7 @@ body .plugin-install-dialog .plugin-install.is-dragging .plugin-drop {
   width: var(--control-h-lg);
   height: var(--control-h-lg);
   place-items: center;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--accent-wash);
   color: var(--accent);
 }

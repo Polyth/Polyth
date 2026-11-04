@@ -1,8 +1,10 @@
 import { createHash, createPrivateKey, sign } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { connect, constants, type ClientHttp2Session } from "node:http2";
+import { join } from "node:path";
 
 import {
-  type DeliveryInput, type Destination, type ProviderAdapter, type ProviderClass, type ProviderReply, ProviderTransportError,
+  type ActivityInput, type DeliveryInput, type Destination, type ProviderAdapter, type ProviderClass, type ProviderReply, ProviderTransportError,
 } from "./types.ts";
 
 const APNS_ORIGIN = {
@@ -51,6 +53,26 @@ const ttlSeconds = (kind: DeliveryInput["kind"]): number => kind === "mention" |
 /** Provider payload ceiling (APNs and FCM both allow 4 KiB); beyond it the sealed text is left out. */
 const MAX_PROVIDER_PAYLOAD_BYTES = 4096;
 const collapseId = (tag: string): string => createHash("sha256").update(tag).digest("base64url").slice(0, 32);
+/** ActivityKit decodes a `Date` in `content-state` with JSONDecoder's default
+ *  strategy: seconds since 2001-01-01, not since 1970. */
+const APPLE_REFERENCE_EPOCH = 978_307_200;
+
+/** `aps` for a Live Activity: the device keeps the chat's words and draws them
+ *  beside this state (`PolythLiveActivityWidget.swift`). */
+export const apnsActivityBody = (input: ActivityInput, nowSeconds: number): string => JSON.stringify({
+  aps: {
+    timestamp: nowSeconds,
+    event: input.event,
+    "content-state": {
+      state: input.state,
+      waiting: input.waiting,
+      working: input.working,
+      ...(input.startedAt !== undefined ? { startedAt: input.startedAt - APPLE_REFERENCE_EPOCH } : {}),
+    },
+    "stale-date": input.staleAt,
+    ...(input.dismissAt !== undefined ? { "dismissal-date": input.dismissAt } : {}),
+  },
+});
 
 const apnsBody = (input: DeliveryInput, notice: { title: string; body: string }, sealed: string | undefined): string => {
   const build = (withSealed: boolean) => JSON.stringify({
@@ -200,6 +222,32 @@ export class ApnsProvider implements ProviderAdapter {
       body: apnsBody(input, notice, input.sealed),
       signal,
     };
+    return this.send(request);
+  }
+
+  async deliverActivity(destination: Destination, input: ActivityInput, signal?: AbortSignal): Promise<ProviderClass> {
+    if (destination.platform !== "ios" || !destination.environment || destination.channel !== "liveactivity") return "config";
+    let authorization: string;
+    try { authorization = `bearer ${this.jwt()}`; } catch { return "config"; }
+    const now = this.now();
+    return this.send({
+      origin: APNS_ORIGIN[destination.environment],
+      path: `/3/device/${encodeURIComponent(destination.providerToken)}`,
+      headers: {
+        authorization,
+        "apns-topic": `${this.options.topic}.push-type.liveactivity`,
+        "apns-push-type": "liveactivity",
+        "apns-priority": input.urgent ? "10" : "5",
+        // An end clears a claim of live work, so it may arrive late; an update is replaced by the next one.
+        "apns-expiration": String(now + (input.event === "end" ? 3600 : 300)),
+        "content-type": "application/json",
+      },
+      body: apnsActivityBody(input, now),
+      signal,
+    });
+  }
+
+  private async send(request: ApnsRequest): Promise<ProviderClass> {
     try {
       return classifyApns(await this.transport.send(request));
     } catch (error) {
@@ -225,6 +273,54 @@ export class ApnsProvider implements ProviderAdapter {
     this.cached = { issuedAt: now, token };
     return token;
   }
+}
+
+/** A `.p8` as PEM whether it was stored with its line breaks or flattened onto
+ *  one line by a form field (base64 body between the markers, or the body alone). */
+export function apnsKeyPem(text: string): string | undefined {
+  const body = text.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, "").replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body)) return undefined;
+  const pem = `-----BEGIN PRIVATE KEY-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
+  try {
+    const key = createPrivateKey(pem);
+    return key.asymmetricKeyType === "ec" ? pem : undefined;
+  } catch { return undefined; }
+}
+
+/** An APNs sender from `<dir>/apns.json` (`{teamId, keyId, topic?}`, topic
+ *  defaulting to the app's bundle id) and `<dir>/apns.p8`, re-read when either
+ *  file changes so placing the key needs no restart. Absent or unusable files
+ *  mean no sender. */
+export function apnsFromDir<T extends { close?(): void } = ApnsProvider>(
+  dir: string,
+  create: (options: ApnsProviderOptions) => T = (options) => new ApnsProvider(options) as unknown as T,
+): () => T | undefined {
+  const configFile = join(dir, "apns.json");
+  const keyFile = join(dir, "apns.p8");
+  let stamp = "";
+  let sender: T | undefined;
+  return () => {
+    let next: string;
+    try { next = `${statSync(configFile).mtimeMs}:${statSync(keyFile).mtimeMs}`; } catch { next = ""; }
+    if (next === stamp) return sender;
+    stamp = next;
+    sender?.close?.();
+    sender = undefined;
+    if (!next) return undefined;
+    try {
+      const config = JSON.parse(readFileSync(configFile, "utf8")) as { teamId?: unknown; keyId?: unknown; topic?: unknown };
+      const p8 = apnsKeyPem(readFileSync(keyFile, "utf8"));
+      const topic = config.topic === undefined ? "com.polyth.mobile" : config.topic;
+      if (!p8 || typeof config.teamId !== "string" || !/^[A-Z0-9]{10}$/.test(config.teamId)
+        || typeof config.keyId !== "string" || !/^[A-Z0-9]{10}$/.test(config.keyId)
+        || typeof topic !== "string" || !/^[A-Za-z0-9.-]{1,200}$/.test(topic)) throw new Error("invalid");
+      sender = create({ teamId: config.teamId, keyId: config.keyId, p8, topic });
+    } catch {
+      // Never log the key or its parse error text.
+      console.error(`[polyth] push: the APNs key in ${dir} is incomplete or unusable`);
+    }
+    return sender;
+  };
 }
 
 export const classifyApns = (reply: ProviderReply): ProviderClass => {
@@ -353,6 +449,16 @@ export const classifyFcm = (reply: ProviderReply, validPayload: boolean): Provid
   if (reply.status >= 500 || reply.status === 0 || reply.reason === "UNAVAILABLE") return "transient";
   return "config";
 };
+
+/** An FCM sender from a Firebase service-account JSON file (its `project_id`
+ *  names the project), or undefined when the file is absent. */
+export function fcmFromFile(file: string): FcmProvider | undefined {
+  let text: string;
+  try { text = readFileSync(file, "utf8"); } catch { return undefined; }
+  const project = (JSON.parse(text) as { project_id?: unknown }).project_id;
+  if (typeof project !== "string") throw new Error("invalid service account");
+  return new FcmProvider({ project, accessTokenProvider: new ServiceAccountAccessTokenProvider({ serviceAccountJson: text }) });
+}
 
 export interface ServiceAccountTokenOptions { serviceAccountJson: string; fetchFn?: typeof fetch; now?: () => number; timeoutMs?: number; }
 /** Minimal OAuth2 service-account exchange; no ambient credential files are read. */

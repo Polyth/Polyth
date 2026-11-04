@@ -46,7 +46,11 @@ export function pcmToWav(pcm: Uint8Array, format: DictationFormat): Uint8Array {
   return out;
 }
 
-const joinUrl = (base: string, path: string): string => `${base.replace(/\/+$/, "")}${path}`;
+const joinUrl = (base: string, path: string): string => {
+  let end = base.length;
+  while (end > 0 && base[end - 1] === "/") end--;
+  return `${base.slice(0, end)}${path}`;
+};
 
 const promptFromContext = (context?: DictationContext): string => {
   if (!context) return "";

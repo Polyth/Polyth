@@ -12,6 +12,7 @@ import type {
   RuntimeEndpoint, RuntimeEvent, RuntimeLifecycleNotification, RuntimeSessionBinding, RuntimeSnapshot,
 } from "@polyth/contracts";
 import { createSessionService, type Broadcaster, type MemoryRuntimeService } from "../src/sessions.ts";
+import { sessionSummary } from "../src/sessionSummary.ts";
 import type { PermissionService } from "@polyth/permissions";
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
@@ -296,6 +297,38 @@ test("session purpose persists, survives fork, and supplies hidden context on ev
   assert.equal(fake.startedTexts.at(-1), "ordinary chat");
   fake.emit(ordinary.id, { type: "turn/stopped", reason: "completed" });
   await flush();
+  await store.close();
+});
+
+test("an automation origin persists on the session, reaches its summary and stays with it alone", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({
+    projectId: "p1",
+    title: "Load is high on db-1",
+    origin: { source: "monitoring", wake: "alert", label: "  Monitoring\n" },
+  });
+  const origin = { source: "monitoring", wake: "alert", label: "Monitoring" };
+  assert.deepEqual((await store.projection(id))?.origin, origin, "the label is trimmed to one line");
+  assert.deepEqual((await store.events(id)).find((event) => event.type === "session/created")?.data.origin, origin);
+  assert.deepEqual(sessionSummary((await store.projection(id))!).origin, origin);
+  const page = await sessions.summaries!({ projectId: "p1" });
+  assert.deepEqual(page.sessions.find((row) => row.id === id)?.origin, origin, "the summary page carries it as an object");
+  await sessions.send(id, { text: "diagnose it" });
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  const fork = await sessions.fork(id);
+  assert.equal((await store.projection(fork.id))?.origin, undefined, "a person's fork was not started by the automation");
+  const child = await sessions.create({ projectId: "p1", parentId: id });
+  assert.equal((await store.projection(child.id))?.origin, undefined);
+  for (const bad of [
+    { source: "Monitoring", wake: "alert", label: "x" },
+    { source: "monitoring", wake: "sometimes", label: "x" },
+    { source: "monitoring", wake: "alert", label: " " },
+    "monitoring",
+  ]) {
+    await assert.rejects(sessions.create({ projectId: "p1", origin: bad as never }), { code: "invalid-input" });
+  }
   await store.close();
 });
 

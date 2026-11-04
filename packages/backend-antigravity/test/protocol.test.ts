@@ -23,6 +23,7 @@ test("model catalog is dynamic, deduplicated and does not invent auth or prices"
   assert.equal(models[0]?.variants, undefined);
   assert.equal(models[0]?.connected, undefined);
   assert.equal(models[0]?.cost, undefined);
+  assert.equal(models[0]?.context, 1_048_576);
   assert.deepEqual(parseAgyModels("Sign in to continue"), []);
 });
 test("models with effort suffixes are deduplicated and grouped with thinking effort variants", () => {

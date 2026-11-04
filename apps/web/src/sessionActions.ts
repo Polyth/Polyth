@@ -21,10 +21,18 @@ export function needsDestructiveConfirm(session: SessionActionTarget): boolean {
     || (session.attention?.permissions ?? 0) > 0;
 }
 
+export interface ArchiveSessionOptions {
+  /** A deliberate action (Shift-hover quick button): skip the soft
+   * `confirmSessionArchive` preference prompt, which exists for accidental
+   * menu clicks. Live agent activity still confirms in every mode. */
+  deliberate?: boolean;
+}
+
 /** Archive through the canonical session action after applying the same user
  * confirmation policy everywhere the verb is exposed. */
 export async function archiveSessionWithPolicy(
   session: SessionActionTarget,
+  options: ArchiveSessionOptions = {},
 ): Promise<boolean> {
   const label = session.title || tr("sidebar.sessionlist.session");
   if (
@@ -38,7 +46,8 @@ export async function archiveSessionWithPolicy(
     )
   ) return false;
   if (
-    !needsDestructiveConfirm(session)
+    !options.deliberate
+    && !needsDestructiveConfirm(session)
     && getUiSettings().confirmSessionArchive
     && !await confirmAlert(
       tr("sidebar.sessionlist.archiveValue", { label }),

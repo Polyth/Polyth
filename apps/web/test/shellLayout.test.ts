@@ -20,12 +20,15 @@ test("a fresh window is bare with floating columns; saved profiles keep theirs; 
   assert.equal(fresh.floatingColumns, true);
   assert.equal(fresh.shellToolsDock, "end");
   assert.equal(fresh.shellActionsDock, "start");
-  assert.equal(fresh.shellTitle, "chat");
+  // No top bar and no title line over the chat either: the active chat is
+  // named by its navigator row.
+  assert.equal(fresh.shellTitle, "hidden");
   // An existing profile without the fields keeps the window it was built
   // with: the classic shell, and the actions in the strip if it goes bare.
   const saved = parseUiSettings("{}");
   assert.equal(saved.shellLayout, "classic", "nobody's window changes until they pick a layout");
   assert.equal(saved.shellActionsDock, "end");
+  assert.equal(saved.shellTitle, "chat", "a saved profile keeps the title line it had");
   for (const layout of SHELL_LAYOUTS) assert.equal(parseUiSettings(JSON.stringify({ shellLayout: layout })).shellLayout, layout);
   const bogus = parseUiSettings(JSON.stringify({
     shellLayout: "sideways", shellBarStyle: 3, floatingColumns: "yes", shellToolsDock: "top", shellActionsDock: null, shellTitle: "both",

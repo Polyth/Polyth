@@ -2,6 +2,13 @@
 // and the widgets. No Node APIs here: widgets import this file directly.
 import type { HarnessSelection, ModelRef } from "@polyth/contracts";
 
+/** Event a run appends to its session before the prompt; settlement reads
+ *  only what follows it, and the chat shows it as the run's timeline fact. */
+export const PLANNER_RUN_STARTED_EVENT = "planner/run-started";
+
+/** The agent tool an agent schedules into its own session with. */
+export const PLANNER_TOOL_NAME = "polyth_planner";
+
 export type PlannerKind = "at" | "every" | "cron";
 
 export type PlannerCadence =

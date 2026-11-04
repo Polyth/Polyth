@@ -55,6 +55,7 @@ import {
   SESSION_PURPOSE_CONVERSATION,
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
+  normalizeSessionOrigin,
 } from "@polyth/contracts";
 import { sessionMentionCandidates, sessionAudience } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -4329,6 +4330,9 @@ export function createSessionService(deps: {
   // so a crash or a lost event cannot leave a session wedged behind it.
   const compactions = new Map<string, ReturnType<typeof setTimeout> | undefined>();
   const NATIVE_COMPACTION_MAX_MS = 10 * 60_000;
+  /** Sessions whose background native compaction, when it fails, is replaced
+   *  by a Polyth compaction (see `compactLocked`'s `fallback`). */
+  const nativeCompactionFallbacks = new Set<string>();
   const beginCompaction = (sessionId: string, maxMs?: number): void => {
     clearTimeout(compactions.get(sessionId));
     const timer = maxMs === undefined ? undefined : setTimeout(() => {
@@ -4341,6 +4345,7 @@ export function createSessionService(deps: {
     compactions.set(sessionId, timer);
   };
   const endCompaction = (sessionId: string): void => {
+    nativeCompactionFallbacks.delete(sessionId);
     if (!compactions.has(sessionId)) return;
     clearTimeout(compactions.get(sessionId));
     compactions.delete(sessionId);
@@ -4365,7 +4370,7 @@ export function createSessionService(deps: {
    *  be finishing in the background (see `compactionSettled`). */
   const compactLocked = async (
     sessionId: string,
-    options: { forResume?: boolean; model?: ModelRef; background?: boolean } = {},
+    options: { forResume?: boolean; model?: ModelRef; background?: boolean; fallback?: boolean } = {},
   ): Promise<"native" | "polyth" | "fresh-epoch"> => {
     const { proj } = await assertMutable(sessionId);
     // A replaced runtime has no native context left to compact. Recovering the
@@ -4419,10 +4424,13 @@ export function createSessionService(deps: {
       // `session/compacted` or a failure reports its end. Registered before
       // the log is read, so an end landing in between still releases it.
       beginCompaction(sessionId, NATIVE_COMPACTION_MAX_MS);
+      if (options.fallback && deps.compactionSummary) nativeCompactionFallbacks.add(sessionId);
       const requestSeq = prepared.operation.ownerEventSeq ?? 0;
-      const ended = (await store.events(sessionId)).some((event) => event.seq > requestSeq
+      const ended = (await store.events(sessionId)).findLast((event) => event.seq > requestSeq
         && (event.type === "session/compacted" || event.type === "session/compaction-failed"));
-      if (ended) endCompaction(sessionId);
+      if (ended?.type === "session/compaction-failed" && nativeCompactionFallbacks.delete(sessionId)) {
+        compactAfterNativeFailure(sessionId, String((ended.data as { error?: unknown }).error ?? ""));
+      } else if (ended) endCompaction(sessionId);
       else await publishCompactionState(sessionId, { active: true });
     }
     if (outcome.kind === "rejected") {
@@ -4438,8 +4446,44 @@ export function createSessionService(deps: {
       scheduleReconciliation(sessionId, proj, runtime, "mutation-outcome-unknown");
       throw outcomeError(outcome);
     }
-    if (outcome.kind === "rejected") throw outcomeError(outcome);
+    if (outcome.kind === "rejected") {
+      // The harness refused (e.g. Claude Code's "Not enough messages to
+      // compact" on a short native leg): Polyth summarizes canonical history
+      // instead, so a requested compaction never dead-ends on the harness.
+      if (options.fallback && deps.compactionSummary && outcome.code !== "conflict") {
+        await compactWithFreshLegLocked(sessionId, proj, runtime, options.model, {
+          background: options.background === true,
+        });
+        return "polyth";
+      }
+      throw outcomeError(outcome);
+    }
     return "native";
+  };
+
+  const compactAfterNativeFailure = (sessionId: string, nativeError: string): void => {
+    void withSessionLock(sessionId, async () => {
+      const { proj } = await assertMutable(sessionId);
+      if (proj.status !== "idle" || turnActive(sessionId)) {
+        throw Object.assign(new Error(`cannot compact while the session is ${proj.status}`), { code: "conflict" });
+      }
+      const runtime = await ensureWired(sessionId, proj);
+      await compactWithFreshLegLocked(sessionId, proj, runtime);
+    }).catch(async (error: unknown) => {
+      // Refused before it began (nothing to summarize, no fresh-leg support):
+      // the native failure stands. A failure past that point recorded itself.
+      if (compactions.has(sessionId)) {
+        await appendAndBroadcast(sessionId, "session/compaction-failed", {
+          strategy: "fresh-runtime-leg",
+          error: nativeError,
+        }, { ignorable: true }).catch(() => undefined);
+      }
+      console.error(`[polyth] compaction fallback failed for ${sessionId}`, error);
+    }).finally(() => {
+      if (!compactions.has(sessionId)) return;
+      void publishCompactionState(sessionId, { active: false }).catch(() => undefined);
+      endCompaction(sessionId);
+    });
   };
 
   /** Polyth-owned compaction for a runtime without a native one, shaped like
@@ -4799,8 +4843,10 @@ export function createSessionService(deps: {
     beginAutomaticTitleResolution(sessionId, sessionRuntime.get(sessionId));
     const current = await store.projection(sessionId);
     if (current?.harnessTransition && !deps.isShuttingDown?.()) {
+      // A switch that cannot prove release is withdrawn; the dispatch below
+      // then runs the queue on the harness that kept the chat.
       void withSessionLock(sessionId, () => finishHarnessSwitchUnderLock(sessionId))
-        .then(() => dispatchQueue(sessionId)).catch((error) => console.error("[polyth] harness switch remains pending", error));
+        .then(() => dispatchQueue(sessionId)).catch((error) => console.error(`[polyth] harness switch did not finish for ${sessionId}`, error));
     }
     // A keep-alive turn only refreshed the prompt cache: nobody is told it
     // finished and no completion consumer (goals, recap, memory, isolation,
@@ -5466,6 +5512,7 @@ export function createSessionService(deps: {
           { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         if (sideEffects) {
+          nativeCompactionFallbacks.delete(sessionId);
           await publishCompactionState(sessionId, { active: false, lastAt: Date.now() });
           endCompaction(sessionId);
         }
@@ -5475,10 +5522,20 @@ export function createSessionService(deps: {
         await persist(
           sessionId,
           "session/compaction-failed",
-          { strategy: "runtime", error: ev.error ?? "the runtime could not compact the conversation" },
+          {
+            strategy: "runtime",
+            error: ev.error ?? "the runtime could not compact the conversation",
+            ...(sideEffects && nativeCompactionFallbacks.has(sessionId) && compactions.has(sessionId) ? { fallback: "polyth" } : {}),
+          },
           { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         if (sideEffects) {
+          // A requested compaction the harness could not finish continues as
+          // a Polyth one; the queue stays held until that ends.
+          if (nativeCompactionFallbacks.delete(sessionId) && compactions.has(sessionId)) {
+            compactAfterNativeFailure(sessionId, ev.error ?? "the runtime could not compact the conversation");
+            break;
+          }
           await publishCompactionState(sessionId, { active: false });
           endCompaction(sessionId);
         }
@@ -7402,7 +7459,17 @@ export function createSessionService(deps: {
       await withSessionLock(sessionId, async () => {
         if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
         let proj = await store.projection(sessionId);
-        if (proj?.harnessTransition) proj = await finishHarnessSwitchUnderLock(sessionId);
+        if (proj?.harnessTransition) {
+          try {
+            proj = await finishHarnessSwitchUnderLock(sessionId);
+          } catch (error) {
+            // A withdrawn switch hands the queue back to the harness that kept
+            // the chat; only a transition that is still pending stops here.
+            proj = await store.projection(sessionId);
+            if (proj?.harnessTransition) throw error;
+            console.warn(`[polyth] harness switch withdrawn for ${sessionId}; queued work stays on the current harness`, error);
+          }
+        }
         if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
         if (lastTurnId.has(sessionId)) await releaseRecordedStoppedTurn(sessionId);
         if (turnActive(sessionId)) return;
@@ -7436,6 +7503,20 @@ export function createSessionService(deps: {
           // A non-fork rewind retires the old facade and wires a fresh runtime
           // epoch. Do not let the queued turn use the pre-replacement object.
           rt = await ensureWired(sessionId, proj);
+        }
+        // Queued work carries no per-send model: the eventual turn uses the
+        // session's persisted selection. A launch-locked runtime must therefore
+        // be re-launched with that selection before the head is reserved.
+        const launchAligned = await alignLaunchSelectionUnderLock(
+          sessionId,
+          proj,
+          rt ?? await ensureWired(sessionId, proj),
+          proj.model,
+          proj.agent,
+        );
+        if (launchAligned) {
+          proj = launchAligned.projection;
+          rt = launchAligned.runtime;
         }
         const reserved = await broadcastTail(
           sessionId,
@@ -8260,6 +8341,20 @@ export function createSessionService(deps: {
             input.memory,
             input.author,
         );
+      }
+      // A launch-locked runtime (e.g. Antigravity) freezes model/effort/agent
+      // at native creation. Apply the next turn's selection by replacing the
+      // idle leg first, instead of admitting a turn the runtime must refuse.
+      const launchAligned = await alignLaunchSelectionUnderLock(
+        sessionId,
+        current,
+        rt,
+        input.model ?? current.model,
+        input.agent ?? current.agent,
+      );
+      if (launchAligned) {
+        current = launchAligned.projection;
+        rt = launchAligned.runtime;
       }
       return admitTurnCore(sessionId, current, rt, input, reserved, clientRequestFingerprint);
     });
@@ -9197,8 +9292,43 @@ export function createSessionService(deps: {
   };
 
   /** Called under the existing session lock. Release is idempotent against an
-   * exact binding; target creation uses the existing durable mutation journal. */
-  const finishHarnessSwitchUnderLock = async (sessionId: string, retryFailed = false): Promise<SessionProjection> => {
+   * exact binding; target creation uses the existing durable mutation journal.
+   * A requested transition that fails before its old execution is proven
+   * released is withdrawn at once (`harness/switch-cancelled` with `reason`):
+   * the old harness keeps the chat, its binding and generation, and nothing is
+   * started or replayed. A shutdown keeps the intent durable instead, and a
+   * transition already past release keeps its own failed/retry path. */
+  const finishHarnessSwitchUnderLock = async (
+    sessionId: string,
+    retryFailed = false,
+    reason = "release-unproven",
+  ): Promise<SessionProjection> => {
+    const requested = (await store.projection(sessionId))?.harnessTransition;
+    try {
+      return await advanceHarnessSwitchUnderLock(sessionId, retryFailed);
+    } catch (error) {
+      if (requested?.phase === "requested" && !deps.isShuttingDown?.()) {
+        await withdrawUnprovenSwitch(sessionId, requested.id, reason, error)
+          .catch((withdrawError) => console.error(`[polyth] could not withdraw harness switch ${requested.id}`, withdrawError));
+      }
+      throw error;
+    }
+  };
+
+  const withdrawUnprovenSwitch = async (sessionId: string, transitionId: string, reason: string, error: unknown) => {
+    const current = (await store.projection(sessionId))?.harnessTransition;
+    if (current?.id !== transitionId || current.phase !== "requested") return;
+    const code = (error as { code?: unknown }).code;
+    await commitHarnessIntent(sessionId, { harnessTransition: undefined }, "harness/switch-cancelled", {
+      transitionId,
+      targetHarnessId: current.targetHarnessId,
+      reason,
+      ...(typeof code === "string" ? { code } : {}),
+      message: error instanceof Error ? error.message : String(error),
+    });
+  };
+
+  const advanceHarnessSwitchUnderLock = async (sessionId: string, retryFailed: boolean): Promise<SessionProjection> => {
     let projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
     let transition = projection.harnessTransition;
@@ -9308,7 +9438,13 @@ export function createSessionService(deps: {
         ), transition.id);
         if (!released) return unreleasable();
       } else {
-        if (!old?.releaseExecution) throw Object.assign(new Error("This harness cannot yet prove execution has stopped"), { code: "unsupported" });
+        if (!old?.releaseExecution) {
+          const sourceHarnessId = projection.resolvedHarnessId ?? old?.harnessId;
+          const name = (sourceHarnessId && deps.harnesses?.displayName?.(sourceHarnessId)) || sourceHarnessId;
+          throw Object.assign(new Error(name
+            ? `${name} cannot prove its run has stopped here, so the chat stays on ${name}`
+            : "This harness cannot prove its run has stopped here, so the chat stays on it"), { code: "unsupported" });
+        }
         released = await boundedRuntimeAwait(old.releaseExecution(releaseBinding, transition.id), transition.id);
       }
       if (released.kind !== "confirmed") throw outcomeError(released);
@@ -9519,6 +9655,9 @@ export function createSessionService(deps: {
   const restartRuntimeUnderLock = async (
     sessionId: string,
     source: "user" | "send-recovery",
+    /** What the replacement leg must launch with. A launch-locked runtime
+     *  ignores a per-turn change, so the new leg is created with it instead. */
+    launch?: RuntimeLaunchSelection,
   ): Promise<SessionProjection> => {
     const projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -9540,6 +9679,7 @@ export function createSessionService(deps: {
     const selection = projection.harness ?? { mode: "auto" as const };
     const transition: HarnessTransition = {
       id: randomUUID(), selection, targetHarnessId: harnessId, timing: "stop-now", phase: "requested",
+      ...(launch?.model || launch?.agent ? { launch } : {}),
     };
     await commitHarnessIntent(sessionId, { harnessTransition: transition }, "harness/switch-requested", {
       transitionId: transition.id,
@@ -9550,8 +9690,9 @@ export function createSessionService(deps: {
       selection: { ...selection },
     });
     try {
-      return await finishHarnessSwitchUnderLock(sessionId);
+      return await finishHarnessSwitchUnderLock(sessionId, false, "runtime-restart-unproven");
     } catch (error) {
+      // The shared withdrawal keeps a shutdown's intent; a restart never does.
       const current = (await store.projection(sessionId))?.harnessTransition;
       if (current?.id === transition.id && current.phase === "requested") {
         await commitHarnessIntent(sessionId, { harnessTransition: undefined }, "harness/switch-cancelled", {
@@ -9562,6 +9703,46 @@ export function createSessionService(deps: {
       }
       throw error;
     }
+  };
+
+  const launchSelectionMatches = (
+    launch: RuntimeLaunchSelection,
+    model: ModelRef | undefined,
+    agent: string | undefined,
+  ): boolean => {
+    if (agent !== undefined && launch.agent !== agent) return false;
+    if (!model) return true;
+    if (!launch.model
+      || model.providerID !== launch.model.providerID
+      || model.modelID !== launch.model.modelID) return false;
+    // An unstated effort inherits the launched one (adapters compare the same
+    // way); only an explicit different effort needs a fresh native leg.
+    return model.variant === undefined || model.variant === launch.model.variant;
+  };
+
+  /** A launch-locked runtime freezes model/effort/agent when its native session
+   * is created. A changed selection is next-leg intent, not a refused turn:
+   * release the current leg and create its successor with that selection.
+   * Never stops running work; `undefined` means nothing has to change. */
+  const alignLaunchSelectionUnderLock = async (
+    sessionId: string,
+    projection: SessionProjection,
+    runtime: AgentRuntime,
+    model: ModelRef | undefined,
+    agent: string | undefined,
+  ): Promise<{ projection: SessionProjection; runtime: AgentRuntime } | undefined> => {
+    if (!runtime.launchSelection || !projection.runtimeBinding?.backendSessionId) return undefined;
+    if (projection.status === "archived" || projection.harnessTransition) return undefined;
+    if (turnActive(sessionId) || admitting.has(sessionId)) return undefined;
+    const capabilities = await cachedCapabilities(runtime).catch(() => undefined);
+    if (capabilities?.launchLocked !== true) return undefined;
+    const launch = runtime.launchSelection();
+    if (!launch || launchSelectionMatches(launch, model, agent)) return undefined;
+    const next = await restartRuntimeUnderLock(sessionId, "user", {
+      ...(model ? { model } : {}),
+      ...(agent !== undefined ? { agent } : {}),
+    });
+    return { projection: next, runtime: await ensureWired(sessionId, next) };
   };
 
   const commitHarnessIntent = async (sessionId: string, patch: Partial<SessionProjection>, type: string, data: JsonObject) => {
@@ -10841,6 +11022,10 @@ export function createSessionService(deps: {
       if (input.purpose !== undefined && (typeof input.purpose !== "string" || !SESSION_PURPOSE_ID.test(input.purpose))) {
         throw Object.assign(new Error("purpose must be a short lowercase id"), { code: "invalid-input" });
       }
+      const origin = input.origin === undefined ? undefined : normalizeSessionOrigin(input.origin);
+      if (origin === null) {
+        throw Object.assign(new Error("origin needs a package id, a known wake and a label"), { code: "invalid-input" });
+      }
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
       const projectProfileId = project.defaults?.agentProfileId ?? undefined;
@@ -11003,6 +11188,7 @@ export function createSessionService(deps: {
         // spawned, not for whoever writes to the parent later.
         ...(parent?.actor ? { actor: { ...parent.actor, via: "delegation" as const } } : {}),
         ...(input.purpose ? { purpose: input.purpose } : {}),
+        ...(origin ? { origin } : {}),
         ...(inheritedAutoAccept !== "off" ? autoAcceptFlags(inheritedAutoAccept) : {}),
         title: input.title || "New session",
         titleSource: input.title && !isPlaceholderTitle(input.title, sessionId) ? "manual" : "placeholder",
@@ -11027,6 +11213,7 @@ export function createSessionService(deps: {
             title: projection.title, projectId: project.id,
             harness: harness as unknown as JsonObject,
             ...(input.purpose ? { purpose: input.purpose } : {}),
+            ...(origin ? { origin: origin as unknown as JsonObject } : {}),
             ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
             workspace: sessionWorkspace as unknown as JsonObject,
             ...(input.isolation ? { isolation: input.isolation as unknown as JsonObject } : {}),
@@ -12300,7 +12487,7 @@ export function createSessionService(deps: {
       if (compactions.has(sessionId)) {
         throw Object.assign(new Error("the conversation is already being compacted"), { code: "conflict" });
       }
-      await withSessionLock(sessionId, () => compactLocked(sessionId, { background: true }));
+      await withSessionLock(sessionId, () => compactLocked(sessionId, { background: true, fallback: true }));
     },
 
     async cancelResume(sessionId) {
@@ -12509,8 +12696,9 @@ export function createSessionService(deps: {
 
         const now = Date.now();
         // A fork belongs to whoever forked it: the source's draft, pin and
-        // acting person are someone else's and never carry over.
-        const { draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, ...forkable } = proj;
+        // acting person are someone else's and never carry over, and no
+        // automation started it.
+        const { draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin, ...forkable } = proj;
         const projection: SessionProjection = {
           ...forkable, id: forkId, parentId: sessionId, title,
           status: "reconciling",

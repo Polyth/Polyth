@@ -94,7 +94,7 @@ test("failures are classified from the installers' own words", () => {
 test("sources name where an installer downloads from", () => {
     assert.deepEqual(installSources(vendorScriptInstallCommand({ posix: "https://antigravity.google/cli/install.sh" })!), ["antigravity.google"]);
     assert.deepEqual(installSources(npmCliInstallCommand("@openai/codex")), ["nodejs.org", "registry.npmjs.org"]);
-    assert.ok(installSources(npmCliInstallCommand("@openai/codex", "win32")).includes("registry.npmjs.org"));
+    assert.ok(installSources(npmCliInstallCommand("@openai/codex", "win32")).some((host) => host === "registry.npmjs.org"));
     assert.deepEqual(installSources("powershell -NoProfile -Command \"irm 'https://claude.ai/install.ps1' | iex\""), ["claude.ai"]);
 });
 

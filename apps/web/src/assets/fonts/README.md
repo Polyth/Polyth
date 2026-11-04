@@ -4,6 +4,11 @@ Every font file here is licensed under the SIL Open Font License 1.1; the
 license text and the copyright notice of each family are in [OFL.txt](OFL.txt),
 which the web build copies to `dist/assets/fonts/` together with the fonts.
 The fonts are declared in `apps/web/src/fonts.css` ([style guide](../../../../../docs/dev/styles.md)).
+The web build copies every font file here into `dist/assets/fonts/` twice: under its
+plain name (a page opened before a rebuild still references it) and under a
+content-addressed name such as `inter-normal-<HASH>.woff2`, which is what the
+built stylesheet uses. A redeploy that leaves a font's bytes unchanged therefore
+keeps the same URL, so a warm launch does not request it again.
 
 When adding a font, add its copyright notice (the `name` table copyright
 string of the file) to `OFL.txt` and a row here. A font under any other

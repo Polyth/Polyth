@@ -41,6 +41,30 @@ export function plannedHarnessEpoch(
   return session.runtimeControl !== "borrowed";
 }
 
+const ACTIVE_STATUSES: ReadonlySet<string> = new Set(["working", "waiting", "reconciling", "unknown", "epoch-pending"]);
+
+/** Rows this client shows as working, waiting or unread, most urgent and then
+ *  most recent first. A reconnect re-reads them (`refreshSessionIds`): a turn
+ *  that ended or a question answered while the link was down would otherwise
+ *  keep its old mark on the rail and in the phone's Live Activity. */
+export function sessionIdsToRefresh(sessions: readonly SessionProjection[], limit = 100): string[] {
+  const tier = (session: SessionProjection): number => {
+    if (session.status === "archived") return -1;
+    const background = (session.backgroundWork?.multirun ?? 0)
+      + (session.backgroundWork?.fusion ?? 0)
+      + (session.backgroundWork?.workflow ?? 0);
+    if (ACTIVE_STATUSES.has(session.status) || background > 0 || session.resume
+      || (session.attention?.questions ?? 0) > 0 || (session.attention?.permissions ?? 0) > 0) return 0;
+    return (session.attention?.unread ?? 0) > 0 ? 1 : -1;
+  };
+  return sessions
+    .map((session) => ({ id: session.id, tier: tier(session), at: session.updatedAt ?? 0 }))
+    .filter((row) => row.tier >= 0)
+    .sort((a, b) => a.tier - b.tier || b.at - a.at)
+    .slice(0, limit)
+    .map((row) => row.id);
+}
+
 /** One pure priority resolver for sidebar, hero, mobile navigation, and
  * palette rows. Attention that needs a person always outranks activity. */
 export function resolveSessionStatus(

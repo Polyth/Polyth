@@ -1,5 +1,7 @@
 import { activeBrowserAccountId } from "./accountStorage.ts";
+import { hydrateClientRecord, writeClientPreference } from "./clientPersistence.ts";
 import { openSession } from "./init.ts";
+import { clientAccountPersistenceScope } from "./reliabilityContext.ts";
 import {
   NativePushController,
   disableNativePush,
@@ -36,7 +38,9 @@ function controller() {
     },
     {
       status: () => request<{ enabled: boolean; subscribed: boolean; subscriptionId?: string }>("/api/native-push", json("GET")),
-      claim: (claimToken, contentKey) => request<{ subscriptionId: string }>("/api/native-push", json("POST", contentKey ? { claimToken, contentKey } : { claimToken })),
+      // The device's APNs or FCM token, over the Polyth Link connection this
+      // page uses; this server sends through Polyth's push service.
+      claim: (claim) => request<{ subscriptionId: string }>("/api/native-push", json("POST", { ...claim })),
       unregister: async () => { await request<{ ok: boolean }>("/api/native-push", json("DELETE")); },
     },
   );
@@ -74,7 +78,24 @@ export async function enableNativePushForCurrentAccount(): Promise<NativePushSta
   }
 }
 
+/** Per connection + account: push was on here once, or the user turned it off
+ * in Settings. From then on only Settings changes it. */
+const SETTLED_KIND = "native-push-settled";
+
+/** After the app connects to a server, ask the OS once and register, so push
+ * needs no visit to Settings. A refused prompt is the OS's to remember: later
+ * launches see "denied" and never ask again. */
+export async function autoEnableNativePush(): Promise<void> {
+  if (!nativePushAvailable()) return;
+  const scope = clientAccountPersistenceScope();
+  if (await hydrateClientRecord(SETTLED_KIND, scope) !== null) return;
+  let status = await authoritativeStatus();
+  if (status.state === "disabled") status = await enableNativePushForCurrentAccount();
+  if (status.state === "enabled") writeClientPreference(SETTLED_KIND, scope, "on");
+}
+
 export async function disableNativePushForCurrentAccount(): Promise<NativePushStatus> {
+  writeClientPreference(SETTLED_KIND, clientAccountPersistenceScope(), "off");
   try {
     const status = await controller().disable({ accountId: activeBrowserAccountId() });
     setNativePushAuthoritativeProjection(status.state === "enabled");

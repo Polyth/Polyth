@@ -112,6 +112,9 @@ test("CI is automatic on devel and master while build and release workflows stay
 test("nightlies build devel behind the release gate and promotions verify master before pushing", () => {
   const nightly = read(".github/workflows/nightly.yml");
   assert.doesNotMatch(nightly, /^\s*push:/m);
+  // The schedule is plain UTC: with `timezone: Europe/Kyiv` no slot ever fired.
+  assert.match(nightly, /^ {4}- cron: '17 3 \* \* \*'$/m);
+  assert.doesNotMatch(nightly, /^\s*timezone:/m);
   // Automatic runs stay off until the repository opts in; manual runs always work.
   assert.match(nightly, /vars\.POLYTH_NIGHTLY == '1'/);
   assert.match(nightly, /\|\| 'devel' \}\}/);

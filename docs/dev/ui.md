@@ -265,6 +265,18 @@ A release before the hold completes sends: touch/pen Send is admitted on
 off Send does not send), and the click that ends a hold is swallowed. An empty
 composer or a queued-message edit never starts a hold.
 
+**IME composition.** Phone keyboards (Gboard and others) keep the word being
+typed in an open IME composition, and `AdaptiveTextInput` commits draft edits
+(`onTextChange`) only when it ends. Send, the mode and People send buttons
+therefore gate on the live text (`onComposingText`), so a one-word draft
+enables them before the keyboard commits it. Every send path first calls
+`finishComposition()`, a same-task blur/refocus that makes the browser commit
+the word (focus changes are not reported for it), so the sent text and the
+submit-time clear see the final draft. A composition the browser drops without
+`compositionend` (Chromium does so when script writes `value`) is closed by the
+next non-composition `input` or by blur, never left to ignore later typing.
+Enter during a composition still never sends.
+
 Both navigators and the new chat's recent list show drafts among all chats
 with an accent **Draft** `Badge` (`apps/web/src/sessionDraft.ts`). A chat that
 never ran a turn is named by the first line of its draft (navigator, title
@@ -366,7 +378,14 @@ Chat). Its offset is measured, not a constant: `promptRailInset`
 launcher strip, the 961–1400px floating cluster, a slide-over pane), while
 in-flow chrome beside the chat (expanded/collapsed navigator, pinned pane) costs
 nothing. A ResizeObserver re-measures on every collapse/expand. A left rail also
-reserves its gutter in the transcript's left padding.
+reserves its gutter in the transcript's left padding. A classic (layout)
+scrollbar is measured separately (`scrollbarThickness`, `scrollbarRailBox` in
+the same module) and treated as chrome on the scroller's inline-end edge: the
+rail clears it only when it sits on that same side, overlay scrollbars cost
+nothing, and a launcher strip already reaching past the scrollbar is not
+counted twice. The scroller itself is observed too, because a scrollbar
+appearing or disappearing changes its content box without resizing the rail's
+viewport.
 
 The rail's hover panel and the bookmark peek share `.prompt-nav-row`: text two
 pixels above `--font-meta`, clamped to two lines, with no leading mark (the tape
@@ -484,6 +503,14 @@ archive time, the same clock archive retention uses; paging continues on scroll
 and stops early once a recency window is satisfied. Rows open read-only, and
 restore (`bulkSessions("restore")`) or permanent delete work singly or on a
 selection. Pure rules live in `apps/web/src/archivedSessions.ts`.
+
+Session confirmation follows intent and activity. Row-menu and swipe actions
+ask first; holding Shift over a wide desktop row reveals the quick
+archive/delete buttons, which are deliberate: an idle row acts immediately —
+including archive even while the *Confirm before archiving sessions* preference
+is on — while a session that is working, waiting, reconciling, unknown, epoch
+pending or holding pending questions/approvals still confirms. A delete that
+also removes a package-owned isolation workspace always confirms.
 
 Session and project verbs are optimistic: delete, archive, restore (single and
 bulk), rename, pin and labels for sessions, rename and close for projects, and
@@ -992,7 +1019,9 @@ and without any project (none could be made for it) there is no composer, so
 the start step is left out. Steps
 resolve the first *visible* selector in `anchors` and centre the card when none
 is on screen. `data-intro-anchor` marks controls whose class is ambiguous —
-keep those attributes when restyling the rail.
+keep those attributes when restyling the rail. The card's buttons use the
+normal control size (no `size="sm"`): the footer wraps a long locale's
+buttons onto their own row rather than shrinking them.
 
 Admission (`decideShellIntroAdmission`, run by `App.tsx`) waits for the first
 account settings snapshot (`isClientSettingsSettled`, 5 s fallback) and a
@@ -1015,6 +1044,15 @@ no overlay is open, `App.tsx` resumes it after `SHELL_INTRO_RESUME_DELAY_MS`
 active project's rail tile); a cancelled dialog continues with the step after
 add-project. A resume lands by step id (`shellIntroResumeIndex`), so a changed
 step list cannot shift it; replaying the tour drops a pending resume.
+
+A step may carry art above its text (`ShellIntroStep.art`): the shell
+schematic on welcome, the drag pass on drag, and on the chats-and-projects step
+(phone too) a column of project tiles wearing the real status dot — same
+corner and `--green` / `--amber` colours as `.sidebar-project-rail-status`,
+each led to a translated label (`shellintro.statusWorking` /
+`statusWaiting`). A new account has no project tile to point at, so the card
+shows the dot itself. Change that art together with the rail dot. Art is
+`aria-hidden`; the step text must say the same thing on its own.
 
 Tour copy is written for people who have never used a developer tool: everyday
 words ("buttons", "tools at the top", "add-ons"), no rail/composer/package
@@ -1478,8 +1516,9 @@ The command palette
   available; never reach past it into host internals.
 
 `sidebar.session.actions` renders after the built-in entries in both desktop
-and phone session menus. Contributions receive `sessionId`, `status`, and
-`closeMenu()` for dismissing the invoking menu after an action succeeds. Use
+and phone session menus, including the phone header's ⋮ menu. Contributions
+receive `sessionId`, `status`, and `closeMenu()` for dismissing the invoking
+menu after an action succeeds. Use
 the shared menu-item styling and semantics so keyboard navigation includes the
 contributed action; unregister it when the package is disabled.
 
@@ -1540,6 +1579,15 @@ menus (a Conversations drill-in) and its conversation's heads, and names the
 agent in the header of its own session in Chat (`session.header.status`); a
 working agent's row shows its own glyph with a travelling arc rather than the
 chat spinner.
+A session an automation started without a person carries
+`SessionProjection.origin` (`SessionOrigin`: owning package `source`, the
+`wake` that started it — schedule, heartbeat, event, manual or alert — and a
+display `label`). Trusted server code sets it through `CreateSessionInput.origin`
+(the HTTP create route never accepts it); it is part of the summary fields and is
+not inherited by forks or delegated children. The Agents runner sets it on an
+agent's own sessions (label = agent name) and Monitoring on its incident chats
+(`monitoring`/`alert`/"Monitoring"). Lists use it to leave automation out on
+request and to draw it as automation rather than as a person's chat.
 
 Session grouping and order live in the list options' **Sessions** section as
 two drill-in rows, **Group by** and **Sort by**, each naming its current
@@ -1599,7 +1647,7 @@ icon or provenance, so a row reserves the icon track only when it renders one.
 **Built-in host actions:** a few built-in commands are host actions, not
 prompts. `/compact` compacts the conversation — the active runtime's native
 compaction, or Polyth's own summary-and-fresh-leg compaction when the runtime
-has none — and renders the same expandable context-compacted block as the
+has none or its native one refuses or fails — and renders the same expandable context-compacted block as the
 Context rail control; it never creates a session, echoes the command, or
 spends a model turn. The Compact controls (context pie, Context rail, "Compact
 before proceeding") show for every agent session. While a compaction runs the
@@ -1755,22 +1803,31 @@ no heading and no chrome of its own. Its options live under the Recent row of
 the Customize panel: count 3/5/8/12, Show
 All/Active/Unread (Active = working, needs approval/reply, reconciling),
 Subagent sessions (children with `parentId`, off by default because the
-navigator nests them), Projects Current/All/Selected (checkbox list; picking
+navigator nests them), Agent sessions (off by default: sessions an automation
+started — an `origin`, a `purpose` a package claims for its own list, or a
+child of one — are machinery the owning package already shows), Projects
+Current/All/Selected (checkbox list; picking
 Selected starts from the project in view; rows from another project show its
 name), and text size S/M/L relative to `--font-label`. Choices live in
 `heroWidgetPrefs.recent`. Selection is the pure
 `selectHeroRecentSessions` (`apps/web/src/heroRecent.ts`) over sessions in the
-client store. The count sets the list's height, not its length: the rows
-scroll inside it, a bottom sentinel reveals another `heroRecentPageSize` rows,
+client store, with `isAutomatedSession` deciding automation. Shown automated
+rows read as automation, not as the person's chats: the lead mark is a tinted
+tile (`--accent-wash`/`--accent-text`) holding the glyph for what woke it
+(schedule/heartbeat/event/alert, or the agent mark for a legacy claimed
+session), a muted meta after the title names it (`Monitoring · Alert`, or just
+`Agent`), and the wake label is the row mark's accessible name; `working` keeps
+the spinner and `needs-approval` the shield, so an automation waiting on the
+person is never hidden. The count sets the list's height, not its length: the
+rows scroll inside it, a bottom sentinel reveals another `heroRecentPageSize` rows,
 and once the cached matches run out it pages older summaries through
 `useSessionSummaryPages` with `heroRecentSummaryQuery` (server-side project
-narrowing only for exactly one project; status/subagent filters stay
+narrowing only for exactly one project; status/subagent/automation filters stay
 client-side). Nothing is fetched until the cache cannot fill the next page.
 A narrowed list (status filter or Selected) that matches nothing renders an
 empty line; an empty default list renders nothing.
 
-**Context liquid:** the running primary (Stop, or the Send now / queued-save
-segment) is also the session's context gauge. Desktop and phone session titles
+**Context liquid:** Stop is also the session's context gauge. Desktop and phone session titles
 show no provider logo or context indicator (the former donut and logo modes and
 their settings are gone); the session status popover/overview still reports
 context percent and tokens. Chat settings
@@ -1782,20 +1839,73 @@ Missing or invalid values (including the retired `logo`) use `title`. Visible
 attention cues add a leading status dot; live announcements remain
 available when the control is hidden. Header clearance follows the chosen
 mode and text size. `ContextLiquid` derives the session's context gauge and
-renders inside the button: an outline in the action's own
-solid color while the context is empty, a gently drifting liquid of that color
-rising with usage, solid when full. Unknown usage stays an outline. The model
+renders inside Stop: a soft tonal disc with no outline while the context is
+empty, a gently drifting liquid of a slightly stronger tone rising with usage.
+Unknown usage stays the plain disc. The model
 context limit still gives fresh sessions an estimated `~0%` gauge before the
 selected harness reports live occupancy; an explicit unknown/compaction sample
-remains unknown rather than being treated as zero. The solid
-rules in `styles.css` publish `--context-liquid-tone/-ink`, so the fill follows
-the same desktop/phone colors as the solid action; a copy of the glyph inside
-the liquid switches the submerged part to the ink color along the wave, and
+remains unknown rather than being treated as zero. Stop publishes
+`--context-liquid-tone/-ink`; a copy of the glyph inside
+the liquid takes full ink along the wave, so it holds 3:1 on a full gauge, and
 any rule that sizes the host glyph through a child combinator must also size
-that copy. The level transitions through the registered `--context-fill`;
+that copy. Stop is neutral at rest and turns red only on hover or press. Send is
+always a solid disc with no ring or glow, in every look, including the running
+Send beside its bare chevron, where the context pie reports the level. The level transitions through the registered `--context-fill`;
 reduced-motion and low-resource modes keep a still level. The idle Send stays
-solid. `contextLiquid.test.ts` measures glyph alignment and tones through the
-real cascade.
+solid. On phones the running primary draws its contour as one complete 40px
+disc centred in the 44px tap box, and the split's divider is centred in the
+visible gap between that disc and the chevron instead of sitting flush with
+the disc, so the fill, the gauge and the space around them stay balanced;
+desktop keeps the split's open edge. The contour is a state gauge, so
+*Hide interface borders* keeps it while surface outlines clear ([styles](styles.md)).
+`contextLiquid.test.ts` measures glyph alignment and tones through the real
+cascade.
+
+**Phone session menu (⋮):** the actions island holds a narrower ⋮,
+✎ New session and ⧉ Open tools (`MobileSessionMenu.tsx`; a new chat has no ⋮).
+⋮ opens a compact popover lined up under the island: a head with the chat
+title and one status · model · context line (a tap opens the session
+overview, which a hidden title would otherwise open; a conversation's head
+only names it), then Rename (shared prompt), Pin, Share/Who has access, Fork
+(not for an isolated chat), Mute for a conversation, Copy session ID, Archive
+and Delete, the same routes and manage gates as the Navigator row menu, and
+the `sidebar.session.actions` contributions. Every island button presses and
+stays open as an accent glyph colour only ([design system](design-system.md),
+"Press composes"). `apps/web/test/mobileSessionMenu.test.ts` covers the menu
+and the press/open rule.
+
+**Composer attachments:** the next message's files are one row of the card —
+the *attachment tray* — between the model line and the editor, in a new chat
+and an open one alike (never above the project row). `AttachmentPills` draws
+quiet cards: a file names its type with its extension in a neutral glyph (the
+accent stays on Send), a previewable image is a bare tile, and remove shows
+on hover or keyboard focus with a fine pointer (always on touch). The row does
+not wrap: cards narrow to a readable name, then the row scrolls sideways and
+fades into the edge it is scrolled away from (`data-overflow-start|end`); a
+card that arrives past the visible end scrolls into view. The first file
+*opens* the tray and removing the last one *closes* it over that card
+(`useAttachmentTray`, `apps/web/src/composer/attachmentTray.ts`;
+composerAdaptive.css "Attachment tray"): the row's track eases between `0fr`
+and `1fr` (`--motion-surface` open, `--motion-normal` close), so the card
+grows and shrinks with it. The cards hold the row's bottom edge, so they sit
+still on the text while the top edge and the model line rise off them; the
+editor and Send never move and whatever sits above the card follows the edge.
+A card waits until the edge has nearly cleared it, so the clip never cuts a
+visible card; one added to an open tray enters on its own (`att-fresh`).
+Nothing animates when the composer mounts or switches scope with files
+already there (a restored draft, the hero → transcript remount), when a send
+takes the files, under reduced motion (the hook settles when there is no
+animation), or on a resting phone row: a file engages it and
+`useComposerMorph` grows the card, treating the tray like the model line.
+On phones the editor's cap leaves the tray its room. Once the row has opened
+or closed beside a focused editor, the Composer asks the field to redraw its
+caret (`TextInputHandle.refreshCaret`): iOS WebKit draws the caret above the
+page and re-measures it only on a selection change, so it stayed over the
+files until the next tap or keystroke. The field steps its selection away and
+back in one task (an empty field steps its value), only on an engine that
+supports `-webkit-touch-callout`, only while focused and not composing.
+`apps/web/test/composerAttachmentTray.test.ts` scrubs the real Composer
+through both changes and counts the caret refresh.
 
 **Context pie:** an open session also shows its context-window share as a
 quiet pie on the model line, right after the thinking-effort chip (after the
@@ -1832,10 +1942,10 @@ contributions. Desktop continues to use its independent slot placements.
 An idle composer (no focus, draft, attachment, shell mode or rail editing)
 *rests* as one `--composer-height` row: Add · the context pie (when the open
 session has one) · placeholder · the launcher the engaged rail shows nearest
-Send (the last one on its first, unscrolled page; the first placed launcher
-only when that page holds nothing but Add) · Send/Stop. The resting row
+Send (the last one of the run beside Send, else the last one of the leading
+run's unscrolled part, else its first launcher besides Add) · Send/Stop. The resting row
 measures the engaged lane count from the card, so both states agree before the
-composer has ever been engaged. The model line, pencil and
+composer has ever been engaged. The model line and
 other launchers are hidden with CSS, not unmounted, so a control in use (an
 active dictation) survives engagement; only rail editing, not the rail itself,
 holds the composer engaged (`composerLayoutState({ railEditing })`). A running
@@ -1873,34 +1983,69 @@ rows runs first (the editor's auto-grow is a layout effect declared before the
 hook), no row but the opening editor grows or shrinks with the easing height
 (the editor counts at its content's size), and a row that still changes
 mid-way — the keyboard re-banding the shell, a late render — re-aims the
-running morph instead of snapping the card at the end. Engaged, the model/effort line stays above the editor,
-with a small edit pencil at its upper inline end. The pencil is nearly
-transparent at rest; holding, keyboard focus and the active Done state remain
-visible.
+running morph instead of snapping the card at the end. Engaged, the model/effort line stays above the editor.
 
-The measured rail and primary-action widths determine the number of sections
-(a full `--tap` control plus the measured `--space-1` gap between sections).
-All launcher glyphs, including Add, are centered in their section. Send/Stop owns the final
-section and cannot be removed; extra launchers scroll horizontally while it
-stays reachable. Empty sections have no chrome in normal use. A 420 ms pencil
-hold enters editing; a short touch tap only announces the hold instruction.
-Mouse, keyboard and assistive activation enter directly. Done or Escape exits. Editing blurs the
-editor to release the software keyboard and temporarily makes live launcher
-controls and Send inert.
+The rail is two runs of `--tap` launchers, not a grid of lanes: the leading
+run reads from the inline start (and scrolls horizontally when it overflows),
+and the run beside Send hugs Send/Stop, which cannot be removed. Both rails
+keep the editor's 16px text gutter, so the leading tap cell and the primary
+action's trailing edge line up with the editor's text edges. The space
+between them is whatever the leading run leaves. Membership and order are what
+is saved, so a narrower screen, a wider Stop/split action or a launcher with
+nothing to show (`isAvailable` false, which gives up its place outside
+editing) never moves another launcher; a launcher put beside Send stays beside
+Send. The measured lane count (`mobileRailColumns`) only picks the resting
+launcher and the drop zone beside Send.
 
-Editing reveals quiet cell boundaries, empty-cell add pickers, and an extra
-row when another section is needed. Touch/pointer dragging swaps occupied
-sections or moves into an empty section. Tapping an occupied cell opens the
-shared anchored Menu with previous/next moves and removal; package-required
-controls cannot be removed. Reset restores catalog defaults. Drag cancellation,
-window blur, resize and unmount do not commit a move. Movement follows the
-pointer through a composited transform; committed rearrangements use the shared
-motion duration and skip animation for reduced-motion and low-resource modes.
+Editing works like the iOS Home Screen. There is no edit control: a 500 ms
+touch hold on any launcher (`MOBILE_RAIL_HOLD_MS`; not on Send) starts it, and
+the release does not also press the launcher. A mouse press never does (the mic
+uses it for push-to-talk); a right click arranges straight away. Keyboard and
+assistive users get a visually hidden "Edit composer buttons" button on the
+model line that appears on focus; the new chat's Customize panel still asks
+through `requestMobileRailEdit`. Editing blurs the editor to release the
+software keyboard, makes live launchers and Send inert and wiggles every
+launcher (still under any reduce-motion source: the OS preference,
+`data-reduce-animations`, desktop low-resource). Each one carries a minus badge
+(none for package-required controls) whose enlarged tap box grows only outward,
+so the middle of a button is always the drag handle. The badges overhang the
+row, so the phone rail never clips (`overflow: visible`, overriding the narrow
+desktop rail's scroll) and, while editing, gains top padding and stacks above
+the editor so a badge is never under the text field; a launcher with nothing
+to show is drawn with its quiet catalog glyph. Dragging lifts the launcher under
+the finger and reflows the others live; reaching the last lane or Send drops
+it into the run beside Send, anywhere else places it by reading order in the
+leading run, which wraps while editing. Arrow keys move the focused launcher
+along the row and across the gap. Only the drop persists; cancellation, window
+blur and unmount do not. Below the rail, as in the iOS Control Center editor,
+a "More buttons" tray lists every launcher not in the rail (the rail's own
+defaults first, so one just removed is in sight) as chips with the launcher's
+mark (`widgetIconFor`; `capability:<id>` launchers wear that capability's mark),
+its name and a green plus badge. The tray is two rows that scroll sideways
+behind a fading edge, so a long catalog never pushes the rail off screen; two
+chips with the same name add their widget descriptions. Tapping a chip adds the
+launcher to the end of the leading run, where it settles in like an arriving
+one. Under the tray, Reset (the catalog defaults, saved for this scope) and
+Done; Escape or a tap anywhere outside the rail also
+ends editing. Reflow and the drop settle on the shared motion duration and skip
+animation for reduced-motion and low-resource modes. Holding and dragging in
+one gesture is attempted (a non-passive `touchmove` keeps the touch once a
+launcher is lifted), but Chromium's touch emulation still cancels it;
+releasing and dragging again always works.
 
 The arrangement is one account-owned UI preference (`core.mobile-composer-rail`
 in `composer/mobileRail.ts`), a map of Space + project key to arrangement that
 `settingsSync` mirrors to the server blob, so a client that has never opened
-the project still inherits the buttons the user arranged elsewhere. It never
+the project still inherits the buttons the user arranged elsewhere. A scope
+with no record of its own shows the arrangement most recently edited in the
+same Space (`readEffectiveMobileRail`) and gets its own record only once it is
+edited, so a project the user has not arranged yet does not fall back to the
+package defaults. Records keep the `{v:1,slots}` shape: the leading run, then
+`slot:gap` and the run beside Send. A client that predates the runs reads the
+gap as an unknown launcher id and keeps it, rather than stripping and pushing
+back the record; positional records from such a client (`null` lanes) are
+read with the last empty lane before a launcher as the start of the run beside
+Send (`mobileRailFromSlots`). It never
 changes desktop visibility or placement, and one project's key never touches
 another's. `localStorage` (`polyth.composer.mobile-rail.v2`) is the synchronous
 cache; the paired mobile app also mirrors it through the app-owned
@@ -1909,9 +2054,8 @@ client-context store, because its Link loopback shell starts from an empty
 first render). The older per-key `polyth.composer.mobile-rail.v1.<space>.<project>`
 record is read once as a migration source and never wins over the map.
 Unknown launcher ids survive package disable/re-enable; a malformed id or
-unknown key from another client is dropped at the parse boundary.
-Resize changes the presentation without truncating saved positions; additional
-launchers remain available by scrolling.
+unknown key from another client is dropped at the parse boundary (never read
+as an empty lane). Resize changes only the presentation.
 If browser storage rejects a write, editing remains usable in memory for the
 current page lifetime. The editing grid scrolls vertically after three rows,
 so a large arrangement stays bounded on short phone viewports. Widget
@@ -2098,8 +2242,42 @@ view, the extent floor retains exactly enough space to prevent the browser
 from clamping the scroll, including when the working-status dock leaves and the
 scrollport grows in the completion commit. Idle layout refreshes preserve this
 position; content growing over the blank, the reader scrolling away from it, a
-new send, session switch or explicit Jump to latest clears the hold. A newly opened short chat starts naturally at the top. The
-mounted regression checks are in `apps/web/test/timelineMotion.test.ts`; the
+new send, session switch or explicit Jump to latest clears the hold. A newly opened short chat starts naturally at the top.
+
+**Opening a long chat:** a chat opens on a passive read of its newest 400
+events (`INITIAL_EVENT_WINDOW` in `init.ts`; streamed answers and thoughts are
+many chunk events, so the newest 40 were often one answer and the first frame
+showed a row or two at the top of the screen). The first frame lands at rest
+on the tail (or the saved reading position): apart from the surface's one
+reveal, no lift, entrance or fade for rows already in the log. The background
+backfill (2,000-event pages up to 4,000) then lands above without changing what is rendered: the suffix window
+keeps its first row (`heldWindowStart`, located again by its first rows' ids
+when history merges into it, `locateWindowHead` in `timelineWindow.ts`), so
+nothing the reader sees moves and no long mount runs under them. The window's
+earlier rows are revealed `TIMELINE_AUTO_CHUNK` (30) at a time once the
+reader is within a screen of its first row, anchored like Show earlier and
+never while a finger owns the scroll (the gesture's rest reveals them); at
+the top with every cached row shown, scrolling pulls the server's next page,
+which lands held the same way. The explicit Show earlier / Load earlier
+controls keep their chunk / everything reveals. A held window grows with the
+live turn up to the 150-row window and slides from there, like a window the
+reader filled by revealing history. While only part of a longer
+chat is rendered, the earlier-history host takes the free space above it
+(`margin-block-start: auto`), so a short partial transcript rests on the
+composer edge and what is revealed fills the blank over it instead of
+pushing the rows down. A user prompt that arrives with that history (a live
+turn's prompt older than the opening window) is no send: its sequence is at
+or below the tail already on screen, so it neither aligns the view on the
+focus line nor reattaches a reader who scrolled away. Treating it as one
+scrolled the view to an unpainted position and lifted every row from there,
+across the rows still in place. Pinned by the two "history that lands" /
+"held history" cases in `apps/web/test/timelineMotion.test.ts`, the window
+math in `timelineWindow.test.ts`, and the phone-over-a-slow-link case of
+`timelineMotion.live.ts`. On the old code that gate fails every run (the
+backfill mounted ~140 rows under the reader), and in most runs a row also
+glided 800–2,000 px across the rows still in place, text drawn over text.
+
+The mounted regression checks are in `apps/web/test/timelineMotion.test.ts`; the
 overflowing-chat Chromium gate is `apps/web/test/timelineMotion.live.ts`. On phones
 the floating session island covers the top of the
 timeline scrollport. Its CSS clearance (`--timeline-pad-top`) also publishes
@@ -2198,8 +2376,9 @@ and repeats that summary, the active pins and those messages; nothing is sent
 until the user sends it. Package timeline events inside a rewound range remain
 hidden with that branch.
 
-**Action grouping and Thinking separators:** Chat settings exposes matching
-segmented selectors for Action blocks and Thinking blocks. Grouped mode projects
+**Action grouping and Thinking separators:** Chat settings exposes a *Group steps
+into one block* switch under Agent steps and a segmented selector under Thinking.
+Grouped mode projects
 tool/task work into activity cards. A card's header is named by the actions
 inside it (`activityTitle.ts`): up to three of the most significant kinds
 (changes, tests, commands, delegation, then reads, searches, web, tools,
@@ -2253,7 +2432,9 @@ fill.
 **The live line:** a block is one row, live or not. While it is the tail of a
 working turn (nothing follows it yet), its summary line names the step in
 progress — the step's glyph, its name and quiet preview, exactly as the folded
-step reads (`ActivityTicker.tsx`, `activityTicker.ts`). Each new step takes
+step reads (`ActivityTicker.tsx`, `activityTicker.ts`). On a narrow line only
+the preview gives way; the name stays whole (a runaway tool name is capped at
+60% of the line). Each new step takes
 the line's place in it: the old words rise away as the new ones rise in, in one
 grid cell, transform and opacity only, so the block never adds, removes or
 resizes a row while it works (the leaving words are out of flow, so a look whose
@@ -2266,7 +2447,8 @@ Nothing after the block waits for it: the next thought, answer or block renders
 the moment it arrives. Everything that describes the line follows the words on
 screen, not the newest event: the block's accessible name always contains the
 visible line, and a command the line names gets its Stop beside the line
-(outside its button) only once it has run for 700 ms, so short steps never
+(outside its button; drawn per style as in [styles](styles.md#theme-layers),
+the pill's twin beside a Chip or Air pill) only once it has run for 700 ms, so short steps never
 flash it; an open block shows the step's own Stop instead, a delegated agent is
 stopped from its session, and a Stop that leaves while focused hands focus to
 the line. Lines are never a touch target. Reduced motion, the low-resource
@@ -2276,7 +2458,7 @@ column, the task text in the step-name voice, then its kind (`Task
 completed`, …) in the quiet preview voice, which gives way first on a narrow
 line. The contract is pinned in `apps/web/test/executionUi.test.ts`.
 
-**Activity block looks:** Chat settings → *Activity block style*
+**Activity block looks:** Chat settings → *Agent steps*
 (`UiSettings.activityBlockStyle`, published as `body[data-activity-style]`)
 picks how the steps are held together. Everything above is the default
 `thread`. The others keep the same rows, rhythm and plate-free column and drop
@@ -2296,26 +2478,55 @@ Every outline is a `--borderless-edge` shadow or background, never a border,
 so Borderless keeps it. The look is pure body-level CSS, so switching it
 restyles every block already in the transcript without a re-render.
 
-**Status above the composer:** the live agent status (`AgentStatusDock`, also
-used for the spawn status and on the Agents page) and the git package's edited
-files (`PendingChangesBar`) are lines of text, not cards: no plate, shadow or
-glass. The status reads mark · model · action, then the files tally and the
-elapsed time. Light moving through the action's words and an accent dot on the
-mark say "live"; reduced motion and low-resource mode keep the words still.
-The action outranks the rest: the model name gives way first, and at 600 px or
-less the files tally steps aside. Folded, the edited files are one summary
-line whose title carries the count. Open, the files hang from the same thread
-as activity steps, and Undo / Review are text actions (Review in the
-text-safe `--chat-ink-accent`). Their quiet inks follow the wallpaper wash
-([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset
-theme and wallpaper.
-Chat settings → *Status above the composer* (`composerStatusStyle`,
-`body[data-composer-status-style]`) picks `line` (the base), `tab` (a faint
-tab growing out of the composer's top edge, inset from its corners, further
-in on a phone's pill composer; the composer drops its top padding under it)
-or `capsule` (a centred hairline pill that hugs its words; the open file list
-sits in a hairline frame). Pinned in `apps/web/test/composerChatStyle.test.ts`
-and `packages/git/test/sourceControlVisualGrammar.test.ts`.
+**The pending stack above the composer:** everything that waits on the composer
+is lines of text, not cards, with the composer card as the one surface. Top to
+bottom: the agent's status or the edited files, any subagents hanging from them,
+the queued prompts and the suggested next prompt. No line paints a plate, border,
+shadow or glass in any platform style or look. Everything sits on one grid
+measured from the card's outer edge: marks are centred on the model logo's column
+(`--composer-stack-mark`), labels start at the model name
+(`--composer-stack-text`), trailing glyphs end where the marks start
+(`--composer-stack-end`). A line reads `--composer-stack-row` tall; on touch, a line
+that opens something keeps its full target by reaching up into the timeline's
+bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
+([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset theme and
+wallpaper.
+
+The status (`AgentStatusDock`, also used for the spawn status and on the Agents
+page) reads mark · action, then the files tally and the elapsed time. The mark (the
+harness logo) says which agent works; the model or harness name is never written
+out, only the mark's tooltip, so the short line keeps its room for the action.
+Light moving through the action's words and an accent dot on the mark say "live";
+reduced motion and low-resource mode keep the words still. The action outranks the
+rest: at 600 px or less the files tally steps aside.
+
+The edited files (`PendingChangesBar`) share the status line's chat frame, so nothing
+jumps when a turn ends. Folded, they are one summary line whose title carries the
+count. Open, the files hang from the same thread as activity steps, and Undo / Review
+are text actions (Review in the text-safe `--chat-ink-accent`). In a bar 420 px or
+narrower the head keeps one line with its chevron and the actions close the list, on
+the line with "N more".
+
+**Queued prompts:** a row is the prompt's text on the text column with `↳` on the mark
+column; past two rows the rest fold behind "N more". Where the pointer hovers, a row's
+handle replaces `↳` and its actions (send now, remove, edit) stand over its end, so
+the text keeps the whole width at rest; focus brings them too. Dragging shows an
+insertion line on the side the row will land. Alt+↑/↓ moves a row from anywhere on it,
+plain arrows from its focused handle. In the phone shell, or without a hover, the rows
+are plain text and the whole block is one target of at least 44 px that opens the queue
+sheet (`ResponsiveOverlay`): a tap on the text edits, the handle drags on pointer
+events, and send now and remove are full-size. A row taken into the composer keeps its
+place as "Editing in the message box below · Cancel"; Esc does the same on a keyboard.
+A paused or stalled queue leads with a service row of words whose Resume is always
+visible.
+
+The suggested next prompt is one line above the card: the whole line takes it as an
+editable draft, × dismisses it, Tab is the keyboard shortcut.
+
+Pinned in `apps/web/test/composerPendingStack.test.ts` (geometry and paint in a real
+browser, every look), `apps/web/test/composerChatStyle.test.ts`,
+`apps/web/test/shellLooks.test.ts`, `apps/web/test/queuedMessageList.test.ts` and
+`packages/git/test/sourceControlVisualGrammar.test.ts`.
 
 **A watched pull request above the composer:** while the chat watches a pull
 request (see the `github` row in [architecture](architecture.md)), the GitHub
@@ -2346,6 +2557,48 @@ narrow column the words wrap under the title instead of being cut. Only
 `https:` links render. The PR view's action row adds a *Watch in this chat*
 switch when the provider declares `watch` and a chat is open; its name never
 changes, `aria-pressed` and the accent wash with a dot say it is on.
+
+**A chat's planned runs above the composer:** Planner tasks that post into a
+chat (an `existing-session` task for it, including every `polyth_planner` task
+the agent made there, or a "Keep one chat" task whose runs go there) show in
+that chat through two Planner package contributions
+(`packages/planner/widgets/ChatSchedule.tsx`). `planner.chat-schedule` in
+`session.composer.before` (order 890, just above a watched pull request's line)
+is one more line of the same grammar while at least one of them is upcoming:
+the calendar-clock mark (an accent dot while a run is in flight), when the
+next run comes (*Due now*, *in 12 minutes* within the hour, else *Tomorrow,
+09:00* / *Mon, 09:00* / a date), its title, its short cadence and `+N` for the
+others, then a chevron. Pressing it opens the chat's planned tasks **upward**,
+so the line stays under the pointer: a row per task (day and time in a
+tabular column, title, cadence, a failed-last-run warning), *Run now* for an
+upcoming task and a menu with Run now, Pause/Resume, *Open in Planner* (the
+pane opens on that task's page
+through `plannerOpen.ts`) and Delete (confirmed), then a closing note that each
+run arrives as the person's own message. Paused tasks list after the upcoming
+ones; a finished one-time task has left. While open, the line stays even when
+its last upcoming task is paused; folded, it leaves once nothing is upcoming.
+Escape folds the list and returns focus to the line. Line and list enter and
+leave through `ComposerNoticeRow`. The look follows Chat settings → *Status
+above the composer*: `line` is plateless with a faint tray when open, `tab`
+insets both to the tab's line, `capsule` hugs the folded line in a centred
+hairline pill and frames the open list; outlines and the chevron are inset
+shadows and an icon, so *Hide interface borders* keeps them. Inks come from
+the chat frame (wallpaper wash). As an `inline-size` container the line drops
+the cadence at 520 px, and at 360 px the list stacks time over title and
+keeps only the menu. `planner.run-fact` in `session.timeline.event` renders
+each `planner/run-started` event as a centred line between background
+hairlines just before the prompt it sent: *Planned run*, *Started by hand* or
+*Late run* (from the run record's `manual`/`late`, carried on the event), the
+task's title (a link to it while it exists) and the time; on a narrow column
+what ran takes its own line. Both read one browser snapshot of the Space's
+tasks (`widgets/plannerTasks.ts`) that the Planner pane shares: it reloads
+after a change made in either, when a planned run starts or an agent's
+`polyth_planner` call settles in an open chat (a result is matched to its call
+by `callId`, because some harnesses report every result as tool `tool`), when
+the page becomes visible, on opening a chat whose snapshot is older than
+15 s, and every 60 s while something shows it. Pinned in
+`packages/planner/test/chatSchedule.test.ts` and
+`packages/planner/test/chatScheduleLine.test.ts`.
 
 **Subagents above the composer:** while any delegated child of the open chat
 works, waits for a person or is paused, its subagents hang from the agent's own status
@@ -2407,9 +2660,7 @@ named by the same `liveAction.ts` as the agent's own line. In a container of
 own, rows drop the chevron (the row itself opens the chat) and a running row
 leaves the model out so its action and time stay readable. The agent's own
 logo wears its harness profile's color, as the composer's model chip does.
-In the Standard look the island is text on the canvas; the other looks
-give it their in-flow card (the line inside keeps none), and the Tab and
-Capsule status styles frame the whole island. State
+The island is text on the canvas in every look, on the pending stack's grid. State
 comes from the canonical child projections (`parentId`) rolled up through
 grandchildren (`apps/web/src/subagentActivity.ts`), the same source as the
 navigator's disclosure pill. Pinned in `apps/web/test/subagentBranch.test.ts`.
@@ -2463,7 +2714,7 @@ The request and the plan stay one column, so a short request never leaves a
 hole beside a long plan.
 
 The surface reads the live render model for context, token usage, separate cache
-reads/writes, cost, ChatMetrics-compatible session duration, and task-plan
+reads/writes, cost, session duration, and task-plan
 progress. The content panel labels the cached last user message as a latest
 request excerpt, never as an agent-authored summary. Missing usage samples
 display unavailable values rather than invented zeroes; reported zero remains
@@ -2510,7 +2761,13 @@ server (only it knows whether they block Merge). Pressing Integrate shows the
 integrating steps at once: the server persists its first phase (`publishing`)
 only after snapshotting the workspace and building the merge, seconds on a busy
 host, so the card's own merge request stands for that phase until the server's
-answer or a refusal returns it to the ready card. While the agent works the
+answer or a refusal returns it to the ready card. A new prompt starts the
+card's collapse in the commit that stages its echo: the echo, and then the
+admitted prompt until `turn/started` (the projection still reads idle in
+between), count as the agent working, and an answer read while the session
+rested never offers Integrate during a turn. The card waits neither for the
+status nor for a fresh read, its content fades on an even curve while the box
+closes, and it returns when the turn ends. While the agent works the
 status is read once, not on every projection update of the turn. A read that
 fails in transit (a phone's
 Link connection still returning after resume outlasts the shared ~4 s read
@@ -2522,9 +2779,11 @@ and `online`; a 4xx is final. On the server the read uses the indexed newest
 independent Git reads together; the latency contract is
 `packages/git/test/isolationCardLatency.test.ts`. An idle read keeps only the
 held tail position described above. While a turn is in progress, answers
-already closed by a later prompt keep their response footer's box but render it
-dormant (`data-dormant`, invisible); removing those footers reflowed the whole
-transcript at every send and again at turn end. The identity panel is one per
+already closed by a later prompt keep their response footer in place and
+visible (identity and quick actions); removing those footers reflowed the
+whole transcript at every send and again at turn end, and hiding them
+(`data-dormant`, now only the working turn's own answers) left a blank band
+above the block under the answer. The identity panel is one per
 turn (its terminal answer), but every finished answer keeps its quick actions:
 an interim answer that tools, an answered question or more prose of the same
 turn follow gets an actions-only footer (`data-actions-only`). In the live turn
@@ -2539,7 +2798,10 @@ footer *is* the group gap (no top margin, a negative bottom margin of
 gap (`--conversation-group-gap` = `--timeline-gap`, 12px); touch block rows
 keep a 44px hit box but lay out as 36px (`--activity-row-trim` pulls the
 block into the gaps around it), and consecutive blocks' hit boxes meet
-(`--space-1` apart with a mouse). A thought row keeps prose's ink gap (group
+(`--space-1` apart with a mouse). The trim only reaches into a row's empty
+padding, so a look that draws the summary's box (the Chip outline, Air's pill
+and open island, Line's rule) sets it to 0 on the block and keeps the full
+gap; trimmed, a prompt under Air's pill sat 8px from it. A thought row keeps prose's ink gap (group
 gap less its header pad). A progress update (an
 interim answer followed by a block) only quiets its ink; new type metrics would
 reflow the lines right above the block that just arrived. The overflowing think
@@ -3272,7 +3534,9 @@ empty or error markup.
   `Section tone="danger"`. A page with more than ~6 rows has sections.
 - **Rows.** `Row({ label, hint?, layout?, top?, disabled? })` for one setting
   (control right, one shared control column). `layout="stacked"` puts a
-  full-width control under the label (textareas, long lists, templates).
+  full-width control under the label (textareas, long lists, templates). Only
+  a `DisclosureRow` opening onto its one setting omits the label: its head
+  already names it.
   `ReadonlyRow({ label, value, mono?, action? })` for facts. Add/edit forms use
   `FormField({ label, hint?, error?, optional? })` — visible labels, never
   placeholder-only fields.
@@ -3288,9 +3552,25 @@ empty or error markup.
   the controls. `HighlightedText` marks search words (shared with
   `textMatch.ts`). Quiet buttons inside a row take the raised step so they
   stay visible on the list surface.
+- **Rows that open in place.** A long page reads as a summary with
+  `DisclosureRow({ label, value, open, animate?, onToggle, onOpened?, rowId?, children })`
+  inside an `ItemList`: one line with the name and the current value, the
+  settings under it when open, and their hints only there. The page keeps one
+  row open at a time. A closed row renders no settings, so nothing in it carries
+  `data-settings-item` on the head: a search hit or deep link arrives as the
+  page's `settingsTarget`, the page opens the owning row with `animate={false}`,
+  and the routed-target effect then lands on the setting at its final position.
+  `control` instead of `children` keeps a setting that fits on the line in the
+  same geometry (then `itemId` sits on the row). The panel grows on its grid
+  track and clips only during the motion, so focus rings survive at rest.
+  `onOpened` fires when it has finished growing: measure then, since a fixed
+  delay races a slow first render of the settings inside.
 - **Control vocabulary.** Boolean → `Toggle` (never a lone checkbox).
   ≤4 mutually exclusive options → `Seg`. More options → `Select` (from
   `components/ui`). Several independent choices of one kind → `CheckGroup`.
+  A choice easier seen than described (the interface style, Chat's level of
+  detail and step style) → tiles drawn in the option's own look on
+  `.shell-look-option`, with an inset-shadow schematic in theme tokens.
   Mutually exclusive options whose consequences each need a sentence (the
   approval levels in Settings → Permissions, Judgment routes) → a radio list
   on the item-list surface: one row per option with its title and one-line
@@ -3346,9 +3626,9 @@ boot settles (`whenPackagesSettled`) the nav shows a skeleton instead of a
 partial list. Search matches page titles, `SETTINGS_PAGE_KEYWORDS` page
 synonyms (`settings/registry.ts`) and registered items, and groups results
 under their page (capped). An item hit focuses and flashes its row; when the
-row is not rendered (it sits behind one of the page's own tabs), the hit is
-handed to the page as its `settingsTarget` so the page can reveal it, and the
-routed-target effect then scrolls to it. Mod+K or `/` focuses the settings search while
+row is not rendered (it sits behind one of the page's own tabs or a closed
+`DisclosureRow`), the hit is handed to the page as its `settingsTarget` so the
+page can reveal it, and the routed-target effect then scrolls to it. Mod+K or `/` focuses the settings search while
 Settings is open; Escape clears a non-empty search, then goes back to the nav
 on phone, then closes. The header keeps a fixed slot for the package tour
 `?`, so the close button never moves. The `?` appears exactly when the
@@ -3363,6 +3643,41 @@ web-local `link: { settingsPage, label }` (`packages/onboarding/types.ts`);
 the overlay renders it as a button that completes the tour and calls
 `openSettingsPage`. The Providers & Models tour opens on such a step, pointing
 new accounts at Harnesses (installing more harnesses is optional).
+
+**Chat settings** (`settings/ChatSettingsPage.tsx`, model in
+`chatSettingsModel.ts`) read as a summary beside a live preview. *Level of
+detail* (Minimal / Balanced / Detailed) writes the look preferences together:
+step grouping and style, thinking, how each role's buttons reveal, and whether
+the prompt rail shows. It is derived from those preferences and never stored, so
+one hand-edited row reads as *Custom* with a Reset back to Balanced, which is the
+install defaults. A level leaves typing and sending alone, and never changes
+which buttons exist, where they sit or their order. Below it, three groups of
+`DisclosureRow`s (Conversation, Typing and sending, Buttons and bars) and a
+*More options* fold; `CHAT_ROW_ITEMS` and `CHAT_MORE_ITEMS` say which row owns
+each `chat.*` item, and a test holds that to the search registry. A registered
+label is the name the page shows, so search finds what the person reads.
+
+The preview (`ChatSettingsPreview.tsx`) is a sample conversation drawn from the
+same preferences, with the looks copied from "Activity block looks" and the
+composer status styles. It is not the real Timeline, so a new look needs its
+sample here too. While a row is open everything but the part it changes dims; a
+click on a part opens its row, as a pointer shortcut (`aria-hidden`, no focus
+stop), since every setting is reachable from its row. A setting with no look of
+its own shows its value as a note in the sample composer. The device choice
+follows the setting being changed: a phone-only title shows the phone. The layout
+follows the pane through a container query, not the viewport: from 760px the
+preview sits beside the rows and sticks; narrower it leads the page, and while a
+row is open it sticks above the page showing only the part in play, beside any
+context it needs. Opening a row holds its head in place while the rows around it
+change height, then, once it has grown, brings the whole row into view.
+
+The button editor (`MessageActionsEditor.tsx`) places a role's buttons in three
+lanes (bar, the More menu, hidden), which are views of one ordered list
+(`placeMessageAction`), so a hidden button keeps its slot. A mouse drags a chip
+from anywhere on it; a finger drags only by its grip, so a swipe on the chip still
+scrolls; arrows reorder and change lane from the keyboard; a click or Enter opens
+the chip's menu, which says what the button does and moves it without a drag. A
+bar-only package button has no menu lane.
 
 **Users and account settings.** There is no separate Access page. Settings →
 Users opens on the signed-in person's account card, then *People* (one grouped
@@ -3648,7 +3963,12 @@ Opening a folder adds or activates the Project and focuses the composer; there
 is no classification question.
 
 **Sidebar project presentations.** Tree mode nests sessions under expandable
-projects. Clicking a project in the phone navigator, desktop tree, or Project
+projects. A fresh install starts in Tree (`SIDEBAR_VIEW_MODE_DEFAULT`,
+`sidebarPrefs.ts`), and a shell whose rail would have no icon to show — a
+registry with no project, or only the lone Personal project — presents the
+tree whatever was saved, so the left edge is never an empty strip; the layout
+menu then leaves out the Project rail choice until a project exists. Clicking a
+project in the phone navigator, desktop tree, or Project
 rail only toggles its sessions; it never activates the project, changes the
 current session, or closes the navigator. The rail's browsed project is local
 presentation state, independent of the active workspace. Opening a session or
@@ -3663,26 +3983,37 @@ list says "No sessions".
 The phone Navigator is one grid (`MobileNavigator.css`, pinned by
 `mobileNavigatorLayout.test.ts` at 320–430px, every density and RTL). Most
 rows leave the leading column empty and every row ends in ⋮, so both edge
-columns are kept to what their marks need. Project marks are 24px tiles on an
-8px content edge; a session's state mark is centred in the same leading
-column, and search's Back glyph on that column's centre, 20px from the
-screen, never further in than the ⋮ column, so the start side carries no
-extra margin. Names, titles, pagination and the empty text share one start
-edge 40px in (gutter + mark + 8px). On the end side close, project ⋯ and session ⋯ glyphs share one
+columns are kept to what their marks need. Project marks are 24px tiles on a
+content edge that is the ⋮ glyph's own edge (the end axis less half a glyph,
+`--nav-gutter`, 15px on a standard phone), so the empty margin measures the
+same at both ends of a row; a session's state mark is centred in the same
+leading column, and search's Back glyph on that column's centre. Names,
+titles, pagination and the empty text share one start
+edge 47px in (gutter + mark + 8px). On the end side project ⋯ and session ⋯ glyphs share one
 column 24px from the screen (`--nav-axis`): the thumb aims at the glyph and a
 phone's rounded edge and case lip make the last few points hard to press, so
-the end column sits a little further in than the start side (close's ink
-lands on the platform's 16pt margin) while every target still runs out to the
-edge. New chat and every ⋮ draw the same 28px press circle centred on that
-axis (`--nav-dots-wash`), whatever the axis. A row's trailing marks (isolation, merge,
-running clock, an agent's next wake) end 12px clear of the ⋮ dots
-(`--nav-mark-end`, 37px from the screen): the body runs `--nav-mark-tuck`
-into the ⋮ control's 44px target. A
-title with no marks runs to that same edge (the row grid has no column gap,
-each present mark brings its own 8px lead-in), so the last few pixels of a
+the axis sits clear of the screen's rounded edge while every target still
+runs out to the edge. Close's × ends where those ⋮ dots do (see the toolbar
+below). The toolbar's `--nav-bar-axis` is `--nav-axis` unless an
+interface style floats the rows in from the edge (Air insets it with its
+islands, so close moves in with their ⋮; inside an island Air also gives the rows
+their own `--nav-row-inset`, so a mark sits as far in from the island's side
+as from its top and names, chats, Add project and the title follow it). A chat row's ⋮ draws a 28px press circle centred on that
+axis (`--nav-dots-wash`), whatever the axis; a project's New chat and ⋮ use
+the toolbar tools' 32px circle. A row's trailing marks (isolation, merge,
+running clock, an agent's next wake) are spaced by ink like a project's
+cluster: the last mark stands as far from the ⋮ dots as the dots from the
+screen edge (22.6px on the 24px axis), so marks end two axes in
+(`--nav-mark-end`, 48px from the screen), on the column where a project's
+New chat bubble ends. The body runs `--nav-mark-tuck` into the ⋮ control's
+44px target. A title with no marks runs to that same edge (the row grid has
+no column gap; the first present mark brings a 12px lead-in from the title,
+the next ones 8px each, and in the Pinned group the hidden pin leaves none
+behind), so the last few pixels of a
 long title sit over the ⋮ target; only a subagent pill, a real control,
 stays clear of it. Rows keep a 6px edge for the current row's rounded wash.
-Small phones (≤360px) use a 6px gutter, a 20px end column and a 4px edge.
+Small phones (≤360px) use an 11px content edge, a 20px end column and a 4px
+edge.
 The toolbar is the title and four tools. The title is the active Space's
 name on the content edge, at a project name's size and a firmer weight; in
 the native app it opens the native server menu (the separate Switch server
@@ -3706,16 +4037,30 @@ focus), and the bar tools' keyboard ring is their round wash, not the slot.
 Sort and filter is a circle in the field's round end cap, and a choice
 away from the default puts a dot on the search tool as well. The field is
 the tools' 44px height and ends on the content edge.
+A project's New chat and ⋮ are the row's primary controls and are drawn
+like the toolbar's tools: a full 44px box each and the toolbar's 20px glyph
+(`--icon-lg`, stroke `--nav-action-stroke`), ⋮ on the axis. The cluster is
+spaced by visible ink, not by boxes: the screen edge, the ⋮ dots, New
+chat's bubble and the status pills (or the name) stand one
+`--nav-cluster-gap` apart, which is the air between the screen edge and the
+dots (22.4px on a 24px axis). Even 20px boxes do not give even air, because
+the dots are about 3px of ink with 8px of empty box on each side. On the
+narrowest 20px axis that gap would squeeze a target under 44px, so there
+the two inner gaps share the extra (about 24px each, 18.4px at the edge).
 The toolbar's tools are the bar's primary controls and each keeps a full
-44px box: their glyphs sit one tap step apart (`--nav-tool-step`, the tool
-pitch), and close's box runs from half a step inside its glyph out to the
-screen edge. A project's New chat and ⋮ step like a chat row's marks toward
-its ⋮: 12px of air between neighbouring glyphs, New chat ends on
-`--nav-mark-end`, and status pills stop 12px before New chat. Their press
-wash is a circle round the glyph. Project targets are the full row height
-and split the room between neighbouring glyphs, so a tap never lands
-between two actions, but they are narrower than 44px (never below WCAG
-2.2's 24px): the exception `styles.md` records for trailing icon clusters. Search's Back and a row's ⋮ keep a 44px target that runs out
+44px box (close's runs out to the screen edge and half a gap past its ×).
+Their glyphs are spaced by ink the same way: the bar's edge, close's ×,
+the Settings gear, Select's box and Search's lens stand one
+`--nav-tool-gap` apart. That gap is the project cluster's edge air, so the
+× ends where the ⋮ dots below it do and the whole end side shares one
+22.4px rhythm; its centre sits about 4px inside the ⋮ column because the ×
+is wider. On the narrowest axis four 44px targets need a wider gap, so the
+toolbar's gaps are all about 20.8px there. The glyphs' ink spans are
+recorded on Lucide's 24-unit grid in `MobileNavigator.css`; Select's box
+and the lens are not symmetric, so their end-side insets swap in RTL. The
+closed search pill and the filter dot follow the lens. Every phone ⋮ is the stroked vertical ellipsis
+(`MoreVerticalIcon`), whose dots stay legible at row size. Their press wash
+is a circle round the glyph and their targets are the full row height. Search's Back and a row's ⋮ keep a 44px target that runs out
 to the edge through a transparent `::after`; press rules set
 `background-color` only.
 Hierarchy is size and weight together: a project name uses the user's
@@ -3795,7 +4140,9 @@ by `apps/web/test/sidebarFolderMode.test.ts`.
 Each project tile carries a live status dot: green while any of that project's
 sessions works, amber when one needs attention. The socket keeps active rows
 from every project current as summary projections, so the dot appears and
-clears without opening that project.
+clears without opening that project; after a reconnect it also re-reads the
+rows the client still shows as active, so a turn that ended while the link was
+down clears its dot too.
 
 **Primary workbench profiles.** A package profile opts into the same top-level
 switcher as Chat with `presentation: { navigation: "primary" }`. Profiles without
@@ -3889,9 +4236,12 @@ the same column; when the actions are hidden it stays at the navigator's foot
 so its menu remains reachable. A fresh install starts `bare` with
 **Floating columns**, the tools in the launcher strip (`end`) and the header
 actions plus the account at the foot of the navigator (`start`), where the
-docked Settings stands in for the rail's own gear — one Settings button. A
+docked Settings stands in for the rail's own gear — one Settings button. It
+also starts with the bare chat title hidden (`shellTitle: "hidden"`): no top
+bar and no title line over the conversation, the active chat being named by
+its navigator row; Settings → Appearance puts the title back. A
 saved record without these fields keeps the window it was built with
-(`classic`, actions `end`). Docked groups are the
+(`classic`, actions `end`, the title over the chat). Docked groups are the
 bar's own components (`CapabilityNav`, `HeaderActionsRail`, `UserMenu`)
 rendered once through `ShellDock` in `Sidebar` and
 `ContextRail`, so order, customisation and drag targets stay the same; a

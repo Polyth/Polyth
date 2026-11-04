@@ -1,46 +1,46 @@
 // Settings editor for one role's quick actions. User messages and agent
-// replies render this same section, so both are configured identically: a
-// live preview, a master switch, how the bar reveals on a computer and on
-// touch, and one ordered list where each action sits on the bar, in the More
-// menu, or is off. Package buttons are rows of that list too.
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+// replies open this same body, so both are configured identically: a master
+// switch, how the bar reveals on a computer and on touch, and three lanes (the
+// bar, the More menu, hidden) a button is dragged between. Lanes are views of
+// one ordered list, so a hidden button keeps its slot; package buttons sit in
+// them too. The chat preview beside the page shows the result.
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { tr } from "../../i18n/index.ts";
 import {
   ASSISTANT_MESSAGE_ACTIONS_DEFAULT,
   cloneMessageActionLayout,
   isPackageMessageActionId,
-  moveMessageAction,
+  placeMessageAction,
   resolveMessageActions,
   sameMessageActionLayout,
-  setMessageActionPlacement,
   USER_MESSAGE_ACTIONS_DEFAULT,
   withPackageMessageActions,
   type MessageActionId,
+  type MessageActionItem,
   type MessageActionLayout,
   type MessageActionPlacement,
   type MessageActionReveal,
   type MessageActionRole,
   type MessageActionTouchReveal,
+  type ResolvedMessageActions,
   type WithPackageActions,
 } from "../../messageActionLayout.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { MESSAGE_ACTION_ICONS, messageActionDescription, messageActionName } from "../messageActionCatalog.ts";
 import { useMessageActionContributions, type MessageActionContribution } from "../messageActionContributions.ts";
-import { useTouchPointer } from "../MessageActionBar.tsx";
-import { DragHandleIcon, Icon, MoreIcon, PluginIcon, PointerIcon, type LucideIcon } from "../ui/index.ts";
-import { ResetLink, Row, Section, Seg, Toggle } from "./parts.tsx";
+import { DragHandleIcon, Icon, Menu, PluginIcon, type LucideIcon, type MenuEntry, type MenuTriggerProps } from "../ui/index.ts";
+import { ResetLink, Row, Seg, Toggle } from "./parts.tsx";
 import "./MessageActionsEditor.css";
 
-type PreviewDevice = "computer" | "touch";
-type ActionKey = WithPackageActions<MessageActionId>;
+export type ActionKey = WithPackageActions<MessageActionId>;
 
-/** How one row reads: built-in actions from the catalog, package buttons from
- *  their contribution (or their id while the package is off). */
-interface RowInfo {
+/** How one button reads: built-in actions from the catalog, package buttons
+ *  from their contribution (or their id while the package is off). */
+export interface RowInfo {
   name: string;
   icon: LucideIcon;
   description: string;
-  /** Its package is off or gone: the row keeps its slot but shows nothing. */
+  /** Its package is off or gone: it keeps its slot but shows nothing. */
   unavailable: boolean;
   /** Bar-only package buttons offer no "Menu" placement. */
   menu: boolean;
@@ -99,42 +99,45 @@ function writeRole(role: MessageActionRole, patch: { show?: boolean; layout?: Me
   });
 }
 
-export default function MessageActionsEditor({ role, itemId }: { role: MessageActionRole; itemId: string }) {
+/** The role's stored settings joined with the package buttons on offer, for
+ *  the editor, the preview and the row's summary alike. */
+export function useMessageActionRows(role: MessageActionRole) {
   const ui = useUiSettings();
-  const touchPointer = useTouchPointer();
-  const [device, setDevice] = useState<PreviewDevice>(touchPointer ? "touch" : "computer");
   const contributions = useMessageActionContributions(role);
   const { show, layout: stored, defaults } = roleState(role, ui);
-  const layout = withPackageMessageActions(stored, contributions);
   const byPackage = new Map<string, MessageActionContribution>(contributions.map((entry) => [entry.id, entry]));
-  const setLayout = (next: MessageActionLayout<ActionKey>) => writeRole(role, { layout: next });
   const info = (id: ActionKey) => rowInfo(role, id, byPackage);
+  return {
+    show,
+    stored,
+    defaults,
+    layout: withPackageMessageActions(stored, contributions),
+    info,
+    resolve: (touch: boolean): ResolvedMessageActions<ActionKey> => resolveMessageActions(
+      withPackageMessageActions(stored, contributions),
+      (id) => !info(id).unavailable,
+      touch,
+      (id) => info(id).menu,
+    ),
+  };
+}
+
+export default function MessageActionsEditor({ role, itemId, onDevice }: {
+  role: MessageActionRole;
+  itemId: string;
+  /** A reveal change is about one kind of device: the preview follows it. */
+  onDevice?: (device: "computer" | "phone") => void;
+}) {
+  const { show, stored, defaults, layout, info } = useMessageActionRows(role);
+  const setLayout = (next: MessageActionLayout<ActionKey>) => writeRole(role, { layout: next });
   const isDefault = show && sameMessageActionLayout(stored, defaults);
 
   return (
-    <Section
-      title={role === "user" ? tr("settings.quickActions.userTitle") : tr("settings.quickActions.assistantTitle")}
-      hint={role === "user" ? tr("settings.quickActions.userHint") : tr("settings.quickActions.assistantHint")}
-      itemId={itemId}
-      action={(
-        <ResetLink
-          disabled={isDefault}
-          onClick={() => writeRole(role, { show: true, layout: cloneMessageActionLayout(defaults) })}
-        />
-      )}
-    >
-      <ActionPreview
-        role={role}
-        layout={layout}
-        show={show}
-        device={device}
-        onDevice={setDevice}
-        info={info}
-      />
-      <Row label={tr("settings.quickActions.show")} hint={tr("settings.quickActions.showHint")}>
+    <>
+      <Row label={tr("settings.quickActions.show")} itemId={itemId}>
         <Toggle on={show} onChange={(next) => writeRole(role, { show: next })} label={tr("settings.quickActions.show")} />
       </Row>
-      <Row label={tr("settings.quickActions.computer")} hint={tr("settings.quickActions.computerHint")} disabled={!show}>
+      <Row label={tr("settings.quickActions.computer")} disabled={!show}>
         <Seg<MessageActionReveal>
           label={tr("settings.quickActions.computer")}
           value={layout.reveal}
@@ -145,12 +148,12 @@ export default function MessageActionsEditor({ role, itemId }: { role: MessageAc
             ["menu", tr("settings.quickActions.menuOnly")],
           ]}
           onChange={(reveal) => {
-            setDevice("computer");
+            onDevice?.("computer");
             setLayout({ ...layout, reveal });
           }}
         />
       </Row>
-      <Row label={tr("settings.quickActions.touch")} hint={tr("settings.quickActions.touchHint")} disabled={!show}>
+      <Row label={tr("settings.quickActions.touch")} disabled={!show}>
         <Seg<MessageActionTouchReveal>
           label={tr("settings.quickActions.touch")}
           value={layout.touch}
@@ -160,186 +163,181 @@ export default function MessageActionsEditor({ role, itemId }: { role: MessageAc
             ["menu", tr("settings.quickActions.menuOnly")],
           ]}
           onChange={(touch) => {
-            setDevice("touch");
+            onDevice?.("phone");
             setLayout({ ...layout, touch });
           }}
         />
       </Row>
-      <Row label={tr("settings.quickActions.buttons")} hint={tr("settings.quickActions.buttonsHint")} layout="stacked" disabled={!show}>
-        <ActionList
-          layout={layout}
-          disabled={!show}
-          info={info}
-          onChange={setLayout}
+      <ActionLanes layout={layout} disabled={!show} info={info} onChange={setLayout} />
+      <div className="mqa-foot">
+        <p className="mqa-foot-hint">{tr("settings.quickActions.lanesHint")}</p>
+        <ResetLink
+          disabled={isDefault}
+          onClick={() => writeRole(role, { show: true, layout: cloneMessageActionLayout(defaults) })}
         />
-      </Row>
-    </Section>
+      </div>
+    </>
   );
 }
 
-function ActionPreview({ role, layout, show, device, onDevice, info }: {
-  role: MessageActionRole;
-  layout: MessageActionLayout<ActionKey>;
-  show: boolean;
-  device: PreviewDevice;
-  onDevice: (device: PreviewDevice) => void;
-  info: (id: ActionKey) => RowInfo;
-}) {
-  const resolved = resolveMessageActions(
-    layout,
-    (id) => !info(id).unavailable,
-    device === "touch",
-    (id) => info(id).menu,
-  );
-  const empty = resolved.bar.length === 0 && resolved.menu.length === 0;
-  const caption = !show
-    ? tr("settings.quickActions.previewOff")
-    : empty
-      ? tr("settings.quickActions.previewEmpty")
-      : resolved.mode === "hover"
-        ? tr("settings.quickActions.previewHover")
-        : resolved.mode === "menu"
-          ? tr("settings.quickActions.previewMenu")
-          : tr("settings.quickActions.previewAlways");
-  const bar = show && !empty && (
-    <span className="mqa-preview-bar" data-reveal={resolved.mode}>
-      {resolved.bar.map((id) => (
-        <span key={id} className="mqa-preview-btn">
-          <Icon icon={info(id).icon} size="sm" />
-        </span>
-      ))}
-      {resolved.menu.length > 0 && (
-        <span className="mqa-preview-btn mqa-preview-more">
-          <Icon icon={MoreIcon} size="sm" />
-        </span>
-      )}
-      {resolved.mode === "hover" && device === "computer" && (
-        <span className="mqa-preview-cursor"><Icon icon={PointerIcon} size="sm" /></span>
-      )}
-    </span>
-  );
-  return (
-    <div className="mqa-preview" data-role={role} data-device={device}>
-      <div className="mqa-preview-head">
-        <span className="mqa-preview-title">{tr("settings.quickActions.preview")}</span>
-        <Seg<PreviewDevice>
-          label={tr("settings.quickActions.previewDevice")}
-          value={device}
-          options={[
-            ["computer", tr("settings.quickActions.previewComputer")],
-            ["touch", tr("settings.quickActions.previewTouch")],
-          ]}
-          onChange={onDevice}
-        />
-      </div>
-      <div className="mqa-preview-stage" aria-hidden="true">
-        {role === "user" ? (
-          <div className="mqa-preview-message mqa-preview-message--user">
-            <div className="mqa-preview-bubble">{tr("settings.quickActions.sampleUser")}</div>
-            <div className="mqa-preview-meta">
-              <span className="mqa-preview-time">12:41</span>
-              {bar}
-            </div>
-          </div>
-        ) : (
-          <div className="mqa-preview-message mqa-preview-message--assistant">
-            <span className="mqa-preview-line" style={{ inlineSize: "92%" }} />
-            <span className="mqa-preview-line" style={{ inlineSize: "78%" }} />
-            <span className="mqa-preview-line" style={{ inlineSize: "54%" }} />
-            <div className="mqa-preview-meta">
-              <span className="mqa-preview-identity">
-                <span className="mqa-preview-logo" />
-                {tr("settings.quickActions.sampleAgent")}
-              </span>
-              {bar}
-            </div>
-          </div>
-        )}
-        {show && resolved.menu.length > 0 && (
-          <div className="mqa-preview-menu">
-            {resolved.menu.map((id) => (
-              <span key={id} className="mqa-preview-menu-item">
-                <Icon icon={info(id).icon} size="sm" />
-                <span>{info(id).name}</span>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-      <p className="mqa-preview-caption" aria-live="polite">{caption}</p>
-    </div>
-  );
-}
+const LANES: readonly MessageActionPlacement[] = ["bar", "menu", "off"];
 
-function ActionList({ layout, disabled, info, onChange }: {
+const laneName = (lane: MessageActionPlacement): string => lane === "bar"
+  ? tr("settings.quickActions.placeBar")
+  : lane === "menu"
+    ? tr("settings.quickActions.laneMenu")
+    : tr("settings.quickActions.laneHidden");
+
+const laneEmpty = (lane: MessageActionPlacement): string => lane === "bar"
+  ? tr("settings.quickActions.laneEmptyBar")
+  : lane === "menu"
+    ? tr("settings.quickActions.laneEmptyMenu")
+    : tr("settings.quickActions.laneEmptyHidden");
+
+const DRAG_THRESHOLD = 4;
+
+function ActionLanes({ layout, disabled, info, onChange }: {
   layout: MessageActionLayout<ActionKey>;
   disabled: boolean;
   info: (id: ActionKey) => RowInfo;
   onChange: (next: MessageActionLayout<ActionKey>) => void;
 }) {
-  const listRef = useRef<HTMLOListElement>(null);
+  const lanesRef = useRef<HTMLDivElement>(null);
+  const keyboardHintId = useId();
   const [dragging, setDragging] = useState<ActionKey | null>(null);
   const [status, setStatus] = useState("");
   // Latest layout for pointer moves that land between renders.
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
+  const pressRef = useRef<{ id: ActionKey; x: number; y: number; moved: boolean } | null>(null);
+  // The click ending a drag must not open the chip's menu. A finger's drag ends
+  // with no click, so the next press or key clears this as well.
+  const justDraggedRef = useRef(false);
 
-  const moveTo = (id: ActionKey, index: number, announce: boolean) => {
-    const current = layoutRef.current;
-    const from = current.items.findIndex((item) => item.id === id);
-    const target = Math.max(0, Math.min(current.items.length - 1, index));
-    if (from < 0 || from === target) return;
-    const next = moveMessageAction(current, id, target);
-    layoutRef.current = next;
-    onChange(next);
-    if (announce) {
-      setStatus(tr("settings.quickActions.moved", { action: info(id).name, position: target + 1, total: next.items.length }));
-    }
+  /** A bar-only button reads its stored "menu" placement as the bar, where it
+   *  actually renders. */
+  const laneOf = (item: MessageActionItem<ActionKey>): MessageActionPlacement =>
+    !info(item.id).menu && item.placement === "menu" ? "bar" : item.placement;
+  const inLane = (current: MessageActionLayout<ActionKey>, lane: MessageActionPlacement) =>
+    current.items.filter((item) => laneOf(item) === lane);
+
+  const announce = (id: ActionKey) => {
+    const lane = layoutRef.current.items.find((item) => item.id === id);
+    if (!lane) return;
+    const items = inLane(layoutRef.current, laneOf(lane));
+    setStatus(tr("settings.quickActions.movedToLane", {
+      action: info(id).name,
+      lane: laneName(laneOf(lane)),
+      position: items.findIndex((item) => item.id === id) + 1,
+      total: items.length,
+    }));
   };
 
-  const onHandleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: ActionKey, index: number) => {
-    const last = layout.items.length - 1;
-    const target = event.key === "ArrowUp" ? index - 1
-      : event.key === "ArrowDown" ? index + 1
-      : event.key === "Home" ? 0
-      : event.key === "End" ? last
-      : null;
-    if (target === null) return;
-    event.preventDefault();
-    moveTo(id, target, true);
-    // The row re-renders at its new index; keep focus on its handle.
+  const moveTo = (id: ActionKey, lane: MessageActionPlacement, index: number): boolean => {
+    if (lane === "menu" && !info(id).menu) return false;
+    const current = layoutRef.current;
+    const next = placeMessageAction(current, id, lane, index, laneOf);
+    if (sameMessageActionLayout(next, current)) return false;
+    layoutRef.current = next;
+    onChange(next);
+    return true;
+  };
+
+  const refocus = (id: ActionKey) => {
+    // The chip re-renders at its new place; keep focus on it.
     requestAnimationFrame(() => {
-      listRef.current?.querySelector<HTMLButtonElement>(`[data-action-handle="${id}"]`)?.focus();
+      lanesRef.current?.querySelector<HTMLButtonElement>(`[data-action-chip="${id}"]`)?.focus();
     });
   };
 
-  const onPointerDown = (event: PointerEvent<HTMLButtonElement>, id: ActionKey) => {
-    if (disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
-    event.preventDefault();
-    setDragging(id);
+  /** Up and down change lane; a bar-only button skips the menu it cannot join. */
+  const neighbourLane = (id: ActionKey, lane: MessageActionPlacement, step: -1 | 1): MessageActionPlacement | null => {
+    const lanes = LANES.filter((candidate) => candidate !== "menu" || info(id).menu);
+    return lanes[lanes.indexOf(lane) + step] ?? null;
   };
 
-  // Track the drag on the window: reordering moves the row's DOM node, which
-  // would drop a pointer capture held by its handle mid-gesture.
+  const shift = (id: ActionKey, lane: MessageActionPlacement, step: -1 | 1) => {
+    const items = inLane(layoutRef.current, lane).filter((item) => item.id !== id);
+    const index = inLane(layoutRef.current, lane).findIndex((item) => item.id === id);
+    const target = index + step;
+    if (target < 0 || target > items.length) return;
+    if (moveTo(id, lane, target)) announce(id);
+  };
+
+  const onChipKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: ActionKey, lane: MessageActionPlacement) => {
+    justDraggedRef.current = false;
+    if (disabled || event.altKey || event.ctrlKey || event.metaKey) return;
+    const rtl = getComputedStyle(event.currentTarget).direction === "rtl";
+    const forward = rtl ? "ArrowLeft" : "ArrowRight";
+    const backward = rtl ? "ArrowRight" : "ArrowLeft";
+    if (event.key === forward || event.key === backward) {
+      shift(id, lane, event.key === forward ? 1 : -1);
+    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const next = neighbourLane(id, lane, event.key === "ArrowDown" ? 1 : -1);
+      if (next && moveTo(id, next, inLane(layoutRef.current, next).length)) announce(id);
+    } else {
+      return;
+    }
+    event.preventDefault();
+    refocus(id);
+  };
+
+  const onChipPointerDown = (event: PointerEvent<HTMLButtonElement>, id: ActionKey) => {
+    justDraggedRef.current = false;
+    if (disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
+    // A finger on the chip scrolls the page or taps it; only its grip drags.
+    if (event.pointerType !== "mouse" && !(event.target as Element).closest(".mqa-chip-grip")) return;
+    pressRef.current = { id, x: event.clientX, y: event.clientY, moved: false };
+  };
+
+  // Track the drag on the window: moving a chip moves its DOM node, which would
+  // drop a pointer capture held by the chip mid-gesture.
   useEffect(() => {
-    if (!dragging) return;
-    const id = dragging;
+    const laneAt = (y: number) => {
+      const lanes = Array.from(lanesRef.current?.querySelectorAll<HTMLElement>("[data-lane]") ?? []);
+      let nearest: HTMLElement | null = null;
+      let distance = Number.POSITIVE_INFINITY;
+      for (const lane of lanes) {
+        const rect = lane.getBoundingClientRect();
+        const away = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+        if (away < distance) {
+          distance = away;
+          nearest = lane;
+        }
+      }
+      return nearest;
+    };
     const onMove = (event: globalThis.PointerEvent) => {
-      if (!listRef.current) return;
-      // Target = how many other rows sit above the pointer.
-      const rows = Array.from(listRef.current.querySelectorAll<HTMLElement>(":scope > li"))
-        .filter((row) => row.dataset.actionId !== id);
-      const index = rows.filter((row) => {
-        const rect = row.getBoundingClientRect();
-        return rect.top + rect.height / 2 < event.clientY;
-      }).length;
-      moveTo(id, index, false);
+      const press = pressRef.current;
+      if (!press) return;
+      if (!press.moved) {
+        if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < DRAG_THRESHOLD) return;
+        press.moved = true;
+        setDragging(press.id);
+      }
+      const lane = laneAt(event.clientY);
+      if (!lane) return;
+      // Target = how many other chips in that lane come before the pointer:
+      // the rows above it, then those on its own row toward the line's start.
+      const rtl = getComputedStyle(lane).direction === "rtl";
+      const index = Array.from(lane.querySelectorAll<HTMLElement>("[data-action-chip]"))
+        .filter((chip) => chip.dataset.actionChip !== press.id)
+        .filter((chip) => {
+          const rect = chip.getBoundingClientRect();
+          if (rect.bottom < event.clientY) return true;
+          if (rect.top > event.clientY) return false;
+          const middle = rect.left + rect.width / 2;
+          return rtl ? middle > event.clientX : middle < event.clientX;
+        }).length;
+      moveTo(press.id, lane.dataset.lane as MessageActionPlacement, index);
     };
     const onEnd = () => {
+      const press = pressRef.current;
+      pressRef.current = null;
+      if (!press?.moved) return;
+      justDraggedRef.current = true;
       setDragging(null);
-      const current = layoutRef.current;
-      const index = current.items.findIndex((item) => item.id === id);
-      setStatus(tr("settings.quickActions.moved", { action: info(id).name, position: index + 1, total: current.items.length }));
+      announce(press.id);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onEnd);
@@ -349,67 +347,126 @@ function ActionList({ layout, disabled, info, onChange }: {
       window.removeEventListener("pointerup", onEnd);
       window.removeEventListener("pointercancel", onEnd);
     };
-  // moveTo reads the latest layout through layoutRef.
+  // moveTo and announce read the latest layout through layoutRef.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragging]);
+  }, []);
 
   return (
     <>
-      <ol ref={listRef} className="mqa-list" data-dragging={dragging ? "true" : undefined}>
-        {layout.items.map((item, index) => {
-          const row = info(item.id);
-          const name = row.name;
-          // A bar-only button reads its stored "menu" placement as the bar,
-          // where it actually renders.
-          const placement = !row.menu && item.placement === "menu" ? "bar" : item.placement;
-          const detail = row.unavailable
-            ? tr("settings.quickActions.packageOff")
-            : row.menu
-              ? row.description
-              : `${row.description} ${tr("settings.quickActions.barOnly")}`;
+      <div ref={lanesRef} className="mqa-lanes" data-dragging={dragging ? "true" : undefined} data-disabled={disabled ? "true" : undefined}>
+        {LANES.map((lane) => {
+          const items = inLane(layout, lane);
           return (
-            <li
-              key={item.id}
-              className="mqa-item"
-              data-action-id={item.id}
-              data-placement={placement}
-              data-dragging={dragging === item.id ? "true" : undefined}
-            >
-              <button
-                type="button"
-                className="mqa-handle"
-                data-action-handle={item.id}
-                aria-label={tr("settings.quickActions.reorder", { action: name })}
-                title={tr("settings.quickActions.reorder", { action: name })}
-                disabled={disabled}
-                onKeyDown={(event) => onHandleKeyDown(event, item.id, index)}
-                onPointerDown={(event) => onPointerDown(event, item.id)}
-              >
-                <Icon icon={DragHandleIcon} size="sm" />
-              </button>
-              <span className="mqa-item-glyph"><Icon icon={row.icon} size="md" /></span>
-              <span className="mqa-item-copy">
-                <span className="mqa-item-name">{name}</span>
-                <span className="mqa-item-detail">{detail}</span>
-              </span>
-              <span className="mqa-item-placement">
-                <Seg<MessageActionPlacement>
-                  label={tr("settings.quickActions.placement", { action: name })}
-                  value={placement}
-                  disabled={disabled}
-                  options={[
-                    ["bar", tr("settings.quickActions.placeBar")],
-                    ...(row.menu ? [["menu", tr("settings.quickActions.placeMenu")] as [MessageActionPlacement, string]] : []),
-                    ["off", tr("settings.quickActions.placeOff")],
-                  ]}
-                  onChange={(placement) => onChange(setMessageActionPlacement(layout, item.id, placement))}
-                />
-              </span>
-            </li>
+            <div key={lane} className="mqa-lane" data-lane={lane} role="group" aria-label={laneName(lane)}>
+              <span className="mqa-lane-name" aria-hidden="true">{laneName(lane)}</span>
+              <div className="mqa-chips" data-empty={items.length === 0 ? "true" : undefined}>
+                {items.map((item, index) => (
+                  <ActionChip
+                    key={item.id}
+                    id={item.id}
+                    lane={lane}
+                    row={info(item.id)}
+                    first={index === 0}
+                    last={index === items.length - 1}
+                    disabled={disabled}
+                    dragging={dragging === item.id}
+                    keyboardHintId={keyboardHintId}
+                    justDragged={justDraggedRef}
+                    onPlace={(next) => {
+                      if (moveTo(item.id, next, inLane(layoutRef.current, next).length)) announce(item.id);
+                    }}
+                    onShift={(step) => shift(item.id, lane, step)}
+                    onKeyDown={(event) => onChipKeyDown(event, item.id, lane)}
+                    onPointerDown={(event) => onChipPointerDown(event, item.id)}
+                  />
+                ))}
+                {items.length === 0 && <span className="mqa-lane-empty">{laneEmpty(lane)}</span>}
+              </div>
+            </div>
           );
         })}
-      </ol>
+      </div>
+      <span id={keyboardHintId} className="sr-only">{tr("settings.quickActions.lanesKeyboardHint")}</span>
       <span className="mqa-status" role="status">{status}</span>
     </>
+  );
+}
+
+/** One button in a lane. A click (or Enter) opens its menu, which says what the
+ *  button does and moves it without a drag; a finger drags it by its grip. */
+function ActionChip({
+  id, lane, row, first, last, disabled, dragging, keyboardHintId, justDragged, onPlace, onShift, onKeyDown, onPointerDown,
+}: {
+  id: ActionKey;
+  lane: MessageActionPlacement;
+  row: RowInfo;
+  first: boolean;
+  last: boolean;
+  disabled: boolean;
+  dragging: boolean;
+  keyboardHintId: string;
+  justDragged: { current: boolean };
+  onPlace: (lane: MessageActionPlacement) => void;
+  onShift: (step: -1 | 1) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+}) {
+  const detail = row.unavailable
+    ? tr("settings.quickActions.packageOff")
+    : row.menu
+      ? row.description
+      : `${row.description} ${tr("settings.quickActions.barOnly")}`;
+  const placementEntry = (target: MessageActionPlacement): MenuEntry => ({
+    id: target,
+    label: laneName(target),
+    kind: "radio",
+    checked: lane === target,
+    onSelect: () => onPlace(target),
+  });
+  const entries: MenuEntry[] = [
+    placementEntry("bar"),
+    ...(row.menu ? [placementEntry("menu")] : []),
+    placementEntry("off"),
+    "separator",
+    { id: "earlier", label: tr("settings.quickActions.moveEarlier"), disabled: first, onSelect: () => onShift(-1) },
+    { id: "later", label: tr("settings.quickActions.moveLater"), disabled: last, onSelect: () => onShift(1) },
+  ];
+  return (
+    <Menu
+      label={row.name}
+      title={row.name}
+      entries={entries}
+      header={<p className="mqa-chip-detail">{detail}</p>}
+    >
+      {(trigger: MenuTriggerProps) => (
+        <button
+          ref={trigger.ref}
+          type="button"
+          className="mqa-chip"
+          data-action-chip={id}
+          data-placement={lane}
+          data-dragging={dragging ? "true" : undefined}
+          data-unavailable={row.unavailable ? "true" : undefined}
+          aria-haspopup={trigger["aria-haspopup"]}
+          aria-expanded={trigger["aria-expanded"]}
+          aria-describedby={keyboardHintId}
+          title={detail}
+          disabled={disabled}
+          onClick={() => {
+            if (justDragged.current) {
+              justDragged.current = false;
+              return;
+            }
+            trigger.onClick();
+          }}
+          onKeyDown={onKeyDown}
+          onPointerDown={onPointerDown}
+        >
+          <span className="mqa-chip-grip" aria-hidden="true"><Icon icon={DragHandleIcon} size="sm" /></span>
+          <span className="mqa-chip-glyph" aria-hidden="true"><Icon icon={row.icon} size="sm" /></span>
+          <span className="mqa-chip-name">{row.name}</span>
+        </button>
+      )}
+    </Menu>
   );
 }

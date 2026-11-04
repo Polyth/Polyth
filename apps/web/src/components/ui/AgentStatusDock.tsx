@@ -3,6 +3,8 @@ import "./AgentStatusDock.css";
 
 export interface AgentStatusDockProps {
   icon: ReactNode;
+  /** Model or harness name. The mark says who works and the line keeps its
+   * room for the action, so the name is only the mark's tooltip. */
   model: string;
   status: string;
   elapsed?: string | null;
@@ -45,10 +47,9 @@ export default function AgentStatusDock({
   ].filter(Boolean).join(" ");
   const content = (
     <>
-      <span className="agent-status-dock-icon" aria-hidden="true">{icon}{!idle && <i />}</span>
+      <span className="agent-status-dock-icon" aria-hidden="true" title={model}>{icon}{!idle && <i />}</span>
       <span className="agent-status-dock-content">
         <span className="agent-status-dock-primary">
-          <strong title={model}>{model}</strong>
           <span
             className="agent-status-dock-state"
             title={status}

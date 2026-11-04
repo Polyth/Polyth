@@ -75,6 +75,7 @@ export const ar: TerminalMessages = {
   "terminalview.swipeUpFor": "اسحب لأعلى لـ {key}",
   "terminalview.terminalTabName": "اسم تبويب الطرفية",
   "terminalview.terminalValue": "الطرفية: {title}",
+  "terminalview.title": "الطرفية",
   "terminalview.textInput": "إدخال النص",
   "terminalview.textInputPlaceholder": "اكتب أمرًا، ويرسله Enter",
   "terminalview.toggleKeyboard": "إظهار لوحة المفاتيح أو إخفاؤها",

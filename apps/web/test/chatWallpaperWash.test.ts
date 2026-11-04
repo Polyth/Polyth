@@ -192,7 +192,7 @@ test("a sampled image's tone uses the preset thresholds", () => {
 });
 
 test("the wash moves the inks only inside the transcript and the lines above the composer", () => {
-  const scope = block(styles, ":is(.timeline, .conversation-composer-dock > :not(.composer))");
+  const scope = block(styles, ":is(.timeline, .conversation-composer-dock > :not(.composer), .composer-chat > :is(.queue-list, .composer-suggestion))");
   for (const [token, ink] of [["--text-dim", "dim"], ["--muted", "muted"], ["--faint", "faint"], ["--green", "green"], ["--red", "red"]]) {
     assert.match(scope, new RegExp(`${token}: var\\(--chat-ink-${ink}\\);`));
   }

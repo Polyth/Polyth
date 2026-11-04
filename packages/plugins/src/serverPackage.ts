@@ -258,6 +258,21 @@ export interface ServerPermissionWaitingBus {
 export const SERVER_PERMISSION_WAITING_BUS =
   serverServiceKey<ServerPermissionWaitingBus>("session.permission-waiting");
 
+/** A server account the owner is removing. Listeners run, and are awaited,
+ *  before its credential goes, so access a package granted to the account
+ *  (a paired phone, a token) ends with it. A failing listener is logged and
+ *  does not keep the account. */
+export interface ServerAccountRemovedEvent {
+  userId: string;
+}
+
+export interface ServerAccountRemovalBus {
+  subscribe(listener: (event: ServerAccountRemovedEvent) => void | Promise<void>): Disposable;
+}
+
+export const SERVER_ACCOUNT_REMOVAL_BUS =
+  serverServiceKey<ServerAccountRemovalBus>("server.account-removed");
+
 /** An event source a package offers agents (Monitoring, Git, Home Assistant…). */
 export interface AgentEventSourceDescriptor {
   /** Lowercase id, e.g. `monitoring`. */

@@ -2,17 +2,21 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use iroh::endpoint::{Connection, RecvStream, SendStream};
 use polyth_link_core::identity;
 use polyth_link_core::net::{bind_link_endpoint, endpoint_addr_from_ticket};
 use polyth_link_core::pairing::client_proof;
 use polyth_link_core::protocol::{
     decode_head, encode_head, ControlMessage, HttpRequestHeadV1, HttpResponseHeadV1, STREAM_HTTP,
 };
-use polyth_link_core::ticket::{decode_invite_secret, parse_pairing_ticket, POLYTH_LINK_ALPN};
+use polyth_link_core::ticket::{
+    decode_invite_secret, parse_pairing_ticket, PairingTicket, POLYTH_LINK_ALPN,
+};
 use polyth_link_core::transport::TransportPolicy;
 use polyth_link_core::wire::{
     open_control, read_control, read_len_prefixed, write_all, write_control, write_stream_kind,
 };
+use polyth_link_core::PROTOCOL_VERSION;
 use rand::RngCore;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -125,8 +129,14 @@ async fn serve_ingress(socket: PathBuf) {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn host_binary_pairs_and_proxies_http() {
+struct LinkHost {
+    _proc: HostProc,
+    rpc: BufReader<UnixStream>,
+    _dir: tempfile::TempDir,
+}
+
+/// A host with a bound endpoint and a configured ingress.
+async fn start_host() -> LinkHost {
     let dir = tempfile::tempdir().unwrap();
     let control = dir.path().join("host.sock");
     let ingress = dir.path().join("ingress.sock");
@@ -140,7 +150,7 @@ async fn host_binary_pairs_and_proxies_http() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn host");
-    let _host = HostProc(child);
+    let proc = HostProc(child);
 
     let started = std::time::Instant::now();
     while !control.exists() {
@@ -166,31 +176,6 @@ async fn host_binary_pairs_and_proxies_http() {
     );
 
     rpc(&mut rpc_stream, 2, "endpoint.start", json!({})).await;
-    let status = rpc(&mut rpc_stream, 20, "status", json!({})).await;
-    assert_eq!(
-        status.get("activePolicy").and_then(Value::as_str),
-        Some("direct-preferred")
-    );
-    assert_eq!(
-        status.get("endpointBound").and_then(Value::as_bool),
-        Some(true)
-    );
-    let rejected = rpc_try(
-        &mut rpc_stream,
-        21,
-        "pairing.create",
-        json!({ "profile": "interact", "mode": "relay-only" }),
-    )
-    .await;
-    assert!(rejected.get("error").is_some());
-    let policy_rejected = rpc_try(
-        &mut rpc_stream,
-        22,
-        "endpoint.set_policy",
-        json!({ "policy": "air-gapped" }),
-    )
-    .await;
-    assert!(policy_rejected.get("error").is_some());
     rpc(
         &mut rpc_stream,
         3,
@@ -202,9 +187,16 @@ async fn host_binary_pairs_and_proxies_http() {
     )
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
+    LinkHost {
+        _proc: proc,
+        rpc: rpc_stream,
+        _dir: dir,
+    }
+}
 
+async fn create_invitation(rpc_stream: &mut BufReader<UnixStream>) -> (PairingTicket, String) {
     let created = rpc(
-        &mut rpc_stream,
+        rpc_stream,
         4,
         "pairing.create",
         json!({
@@ -226,24 +218,28 @@ async fn host_binary_pairs_and_proxies_http() {
         .and_then(Value::as_str)
         .unwrap()
         .to_string();
-    let ticket = parse_pairing_ticket(&ticket_text).unwrap();
-    assert_eq!(ticket.candidates[0].policy, "direct-preferred");
-    let status = rpc(&mut rpc_stream, 23, "status", json!({})).await;
-    assert_eq!(
-        status.get("activePolicy").and_then(Value::as_str),
-        Some(ticket.candidates[0].policy.as_str())
-    );
+    (parse_pairing_ticket(&ticket_text).unwrap(), pairing_id)
+}
 
-    let device_dir = dir.path().join("device");
-    let device_id = identity::load_or_create(device_dir.join("identity")).unwrap();
-    let device_ep = bind_link_endpoint(device_id.secret_key(), TransportPolicy::DirectPreferred)
+/// The phone's side of a pairing; ends with the committed connection. The
+/// control streams come back too: the link lives only while they are open.
+struct PairedLink {
+    endpoint: iroh::Endpoint,
+    conn: Connection,
+    _control: (SendStream, RecvStream),
+}
+
+async fn pair_device(
+    ticket: PairingTicket,
+    device: &identity::HostIdentity,
+) -> tokio::task::JoinHandle<PairedLink> {
+    let device_ep = bind_link_endpoint(device.secret_key(), TransportPolicy::DirectPreferred)
         .await
         .unwrap();
     let secret = decode_invite_secret(&ticket).unwrap();
     let addr = endpoint_addr_from_ticket(&ticket).unwrap();
-    let device_endpoint = device_id.endpoint_id();
-
-    let device_task = tokio::spawn(async move {
+    let device_endpoint = device.endpoint_id();
+    tokio::spawn(async move {
         let conn = timeout(
             Duration::from_secs(15),
             device_ep.connect(addr, POLYTH_LINK_ALPN.as_bytes()),
@@ -305,51 +301,22 @@ async fn host_binary_pairs_and_proxies_http() {
                 other => panic!("unexpected {other:?}"),
             }
         }
-        let (mut http_send, mut http_recv) = conn.open_bi().await.unwrap();
-        write_stream_kind(&mut http_send, STREAM_HTTP)
-            .await
-            .unwrap();
-        let mut request_id = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut request_id);
-        write_all(
-            &mut http_send,
-            &encode_head(&HttpRequestHeadV1 {
-                version: 1,
-                request_id,
-                method: "GET".into(),
-                path_and_query: "/api/health".into(),
-                headers: vec![],
-                body_length: Some(0),
-            })
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-        http_send.finish().unwrap();
-        let payload = read_len_prefixed(&mut http_recv, 64 * 1024).await.unwrap();
-        let mut framed = Vec::new();
-        framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-        framed.extend_from_slice(&payload);
-        let (response, _): (HttpResponseHeadV1, usize) = decode_head(&framed).unwrap();
-        assert_eq!(response.status, 200);
-        let mut buf = [0u8; 64];
-        let n = http_recv.read(&mut buf).await.unwrap();
-        let count = n.unwrap_or(0);
-        assert!(count > 0 || response.body_length == Some(0));
-        conn
-    });
+        PairedLink {
+            endpoint: device_ep,
+            conn,
+            _control: (send, recv),
+        }
+    })
+}
 
+/// The server's side of a pairing, as the tunnel package drives it: approve,
+/// store the device's trust, then finish.
+async fn commit_pairing(rpc_stream: &mut BufReader<UnixStream>, pairing_id: &str, device_id: &str) {
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
     let mut approved = false;
     let mut finished = false;
     while std::time::Instant::now() < deadline {
-        let status = rpc(
-            &mut rpc_stream,
-            10,
-            "pairing.get",
-            json!({"id": pairing_id}),
-        )
-        .await;
+        let status = rpc(rpc_stream, 10, "pairing.get", json!({"id": pairing_id})).await;
         let state = status.get("state").and_then(Value::as_str).unwrap_or("");
         if status
             .get("safetyPhrase")
@@ -357,13 +324,7 @@ async fn host_binary_pairs_and_proxies_http() {
             .is_some()
             && !approved
         {
-            rpc(
-                &mut rpc_stream,
-                11,
-                "pairing.approve",
-                json!({"id": pairing_id}),
-            )
-            .await;
+            rpc(rpc_stream, 11, "pairing.approve", json!({"id": pairing_id})).await;
             approved = true;
         }
         if (state == "committing" || status.get("deviceConfirmed") == Some(&json!(true)))
@@ -373,27 +334,19 @@ async fn host_binary_pairs_and_proxies_http() {
             if let Some(endpoint_id) = status.get("endpointId").and_then(Value::as_str) {
                 if !endpoint_id.is_empty() {
                     rpc(
-                        &mut rpc_stream,
+                        rpc_stream,
                         12,
-                        "trust.sync",
+                        "trust.upsert",
                         json!({
-                            "devices": [{
-                                "endpointId": endpoint_id,
-                                "deviceId": "dev-e2e",
-                                "grants": ["core.sessions.read"],
-                                "grantRevision": 1,
-                                "revoked": false
-                            }]
+                            "endpointId": endpoint_id,
+                            "deviceId": device_id,
+                            "grants": ["core.sessions.read"],
+                            "grantRevision": 1,
+                            "revoked": false
                         }),
                     )
                     .await;
-                    rpc(
-                        &mut rpc_stream,
-                        13,
-                        "pairing.finish",
-                        json!({"id": pairing_id}),
-                    )
-                    .await;
+                    rpc(rpc_stream, 13, "pairing.finish", json!({"id": pairing_id})).await;
                     finished = true;
                 }
             }
@@ -404,9 +357,165 @@ async fn host_binary_pairs_and_proxies_http() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(approved && finished, "host did not commit pairing");
+}
 
-    timeout(Duration::from_secs(15), device_task)
+async fn get_health(conn: &Connection) {
+    let (mut http_send, mut http_recv) = conn.open_bi().await.unwrap();
+    write_stream_kind(&mut http_send, STREAM_HTTP)
+        .await
+        .unwrap();
+    let mut request_id = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut request_id);
+    write_all(
+        &mut http_send,
+        &encode_head(&HttpRequestHeadV1 {
+            version: 1,
+            request_id,
+            method: "GET".into(),
+            path_and_query: "/api/health".into(),
+            headers: vec![],
+            body_length: Some(0),
+        })
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    http_send.finish().unwrap();
+    let payload = read_len_prefixed(&mut http_recv, 64 * 1024).await.unwrap();
+    let mut framed = Vec::new();
+    framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    framed.extend_from_slice(&payload);
+    let (response, _): (HttpResponseHeadV1, usize) = decode_head(&framed).unwrap();
+    assert_eq!(response.status, 200);
+    let mut buf = [0u8; 64];
+    let n = http_recv.read(&mut buf).await.unwrap();
+    let count = n.unwrap_or(0);
+    assert!(count > 0 || response.body_length == Some(0));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn host_binary_pairs_and_proxies_http() {
+    let mut host = start_host().await;
+    let rpc_stream = &mut host.rpc;
+    let status = rpc(rpc_stream, 20, "status", json!({})).await;
+    assert_eq!(
+        status.get("activePolicy").and_then(Value::as_str),
+        Some("direct-preferred")
+    );
+    assert_eq!(
+        status.get("endpointBound").and_then(Value::as_bool),
+        Some(true)
+    );
+    let rejected = rpc_try(
+        rpc_stream,
+        21,
+        "pairing.create",
+        json!({ "profile": "interact", "mode": "relay-only" }),
+    )
+    .await;
+    assert!(rejected.get("error").is_some());
+    let policy_rejected = rpc_try(
+        rpc_stream,
+        22,
+        "endpoint.set_policy",
+        json!({ "policy": "air-gapped" }),
+    )
+    .await;
+    assert!(policy_rejected.get("error").is_some());
+
+    let (ticket, pairing_id) = create_invitation(rpc_stream).await;
+    assert_eq!(ticket.candidates[0].policy, "direct-preferred");
+    let status = rpc(rpc_stream, 23, "status", json!({})).await;
+    assert_eq!(
+        status.get("activePolicy").and_then(Value::as_str),
+        Some(ticket.candidates[0].policy.as_str())
+    );
+
+    let device_dir = tempfile::tempdir().unwrap();
+    let device = identity::load_or_create(device_dir.path().join("identity")).unwrap();
+    let device_task = pair_device(ticket, &device).await;
+    commit_pairing(rpc_stream, &pairing_id, "dev-e2e").await;
+    let link = timeout(Duration::from_secs(15), device_task)
         .await
         .expect("device timeout")
         .unwrap();
+    get_health(&link.conn).await;
+}
+
+/// A phone keeps one identity per host. After its device is revoked (by its
+/// owner, or with the owner's account) the same identity must be able to pair
+/// again with a new invitation, while its old trust still refuses a plain
+/// reconnect.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn revoked_device_pairs_again_with_the_same_identity() {
+    let mut host = start_host().await;
+    let rpc_stream = &mut host.rpc;
+    let device_dir = tempfile::tempdir().unwrap();
+    let device = identity::load_or_create(device_dir.path().join("identity")).unwrap();
+
+    let (ticket, pairing_id) = create_invitation(rpc_stream).await;
+    let host_addr = endpoint_addr_from_ticket(&ticket).unwrap();
+    let first = pair_device(ticket, &device).await;
+    commit_pairing(rpc_stream, &pairing_id, "dev-first").await;
+    let first_link = timeout(Duration::from_secs(15), first)
+        .await
+        .expect("first pairing timeout")
+        .unwrap();
+    get_health(&first_link.conn).await;
+    rpc(
+        rpc_stream,
+        30,
+        "trust.revoke",
+        json!({"deviceId": "dev-first"}),
+    )
+    .await;
+    first_link.endpoint.close().await;
+    drop(first_link);
+
+    // The revoked trust still answers a reconnect authoritatively.
+    let probe_ep = bind_link_endpoint(device.secret_key(), TransportPolicy::DirectPreferred)
+        .await
+        .unwrap();
+    let conn = timeout(
+        Duration::from_secs(15),
+        probe_ep.connect(host_addr, POLYTH_LINK_ALPN.as_bytes()),
+    )
+    .await
+    .expect("reconnect wait")
+    .expect("reconnect");
+    let (mut send, mut recv) = conn.open_bi().await.unwrap();
+    open_control(&mut send).await.unwrap();
+    write_control(
+        &mut send,
+        &ControlMessage::ConnectionHello {
+            version: PROTOCOL_VERSION,
+            device_endpoint: device.endpoint_id(),
+        },
+    )
+    .await
+    .unwrap();
+    match read_control(&mut recv).await {
+        Ok(ControlMessage::ConnectionRejected { code }) => assert_eq!(code, "device-revoked"),
+        Ok(other) => panic!("revoked reconnect answered {other:?}"),
+        // The host may close the connection before the rejection frame lands.
+        Err(_) => {
+            let reason = format!("{:?}", conn.closed().await);
+            assert!(
+                reason.contains("revoked"),
+                "revoked reconnect closed with {reason}"
+            );
+        }
+    }
+    drop(conn);
+    probe_ep.close().await;
+
+    // A new invitation (another account's, or the same one's) pairs it again.
+    let (ticket, pairing_id) = create_invitation(rpc_stream).await;
+    let second = pair_device(ticket, &device).await;
+    commit_pairing(rpc_stream, &pairing_id, "dev-second").await;
+    let link = timeout(Duration::from_secs(15), second)
+        .await
+        .expect("second pairing timeout")
+        .unwrap();
+    get_health(&link.conn).await;
 }

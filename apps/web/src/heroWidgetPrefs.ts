@@ -12,6 +12,11 @@ export interface HeroRecentPrefs {
   /** Delegated child sessions (parentId) are nested under their parent in the
    *  navigator, so Recent leaves them out unless asked. */
   subagents: boolean;
+  /** Sessions an automation started (a Polyth Agent's run, a monitoring
+   *  incident chat) are machinery rather than the person's own chats, and the
+   *  package that owns them already lists them; Recent leaves them out unless
+   *  asked. */
+  automated: boolean;
   scope: HeroRecentScope;
   /** Used only when scope is "selected". */
   projectIds: string[];
@@ -54,6 +59,7 @@ export const HERO_RECENT_DEFAULTS: HeroRecentPrefs = {
   limit: 3,
   filter: "all",
   subagents: false,
+  automated: false,
   scope: "current",
   projectIds: [],
   size: "md",
@@ -95,6 +101,7 @@ export function normalizeHeroRecentPrefs(value: unknown): HeroRecentPrefs {
     limit,
     filter: oneOf(raw.filter, FILTERS, HERO_RECENT_DEFAULTS.filter),
     subagents: typeof raw.subagents === "boolean" ? raw.subagents : HERO_RECENT_DEFAULTS.subagents,
+    automated: typeof raw.automated === "boolean" ? raw.automated : HERO_RECENT_DEFAULTS.automated,
     scope: oneOf(raw.scope, SCOPES, HERO_RECENT_DEFAULTS.scope),
     projectIds: Array.isArray(raw.projectIds)
       ? [...new Set(raw.projectIds.filter((id): id is string => typeof id === "string" && id.length > 0))]
@@ -124,6 +131,7 @@ export function isDefaultHeroRecentPrefs(value: HeroRecentPrefs): boolean {
   return value.limit === base.limit
     && value.filter === base.filter
     && value.subagents === base.subagents
+    && value.automated === base.automated
     && value.scope === base.scope
     && value.size === base.size
     && (value.scope !== "selected" || value.projectIds.length === 0);

@@ -409,11 +409,11 @@ export function renderBlocks(blocks: Block[], keyBase: string): ReactNode[] {
           <div key={k} className="md-table-scroll" role="region" tabIndex={0} aria-label={tr("markdown.table")}>
             <table className="md-table">
               <thead>
-                <tr>{b.header.map((c, j) => <th key={j} {...cellAlign(b.align?.[j])}>{renderInline(c, `${k}-h${j}`)}</th>)}</tr>
+                <tr>{b.header.map((c, j) => <th key={j} {...cellAlign(b.align?.[j])}><span className="md-cell">{renderInline(c, `${k}-h${j}`)}</span></th>)}</tr>
               </thead>
               <tbody>
                 {b.rows.map((r, ri) => (
-                  <tr key={ri}>{r.map((c, ci) => <td key={ci} {...cellAlign(b.align?.[ci])}>{renderInline(c, `${k}-r${ri}c${ci}`)}</td>)}</tr>
+                  <tr key={ri}>{r.map((c, ci) => <td key={ci} {...cellAlign(b.align?.[ci])}><span className="md-cell">{renderInline(c, `${k}-r${ri}c${ci}`)}</span></td>)}</tr>
                 ))}
               </tbody>
             </table>

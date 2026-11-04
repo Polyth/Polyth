@@ -13,7 +13,7 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: cargo
-    directory: /
+    directories: ["/", "/fuzz"]
     target-branch: devel
     schedule:
       interval: weekly
@@ -21,6 +21,16 @@ updates:
     groups:
       cargo-minor-and-patch:
         update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    target-branch: devel
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      docker-images:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /

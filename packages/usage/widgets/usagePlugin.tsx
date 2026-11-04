@@ -14,7 +14,7 @@ import { useSessionContext } from "./contextUsage.ts";
 import { LimitsWidget, LimitsWidgetSettings } from "./usage/LimitsWidget.tsx";
 import { UsageWidget, UsageWidgetSettings } from "./usage/UsageWidget.tsx";
 import { usageWidgetPreferences } from "./usage/widgetPresentation.ts";
-import { limitsWidgetPreferences } from "./usage/limitsModel.ts";
+import { limitsSubject, limitsWidgetPreferences } from "./usage/limitsModel.ts";
 import type { UsageStatsQuery } from "../src/analytics/contracts.ts";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -80,11 +80,11 @@ function GlobalUsageWidget(props: WidgetRenderContext) {
 }
 
 function LimitsWidgetWrapper(props: WidgetRenderContext) {
-  const { sessionId } = props;
+  const { sessionId, composerModel } = props;
   const activeSessionId = useStore((state) => state.activeSessionId);
   const resolved = sessionId ?? activeSessionId;
   const session = useStore((state) => state.sessions.find((item) => item.id === resolved) ?? null);
-  return <LimitsWidget {...props} session={session} />;
+  return <LimitsWidget {...props} session={limitsSubject(composerModel, session)} />;
 }
 
 const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
@@ -96,10 +96,12 @@ const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
 
 /** Session-scope cards have nothing to show without an active session, so the
  *  hosts omit them entirely instead of painting an empty "No active session"
- *  card. Limits only needs one in its default `current` source. */
+ *  card. Limits only needs one in its default `current` source, and on the
+ *  new-chat board the composer's model stands in for it. */
 const AVAILABILITY: Record<string, (context: WidgetAvailabilityContext) => boolean> = {
   "usage.session": ({ sessionId }) => sessionId !== null,
-  "usage.limits": ({ sessionId, config }) => sessionId !== null || limitsWidgetPreferences(config).source !== "current",
+  "usage.limits": ({ sessionId, config, composerModel }) =>
+    sessionId !== null || !!composerModel || limitsWidgetPreferences(config).source !== "current",
 };
 
 export function createUsageWidgetPlugin(translate: Translate = defaultTranslate): WidgetPlugin {

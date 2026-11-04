@@ -260,6 +260,27 @@ export function moveMessageAction<T extends string>(
   return { ...layout, items };
 }
 
+/** Put one action at `index` among the actions of a placement, the way a lane
+ *  of the Settings editor shows them. Only its position relative to that
+ *  placement changes, so the others keep their slots. `laneOf` says where an
+ *  item shows when that differs from what is stored (a bar-only button). */
+export function placeMessageAction<T extends string>(
+  layout: MessageActionLayout<T>,
+  id: T,
+  placement: MessageActionPlacement,
+  index: number,
+  laneOf: (item: MessageActionItem<T>) => MessageActionPlacement = (item) => item.placement,
+): MessageActionLayout<T> {
+  if (!layout.items.some((item) => item.id === id)) return layout;
+  const items = layout.items.filter((item) => item.id !== id).map((item) => ({ ...item }));
+  const lane = items.filter((item) => laneOf(item) === placement);
+  const before = lane[Math.max(0, Math.min(lane.length, Math.round(index)))];
+  const last = lane.at(-1);
+  const at = before ? items.indexOf(before) : last ? items.indexOf(last) + 1 : items.length;
+  items.splice(at, 0, { id, placement });
+  return { ...layout, items };
+}
+
 export function sameMessageActionLayout<T extends string>(a: MessageActionLayout<T>, b: MessageActionLayout<T>): boolean {
   return a.reveal === b.reveal
     && a.touch === b.touch

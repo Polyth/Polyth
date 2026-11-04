@@ -161,7 +161,7 @@
   --activity-row-height: calc(48px * var(--density-scale));
   --agent-dock-height: calc(68px * var(--density-scale));
   --composer-height: calc(56px * var(--density-scale));
-  --composer-action-size: calc(42px * var(--density-scale));
+  --composer-action-size: calc(36px * var(--density-scale));
   /* `--composer-max-input-height` is declared with the type roles below: it is
      a font-derived ceiling, so it has to read the surface's own type size. */
   /* Host-owned package-window seam. Packages consume these values and never
@@ -171,6 +171,18 @@
   /* Density seam: 0px on fine pointers; core styles raise it to --tap on
      coarse pointers so hit areas grow without enlarging control visuals. */
   --hit-min: 0px;
+  /* The pending stack above the composer (styles.css): its one grid, measured
+     from the composer card's outer edge so nothing drifts from line to line.
+     Marks are centred on the model logo's column, labels start at the model
+     name, trailing glyphs end where the marks start. A line reads one row
+     tall; on touch, a line that opens something keeps its full target by
+     reaching up into the timeline's bottom space. */
+  --composer-stack-mark: calc(var(--space-4) + 2px + var(--icon-sm) / 2);
+  --composer-stack-text: calc(var(--composer-stack-mark) + var(--icon-sm) / 2 + 6px);
+  --composer-stack-end: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  --composer-stack-row: 28px;
+  --composer-stack-control: 26px;
+  --composer-stack-reach: calc(max(var(--composer-stack-row), var(--hit-min)) - var(--composer-stack-row));
 
   /* icon size scale (UI action glyphs) */
   --icon-sm: 16px;
@@ -189,6 +201,17 @@
 
   /* One scalable radius vocabulary: controls → cards → surfaces → sheets. */
   --corner-radius-scale: 1;
+  /* 1 only at the last Corner rounding notch (uiPrefs.ts). There every platform
+     style leaves its native radii for one shared, fully rounded geometry, so
+     "maximum" looks the same size of round on Fluent, Big Sur and macOS 27. */
+  --corner-max: 0;
+  --radius-max-control: calc(22px * var(--corner-max));
+  --radius-max-card: calc(22px * var(--corner-max));
+  --radius-max-surface: calc(26px * var(--corner-max));
+  --radius-max-sheet: calc(32px * var(--corner-max));
+  --radius-max-float: calc(28px * var(--corner-max));
+  --radius-max-menu: calc(20px * var(--corner-max));
+  --radius-max-pill: calc(999px * var(--corner-max));
   --radius-control: calc(8px * var(--corner-radius-scale));
   --radius-card: calc(10px * var(--corner-radius-scale));
   --radius-surface: calc(12px * var(--corner-radius-scale));
@@ -198,8 +221,15 @@
   --radius-dock: calc(23px * var(--corner-radius-scale));
   --radius-composer: var(--radius-sheet);
   --radius-bubble: calc(18px * var(--corner-radius-scale));
-  /* Fully rounded. A pill stays a pill at every corner-radius setting. */
-  --radius-round: 999px;
+  /* A pill: anything capsule-shaped that a person reads as a control, tag or
+     track. Full at the default rounding, squares with the setting, and each
+     platform style sets how far its own pills go (a Fluent chip is not a
+     capsule). --radius-circle is a shape that carries meaning and stays round
+     at every setting: spinners, avatars, radios, status dots. */
+  --radius-round: max(calc(14px * var(--corner-radius-scale)), var(--radius-max-pill));
+  --radius-circle: 999px;
+  /* A switch track and its thumb square together, on every platform style. */
+  --radius-switch: calc(5.6px * var(--corner-radius-scale));
 
   /* Deprecated radius aliases. Do not use in new CSS. */
   --radius: var(--radius-control);
@@ -440,6 +470,8 @@
   --font-tool-label-lh: calc(18px * var(--text-scale, 1));
   --font-technical: calc(13.25px * var(--text-scale, 1));
   --font-technical-lh: calc(18px * var(--text-scale, 1));
+  /* Lines of the pending stack above the composer: status, queue, edited files. */
+  --font-composer-stack: calc(13px * var(--text-scale, 1));
   --font-response-meta: calc(12.25px * var(--text-scale, 1));
   --font-response-meta-lh: calc(16px * var(--text-scale, 1));
   /* Geometry derived from those roles belongs to the same surface: prose

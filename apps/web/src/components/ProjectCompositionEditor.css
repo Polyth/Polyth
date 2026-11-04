@@ -71,7 +71,7 @@
   inset: auto -28px -34px auto;
   width: 88px;
   height: 88px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: radial-gradient(circle,
     color-mix(in srgb, var(--accent) 10%, transparent),
     transparent 68%);

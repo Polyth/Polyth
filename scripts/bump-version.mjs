@@ -68,6 +68,8 @@ const MINOR_TYPES = new Set(["feat"]);
 const RECORD_SEPARATOR = "\x1e";
 const FIELD_SEPARATOR = "\x1f";
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
 /**
  * A tag name that carries an aligned stable version.
  * @param {string} tag
@@ -513,8 +515,8 @@ export function bumpDependentPins(repoRoot, current, next, options) {
     if (!bumpPins(expected, names, current, next)) continue;
     let updated = original;
     for (const name of names) {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-      updated = updated.replace(new RegExp(`("${escaped}"\\s*:\\s*)"${current.replace(/\./g, "\\.")}"`, "g"), `$1"${next}"`);
+      const pattern = `("${escapeRegExp(name)}"\\s*:\\s*)"${escapeRegExp(current)}"`;
+      updated = updated.replace(new RegExp(pattern, "g"), `$1"${next}"`);
     }
     if (!isDeepStrictEqual(JSON.parse(updated), expected)) {
       throw new Error(`Refusing to bump ${path}: the pin edit changed more than the aligned dependency versions`);

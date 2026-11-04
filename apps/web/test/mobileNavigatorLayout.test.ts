@@ -1,15 +1,22 @@
 // Phone Navigator geometry measured in a real browser (skipped without one).
 // The list is one grid: project marks and session state marks share a leading
-// column, names and titles share one start edge, and close, project ⋮ and
-// session ⋮ share the trailing column. The toolbar's tools keep full tap
-// boxes; a project's New chat steps the way a chat row's marks step toward
-// its ⋮. These checks hold at
-// every phone width, density, status mix and direction.
+// column, names and titles share one start edge, and project ⋮ and session
+// ⋮ share the trailing column. The toolbar's tools keep full tap boxes, and
+// so do a project's New chat and ⋮; both clusters space their glyphs by
+// visible ink. These checks hold at every phone width, density, status mix
+// and direction.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { register } from "node:module";
 import type { Browser, Page } from "playwright-core";
+import { createElement, type FunctionComponent } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MoreVerticalIcon, NewChatIcon, SelectIcon, type LucideIcon } from "../src/components/ui/icons.ts";
 import { findChromium } from "./chromium.ts";
+
+register("./tsxHooks.mjs", import.meta.url);
+const { Icon } = await import("../src/icons.tsx");
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 const CHROME = await findChromium();
@@ -37,6 +44,11 @@ after(async () => {
 
 const svg = `<svg viewBox="0 0 24 24"><path d="M4 12h16"/></svg>`;
 const icon = (size = "md") => `<svg class="ui-icon ui-icon--${size}" viewBox="0 0 24 24"><path d="M4 12h16"/></svg>`;
+// The toolbar's tools and a project's New chat and ⋮ are spaced by their
+// ink, so they draw the real glyphs, as UiIcon and Icon render them.
+const lucide = (glyph: LucideIcon, size = "lg") =>
+  renderToStaticMarkup(createElement(glyph, { className: `ui-icon ui-icon--${size}`, strokeWidth: 1.75, "aria-hidden": true }));
+const glyph = (draw: FunctionComponent) => renderToStaticMarkup(createElement(draw));
 const pill = (kind: string, count: number) =>
   `<span class="mobile-nav-project-status is-${kind}">${icon("sm").replace("ui-icon ", "ui-icon mobile-nav-state-icon ")}<span>${count}</span></span>`;
 
@@ -46,24 +58,24 @@ function project(id: string, name: string, pills: string, body = "") {
       <span class="project-glyph">${svg}</span>
       <button class="mobile-nav-project-main"><span class="mobile-nav-project-name">${name}</span>${pills ? `<span class="mobile-nav-project-statuses">${pills}</span>` : ""}</button>
       <div class="mobile-nav-project-actions">
-        <button class="mobile-nav-project-action">${icon("lg")}</button>
-        <button class="mobile-nav-project-action" aria-haspopup="menu">${svg}</button>
+        <button class="mobile-nav-project-action">${lucide(NewChatIcon)}</button>
+        <button class="mobile-nav-project-action" aria-haspopup="menu">${lucide(MoreVerticalIcon)}</button>
       </div>
     </div>
     ${body ? `<div class="mobile-nav-project-body">${body}</div>` : ""}
   </section>`;
 }
 
-function session(title: string, lead: string, flags = "", children = 0) {
+function session(title: string, lead: string, flags = "", children = 0, clock = "") {
   const pill = children ? `<button class="mobile-nav-subagent-toggle" aria-expanded="false">${svg}<span class="mobile-nav-subagent-count">${children}</span></button>` : "";
   return `<div class="mobile-nav-session-swipe"><div class="mobile-nav-session-row">
     <button class="mobile-nav-session-main"></button>
     <span class="mobile-nav-session-body">
       <span class="mobile-nav-session-lead">${lead}</span>
       <span class="mobile-nav-session-heading"><span class="mobile-nav-session-title" dir="auto">${title}</span>${pill}</span>
-      <span class="mobile-nav-session-trailing"><span class="mobile-nav-session-flags">${flags}</span></span>
+      <span class="mobile-nav-session-trailing">${clock ? `<span class="mobile-nav-duration">${clock}</span>` : ""}<span class="mobile-nav-session-flags">${flags}</span></span>
     </span>
-    <button class="mobile-nav-more">${svg}</button>
+    <button class="mobile-nav-more">${lucide(MoreVerticalIcon, "md")}</button>
   </div></div>`;
 }
 
@@ -74,10 +86,10 @@ const fixture = `<nav class="mobile-navigator" style="animation:none">
     <div class="mobile-nav-toolbar-row">
       <button class="mobile-nav-place"><span class="mobile-nav-place-name">Personal</span>${svg}</button>
       <div class="mobile-nav-tools">
-        <button class="mobile-nav-tool mobile-nav-search-toggle" id="search-tool">${svg}</button>
-        <button class="mobile-nav-tool mobile-nav-select-toggle" id="select">${icon("lg")}</button>
-        <button class="mobile-nav-tool" id="settings">${svg}</button>
-        <button class="mobile-nav-tool" id="close">${svg}</button>
+        <button class="mobile-nav-tool mobile-nav-search-toggle" id="search-tool">${glyph(Icon.search)}<span class="mobile-nav-filter-dot"></span></button>
+        <button class="mobile-nav-tool mobile-nav-select-toggle" id="select">${lucide(SelectIcon)}</button>
+        <button class="mobile-nav-tool" id="settings">${glyph(Icon.gear)}</button>
+        <button class="mobile-nav-tool" id="close">${glyph(Icon.close)}</button>
       </div>
     </div>
     <div class="mobile-nav-search-bar" inert>
@@ -87,6 +99,8 @@ const fixture = `<nav class="mobile-navigator" style="animation:none">
   </div>
   <div class="mobile-nav-scroll" style="animation:none">
     ${project("open", "polyth", "", `
+      <div class="mobile-nav-pinned">${session("Pinned and running", "", `<span class="mobile-nav-pin-icon">${svg}</span>`, 0, "3h")}</div>
+      ${session("Running a session whose title is long enough to truncate before its clock", "", "", 0, "42m")}
       ${session("Plain session title long enough to truncate before its subagent count", "", "", 4)}
       ${session("Running session", `<span class="mobile-nav-running-ring"></span>`, `<span class="isolation-list-badge" id="flag">${svg}</span>`)}
       ${session("A plain session title with no marks that is long enough to truncate at the trailing edge", "")}
@@ -118,6 +132,25 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
     const busyNewChat = rect(busy.querySelector(".mobile-nav-project-action svg")!);
     const endFromEnd = (el: Element) => { const r = rect(el); return rtl ? r.left : W - r.right; };
     const startFromEnd = (el: Element) => { const r = rect(el); return rtl ? r.right : W - r.left; };
+    // A glyph's visible ink, not its box: each shape grown by half its stroke.
+    const ink = (svg: Element) => {
+      let left = Infinity, right = -Infinity;
+      for (const shape of svg.querySelectorAll<SVGGraphicsElement>("path, circle")) {
+        const b = shape.getBBox();
+        const half = parseFloat(getComputedStyle(shape).strokeWidth) / 2;
+        const m = shape.getScreenCTM()!;
+        for (const x of [b.x - half, b.x + b.width + half]) {
+          const p = new DOMPoint(x, b.y).matrixTransform(m);
+          left = Math.min(left, p.x);
+          right = Math.max(right, p.x);
+        }
+      }
+      return { left, right };
+    };
+    const inkEnd = (svg: Element) => { const i = ink(svg); return rtl ? i.left : W - i.right; };
+    const inkStart = (svg: Element) => { const i = ink(svg); return rtl ? i.right : W - i.left; };
+    const busyDots = busy.querySelector(".mobile-nav-project-actions > :last-child svg")!;
+    const busyBubble = busy.querySelector(".mobile-nav-project-actions > :first-child svg")!;
     return {
       W,
       place: textStart(q(".mobile-nav-place-name")),
@@ -132,8 +165,37 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
       })(),
       searchEnd: endFromEnd(q(".mobile-nav-search")),
       // The truncating title of the row with no marks or subagent pill.
-      plainTitleEnd: endFromEnd(all(".mobile-nav-session-title")[2]!),
+      plainTitleEnd: endFromEnd(all(".mobile-nav-session-title")[4]!),
       flagEnd: endFromEnd(q("#flag")),
+      // A running clock's air, on its ink: the ⋮ dots to the clock's last
+      // character, the title's end to its box, and the screen edge to the dots.
+      ...(() => {
+        const clocks = all(".mobile-nav-duration");
+        // The clock reads left to right in either direction, so the
+        // character nearest ⋮ is its last in LTR and its first in RTL.
+        const textEnd = (el: Element) => {
+          const node = el.firstChild as Text;
+          const at = rtl ? 0 : node.length - 1;
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + 1);
+          const box = range.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          const context = document.createElement("canvas").getContext("2d")!;
+          context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+          const ink = context.measureText(node.data[at]!);
+          return rtl ? box.left - ink.actualBoundingBoxLeft : W - (box.left + ink.actualBoundingBoxRight);
+        };
+        const dots = (el: Element) => el.closest(".mobile-nav-session-row")!.querySelector(".mobile-nav-more svg")!;
+        const clock = clocks[1]!;
+        const title = rect(clock.closest(".mobile-nav-session-row")!.querySelector(".mobile-nav-session-title")!);
+        return {
+          rowEdgeGap: inkEnd(dots(clock)),
+          clockGap: textEnd(clock) - inkStart(dots(clock)),
+          pinnedClockGap: textEnd(clocks[0]!) - inkStart(dots(clocks[0]!)),
+          clockLead: rtl ? title.left - rect(clock).right : rect(clock).left - title.right,
+        };
+      })(),
       // Edge controls draw a small circle on the edge column but keep a
       // target that runs out to the edge. A row's ⋮ keeps 44px (the body
       // tucks over it); close and project ⋮ meet their neighbour's target.
@@ -159,11 +221,49 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
       })(),
       targets: all(".mobile-nav-tools > .mobile-nav-tool, .mobile-nav-project-action").map((el) => [rect(el).width, rect(el).height] as const),
       toolBoxes: all(".mobile-nav-tools > .mobile-nav-tool:not(:last-child)").map((el) => [rect(el).width, rect(el).height] as const),
-      closeWidth: rect(q("#close")).width,
       rowMoreWash: [rect(q(".mobile-nav-more")).width, rect(q(".mobile-nav-more")).height, rect(q(".mobile-nav-session-row")).height] as const,
-      tools: ["#close", "#settings", "#select", "#search-tool"].map((s) => centreFromEnd(q(`${s} svg`))),
-      projectNewEnd: all(".mobile-nav-project-actions > :first-child svg").map(endFromEnd),
-      pillsGap: endFromEnd(busy.querySelector(".mobile-nav-project-statuses")!) - startFromEnd(busy.querySelector(".mobile-nav-project-action svg")!),
+      // The toolbar's visible air: the bar's edge to ×, × to the gear, the
+      // gear to select's box, the box to the lens.
+      toolGaps: (() => {
+        const tools = ["#close", "#settings", "#select", "#search-tool"].map((s) => q(`${s} svg`));
+        return tools.map((svg, i) => inkEnd(svg) - (i ? inkStart(tools[i - 1]!) : 0));
+      })(),
+      toolInkInTarget: ["#close", "#settings", "#select", "#search-tool"].map((s) => {
+        const i = ink(q(`${s} svg`));
+        const t = rect(q(s));
+        return i.left >= t.left - 0.01 && i.right <= t.right + 0.01;
+      }),
+      // The closed search pill is a circle centred --nav-search-axis from
+      // the bar's end; opening grows it out of the lens.
+      seedOffset: (() => {
+        const bar = q(".mobile-nav-search-bar");
+        const probe = document.createElement("div");
+        probe.style.cssText = "position:absolute;width:var(--nav-search-axis);height:1px";
+        bar.append(probe);
+        const axis = rect(probe).width;
+        probe.remove();
+        return axis - (W - endFromEnd(bar) - centreFromStart(q("#search-tool svg")));
+      })(),
+      // The filter dot marks the lens's top-end corner.
+      filterDot: (() => {
+        const dot = rect(q(".mobile-nav-filter-dot"));
+        const lens = rect(q("#search-tool svg"));
+        return [rtl ? lens.left - dot.left : dot.right - lens.right, lens.top - dot.top] as const;
+      })(),
+      projectNew: all(".mobile-nav-project-actions > :first-child svg").map(centreFromEnd),
+      // The visible air in a project's trailing cluster: screen edge to the ⋮
+      // dots, dots to New chat's bubble, bubble to the status pills.
+      edgeGap: inkEnd(busyDots),
+      dotsGap: inkEnd(busyBubble) - inkStart(busyDots),
+      pillsGap: endFromEnd(busy.querySelector(".mobile-nav-project-statuses")!) - inkStart(busyBubble),
+      bubbleInTarget: (() => {
+        const i = ink(busyBubble);
+        const t = rect(busyBubble.closest("button")!);
+        return i.left >= t.left - 0.01 && i.right <= t.right + 0.01;
+      })(),
+      newChatWidth: rect(busyBubble.closest("button")!).width,
+      projectGlyphSizes: all(".mobile-nav-project-action svg").map((el) => [rect(el).width, rect(el).height] as const),
+      toolGlyph: rect(q("#settings svg")).width,
       glyphs: all(".project-glyph").map(start),
       glyphCentre: centreFromStart(q(".project-glyph")),
       leads: all(".mobile-nav-session-lead").map(centreFromStart),
@@ -209,9 +309,9 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
 const near = (actual: number, expected: number, label: string) =>
   assert.ok(Math.abs(actual - expected) <= 0.6, `${label}: ${actual} ≠ ${expected}`);
 
-// gutter: content edge; axis: end-column glyph centre from the screen;
-// titleStart: gutter + 24px mark + 8px.
-for (const [width, gutter, axis, titleStart] of [[320, 6, 20, 38], [390, 8, 24, 40], [430, 8, 24, 40]] as const) {
+// gutter: content edge, the ⋮ glyph's own edge; axis: end-column glyph
+// centre from the screen; titleStart: gutter + 24px mark + 8px.
+for (const [width, gutter, axis, titleStart] of [[320, 11, 20, 43], [390, 15, 24, 47], [430, 15, 24, 47]] as const) {
   for (const density of ["comfortable", "compact"]) {
     test(`phone navigator grid holds at ${width}px, ${density}`, { skip: !CHROME }, async () => {
       const m = await measure(width, { density });
@@ -219,32 +319,61 @@ for (const [width, gutter, axis, titleStart] of [[320, 6, 20, 38], [390, 8, 24, 
       near(m.searchEnd, gutter, "the open search field ends on the content edge");
       for (const g of m.glyphs) near(g, gutter, "project mark on the content edge");
       near(m.glyphCentre, gutter + 12, "a 24px project mark: the leading column is no wider than the marks need");
-      assert.ok(m.glyphCentre - axis <= 2.6, `the leading column (${m.glyphCentre}px) sits no further in than the ⋮ axis (${axis}px), so the start side carries no extra margin`);
+      // Both ends of a row keep the same air: the start edge is the ⋮ glyph's
+      // own edge (the axis less half an 18px glyph).
+      near(m.glyphs[0]!, axis - 9, "the start edge sits on the ⋮ glyph's edge, so the two margins measure the same");
       near(m.backCentre, m.glyphCentre, "search's Back glyph sits over the project marks");
       for (const lead of m.leads) near(lead, m.glyphCentre, "session state mark centred under the project mark");
       const titleEdge = m.names[0]!;
       near(titleEdge, titleStart, "titles start one mark and one gap in, not a wasted indent");
       for (const x of [...m.names, ...m.titles, m.pagination, m.empty]) near(x, titleEdge, "names, titles, pagination and empty text share one edge");
       near(m.plainTitleEnd, m.flagEnd, "a title with no marks ends where marks do, not a column gap short");
-      const [close, settings, select, search] = m.tools as [number, number, number, number];
-      for (const x of [close, ...m.projectMore, ...m.rowMore]) near(x, axis, "close, project ⋯ and session ⋯ glyphs share the edge column, clear of the screen's rounded edge");
-      near(m.flagEnd, axis + 13, "a session's trailing marks end 12px clear of its ⋮ dots");
-      // A chat row's air between its last mark and the ⋮ dots (whose ink
-      // runs 1px past the axis) is the rhythm of every trailing cluster.
-      const air = m.flagEnd - axis - 1;
+      for (const x of [...m.projectMore, ...m.rowMore]) near(x, axis, "project ⋯ and session ⋯ glyphs share the edge column, clear of the screen's rounded edge");
+      // A chat row's trailing marks are spaced by ink too: the running clock
+      // stands as far from the ⋮ dots as the dots from the screen edge, so
+      // marks end two axes in; the first mark keeps 12px from the title.
+      near(m.flagEnd, 2 * axis, "a session's trailing marks end two axes in");
+      near(m.rowEdgeGap, axis - 1.4, "a session's ⋮ dots stay on the edge column");
+      near(m.clockGap, m.rowEdgeGap, "the running clock stands as far from ⋮ as ⋮ from the screen edge");
+      near(m.pinnedClockGap, m.clockGap, "a Pinned row's hidden pin leaves no lead-in before ⋮");
+      near(m.clockLead, 12, "a running clock keeps 12px from a truncated title");
+      const air = m.rowEdgeGap;
       // The toolbar's tools are its primary controls: a full tap box each,
       // never squeezed into the row-mark rhythm below.
-      for (const step of [search - select, select - settings, settings - close]) near(step, 44, "toolbar glyphs sit one tap step apart");
       for (const [w, h] of m.toolBoxes) assert.ok(w >= 44 && h >= 44, `a toolbar tool keeps the 44px tap floor (${w}×${h})`);
       const [washW, washH, rowH] = m.rowMoreWash;
-      near(washW, 28, "a row's ⋮ press circle is a project ⋮'s, whatever the axis");
+      near(washW, 28, "a row's ⋮ press circle keeps its size whatever the axis");
       assert.ok(washW === washH && washH <= rowH, `the ⋮ circle (${washW}×${washH}) fits its row (${rowH}px)`);
-      near(m.closeWidth, axis + 22, "close's target runs half a tap step inside its glyph and out to the edge");
-      for (const x of m.projectNewEnd) near(x, m.flagEnd, "New chat ends where a chat row's marks end");
-      near(m.pillsGap, air, "status pills stop that same air before New chat");
+      for (const [w, h] of m.projectGlyphSizes) {
+        assert.ok(w === m.toolGlyph && h === m.toolGlyph, `a project's New chat and ⋮ draw the toolbar's glyph size (${w}×${h} vs ${m.toolGlyph})`);
+      }
+      // One visible rhythm across a project's cluster, measured on the ink
+      // (the ⋮ dots are 3px wide in a 20px box): the screen edge, the dots,
+      // New chat's bubble and the pills stand the same air apart. Only the
+      // narrowest axis is too tight for that and two 44px targets, so there
+      // the two inner gaps share the extra.
+      near(m.edgeGap, axis - 1.6, "the ⋮ dots stay on the edge column");
+      near(m.pillsGap, m.dotsGap, "the pills stand as far from New chat as New chat from ⋮");
+      if (axis >= 24) near(m.dotsGap, m.edgeGap, "New chat stands as far from ⋮ as ⋮ from the screen edge");
+      else assert.ok(m.dotsGap > m.edgeGap && m.dotsGap - m.edgeGap <= 6, `the narrow axis widens only the inner gaps (${m.dotsGap} vs ${m.edgeGap})`);
+      near(m.newChatWidth, 44, "New chat keeps a full tap box");
+      assert.equal(m.bubbleInTarget, true, "New chat's bubble lies inside its own target, never ⋮'s");
+      // The toolbar keeps that rhythm on its own ink: the edge, ×, the gear,
+      // select's box and the lens stand one gap apart. The gap is the
+      // cluster's edge air, so × ends where the ⋮ dots below it do, unless
+      // four 44px targets need more, which only the narrowest axis does.
+      const [toolEdge] = m.toolGaps as [number];
+      for (const gap of m.toolGaps) near(gap, toolEdge, "toolbar glyphs stand one gap apart, the edge included");
+      if (axis >= 24) near(toolEdge, m.edgeGap, "× ends where the ⋮ dots below it do");
+      else assert.ok(toolEdge > m.edgeGap && toolEdge - m.edgeGap <= 3, `the narrow axis widens the toolbar's gap only as far as its targets need (${toolEdge} vs ${m.edgeGap})`);
+      assert.deepEqual(m.toolInkInTarget, [true, true, true, true], "each tool's glyph lies inside its own target");
+      near(m.seedOffset, 0, "the search pill grows out of the lens");
+      near(m.filterDot[0], 1, "the filter dot sits on the lens's end corner");
+      near(m.filterDot[1], 1, "the filter dot sits on the lens's top corner");
+      assert.ok(m.pillsGap >= air - 0.6, `status pills stop at least a row's mark air before New chat (${m.pillsGap})`);
       assert.deepEqual(m.edgeTargets, [true, true, true, true, true, true, true, true], "edge targets run out to the edge and meet their neighbour's");
       for (const [w, h] of m.targets) {
-        assert.ok(w >= 24 && h >= 44, `a toolbar or project target spans the room between its neighbours, the full height, and at least WCAG 2.2's 24px (${w}×${h})`);
+        assert.ok(w >= 44 && h >= 44, `a toolbar or project target keeps the 44px tap floor (${w}×${h})`);
       }
       assert.ok(m.pillsClearOfActions, "status pills never run into New chat");
       assert.ok(m.busyName >= Math.min(5 * m.busyFontSize, 80) - 1, `a busy project keeps a readable name (${m.busyName}px)`);
@@ -266,10 +395,13 @@ for (const [width, gutter, axis, titleStart] of [[320, 6, 20, 38], [390, 8, 24, 
 test("phone navigator grid mirrors in RTL", { skip: !CHROME }, async () => {
   const ltr = await measure(390);
   const rtl = await measure(390, { dir: "rtl" });
-  for (const key of ["place", "searchEnd", "glyphCentre", "backCentre", "pagination", "empty", "flag", "flagEnd", "plainTitleEnd", "pillsGap"] as const) {
+  for (const key of ["place", "searchEnd", "glyphCentre", "backCentre", "pagination", "empty", "flag", "flagEnd", "plainTitleEnd", "edgeGap", "dotsGap", "pillsGap", "rowEdgeGap", "clockLead"] as const) {
     near(rtl[key], ltr[key], `${key} mirrors`);
   }
-  for (const key of ["tools", "projectNewEnd"] as const) rtl[key].forEach((x, i) => near(x, ltr[key][i]!, `${key} mirror`));
+  for (const key of ["toolGaps", "projectNew", "filterDot"] as const) rtl[key].forEach((x, i) => near(x, ltr[key][i]!, `${key} mirror`));
+  near(rtl.seedOffset, 0, "the search pill grows out of the lens in RTL");
+  near(rtl.clockGap, rtl.rowEdgeGap, "the running clock keeps its air from ⋮ in RTL");
+  near(rtl.pinnedClockGap, rtl.clockGap, "a Pinned row's clock keeps it too");
   for (const [a, b] of rtl.titleBoxes.map((x, i) => [x, ltr.titleBoxes[i]!] as const)) near(a, b, "titles mirror");
   assert.equal(rtl.pillsClearOfActions, true);
   assert.equal(rtl.pillClearOfMenu, true);

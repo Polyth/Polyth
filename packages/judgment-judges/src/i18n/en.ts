@@ -239,7 +239,6 @@ export const en = {
   "judgesui.markerSkipped": "{name} skipped",
   "judgesui.markerWithDetail": "{text}: {detail}",
   "judgesui.markerLikely": "{percent} likely",
-  "judgesui.markerLabelLikely": "{label}, {percent} likely",
   "judgesui.markerAria": "Judgment: {title}",
   "judgesui.markerVerify": "Ask the agent to verify",
   "judgesui.markerDraft": "Draft follow-up",

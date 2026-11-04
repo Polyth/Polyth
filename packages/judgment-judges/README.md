@@ -168,9 +168,17 @@ another judge or the person already answered is not asked about.
 
 Markers change only what people see:
 
-- `timeline-marker`: a quiet marker in the chat.
-- `needs-attention`: the marker is highlighted (`attention: true`) and an idle
-  chat's notification is raised to a question, as for `judges.needs-you`.
+- `timeline-marker`: a quiet note card in the chat, the trace of the decision
+  (a request card the judge answered is gone by then): the judge's glyph and
+  name, and on the trailing edge its answer with the request card's chance
+  meter (`safe ▬ 88% likely`); under it one line per action with a mark for
+  its outcome (done, sending, skipped, failed), then the follow-up. It wears
+  the paused notice's overlay tint, so no theme's amber or red tints it, and
+  insets its content like the chip activity pill, so under that pill the
+  glyph and the name fall on the pill's columns.
+- `needs-attention`: the marker is highlighted (`attention: true`: an amber
+  glyph and a full-strength name; a failed action turns the glyph red) and an
+  idle chat's notification is raised to a question, as for `judges.needs-you`.
 - `suggest-follow-up` (`text` ≤ 500, turn judges): a button that fills the
   composer and is never sent automatically.
 

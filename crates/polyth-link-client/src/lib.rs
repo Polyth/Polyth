@@ -537,7 +537,9 @@ fn list_native_metadata(data_dir: &Path) -> Result<Value, LinkError> {
                 json!({
                     "id": item.get("id").cloned().unwrap_or(Value::Null),
                     "hostEndpointId": item.get("hostEndpointId").cloned().unwrap_or(Value::Null),
-                    "hostLabel": item.get("hostLabel").cloned().unwrap_or(Value::String(String::new())),
+                    "hostLabel": display_label(&item),
+                    "serverLabel": item.get("hostLabel").cloned().unwrap_or(Value::String(String::new())),
+                    "customLabel": item.get("customLabel").cloned().unwrap_or(Value::String(String::new())),
                     "pairingState": item.get("pairingState").cloned().unwrap_or(Value::String("active".into())),
                     "lastUsedAt": item.get("lastUsedAt").cloned().unwrap_or(Value::from(0)),
                     "lastTransport": item.get("lastTransport").cloned().unwrap_or(Value::Null),

@@ -540,7 +540,7 @@ test("origin expansion requires connection security review", async () => {
   });
   const pending = await reg.update("com-example-demo", { storage });
   assert.equal(pending.version, "1.0.0");
-  assert.ok(pending.permissions.review?.connections[0]?.next.origins.includes("https://other.example"));
+  assert.ok(pending.permissions.review?.connections[0]?.next.origins.some((origin) => origin === "https://other.example"));
   await reg.dispose();
 });
 

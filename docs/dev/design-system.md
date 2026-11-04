@@ -101,7 +101,10 @@ scale — see "Type surfaces" in `docs/dev/styles.md`.
 - **Radius** (the calm scale, all × `--corner-radius-scale`):
   controls 8px (`--radius-control`), cards 10px (`--radius-card`),
   substantial panels 12px (`--radius-surface`), sheets/dialogs/composer 16px
-  (`--radius-sheet`/`--radius-composer`). `999px`/`50%` only for pills/circles.
+  (`--radius-sheet`/`--radius-composer`). Pills are `--radius-round` and square
+  with the setting; `--radius-circle`/`50%` only for true circles (spinners,
+  avatars, radios, status dots). The last rounding notch is one shared rounded
+  geometry on every platform style (`--corner-max`, [styles](styles.md#radius)).
 - **Shadows** climb with detachment: `--shadow-sm` cards, `--shadow-md`
   (= `--overlay-shadow`) popovers/menus, `--shadow-lg` modals/sheets. Never
   hand-rolled `box-shadow` colors.
@@ -197,7 +200,11 @@ the shell and every package stylesheet.
 - **Press composes.** Core gives `:active` a `scale(.98)` settle at zero
   specificity (a button that positions itself with a transform keeps it) and
   an inset `--surface-overlay-strong` wash over the fill; `Button` variants
-  own their press.
+  own their press. The phone shell's floating islands are the exception:
+  their buttons (☰, ✎, ⋮, ⧉ and a title shown as a control) press and stay
+  open (`aria-expanded`) as a glyph colour change to `--accent-text` alone,
+  with no plate, glow or settle; release fades it back (`styles.css`, phone
+  island block; looks recolour those glyphs at rest only).
 - **Disabled is gray and inert at rest.** No hover, press, tap highlight or
   pointer cursor. Every `:hover`/`:active` rule on a button carries the
   zero-specificity `:where(:not(:disabled))` guard (`:not(:disabled)` where
@@ -312,6 +319,10 @@ All from `apps/web/src/components/ui` (see `index.ts`):
   radios: give the action `entries` (its choices) and `value` (the current
   one, shown muted before a chevron). Selecting it shows those entries in
   place of the menu under a Back row; the footer belongs to the top level.
+  So does `header`: content before the entries, such as the head row naming
+  the session the phone ⋮ menu acts on (interactive rows take
+  `role="menuitem"` to join arrow keys). `anchorRef` places the menu against
+  another element than its trigger, e.g. the island that holds it.
   ```tsx
   <Menu label="Session actions" entries={[
     { id: "rename", label: "Rename", icon: EditIcon, onSelect: rename },
@@ -449,7 +460,12 @@ Themed thin scrollbars are global. Height caps for overlay bodies derive from
 visible band already excludes the keyboard. A Markdown table is a scroll area
 of its own: the renderer wraps it in `.md-table-scroll`, whose `overflow-x:
 auto; overflow-y: hidden` keeps the grid at `width: max-content` so a narrow
-column scrolls the table instead of crushing its cells.
+column scrolls the table instead of crushing its cells. A `Tabs` strip that
+does not fit scrolls sideways the same way: the primitive marks the edge that
+hides tabs (`data-overflow-start` / `data-overflow-end`), CSS fades that edge,
+and the selected tab is scrolled into the visible part, so a phone never shows
+a tab cut at the border with nothing hinting at more. Strips that opt into
+`.ui-scroll-tabs` keep that class's own edge fade.
 
 ## 12. Mobile rules
 
@@ -466,7 +482,7 @@ column scrolls the table instead of crushing its cells.
   `apps/web/src/messageActionLayout.ts`) may reveal on hover or keyboard focus
   only with a fine pointer; touch resolves to an always-visible bar or the
   More menu. Each action is placed on the bar, in the More menu or off, in a
-  user-chosen order (Settings > Chat). Faded controls keep their space; the
+  user-chosen order (Settings > Chat > Buttons and bars). Faded controls keep their space; the
   reveal animates opacity only. Package `session.message.actions`
   contributions are entries of the same layout (`pkg:<contribution id>`), so
   every button under a message can be reordered, moved or turned off; only a
@@ -482,6 +498,19 @@ column scrolls the table instead of crushing its cells.
   rules. Both surfaces run the same commands (`selectionCommands.ts`).
 - Package/panel content adapts with container queries; viewport media queries
   are shell-only.
+- Narrow phones (320–375px) are first-class: check every surface at 320, 360
+  and 393px. Recurring causes of broken layouts there, with the fix to reach
+  for: an implicit `auto` grid column or a flex child without `min-width: 0`
+  grows to its widest unwrapped child and pushes the page past the screen
+  (use `grid-template-columns: minmax(0, 1fr)`); a trailing control or badge
+  beside text squeezes the text to one word per line (move it below the text
+  in a narrow container query); a hint beside a name truncates the name (put
+  the hint on a second line). A phone settings page scrolls vertically only
+  (`overflow-x: hidden` on `.settings-mobile-page .settings-pane-body`), its
+  header drops the "Back" word below 400px so the page title fits, and the
+  Workspace launcher grid uses three columns up to a 420px container so tile
+  labels are not broken mid-word. Placeholders ellipsize (`input:placeholder-shown`
+  and the collapsed composer's `::placeholder`) instead of being cut mid-letter.
 
 ## 13. Desktop density
 

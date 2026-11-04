@@ -280,6 +280,20 @@ pub fn decode_invite_secret(ticket: &PairingTicket) -> Result<[u8; 32], LinkErro
     bytes.try_into().map_err(|_| LinkError::PairingInvalid)
 }
 
+/// A server name as people see it: one printable line of at most
+/// `label_chars` characters. `None` when nothing printable is left.
+pub fn clean_label(raw: &str) -> Option<String> {
+    let limit = Limits::v1().label_chars;
+    let words = raw
+        .split(|ch: char| ch.is_whitespace() || ch.is_control())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let kept: String = words.chars().take(limit).collect();
+    let kept = kept.trim_end();
+    (!kept.is_empty()).then(|| kept.to_string())
+}
+
 fn decode_b64(value: &str) -> Result<Vec<u8>, LinkError> {
     URL_SAFE_NO_PAD
         .decode(value.as_bytes())
@@ -351,6 +365,20 @@ mod tests {
         let encoded = encode_pairing_ticket(&sample()).unwrap();
         let parsed = parse_pairing_ticket(&encoded).unwrap();
         assert_eq!(parsed.host.endpoint_id, sample().host.endpoint_id);
+    }
+
+    #[test]
+    fn labels_are_one_bounded_printable_line() {
+        assert_eq!(
+            clean_label("  Studio\n Mac\u{7}  ").as_deref(),
+            Some("Studio Mac")
+        );
+        assert_eq!(clean_label(" \t\r\n"), None);
+        let long = "й".repeat(120);
+        assert_eq!(
+            clean_label(&long).unwrap().chars().count(),
+            Limits::v1().label_chars
+        );
     }
 
     #[test]

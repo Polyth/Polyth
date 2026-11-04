@@ -480,16 +480,31 @@ test("execution code surfaces override the global prose font preference", async 
 
 test("the inline stop action is a red outline with no fill and a preserved hit area", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  const rule = /\.execution-stop\.ui-btn\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  // The variant class lifts the Stop over the platform styles' push-button
+  // rules (html[data-theme-style] .ui-btn, :is(.ui-btn--danger, ...)).
+  const rule = /\n\.execution-stop\.ui-btn\.ui-btn--danger\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(rule, /min-height:\s*var\(--control-h-sm\)/);
   assert.match(rule, /padding-inline:\s*var\(--control-pad-x-sm\)/);
-  // One of the few contours in the transcript: red ink and outline, no fill.
+  // One of the few contours in the transcript: red ink and outline, no fill,
+  // in a capsule under every platform style.
   assert.match(rule, /background:\s*transparent/);
+  assert.match(rule, /border-radius:\s*var\(--radius-round\)/);
+  assert.match(rule, /box-shadow:\s*none/);
   assert.match(rule, /border-color:\s*var\(--execution-stop-line\)/);
   assert.match(rule, /--execution-stop-line:\s*color-mix\(in srgb, var\(--red\) 38%, transparent\)/);
+  // Press stays red under every style (Fluent's press would grey it).
+  assert.match(css, /\.execution-stop\.ui-btn\.ui-btn--danger:active:not\(:disabled\)\s*\{[^}]*color: var\(--red\)/);
   // Borderless appearance clears every border; the Stop outline is kept.
   assert.match(css, /body\[data-hide-borders="true"\] \.execution-stop\.ui-btn \{\s*border-color: var\(--execution-stop-line\) !important;/);
   assert.match(css, /\.execution-stop\.ui-btn::after\s*\{[^}]*var\(--hit-min\)[^}]*var\(--control-h-sm\)/s);
+  // Beside the chip pill it takes the pill's height.
+  assert.match(css, /body\[data-activity-style="chip"\]:is\(:not\(\[data-shell-look\]\), \[data-shell-look="standard"\]\) \.activity-group\.has-live-stop > \.activity-live-stop \{ align-self: stretch; \}/);
+  // Fluent keeps its push-button edges in Borderless, but not on the Stop.
+  const fluent = await readFile(new URL("../src/fluentTheme.css", import.meta.url), "utf8");
+  assert.match(fluent, /body\[data-hide-borders="true"\] :is\(\.ui-btn--quiet, \.ui-btn--danger:not\(\.execution-stop\),/);
+  // Liquid Glass draws it as its tinted capsule, without the line.
+  const glass = await readFile(new URL("../src/liquidGlassTheme.css", import.meta.url), "utf8");
+  assert.match(glass, /html\[data-theme-style="liquid-glass"\] \.execution-stop\.ui-btn\.ui-btn--danger \{\s*--execution-stop-line: transparent;\s*background: color-mix\(in srgb, var\(--red\) var\(--lg-tint\), transparent\);/);
 });
 
 const dom = new Window({ url: "http://localhost/" });

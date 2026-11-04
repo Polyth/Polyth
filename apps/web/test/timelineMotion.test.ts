@@ -217,6 +217,7 @@ const {
   activateProject,
   activateSession,
   applyEvent,
+  applyEvents,
   beginPendingSend,
   getState,
   reduceSessionModel,
@@ -831,6 +832,84 @@ test("a detached reader's row stays put through late layout above it and the ear
     );
     assert.equal(el.querySelector(":scope > .timeline-earlier"), null, "the host left once nothing earlier remains");
     assert.equal(reading.getBoundingClientRect().top, top, "the host leaving did not move the reader's row");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+/** A live chat opened on its newest events only: the turn's prompt and the
+ *  settled turns before it are older history the background backfill brings
+ *  later. Returns that history and mounts the tail. */
+async function mountLiveTail() {
+  let older: SessionEvent[] = [];
+  const t = await mountTimeline({
+    seed: ({ event, turn }) => {
+      older = [
+        event("session/created", { title: "Motion" }),
+        ...turn(1, "Settled one."), ...turn(2, "Settled two."), ...turn(3, "Settled three."),
+        event("user/message", { text: "The long live turn." }),
+      ];
+      const tail = [event("turn/started", { turnId: "open-long" })];
+      for (let step = 1; step <= 6; step += 1) {
+        tail.push(
+          event("tool/call", { callId: `long-c${step}`, tool: "list", input: { path: "." } }),
+          event("tool/result", { callId: `long-c${step}`, tool: "list", output: "README.md" }),
+          event("assistant/message", { partId: `long-p${step}`, text: LONG }),
+        );
+      }
+      return tail;
+    },
+  });
+  return { t, older };
+}
+
+test("history that lands with an open live turn's prompt moves, lifts and mounts nothing", async () => {
+  const { t, older } = await mountLiveTail();
+  try {
+    const el = t.timeline();
+    assert.ok(el.scrollTop > 0, "the tail overflows the view");
+    assert.ok(el.querySelector(":scope > .timeline-earlier"), "earlier history is advertised");
+    const rows = () => [...el.querySelectorAll<HTMLElement>(":scope > .msg")];
+    const count = rows().length;
+    const visible = rows().filter((row) => row.getBoundingClientRect().bottom > 0);
+    const tops = visible.map((row) => row.getBoundingClientRect().top);
+    const scrollTop = el.scrollTop;
+    const before = recorded.length;
+    // The backfill: older events, the live turn's prompt among them.
+    await act(async () => { applyEvents(older); });
+    await t.push();
+    await t.wait(40);
+    const lifts = recorded.slice(before).filter((animation) => Number.isFinite(travel(animation)));
+    assert.equal(lifts.length, 0, `no row glides from an unpainted position: ${lifts.map(travel).join(", ")}`);
+    assert.deepEqual(visible.map((row) => row.getBoundingClientRect().top), tops,
+      "no row the reader sees moved");
+    assert.equal(t.reserve(), 0, "the prompt that arrived with history is no send: no fresh-turn sheet re-aligns the view");
+    assert.equal(rows().length, count, "the history is held above the window, not mounted under the reader");
+    assert.equal(el.scrollTop, scrollTop, "nothing above the reader changed, so neither did the scroll");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("held history is revealed a chunk at a time as the reader scrolls up to it, without moving their row", async () => {
+  const { t, older } = await mountLiveTail();
+  try {
+    const el = t.timeline();
+    await act(async () => { applyEvents(older); });
+    await t.push();
+    const rows = () => [...el.querySelectorAll<HTMLElement>(":scope > .msg")];
+    const count = rows().length;
+    // The reader scrolls up, deliberately, to within a screen of the top.
+    await act(async () => {
+      el.dispatchEvent(new dom.WheelEvent("wheel", { deltaY: -120, bubbles: true }) as unknown as Event);
+      el.scrollTop = 120;
+      el.dispatchEvent(new dom.Event("scroll") as unknown as Event);
+    });
+    const reading = rows().find((row) => row.getBoundingClientRect().bottom > 0)!;
+    const top = reading.getBoundingClientRect().top;
+    await t.wait(40);
+    assert.ok(rows().length > count, "the earlier rows were revealed");
+    assert.equal(reading.getBoundingClientRect().top, top, "the reader's row stayed where they read it");
   } finally {
     await t.cleanup();
   }

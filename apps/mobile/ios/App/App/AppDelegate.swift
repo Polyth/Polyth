@@ -647,6 +647,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "recoverConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "forgetConnection", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "renameConnection", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getStatus", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "scanPairingQr", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "presentServerMenu", returnType: CAPPluginReturnPromise),
@@ -764,6 +765,15 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         defer { polythLinkStringFree(pointer) }
         return String(cString: pointer)
+    }
+
+    /// This phone's name on the server's Link page. iOS 16 and later give an
+    /// app the model ("iPhone", "iPad"), not the name its owner chose; the
+    /// server numbers phones that share a name.
+    private func deviceLabel() -> String {
+        let read = { UIDevice.current.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let name = Thread.isMainThread ? read() : DispatchQueue.main.sync(execute: read)
+        return name.isEmpty ? "iPhone" : String(name.prefix(80))
     }
 
     private func freshSecret() throws -> Data {
@@ -991,7 +1001,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func beginPairing(_ call: CAPPluginCall) {
         guard trusted(call), let raw = require(call, "raw", code: "pairing-invalid") else { return }
-        let label = call.getString("label") ?? "This phone"
+        let label = call.getString("label") ?? deviceLabel()
         queue.async {
             do {
                 let hostID = try self.hostID(raw)
@@ -1021,7 +1031,7 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         guard trusted(call),
               let hostID = require(call, "hostEndpointId", code: "pairing-invalid"),
               let code = require(call, "code", code: "pairing-invalid") else { return }
-        let label = call.getString("label") ?? "This phone"
+        let label = call.getString("label") ?? deviceLabel()
         let addresses = call.getArray("addresses", String.self) ?? []
         let port = call.getInt("port")
         queue.async {
@@ -1166,6 +1176,19 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
                 try self.keychain.delete(connectionID)
                 _ = try self.invoke("forget", ["connectionId": connectionID])
                 self.forgetTransport(connectionID)
+                call.resolve(["ok": true])
+            } catch { self.reject(call, error) }
+        }
+    }
+
+    /** The hub's name for a saved server, kept with its metadata so the server
+     *  menu shows it too. An empty name goes back to the server's own. */
+    @objc func renameConnection(_ call: CAPPluginCall) {
+        guard trusted(call), let connectionID = require(call, "connectionId", code: "device-unknown") else { return }
+        let label = call.getString("label") ?? ""
+        queue.async {
+            do {
+                _ = try self.invoke("connections.rename", ["connectionId": connectionID, "label": label])
                 call.resolve(["ok": true])
             } catch { self.reject(call, error) }
         }
@@ -1354,9 +1377,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 /** Native push authority. Its plugin contract only returns semantic state, a
- * short-lived claim, and a validated pending notification id. APNs tokens,
- * relay management capabilities, binding material, and relay origin never
- * cross into JavaScript or ordinary storage. */
+ * short-lived claim, and a validated pending notification id. Relay
+ * management capabilities, binding material, and relay origin never cross
+ * into JavaScript or ordinary storage. With a relay the APNs token stays here
+ * too; a build without one is in direct mode: the page's own server holds
+ * the APNs key, so `enable` hands the page the token and a locally made
+ * subscription id, which it registers with that server over Polyth Link. */
 @objc(PolythPushPlugin)
 final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCenterDelegate {
     static let shared = PolythPushPlugin()
@@ -1401,8 +1427,11 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
         let deviceEndpointId: String
         let accountId: String
         let subscriptionId: String
+        /** Empty in direct mode (no relay registration). */
         let manageToken: String
         let binding: String
+        /** Direct mode: the APNs token the server was given. */
+        var providerToken: String? = nil
     }
 
     private struct PendingOpen: Codable {
@@ -1432,7 +1461,7 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
     override public func load() {
         // Keychain may survive uninstall while UserDefaults does not. Never
         // treat an orphaned mapping or tap as identity recovery for a fresh
-        // installation; the user must explicitly enable each server/account.
+        // installation; each server/account registers afresh through enable().
         if !UserDefaults.standard.bool(forKey: Self.installMarker) {
             secureRemoveAll()
             setMappingIds([])
@@ -1660,16 +1689,25 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
         }
     }
 
+    /** The APNs environment of this build; the Live Activity's push token
+     * goes to the page's server with it (PolythLiveActivityPlugin). */
+    func apnsEnvironment() -> String? { relayEnvironment() }
+
     @objc func getStatus(_ call: CAPPluginCall) {
         guard requireSemanticReader(call) else { return }
-        guard relayOrigin() != nil, relayEnvironment() != nil else { call.resolve(["state": "unavailable", "reason": "relay-not-configured"]); return }
+        guard let environment = relayEnvironment() else { call.resolve(["state": "unavailable", "reason": "relay-not-configured"]); return }
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             if settings.authorizationStatus == .denied {
                 call.resolve(["state": "denied", "reason": "permission-denied"]); return
             }
             self.queue.async {
                 do {
-                    if let key = self.foregroundMapping, let item = try self.mappings().first(where: { "\($0.connectionId)\u{0}\($0.accountId)" == key }) { call.resolve(["state": "enabled", "subscriptionId": item.subscriptionId]) }
+                    if let key = self.foregroundMapping, let item = try self.mappings().first(where: { "\($0.connectionId)\u{0}\($0.accountId)" == key }) {
+                        var status: [String: Any] = ["state": "enabled", "subscriptionId": item.subscriptionId]
+                        // Direct mode: the page re-sends it, so a rotated token reaches its server.
+                        if let token = item.providerToken { status["providerToken"] = token; status["environment"] = environment }
+                        call.resolve(status)
+                    }
                     else { call.resolve(["state": "disabled"]) }
                 } catch { call.resolve(["state": "failed", "reason": "registration-failed"]) }
             }
@@ -1677,8 +1715,8 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
     }
 
     @objc func enable(_ call: CAPPluginCall) {
-        guard requireSemanticReader(call), relayOrigin() != nil, relayEnvironment() != nil else {
-            if relayOrigin() == nil || relayEnvironment() == nil { call.reject("relay-not-configured", "relay-not-configured") }
+        guard requireSemanticReader(call), relayEnvironment() != nil else {
+            if relayEnvironment() == nil { call.reject("relay-not-configured", "relay-not-configured") }
             return
         }
         guard let account = call.getString("accountId"), let input = try? currentInput(accountId: account) else {
@@ -1768,6 +1806,7 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
 
     private func register(token: String, call: CAPPluginCall, input: PushInput) {
         pendingEnable = nil
+        if relayOrigin() == nil { registerDirect(token: token, call: call, input: input); return }
         guard let binding = try? binding(input), let environment = relayEnvironment(), let body = try? JSONSerialization.data(withJSONObject: ["platform": "ios", "providerToken": token, "binding": binding, "environment": environment]) else {
             call.reject("push-registration-failed", "push-registration-failed"); return
         }
@@ -1809,9 +1848,37 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
         }
     }
 
+    /** Direct mode, on `queue`: no relay, so the registration is filed locally
+     * under a fresh id and the page carries the token to its server. */
+    private func registerDirect(token: String, call: CAPPluginCall, input: PushInput) {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        guard active(input), let environment = relayEnvironment(),
+              SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            call.reject("push-registration-failed", "push-registration-failed"); return
+        }
+        let subscription = "sub_" + base64URL(Data(bytes))
+        do {
+            let previous = try mappings().filter { $0.connectionId == input.connectionId && $0.accountId == input.accountId }
+            let contentKey = makeContentKey(subscriptionId: subscription)
+            try store(PushMapping(connectionId: input.connectionId, hostEndpointId: input.hostEndpointId, deviceEndpointId: input.deviceEndpointId, accountId: input.accountId, subscriptionId: subscription, manageToken: "", binding: "", providerToken: token))
+            for item in previous where item.subscriptionId != subscription { forget(item) }
+            var result: [String: Any] = ["subscriptionId": subscription, "providerToken": token, "environment": environment]
+            if let contentKey { result["contentKey"] = contentKey }
+            call.resolve(result)
+        } catch {
+            contentRemove(subscription)
+            call.reject("push-registration-failed", "push-registration-failed")
+        }
+    }
+
     private func rotate(token: String) {
         guard let items = try? mappings() else { return }
         for item in items {
+            // Direct mode: the page re-sends the stored token on its next foreground.
+            if item.manageToken.isEmpty {
+                if item.providerToken != token { var next = item; next.providerToken = token; try? store(next) }
+                continue
+            }
             guard let body = try? JSONSerialization.data(withJSONObject: ["providerToken": token]) else { continue }
             request("PUT", path: "/v1/registrations/\(item.subscriptionId)", body: body, manageToken: item.manageToken) { _ in }
         }

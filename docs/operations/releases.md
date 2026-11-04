@@ -277,7 +277,9 @@ own runners; no deploy key or second repository is involved.
   one target or `all`). Enable it once the repository is public: private-repository macOS and
   Windows minutes are expensive, and while the external builder still publishes nightlies, two feeds
   would compete.
-- **Triggers.** Three schedule slots (05:17, 09:47, 14:17 Kyiv) and `repository_dispatch` type
+- **Triggers.** Three schedule slots at 03:17, 07:47 and 12:17 UTC (05:17, 09:47, 14:17 Kyiv in
+  winter, an hour later in summer; the cron entries carry no `timezone`, because with
+  `timezone: Europe/Kyiv` no slot fired in this repository) and `repository_dispatch` type
   `nightly` (`client_payload.ref` overrides `devel`). Only the first run of each Kyiv day that did
   not fail builds, and a `devel` commit that the newest nightly already holds (its release-notes
   source marker) is not rebuilt.
@@ -326,7 +328,7 @@ The plan job resolves the source ref to one commit (`git ls-remote` with the dep
 
 | Channel | Trigger | Version / tag | GitHub release | Desktop metadata |
 |---|---|---|---|---|
-| Nightly | Automatic: `nightly.yml` schedule 05:17/09:47/14:17 Kyiv or `repository_dispatch` (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
+| Nightly | Automatic: `nightly.yml` schedule 03:17/07:47/12:17 UTC or `repository_dispatch` (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
 | Test | Manual: **Actions → Nightly → Run workflow**, channel `test`, ref `master` | `X.Y.N-beta` | prerelease | `latest*.yml` + `beta*.yml` |
 | Stable | Manual: **Actions → Nightly → Run workflow**, channel `stable`, ref `master` | `X.Y.N` | release, marked **Latest** | `latest*.yml` + `beta*.yml` |
 
@@ -356,7 +358,7 @@ Create it from **Agents → Templates → Nightly release captain** (or start em
 
 - **Range**: from the previous release of the channel (nightly → nightly; test → test or stable; stable → stable; a channel's first release → the newest older release of any channel) up to the built commit. Each body ends with a hidden `<!-- polyth-release: channel=… source=<sha> -->` marker, which gives the next release its exact range. Without a usable marker it falls back to the previous release's publication date, then to the newest 50 commits.
 - **Sections**: ✨ New, 🚀 Improvements, 🐛 Fixes and a collapsed 🧰 Under the hood, from the conventional-commit type (`feat`, `fix`, `perf`, `docs`, `ci`…), else the subject's leading verb (`Add`, `Fix`/`Stop`/`Keep`, `Document`/`Type`…, Ukrainian `Додай`/`Виправ…` too), else Improvements. A commit that touches only docs, tests, `.agents`, `.github` or Markdown is Under the hood. Each entry carries the first sentence of the commit body. Merge, WIP and `fixup!` commits and repeated subjects are dropped.
-- **Contributors**: every human author and `Co-authored-by` trailer, merged by email or exact name through the repository `.mailmap`, counted once per commit, most active first. A `users.noreply.github.com` address becomes an @-mention. AI co-authors (Claude, Cursor, Codex, OpenCode…) are credited separately; bots are skipped. Add new contributor addresses to `.mailmap` to merge identities or get an @-mention.
+- **Contributors**: every human author and `Co-authored-by` trailer, merged by email or exact name through the repository `.mailmap`, counted once per commit, most active first. A `users.noreply.github.com` address becomes an @-mention. Bot identities and AI agents (Claude, Cursor, Codex, OpenCode, Gemini, Copilot…) are skipped, including any trailer naming a model or harness, so a release credits people only. Add new contributor addresses to `.mailmap` to merge identities or get an @-mention.
 
 The builder only sees **pushed** source: `devel` for nightlies, `master` for test and stable runs. Push the source changes before relying on a new builder workflow: an older source has no `update-feed.mjs`, so its publish job fails.
 

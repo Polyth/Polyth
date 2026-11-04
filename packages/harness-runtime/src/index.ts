@@ -1059,7 +1059,11 @@ export function createHarnessPool(options: {
          * runtime still shared with any other lease is only uncached. Used when
          * the directory itself is about to be deleted. */
         async retireWorkspace(cwd: string) {
-            const normalize = (path: string) => path.replace(/[\\/]+$/, "") || path;
+            const normalize = (path: string) => {
+                let end = path.length;
+                while (end > 0 && (path[end - 1] === "/" || path[end - 1] === "\\")) end--;
+                return path.slice(0, end) || path;
+            };
             const target = normalize(cwd);
             const retiring: HarnessCacheEntry[] = [];
             for (const [key, entry] of cached) {

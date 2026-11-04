@@ -13,7 +13,7 @@ import {
 import { canManageSession, sharingMarkerLabel } from "../../sessionSharing.ts";
 import { conversationUnread, hasMentionAttention, setSessionMuted, unreadBadgeText } from "../../sessionPeople.ts";
 import { useHasArchivedSessions } from "../../useHasArchivedSessions.ts";
-import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, refreshSessions, withOptimisticSessionChange } from "../../init.ts";
+import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, ensureSessionsListed, refreshSessions, withOptimisticSessionChange } from "../../init.ts";
 import { markSessionPerformance } from "../../sessionPerformance.ts";
 import { collectSessionSummaries } from "../../sessionSummaryPages.ts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
@@ -27,6 +27,7 @@ import {
   needsDestructiveConfirm,
   renameSessionTitle,
   toggleSessionPin,
+  type ArchiveSessionOptions,
 } from "../../sessionActions.ts";
 import { copyText, firstUserTextCached } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
@@ -260,9 +261,11 @@ function SessionRow({
 
   useEffect(() => () => cancelLongPress(), []);
 
-  const quickArchive = async () => {
+  // Shift-hover quick actions are deliberate (modifier held), so they skip the
+  // soft "confirm archive" preference prompt. Live agent activity still asks.
+  const quickArchive = async (options?: ArchiveSessionOptions) => {
     const label = s.title || tr("sidebar.sessionlist.session");
-    void archiveSessionWithPolicy(s)
+    void archiveSessionWithPolicy(s, options)
       .then((archived) => {
         if (!archived) return;
         successFeedback();
@@ -727,7 +730,9 @@ function SessionRow({
               className="session-quick-btn"
               title={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
               aria-label={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
-              onClick={quickArchive}
+              onClick={shiftQuick && swipeX === null && !swipeRevealed
+                ? () => void quickArchive({ deliberate: true })
+                : () => void quickArchive()}
             ><Icon.download /></button>
           )}
           <button
@@ -853,7 +858,7 @@ export default function SessionList({
   useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
-    if (projectSessions.length === 0) void refreshSessions(projectId);
+    if (projectSessions.length === 0) void ensureSessionsListed(projectId);
   }, [projectId]);
   // Worktrees appear and disappear outside this sidebar — created by the Git
   // UI, by an agent, by a shell. The server bumps this project's topology

@@ -90,6 +90,22 @@ function decompress(body: Buffer, encoding: string, maxOutputLength: number): Bu
   return current;
 }
 
+/** First `attr` value inside the opening tag that starts with `open` (e.g.
+ * `<meta`) within `head`. Scans tag by tag with indexOf so a head full of
+ * unterminated tags stays linear. */
+function tagAttribute(head: string, open: string, attr: RegExp): string | undefined {
+  const lower = head.toLowerCase();
+  for (let at = lower.indexOf(open); at >= 0; at = lower.indexOf(open, at + open.length)) {
+    const end = head.indexOf(">", at);
+    const tag = head.slice(at + open.length, end < 0 ? head.length : end);
+    const found = attr.exec(tag);
+    // The tag needs at least one character before the attribute name.
+    if (found && found.index > 0) return found[1];
+    if (end < 0) return undefined;
+  }
+  return undefined;
+}
+
 function sniffCharset(contentType: string, body: Buffer): string {
   const declared = contentType.match(/charset\s*=\s*["']?([\w.:-]+)/i)?.[1];
   if (declared) return declared;
@@ -98,8 +114,8 @@ function sniffCharset(contentType: string, body: Buffer): string {
   if (body[0] === 0xfe && body[1] === 0xff) return "utf-16be";
   if (/html|xml/i.test(contentType) || !contentType) {
     const head = body.subarray(0, 4_096).toString("latin1");
-    const meta = head.match(/<meta[^>]+charset\s*=\s*["']?([\w.:-]+)/i)?.[1]
-      ?? head.match(/<\?xml[^>]+encoding\s*=\s*["']([\w.:-]+)/i)?.[1];
+    const meta = tagAttribute(head, "<meta", /charset\s*=\s*["']?([\w.:-]+)/i)
+      ?? tagAttribute(head, "<?xml", /encoding\s*=\s*["']([\w.:-]+)/i);
     if (meta) return meta;
   }
   return "utf-8";

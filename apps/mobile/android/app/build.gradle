@@ -32,9 +32,6 @@ def polythVersionName = project.hasProperty('polythVersionName')
 def polythVersionCode = project.hasProperty('polythVersionCode')
     ? project.polythVersionCode.toString().toInteger()
     : defaultVersionCode
-def polythPushRelayOrigin = project.hasProperty('polythPushRelayOrigin')
-    ? project.polythPushRelayOrigin.toString()
-    : ''
 def googleServicesFile = file('google-services.json')
 def polythFirebaseConfigured = googleServicesFile.isFile() && googleServicesFile.length() > 0
 
@@ -70,7 +67,6 @@ android {
         aaptOptions {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
-        buildConfigField 'String', 'POLYTH_PUSH_RELAY_ORIGIN', '"' + polythPushRelayOrigin.replace('"', '\\"') + '"'
         buildConfigField 'boolean', 'POLYTH_FCM_CONFIGURED', polythFirebaseConfigured.toString()
     }
     externalNativeBuild {

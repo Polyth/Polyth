@@ -35,9 +35,14 @@ function fixture(path = ":memory:", options: {
   compactionSummary?: Parameters<typeof createSessionService>[0]["compactionSummary"];
   /** Engines report native compaction that ends in the background with this
    *  outcome (as Claude's `/compact` does). */
-  nativeCompaction?: "compacted" | "failed";
+  nativeCompaction?: "compacted" | "failed" | "refused";
   /** Harnesses that declare `privateSessions`, and the Space preferences. */
   privateSessions?: { supported: string[]; preferences: Record<string, { privateSessions?: boolean }> };
+  /** A harness whose runtime has no release hook (a remote Pi leg). */
+  noReleaseHarness?: string;
+  /** After a turn, report idle by ordering evidence alone, as Pi does,
+   *  instead of naming the create operation as its cause. */
+  orderedStatusEvidence?: boolean;
 } = {}) {
   let store = createStore(path);
   const detach: Array<() => void> = [];
@@ -121,6 +126,9 @@ function fixture(path = ":memory:", options: {
         ...(options.nativeCompaction ? {
           compactOperation: async () => {
             nativeCompactions.push(id);
+            if (options.nativeCompaction === "refused") {
+              return { kind: "rejected" as const, code: "native-failure", message: "Not enough messages to compact." };
+            }
             setTimeout(() => emit(options.nativeCompaction === "compacted"
               ? { type: "session/compacted", backendEventId: randomUUID(), summary: "NATIVE-SUMMARY" }
               : { type: "session/compaction-failed", error: "native compact failed" }), 30);
@@ -160,7 +168,11 @@ function fixture(path = ":memory:", options: {
         history: async () => [], endpoint: async () => endpoint, protocol: async () => "legacy",
         reconcile: async (binding) => ({
           ...endpoint, backendSessionId: binding.backendSessionId!, reconciliationOrdinal: binding.reconciliationOrdinal ?? 0,
-          state: { value: executing.has(authorityId) ? "running" : "idle", comparison: { domain: authorityId, order: ++order }, causalOperationId: lastCreateId },
+          state: {
+            value: executing.has(authorityId) ? "running" : "idle",
+            comparison: { domain: authorityId, order: ++order },
+            ...(options.orderedStatusEvidence && accepted.some((operation) => operation.mutationKind === "turn-submit") ? {} : { causalOperationId: lastCreateId }),
+          },
           completeness: { events: "complete", permissions: "complete", questions: "complete" },
           permissions: [...nativePermissions].map(([requestId, request]) => ({ requestId, ...request, revision: "pending" })),
           questions: [], events: [], acceptedOperations: accepted,
@@ -219,6 +231,7 @@ function fixture(path = ":memory:", options: {
         onEvent: (cb) => { listeners.add(cb); return { dispose: () => { listeners.delete(cb); } }; },
         dispose: async () => {},
       };
+      if (options.noReleaseHarness === id) delete runtime.releaseExecution;
       engines.push(runtime); return runtime;
     },
   });
@@ -1022,6 +1035,7 @@ test("stop-now cannot start B on an abort acknowledgement or unknown release", a
   await f.sessions.send(id, { text: "mutating" });
   await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }, "stop-now"), { code: "outcome-unknown" });
   assert.equal(f.engines.length, 1, "abort acknowledgement must not start the target harness");
+  assert.equal((await f.store.projection(id))?.harnessTransition, undefined, "an unproven stop withdraws the switch");
   f.setReleaseUnknown(true);
   await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }, "stop-now"), { code: "outcome-unknown" });
   assert.equal(f.engines.length, 1);
@@ -1030,6 +1044,91 @@ test("stop-now cannot start B on an abort acknowledgement or unknown release", a
   await f.idle(id);
   const result = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }, "stop-now");
   assert.equal(result.resolvedHarnessId, "fake-b"); await f.close();
+});
+
+test("a switch off a harness that cannot prove release is withdrawn at once and the chat keeps working", async (t) => {
+  const f = fixture(":memory:", { noReleaseHarness: "fake-a" });
+  t.after(() => f.close());
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "first" });
+  f.engines[0]!.complete();
+  await f.idle(id);
+  const before = (await f.store.projection(id))!;
+  await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }, "stop-now"), {
+    code: "unsupported",
+    message: "fake-a cannot prove its run has stopped here, so the chat stays on fake-a",
+  });
+  const after = (await f.store.projection(id))!;
+  assert.equal(after.harnessTransition, undefined);
+  assert.equal(after.resolvedHarnessId, "fake-a");
+  assert.deepEqual(after.runtimeBinding, before.runtimeBinding);
+  assert.deepEqual((await f.store.events(id)).filter((event) => event.type === "harness/switch-cancelled").map((event) => ({
+    reason: event.data.reason, code: event.data.code, targetHarnessId: event.data.targetHarnessId,
+  })), [{ reason: "release-unproven", code: "unsupported", targetHarnessId: "fake-b" }]);
+  assert.equal(f.engines.some((engine) => engine.harnessId === "fake-b"), false);
+  await f.sessions.send(id, { text: "still here" });
+  assert.equal(f.engines[0]!.requests.at(-1)?.text.endsWith("still here"), true);
+  f.engines[0]!.complete();
+  await f.idle(id);
+});
+
+test("an after-turn switch that cannot prove release is withdrawn when the turn ends; its queue runs on the current harness", async (t) => {
+  const f = fixture(":memory:", { noReleaseHarness: "fake-a", orderedStatusEvidence: true });
+  t.after(() => f.close());
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "working" });
+  const pending = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  assert.equal(pending.harnessTransition?.phase, "requested", "waiting for the running turn is not a failure");
+  await f.sessions.send(id, { text: "next" });
+  f.engines[0]!.complete();
+  await until(async () => f.engines[0]!.requests.some((request) => request.text.endsWith("next")));
+  assert.equal((await f.store.projection(id))?.harnessTransition, undefined);
+  assert.equal(f.engines.some((engine) => engine.harnessId === "fake-b"), false);
+  assert.equal((await f.store.events(id)).some((event) => event.type === "harness/switch-cancelled"
+    && event.data.reason === "release-unproven"), true);
+  f.engines[0]!.complete();
+  await f.idle(id);
+});
+
+test("a requested switch an older server left pending is withdrawn by the next send, which then works", async (t) => {
+  const f = fixture(":memory:", { noReleaseHarness: "fake-a" });
+  t.after(() => f.close());
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "first" });
+  f.engines[0]!.complete();
+  await f.idle(id);
+  const projection = (await f.store.projection(id))!;
+  await f.store.upsertProjection({ ...projection, harnessTransition: {
+    id: randomUUID(), selection: { mode: "pinned", harnessId: "fake-b" }, targetHarnessId: "fake-b", timing: "stop-now", phase: "requested",
+  } });
+  await assert.rejects(f.sessions.send(id, { text: "blocked once" }), { code: "unsupported" });
+  assert.equal((await f.store.projection(id))?.harnessTransition, undefined);
+  assert.equal(f.engines[0]!.requests.some((request) => request.text.endsWith("blocked once")), false);
+  await f.sessions.send(id, { text: "works again" });
+  assert.equal(f.engines[0]!.requests.at(-1)?.text.endsWith("works again"), true);
+  assert.equal(f.engines.some((engine) => engine.harnessId === "fake-b"), false);
+  f.engines[0]!.complete();
+  await f.idle(id);
+});
+
+test("the queue dispatcher withdraws a switch that cannot prove release and sends the queue on the current harness", async (t) => {
+  const f = fixture(":memory:", { noReleaseHarness: "fake-a" });
+  t.after(() => f.close());
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "first" });
+  f.engines[0]!.complete();
+  await f.idle(id);
+  const projection = (await f.store.projection(id))!;
+  await f.store.upsertProjection({ ...projection, harnessTransition: {
+    id: randomUUID(), selection: { mode: "pinned", harnessId: "fake-b" }, targetHarnessId: "fake-b", timing: "stop-now", phase: "requested",
+  } });
+  const { item } = await f.store.enqueue(id, "queued behind the switch", "queue");
+  await f.sessions.queueEditCancel!(id, item.id);
+  await until(async () => f.engines[0]!.requests.some((request) => request.text.endsWith("queued behind the switch")));
+  assert.equal((await f.store.projection(id))?.harnessTransition, undefined);
+  assert.equal(f.engines.some((engine) => engine.harnessId === "fake-b"), false);
+  f.engines[0]!.complete();
+  await f.idle(id);
 });
 
 test("an idle requested switch releases its uncertain operation without replay", async (t) => {
@@ -1087,9 +1186,15 @@ for (const outcome of ["confirmed", "unknown", "mismatch", "missing"] as const) 
       assert.equal(result.harnessTransition, undefined);
       assert.equal((await f.store.events(id)).filter(event => event.type === "harness/execution-released").length, 1);
     } else {
-      await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }),
-        { code: outcome === "unknown" ? "outcome-unknown" : outcome === "missing" ? "epoch-pending" : "stale-evidence" });
-      assert.equal((await f.store.projection(id))?.harnessTransition?.phase, "requested");
+      const code = outcome === "unknown" ? "outcome-unknown" : outcome === "missing" ? "epoch-pending" : "stale-evidence";
+      await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }), { code });
+      // Unproven release withdraws the switch at once; the old route is kept.
+      const after = (await f.store.projection(id))!;
+      assert.equal(after.harnessTransition, undefined);
+      assert.equal(after.resolvedHarnessId, "fake-a");
+      assert.equal(after.runtimeBinding?.generation, projection.runtimeBinding?.generation);
+      assert.deepEqual((await f.store.events(id)).filter(event => event.type === "harness/switch-cancelled")
+        .map(event => [event.data.reason, event.data.code]), [["release-unproven", code]]);
       assert.equal((await f.store.events(id)).some(event => event.type === "harness/execution-released"), false);
       assert.equal(f.engines.some(engine => engine.harnessId === "fake-b"), false);
     }
@@ -1117,7 +1222,8 @@ for (const shared of ["authority", "workspace route"] as const) {
     f.pool.releaseSessionExecution = async () => { releases++; throw new Error("another session still owns this scope"); };
     await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }), { code: "epoch-pending" });
     assert.equal(releases, 0);
-    assert.equal((await f.store.projection(id))?.harnessTransition?.phase, "requested");
+    assert.equal((await f.store.projection(id))?.harnessTransition, undefined);
+    assert.equal((await f.store.events(id)).filter(event => event.type === "harness/switch-cancelled").length, 1);
     assert.equal(f.engines.some(engine => engine.harnessId === "fake-b"), false);
   });
 }
@@ -2317,6 +2423,43 @@ test("a runtime without native compaction compacts through a summary and a fresh
     await f.close();
   }
 });
+
+for (const nativeCompaction of ["refused", "failed"] as const) {
+  test(`a native compaction the harness ${nativeCompaction === "refused" ? "refuses" : "fails"} falls back to a Polyth one`, async () => {
+    const f = fixture(":memory:", {
+      nativeCompaction,
+      compactionSummary: async () => "## Goal\nFALLBACK-SUMMARY",
+    });
+    try {
+      const { id } = await f.sessions.create({ projectId: "p" });
+      await f.sessions.send(id, { text: "some work" });
+      f.engines.at(-1)!.complete();
+      await f.idle(id);
+      const before = (await f.store.projection(id))!;
+      await f.sessions.compact!(id);
+      await until(async () => (await f.store.events(id)).some((event) => event.type === "session/compacted"));
+
+      assert.deepEqual(f.nativeCompactions, ["fake-a"]);
+      const events = await f.store.events(id);
+      const failed = events.findLast((event) => event.type === "session/compaction-failed")!;
+      if (nativeCompaction === "failed") assert.equal(failed.data.fallback, "polyth");
+      else assert.equal(failed.data.strategy, "native");
+      const compacted = events.findLast((event) => event.type === "session/compacted")!;
+      assert.equal(compacted.data.source, "polyth");
+      assert.ok(failed.seq < compacted.seq);
+      assert.notEqual((await f.store.projection(id))!.backendSessionId, before.backendSessionId);
+      assert.equal((await f.sessions.runtimeFeatures!(id)).contextWindow?.compaction?.active, false);
+
+      await f.sessions.send(id, { text: "carry on" });
+      await until(async () => (f.engines.at(-1)?.requests.length ?? 0) > 0);
+      assert.match(f.engines.at(-1)!.requests.at(-1)!.text, /FALLBACK-SUMMARY/);
+      f.engines.at(-1)!.complete();
+      await f.idle(id);
+    } finally {
+      await f.close();
+    }
+  });
+}
 
 test("a failed compaction summary leaves the native context in place", async () => {
   const f = fixture(":memory:", {

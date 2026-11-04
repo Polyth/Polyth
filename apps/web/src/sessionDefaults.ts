@@ -11,6 +11,9 @@ export interface SessionDefaults {
   defaultAgent?: string;
   smallModel?: StoredModelRef;
   walkthroughModel?: StoredModelRef;
+  /** Which model writes a Polyth-owned compaction summary; unset = the
+   *  session's own model. The server reads it from the synced record. */
+  compactionModel?: "session" | "small";
   retentionDays?: number;
   retentionAction?: "archive" | "delete";
   archiveRetentionDays?: number;
@@ -51,6 +54,9 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
     const archiveRetentionDays = typeof data?.archiveRetentionDays === "number" && Number.isFinite(data.archiveRetentionDays)
       ? Math.min(3650, Math.max(1, Math.round(data.archiveRetentionDays)))
       : undefined;
+    const compactionModel = data?.compactionModel === "session" || data?.compactionModel === "small"
+      ? data.compactionModel
+      : undefined;
     const retentionAction = data?.retentionAction === "archive" || data?.retentionAction === "delete"
       ? data.retentionAction
       : undefined;
@@ -60,6 +66,7 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
       ...(defaultAgent ? { defaultAgent } : {}),
       ...(smallModel ? { smallModel } : {}),
       ...(walkthroughModel ? { walkthroughModel } : {}),
+      ...(compactionModel ? { compactionModel } : {}),
       ...(retentionDays ? { retentionDays } : {}),
       ...(retentionAction ? { retentionAction } : {}),
       ...(archiveRetentionDays ? { archiveRetentionDays } : {}),

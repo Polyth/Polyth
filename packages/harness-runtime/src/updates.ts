@@ -127,7 +127,7 @@ export function createHarnessUpdateChecker(options: { fetch?: typeof globalThis.
             const tag = source.distTag ?? "latest";
             if (!NPM_PACKAGE.test(source.package) || !NPM_TAG.test(tag))
                 throw new Error("invalid npm release source");
-            const response = await request(`https://registry.npmjs.org/${source.package.replace("/", "%2f")}/${tag}`);
+            const response = await request(`https://registry.npmjs.org/${source.package.replaceAll("/", "%2f")}/${tag}`);
             if (!response.ok)
                 throw new Error(`npm registry answered ${response.status}`);
             const manifest = JSON.parse(await boundedText(response, MAX_NPM_BYTES)) as { version?: unknown };

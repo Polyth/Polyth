@@ -91,7 +91,8 @@ export async function initializeClientReliabilityContext(): Promise<ClientReliab
     // another account's browser/mobile recovery records.
     const nonce = typeof globalThis.crypto?.randomUUID === "function"
       ? globalThis.crypto.randomUUID()
-      : `${Date.now()}-${Math.random()}`;
+      // randomUUID needs a secure context; getRandomValues does not.
+      : Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
     setClientPersistenceBackend(null);
     setClientReliabilityContext({ connectionScope: `account-unresolved-${nonce}`, spaceId: context.spaceId });
     return context;

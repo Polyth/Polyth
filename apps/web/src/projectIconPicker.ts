@@ -63,16 +63,23 @@ export function decodeSvgDataUrl(value: string): string | null {
   return null;
 }
 
+// Mirrors sanitizeProjectIconSvg in packages/server/src/projects.ts.
 export function sanitizeProjectIconSvg(svg: string): string {
-  return svg
-    .replace(/^\uFEFF/, "")
-    .replace(/<\?xml[\s\S]*?\?>/gi, "")
-    .replace(/<!doctype[\s\S]*?>/gi, "")
-    .replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
-    .replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"|'(?!#)[^']*')/gi, "")
-    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*')/gi, "")
-    .trim();
+  let clean = svg.replace(/^\uFEFF/, "");
+  // Repeat until nothing changes: removing one piece can join its neighbours
+  // into a new `<script` or `on\u2026=` ("<scr<script></script>ipt>"). A quoted value
+  // that never closes is removed to the end, as a browser would read it.
+  for (let previous = ""; previous !== clean;) {
+    previous = clean;
+    clean = clean.replace(/<\?xml[\s\S]*?\?>/gi, "");
+    clean = clean.replace(/<!doctype[\s\S]*?>/gi, "");
+    clean = clean.replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
+    clean = clean.replace(/<\/?(?:script|foreignObject)\b[^>]*>?/gi, "");
+    clean = clean.replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
+    clean = clean.replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"?|'(?!#)[^']*'?|[^\s"'>#][^\s>]*)/gi, "");
+    clean = clean.replace(/\son\w+\s*=\s*(?:"[^"]*"?|'[^']*'?|[^\s"'>]+)/gi, "");
+  }
+  return clean.trim();
 }
 
 export function ensureProjectIconSvgXmlns(svg: string): string {

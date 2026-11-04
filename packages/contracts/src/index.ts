@@ -1340,6 +1340,35 @@ export interface ModelMessage {
  * `manual`/`native`/`generated` as final. */
 export type SessionTitleSource = "manual" | "native" | "generated" | "polyth" | "placeholder";
 
+/** What woke the automation that started a session. */
+export type SessionOriginWake = "schedule" | "heartbeat" | "event" | "manual" | "alert";
+export const SESSION_ORIGIN_WAKES: readonly SessionOriginWake[] = ["schedule", "heartbeat", "event", "manual", "alert"];
+
+/** A session a package's automation started without a person — an agent's
+ * own conversation, a monitoring incident chat. Lists use it to hide such
+ * sessions on request and to draw them as automation rather than as chats. */
+export interface SessionOrigin {
+  /** Owning package id, a short lowercase id (`agents`, `monitoring`). */
+  source: string;
+  /** What woke it when the session started. A long-lived agent conversation
+   * keeps the first wake; the owning package knows the later ones. */
+  wake: SessionOriginWake;
+  /** Who started it, as people know it: the agent's name, "Monitoring".
+   * Plain text, at most 80 characters. */
+  label: string;
+}
+
+/** A well-formed origin, or null. The label is trimmed, single-line and cut
+ * to 80 characters. */
+export function normalizeSessionOrigin(value: unknown): SessionOrigin | null {
+  const raw = value && typeof value === "object" ? value as Partial<Record<keyof SessionOrigin, unknown>> : null;
+  if (!raw || typeof raw.source !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(raw.source)) return null;
+  if (!SESSION_ORIGIN_WAKES.includes(raw.wake as SessionOriginWake)) return null;
+  const label = typeof raw.label === "string" ? raw.label.replace(/\s+/g, " ").trim().slice(0, 80).trim() : "";
+  if (!label) return null;
+  return { source: raw.source, wake: raw.wake as SessionOriginWake, label };
+}
+
 export interface CreateSessionInput {
   projectId: string;
   /** Advanced membership selection; omitted means all Project repositories. */
@@ -1358,6 +1387,9 @@ export interface CreateSessionInput {
   /** Immutable package-owned session kind (for example `playground`).
    * Omitted means an ordinary chat. See `SessionProjection.purpose`. */
   purpose?: string;
+  /** Internal seam: the automation that starts this session when no person
+   * does. HTTP session-create must not accept it. See `SessionProjection.origin`. */
+  origin?: SessionOrigin;
   worktreeId?: string;
   /** absolute path of a git worktree; when set the session's runtime uses it as cwd */
   worktreePath?: string;
@@ -2260,6 +2292,10 @@ export interface SessionProjection {
    * and receives that package's per-turn context; forks inherit it. Absent
    * means an ordinary chat. */
   purpose?: string;
+  /** The automation that started this session without a person. Set once at
+   * creation by trusted server code, never accepted over HTTP and never
+   * inherited by forks or delegated children. Absent on ordinary chats. */
+  origin?: SessionOrigin;
   /** Snapshot of this session's repository membership and checkout roots. */
   workspace?: SessionWorkspace;
   /** Absence on legacy sessions is migrated to Auto with the bundled harness. */
@@ -2582,7 +2618,8 @@ export interface SessionService {
    *  agent to carry on from where it was interrupted. Rejects `not-paused`. */
   continuePaused?(sessionId: string, options?: { source?: string }): Promise<SendResult>;
   /** Compact the conversation context: the runtime's native compaction when
-   * it has one, otherwise Polyth's own (summary + fresh native leg). Resolves
+   * it has one, otherwise Polyth's own (summary + fresh native leg); a native
+   * compaction the harness refuses or fails falls back to Polyth's. Resolves
    * once the compaction is under way; `session/compacted` or
    * `session/compaction-failed` records its outcome. */
   compact?(sessionId: string): Promise<void>;
@@ -2846,7 +2883,7 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview"] as const satisfies readonly (keyof SessionProjection)[];
 
 export interface SessionSummaryQuery {
   projectId?: string;
@@ -2866,6 +2903,9 @@ export interface SessionSummaryQuery {
   /** Only rows the reader pinned: their own pin (v21), else the shared
    *  pre-v21 one. Recency pages never guarantee an old pinned chat. */
   pinned?: boolean;
+  /** Only these rows (at most 100). A reconnecting socket re-reads the rows its
+   *  client still shows as active, whose end it may have missed. */
+  ids?: readonly string[];
   fromTime?: number;
   toTime?: number;
 }
@@ -3955,6 +3995,11 @@ export interface RuntimeCapabilities {
   contextOccupancy?: TelemetryQuality;
   /** The harness can predict the next user prompt after a turn. */
   promptSuggestions?: boolean;
+  /** Model, effort and agent are frozen when the native session is created (a
+   *  CLI launch). A selection change is not a per-turn option: it needs a fresh
+   *  native leg launched with that selection. Runtimes that set this also
+   *  report their live launch through `AgentRuntime.launchSelection()`. */
+  launchLocked?: boolean;
 }
 
 // Harnesses construct AgentRuntime; they never own canonical sessions.
@@ -4820,6 +4865,11 @@ export interface AgentRuntime {
    * idempotently re-verifiable for the supplied binding incarnation. */
   releaseExecution?(binding: RuntimeSessionBinding, operationId: string): Promise<MutationOutcome<ExecutionReleaseProof>>;
   capabilities(): Promise<RuntimeCapabilities>;
+  /** What the live native leg was actually launched with. Set only by a
+   *  launch-locked runtime: the server compares it with the next turn's
+   *  selection and starts a fresh leg instead of sending a turn the runtime
+   *  would refuse. Absent means no exact selection is known. */
+  launchSelection?(): RuntimeLaunchSelection | undefined;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
   /** Every provider the backend currently exposes (id + name only) — for the
@@ -8381,14 +8431,75 @@ export function resolveVariantPreference(
 /** Elements that only appear in a rendered HTML document, never in ordinary
  *  prose, so an incidental `<` in a message is left untouched. */
 const MARKUP_BODY = /<\s*(?:!doctype\s+html|html|head|body|title|h[1-6]|p|div|center|br|table|pre)\b/i;
-const MARKUP_TITLE = /<title[^>]*>([\s\S]*?)<\/title>/i;
-const MARKUP_SCRIPT = /<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi;
-const MARKUP_TAG = /<[^>]*>/g;
+
+// The title and tag scans below walk the text with indexOf instead of lazy
+// `[^>]*` / `[\s\S]*?` patterns: an unterminated `<title` or `<script` repeated
+// many times would make those patterns rescan the rest of the body from every
+// opener. Each scan is linear because a missing ">" or closing tag ends it.
+const matchesAt = (text: string, at: number, word: string): boolean =>
+  text.slice(at, at + word.length).toLowerCase() === word;
+
+/** The text of the first `<title ...>...</title>` element, if any. */
+function markupTitle(html: string): string | undefined {
+  const closing = /<\/title>/gi;
+  for (let at = html.indexOf("<"); at !== -1; at = html.indexOf("<", at + 1)) {
+    if (!matchesAt(html, at + 1, "title")) continue;
+    const open = html.indexOf(">", at + 6);
+    if (open === -1) return undefined;
+    closing.lastIndex = open + 1;
+    const end = closing.exec(html);
+    return end ? html.slice(open + 1, end.index) : undefined;
+  }
+  return undefined;
+}
+
+/** The text with `<script>`/`<style>` elements and every remaining tag replaced by a space. */
+function markupVisibleText(html: string): string {
+  const unclosed = new Set<string>();
+  let out = "";
+  let from = 0;
+  let at = html.indexOf("<");
+  while (at !== -1) {
+    const name = ["script", "style"].find((word) => matchesAt(html, at + 1, word) && !/\w/.test(html[at + 1 + word.length] ?? " "));
+    if (name && !unclosed.has(name)) {
+      const open = html.indexOf(">", at + 1 + name.length);
+      const close = open === -1 ? null : new RegExp(`</${name}>`, "gi");
+      if (close) close.lastIndex = open + 1;
+      const end = close?.exec(html);
+      if (end) {
+        out += `${html.slice(from, at)} `;
+        from = end.index + end[0].length;
+        at = html.indexOf("<", from);
+        continue;
+      }
+      // Without a ">" or a closing tag here there is none later either.
+      if (open === -1) break;
+      unclosed.add(name);
+    }
+    at = html.indexOf("<", at + 1);
+  }
+  out += html.slice(from);
+  // Remaining tags: "<" up to the next ">" (an unclosed "<" is plain text).
+  let text = "";
+  let tail = 0;
+  for (let lt = out.indexOf("<"); lt !== -1;) {
+    const gt = out.indexOf(">", lt + 1);
+    if (gt === -1) break;
+    text += `${out.slice(tail, lt)} `;
+    tail = gt + 1;
+    lt = out.indexOf("<", tail);
+  }
+  return text + out.slice(tail);
+}
 
 export interface ErrorBodyTextOptions {
   /** Maximum returned length before an ellipsis is appended. */
   limit?: number;
 }
+
+/** A reference outside Unicode (or a surrogate) is kept as written rather than throwing. */
+const markupCodePoint = (match: string, code: number): string =>
+  code >= 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : match;
 
 const decodeMarkupEntities = (text: string): string =>
   text
@@ -8398,8 +8509,8 @@ const decodeMarkupEntities = (text: string): string =>
     .replace(/&quot;/gi, "\"")
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&amp;/gi, "&")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number.parseInt(dec, 10)));
+    .replace(/&#x([0-9a-f]+);/gi, (match, hex: string) => markupCodePoint(match, Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (match, dec: string) => markupCodePoint(match, Number.parseInt(dec, 10)));
 
 /**
  * Reduce a non-JSON HTTP error body to one readable line.
@@ -8414,10 +8525,8 @@ export function errorBodyText(body: string, options: ErrorBodyTextOptions = {}):
   const trimmed = body.trim();
   if (!trimmed || !MARKUP_BODY.test(trimmed)) return trimmed;
   const limit = options.limit ?? 200;
-  const title = MARKUP_TITLE.exec(trimmed)?.[1]?.trim();
-  const visible = trimmed
-    .replace(MARKUP_SCRIPT, " ")
-    .replace(MARKUP_TAG, " ");
+  const title = markupTitle(trimmed)?.trim();
+  const visible = markupVisibleText(trimmed);
   const chosen = title || visible;
   const collapsed = decodeMarkupEntities(chosen).replace(/\s+/g, " ").trim();
   return collapsed.length > limit ? `${collapsed.slice(0, limit - 1).trimEnd()}…` : collapsed;

@@ -331,8 +331,10 @@ export function sessionGroupsOf<T extends SessionProjection>(
 export const VIEW_MODE_KEY = "polyth.sidebar.viewMode";
 export type SidebarViewMode = "tree" | "rail";
 
-/** A fresh install starts with the compact project switcher. */
-export const SIDEBAR_VIEW_MODE_DEFAULT: SidebarViewMode = "rail";
+/** A fresh install starts with the project tree: someone who has not added a
+ *  project yet has no icon to put in the rail, and an empty rail is a strip
+ *  beside the chats that names nothing. */
+export const SIDEBAR_VIEW_MODE_DEFAULT: SidebarViewMode = "tree";
 
 export function parseSidebarViewMode(raw: string | null): SidebarViewMode {
   if (raw === null) return SIDEBAR_VIEW_MODE_DEFAULT;

@@ -324,9 +324,12 @@ test("Workspace editor and Add page CSS load after the widget fixes and keep the
   ]);
   assert.ok(main.indexOf("workspacePanelEditor.css") > main.indexOf("workspacePanelWidgetFixes.css"));
   assert.ok(main.indexOf("workspaceGallery.css") > main.indexOf("workspacePanelEditor.css"));
-  // The arrangement is drawn as it will look: four tiles to a line (three narrow, six wide).
+  // The arrangement is drawn as it will look: four tiles to a line (three narrow, six wide),
+  // with the same narrow threshold as the Workspace itself.
   assert.match(editor, /\.workspace-editor-grid\s*\{[^}]*repeat\(4,/s);
-  assert.match(editor, /@container workspace-panel \(max-width: 340px\)[\s\S]*?repeat\(3,/);
+  assert.match(editor, /@container workspace-panel \(max-width: 420px\)\s*\{\s*\.workspace-panel-sheet \.workspace-editor-grid\s*\{\s*grid-template-columns:\s*repeat\(3,/);
+  const view = await read("../src/workspacePanelPremium.css");
+  assert.match(view, /@container workspace-panel \(max-width: 420px\)\s*\{\s*\.workspace-panel-sheet \.workspace-panel-items\s*\{\s*grid-template-columns:\s*repeat\(3,/);
   assert.match(editor, /@container workspace-panel \(min-width: 560px\)[\s\S]*?repeat\(6,/);
   // A grip picks up at once; anywhere else a vertical swipe still scrolls.
   assert.match(editor, /\.workspace-editor-grip\s*\{[^}]*touch-action:\s*none/s);
@@ -385,7 +388,7 @@ test("every kind default names a widget its package really registers", async () 
   for (const id of new Set(Object.values(DEFAULT_PANEL_WIDGETS).flat())) {
     const source = await packageSource(id.slice(0, id.indexOf(".")));
     if (source === null) continue;
-    assert.match(source, new RegExp(`id: "${id.replace(/\./g, "\\.")}"`), id);
+    assert.match(source, new RegExp(`id: "${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), id);
     verified += 1;
   }
   // Non-vacuous even when the removable packages in the defaults are absent.

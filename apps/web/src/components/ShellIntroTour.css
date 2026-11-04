@@ -88,7 +88,7 @@
   position: fixed;
   left: 50%;
   top: 50%;
-  width: min(372px, calc(100vw - 24px));
+  width: min(400px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
   display: flex;
   flex-direction: column;
@@ -162,6 +162,103 @@
   100% { transform: translate(160px, 58px); }
 }
 
+/* Project tiles with their status dots, each dot led to its meaning. The dot
+ * copies the real one (Sidebar `.sidebar-project-rail-status`): bottom-end
+ * corner, ringed in the rail's own fill, green working / amber waiting. */
+.shell-intro-art--status {
+  --art-status-rail: color-mix(in srgb, var(--panel) 88%, var(--text));
+  --art-status-tile: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 28px 20px;
+}
+
+.art-status-rows {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The rail column behind the tiles. */
+.art-status-rows::before {
+  content: "";
+  position: absolute;
+  inset-block: -8px;
+  inset-inline-start: -8px;
+  width: calc(var(--art-status-tile) + 16px);
+  border-radius: var(--radius-card);
+  background: var(--art-status-rail);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.art-status-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: var(--art-status-tile);
+}
+
+.art-status-tile {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--art-status-tile);
+  height: var(--art-status-tile);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.art-status-glyph {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 32%, transparent);
+}
+
+.art-status-dot {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  /* A ring, not a border: Hide interface borders (on by default) clears
+   * every border colour. */
+  box-shadow: 0 0 0 2px var(--art-status-rail);
+  border-radius: var(--radius-circle);
+  background: var(--green);
+  animation: shell-intro-dot-in 360ms var(--motion-ease) 260ms 1 both;
+}
+.art-status-dot.attention { background: var(--amber); animation-delay: 520ms; }
+
+.art-status-leader {
+  flex: none;
+  width: 22px;
+  height: 1.5px;
+  margin-inline: 10px 8px;
+  background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--text) 34%, transparent) 0 4px, transparent 4px 7px);
+}
+
+.art-status-label {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.25;
+  text-wrap: balance;
+  animation: fade var(--motion-normal) ease-out 300ms 1 both;
+}
+.art-status-row:last-child .art-status-label { animation-delay: 560ms; }
+
+@keyframes shell-intro-dot-in {
+  from { transform: scale(0); }
+  70% { transform: scale(1.25); }
+  to { transform: scale(1); }
+}
+
 .shell-intro-body {
   display: flex;
   flex-direction: column;
@@ -214,8 +311,11 @@
   line-height: 1.45;
 }
 
+/* Buttons keep the normal control size; a long locale drops them onto their
+ * own row instead of spilling out of the card. */
 .shell-intro-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 14px 20px 14px;
@@ -236,7 +336,7 @@
   min-height: 0;
   padding: 0;
   border: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   /* --hair-strong is a hairline tint, too faint for a 7px mark on glass. */
   background: color-mix(in srgb, var(--text) 26%, transparent);
   transition: width var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease);
@@ -247,7 +347,7 @@
 }
 .shell-intro .shell-intro-dot.active { width: 20px; background: var(--accent); }
 
-.shell-intro-actions { display: flex; gap: 8px; flex: none; }
+.shell-intro-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
 
 .shell-intro-skip-link {
   align-self: center;
@@ -273,6 +373,7 @@
 
 @media (max-width: 480px) {
   .shell-intro-media { height: 112px; }
+  .shell-intro-art--status { --art-status-tile: 24px; }
   .shell-intro-body { padding: 16px 16px 2px; }
   .shell-intro-foot { padding: 12px 16px max(12px, var(--safe-bottom)); }
 }

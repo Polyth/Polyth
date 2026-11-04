@@ -85,6 +85,17 @@ const SELECT_DRAG_THRESHOLD = 8;
 const ADDED_FEEDBACK_MS = 420;
 const NARROW_BREAKPOINT = 720;
 const PANE_RESIZE_MS = 180;
+const FRAME_MIME = /^image\/(?:png|jpeg|webp)$/;
+
+/** The page address as an http(s) URL, or null for anything that could run script. */
+function webPageUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 
 function isApprovalResponse(response: BrowserNavigateResponse): response is Extract<BrowserNavigateResponse, { approval: unknown }> {
   return "approval" in response;
@@ -424,7 +435,10 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
               setSelectionPoint(null);
             }
             revisionRef.current = revision;
-            setFrame({ revision, src: `data:${msg.mime};base64,${msg.data}` });
+            // Only a raster screencast frame may become the <img> source.
+            if (FRAME_MIME.test(String(msg.mime))) {
+              setFrame({ revision, src: `data:${msg.mime};base64,${msg.data}` });
+            }
           } else if (msg.type === "browser/event" && msg.event) {
             const e = msg.event;
             setActivity((prev) => [...prev.slice(-99), `${e.kind}${e.actor ? ` (${e.actor})` : ""}${e.url ? ` ${e.url}` : ""}${e.message ? ` — ${e.message}` : ""}`]);
@@ -1325,7 +1339,7 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
         id: "external",
         label: tr("previewview.openPageInANewTab"),
         icon: ExternalLinkIcon,
-        onSelect: () => { window.open(browser.url, "_blank", "noopener,noreferrer"); },
+        onSelect: () => { const page = webPageUrl(browser.url); if (page) window.open(page, "_blank", "noopener,noreferrer"); },
       }]
       : []),
     "separator" as const,

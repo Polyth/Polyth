@@ -1014,7 +1014,7 @@ button.chat-block-compare-head:disabled { opacity: 1; filter: none; cursor: defa
   block-size: var(--step-mark);
   /* Centre the disc on the title's first line. */
   margin-block-start: calc((var(--font-response-lh, 1.5em) - var(--step-mark)) / 2);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--muted);
   font-size: calc(11px * var(--text-scale, 1));

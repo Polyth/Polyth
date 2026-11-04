@@ -12,7 +12,7 @@ import {
 
 interface PolythLinkCapacitorPlugin {
   parsePairingTicket(options: { raw: string }): Promise<PairingPreview>;
-  beginPairing(options: { raw: string; label: string }): Promise<PairingAttempt>;
+  beginPairing(options: { raw: string; label?: string }): Promise<PairingAttempt>;
   beginNumericPairing(options: NumericPairingInput): Promise<PairingAttempt>;
   confirmPairing(options: { attemptId: string }): Promise<ProxyLaunch>;
   cancelPairing(options: { attemptId: string }): Promise<{ ok: boolean }>;
@@ -21,6 +21,7 @@ interface PolythLinkCapacitorPlugin {
   recoverConnection(options: { connectionId: string }): Promise<ConnectionRecovery>;
   disconnect(options: { connectionId: string }): Promise<{ ok: boolean }>;
   forgetConnection(options: { connectionId: string }): Promise<{ ok: boolean }>;
+  renameConnection(options: { connectionId: string; label: string }): Promise<{ ok: boolean }>;
   getStatus(options: { connectionId: string }): Promise<{
     state: string;
     transport?: "direct" | "relay";
@@ -92,7 +93,7 @@ export function installNativePolythLink(): void {
 
   const adapter: PolythLinkNative = {
     parsePairingTicket: (raw) => NativePolythLink.parsePairingTicket({ raw }),
-    beginPairing: (raw, label) => NativePolythLink.beginPairing({ raw, label }),
+    beginPairing: (raw, label) => NativePolythLink.beginPairing(label === undefined ? { raw } : { raw, label }),
     beginNumericPairing: (input) => NativePolythLink.beginNumericPairing(input),
     confirmPairing: (attemptId) => NativePolythLink.confirmPairing({ attemptId }),
     cancelPairing: async (attemptId) => {
@@ -106,6 +107,9 @@ export function installNativePolythLink(): void {
     },
     forgetConnection: async (connectionId) => {
       await NativePolythLink.forgetConnection({ connectionId });
+    },
+    renameConnection: async (connectionId, label) => {
+      await NativePolythLink.renameConnection({ connectionId, label });
     },
     getStatus: (connectionId) => NativePolythLink.getStatus({ connectionId }),
   };

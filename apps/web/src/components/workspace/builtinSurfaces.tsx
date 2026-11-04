@@ -6,7 +6,7 @@
 // session: the session surface shows its hero until one exists.
 import Badge from "../ui/Badge.tsx";
 import { draftTitleSource, sessionDraftMark } from "../../sessionDraft.ts";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import { focusComposer, isActiveSessionSpawning, overlaySessionProjection, setOverlay, setUiError, useActiveModel, usePendingSends, useStore, workspaceProjectId } from "../../store.ts";
@@ -37,7 +37,9 @@ import { HeroCustomizeButton } from "../mobile/HeroCustomize.tsx";
 import { HeroEditToolbar, useHeroEditGesture } from "../mobile/HeroEditMode.tsx";
 import { MobileStatusIcon } from "../mobile/MobileStatusIcon.tsx";
 import { HeroAppsWidget } from "../mobile/HeroApps.tsx";
-import { heroRecentIsNarrowed, heroRecentPageSize, heroRecentProjectIds, heroRecentSummaryQuery, selectHeroRecentSessions } from "../../heroRecent.ts";
+import { heroRecentIsNarrowed, heroRecentPageSize, heroRecentProjectIds, heroRecentSummaryQuery, isAutomatedSession, selectHeroRecentSessions } from "../../heroRecent.ts";
+import { claimedListingPurposes, subscribeSessionListing } from "../../sessionListing.ts";
+import type { SessionOriginWake } from "@polyth/contracts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
 import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import { conversationUnread, unreadBadgeText } from "../../sessionPeople.ts";
@@ -58,7 +60,7 @@ import {
 import { tr } from "../../i18n/index.ts";
 import { projectGreetingParts } from "../../projectGreeting.ts";
 import { isPersonalProject } from "../../personalProject.ts";
-import { AgentStatusDock, Button, Icon as UiIcon, PeopleIcon, ShieldAlertIcon } from "../ui/index.ts";
+import { AgentStatusDock, BellIcon, BotIcon, Button, ClockIcon, HeartbeatIcon, Icon as UiIcon, PeopleIcon, ShieldAlertIcon, ZapIcon, type LucideIcon } from "../ui/index.ts";
 import { resolveSessionStatus } from "../../sessionStatus.ts";
 import ProviderLogo from "../../../../../packages/models/widgets/ProviderLogo.tsx";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
@@ -178,6 +180,28 @@ function HeroStartersWidget({
   );
 }
 
+/** What woke an automation, as its row's glyph. A legacy claimed session
+ *  (and a child of one) has no origin, so it gets the plain agent mark. */
+function heroRecentWakeIcon(wake: SessionOriginWake | undefined): LucideIcon {
+  switch (wake) {
+    case "schedule": return ClockIcon;
+    case "heartbeat": return HeartbeatIcon;
+    case "event": return ZapIcon;
+    case "alert": return BellIcon;
+    default: return BotIcon;
+  }
+}
+
+function heroRecentWakeLabel(wake: SessionOriginWake): string {
+  switch (wake) {
+    case "schedule": return tr("workspace.herorecent.wakeSchedule");
+    case "heartbeat": return tr("workspace.herorecent.wakeHeartbeat");
+    case "event": return tr("workspace.herorecent.wakeEvent");
+    case "alert": return tr("workspace.herorecent.wakeAlert");
+    default: return tr("workspace.herorecent.wakeManual");
+  }
+}
+
 /** §50: recent work stays a light, bounded list — the new-chat screen is a
  *  starting point, never a dashboard. No heading, no cards, no metrics, no
  *  chrome: count, filter, project scope and text size live in the screen's
@@ -190,6 +214,10 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
   const sessions = useStore((s) => s.sessions);
   const projects = useStore((s) => s.projectRegistry.projects);
   const prefs = useHeroWidgetPrefs().recent;
+  // Purposes a package presents in its own UI (an agent's diary, for example):
+  // those sessions are automation, even when they predate `origin`.
+  const claimedPurposes = useSyncExternalStore(subscribeSessionListing, claimedListingPurposes, claimedListingPurposes);
+  const sessionsById = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
   // The list keeps its `prefs.limit`-row footprint and scrolls: one page more
   // than fits is rendered, each time the end comes into view another page is
   // revealed, and once the cached sessions run out older ones are fetched
@@ -203,8 +231,8 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
     setRemoteWanted(false);
   }, [prefsKey, projectId]);
   const matching = useMemo(
-    () => selectHeroRecentSessions(sessions, prefs, projectId, Date.now(), Number.POSITIVE_INFINITY),
-    [sessions, prefs, projectId],
+    () => selectHeroRecentSessions(sessions, prefs, projectId, Date.now(), Number.POSITIVE_INFINITY, claimedPurposes),
+    [sessions, prefs, projectId, claimedPurposes],
   );
   const recent = useMemo(() => matching.slice(0, visibleCount), [matching, visibleCount]);
   const scopedProjects = heroRecentProjectIds(prefs, projectId);
@@ -264,20 +292,38 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
           const conversation = session.purpose === "conversation";
           const unreadMessages = conversationUnread(session);
           const statusLabel = conversation ? tr("conversation.kind") : done ? tr("notificationcentre.completed") : status.label;
+          const title = displaySessionTitle(session.title, session.id, draftTitleSource(session));
+          // An automated row says what started it instead of the hollow status
+          // circle; a live state (working, needs approval) still wins, because
+          // the person must see that an automation waits on them.
+          const automated = isAutomatedSession(session, sessionsById, claimedPurposes);
+          const live = status.kind === "working" || status.kind === "needs-approval";
+          const wakeMark = automated && !live;
+          const wakeLabel = session.origin ? heroRecentWakeLabel(session.origin.wake) : tr("workspace.herorecent.agent");
+          const markLabel = wakeMark
+            ? session.origin
+              ? tr("workspace.herorecent.startedBy", { name: session.origin.label, wake: wakeLabel })
+              : tr("workspace.herorecent.startedByAutomation")
+            : statusLabel;
+          const automationMeta = session.origin
+            ? [session.origin.label === title ? null : session.origin.label, wakeLabel].filter(Boolean).join(" · ")
+            : tr("workspace.herorecent.agent");
           return (
             <li key={session.id}>
               <button
                 type="button"
-                className="hero-recent-row"
+                className={`hero-recent-row${automated ? " hero-recent-row--automated" : ""}`}
                 onClick={() => void openSession(session.id).catch((error) =>
                   setUiError(friendlyError(tr("common.error"), error)))}
               >
                 <span
-                  className={`hero-recent-status ${conversation ? "conversation" : status.kind}`}
-                  title={statusLabel}
-                  aria-label={statusLabel}
+                  className={`hero-recent-status ${wakeMark ? "hero-recent-status--automated" : conversation ? "conversation" : status.kind}`}
+                  title={markLabel}
+                  aria-label={markLabel}
                 >
-                  {conversation ? (
+                  {wakeMark ? (
+                    <UiIcon icon={heroRecentWakeIcon(session.origin?.wake)} size="sm" />
+                  ) : conversation ? (
                     // People talk here; there is no agent state to show.
                     <UiIcon icon={PeopleIcon} size="sm" />
                   ) : status.kind === "working" ? (
@@ -294,8 +340,11 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
                   )}
                 </span>
                 <span className={`hero-recent-title${(done || conversation) && unread ? " hero-recent-title--unread" : ""}`}>
-                  {displaySessionTitle(session.title, session.id, draftTitleSource(session))}
+                  {title}
                 </span>
+                {automated && (
+                  <span className="hero-recent-origin">{automationMeta}</span>
+                )}
                 {projectNames && session.projectId !== projectId && (
                   <span className="hero-recent-project">{projectNames.get(session.projectId)}</span>
                 )}

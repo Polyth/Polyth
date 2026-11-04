@@ -166,7 +166,17 @@ test("the timeline marker shows the assessment and only fills the composer", asy
     const markers = view.container.querySelectorAll(".judges-marker");
     assert.equal(markers.length, 2, "other event types render nothing");
     assert.match(markers[0]!.textContent ?? "", /Claimed, not verified.*82%/);
+    // A quiet note: the judge's glyph and name, never a badge plate; the glyph
+    // carries attention. A built-in judge's answer is its title, so only the
+    // chance shows beside it.
+    assert.ok(markers[0]!.querySelector(".judges-marker-mark svg") !== null, "the judge glyph leads the note");
+    assert.ok(markers[0]!.querySelector(".ui-badge") === null, `no badge plate: ${markers[0]!.outerHTML.slice(0, 200)}`);
+    assert.equal(markers[0]!.querySelector(".judges-marker-title")?.textContent, "Claimed, not verified");
+    assert.ok(markers[0]!.querySelector(".judges-marker-answer") === null, `no answer beside a built-in title: ${markers[0]!.outerHTML.slice(0, 200)}`);
+    assert.equal(markers[0]!.querySelector(".judges-marker-chance")?.textContent, "82% likely");
+    assert.equal(markers[0]!.hasAttribute("data-tone"), false, "a plain answer has a quiet glyph");
     assert.equal(markers[1]!.getAttribute("data-attention"), "true");
+    assert.equal(markers[1]!.getAttribute("data-tone"), "warning");
     await act(async () => { button(view.container, "Ask the agent to verify")!.click(); await pause(); });
     assert.deepEqual(inserted, ["Please verify."]);
   } finally { await view.unmount(); }
@@ -279,13 +289,21 @@ test("the marker says what a judge did with its owner's access", async () => {
   const view = await mount(createElement(AssessmentMarker, { event }));
   try {
     const marker = view.container.querySelector(".judges-marker")!;
-    assert.match(marker.textContent ?? "", /unfinished, 86% likely/);
+    // The head: the answer and its chance as words, the meter only repeating it.
+    assert.equal(marker.querySelector(".judges-marker-answer")?.textContent, "unfinished");
+    assert.equal(marker.querySelector(".judges-marker-chance")?.textContent, "86% likely");
+    assert.equal(marker.querySelector<HTMLElement>(".judges-marker-meter")?.getAttribute("aria-hidden"), "true");
+    assert.match(marker.querySelector<HTMLElement>(".judges-marker-meter")?.getAttribute("style") ?? "", /--judges-marker-chance:\s*0\.86/);
+    // Each outcome has its mark; the words still say what happened.
+    assert.deepEqual([...marker.querySelectorAll(".judges-marker-action")].map((item) => item.getAttribute("data-status")), ["skipped", "sending", "failed"]);
+    assert.equal(marker.querySelectorAll(".judges-marker-action-mark svg").length, 3);
     assert.deepEqual([...marker.querySelectorAll(".judges-marker-action")].map((item) => item.textContent), [
       "Merge skipped: nothing to merge yet",
       "Sent “You have not finished the work yet.”",
       "Auto-Approve change failed: Only people who manage this chat can do that",
     ]);
     assert.equal(marker.getAttribute("data-attention"), "true", "a failed action raises the marker");
+    assert.equal(marker.getAttribute("data-tone"), "danger", "and turns its glyph red");
   } finally { await view.unmount(); }
 });
 

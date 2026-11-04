@@ -1,10 +1,10 @@
 import { handoffReviewScope } from "./reviewScopeHandoff.ts";
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import type { IsolationStatusDto, IsolationTargetDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
-import { isManagedIsolationBranch, isolationActions, isolationBlocksUserMutation, isolationNeedsRecovery } from "@polyth/contracts";
+import { isManagedIsolationBranch, isolationActions, isolationBlocksUserMutation, isolationNeedsRecovery, isolationRuntimeUnsettled } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { reportGitError } from "./gitRefusal.ts";
-import { activateSession, clearRuntimeFeatures, getState, openChanges, setSessions, upsertSession, useStore, workspacePresentationKey } from "../../../apps/web/src/store.ts";
+import { activateSession, clearRuntimeFeatures, getState, openChanges, setSessions, upsertSession, useStore, workspacePresentationKey, type AppState } from "../../../apps/web/src/store.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { createIsolationClient } from "./isolationClient.ts";
 import {
@@ -134,6 +134,23 @@ function currentStatus(
   const previous = held?.sessionId === sessionId ? held.value : null;
   if (isolation.state === "conflict" && previous?.isolation?.state !== "conflict") return null;
   return previous;
+}
+
+/** A prompt the session is about to work on. Its echo is on screen before the
+ *  server admits it, and an admitted prompt still reads as idle until its turn
+ *  starts; the timeline treats that prompt as a turn in progress too. */
+function promptOwnsNextTurn(state: AppState, sessionId: string): boolean {
+  if (state.pendingSends.some((send) => send.sessionId === sessionId)) return true;
+  const status = state.sessions.find((candidate) => candidate.id === sessionId)?.status;
+  if (status === undefined || isolationBlocksUserMutation(status)) return false;
+  const events = state.events[sessionId];
+  if (!events) return false;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const type = events[index]!.type;
+    if (type === "user/message") return true;
+    if (type === "assistant/message" || type === "turn/started" || type === "turn/stopped") return false;
+  }
+  return false;
 }
 
 /** Worth asking again: no answer, or a gateway/server failure. A 4xx is the
@@ -405,6 +422,7 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
   );
   const isolation = isolationOf(session);
   const sessionWorking = session ? isolationBlocksUserMutation(session.status) : false;
+  const promptPending = useStore((state) => sessionId !== null && promptOwnsNextTurn(state, sessionId));
   // What a status answer describes: read while the agent worked, for an
   // earlier isolation state or for a target since changed, it says nothing
   // about the session now.
@@ -590,7 +608,14 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
     };
   }
 
-  const suggestion = status?.suggestion;
+  const working = isolationBlocksUserMutation(session.status) || promptPending;
+  // A new prompt hands the work back to the agent, and the server answers
+  // "working" for a running turn. Until the session status and a fresh read
+  // say so, an answer read while it rested must not keep offering Integrate:
+  // the card starts to leave with the send. A runtime not yet proven settled
+  // still shows the verdict the server reads for it.
+  const turnRunning = promptPending || (working && !isolationRuntimeUnsettled(session.status));
+  const suggestion = turnRunning ? undefined : status?.suggestion;
   const live = status?.isolation ?? isolation;
   const serverState = status?.effectiveState ?? live.state;
   // The server persists its first integration phase only once it has
@@ -615,7 +640,6 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
   const recovering = liveState === "merging" || liveState === "publishing" || liveState === "rebind-pending" || liveState === "cleanup-pending";
   const discarding = recovering && liveState !== "merging" && liveState !== "publishing" && !live.resultCommit;
   const integrating = recovering && !discarding;
-  const working = isolationBlocksUserMutation(session.status);
   // While the delegating agent runs, integrating its children is its job;
   // once it rests, the card explains why this session cannot integrate yet.
   const delegatedPending = delegated.length > 0 && !working;
@@ -662,7 +686,7 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
     canAbandon: false,
     canChooseTarget: false,
   } : undefined);
-  const ready = actions?.canMerge === true && !mergeRequested;
+  const ready = actions?.canMerge === true && !mergeRequested && !working;
   // Other checked-out branches the work can go to instead. When the recorded
   // origin checkout has since switched branches, its new branch is offered as
   // the way forward rather than a dead end.

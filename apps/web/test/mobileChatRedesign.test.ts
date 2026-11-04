@@ -294,7 +294,7 @@ test("visual-viewport geometry is published as CSS variables and started at boot
   assert.ok(viewport.includes("SHORT_VISUAL_BAND"), "CSS can see a band too short for both zones");
   assert.ok(!/localStorage|sessionStorage/.test(viewport), "viewport geometry is never persisted");
   const bootstrap = await read("../src/bootstrap.tsx");
-  assert.ok(bootstrap.includes("startMobileViewport()"), "the seam is installed before first paint");
+  assert.ok(bootstrap.includes("startMobileViewport({ nativeFrame: isNativeMobile() })"), "the seam is installed before first paint");
 });
 
 test("the mobile viewport is fixed and requests keyboard content resizing", async () => {
@@ -412,7 +412,7 @@ test("session edited-file labels stay collapsed until the user opens the dock", 
   );
   assert.match(
     gitCss,
-    /\.pending-changes-file\s*\{[^}]*min-height:\s*var\(--control-h-sm\)/s,
+    /\.pending-changes-file\s*\{[^}]*min-height:\s*max\(var\(--composer-stack-row, var\(--control-h-sm\)\), min\(var\(--hit-min\), var\(--control-h-sm\)\)\)/s,
     "visible file rows stay compact; coarse pointers grow the tap box separately",
   );
   assert.match(

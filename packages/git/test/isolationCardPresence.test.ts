@@ -35,7 +35,7 @@ const played: Array<{ keyframes: Keyframe[]; options: KeyframeAnimationOptions }
 register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { activateSession, seedSessionCache, upsertSession } = await import("../../../apps/web/src/store.ts");
+const { activateSession, beginPendingSend, seedSessionCache, upsertSession } = await import("../../../apps/web/src/store.ts");
 const { IsolationCard } = await import("../widgets/IsolationCard.tsx");
 const { CARD_DONE_BEAT_MS } = await import("../widgets/isolationCardMotion.ts");
 const { tr } = await import("../../../apps/web/src/i18n/index.ts");
@@ -167,6 +167,50 @@ test("an old merge receipt does not turn a discarded isolation into a merged bea
       proto.animate = quick;
     }
   } finally {
+    api.isolationStatus = original;
+    await mounted.close();
+  }
+});
+
+test("a new prompt starts the ready card's collapse in the send's own commit", async () => {
+  const ready: SessionIsolation = { ...base, state: "merge-ready" };
+  const original = api.isolationStatus;
+  api.isolationStatus = async () => ({
+    isolation: ready,
+    effectiveState: ready.state,
+    suggestion: { eligible: true, hasChanges: true, targetBranch: "main", targetDirty: false, revision: "rev" },
+    actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
+  });
+  const mounted = await mount(projection("presence-send", { isolation: ready }));
+  const proto = dom.HTMLElement.prototype as unknown as { animate: unknown };
+  const quick = proto.animate;
+  const gates: Array<() => void> = [];
+  try {
+    await act(async () => { await wait(); await wait(); });
+    const live = card(mounted.container);
+    assert.equal(live?.querySelector(".isolation-card-title")?.textContent, tr("isolation.changesAreReady"));
+    proto.animate = function animate(keyframes: Keyframe[], options: KeyframeAnimationOptions) {
+      played.push({ keyframes, options });
+      const finished = new Promise<void>((done) => { gates.push(done); });
+      return { finished, playState: "running", cancel() {} } as unknown as Animation;
+    };
+    played.length = 0;
+    // No await inside: the collapse must begin in the commit that stages the
+    // echo, not after a status read or the session turning `working`.
+    act(() => { beginPendingSend({ sessionId: "presence-send", text: "and the tests", attachments: [] }); });
+    const held = card(mounted.container);
+    assert.equal(held, live, "the same card element collapses (no remount)");
+    assert.ok(held?.hasAttribute("inert"), "a leaving card is never a control surface");
+    const collapse = played.find((entry) => entry.options.easing === "cubic-bezier(0.65, 0, 0.35, 1)");
+    assert.ok(collapse, "the box collapses at once");
+    assert.equal(collapse!.keyframes.at(-1)!.paddingTop, "0px");
+    const fade = played.find((entry) => entry.keyframes.at(-1)?.opacity === 0);
+    assert.ok(fade, "the content fades as it leaves");
+    assert.equal(fade!.options.delay ?? 0, 0, "the fade starts with the send");
+    await act(async () => { for (const open of gates.splice(0)) open(); await wait(); await wait(); });
+    assert.equal(card(mounted.container), null, "the collapsed card unmounts");
+  } finally {
+    proto.animate = quick;
     api.isolationStatus = original;
     await mounted.close();
   }

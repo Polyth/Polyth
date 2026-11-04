@@ -156,7 +156,9 @@
   border-radius: var(--radius-control);
   background: var(--sunken);
 }
-.source-segmented .ui-btn {
+/* Doubled class: past a platform style's capsule .ui-btn, so a segment stays
+   concentric with its track. */
+.source-segmented .ui-btn.ui-btn {
   min-height: calc(var(--control-h-sm) - 6px);
   border-color: transparent;
   border-radius: calc(var(--radius-control) - 2px);
@@ -1867,6 +1869,21 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   .git-page .git-repository-overview-card { grid-template-columns: max-content minmax(0, 1fr) max-content; }
   .git-page .git-repository-overview-branch,
   .git-page .git-repository-overview-stats { grid-column: 2 / -1; }
+  /* The changes subbar: the review-scope segments are the part that shrinks,
+     so the view-options button at its end stays whole. A squeezed label
+     ellipsizes inside its segment instead of pushing the row past the pane. */
+  .git-page .source-subbar > .git-review-scope {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .git-page .source-subbar > .git-review-scope > .ui-btn { min-width: 0; }
+  .git-page .source-subbar > .git-review-scope > .ui-btn .ui-btn-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .git-page .source-subbar > .source-view-options { flex: none; }
 }
 
 /* Narrowest panes: the filename is the whole row. The folder survives in the

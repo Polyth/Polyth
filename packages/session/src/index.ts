@@ -2935,6 +2935,11 @@ export function createStore(dbPath: string): Store {
     const args: Array<string | number> = [input.spaceId ?? ""];
     if (input.projectId !== undefined) { conditions.push("project_id = ?"); args.push(input.projectId); }
     if (input.worktreePath !== undefined) { conditions.push("json_extract(data, '$.worktreePath') = ?"); args.push(input.worktreePath); }
+    if (input.ids !== undefined) {
+      const ids = [...new Set(input.ids)].slice(0, 100);
+      conditions.push(ids.length > 0 ? `session_id IN (${ids.map(() => "?").join(", ")})` : "0");
+      args.push(...ids);
+    }
     if (input.cursor) {
       conditions.push("(CAST(json_extract(data, '$.updatedAt') AS INTEGER), session_id) < (?, ?)");
       args.push(input.cursor.updatedAt, input.cursor.id);

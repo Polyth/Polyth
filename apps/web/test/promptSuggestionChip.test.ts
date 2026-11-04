@@ -49,6 +49,7 @@ const { activateProject, activateSession, seedSessionCache, setModels } = await 
 const SUGGESTION = "Run the tests and fix what fails";
 
 const { registerSlot } = await import("../src/slots.ts");
+const { getUiSettings, setUiSettings } = await import("../src/uiPrefs.ts");
 
 async function mount(sessionId: string, status: "idle" | "working" = "idle", promptSuggestion: string | undefined = SUGGESTION) {
   activateProject("suggestion-project");
@@ -188,5 +189,20 @@ test("a composer.suggestion source offers on the same chip with no rail widget; 
     }
   } finally {
     off();
+  }
+});
+
+test("the suggestion is a line above the card, and it still only fills the draft", async () => {
+  const view = await mount("suggestion-line");
+  try {
+    const chip = view.chip();
+    assert.ok(chip, "an idle empty composer offers the suggestion");
+    assert.equal(chip.parentElement?.classList.contains("composer-card"), false, "it stands above the card");
+    assert.equal(view.host.querySelectorAll(".composer-suggestion").length, 1, "never two");
+    await act(async () => { chip.querySelector<HTMLButtonElement>(".composer-suggestion-use")!.click(); });
+    assert.equal(view.input.value, SUGGESTION, "the suggestion becomes an editable draft");
+    assert.equal(view.chip() === null, true, "the line leaves once the draft has text");
+  } finally {
+    await view.unmount();
   }
 });

@@ -189,6 +189,7 @@ test("removal hides the row before the server answers and a rejection restores i
   const root = createRoot(container);
   try {
     await act(async () => root.render(createElement(QueuedMessageList, { sessionId: "s1" })));
+    await act(async () => { click(container.querySelector<HTMLElement>(".queue-fold")!); });
     const before = container.querySelectorAll(".queue-remove").length;
     assert.ok(before > 0);
     await act(async () => { click(container.querySelector<HTMLElement>(".queue-remove")!); });
@@ -262,8 +263,16 @@ test("queued messages hand editing to the composer and drag-reorder through the 
       }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    assert.equal(container.querySelectorAll(".queue-chip").length, 3);
+    // Past two rows the rest fold away behind "N more".
+    assert.equal(container.querySelectorAll(".queue-chip").length, 2);
     assert.deepEqual(observed.map((item) => item.id), ["q1", "q2", "q3"]);
+    const fold = container.querySelector<HTMLElement>(".queue-fold");
+    assert.ok(fold, "the rest of the queue is one click away");
+    assert.equal(fold.getAttribute("aria-expanded"), "false");
+    assert.match(fold.textContent ?? "", /1 more/);
+    await act(async () => { click(fold); });
+    assert.equal(container.querySelectorAll(".queue-chip").length, 3);
+    assert.equal(fold.getAttribute("aria-expanded"), "true");
 
     const steer = container.querySelector<HTMLElement>(".queue-steer");
     assert.ok(steer, "steer is an icon control on the row");
@@ -291,8 +300,24 @@ test("queued messages hand editing to the composer and drag-reorder through the 
         onEdit: (item: QueueItemDto) => { editing = item; },
       }));
     });
-    assert.equal(container.querySelectorAll(".queue-chip").length, 2, "the active edit leaves the queue list");
+    // The edited row keeps its place with a way out; its text lives in the composer.
+    assert.equal(container.querySelectorAll(".queue-chip").length, 3, "the row stays in its place");
+    const editingRow = container.querySelector<HTMLElement>(".queue-chip");
+    assert.equal(editingRow?.classList.contains("queue-chip-editing"), true, "the edited row was first and stays first");
     assert.equal(container.textContent?.includes("first"), false, "the queued text lives only in the composer while editing");
+    assert.equal(editingRow?.querySelector(".queue-grip"), null, "an edited row cannot be dragged away");
+    assert.equal(editingRow?.querySelector("button"), null, "no way out without a parent to end the edit");
+    let cancelled = 0;
+    await act(async () => {
+      root.render(createElement(QueuedMessageList, {
+        sessionId: "s1",
+        editingId: "q1",
+        onEdit: (item: QueueItemDto) => { editing = item; },
+        onCancelEdit: () => { cancelled += 1; },
+      }));
+    });
+    await act(async () => { click(container.querySelector<HTMLElement>(".queue-chip-editing .queue-action-word")!); });
+    assert.equal(cancelled, 1, "Cancel ends the composer's edit");
     await act(async () => {
       root.render(createElement(QueuedMessageList, {
         sessionId: "s1",
@@ -305,6 +330,7 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     assert.ok(sourceGrip);
     await act(async () => { drag(sourceGrip, "dragstart"); });
     await act(async () => { drag(chips[2]!, "dragover"); });
+    assert.equal(chips[2]!.getAttribute("data-drop"), "after", "dragging down lands below the target");
     await act(async () => {
       drag(chips[2]!, "drop");
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -320,9 +346,91 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     const held = [...container.querySelectorAll<HTMLElement>(".queue-chip")]
       .find((chip) => chip.textContent?.includes("third"));
     assert.ok(held);
-    assert.equal(held.querySelector(".queue-grip")?.getAttribute("draggable"), "false");
+    assert.equal(held.querySelector(".queue-grip"), null, "a held row cannot be dragged");
     assert.match(held.textContent ?? "", /Held for review/);
   } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("Alt+arrows move a focused row through the persisted API, and a handle answers plain arrows", async () => {
+  const original = items;
+  // No held row here: a held row is not a stop for a move.
+  items = items.map(({ heldForReview: _held, ...item }, position) => ({ ...item, position }));
+  const [first, second] = items.map((item) => item.id);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const press = (element: HTMLElement, key: string, altKey: boolean) =>
+    element.dispatchEvent(new KeyboardEvent("keydown", { key, altKey, bubbles: true, cancelable: true }));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  try {
+    await act(async () => {
+      root.render(createElement(QueuedMessageList, { sessionId: "s1" }));
+      await settle();
+    });
+    const row = container.querySelector<HTMLElement>(`[data-queue-id="${first}"]`)!;
+    const before = mutations.length;
+    await act(async () => { press(row.querySelector<HTMLElement>(".queue-remove")!, "ArrowDown", false); await settle(); });
+    assert.equal(mutations.length, before, "a plain arrow on an action is left to the page");
+    await act(async () => { press(row.querySelector<HTMLElement>(".queue-remove")!, "ArrowDown", true); await settle(); });
+    assert.deepEqual(mutations.at(-1)?.path, "/api/sessions/s1/queue/order");
+    assert.deepEqual((mutations.at(-1)?.body as { ids: string[] }).ids.slice(0, 2), [second, first]);
+    const grip = container.querySelector<HTMLElement>(`[data-queue-id="${first}"] .queue-grip`)!;
+    assert.equal(grip.getAttribute("role"), "button");
+    assert.equal(grip.getAttribute("tabindex"), "0");
+    await act(async () => { press(grip, "ArrowUp", false); await settle(); });
+    assert.deepEqual((mutations.at(-1)?.body as { ids: string[] }).ids.slice(0, 2), [first, second], "the handle moved it back");
+  } finally {
+    items = original;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("without a hover the rows are plain text: one target opens the sheet, which holds every action", async () => {
+  const win = globalThis.window as unknown as { matchMedia?: unknown };
+  const originalMatchMedia = win.matchMedia;
+  win.matchMedia = (query: string) => ({
+    matches: query === "(hover: none)",
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  });
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  let edited: string | null = null;
+  try {
+    await act(async () => {
+      root.render(createElement(QueuedMessageList, {
+        sessionId: "s1",
+        onEdit: (item: QueueItemDto) => { edited = item.id; },
+      }));
+      await settle();
+    });
+    assert.equal(container.querySelector(".queue-list")?.hasAttribute("data-touch"), true);
+    assert.equal(container.querySelector(".queue-actions"), null, "no per-row controls under a finger");
+    assert.equal(container.querySelector(".queue-grip"), null);
+    assert.equal(container.querySelector("button.queue-fold"), null, "the fold is words: the block itself is the target");
+    assert.match(container.querySelector(".queue-fold")?.textContent ?? "", /1 more/);
+    const open = container.querySelector<HTMLElement>(".queue-open");
+    assert.ok(open, "the block opens the sheet");
+    assert.match(open.getAttribute("aria-label") ?? "", /3 queued messages/);
+    await act(async () => { click(open); await settle(); });
+    const rows = [...document.querySelectorAll<HTMLElement>(".queue-sheet-row")];
+    assert.equal(rows.length, 3, "the sheet lists the whole queue");
+    const movable = rows.find((row) => !row.hasAttribute("data-sheet-held"))!;
+    assert.ok(movable.querySelector(".queue-sheet-grip[role='button']"), "a handle to drag");
+    assert.ok(movable.querySelector(".queue-steer"), "send now");
+    assert.ok(movable.querySelector(".queue-remove"), "remove");
+    await act(async () => { click(movable.querySelector<HTMLElement>(".queue-sheet-text")!); await settle(); });
+    assert.equal(edited, movable.dataset.sheetRow, "a tap on the text edits");
+    assert.equal(document.querySelector(".queue-sheet"), null, "and leaves the sheet for the composer");
+  } finally {
+    win.matchMedia = originalMatchMedia;
     await act(async () => { root.unmount(); });
     container.remove();
   }

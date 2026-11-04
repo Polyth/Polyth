@@ -62,7 +62,7 @@ import { sessionDraftPreview } from "@polyth/contracts";
 import type { ComposerAddMenuItem, ComposerContributionContext, ComposerDraftContext, ComposerMode, ComposerSuggestionOffer } from "@polyth/web-sdk";
 import SlotHost from "./slots/SlotHost.tsx";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
-import MobileComposerRail, { MobileComposerEditButton } from "./mobile/MobileComposerRail.tsx";
+import MobileComposerRail, { MobileComposerEditEntry } from "./mobile/MobileComposerRail.tsx";
 import { mobileRailKey, subscribeMobileRailEditRequest } from "../composer/mobileRail.ts";
 import { setNewChatModel } from "../composer/newChatModel.ts";
 import { useHeroWidgetPrefs } from "./mobile/HeroWidgets.tsx";
@@ -99,6 +99,7 @@ import { retryAfterReconnect } from "../retryAfterReconnect.ts";
 import { composerLayoutState } from "../composerLayout.ts";
 import { applyComposerEditorHeight, measureComposerEditor } from "../composerAutoGrow.ts";
 import { useComposerMorph } from "../composerMorph.ts";
+import { useAttachmentTray } from "../composer/attachmentTray.ts";
 import {
   advanceModelAbsenceGate,
   catalogFromResult,
@@ -461,7 +462,9 @@ function useComposerLocation(session: SessionProjection | null, readLiveText?: (
     branchReadInFlight.current = true;
     // The branch chip is part of a launch's first screen: hold the
     // veil until its label is final instead of letting it change width later.
-    const releaseLaunch = holdLaunchReveal();
+    // A label already known (the last launch's, shown while git answers) is
+    // what the chip reads meanwhile, so it needs no hold.
+    const releaseLaunch = branchRef.current ? () => undefined : holdLaunchReveal();
     let cancelRetry = (): void => undefined;
     void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, sessionId)])
       .then(([nextWorktrees, nextBranches]) => {
@@ -1128,6 +1131,11 @@ function ComposerBody({
     session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "",
     hasInFlightPrompt(getState(), session?.id ?? null) || sessionAdmitting(session?.id),
   ));
+  // What the field shows while a phone keyboard still composes a word. `text`
+  // only follows committed edits, so a one-word draft would otherwise keep
+  // Send disabled until the keyboard committed it (Enter, space).
+  const [composingText, setComposingText] = useState<string | null>(null);
+  const liveText = composingText ?? text;
   const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
   const [queueEditStarting, setQueueEditStarting] = useState(false);
   const [queueEditSaving, setQueueEditSaving] = useState(false);
@@ -1283,6 +1291,7 @@ function ComposerBody({
   const submitMode = useCallback((override?: string) => {
     const mode = activeModeRef.current;
     if (!mode || modeSubmittingRef.current) return;
+    inputRef.current?.finishComposition();
     const raw = (override ?? inputRef.current?.getText() ?? "").trim();
     if (!raw) return;
     const target = sessionIdRef.current;
@@ -1797,6 +1806,7 @@ function ComposerBody({
 
   const sendPeopleMessage = useCallback((override?: string) => {
     const target = sessionIdRef.current;
+    inputRef.current?.finishComposition();
     const raw = (override ?? inputRef.current?.getText() ?? text).trim();
     if (!target || raw === "" || peopleSendingRef.current) return;
     const mentions = personMentionsRef.current.map((mention) => ({ userId: mention.userId, name: mention.name }));
@@ -2360,6 +2370,10 @@ function ComposerBody({
     // Send held: keep the message as a draft chat in the navigator instead.
     parkAsDraft = false,
   ) => {
+    // A Send tap keeps focus in the field, so a phone keyboard may still be
+    // composing the last word. Commit it first: the sent text and the
+    // composer clear must both see the final draft, not a deferred one.
+    inputRef.current?.finishComposition();
     // A composer mode takes the draft instead of the session: never queued,
     // steered, parked or blocked by the running turn.
     if (activeModeRef.current && !queueEdit) {
@@ -3749,6 +3763,11 @@ function ComposerBody({
   };
   const phoneLayout = isPhone;
   useEffect(() => setMobileRailEditing(false), [phoneLayout, spaceId, activeProjectId]);
+  // Arranging the buttons puts the keyboard away so the whole rail is in view.
+  const editMobileRail = (editing: boolean) => {
+    setMobileRailEditing(editing);
+    if (editing) inputRef.current?.element()?.blur();
+  };
   // The new chat's Customize panel hands phone users to this rail's editor;
   // only the fresh-chat composer answers, never a widget or open-chat one.
   const answersRailEditRequest = phoneLayout && !session && !widgetMode;
@@ -3924,10 +3943,10 @@ function ComposerBody({
   const borrowedEpochPending = session?.status === "epoch-pending"
     && session.runtimeControl === "borrowed";
   const draftNativeCommand = !queueEdit && !shellMode && commandCatalog.state === "available"
-    ? nativeCommandInput(text.trim(), commandCatalog.items, selectedCommandRef.current)
+    ? nativeCommandInput(liveText.trim(), commandCatalog.items, selectedCommandRef.current)
     : undefined;
   const draftCompactCommand = !queueEdit && !shellMode && commandCatalog.state === "available"
-    && isCompactCommand(text.trim(), commandCatalog.items, selectedCommandRef.current);
+    && isCompactCommand(liveText.trim(), commandCatalog.items, selectedCommandRef.current);
   const hostOnlyCommandReady = (isHostOnlyExtensionCommand(draftNativeCommand) || draftCompactCommand)
     && attachments.length === 0;
   const sendDisabled = creatingSession
@@ -3936,10 +3955,10 @@ function ComposerBody({
     || compactPending
     || queueEditSaving
     || borrowedEpochPending
-    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
+    || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
-  const hasDraft = text.trim() !== "" || attachments.length > 0;
-  const peopleSendDisabled = peopleSending || text.trim() === "";
+  const hasDraft = liveText.trim() !== "" || attachments.length > 0;
+  const peopleSendDisabled = peopleSending || liveText.trim() === "";
   const runningHasSend = !sendDisabled;
   const runningPrimaryLabel = queueEdit
     ? tr("composer.saveQueuedMessageInIts")
@@ -4021,7 +4040,7 @@ function ComposerBody({
       onClick={() => submitMode()}
       aria-label={modeSubmitLabel}
       title={`${modeSubmitLabel} (${sendKey})`}
-      disabled={modeSubmitting || text.trim() === ""}
+      disabled={modeSubmitting || liveText.trim() === ""}
       aria-busy={modeSubmitting || undefined}
     >
       <span className="send-plane" aria-hidden="true"><Icon.send /></span>
@@ -4049,7 +4068,7 @@ function ComposerBody({
       runningHasSend ? (
         <div className="composer-send-split">
           <button
-            className={`send composer-delivery${queueEdit ? "" : " composer-running-send"} context-liquid-host`}
+            className={`send composer-delivery${queueEdit ? "" : " composer-running-send"}`}
             onPointerDown={onPrimaryPointerDown}
             onPointerUp={onPrimaryPointerUp}
             onPointerCancel={onPrimaryPointerCancel}
@@ -4063,7 +4082,6 @@ function ComposerBody({
           >
             {runningPrimaryGlyph}
             <span className="composer-action-label">{runningPrimaryLabel}</span>
-            <ContextLiquid key={session?.id} gauge={contextGauge}>{runningPrimaryGlyph}</ContextLiquid>
           </button>
           <Menu
             label={tr("composer.moreActiveRunActions")}
@@ -4150,33 +4168,101 @@ function ComposerBody({
     // The visible viewport supplies the emergency cap; the shared
     // --composer-max-input-height token supplies the normal five-line cap.
     // On phones the input never grows past the room its own chrome (model
-    // header, actions, context bar) needs on a keyboard-squeezed viewport.
+    // header, actions, context bar, the attachment tray) needs on a
+    // keyboard-squeezed viewport. The tray's cards keep their full height
+    // while the row opens, so its room is known from the first frame.
+    const trayRoom = phone
+      ? rootRef.current?.querySelector<HTMLElement>(".composer-tray > .attachment-pills")?.offsetHeight ?? 0
+      : 0;
     const cap = phone
-      ? Math.max(44, Math.min(visible * 0.42, visible - 240))
+      ? Math.max(44, Math.min(visible * 0.42, visible - 240 - trayRoom))
       : Math.max(44, visible * 0.42);
     applyComposerEditorHeight(el, Math.min(natural + 2, cap));
     if (followDictationRef.current) {
       followDictationRef.current = false;
       el.scrollTop = el.scrollHeight;
     }
-  }, [text, inputFocused, layoutState, isPhone, bandHeight]);
+  }, [text, inputFocused, layoutState, isPhone, bandHeight, attachments.length > 0]);
   // Resting row ⇄ engaged card eases on the keyboard's curve instead of jumping;
   // resting, the card stays presented as engaged until it has shrunk to the row.
   const presentedExpanded = useComposerMorph(rootRef, expanded, layoutState !== "desktop");
   const stateClass = layoutState === "desktop"
     ? ""
     : ` composer-mobile composer-mobile-grid ${presentedExpanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`;
-  const attachmentStrip = attachments.length > 0 && (
-    <AttachmentPills
-      attachments={attachments}
-      onRemove={(id) => {
-        const sid = session?.id ?? null;
-        if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
-        removeAttachment(sid, id);
-      }}
-    />
+  // The next message's files are a row of the card, between the model line and
+  // the editor (composer/attachmentTray.ts): the first file opens it, the last
+  // one's removal closes it over that card.
+  const tray = useAttachmentTray(attachments, session?.id ?? `new:${activeProjectId ?? ""}`, expanded);
+  // Once the row has opened or closed beside a focused editor, the caret is
+  // measured again (iOS draws it above the page and left it on the files
+  // until the next tap or keystroke). A row that starts to move cancels the
+  // frame its first, unmoved commit queued, so the caret waits for the end.
+  const trayPresent = tray.shown.length > 0;
+  const trayLayoutSeen = useRef(false);
+  useLayoutEffect(() => {
+    if (!trayLayoutSeen.current) {
+      trayLayoutSeen.current = true;
+      return;
+    }
+    if (tray.motion) return;
+    const frame = requestAnimationFrame(() => inputRef.current?.refreshCaret());
+    return () => cancelAnimationFrame(frame);
+  }, [tray.motion, trayPresent]);
+  const attachmentTray = tray.shown.length > 0 && (
+    <div
+      ref={tray.ref}
+      className="composer-tray"
+      data-motion={tray.motion ?? undefined}
+      inert={tray.motion === "close" ? true : undefined}
+      onAnimationEnd={tray.settle}
+    >
+      <AttachmentPills
+        attachments={tray.shown}
+        onRemove={(id) => {
+          const sid = session?.id ?? null;
+          if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
+          const last = attachments.length === 1 && attachments[0]?.id === id ? attachments[0] : null;
+          // The removed card's own button goes with the tray: hand focus to
+          // the editor on desktop (a phone would raise its keyboard).
+          const focused = last !== null && !phoneLayout
+            && rootRef.current?.querySelector(".composer-tray")?.contains(document.activeElement);
+          if (last) tray.closeOver(last);
+          removeAttachment(sid, id);
+          if (focused) inputRef.current?.focus();
+        }}
+      />
+    </div>
   );
 
+  // The suggested next prompt (harness or Session Assist) is never text in the
+  // editor: the whole chip takes it as an editable draft, × (or Esc) dismisses
+  // it, Tab is the shortcut. It is a line of the pending stack above the card
+  // (styles.css, "The pending stack above the composer").
+  const suggestionChip = promptSuggestion ? (
+    <div className="composer-suggestion" role="group" aria-label={tr("composer.promptSuggestionLabel")}>
+      <button
+        type="button"
+        className="composer-suggestion-use"
+        title={tr("composer.promptSuggestionHint")}
+        aria-label={`${tr("composer.promptSuggestionAccept")}: ${promptSuggestion}`}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={acceptPromptSuggestion}
+      >
+        <UiIcon icon={AssistIcon} size="sm" className="composer-suggestion-icon" />
+        <span className="composer-suggestion-text">{promptSuggestion}</span>
+        <kbd className="composer-suggestion-key" aria-hidden="true">Tab</kbd>
+      </button>
+      <IconButton
+        className="composer-suggestion-dismiss"
+        icon={CloseIcon}
+        label={tr("composer.promptSuggestionDismiss")}
+        size="sm"
+        variant="ghost"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setDismissedSuggestion(promptSuggestion)}
+      />
+    </div>
+  ) : null;
   return (
     <div
       ref={rootRef}
@@ -4194,7 +4280,6 @@ function ComposerBody({
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
           switched project or spawned a new session instead of retargeting. */}
-      {!session && attachmentStrip}
       {!session && !creatingSession && !soloPersonal && heroChrome.location && (
         <SessionContextBar {...contextBar} showIsolation={heroChrome.isolation} />
       )}
@@ -4216,43 +4301,16 @@ function ComposerBody({
           editingId={queueEdit?.sessionId === session.id ? queueEdit.id : null}
           launchingId={steeringQueuedId}
           onEdit={beginQueuedEdit}
+          onCancelEdit={cancelQueuedEdit}
           onSteer={steerQueuedItem}
           onItemsChange={updateQueuedItems}
         />
       )}
-      {session && attachmentStrip}
       {/* Headless next-prompt sources (Session Assist): mounted for every agent
           chat whatever the rail shows, so hiding a rail button never turns
           suggestions off. They draw nothing and offer through composerDraft. */}
       {session && !peopleOnly && <SlotHost slot="composer.suggestion" context={slotContext} />}
-      {/* The suggested next prompt (harness or Session Assist) sits on the composer's pending
-          writing stack, never inside the editor: the whole chip takes it as
-          an editable draft, × (or Esc) dismisses it, Tab is the shortcut. */}
-      {promptSuggestion && (
-        <div className="composer-suggestion" role="group" aria-label={tr("composer.promptSuggestionLabel")}>
-          <button
-            type="button"
-            className="composer-suggestion-use"
-            title={tr("composer.promptSuggestionHint")}
-            aria-label={`${tr("composer.promptSuggestionAccept")}: ${promptSuggestion}`}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={acceptPromptSuggestion}
-          >
-            <UiIcon icon={AssistIcon} size="sm" className="composer-suggestion-icon" />
-            <span className="composer-suggestion-text">{promptSuggestion}</span>
-            <kbd className="composer-suggestion-key" aria-hidden="true">Tab</kbd>
-          </button>
-          <IconButton
-            className="composer-suggestion-dismiss"
-            icon={CloseIcon}
-            label={tr("composer.promptSuggestionDismiss")}
-            size="sm"
-            variant="ghost"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => setDismissedSuggestion(promptSuggestion)}
-          />
-        </div>
-      )}
+      {suggestionChip}
       <GlassDock
         className={`composer-card${selectingConversation ? " is-choosing-messages" : ""}${activeMode ? " is-composer-mode" : ""}`}
         {...(activeMode ? { "data-composer-mode": activeMode.id } : {})}
@@ -4298,9 +4356,6 @@ function ComposerBody({
           {PROFILE_MISSING_NOTE}
         </div>
       )}
-      {attachments.length > 0 && !noModels && attachNote && (
-        <div className="composer-attach-note">{attachNote}</div>
-      )}
       {/* Three rows: the model, its pending effort and the context pie share
           one quiet line above the editor (model over the Add control, effort
           and the pie immediately beside it), then the editor, then the rail.
@@ -4312,11 +4367,12 @@ function ComposerBody({
           {effortControl}
           {contextPie}
           <SlotHost slot="composer.config" context={slotContext} />
-          {phoneLayout && <MobileComposerEditButton key={`${activeBrowserAccountId()}:${spaceId}:${activeProjectId ?? ""}`} editing={mobileRailEditing} onChange={(editing) => {
-            setMobileRailEditing(editing);
-            if (editing) inputRef.current?.element()?.blur();
-          }} />}
+          {phoneLayout && <MobileComposerEditEntry editing={mobileRailEditing} onChange={editMobileRail} />}
         </div>
+      )}
+      {attachmentTray}
+      {attachments.length > 0 && !noModels && attachNote && (
+        <div className="composer-attach-note">{attachNote}</div>
       )}
       {selectingConversation && (
         <div className="composer-selection" role="region" aria-label={tr("conversation.startSession")}>
@@ -4415,6 +4471,7 @@ function ComposerBody({
             ...(acSel >= 0 && acOptions[acSel] ? { ariaActiveDescendant: acOptions[acSel].id } : {}),
           } : {})}
           onTextChange={onTextChange}
+          onComposingText={setComposingText}
           onKeyIntercept={onKeyIntercept}
           onUnmovedArrow={onUnmovedArrow}
           onPaste={onPaste}
@@ -4500,7 +4557,7 @@ function ComposerBody({
           primary={primaryAction}
           resting={!presentedExpanded}
           editing={mobileRailEditing}
-          onEditingChange={setMobileRailEditing}
+          onEditingChange={editMobileRail}
         />
       ) : (
         <div className="composer-rail">

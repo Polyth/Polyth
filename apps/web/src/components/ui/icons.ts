@@ -159,6 +159,7 @@ export {
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
   CornerDownLeft as EnterIcon,
+  CornerDownRight as QueueNextIcon,
   // workspace objects that appear inside action controls
   House as HomeIcon,
   Folder as FolderIcon,
@@ -223,6 +224,7 @@ export {
   ShieldCheck as ShieldIcon,
   ShieldAlert as ShieldAlertIcon,
   Shield as ShieldEmptyIcon,
+  Scale as JudgeIcon,
   Server as ServerIcon,
   Database as DatabaseIcon,
   Loader as LoaderIcon,

@@ -97,6 +97,7 @@ export const ptBR: TunnelMessages = {
   "tunnel.hero.title": "Este computador",
   "tunnel.hero.pairFirst": "Pronto para emparelhar seu primeiro celular.",
   "tunnel.hero.connected": "Conectados agora: {online} de {total}",
+  "tunnel.hero.serverName": "Nome nos celulares",
   "tunnel.hero.address": "Endereço",
   "tunnel.hero.copyAddress": "Copiar endereço",
   "tunnel.hero.signIn": "Login",

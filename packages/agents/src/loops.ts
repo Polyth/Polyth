@@ -39,9 +39,11 @@ export function parseLoopFile(text: string): { loop?: LoopSpec; parseError?: str
   const meta: Record<string, string> = {};
   for (const line of m[1]!.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
-    if (!kv) return { parseError: `invalid frontmatter line: ${line.slice(0, 60)}` };
-    meta[kv[1]!] = kv[2]!.trim().replace(/^"(.*)"$/, "$1");
+    const kv = /^([A-Za-z][A-Za-z0-9_-]*):/.exec(line);
+    const value = kv ? line.slice(kv[0].length).trim() : "";
+    // `.` never matched a line terminator, so a stray one inside the value is still invalid.
+    if (!kv || /[\r\u2028\u2029]/.test(value)) return { parseError: `invalid frontmatter line: ${line.slice(0, 60)}` };
+    meta[kv[1]!] = value.replace(/^"(.*)"$/, "$1");
   }
   const id = meta.id ?? "";
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) return { parseError: "frontmatter id must be a short lowercase identifier" };

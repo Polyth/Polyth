@@ -142,6 +142,11 @@ loading is shown in between.
   - Android's re-show is an inset legacy window, so Android skips the curtain.
     There the WebView's brand background and the bootstrap page's own veil
     carry the swap.
+  - On iOS the WebView's own background is the brand night only until a page
+    has painted; then it follows that page's canvas colour, so a strip the
+    page has not painted yet (under a closing keyboard) reads as the page
+    ([mobile viewport](../dev/mobile-viewport.md), *Following the native
+    keyboard*).
   - `launchAutoHide` with 10 s is only the safety net for a page that never
     lifts the splash.
 - **Connection Hub.** When the hub opens a trusted server by itself (warm
@@ -157,12 +162,20 @@ loading is shown in between.
   The decision is `hubPresentation` in `apps/mobile/src/connectionUi.ts`.
 - **Workspace reveal.** `apps/web/src/launchReveal.ts` lifts the veil once,
   when all of these hold:
-  - the projects and the restored session or fresh chat are in place;
-  - the synced settings (theme, wallpaper) are applied;
-  - the web packages have booted (they get up to 1.8 s after hydration);
+  - the projects and the restored session or fresh chat are in place —
+    painted from the remembered navigator when there is one (see
+    [Connecting and reconnecting](../architecture/session-reading.md#connecting-and-reconnecting)),
+    otherwise from the server's answer;
+  - the synced settings (theme, wallpaper) are applied. When the last launch's
+    look was restored (below), they get up to 0.6 s after hydration, so a slow
+    link shows the workspace in the person's look instead of holding the veil,
+    and an ordinary link still reveals with the server's answer in place;
+  - the web packages have booted (they get up to 0.6 s after hydration; a
+    composer launcher that arrives later fades in);
   - first-screen reads have landed: the branch label, the composer's
     worktrees and recent chats (`holdLaunchReveal`, up to 1.6 s after
-    hydration);
+    hydration). A read whose answer is already on screen from the last
+    launch (the remembered branch label, remembered rows) does not hold;
   - the DOM has been still for 160 ms.
 
   Sign-in, setup and the unreachable-server card show as soon as they stop
@@ -181,15 +194,37 @@ loading is shown in between.
 - Desktop browsers (fine pointer, wider than 620 px) remove the veil before
   their first paint.
 - Each app launch opens the Link loopback proxy on a new port, so the shell's
-  origin storage starts empty. Theme, wallpaper and the other synced settings
-  (the default number of sessions a project shows among them) arrive from the
-  server, behind the veil. The navigators' open projects, shown-session
-  counts, project sort and custom project order are device-local, so they are
-  restored from the app-owned client-context store before the first render
-  (`apps/web/src/navigatorState.ts`, see `docs/dev/ui.md`). Usage limit
-  alerts remember what they announced on the server, per person, so a launch
-  does not repeat them (`packages/usage/README.md`, "Usage notifications").
-  Other localStorage-only state still starts empty on every launch.
+  origin storage starts empty. The synced settings arrive from the server, and
+  the first render does not wait for them: the look of the last launch is
+  restored from the app-owned client-context store before it
+  (`apps/web/src/settingsSnapshot.ts`, record `settings-look-v1`, per
+  connection and account).
+  - It holds the settings that shape the first screen: theme, accent, text
+    sizes, the wallpaper preset, the shell and message chrome, the phone
+    composer's buttons and the new-chat hero widgets. It holds no secrets,
+    model picks, notification templates or MCP servers. A browser, whose
+    origin storage works, does not use it.
+  - The server's answer replaces it through the ordinary merge. Restoring
+    never pushes, an edit made meanwhile wins for its own field, and a part the
+    server has no word on goes back to what the client had, so the memory never
+    seeds the account.
+- A custom wallpaper image has its own record in that store
+  (`apps/web/src/customWallpaperMemory.ts`, `custom-wallpaper-v1`, per connection
+  and account). The uploaded image lives in origin storage and can reach about
+  1.9 MB as a data URL, against a Link store of 256 KB per record and 4 MB in
+  total. So when the person picks an image the app also keeps a JPEG copy of at
+  most 200 KB (longest edge up to 1600 px), which the next launch restores before
+  the first render, as the wallpaper or only as the picker's custom tile. The
+  running document keeps the uploaded image until then. The image never reaches
+  the server. Replacing it clears the old copy first, so a reduction that fails
+  or is cut short leaves no image rather than an older one.
+- The navigators' open projects, shown-session counts, project sort and custom
+  project order are device-local, so they are restored from the same store
+  before the first render (`apps/web/src/navigatorState.ts`, see
+  `docs/dev/ui.md`). Usage limit alerts remember what they announced on the
+  server, per person, so a launch does not repeat them
+  (`packages/usage/README.md`, "Usage notifications"). Other localStorage-only
+  state still starts empty on every launch.
 
 Verification status: the web veil, the reveal and the hub transitions are
 checked in Chromium filmstrips, and the veil matches the generated iOS launch
@@ -237,7 +272,12 @@ Capacitor uses native keyboard resize. Keyboard show/hide events also publish
 the reported height through `apps/web/src/mobileViewport.ts`, which remains the
 single owner of `--visual-vh`, `--visual-bottom`, `--visual-offset`, and
 `--keyboard-inset`. This covers Android WebViews where visual viewport geometry
-reports only the already-resized content box.
+reports only the already-resized content box. Because the resized WebView is
+itself the frame, the native app publishes those variables once as the
+WebView's `100dvh` (`html[data-keyboard-frame="native"]`) wherever a probe
+measures the two as equal, so a keyboard resize no longer restyles every
+element ([mobile viewport](../dev/mobile-viewport.md), *Following the native
+keyboard*).
 
 ## Files and attachments
 
@@ -277,13 +317,30 @@ a partial intent handler.
 
 ## Notifications
 
-Mobile push is a native-controller and relay flow. Permission is requested only
-from the explicit Mobile push notifications setting, never at startup or
-pairing. Android requests `POST_NOTIFICATIONS` only on Android 13+; a fresh
-install remains actionable until that request has been made. iOS registers APNs
-only after authorization. The native controller keeps provider tokens and relay
-manage capabilities in secure native storage, while web content receives only
-semantic state and a short-lived claim.
+Mobile push is a native-controller flow that turns itself on: the first time
+the app has loaded a connected server for an account, it asks the OS for
+permission and registers (`autoEnableNativePush`, `apps/web/src/nativePush.ts`).
+From then on only the Phone notifications setting changes it; once push has
+been on, or the user turned it off there, the app never enables it again for
+that server and account. A refused prompt is not repeated: the OS reports
+"denied" and the setting shows it as unavailable. Android requests
+`POST_NOTIFICATIONS` only on Android 13+; a fresh install remains actionable
+until that request has been made. iOS registers APNs only after authorization.
+
+`enable` files the registration natively under a fresh subscription id and
+hands the page that id and the device token (iOS: the APNs token and the
+build's APNs environment; Android: the FCM token with `platform: "android"`).
+The page registers them with its own server (`POST /api/native-push`) over the
+same Polyth Link connection it uses for everything else, and re-sends them on
+every foreground so a rotated token arrives. The phone never talks to a push
+service itself.
+
+The server sends through [Polyth's push service](#polyths-push-service)
+(`https://push.polyth.app`), which holds the app's APNs key and Firebase
+account; a server whose owner placed the app's own APNs key sends iOS pushes
+to APNs itself ([Own APNs key](#own-apns-key)). Only the last hop, server →
+APNs/FCM → phone, leaves Link: a suspended phone has no connection, and only
+APNs/FCM can reach it. Users set up nothing beyond allowing notifications.
 
 Provider data is strictly limited to version, subscription id, notification
 UUID, kind, and opaque tag. Receipt validates and displays an OS notification
@@ -300,12 +357,42 @@ The app uses `polyth_activity` for completed/subagent activity and
 browser notifications remain the fallback when native push is unavailable or
 not successfully claimed. Inside the native app, Settings shows only the Mobile
 push row: browser Web Push can never subscribe from the WebView, so its row is
-hidden there. A build without a relay origin (`POLYTH_PUSH_RELAY_ORIGIN` +
-`POLYTH_PUSH_ENVIRONMENT` on iOS, `-PpolythPushRelayOrigin` +
-`google-services.json` on Android) reports `unavailable`, and the row says local
+hidden there. An iOS build without `POLYTH_PUSH_ENVIRONMENT`, an Android build
+without `google-services.json`, or a server with neither the push service nor
+an own APNs key (`POLYTH_NATIVE_PUSH_RELAY_ORIGIN=off`) reports `unavailable`, and the row says local
 alerts still appear while the app is open. APNs/FCM provider delivery, signing, Firebase
 configuration, and device lifecycle behavior remain external-verification work;
 the repository tests do not make provider calls.
+
+### Polyth's push service
+
+APNs and FCM deliver only for keys of the team that publishes the app, so the
+publisher runs one stateless forwarder for every server
+([`packages/push-relay`](../../packages/push-relay/README.md)). A server
+sends it `POST /v1/send` with the device token and either an alert (version,
+subscription id, notification UUID, kind, opaque tag, and text sealed for the
+device) or a Live Activity update (state, counts, times): never a chat's words,
+names or ids. It stores nothing, logs only provider/status/latency and limits
+each device token and each sender address. Only a server the phone registered
+with knows the token. `POLYTH_NATIVE_PUSH_RELAY_ORIGIN` points a server at
+another deployment of the same service; `off` turns it off.
+
+### Own APNs key
+
+The team that owns the app's bundle id (`com.polyth.mobile`) may also place
+its APNs key on a server, which then sends iOS pushes to APNs itself instead
+of through the push service. The server reads two files from its data
+directory and re-reads them when they change (no restart):
+
+- `<dataDir>/native-push/apns.json`: `{"teamId": "<10 chars>", "keyId":
+  "<10 chars>"}`, optionally `"topic"` (default `com.polyth.mobile`);
+- `<dataDir>/native-push/apns.p8` (mode 0600): the key from Apple Developer →
+  Keys → Apple Push Notifications service (APNs). A copy flattened onto one
+  line by a form field is accepted.
+
+One key serves both APNs environments: development builds register as
+`sandbox`, TestFlight and App Store builds as `production`. An unusable pair
+is logged without its contents. The push service reads the same two files.
 
 ## Live Activity (Dynamic Island)
 
@@ -334,16 +421,66 @@ extension (shared `PolythActivityAttributes.swift`).
   island's right in place of the timer. The minimal presentation is the mark
   alone in the state's colour (the gradient while working). Android's
   monochrome `ic_stat_polyth` is a separate, older glyph.
-- **Freshness.** Updates are local only, throttled to one per second and sent
-  only when the snapshot changes. Once iOS suspends the page the activity keeps
-  its last snapshot and turns stale after 15 minutes ("Open Polyth to update").
-  There is deliberately no ActivityKit push token: remote updates would need
-  APNs `liveactivity` pushes through the relay, which would expose plaintext
-  content to it (Live Activities have no service-extension decryption step).
+- **Freshness.** Local updates are throttled to one per second and sent only
+  when the snapshot changes. The page's socket closes the moment it hides, so
+  without push (below) nothing can tell the activity that a turn ended or a
+  question was answered elsewhere while the phone is locked. Every update
+  therefore carries a stale date two minutes (`LIVE_ACTIVITY_TRUST_MS`) after
+  the server last confirmed
+  the store current — the sync receipts for both the open chat and the list
+  (`getSyncFreshness`). While they hold, a 30-second heartbeat moves the date
+  on, so a long quiet turn never goes stale under an open app; once they stop
+  (page hidden, link lost) the date stays put and iOS marks the activity stale:
+  dimmed, "Open Polyth to update", and no running timer (a ticking clock would
+  claim the work goes on). A snapshot never confirmed is stale at once. Native
+  caps the date at 15 minutes and uses that cap for a page that sends none.
+  The rows are the ones the navigator shows (`overlaySessionProjection`), and on
+  reconnect the socket re-reads every row the client still shows as working or
+  waiting (`refreshSessionIds`, see the [architecture](../dev/architecture.md)
+  subscribe contract), so a chat that ended in another project while the phone
+  slept no longer keeps the activity on "Working" or "Reply needed".
   When nothing is live any more the activity ends with a final Done/Failed
   snapshot that stays ten minutes; a chat that vanished ends it at once. The
   first evaluation after a page load always reaches native, so an activity left
   by a previous process or server is replaced or ended.
+- **Push while suspended.** The server keeps the activity current while the
+  app is suspended, over the same path as alerts: the phone talks only to its
+  own server over Polyth Link, and the server sends through
+  [Polyth's push service](#polyths-push-service) (or its [own key](#own-apns-key)). A Live
+  Activity push cannot be decrypted on the device (no service-extension step),
+  so **no words leave the server**: a push carries only the state, the work's
+  start, and how many other chats wait or work. The widget draws the words
+  from the copy the App keeps in a Keychain group it shares with the widget
+  (`PolythLiveActivityStore`, `com.polyth.mobile.live-activity`): the last
+  snapshot the page showed, plus the page's status word per state and count
+  lines pre-rendered for 1–99 (plural forms stay the page's job). The question
+  or task line and progress are drawn only while the pushed state equals the
+  one they were written for. The flow:
+  1. `setContext` (before the first update) gives native the account and the
+     texts; the activity is then requested with `pushType: .token`. An
+     activity another connection/account started is ended first, so a server
+     the page no longer talks to cannot push into the island.
+  2. Native reports each push token as a `pushToken` event; the page
+     registers it (`POST /api/native-push/live-activity
+     {providerToken, environment}`) when `GET` says the server can send.
+  3. The page then sends `PUT …/live-activity` with `{sessionId, others,
+     shown}` whenever the shown chat, the chats its line counts (at most 20)
+     or the shown state change, and `DELETE` when the activity ends.
+  4. The server (`packages/server/src/nativePush.ts`) re-evaluates those chats
+     about 1.5 s after any of their events or row changes, as the person sees
+     them (same Space, visible project, readable row; `liveActivityState`
+     mirrors `resolveSessionStatus`), and pushes a change at APNs priority 10
+     (`ApnsProvider.deliverActivity` from `@polyth/push-relay`, in process).
+     Unchanged live content is re-sent every 4 minutes at priority 5, so an
+     accepted track earns the page a 10-minute stale date
+     (`LIVE_ACTIVITY_PUSH_TRUST_MS`) instead of two. When the shown chat is no
+     longer live and no counted chat is, the server sends `end`: a finished or
+     failed chat stays ten minutes, a vanished or unreadable one leaves at
+     once. Tracking survives a server restart and lapses after 8 hours (iOS
+     ends the activity then); a token APNs retires is dropped.
+  A push cannot switch the island to another chat (that needs its title); a
+  question from another chat moves only the count, and an alert still
+  announces it.
 - **Trust.** Only the bundled shell or the page on the current Link proxy may
   drive the plugin (same gate as the push semantic reader). Native re-validates
   state, session id and bounds every string.
@@ -359,9 +496,13 @@ extension (shared `PolythActivityAttributes.swift`).
   files best effort; `scripts/ci/remote-build.mjs` drops the newest extension
   and retries when signing or the archive fails, so TestFlight never breaks
   over it. The person can turn Live Activities off in iOS Settings → Polyth.
-- **Evidence.** Projection, payload bounds, publisher ordering and the Xcode
-  project patch are unit-tested. The Swift sources were not compiled here (no
-  Xcode on Linux) and nothing is device-verified yet.
+- **Evidence.** Projection, payload bounds, publisher ordering and stale-date
+  anchoring, the reconnect re-read, the Xcode project patch, the APNs
+  `liveactivity` request shape, the key loader and the server's
+  registration/track/push cycle are unit-tested; the Swift stale-date, timer,
+  push-token, owner and widget store changes are checked as source text only.
+  The Swift sources were not compiled here (no Xcode on Linux), and push is
+  device-verified only once a server holds a key.
 
 ## Permissions
 
@@ -373,7 +514,7 @@ Every prompt follows an explicit user action.
 | Camera | `CAMERA`, hardware optional | `NSCameraUsageDescription` | Pairing QR: iOS native scanner and WebView fallback. Android's Google code scanner needs no camera permission; `CAMERA` serves only the WebView fallback |
 | Microphone | `RECORD_AUDIO` + `MODIFY_AUDIO_SETTINGS`, hardware optional | `NSMicrophoneUsageDescription` | Dictation and voice mode (WebView `getUserMedia`) |
 | Local network | `CHANGE_WIFI_MULTICAST_STATE` | `NSLocalNetworkUsageDescription`, `NSBonjourServices` `_polyth._udp` | Nearby server discovery |
-| Notifications | `POST_NOTIFICATIONS` (Android 13+) | runtime authorization, `aps-environment` | Mobile push setting |
+| Notifications | `POST_NOTIFICATIONS` (Android 13+) | runtime authorization, `aps-environment` | Mobile push: asked after the first connection, then the Phone notifications setting |
 
 Capacitor's Android `BridgeWebChromeClient` requests `MODIFY_AUDIO_SETTINGS`
 together with `RECORD_AUDIO` for every WebView audio capture and denies the

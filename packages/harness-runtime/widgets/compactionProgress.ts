@@ -27,7 +27,9 @@ export function compactionRequestState(
       || event.type === "user/message"
     ) return { kind: "settled" };
     if (event.type === "session/compaction-failed" && !failed) {
-      const data = event.data as { strategy?: unknown; error?: unknown };
+      const data = event.data as { strategy?: unknown; error?: unknown; fallback?: unknown };
+      // The harness gave up and a Polyth compaction takes over: still under way.
+      if (data.fallback) continue;
       // A native refusal answers the request itself and is shown there.
       failed = data.strategy === "native"
         ? { kind: "settled" }

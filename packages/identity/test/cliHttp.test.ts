@@ -58,7 +58,7 @@ async function cliFixture(t: TestContext) {
     password: 'owner test passphrase', recoverySetId: recovery.value.setId, recoveryAcknowledged: true,
   });
   assert.equal(done.status, 200);
-  return { f, origin, browser, cli };
+  return { f, origin, browser, cli, adapter };
 }
 
 test('CLI device sign-in over HTTP: start, confirm in the signed-in UI, redeem, logout', async (t) => {
@@ -86,6 +86,27 @@ test('CLI device sign-in over HTTP: start, confirm in the signed-in UI, redeem, 
 
   assert.deepEqual((await cli('/api/auth/cli/logout', {}, { authorization: `Bearer ${token}` })).value, { ok: true });
   assert.deepEqual((await browser('/api/auth/cli')).value.tokens, []);
+});
+
+test('a full-access paired device reads its own command-line access, read-only', async (t) => {
+  const { browser, adapter } = await cliFixture(t);
+  const ownerId = (await browser('/api/auth/me')).value.id as string;
+  const made = await browser('/api/auth/cli/tokens', { label: 'ci', profile: 'read', expiresInDays: 30, spaceId: null });
+  assert.equal(made.status, 200);
+  const read = (userId: string) => {
+    const res = { statusCode: 0, body: '', setHeader() {}, end(chunk: string) { this.body = chunk; } };
+    assert.equal(adapter.handlePairedRead({ method: 'GET', url: '/api/auth/cli' } as never, res as never, userId), true);
+    assert.equal(res.statusCode, 200);
+    return JSON.parse(res.body) as Record<string, any>;
+  };
+  const own = read(ownerId);
+  assert.equal(own.readOnly, true);
+  assert.equal(own.canManageTrust, false);
+  assert.deepEqual(own.tokens.map((x: { label: string }) => x.label), ['ci']);
+  assert.deepEqual(Object.keys(own.trust).sort(), ['mode', 'revision']);
+  assert.equal(JSON.stringify(own).includes(made.value.token), false);
+  // Another account's tokens never show up.
+  assert.deepEqual(read('usr_someone_else').tokens, []);
 });
 
 test('CLI endpoints refuse browser-originated requests; UI endpoints refuse requests without the browser binding', async (t) => {

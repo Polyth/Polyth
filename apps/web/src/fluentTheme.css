@@ -11,17 +11,18 @@ html[data-theme-style="fluent"] {
   /* Two radii, as in Windows 11: 4px for in-page controls and rows, 8px for
      everything that frames or floats (cards, flyouts, dialogs, the composer).
      Rounding is measured from its default (9 → scale 1.8, uiPrefs.ts),
-     which draws these radii exactly; lower squares them, higher rounds a
-     little past Fluent. */
+     which draws these radii exactly; lower squares them, and the last notch
+     takes the shared rounded geometry (--radius-max-*, tokens.css). */
   --fluent-round: calc(var(--corner-radius-scale) / 1.8);
-  --radius-control: calc(4px * var(--fluent-round));
-  --radius-card: calc(8px * var(--fluent-round));
-  --radius-surface: calc(8px * var(--fluent-round));
-  --radius-sheet: calc(8px * var(--fluent-round));
-  --radius-activity: calc(4px * var(--fluent-round));
-  --radius-island: calc(8px * var(--fluent-round));
-  --radius-dock: calc(8px * var(--fluent-round));
-  --radius-composer: calc(8px * var(--fluent-round));
+  --radius-control: max(calc(4px * var(--fluent-round)), var(--radius-max-control));
+  --radius-card: max(calc(8px * var(--fluent-round)), var(--radius-max-card));
+  --radius-surface: max(calc(8px * var(--fluent-round)), var(--radius-max-surface));
+  --radius-sheet: max(calc(8px * var(--fluent-round)), var(--radius-max-sheet));
+  --radius-activity: max(calc(4px * var(--fluent-round)), var(--radius-max-card));
+  --radius-island: max(calc(8px * var(--fluent-round)), var(--radius-max-float));
+  --radius-dock: max(calc(8px * var(--fluent-round)), var(--radius-max-float));
+  --radius-composer: max(calc(8px * var(--fluent-round)), var(--radius-max-float));
+  --radius-round: max(calc(8px * var(--fluent-round)), var(--radius-max-pill));
 
   /* 32px is the Windows standard control, 40px a list row; compact controls
      keep their --hit-min floor on coarse pointers. */
@@ -483,11 +484,12 @@ html[data-theme-style="fluent"] ::selection { background: var(--accent); color: 
 /* Borderless appearance still clears structural borders and separators. The
    Fluent material edges are not decoration: like the composer outline and
    the checkbox, a control's elevation edge and a flyout's surface stroke
-   identify the thing itself, so they stay. */
+   identify the thing itself, so they stay. The transcript's inline Stop is
+   not a push button: its red line is what identifies it (styles.css). */
 html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ui-tooltip, .dialog-panel) {
   border-color: var(--fluent-stroke-surface) !important;
 }
-html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.ui-btn--quiet, .ui-btn--danger, .ui-icon-btn--quiet, .seg button.active, .seg button.on, .ui-tab--selected):not(:disabled) {
+html[data-theme-style="fluent"] body[data-hide-borders="true"] :is(.ui-btn--quiet, .ui-btn--danger:not(.execution-stop), .ui-icon-btn--quiet, .seg button.active, .seg button.on, .ui-tab--selected):not(:disabled) {
   border-color: var(--fluent-edge-top) var(--fluent-stroke-control) var(--fluent-edge-bottom) !important;
 }
 html[data-theme-style="fluent"] body[data-hide-borders="true"] .ui-btn--primary:not(:disabled) {

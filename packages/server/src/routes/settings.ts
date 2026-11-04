@@ -1,7 +1,7 @@
 // Settings routes: global behavior instructions, system info, MCP configuration,
 // and the managed plugin registry. Secret values never leave this boundary —
 // requests may carry them in, responses only ever name their keys.
-import type { AgentDescriptor, ClientSettingsDto, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
+import { principalHasFullAccess, type AgentDescriptor, type ClientSettingsDto, type McpTransport, type ModelRef, type SystemInfoDto } from "@polyth/contracts";
 import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import type { RouteHandler } from "../http.ts";
 import type { BehaviorService } from "../behavior.ts";
@@ -114,7 +114,7 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       if (rc.principal.kind === "anonymous") {
         throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
       }
-      if (rc.principal.kind === "paired-device") {
+      if (rc.principal.kind === "paired-device" && !principalHasFullAccess(rc.principal)) {
         throw Object.assign(new Error("not allowed"), { code: "forbidden" });
       }
       const revealLocal = (rc.principal.kind === "local-user" || rc.principal.kind === "ui-session")

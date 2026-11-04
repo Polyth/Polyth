@@ -84,3 +84,18 @@ test("the hub opens a server picked from the menu behind the veil, and leads wit
   assert.match(screen, /switchConnectStarted\.current = true;\s*void reconnectTrusted\(switchTarget\);/);
   assert.match(screen, /pairSectionRef\.current\?\.scrollIntoView/);
 });
+
+test("only the bundled hub renames a saved server, through the Link client's metadata", async () => {
+  const [swift, android] = await Promise.all([
+    read("../ios/App/App/AppDelegate.swift"),
+    read("../android/app/src/main/java/com/polyth/mobile/PolythLinkPlugin.java"),
+  ]);
+  assert.match(swift, /CAPPluginMethod\(name: "renameConnection"/);
+  const renameSwift = method(swift, /@objc func renameConnection\(/);
+  assert.match(renameSwift, /guard trusted\(call\), let connectionID = require\(call, "connectionId"/);
+  assert.match(renameSwift, /invoke\("connections\.rename", \["connectionId": connectionID, "label": label\]\)/);
+  assert.doesNotMatch(renameSwift, /secret:/);
+  const renameAndroid = method(android, /public void renameConnection\(/);
+  assert.match(renameAndroid, /if \(!trusted\(call\)\) return;/);
+  assert.match(renameAndroid, /invoke\("connections\.rename", new JSObject\(\)\.put\("connectionId", connectionId\)\.put\("label", label\), null\)/);
+});

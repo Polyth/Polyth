@@ -21,11 +21,12 @@ const decodePath = (raw: string): string => {
 const pathAfterPrefix = (raw: string): string | null => {
   const value = decodePath(raw);
   if (value === "/dev/null") return null;
-  return value.replace(/^[ab]\//, "");
+  // A header naming nothing ("+++ " or a stray quote) is no path.
+  return value.replace(/^[ab]\//, "") || null;
 };
 
 const headerPaths = (header: string): [string, string] | null => {
-  const tokens = header.slice("diff --git ".length).match(/"(?:\\.|[^"])*"|\S+/g);
+  const tokens = header.slice("diff --git ".length).match(/"(?:\\.|[^"\\])*"|\S+/g);
   return tokens?.length === 2 ? [tokens[0]!, tokens[1]!] : null;
 };
 
@@ -86,7 +87,7 @@ export function splitPrDiff(diff: string): PrDiffFile[] {
       : copyTo !== undefined
         ? decodePath(copyTo)
         : newHeader ? pathAfterPrefix(newHeader) : paths ? pathAfterPrefix(paths[1]) : null;
-    const path = newPath ?? oldPath ?? tr("gitview.prDiffFileN", { n: index + 1 });
+    const path = newPath || oldPath || tr("gitview.prDiffFileN", { n: index + 1 });
     return {
       path,
       ...(oldPath && newPath && oldPath !== newPath ? { previousPath: oldPath } : {}),

@@ -83,9 +83,11 @@ export default function CommandLinePage() {
   return (
     <div className="cli-page">
       <PageHead blurb={tr("settings.commandline.blurb")} />
-      <DeviceConfirm withReauth={withReauth} onDone={refresh} />
-      <TokenList tokens={state.tokens} onChanged={refresh} />
-      <CreateToken state={state} withReauth={withReauth} onCreated={refresh} />
+      {state.readOnly
+        ? <Notice tone="info">{tr("settings.commandline.manageInBrowser")}</Notice>
+        : <DeviceConfirm withReauth={withReauth} onDone={refresh} />}
+      <TokenList tokens={state.tokens} readOnly={state.readOnly} onChanged={refresh} />
+      {!state.readOnly && <CreateToken state={state} withReauth={withReauth} onCreated={refresh} />}
       {state.canManageTrust && <TrustMode state={state} withReauth={withReauth} onChanged={refresh} />}
       <GetCli />
       {prompt}
@@ -191,7 +193,7 @@ function DeviceConfirm({ withReauth, onDone }: { withReauth: WithReauth; onDone:
   );
 }
 
-function TokenList({ tokens, onChanged }: { tokens: CliTokenSummary[]; onChanged: () => Promise<void> }) {
+function TokenList({ tokens, readOnly, onChanged }: { tokens: CliTokenSummary[]; readOnly: boolean; onChanged: () => Promise<void> }) {
   const spaces = useSpaces();
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -231,16 +233,18 @@ function TokenList({ tokens, onChanged }: { tokens: CliTokenSummary[]; onChanged
                 <Badge tone={token.kind === "device" ? "info" : "neutral"}>
                   {token.kind === "device" ? tr("settings.commandline.kindTerminal") : tr("settings.commandline.kindAutomation")}
                 </Badge>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="cli-token-revoke"
-                  busy={busyId === token.id}
-                  disabled={busyId !== null}
-                  onClick={() => void revoke(token)}
-                >
-                  {tr("settings.commandline.revoke")}
-                </Button>
+                {!readOnly && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="cli-token-revoke"
+                    busy={busyId === token.id}
+                    disabled={busyId !== null}
+                    onClick={() => void revoke(token)}
+                  >
+                    {tr("settings.commandline.revoke")}
+                  </Button>
+                )}
               </div>
               <dl className="cli-facts">
                 <dt>{tr("settings.commandline.access")}</dt><dd>{accessText(accessLevel(token.grants))}</dd>

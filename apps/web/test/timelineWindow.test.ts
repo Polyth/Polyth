@@ -9,9 +9,11 @@ import {
   TIMELINE_CHUNK,
   TIMELINE_WINDOW,
   grownLimit,
+  heldWindowStart,
   hiddenCount,
   initialTimelineWindow,
   limitToInclude,
+  locateWindowHead,
   windowStart,
 } from "../src/timelineWindow.ts";
 
@@ -74,6 +76,32 @@ test("limitToInclude: visible rows keep the limit, hidden rows grow it exactly",
   // out-of-range indexes change nothing (unknown prompt id)
   assert.equal(limitToInclude(500, 150, -1), 150);
   assert.equal(limitToInclude(500, 150, 500), 150);
+});
+
+test("locateWindowHead finds the first shown row, or the row before a later one when history re-keyed it", () => {
+  const rows = ["h1", "h2", "activity-a0", "m5", "m6", "m7"];
+  assert.equal(locateWindowHead(rows, ["m5", "m6", "m7"]), 3);
+  // The first row was a partial activity block; its earlier steps arrived
+  // with the history and gave it a new id, so the next row locates it.
+  assert.equal(locateWindowHead(rows, ["activity-a3", "m5", "m6"]), 2);
+  assert.equal(locateWindowHead(rows, ["gone-1", "gone-2"]), null);
+  assert.equal(locateWindowHead(rows, []), null);
+  assert.equal(locateWindowHead(["x"], ["y", "x"]), 0, "never before the first row");
+});
+
+test("heldWindowStart holds the first row when history lands above it, and a full window slides as before", () => {
+  // 12 rows shown from 0; 7 rows of history land above: the head moves to 7.
+  assert.equal(heldWindowStart({ naturalStart: 0, headIndex: 7, committedStart: 0, held: false }), 7);
+  // Later commits keep holding (a live row appended at the tail).
+  assert.equal(heldWindowStart({ naturalStart: 0, headIndex: 7, committedStart: 7, held: true }), 7);
+  // Nothing landed above, nothing held: the ordinary suffix window.
+  assert.equal(heldWindowStart({ naturalStart: 0, headIndex: 0, committedStart: 0, held: false }), 0);
+  assert.equal(heldWindowStart({ naturalStart: 0, headIndex: 5, committedStart: 5, held: false }), 0,
+    "a head that did not move holds nothing");
+  // A full window: appends slide it past the held head, which drops the hold.
+  assert.equal(heldWindowStart({ naturalStart: 351, headIndex: 350, committedStart: 350, held: true }), 351);
+  // The head is gone (a rewind cut it): the ordinary window again.
+  assert.equal(heldWindowStart({ naturalStart: 0, headIndex: null, committedStart: 4, held: true }), 0);
 });
 
 // ---- Timeline layout integration: growth keeps the reader's anchor ---------

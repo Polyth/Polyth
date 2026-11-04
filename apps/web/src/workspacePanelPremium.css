@@ -128,8 +128,16 @@
     min-height: calc((2 * var(--control-h)) + var(--space-2));
   }
 
+  /* An icon row over a fixed two-line label slot: every tile stacks to the
+     same height, so icons stay level whether or not a label wraps, and the
+     tile fills its row instead of ending at its own content. */
   .workspace-panel-sheet .workspace-panel-launcher {
+    height: 100%;
     min-height: calc((2 * var(--control-h)) + var(--space-2));
+    display: grid;
+    grid-template-rows: var(--icon-xl) calc(2em * var(--font-meta-lh));
+    align-content: center;
+    justify-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-1);
     border: 1px solid var(--material-glass-border);
@@ -150,11 +158,17 @@
   }
 
   .workspace-panel-sheet .workspace-panel-launcher > span {
+    align-self: center;
     display: -webkit-box;
     min-width: 0;
     overflow: hidden;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+    /* A long single word ("Планувальник") hyphenates at a real syllable
+       break where the platform has a dictionary (iOS, Android) instead of
+       being cut mid-syllable; `anywhere` stays the last resort. */
+    -webkit-hyphens: auto;
+    hyphens: auto;
     overflow-wrap: anywhere;
     text-wrap: balance;
   }
@@ -348,7 +362,11 @@
   /* Package widgets own their inner presentation. The Workspace host only
      controls the frame, scrolling, and widget placement around them. */
 
-  @container workspace-panel (max-width: 340px) {
+  /* Four tiles across a 344–412px phone (Fold cover, Galaxy S, SE, iPhone
+     15/16/17, Pixel) leave 70–80px for a label, so "Планувальник" or
+     "Керування" broke mid-word; three columns give every label a real line.
+     Plus/Pro Max widths (430px+) keep four. */
+  @container workspace-panel (max-width: 420px) {
     .workspace-panel-sheet .workspace-panel-items {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }

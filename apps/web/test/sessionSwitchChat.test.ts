@@ -263,7 +263,7 @@ test("a cold open paints from a passive tail before bounded replay and runtime a
   // without first materializing the native runtime.
   assert.deepEqual(requestedPaths, [
     "/api/sessions/parallel",
-    "/api/sessions/parallel/events?afterSeq=0&limit=40&prefetch=1",
+    "/api/sessions/parallel/events?afterSeq=0&limit=400&prefetch=1",
   ]);
   // Both open-critical reads are bounded: a stalled connection fails the open
   // (and clears its loading claim) instead of leaving it pending forever.
@@ -362,7 +362,7 @@ test("tail prefetch dedupes and click paints its cache before reconcile resolves
   prefetchSessionTail(sessionId);
   await Promise.resolve();
   assert.deepEqual(requestedPaths, [
-    `/api/sessions/${sessionId}/events?afterSeq=0&limit=40&prefetch=1`,
+    `/api/sessions/${sessionId}/events?afterSeq=0&limit=400&prefetch=1`,
   ], "repeated pointer intent shares one bounded request");
 
   const opening = openSession(sessionId);
@@ -421,7 +421,7 @@ test("a passive tail poll refreshes a hydrated background session title without 
   );
   assert.equal(store.getState().activeSessionId, activeBefore, "title polling must not navigate");
   assert.deepEqual(requestedPaths, [
-    `/api/sessions/${sessionId}/events?afterSeq=0&limit=40&prefetch=1`,
+    `/api/sessions/${sessionId}/events?afterSeq=0&limit=400&prefetch=1`,
   ]);
   eventFixtures.delete(sessionId);
 });

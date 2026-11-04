@@ -245,6 +245,10 @@ const mutation = async <T>(operationId: string, action: () => Promise<T>): Promi
 export interface PiRuntimeOptions {
   /** `pi` or one of its account harnesses (`pi-<account>`). */
   harnessId?: string;
+  /** Reads a project attachment (a path relative to `context.cwd`, or
+   *  absolute) where Pi runs. A remote host's project files are not on this
+   *  machine; the default reads the local filesystem. */
+  readAttachment?: (path: string) => Promise<Uint8Array>;
 }
 export function createPiRuntime(context: HarnessContext, rpc: PiRpc, options: PiRuntimeOptions = {}): AgentRuntime {
   const harnessId = options.harnessId ?? "pi";
@@ -639,16 +643,22 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc, options: Pi
       const delivered = composeTurnPrompt(request.text, request.attachments);
       const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
       const seenImagePaths = new Set<string>();
-      const addImage = async (path: string, mime: string) => {
-        const absolute = isAbsolute(path) ? path : join(context.cwd, path);
-        if (seenImagePaths.has(absolute)) return;
-        const data = await readFile(absolute);
-        seenImagePaths.add(absolute);
-        images.push({ type: "image", data: data.toString("base64"), mimeType: mime });
+      const addImage = async (key: string, read: () => Promise<Uint8Array>, mime: string) => {
+        if (seenImagePaths.has(key)) return;
+        const data = await read();
+        seenImagePaths.add(key);
+        images.push({ type: "image", data: Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("base64"), mimeType: mime });
       };
+      const localPath = (path: string) => isAbsolute(path) ? path : join(context.cwd, path);
+      const readAttachment = options.readAttachment;
 
       try {
-        for (const image of delivered.images) await addImage(image.localPath, image.mime);
+        // Browser captures are Polyth artifacts on this machine, even when
+        // the project's files live on a remote host.
+        for (const image of delivered.images) {
+          const path = localPath(image.localPath);
+          await addImage(path, () => readFile(path), image.mime);
+        }
         for (const attachment of request.attachments ?? []) {
           if (attachment.kind === "browser-context") continue;
           const modality = attachmentModality(attachment);
@@ -662,7 +672,9 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc, options: Pi
           if (!attachment.path) {
             return { kind: "rejected", code: "invalid-attachment", message: `${attachment.name} could not be read.` };
           }
-          await addImage(attachment.path, attachment.mime);
+          const path = attachment.path;
+          if (readAttachment) await addImage(`project:${path}`, () => readAttachment(path), attachment.mime);
+          else await addImage(localPath(path), () => readFile(localPath(path)), attachment.mime);
         }
       } catch {
         return { kind: "rejected", code: "invalid-attachment", message: "Pi image attachment could not be read" };

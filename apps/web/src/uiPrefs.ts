@@ -25,7 +25,6 @@ export type FollowUpBehavior = "steer" | "queue" | "interrupt";
 export type LargeTextPasteBehavior = "ask" | "attach" | "inline";
 export type NotificationKindPref = NotificationKind;
 export type MessageCopyFormat = "markdown" | "json";
-export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type TopRailAlignment = "center" | "left";
 export type GlassEffect = "off" | "matte" | "clear";
 /** How the top rail separates from the workspace below it: `shadow` keeps the
@@ -86,18 +85,16 @@ const LEGACY_MOBILE_SHORTCUTS = ["files", "git", "terminal", "browser", "notific
  *  the account and actions in the navigator's column became the default. */
 const LEGACY_SHELL_LAYOUT: ShellLayout = "classic";
 const LEGACY_SHELL_ACTIONS_DOCK: ShellDockSide = "end";
+/** Records saved before the title moved off the bare bar keep their line. */
+const LEGACY_SHELL_TITLE: ShellTitlePlacement = "chat";
 export type ActionGrouping = "grouped" | "ungrouped";
 export type ThinkingDisplayMode = "collapsed" | "expanded" | "activity";
 export type SessionActivityDetailsMode = "tabs" | "all";
 /** How agent activity blocks draw in the transcript (docs/dev/ui.md). */
 export const ACTIVITY_BLOCK_STYLES = ["thread", "ledger", "chip", "margin"] as const;
 export type ActivityBlockStyle = typeof ACTIVITY_BLOCK_STYLES[number];
-/** How the agent status and edited-files line above the composer draws. */
-export const COMPOSER_STATUS_STYLES = ["line", "tab", "capsule"] as const;
-export type ComposerStatusStyle = typeof COMPOSER_STATUS_STYLES[number];
 export type MobileSessionTitleMode = "hidden" | "title" | "button";
 
-export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const MOBILE_SHORTCUT_IDS = [
   "session", "files", "browser", "goals", "git", "terminal",
   "notification-centre", "multirun", "workflow", "fusion", "walkthrough",
@@ -159,7 +156,6 @@ export interface UiSettings {
   /** Activity block look: thread, ledger, chip or hanging margin icons. */
   activityBlockStyle: ActivityBlockStyle;
   /** Above-composer status and edited files: line, tab or capsule. */
-  composerStatusStyle: ComposerStatusStyle;
   /** Phone session title: hidden, transparent, or a full glass button. */
   mobileSessionTitle: MobileSessionTitleMode;
   /** Prompt navigator rail. Settings expose it as on (`auto`) / off;
@@ -178,7 +174,6 @@ export interface UiSettings {
   /** Payload selected by the single message Copy action. */
   messageCopyFormat: MessageCopyFormat;
   /** Visible session-header metrics, in drag-configured order. */
-  headerMetrics: HeaderMetricId[];
   /** User-message quick actions: order, bar/menu placement, reveal. Package
    *  buttons are entries too (`pkg:<contribution id>`). */
   userMessageActions: MessageActionLayout<WithPackageActions<UserMessageActionId>>;
@@ -285,7 +280,6 @@ export const UI_DEFAULTS: UiSettings = {
   thinkingDisplayMode: "collapsed",
   sessionActivityDetails: "all",
   activityBlockStyle: "thread",
-  composerStatusStyle: "line",
   mobileSessionTitle: "hidden",
   promptNavigator: "auto",
   promptNavigatorSide: "left",
@@ -293,7 +287,6 @@ export const UI_DEFAULTS: UiSettings = {
   pinLatestPrompt: false,
   promptBookmarkDesktop: false,
   messageCopyFormat: "markdown",
-  headerMetrics: [...HEADER_METRIC_IDS],
   userMessageActions: USER_MESSAGE_ACTIONS_DEFAULT,
   assistantMessageActions: ASSISTANT_MESSAGE_ACTIONS_DEFAULT,
   showAnswerQuickActions: true,
@@ -307,7 +300,9 @@ export const UI_DEFAULTS: UiSettings = {
   floatingColumns: true,
   shellToolsDock: "end",
   shellActionsDock: "start",
-  shellTitle: "chat",
+  // A fresh window draws no top bar at all: the active chat is named by its
+  // navigator row. Settings can put the title back over the chat.
+  shellTitle: "hidden",
   topRailSize: RAIL_SIZE_DEFAULT,
   rightRailSize: 90,
   leftRailSize: RAIL_SIZE_DEFAULT,
@@ -445,9 +440,6 @@ export function parseUiSettings(raw: string | null): UiSettings {
       activityBlockStyle: ACTIVITY_BLOCK_STYLES.includes(data.activityBlockStyle as ActivityBlockStyle)
         ? data.activityBlockStyle as ActivityBlockStyle
         : UI_DEFAULTS.activityBlockStyle,
-      composerStatusStyle: COMPOSER_STATUS_STYLES.includes(data.composerStatusStyle as ComposerStatusStyle)
-        ? data.composerStatusStyle as ComposerStatusStyle
-        : UI_DEFAULTS.composerStatusStyle,
       // The retired `logo` mode falls back to the plain title.
       mobileSessionTitle: data.mobileSessionTitle === "hidden" || data.mobileSessionTitle === "button"
         ? data.mobileSessionTitle : "title",
@@ -457,7 +449,6 @@ export function parseUiSettings(raw: string | null): UiSettings {
       pinLatestPrompt: data.pinLatestPrompt === true,
       promptBookmarkDesktop: data.promptBookmarkDesktop === true,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",
-      headerMetrics: orderedIds(data.headerMetrics, HEADER_METRIC_IDS),
       userMessageActions: parseMessageActionLayout(data.userMessageActions, USER_MESSAGE_ACTION_IDS, UI_DEFAULTS.userMessageActions),
       // `responseActions` (an ordered id list) predates the shared layout and
       // is read only as a migration source.
@@ -477,7 +468,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       floatingColumns: typeof data.floatingColumns === "boolean" ? data.floatingColumns : UI_DEFAULTS.floatingColumns,
       shellToolsDock: oneOf(data.shellToolsDock, SHELL_DOCK_SIDES, UI_DEFAULTS.shellToolsDock),
       shellActionsDock: oneOf(data.shellActionsDock, SHELL_DOCK_SIDES, LEGACY_SHELL_ACTIONS_DOCK),
-      shellTitle: oneOf(data.shellTitle, SHELL_TITLE_PLACEMENTS, UI_DEFAULTS.shellTitle),
+      shellTitle: oneOf(data.shellTitle, SHELL_TITLE_PLACEMENTS, LEGACY_SHELL_TITLE),
       // The discrete topRailIconSize/rightRailIconSize records predate the
       // sliders; read them as a migration source only.
       topRailSize: parseRailSize(data.topRailSize ?? (data as { topRailIconSize?: unknown }).topRailIconSize),
@@ -570,7 +561,6 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.chatwidth = s.chatWidth;
   b.dataset.mobileSessionTitle = s.mobileSessionTitle;
   b.dataset.activityStyle = s.activityBlockStyle;
-  b.dataset.composerStatusStyle = s.composerStatusStyle;
   b.dataset.technical = String(s.showTechnicalButtons);
   b.dataset.dictate = String(s.showDictate);
   b.dataset.autoApprove = String(s.showAutoApprove);
@@ -614,6 +604,7 @@ export function applyUiSettings(s: UiSettings = settings): void {
   // a scale set on <body> would never reach them. Do not publish a second
   // runtime radius vocabulary here.
   document.documentElement.style?.setProperty("--corner-radius-scale", String(cornerRadiusScale(s.rounding)));
+  document.documentElement.style?.setProperty("--corner-max", s.rounding >= 10 ? "1" : "0");
 }
 
 /** The radius multiplier a rounding setting publishes. 0..9 is linear

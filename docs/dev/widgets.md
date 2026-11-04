@@ -246,7 +246,9 @@ export default defineWebPackage((host) => () => {
   (2 on a phone-wide column): `compact` ¼, `standard` ½, `wide`/`large` a full
   row (`large` taller). Sizes offered are the widget's `panelSizes`
   (`panelDefaultSize` first); a widget without them keeps a full-width row.
-  The host's `SlotHost` for that slot renders only registered contributions
+  Every sized tile sits in one card the board draws (`.hero-widget[data-size]`:
+  border, card radius, `--surface-1`), so the widget renders content only and
+  fills the tile; it must not draw a second frame of its own. The host's `SlotHost` for that slot renders only registered contributions
   (`placed={false}`); a visible layout placement there (an older client, the
   Canvas library) is adopted onto the board as an item of that project and
   hidden in the layout (`adoptLegacyHeroPlacements`). Nothing is added by

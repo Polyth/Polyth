@@ -2,7 +2,7 @@
 // in httpCore.ts; security authorities that must run before route dispatch are
 // composed here so they cannot accidentally fall through to legacy routes.
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import type { RequestIngress } from "@polyth/contracts";
+import { principalHasFullAccess, type RequestIngress } from "@polyth/contracts";
 import { UNTRUSTED_INGRESS_HEADERS } from "./auth.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import {
@@ -20,6 +20,9 @@ export interface IdentityHttpHandler {
   handle(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
   /** The auth status to embed in the HTML shell (see httpCore `shellStatus`). */
   shellStatus?(req: IncomingMessage, res: ServerResponse): Record<string, unknown> | null;
+  /** Read-only account views (`GET /api/auth/accounts`, `/api/auth/me`) for
+   *  an account this gateway authenticated: a full-access paired device. */
+  handlePairedRead?(req: IncomingMessage, res: ServerResponse, userId: string): boolean;
 }
 
 export interface HttpDeps extends CoreHttpDeps {
@@ -49,6 +52,16 @@ const sanitizePublicIdentityHeaders = (req: IncomingMessage): void => {
   }
 };
 
+const authRequestOf = (req: IncomingMessage) => ({
+  headers: {
+    cookie: req.headers.cookie,
+    "user-agent": Array.isArray(req.headers["user-agent"])
+      ? req.headers["user-agent"][0]
+      : req.headers["user-agent"],
+  },
+  socket: { remoteAddress: req.socket?.remoteAddress },
+});
+
 const requestPath = (req: IncomingMessage): string | null => {
   try { return new URL(req.url ?? "/", "http://x").pathname; }
   catch { return null; }
@@ -70,6 +83,15 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
     ...coreDeps,
     ...(identityHttp.shellStatus ? { shellStatus: identityHttp.shellStatus.bind(identityHttp) } : {}),
   });
+  /** The account of a Link device its owner granted full access; undefined
+   *  for every other caller. Resolved per request, so a revoked or downgraded
+   *  device (or a guarded account) loses it on the next call. */
+  const pairedFullAccessUser = (req: IncomingMessage, ingress: RequestIngress): string | undefined => {
+    const auth = deps.auth;
+    if (ingress.kind !== "polyth-link" || !auth?.userIdForPrincipal) return undefined;
+    const { principal, authenticated } = auth.resolve(authRequestOf(req), ingress);
+    return authenticated && principalHasFullAccess(principal) ? auth.userIdForPrincipal(principal) : undefined;
+  };
 
   return async (req, res, ingress: RequestIngress) => {
     const path = requestPath(req);
@@ -85,15 +107,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
     // canonical installation authority here before they can reach it. Core
     // still performs its normal auth, Space and remote-capability checks.
     if (security && instanceGlobalVisibilityMutation(path, req.method)) {
-      const resolution = security.auth.resolve({
-        headers: {
-          cookie: req.headers.cookie,
-          "user-agent": Array.isArray(req.headers["user-agent"])
-            ? req.headers["user-agent"][0]
-            : req.headers["user-agent"],
-        },
-        socket: { remoteAddress: req.socket?.remoteAddress },
-      }, ingress);
+      const resolution = security.auth.resolve(authRequestOf(req), ingress);
       if (!resolution.authenticated) {
         writeJson(res, 401, { error: "unauthorized", message: "authentication required" });
         return;
@@ -123,6 +137,10 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
     }
     try {
       if (ingress.kind !== "public-http") {
+        // A device its owner trusts like this computer may read its own
+        // account (Settings → Users). Changes still need browser identity.
+        const userId = pairedFullAccessUser(req, ingress);
+        if (userId && identityHttp.handlePairedRead?.(req, res, userId)) return;
         writeJson(res, 403, { error: "forbidden", message: "not allowed" });
         return;
       }

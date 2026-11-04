@@ -97,6 +97,7 @@ export const bg: TunnelMessages = {
   "tunnel.hero.title": "Този компютър",
   "tunnel.hero.pairFirst": "Готово за сдвояване с първия ви телефон.",
   "tunnel.hero.connected": "Свързани сега: {online} от {total}",
+  "tunnel.hero.serverName": "Име на телефоните",
   "tunnel.hero.address": "Адрес",
   "tunnel.hero.copyAddress": "Копиране на адреса",
   "tunnel.hero.signIn": "Вход",

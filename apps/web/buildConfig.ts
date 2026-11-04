@@ -1,6 +1,7 @@
 import type { BuildOptions, Plugin } from "esbuild";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, readdir } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 import { scaleUiFontSizes } from "./fontScaleCss.ts";
 
 export const reactExternals = [
@@ -40,6 +41,51 @@ export const browserBuildOptions = {
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 } satisfies BuildOptions;
+
+/** The uppercase hex form HASHED_ASSET (httpCore.ts) recognizes as content-addressed. */
+const contentHash = (bytes: Uint8Array): string =>
+  createHash("sha256").update(bytes).digest("hex").slice(0, 16).toUpperCase();
+
+/** `inter-normal.woff2` + its bytes -> `inter-normal-<HASH>.woff2`. */
+export const contentAddressedName = (name: string, bytes: Uint8Array): string => {
+  const extension = extname(name);
+  return `${name.slice(0, name.length - extension.length)}-${contentHash(bytes)}${extension}`;
+};
+
+export const FONT_ASSET_PREFIX = "/assets/fonts/";
+
+/**
+ * Fonts are addressed by their bytes, not by the build id: a redeploy that
+ * leaves a font unchanged keeps the exact URL the browser already cached, so a
+ * warm launch makes no font request at all. The plain names are copied too —
+ * a page loaded before the rebuild (or the native shell's own markup) still
+ * references them and must keep resolving.
+ */
+export const emitFontAssets = async (options: {
+  sourceDir: string;
+  targetDir: string;
+  css: string;
+}): Promise<string> => {
+  const { sourceDir, targetDir } = options;
+  await cp(sourceDir, targetDir, { recursive: true });
+  let css = options.css;
+  for (const entry of await readdir(sourceDir, { withFileTypes: true })) {
+    if (!entry.isFile() || extname(entry.name) !== ".woff2") continue;
+    const source = join(sourceDir, entry.name);
+    const hashed = contentAddressedName(entry.name, await readFile(source));
+    await copyFile(source, join(targetDir, hashed));
+    css = css.replaceAll(`${FONT_ASSET_PREFIX}${entry.name}`, `${FONT_ASSET_PREFIX}${hashed}`);
+  }
+  return css;
+};
+
+/** Copy one file under a content-addressed name and return that name. */
+export const emitContentAddressedCopy = async (sourceFile: string, targetDir: string): Promise<string> => {
+  const name = contentAddressedName(basename(sourceFile), await readFile(sourceFile));
+  await mkdir(targetDir, { recursive: true });
+  await copyFile(sourceFile, join(targetDir, name));
+  return name;
+};
 
 export const shellModuleName = (repositoryRelativePath: string): string =>
   `shell-api/${repositoryRelativePath.replaceAll(".", "__")}`;

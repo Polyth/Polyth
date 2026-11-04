@@ -114,7 +114,7 @@ test("interface styles keep quiet text readable and speak one selection language
   assert.match(css, /\.session-row \.session-btn::before \{\s*background: transparent !important;/);
 });
 
-test("the suggested prompt joins the look's option chip and quiet ink", async () => {
+test("the suggested prompt stays a line in every look, in its quiet ink", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   const shared = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#)';
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! }));
@@ -123,11 +123,9 @@ test("the suggested prompt joins the look's option chip and quiet ink", async ()
     assert.ok(found, `no shared rule for ${selector} with ${declaration}`);
     return found;
   };
-  // A queued prompt, an attachment and the suggested next prompt sit on the
-  // same pending writing stack: one option surface and edge per look.
-  const options = find(".composer-suggestion", /background: var\(--look-option\) !important;/);
-  assert.match(options.sel, /\.queue-chip/, "the suggestion left the pending writing stack");
-  assert.match(options.body, /border: 1px solid var\(--look-option-edge\) !important;/);
+  // Neither the suggestion nor a queued prompt is an option chip any more.
+  const options = find(".attachment-pill", /background: var\(--look-option\) !important;/);
+  assert.doesNotMatch(options.sel, /\.composer-suggestion(?!-)|\.queue-chip/, "the pending stack has no plate in any look");
   // Its text is the look's quiet ink, and its own use target hovers and
   // presses in the look's hover rather than the base overlay.
   assert.match(find(".composer-suggestion-text", /color: var\(--look-ink-dim\) !important;/).body, /--look-ink-dim/);
@@ -235,7 +233,7 @@ test("every look owns the chrome a platform style paints, each piece in its role
     assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\{[^}]*--look-rule: var\\(--look-line\\)`), `${look} rules its regions`);
   }
   role("status bar rule", /border-block-start: 1px solid var\(--look-rule\) !important/, [".statusbar"]);
-  role("option chips", /background: var\(--look-option\) !important;[\s\S]*border: 1px solid var\(--look-option-edge\) !important/, [".queue-chip", ".starter-chip", ".hero-customize-trigger", ".composer-suggestion"]);
+  role("option chips", /background: var\(--look-option\) !important;[\s\S]*border: 1px solid var\(--look-option-edge\) !important/, [".starter-chip", ".hero-customize-trigger"]);
   // Every text field and select is the look's field, and focus stays visible.
   role("fields", /background: var\(--look-field\) !important;[\s\S]*border-radius: var\(--look-field-radius\) !important/, [".sidebar-search", ".picker-search", ".ui-field-well", ".ui-input", ".ui-textarea", ".sel select", ".theme-picker-current"]);
   role("field focus", /0 0 0 2px var\(--look-focus-ring\) !important/, [".ui-input:focus", ".sidebar-search:focus-within", ".picker-search:focus-within", ".ui-field-well:focus-within"]);
@@ -311,12 +309,41 @@ test("every look radius follows Corner rounding: no literal corner but pills and
     }
   }
   assert.deepEqual(literal, []);
-  // --look-round is the platform styles' divisor, so rounding 9 draws these radii.
+  // --look-round is the platform styles' divisor, so rounding 9 draws these
+  // radii and the last notch reaches 1.5× (scale 2.7), matching the platform
+  // styles' growth instead of tripling an already large look radius.
   assert.match(css, /--look-round: calc\(var\(--corner-radius-scale\) \/ 1\.8\);/);
+  // A look's pill squares with the setting rather than staying a frozen 999px.
+  assert.doesNotMatch(css, /radius:\s*999px/);
 });
 
 test("Monolith column corners do not reference the rail radius Floating columns derive from them", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   assert.match(css, /\[data-shell-floating="true"\]:not\(#\\#\) \{[^}]*--look-rail-radius: var\(--look-column-radius/);
   assert.doesNotMatch(css, /--look-column-radius: var\(--look-rail-radius\)/);
+});
+
+test("the lines above the composer are text in every look", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  // No look turns the status / edited-files line into a card.
+  const cards = css.match(/:where\(\.question-card[^)]*\)/)?.[0] ?? "";
+  assert.ok(cards, "in-flow card rule");
+  for (const line of [".pending-changes-bar", ".agent-status-dock", ".subagent-island", ".queue-chip", ".composer-suggestion"]) {
+    assert.doesNotMatch(cards, new RegExp(line.replace(".", "\\.")), `${line} has no plate in any look`);
+  }
+  assert.doesNotMatch(css, /body\[data-shell-look="obsidian"\][^{]*\.pending-changes-bar/);
+  // The status styles left the looks with their material and rules.
+  assert.doesNotMatch(css, /data-composer-status-style|--composer-tray-|--composer-header-rule/);
+  // No look re-pads the lines: their mark and time keep the stack's columns.
+  assert.doesNotMatch(css, /\.(?:agent-status-dock|subagent-island|pending-changes-bar)[^,{]*\{[^}]*padding-inline/);
+});
+
+test("Send and Stop share each look's corner, with no glow or ring", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  for (const look of ["paper", "editorial"]) {
+    assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) :is\\(\\.send, \\.stop\\) \\{[^}]*--look-control-radius`), `${look}: one silhouette`);
+  }
+  assert.match(css, /body\[data-shell-look="line"\]:not\(#\\#\) :is\(\.send, \.stop\) \{[^}]*--look-r/);
+  assert.doesNotMatch(css, /\.send:not\(:disabled\) \{[^}]*box-shadow:\s*0 /, "no Send glows");
+  assert.doesNotMatch(css, /transform:\s*scale\(0\.82\)/, "Send keeps its size");
 });

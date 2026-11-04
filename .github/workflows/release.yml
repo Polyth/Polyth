@@ -52,11 +52,10 @@ on:
         required: true
         default: false
 
+# Read-only by default; each job below asks for the writes it needs.
 permissions:
-  contents: write
+  contents: read
   actions: read
-  id-token: write
-  packages: write
 
 concurrency:
   group: release
@@ -64,6 +63,9 @@ concurrency:
 
 jobs:
   prepare:
+    permissions:
+      contents: write
+      actions: read
     name: Validate release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -220,6 +222,9 @@ jobs:
           fi
 
   linux:
+    permissions:
+      contents: write
+      actions: read
     name: Linux ${{ matrix.arch }} AppImage
     needs: prepare
     strategy:
@@ -299,6 +304,9 @@ jobs:
           if-no-files-found: error
 
   windows:
+    permissions:
+      contents: write
+      actions: read
     name: Windows ${{ matrix.arch }} NSIS
     needs: prepare
     strategy:
@@ -377,6 +385,9 @@ jobs:
           if-no-files-found: error
 
   macos:
+    permissions:
+      contents: write
+      actions: read
     name: macOS x64 + arm64 DMG + ZIP
     needs: prepare
     runs-on: macos-15
@@ -427,11 +438,8 @@ jobs:
           PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: mac14-arm64
 
       - name: Install both esbuild binaries
-        run: |
-          ESBUILD_VERSION="$(node -p "require('./node_modules/esbuild/package.json').version")"
-          npm install --ignore-scripts --no-save --package-lock=false --force \
-            "@esbuild/darwin-x64@$ESBUILD_VERSION" \
-            "@esbuild/darwin-arm64@$ESBUILD_VERSION"
+        # Both come from package-lock.json, checked against its integrity hashes.
+        run: node scripts/ci/install-locked-packages.mjs @esbuild/darwin-x64 @esbuild/darwin-arm64
 
       - name: Build multi-arch desktop bundle
         run: npm run build:desktop
@@ -597,7 +605,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
-          cache: npm
+          # No npm cache: a release job must not write the default branch's cache.
 
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
@@ -619,6 +627,10 @@ jobs:
           if-no-files-found: error
 
   docker:
+    permissions:
+      contents: read
+      actions: read
+      packages: write
     name: Docker ${{ matrix.target }} ${{ matrix.arch }}
     if: inputs.docker_image
     needs: prepare
@@ -694,6 +706,10 @@ jobs:
           if-no-files-found: error
 
   publish:
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
     name: Publish release
     if: >-
       always()
@@ -795,6 +811,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   docker-publish:
+    permissions:
+      contents: read
+      actions: read
+      packages: write
     name: Publish Docker ${{ matrix.target }}
     if: >-
       always()

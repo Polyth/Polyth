@@ -77,6 +77,9 @@ test("session-scoped usage widgets advertise when the host should omit them", ()
   assert.equal(limits.isAvailable!(at(null)), false, "the default current source reads the active session");
   assert.equal(limits.isAvailable!(at("session-a")), true);
   assert.equal(limits.isAvailable!(at(null, { source: "all" })), true, "a source shared by every project needs no session");
+  const composerModel = { harnessId: "codex", providerID: "openai", modelID: "gpt-5.5" };
+  assert.equal(limits.isAvailable!({ ...at(null), composerModel }), true, "the new-chat board reads the composer's model");
+  assert.ok(limits.supportedSlots?.includes("session.empty.widgets"));
   assert.equal(widget("usage.project").isAvailable, undefined, "project and global cards are never session-gated");
 });
 

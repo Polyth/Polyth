@@ -1,329 +1,147 @@
 /* Quick-action editor (Settings > Chat). One component serves both roles;
    everything here is scoped under .mqa-* and reads canonical tokens only. */
 
-/* ---- live preview ------------------------------------------------------ */
-.mqa-preview {
-  container: mqa-preview / inline-size;
+/* ---- lanes: the bar, the More menu, hidden ------------------------------ */
+.mqa-lanes {
   display: grid;
   gap: var(--space-2);
-  margin-block: var(--space-2) var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--hair);
-  border-radius: var(--radius-card);
-  background:
-    radial-gradient(120% 90% at 100% 0%, var(--accent-wash), transparent 60%),
-    var(--sunken);
+  margin-block-start: var(--space-2);
 }
+.mqa-lanes[data-disabled="true"] { opacity: 0.6; }
 
-.mqa-preview-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.mqa-lane {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: start;
   gap: var(--space-3);
-  min-width: 0;
 }
 
-.mqa-preview-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.mqa-lane-name {
+  padding-block-start: var(--space-2);
   color: var(--muted);
-  font-size: var(--font-meta);
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.mqa-preview-head .seg {
-  flex: none;
-  flex-wrap: nowrap;
-}
-
-.mqa-preview-stage {
-  position: relative;
-  display: grid;
-  min-height: 112px;
-  padding: var(--space-3) var(--space-2) var(--space-2);
-  overflow: hidden;
-}
-
-.mqa-preview-message {
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-  align-content: start;
-}
-
-.mqa-preview-message--user { justify-items: end; }
-
-.mqa-preview-bubble {
-  max-inline-size: min(85%, 420px);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--bubble-user-line);
-  border-radius: var(--radius-card);
-  background: var(--bubble-user-bg);
-  color: var(--text);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
 
-.mqa-preview-line {
-  display: block;
-  block-size: 8px;
-  border-radius: 999px;
-  background: var(--hair-strong);
-}
-
-.mqa-preview-meta {
+.mqa-chips {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 28px;
-  min-width: 0;
+  gap: var(--space-1);
+  min-height: calc(var(--control-h-sm) + var(--space-2));
+  padding: var(--space-1);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+/* Outlines survive borderless mode, where every border turns transparent. */
+.mqa-chips[data-empty="true"] {
+  background: transparent;
+  outline: 1px dashed color-mix(in srgb, var(--text) 14%, transparent);
+  outline-offset: -1px;
 }
 
-.mqa-preview-message--user .mqa-preview-meta { justify-content: flex-end; }
-
-.mqa-preview-time,
-.mqa-preview-identity {
+.mqa-lane-empty {
+  padding-inline: var(--space-2);
   color: var(--faint);
   font-size: var(--font-meta);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  line-height: var(--font-meta-lh);
 }
 
-.mqa-preview-identity {
+/* ---- a button in a lane ------------------------------------------------- */
+.mqa-chip {
+  max-width: 100%;
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  color: var(--text-dim);
-  font-weight: 600;
-}
-
-.mqa-preview-logo {
-  inline-size: var(--icon-md);
-  block-size: var(--icon-md);
-  border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-line));
-}
-
-.mqa-preview-bar {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  transition: opacity var(--motion-normal) var(--motion-ease);
-}
-
-/* Hover mode shows the bar as a ghost under a pointer glyph, so the preview
-   tells "appears on hover" without hiding what will appear. */
-.mqa-preview-bar[data-reveal="hover"] { opacity: 0.5; }
-.mqa-preview-bar[data-reveal="menu"] .mqa-preview-more {
+  gap: var(--space-1);
+  padding-block: 0;
+  padding-inline: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--hair), var(--inset-hi);
   color: var(--text);
-  background: var(--surface-overlay-strong);
+  font: inherit;
+  font-size: var(--font-meta);
+  line-height: 1.2;
+  cursor: grab;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
-
-.mqa-preview-btn {
-  display: inline-grid;
-  place-items: center;
-  inline-size: 26px;
-  block-size: 26px;
-  border-radius: var(--radius-control);
+.mqa-chip:disabled { cursor: default; }
+@media (hover: hover) {
+  .mqa-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.mqa-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.mqa-chip[data-placement="off"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
   color: var(--muted);
 }
-
-.mqa-preview-more { color: var(--text-dim); }
-
-.mqa-preview[data-device="touch"] .mqa-preview-btn {
-  inline-size: 30px;
-  block-size: 30px;
+.mqa-chip[data-unavailable="true"] { color: var(--faint); }
+.mqa-chip[data-dragging="true"] {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-sm);
+  cursor: grabbing;
 }
+.mqa-lanes[data-dragging="true"] { user-select: none; -webkit-user-select: none; cursor: grabbing; }
 
-.mqa-preview-cursor {
-  position: absolute;
-  inset-block-start: 55%;
-  inset-inline-end: -10px;
-  color: var(--text);
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
-  animation: mqa-preview-point 2.4s var(--motion-ease) infinite;
-}
-
-@keyframes mqa-preview-point {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(-6px, -3px); }
-}
-
-/* The More menu, drawn open under the bar it belongs to: at the end for a
-   user message, under the answer's footer for an agent reply. */
-.mqa-preview-menu {
-  justify-self: end;
+/* Only the grip claims a finger; the rest of the chip still scrolls the page. */
+.mqa-chip-grip {
+  flex: none;
+  align-self: stretch;
   display: grid;
-  gap: 1px;
-  min-inline-size: 168px;
-  margin-block-start: var(--space-2);
-  padding: var(--space-1);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--elevated);
-  box-shadow: var(--shadow-md);
+  place-items: center;
+  min-width: var(--icon-sm);
+  color: var(--faint);
+  touch-action: none;
 }
-
-.mqa-preview-message--assistant ~ .mqa-preview-menu { justify-self: start; }
-
-.mqa-preview-menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 3px var(--space-2);
-  border-radius: calc(var(--radius-control) - 2px);
-  color: var(--text-dim);
-  font-size: var(--font-meta);
+.mqa-chip-glyph { flex: none; display: grid; place-items: center; color: var(--text-dim); }
+.mqa-chip[data-placement="off"] .mqa-chip-glyph { color: var(--faint); }
+.mqa-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.mqa-preview-caption {
+/* What the button does, above its placement choices. */
+.mqa-chip-detail {
+  max-width: 34ch;
+  margin: 0;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- foot --------------------------------------------------------------- */
+.mqa-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.mqa-foot-hint {
+  min-width: 0;
   margin: 0;
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
 
-/* ---- ordered action list ----------------------------------------------- */
-.mqa-list {
-  container: mqa-list / inline-size;
-  display: grid;
-  gap: var(--space-1);
-  margin: var(--space-2) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.mqa-item {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-1);
-  border: 1px solid var(--hair);
-  border-radius: var(--radius-control);
-  background: var(--surface-overlay-hover);
-  transition:
-    background var(--motion-fast) var(--motion-ease),
-    border-color var(--motion-fast) var(--motion-ease),
-    box-shadow var(--motion-fast) var(--motion-ease),
-    opacity var(--motion-fast) var(--motion-ease);
-}
-
-.mqa-item[data-placement="bar"] { border-color: var(--accent-line); }
-.mqa-item[data-placement="off"] { opacity: 0.62; background: transparent; }
-
-.mqa-item[data-dragging="true"] {
-  position: relative;
-  z-index: 1;
-  border-color: var(--accent);
-  background: var(--raised);
-  box-shadow: var(--shadow-md);
-  opacity: 1;
-}
-
-.mqa-list[data-dragging="true"] { cursor: grabbing; user-select: none; }
-
-.mqa-handle {
-  display: inline-grid;
-  place-items: center;
-  inline-size: 24px;
-  block-size: 32px;
-  padding: 0;
-  border: 0;
-  border-radius: calc(var(--radius-control) - 2px);
-  background: transparent;
-  color: var(--faint);
-  cursor: grab;
-  touch-action: none;
-}
-
-.mqa-handle:focus-visible {
-  color: var(--text);
-  background: var(--surface-overlay-hover);
-}
-@media (hover: hover) {
-  .mqa-handle:hover:not(:disabled) {
-    color: var(--text);
-    background: var(--surface-overlay-hover);
-  }
-}
-
-.mqa-handle:focus-visible {
-  outline: 2px solid var(--accent-line);
-  outline-offset: 1px;
-}
-
-.mqa-handle:disabled { cursor: default; opacity: 0.5; }
-.mqa-item[data-dragging="true"] .mqa-handle { cursor: grabbing; color: var(--accent); }
-
-.mqa-item-glyph {
-  display: inline-grid;
-  place-items: center;
-  inline-size: 32px;
-  block-size: 32px;
-  border-radius: var(--radius-control);
-  background: var(--sunken);
-  color: var(--text-dim);
-}
-
-.mqa-item[data-placement="bar"] .mqa-item-glyph {
-  background: var(--accent-wash);
-  color: var(--accent);
-}
-
-.mqa-item-copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.mqa-item-name {
-  overflow: hidden;
-  color: var(--text);
-  font-size: var(--font-label);
-  font-weight: 560;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mqa-item-detail {
-  color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
-
-.mqa-item-placement { justify-self: end; }
-.mqa-item-placement .seg { flex-wrap: nowrap; }
-
-/* Narrow panes: the placement control drops under the name. */
-@container mqa-list (max-width: 460px) {
-  .mqa-item {
-    grid-template-columns: auto auto minmax(0, 1fr);
-    row-gap: var(--space-2);
-  }
-  .mqa-item-placement {
-    grid-column: 3;
-    justify-self: start;
-  }
-  .mqa-item-detail { display: none; }
-  .mqa-item-name { white-space: normal; }
-}
-
 .mqa-status {
   position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
+  width: 1px;
+  height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .mqa-preview-cursor { animation: none; }
+@container settings-list (max-width: 520px) {
+  .mqa-lane { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .mqa-lane-name { padding-block-start: 0; }
+  /* A finger needs room on the grip to claim it. */
+  .mqa-chip-grip { min-width: calc(var(--icon-sm) + var(--space-2)); }
 }

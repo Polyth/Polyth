@@ -124,7 +124,9 @@ export const auditorPrompt = (objective: string, reply: string, context?: GoalCo
   ].join("\n");
 
 export function parseVerdict(raw: string): { verdict: GoalVerdict; reason: string } {
-  const match = raw.match(/\{[\s\S]*\}/);
+  const open = raw.indexOf("{");
+  const close = raw.lastIndexOf("}");
+  const match = open !== -1 && close > open ? [raw.slice(open, close + 1)] as [string] : null;
   if (match) {
     try {
       const obj = JSON.parse(match[0]) as { verdict?: unknown; reason?: unknown };

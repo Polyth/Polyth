@@ -3,7 +3,7 @@
 // docs/dev/ui.md §4.5 "Settings page contract"; these primitives implement it
 // for built-in pages and for package pages that import this module.
 import {
-  useEffect, useId, useState,
+  useEffect, useId, useRef, useState,
   type ComponentProps, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
 import { readErrorDiagnostics } from "@polyth/contracts";
@@ -16,7 +16,7 @@ import Spinner from "../ui/Spinner.tsx";
 import Switch from "../ui/Switch.tsx";
 import Tabs, { TabPanel, type TabItem } from "../ui/Tabs.tsx";
 import TextInput from "../ui/TextInput.tsx";
-import { ChevronRightIcon, MinusIcon, PlusIcon } from "../ui/icons.ts";
+import { ChevronDownIcon, ChevronRightIcon, MinusIcon, PlusIcon } from "../ui/icons.ts";
 import { PackageGlyph } from "./packageIcons.tsx";
 import { highlightParts } from "./textMatch.ts";
 import { tr } from "../../i18n/index.ts";
@@ -28,9 +28,11 @@ export { PackageGlyph };
 
 /** One setting: label + one-sentence hint on the left, control on the right.
  *  `layout="stacked"` puts a full-width control under the label (textareas,
- *  long inputs, lists). `top` aligns the label to the top of a tall control. */
+ *  long inputs, lists). `top` aligns the label to the top of a tall control.
+ *  Only a `DisclosureRow` that opens onto its one setting omits the label: its
+ *  own head already names it. */
 export function Row({ label, hint, itemId, children, layout = "inline", top = false, disabled = false }: {
-  label: ReactNode;
+  label?: ReactNode;
   hint?: ReactNode;
   itemId?: string;
   children: ReactNode;
@@ -49,7 +51,7 @@ export function Row({ label, hint, itemId, children, layout = "inline", top = fa
   return (
     <div className={className} {...(itemId ? { "data-settings-item": itemId } : {})}>
       <div className="set-row-text">
-        <div className="set-row-label">{label}</div>
+        {label !== undefined && <div className="set-row-label">{label}</div>}
         {hint && <div className="set-row-hint">{hint}</div>}
       </div>
       <div className="set-row-control">{children}</div>
@@ -230,6 +232,93 @@ export function ItemRow({
       <span className="settings-list-chevron" aria-hidden="true">
         {opens && <Icon icon={ChevronRightIcon} size="sm" />}
       </span>
+    </div>
+  );
+}
+
+type DisclosureMotion = "opening" | "closing" | null;
+
+/** One line of an `ItemList` that opens in place: its name and current value,
+ *  then its settings under them. A closed row renders no settings, so the page
+ *  routes a search hit or deep link on one of them to the row first and opens it
+ *  with `animate={false}`, which lands on the settings' final position. Pass
+ *  `control` instead of `children` for a setting that fits on the line itself.
+ *  The panel stays mounted through its closing motion; reduced motion has no
+ *  animation to wait for, so it settles at once. */
+export function DisclosureRow({ label, value, control, open = false, animate = true, onToggle, onOpened, itemId, rowId, children }: {
+  label: ReactNode;
+  /** The current value, shown at the trailing edge while the row is closed and open. */
+  value?: ReactNode;
+  control?: ReactNode;
+  open?: boolean;
+  animate?: boolean;
+  onToggle?: (head: HTMLElement) => void;
+  /** The panel has finished growing, so its full height can be measured. A
+   *  fixed delay would race a slow first render of the settings inside. */
+  onOpened?: () => void;
+  /** Only for a `control` row: a row that opens keeps its items on its settings. */
+  itemId?: string;
+  /** Lets the page find this row (`data-disclosure-row`), to bring it into view. */
+  rowId?: string;
+  children?: ReactNode;
+}) {
+  const panelId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const openedRef = useRef(onOpened);
+  openedRef.current = onOpened;
+  const [state, setState] = useState<{ open: boolean; rendered: boolean; motion: DisclosureMotion }>({ open, rendered: open, motion: null });
+  if (state.open !== open) {
+    setState({
+      open,
+      rendered: open || animate,
+      motion: animate ? (open ? "opening" : "closing") : null,
+    });
+  }
+  const { rendered, motion } = state;
+  useEffect(() => {
+    if (!motion) return;
+    let live = true;
+    const settle = () => {
+      if (!live) return;
+      setState((current) => ({ ...current, rendered: current.open, motion: null }));
+      if (motion === "opening") openedRef.current?.();
+    };
+    const running = panelRef.current?.getAnimations?.() ?? [];
+    if (running.length === 0) settle();
+    else void Promise.all(running.map((animation) => animation.finished)).then(settle, settle);
+    return () => { live = false; };
+  }, [motion]);
+  return (
+    <div
+      className="settings-disclosure"
+      role="listitem"
+      data-open={open ? "true" : undefined}
+      data-motion={motion ?? undefined}
+      {...(rowId ? { "data-disclosure-row": rowId } : {})}
+    >
+      {control !== undefined ? (
+        <div className="settings-row settings-disclosure-head is-static" {...(itemId ? { "data-settings-item": itemId } : {})}>
+          <span className="settings-disclosure-label">{label}</span>
+          <div className="settings-disclosure-control">{control}</div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="settings-disclosure-head"
+          aria-expanded={open}
+          {...(rendered ? { "aria-controls": panelId } : {})}
+          onClick={(event) => onToggle?.(event.currentTarget)}
+        >
+          <span className="settings-disclosure-label">{label}</span>
+          <span className="settings-disclosure-value">{value}</span>
+          <span className="settings-disclosure-chevron" aria-hidden="true"><Icon icon={ChevronDownIcon} size="sm" /></span>
+        </button>
+      )}
+      {rendered && control === undefined && (
+        <div ref={panelRef} id={panelId} className="settings-disclosure-panel">
+          <div className="settings-disclosure-body">{children}</div>
+        </div>
+      )}
     </div>
   );
 }

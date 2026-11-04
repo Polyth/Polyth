@@ -1,0 +1,426 @@
+/* Settings > Chat: a live preview beside one Level of detail and one-line rows.
+   Scoped under .chat-settings-*, .chat-level-*, .chat-sch*, .chat-preview-* and
+   built on canonical tokens. Intentional lines are inset shadows or
+   --borderless-edge so borderless mode keeps them. */
+
+/* Layout follows the pane, not the viewport: Settings can be a narrow window on
+   a wide screen. Narrow, the preview leads and the page is one block, so the
+   preview can stay stuck above the row being changed. */
+.chat-settings { container: chat-settings / inline-size; }
+.chat-settings-main { min-width: 0; }
+.chat-settings-main > .settings-section:first-child { margin-top: 0; }
+.chat-settings-aside {
+  margin-block: var(--space-2) var(--space-5);
+}
+/* Stuck above the page while a row is open, showing only the part in play. The
+   underlay is the pane's own --bg, so rows pass under it and fade out beneath.
+   Chromium sticks at the scroller's padding edge, so it reaches past it. */
+.chat-settings-aside[data-focus] {
+  position: sticky;
+  z-index: 2;
+  inset-block-start: calc(-1 * var(--space-3));
+  margin-block-start: 0;
+  padding-block: var(--space-2);
+  background: var(--bg);
+}
+.chat-settings-aside[data-focus]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 100%;
+  height: var(--space-3);
+  background: linear-gradient(var(--bg), transparent);
+  pointer-events: none;
+}
+.chat-settings-aside[data-focus] .chat-preview { padding: var(--space-3) var(--space-4); }
+/* Only one block of the sample shows here, so nothing is left to separate. */
+.chat-settings-aside[data-focus] .chat-preview-stage { gap: 0; }
+.chat-settings-aside[data-focus] .chat-preview-head,
+.chat-settings-aside[data-focus] .chat-preview-caption { display: none; }
+.chat-settings-aside[data-focus] .chat-preview-part:not([data-focused], [data-context]) { display: none; }
+.chat-settings-aside[data-focus] .chat-preview-part[data-context] .chat-preview-answer {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* A search hit or deep link scrolls its setting to the top of the pane: leave
+   room for the stuck preview, the part in play at its tallest. */
+.chat-settings-main [data-settings-item] { scroll-margin-block-start: 220px; }
+
+@container chat-settings (min-width: 760px) {
+  .chat-settings-main [data-settings-item] { scroll-margin-block-start: 0; }
+  .chat-settings-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+    gap: var(--space-6);
+    align-items: start;
+  }
+  .chat-settings-main { grid-column: 1; grid-row: 1; }
+  .chat-settings-aside,
+  .chat-settings-aside[data-focus] {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    z-index: auto;
+    inset-block-start: var(--space-2);
+    margin: 0;
+    padding: 0;
+    background: none;
+  }
+  .chat-settings-aside[data-focus]::after { display: none; }
+  .chat-settings-aside[data-focus] .chat-preview { padding: var(--space-2) var(--space-4) var(--space-4); }
+  .chat-settings-aside[data-focus] .chat-preview-stage { gap: var(--space-3); }
+  .chat-settings-aside[data-focus] .chat-preview-head { display: flex; }
+  .chat-settings-aside[data-focus] .chat-preview-caption { display: block; }
+  .chat-settings-aside[data-focus] .chat-preview-part:not([data-focused], [data-context]) { display: block; }
+  .chat-settings-aside[data-focus] .chat-preview-part[data-context] .chat-preview-answer { display: block; }
+}
+
+/* ---- level of detail ---------------------------------------------------- */
+.chat-level-custom { color: var(--muted); font-size: var(--font-meta); }
+.chat-level-tiles.shell-look-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.chat-level-compact { display: none; }
+.chat-level-compact .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); justify-content: stretch; }
+.chat-level-compact p {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+@container chat-settings (max-width: 520px) {
+  .chat-level-tiles.shell-look-grid { display: none; }
+  .chat-level-compact { display: block; }
+}
+
+/* A choice drawn rather than described; the tile itself is .shell-look-option. */
+.chat-sch {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  height: 78px;
+  padding: var(--space-2) var(--space-3);
+  overflow: hidden;
+  border-radius: calc(var(--radius-card) - 2px);
+  background: color-mix(in srgb, var(--text) 5%, var(--bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+}
+.chat-sch i {
+  flex: none;
+  display: block;
+  height: 4px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 20%, transparent);
+}
+.chat-sch i.chat-sch-faint { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.chat-sch i.chat-sch-user {
+  align-self: flex-end;
+  inline-size: 42%;
+  height: 9px;
+  border-radius: calc(var(--radius-card) * 0.4);
+  background: var(--bubble-user-bg);
+  box-shadow: inset 0 0 0 1px var(--bubble-user-line);
+}
+.chat-sch b {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
+  background: color-mix(in srgb, var(--text) 34%, transparent);
+}
+.chat-sch-thread {
+  display: grid;
+  gap: 4px;
+  margin-inline-start: 2px;
+  padding-inline-start: 7px;
+  box-shadow: inset 1.5px 0 0 color-mix(in srgb, var(--text) 26%, transparent);
+}
+html[dir="rtl"] .chat-sch-thread { box-shadow: inset -1.5px 0 0 color-mix(in srgb, var(--text) 26%, transparent); }
+.chat-sch-head { display: flex; align-items: center; gap: 5px; }
+.chat-sch-ledger { display: grid; }
+.chat-sch-ledger i { margin-block: 2px; }
+.chat-sch-ledger i + i { box-shadow: 0 -3px 0 -2px color-mix(in srgb, var(--text) 10%, transparent); }
+.chat-sch-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  inline-size: 62%;
+  margin-block-end: 2px;
+  padding: 4px 7px;
+  border-radius: var(--radius-round);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 24%, transparent);
+}
+.chat-sch-chip i { flex: 1; background: color-mix(in srgb, var(--text) 16%, transparent); }
+.chat-sch-margin {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 5px;
+  margin-inline-start: -8px;
+}
+.chat-sch-margin b { border-radius: calc(var(--radius-control) * 0.25); background: color-mix(in srgb, var(--text) 22%, transparent); }
+
+/* ---- step styles in the opened row -------------------------------------- */
+.chat-step-styles.shell-look-grid {
+  width: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.chat-step-styles .shell-look-option { gap: var(--space-1); padding: var(--space-1); }
+.chat-step-styles .chat-sch { gap: 4px; height: 58px; padding: var(--space-2); }
+.chat-step-styles .shell-look-copy strong { font-size: var(--font-meta); }
+.chat-step-styles .shell-look-check {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  inset-block-start: var(--space-2);
+  inset-inline-end: var(--space-2);
+}
+.chat-step-styles .shell-look-check svg { width: 12px; height: 12px; }
+@container settings-list (max-width: 520px) {
+  .chat-step-styles.shell-look-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---- more options ------------------------------------------------------- */
+.chat-settings-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-4);
+}
+.chat-settings-more .settings-disclosure-toggle { margin-inline-start: calc(-1 * var(--space-2)); }
+.chat-settings-more small { color: var(--faint); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.chat-settings-more-body { margin-top: var(--space-2); }
+@media (min-width: 701px) {
+  .chat-settings-more-body .set-row > .set-row-control { flex-shrink: 0; max-width: 66%; }
+}
+
+/* ---- live preview ------------------------------------------------------- */
+.chat-preview-frame { display: grid; gap: var(--space-2); }
+.chat-preview {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--text) 4%, var(--bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.chat-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--muted);
+}
+.chat-preview-devices { display: inline-flex; gap: 2px; }
+.chat-preview-caption {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+}
+.chat-preview-stage { position: relative; display: grid; gap: var(--space-3); min-width: 0; }
+/* The sample's type is a step under the real chat's, and its glyphs follow. */
+.chat-preview-stage svg { width: 14px; height: 14px; }
+.chat-preview-column { position: relative; display: grid; gap: var(--space-3); min-width: 0; }
+.chat-preview[data-device="computer"][data-width="normal"] .chat-preview-column { padding-inline: var(--space-2); }
+
+/* A part dims while another row is open and offers itself under the pointer. */
+.chat-preview-part {
+  min-width: 0;
+  margin: calc(-1 * var(--space-1));
+  padding: var(--space-1);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: opacity var(--motion-normal) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+}
+.chat-preview[data-focus] .chat-preview-part:not([data-focused]) { opacity: 0.32; }
+@media (hover: hover) and (pointer: fine) {
+  .chat-preview-part:hover { background: var(--surface-overlay-hover); }
+}
+
+.chat-preview-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--icon-lg);
+  color: var(--muted);
+}
+.chat-preview-header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-preview-header[data-title-mode="button"] strong {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
+}
+.chat-preview-header-actions { display: inline-flex; gap: var(--space-2); margin-inline-start: auto; }
+
+.chat-preview-user { display: grid; justify-items: end; gap: var(--space-1); }
+.chat-preview-bubble {
+  max-inline-size: 88%;
+  padding: 6px 10px;
+  border-radius: var(--radius-card);
+  background: var(--bubble-user-bg);
+  box-shadow: inset 0 0 0 1px var(--bubble-user-line);
+}
+.chat-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--icon-sm);
+  color: var(--muted);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.chat-preview-actions time { color: var(--faint); font-variant-numeric: tabular-nums; }
+/* Hover-revealed buttons wait quietly, as they do under a real message: the
+   open row or a pointer on the part brings them up. */
+.chat-preview-actions[data-reveal="hover"] > svg { opacity: 0.45; transition: opacity var(--motion-fast) var(--motion-ease); }
+.chat-preview-part[data-focused] .chat-preview-actions[data-reveal="hover"] > svg { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .chat-preview-part:hover .chat-preview-actions[data-reveal="hover"] > svg { opacity: 1; }
+}
+
+/* The four looks, after "Activity block looks" in styles.css. */
+.chat-preview-steps { display: grid; gap: var(--space-1); color: var(--muted); }
+.chat-preview-steps ol, ol.chat-preview-steps { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.chat-preview-summary { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.chat-preview-summary svg { flex: none; color: var(--muted); }
+.chat-preview-step { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.chat-preview-step svg { flex: none; color: var(--faint); }
+.chat-preview-add { color: var(--green); font-variant-numeric: tabular-nums; }
+.chat-preview-del { color: var(--red); font-variant-numeric: tabular-nums; }
+.chat-preview-steps[data-style="thread"] ol {
+  margin-inline-start: 7px;
+  padding-inline-start: var(--space-3);
+  box-shadow: inset 1px 0 0 var(--borderless-edge);
+}
+html[dir="rtl"] .chat-preview-steps[data-style="thread"] ol { box-shadow: inset -1px 0 0 var(--borderless-edge); }
+.chat-preview-steps[data-style="ledger"] .chat-preview-summary::after {
+  content: "";
+  flex: 1 1 var(--space-4);
+  height: 1px;
+  background: var(--borderless-edge);
+}
+.chat-preview-steps[data-style="ledger"] ol { gap: 0; }
+.chat-preview-steps[data-style="ledger"] .chat-preview-step { padding-block: 3px; }
+.chat-preview-steps[data-style="ledger"] .chat-preview-step + .chat-preview-step { box-shadow: inset 0 1px 0 var(--borderless-edge); }
+.chat-preview-steps[data-style="chip"] .chat-preview-summary {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-round);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
+}
+.chat-preview-steps[data-style="margin"] { --chat-preview-hang: calc(var(--icon-sm) + 3px); }
+.chat-preview-steps[data-style="margin"] :is(.chat-preview-summary, .chat-preview-step) { margin-inline-start: calc(-1 * var(--chat-preview-hang)); gap: 3px; }
+
+.chat-preview-thought { display: grid; gap: var(--space-1); color: var(--muted); }
+.chat-preview-thought-toggle { display: inline-flex; align-items: center; gap: var(--space-1); }
+html[dir="rtl"] .chat-preview-thought:not([data-open]) svg { transform: scaleX(-1); }
+.chat-preview-thought p { margin: 0; color: var(--muted); }
+.chat-preview-answer { margin: 0; color: var(--text); }
+
+/* Rail ticks stand in the plate's gutter on their chosen side. */
+.chat-preview-column > [data-part="rail"] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline: 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+.chat-preview-rail {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  display: grid;
+  gap: 5px;
+  pointer-events: auto;
+  cursor: pointer;
+  padding: var(--space-1);
+}
+/* Physical, as the real rail: "left" stays left in a right-to-left language. */
+.chat-preview-rail[data-side="left"] { left: calc(-1 * var(--space-4) - var(--space-1) + 2px); }
+.chat-preview-rail[data-side="right"] { right: calc(-1 * var(--space-4) - var(--space-1) + 2px); }
+.chat-preview[data-device="computer"][data-width="normal"] .chat-preview-rail[data-side="left"] { left: calc(-1 * var(--space-4) + 2px); }
+.chat-preview[data-device="computer"][data-width="normal"] .chat-preview-rail[data-side="right"] { right: calc(-1 * var(--space-4) + 2px); }
+.chat-preview-rail i {
+  display: block;
+  inline-size: 6px;
+  block-size: 2px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 26%, transparent);
+}
+.chat-preview-rail i:last-child { background: var(--accent); inline-size: 9px; }
+.chat-preview-bookmark {
+  position: absolute;
+  inset-block-start: var(--space-1);
+  inset-inline-start: var(--space-1);
+  display: grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: var(--radius-round);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge), var(--shadow-sm);
+  color: var(--text-dim);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* The status above the composer, after AgentStatusDock.css. */
+.chat-preview-composer-wrap { display: grid; gap: var(--space-1); }
+.chat-preview-status { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.chat-preview-status i { flex: none; width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--green); }
+.chat-preview-composer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 38px;
+  padding: 5px 5px 5px 10px;
+  border-radius: var(--radius-composer);
+  background: var(--elevated);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge), var(--shadow-sm);
+  color: var(--faint);
+}
+.chat-preview[data-device="phone"] .chat-preview-composer { border-radius: var(--radius-round); }
+.chat-preview-composer > svg { flex: none; }
+.chat-preview-placeholder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-preview-note {
+  flex: none;
+  padding: 1px var(--space-2);
+  border-radius: calc(var(--radius-control) - 2px);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font: inherit;
+  white-space: nowrap;
+}
+.chat-preview-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  color: var(--accent-ink);
+}

@@ -82,6 +82,13 @@ export function HeroRecentOptions({
           onChange={(subagents) => setHeroRecentPrefs({ subagents })}
         />
       </SettingsRow>
+      <SettingsRow label={tr("workspace.herorecent.automated")} id="hero-recent-automated">
+        <Switch
+          checked={prefs.automated}
+          labelledBy="hero-recent-automated"
+          onChange={(automated) => setHeroRecentPrefs({ automated })}
+        />
+      </SettingsRow>
       <SettingsRow label={tr("workspace.herorecent.projects")} id="hero-recent-projects">
         <Seg<HeroRecentScope>
           label={tr("workspace.herorecent.projects")}

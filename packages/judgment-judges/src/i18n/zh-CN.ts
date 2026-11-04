@@ -236,7 +236,6 @@ export const zhCN: JudgmentJudgesMessages = {
   "judgesui.markerSkipped": "{name} 已跳过",
   "judgesui.markerWithDetail": "{text}：{detail}",
   "judgesui.markerLikely": "可能性 {percent}",
-  "judgesui.markerLabelLikely": "{label}，可能性 {percent}",
   "judgesui.markerAria": "Judgment：{title}",
   "judgesui.markerVerify": "请代理进行核实",
   "judgesui.markerDraft": "起草后续消息",

@@ -1,113 +1,112 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
-import { createPushRelay, startRelayHttpServer, type ProviderAdapter, type ProviderClass } from "../src/index.ts";
-import type { DeliveryInput, Destination } from "../src/types.ts";
+import { createPushRelay, startRelayHttpServer, type ProviderAdapter, type ProviderClass, type RelayOptions } from "../src/index.ts";
+import type { ActivityInput, DeliveryInput, Destination } from "../src/types.ts";
 
-const binding = createHash("sha256").update("http-binding").digest("base64url").toLowerCase();
-const db = () => join(mkdtempSync(join(tmpdir(), "polyth-relay-http-")), "relay.sqlite");
+const IOS = "ab".repeat(32);
+const FCM = "fcm:opaque-token-abcdefghijklmnopqrstuvwxyz";
+const alert = { version: 1, subscriptionId: `sub_${"a".repeat(22)}`, notificationId: "bbbeeeee-1111-4222-8333-444444444444", kind: "completed", tag: "opaque" };
+const now = () => Math.floor(Date.now() / 1_000);
+const activity = () => ({ event: "update", state: "working", waiting: 1, working: 0, staleAt: now() + 600, urgent: true, startedAt: now() - 30 });
 
 class Provider implements ProviderAdapter {
-  calls = 0;
-  async deliver(_destination: Destination, _input: DeliveryInput): Promise<ProviderClass> { this.calls++; return "success"; }
+  sent: Array<{ to: Destination; alert?: DeliveryInput; activity?: ActivityInput }> = [];
+  result: ProviderClass = "success";
+  async deliver(to: Destination, input: DeliveryInput): Promise<ProviderClass> { this.sent.push({ to, alert: input }); return this.result; }
+  async deliverActivity(to: Destination, input: ActivityInput): Promise<ProviderClass> { this.sent.push({ to, activity: input }); return this.result; }
 }
 
-async function serverFor(limits?: { registrations?: number; claims?: number; deliveries?: number }) {
-  const provider = new Provider();
-  const relay = createPushRelay({ file: db(), masterKey: Buffer.alloc(32, 4), providers: { android: provider }, rateLimits: limits });
-  const server = await startRelayHttpServer(relay, { host: "127.0.0.1", port: 0, testMode: true });
+async function serverFor(options: Omit<RelayOptions, "providers"> = {}, trustedProxy?: string) {
+  const ios = new Provider();
+  const android = new Provider();
+  const relay = createPushRelay({ ...options, providers: { ios: () => ios, android: () => android } });
+  const server = await startRelayHttpServer(relay, { host: "127.0.0.1", port: 0, testMode: true, ...(trustedProxy ? { trustedProxy } : {}) });
   const address = server.address();
   assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}`;
   return {
-    relay,
-    provider,
-    url: `http://127.0.0.1:${address.port}`,
-    async close() {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      relay.close();
-    },
+    ios, android, url,
+    send: (body: unknown, headers: Record<string, string> = {}) => fetch(`${url}/v1/send`, {
+      method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body),
+    }),
+    close: () => new Promise<void>((resolve) => server.close(() => { relay.close(); resolve(); })),
   };
 }
 
-const post = (url: string, path: string, body: unknown, token?: string) => fetch(`${url}${path}`, {
-  method: "POST",
-  headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-  body: JSON.stringify(body),
-});
-
-test("HTTP API enforces exact JSON, content type, bounded delivery fields, sender authority, and rate limits", async () => {
-  const setup = await serverFor({ deliveries: 1, claims: 3 });
+test("only exact alert and Live Activity shapes reach a provider", async () => {
+  const setup = await serverFor();
   try {
-    const noContentType = await fetch(`${setup.url}/v1/registrations`, { method: "POST", body: "{}" });
-    assert.equal(noContentType.status, 400);
-    const invalid = await post(setup.url, "/v1/registrations", { platform: "android", providerToken: "fcm:opaque-token-abcdefghijklmnopqrstuvwxyz", binding, environment: "production" });
-    assert.equal(invalid.status, 400, "android rejects iOS environment");
-    const missingIosEnvironment = await post(setup.url, "/v1/registrations", { platform: "ios", providerToken: "a".repeat(64), binding });
-    assert.equal(missingIosEnvironment.status, 400, "iOS requires an APNs environment");
-    const created = await post(setup.url, "/v1/registrations", { platform: "android", providerToken: "fcm:opaque-token-abcdefghijklmnopqrstuvwxyz", binding });
-    assert.equal(created.status, 201);
-    const registration = await created.json() as { subscriptionId: string; claimToken: string; manageToken: string };
-    const claim = await post(setup.url, "/v1/claims/redeem", { claimToken: registration.claimToken, binding });
-    const sender = await claim.json() as { senderToken: string };
-    const badContent = await post(setup.url, "/v1/deliver", {
-      version: 1, subscriptionId: registration.subscriptionId, notificationId: "bbbeeeee-1111-4222-8333-444444444444", kind: "completed", tag: "opaque", title: "leak me",
-    }, sender.senderToken);
-    assert.equal(badContent.status, 400);
-    assert.equal(setup.provider.calls, 0);
-    const message = { version: 1, subscriptionId: registration.subscriptionId, notificationId: "bbbeeeee-1111-4222-8333-444444444444", kind: "completed", tag: "opaque" };
-    assert.equal((await post(setup.url, "/v1/deliver", message, sender.senderToken)).status, 202);
-    assert.equal((await post(setup.url, "/v1/deliver", message, sender.senderToken)).status, 429);
-    const replay = await post(setup.url, "/v1/claims/redeem", { claimToken: registration.claimToken, binding });
-    assert.equal(replay.status, 401);
-    const senderDelete = await fetch(`${setup.url}/v1/senders/${registration.subscriptionId}`, { method: "DELETE", headers: { authorization: `Bearer ${sender.senderToken}` } });
-    assert.equal(senderDelete.status, 204);
-    const rotate = await fetch(`${setup.url}/v1/registrations/${registration.subscriptionId}`, {
-      method: "PUT", headers: { authorization: `Bearer ${registration.manageToken}`, "content-type": "application/json" }, body: JSON.stringify({ providerToken: "fcm:rotated-token-abcdefghijklmnopqrstuvwxyz" }),
+    assert.equal((await fetch(`${setup.url}/v1/send`, { method: "POST", body: "{}" })).status, 400, "content type");
+    const refused = [
+      { to: { platform: "ios", token: IOS }, alert },
+      { to: { platform: "ios", environment: "production", token: "not-hex" }, alert },
+      { to: { platform: "android", environment: "production", token: FCM }, alert },
+      { to: { platform: "android", token: FCM }, activity: activity() },
+      { to: { platform: "ios", environment: "production", token: IOS }, alert: { ...alert, title: "leak me" } },
+      { to: { platform: "ios", environment: "production", token: IOS }, alert: { ...alert, kind: "nonsense" } },
+      { to: { platform: "ios", environment: "production", token: IOS }, alert, activity: activity() },
+      { to: { platform: "ios", environment: "production", token: IOS } },
+      { to: { platform: "ios", environment: "production", token: IOS }, activity: { ...activity(), title: "words" } },
+      { to: { platform: "ios", environment: "production", token: IOS }, activity: { ...activity(), waiting: 100 } },
+      { to: { platform: "ios", environment: "production", token: IOS }, activity: { ...activity(), staleAt: now() + 3 * 86_400 } },
+      { to: { platform: "ios", environment: "production", token: IOS }, extra: 1, alert },
+    ];
+    for (const body of refused) assert.equal((await setup.send(body)).status, 400, JSON.stringify(body));
+    assert.equal(setup.ios.sent.length + setup.android.sent.length, 0);
+
+    const ok = await setup.send({ to: { platform: "ios", environment: "sandbox", token: IOS }, alert: { ...alert, kind: "message", sealed: "abc_-" } });
+    assert.deepEqual(await ok.json(), { result: "success" });
+    assert.deepEqual(setup.ios.sent[0], {
+      to: { subscriptionId: "relay", version: 1, platform: "ios", environment: "sandbox", providerToken: IOS },
+      alert: { ...alert, kind: "message", sealed: "abc_-" },
     });
-    assert.equal(rotate.status, 204, "sender revocation did not revoke device management");
-    const claimLimited = await post(setup.url, "/v1/registrations", { platform: "android", providerToken: "fcm:claim-limit-token-abcdefghijklmnopqrstuvwxyz", binding });
-    const next = await claimLimited.json() as { claimToken: string };
-    const wrong = await post(setup.url, "/v1/claims/redeem", { claimToken: "a".repeat(43), binding });
-    assert.equal(wrong.status, 401);
-    const validAfterDifferentToken = await post(setup.url, "/v1/claims/redeem", { claimToken: next.claimToken, binding });
-    assert.equal(validAfterDifferentToken.status, 429, "a random claim token cannot bypass the per-IP ceiling");
+    await setup.send({ to: { platform: "ios", environment: "production", token: IOS }, activity: activity() });
+    assert.equal(setup.ios.sent[1]!.to.channel, "liveactivity");
+    assert.equal(setup.ios.sent[1]!.activity?.state, "working");
+    await setup.send({ to: { platform: "android", token: FCM }, alert });
+    assert.equal(setup.android.sent[0]!.to.providerToken, FCM);
+
+    setup.ios.result = "permanent";
+    assert.deepEqual(await (await setup.send({ to: { platform: "ios", environment: "production", token: IOS }, alert })).json(), { result: "permanent" });
+    assert.deepEqual(await (await fetch(`${setup.url}/v1/health`)).json(), { ok: true });
+    assert.equal((await fetch(`${setup.url}/v1/registrations`, { method: "POST" })).status, 404);
   } finally { await setup.close(); }
 });
 
-test("a person's message or mention is a deliverable kind; an unknown kind is refused", async () => {
-  const setup = await serverFor({ deliveries: 5, claims: 3 });
+test("a device token and a sender are each rate limited; behind the trusted proxy the forwarded address counts", async () => {
+  const perToken = await serverFor({ limits: { perToken: 1 } });
   try {
-    const created = await post(setup.url, "/v1/registrations", { platform: "android", providerToken: "fcm:people-token-abcdefghijklmnopqrstuvwxyz", binding });
-    const registration = await created.json() as { subscriptionId: string; claimToken: string };
-    const sender = await (await post(setup.url, "/v1/claims/redeem", { claimToken: registration.claimToken, binding })).json() as { senderToken: string };
-    const deliver = (kind: string) => post(setup.url, "/v1/deliver", {
-      version: 1, subscriptionId: registration.subscriptionId, notificationId: "bbbeeeee-1111-4222-8333-444444444444", kind, tag: "opaque",
-    }, sender.senderToken);
-    assert.equal((await deliver("message")).status, 202);
-    assert.equal((await deliver("mention")).status, 202);
-    assert.equal((await deliver("nonsense")).status, 400);
-  } finally { await setup.close(); }
+    const body = { to: { platform: "ios", environment: "production", token: IOS }, alert };
+    assert.equal((await perToken.send(body)).status, 200);
+    assert.equal((await perToken.send(body)).status, 429);
+    assert.equal((await perToken.send({ ...body, to: { ...body.to, token: "cd".repeat(32) } })).status, 200, "another device is unaffected");
+  } finally { await perToken.close(); }
+
+  const proxied = await serverFor({ limits: { perSource: 1 } }, "127.0.0.1");
+  try {
+    const body = (token: string) => ({ to: { platform: "ios", environment: "production", token }, alert });
+    assert.equal((await proxied.send(body("01".repeat(32)), { "x-forwarded-for": "198.51.100.7" })).status, 200);
+    assert.equal((await proxied.send(body("02".repeat(32)), { "x-forwarded-for": "198.51.100.7" })).status, 429);
+    // A spoofed first entry does not dodge the limit: the proxy appends the real peer last.
+    assert.equal((await proxied.send(body("03".repeat(32)), { "x-forwarded-for": "203.0.113.9, 198.51.100.7" })).status, 429);
+    assert.equal((await proxied.send(body("04".repeat(32)), { "x-forwarded-for": "198.51.100.8" })).status, 200);
+  } finally { await proxied.close(); }
 });
 
-test("production listener requires explicit TLS termination and logger input excludes every request secret", async () => {
+test("no provider configured is a config result, and the log carries no token or address", async () => {
   const logs: unknown[] = [];
-  const relay = createPushRelay({ file: db(), masterKey: Buffer.alloc(32, 3), providers: { android: new Provider() }, logger: (event) => logs.push(event) });
+  const relay = createPushRelay({ logger: (event) => logs.push(event) });
   await assert.rejects(startRelayHttpServer(relay, { host: "0.0.0.0", port: 0 }), /TLS/);
   const server = await startRelayHttpServer(relay, { host: "127.0.0.1", port: 0, testMode: true });
-  const address = server.address() as { port: number };
-  const url = `http://127.0.0.1:${address.port}`;
-  const providerToken = "fcm:raw-secret-destination-abcdefghijklmnopqrstuvwxyz";
-  const created = await post(url, "/v1/registrations", { platform: "android", providerToken, binding });
-  const registration = await created.json() as { subscriptionId: string; claimToken: string; manageToken: string };
-  const claimed = await post(url, "/v1/claims/redeem", { claimToken: registration.claimToken, binding });
-  const sender = await claimed.json() as { senderToken: string };
-  await post(url, "/v1/deliver", { version: 1, subscriptionId: registration.subscriptionId, notificationId: "bbbeeeee-1111-4222-8333-444444444444", kind: "completed", tag: "opaque" }, sender.senderToken);
+  const { port } = server.address() as { port: number };
+  const response = await fetch(`http://127.0.0.1:${port}/v1/send`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ to: { platform: "android", token: "fcm:raw-secret-destination-abcdefghijklmnopqrstuvwxyz" }, alert }),
+  });
+  assert.deepEqual(await response.json(), { result: "config" });
   await new Promise<void>((resolve) => server.close(() => resolve()));
   relay.close();
-  const text = JSON.stringify(logs);
-  assert.doesNotMatch(text, /raw-secret|claimToken|manageToken|senderToken/);
+  assert.deepEqual(logs, [{ provider: "android", status: 400, code: "alert", latencyMs: (logs[0] as { latencyMs: number }).latencyMs }]);
+  assert.doesNotMatch(JSON.stringify(logs), /raw-secret|127\.0\.0\.1|sub_/);
 });

@@ -2,7 +2,7 @@
 // The browser cannot call api.github.com anonymously (no CORS headers, and a
 // 60 req/h/IP limit), so the server proxies one cached /releases/latest read —
 // the same reason and shape as routes/iconify.ts.
-import type { ReleaseDownloadDto, ReleaseDownloadsDto } from "@polyth/contracts";
+import { principalHasFullAccess, type ReleaseDownloadDto, type ReleaseDownloadsDto } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
 
 export type ReleasesFetch = typeof fetch;
@@ -175,7 +175,7 @@ export function releasesRoutes(deps: ReleasesRouteDeps = {}): RouteHandler {
     if (rc.principal.kind === "anonymous") {
       throw Object.assign(new Error("authentication required"), { code: "unauthorized" });
     }
-    if (rc.principal.kind === "paired-device") {
+    if (rc.principal.kind === "paired-device" && !principalHasFullAccess(rc.principal)) {
       throw Object.assign(new Error("not allowed"), { code: "forbidden" });
     }
     const rawRepository = readRepository();

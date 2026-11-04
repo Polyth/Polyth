@@ -3,6 +3,7 @@ import {
   cadenceToDisplayView,
   formatClock,
   formatOnceSummary,
+  formatRelative,
   formatWeekdays,
   intervalParts,
 } from "../src/cadenceView.ts";
@@ -40,6 +41,32 @@ export function cadenceSummary(cadence: PlannerCadence | null | undefined, local
 
 export function formatClockAt(at: number, locale: string): string {
   return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(at));
+}
+
+const dayKey = (at: number) => {
+  const date = new Date(at);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+};
+
+/** The day of a run as a chat says it: "Today", "Tomorrow", a weekday within
+ *  the coming week, else the date. */
+export function formatRunDay(at: number, now: number, locale: string): string {
+  if (dayKey(at) === dayKey(now)) return t("list.today");
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (dayKey(at) === dayKey(tomorrow.getTime())) return t("list.tomorrow");
+  const format = at - now < 6 * 86_400_000 ? { weekday: "short" } as const : { day: "numeric", month: "short" } as const;
+  const day = new Intl.DateTimeFormat(locale, format).format(new Date(at));
+  // It heads a time like "Today" does: "Пн", not "пн".
+  return day.charAt(0).toLocaleUpperCase(locale) + day.slice(1);
+}
+
+/** When a planned run arrives, at a glance: "Due now", "in 12 minutes"
+ *  within the hour, else "Tomorrow, 09:00". */
+export function formatRunWhen(at: number, now: number, locale: string): string {
+  if (at <= now + 30_000) return t("list.dueNow");
+  if (at - now < 3_600_000) return formatRelative(at, now, locale);
+  return t("chat.at", { day: formatRunDay(at, now, locale), time: formatClockAt(at, locale) });
 }
 
 export function formatDayHeading(dateKey: string, locale: string): string {

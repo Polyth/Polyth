@@ -77,7 +77,8 @@ interface StoredEntry {
 /** `polyth://cache/tool_<id>` → `<id>`, or undefined for any other input. */
 export function parseOutputCacheUri(uri: string): string | undefined {
   if (!uri.startsWith(OUTPUT_CACHE_SCHEME)) return undefined;
-  const id = uri.slice(OUTPUT_CACHE_SCHEME.length).replace(/\/+$/, "");
+  let id = uri.slice(OUTPUT_CACHE_SCHEME.length);
+  while (id.endsWith("/")) id = id.slice(0, -1);
   return id || undefined;
 }
 

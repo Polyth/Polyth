@@ -5,6 +5,8 @@
 import "./arrayCompat.ts";
 import { ensureLocale, getLocaleSnapshot } from "./i18n/index.ts";
 import { prefetchAuthStatus } from "./authPrefetch.ts";
+import { authBootstrapPhase } from "./authBootstrap.ts";
+import { preconnectSync, syncSocketUrl } from "./syncPreconnect.ts";
 import { installBuildFreshnessWatcher } from "./buildFreshness.ts";
 import { offerWebUpdate } from "./webUpdateNotice.ts";
 import { isNativeMobile, prepareMobileLaunch } from "@polyth/mobile/runtime";
@@ -65,6 +67,11 @@ if (mobileLaunch.kind === "connect") {
   renderMobileConnection(mobileLaunch, { veil: launchVeil });
 } else if (mobileLaunch.kind !== "navigating") {
   const authStatus = prefetchAuthStatus();
+  // A ready, authorized installation dials /ws now, while the app graph below
+  // still loads and evaluates; init() adopts the socket (syncPreconnect.ts).
+  void authStatus.then((status) => {
+    if (authBootstrapPhase(status) === "ready") preconnectSync(syncSocketUrl());
+  }).catch(() => undefined);
   await ensureLocale(getLocaleSnapshot());
   await authStatus.catch(() => undefined);
   await import("./bootstrap.tsx");

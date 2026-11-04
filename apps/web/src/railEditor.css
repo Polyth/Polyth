@@ -54,7 +54,7 @@
 .rail-editor-count {
   flex: none;
   padding: 2px var(--space-2);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--surface-overlay-strong);
   color: var(--muted);
   font-size: var(--font-meta);
@@ -223,7 +223,7 @@
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: transparent;
   color: var(--faint);
 }
@@ -303,7 +303,7 @@
   place-items: center;
   width: 18px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--accent);
   color: var(--on-accent, #fff);
   opacity: 0;
@@ -322,7 +322,7 @@
   max-width: 100%;
   overflow: hidden;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--surface-overlay-strong);
   color: var(--muted);
   font-size: calc(var(--font-meta) * 0.9);

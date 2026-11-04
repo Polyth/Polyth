@@ -71,6 +71,24 @@ test("the management view covers access, projects, assistants, daily limits and 
   assert.match(detail, /<SaveBar/);
 });
 
+test("a full-access paired phone reads Users and sends changes to a signed-in browser", async () => {
+  const accounts = await source("../src/accounts.ts");
+  assert.match(accounts, /readOnly: raw\.readOnly === true/);
+  assert.match(accounts, /canManageInBrowser: raw\.readOnly === true && raw\.canManageInBrowser === true/);
+  const users = await source("../src/components/settings/UsersPage.tsx");
+  assert.match(users, /setReadOnly\(state\.readOnly \? \{ owner: state\.canManageInBrowser \} : null\)/);
+  // No AccountDetail drill-in: its changes need a browser identity session.
+  assert.match(users, /if \(ownOpen && self && !readOnly\)/);
+  assert.match(users, /<div className="users-self-card is-readonly"/);
+  assert.match(users, /tr\(readOnly \? "settings\.users\.selfHintBrowser" : "settings\.users\.selfHint"\)/);
+  assert.match(users, /readOnly\?\.owner \? tr\("settings\.users\.manageInBrowser"\) : tr\("settings\.users\.peopleHintReadonly"\)/);
+  assert.equal(en["settings.users.manageInBrowser"], "Add or change users in a browser signed in to this server.");
+  assert.match(en["settings.users.selfHintBrowser"], /in a browser signed in to this server/);
+  const styles = await source("../src/styles.css");
+  assert.match(styles, /\.users-self-card\.is-readonly\s*\{[^}]*cursor:\s*default/);
+  assert.match(styles, /\.users-self-card:hover:where\(:not\(:disabled, \.is-readonly\)\)/);
+});
+
 test("Users page has a hairline list and a phone layout", async () => {
   const styles = await source("../src/styles.css");
   assert.match(styles, /\.users-page-filter\s*\{/);
@@ -105,7 +123,7 @@ test("the Access page is gone and its settings live in Users and Polyth Link", a
     "settings.accesspage.signOut": "Sign out",
   } as const;
   for (const [key, title] of Object.entries(ownTitles)) {
-    assert.match(own, new RegExp(`title=\\{tr\\("${key.replace(/\./g, "\\.")}"\\)\\}`), title);
+    assert.match(own, new RegExp(`title=\\{tr\\("${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\)\\}`), title);
     assert.equal(en[key as keyof typeof en], title);
   }
   assert.match(own, /changeAccountPassword\(/);

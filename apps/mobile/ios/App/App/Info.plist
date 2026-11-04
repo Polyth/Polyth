@@ -71,8 +71,6 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Polyth uses the microphone only while you are dictating a message or talking in voice mode.</string>
-	<key>PolythPushRelayOrigin</key>
-	<string>$(POLYTH_PUSH_RELAY_ORIGIN)</string>
 	<key>PolythPushEnvironment</key>
 	<string>$(POLYTH_PUSH_ENVIRONMENT)</string>
 	<key>UIApplicationSceneManifest</key>

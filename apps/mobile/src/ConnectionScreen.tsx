@@ -96,6 +96,11 @@ function connectionStatusTone(connection: ConnectionMetadata, activeConnectionId
   return "is-ready";
 }
 
+/** Same bound as the server name (`SERVER_NAME_MAX_CHARS`, `clean_label`). */
+const NAME_MAX_CHARS = 80;
+
+type Renaming = { id: string; draft: string; saving: boolean; error: string };
+
 type RecoveryPresentation = {
   tone: "warning" | "danger";
   body: string;
@@ -290,6 +295,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
   const [legacyBusy, setLegacyBusy] = useState(false);
   const [legacyError, setLegacyError] = useState("");
   const [retryConnectionId, setRetryConnectionId] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<Renaming | null>(null);
   const scanCleanup = useRef<(() => void) | null>(null);
   const scanIntent = useRef<number | null>(null);
   const autoReconnectStarted = useRef(false);
@@ -478,7 +484,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
     setPreferNumericDiscovery(false);
     rememberPendingPairingLink(raw);
     if (!controller) return;
-    const pairing = await controller.beginPairing(raw, "This phone");
+    const pairing = await controller.beginPairing(raw);
     if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
   };
 
@@ -558,7 +564,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
         setCameraPermission("granted");
         rememberPendingPairingLink(raw);
         setTicket(raw);
-        const pairing = await controller.acceptQrResult(scanEpoch, raw, "This phone");
+        const pairing = await controller.acceptQrResult(scanEpoch, raw);
         if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
       } catch (cause) {
         const detail = cause instanceof Error ? cause.message : String(cause);
@@ -621,7 +627,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
           rememberPendingPairingLink(raw);
           setTicket(raw);
           stopCamera();
-          const pairing = await controller.acceptQrResult(scanEpoch, raw, "This phone");
+          const pairing = await controller.acceptQrResult(scanEpoch, raw);
           if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
           return;
         }
@@ -663,7 +669,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
 
   const submitNumericCode = async () => {
     if (!controller || !numericCodeValid) return;
-    const pairing = await controller.submitNumericCode(normalizedNumericCode, "This phone");
+    const pairing = await controller.submitNumericCode(normalizedNumericCode);
     if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
   };
 
@@ -686,6 +692,27 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
       ? await controller.recoverPrepared(connection.id)
       : await controller.connect(connection.id);
     if (launched) openLaunch(launched);
+  };
+
+  const startRename = (connection: ConnectionMetadata) => {
+    setRenaming({ id: connection.id, draft: connection.customLabel || connection.hostLabel || "", saving: false, error: "" });
+  };
+
+  /** Names the server on this phone only; "" goes back to the server's name. */
+  const saveName = async (connection: ConnectionMetadata, label: string) => {
+    if (!controller) return;
+    // Unchanged: an untouched server name keeps following the computer.
+    if (label.trim() && label.trim() === connection.hostLabel) {
+      setRenaming(null);
+      return;
+    }
+    setRenaming((current) => current && { ...current, saving: true, error: "" });
+    try {
+      await controller.rename(connection.id, label);
+      setRenaming(null);
+    } catch {
+      setRenaming((current) => current && { ...current, saving: false, error: "The name could not be saved. Try again." });
+    }
   };
 
   useEffect(() => {
@@ -832,6 +859,59 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
                 const failed = inlineRecovery && connection.id === retryConnection?.id ? inlineRecovery : null;
                 const connecting = (connectionState?.phase === "reconnecting" || connectionState?.phase === "switching" || connectionState?.phase === "recovering")
                   && connection.id === (connectionState.targetConnectionId ?? retryConnectionId);
+                const serverName = connection.serverLabel || "Polyth";
+                if (renaming?.id === connection.id) {
+                  return (
+                    <form
+                      className="mobile-connect-rename"
+                      key={connection.id}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveName(connection, renaming.draft);
+                      }}
+                    >
+                      <label className="mobile-connect-field">
+                        <span>Name on this phone</span>
+                        <input
+                          type="text"
+                          name="server-name"
+                          value={renaming.draft}
+                          placeholder={serverName}
+                          maxLength={NAME_MAX_CHARS}
+                          autoFocus
+                          autoCapitalize="words"
+                          autoCorrect="off"
+                          enterKeyHint="done"
+                          disabled={renaming.saving}
+                          onChange={(event) => setRenaming({ ...renaming, draft: event.target.value, error: "" })}
+                          onKeyDown={(event) => { if (event.key === "Escape") setRenaming(null); }}
+                        />
+                      </label>
+                      <p className="mobile-connect-rename-hint">
+                        {connection.customLabel ? `The computer calls itself “${serverName}”.` : "Only this phone uses this name."}
+                      </p>
+                      {renaming.error && <p className="mobile-connect-rename-error" role="alert">{renaming.error}</p>}
+                      <div className="mobile-connect-inline-actions">
+                        <button type="submit" className="mobile-connect-primary is-compact" disabled={renaming.saving}>
+                          Save
+                        </button>
+                        <button type="button" className="mobile-connect-quiet-action" disabled={renaming.saving} onClick={() => setRenaming(null)}>
+                          Cancel
+                        </button>
+                        {connection.customLabel && (
+                          <button
+                            type="button"
+                            className="mobile-connect-quiet-action is-end"
+                            disabled={renaming.saving}
+                            onClick={() => void saveName(connection, "")}
+                          >
+                            Use computer’s name
+                          </button>
+                        )}
+                      </div>
+                    </form>
+                  );
+                }
                 return (
                 <article className="mobile-connect-server-row" key={connection.id}>
                   <button
@@ -857,6 +937,16 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
                     <div>
                       <button
                         type="button"
+                        onClick={(event) => {
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                          startRename(connection);
+                        }}
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="is-danger"
                         disabled={busy}
                         onClick={() => void controller?.forget(connection.id)}
                       >

@@ -158,6 +158,22 @@ export const en = {
   "history.showLess": "Show less",
   "history.ranTimes": "Ran {count} times",
 
+  // A chat's own schedule
+  "chat.title": "Planned in this chat",
+  "chat.next": "Next planned run:",
+  "chat.at": "{day}, {time}",
+  "chat.more": "+{count}",
+  "chat.moreLabel": "{count} more planned in this chat",
+  "chat.nothingUpcoming": "Nothing coming up",
+  "chat.pausedCount": "{count} paused",
+  "chat.explain": "Each arrives here at its time as a message from you.",
+  "chat.openTask": "Open in Planner",
+  "chat.openPlanner": "Planner",
+  "chat.runPlanned": "Planned run",
+  "chat.runManual": "Started by hand",
+  "chat.runLate": "Late run",
+  "chat.runLateHint": "Polyth was off at the planned time, so this ran when it started.",
+
   // Templates
   "template.briefing": "Morning briefing",
   "template.briefingPrompt": "Give me a short briefing for today: what changed in this project since yesterday, open pull requests that need my attention, and anything that looks broken.",

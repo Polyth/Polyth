@@ -236,7 +236,6 @@ export const bg: JudgmentJudgesMessages = {
   "judgesui.markerSkipped": "{name}: пропуснато",
   "judgesui.markerWithDetail": "{text}: {detail}",
   "judgesui.markerLikely": "вероятност {percent}",
-  "judgesui.markerLabelLikely": "{label}, вероятност {percent}",
   "judgesui.markerAria": "Judgment: {title}",
   "judgesui.markerVerify": "Помолете агента да провери",
   "judgesui.markerDraft": "Чернова на продължение",

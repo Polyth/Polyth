@@ -17,42 +17,129 @@
   position: relative;
 }
 
-/* Attachments are next-turn context, not text-field chrome. The strip
-   scrolls sideways, which clips both axes — so it pads the cards' focus ring
-   and every control stays inside its own card (styles.css). */
-.composer-simple > .attachment-pills {
+/* Attachment tray (composer/attachmentTray.ts): the next message's files are
+   one row of the card, between the model line and the editor, in a new chat
+   and an open one alike. The row scrolls sideways, which clips both axes — so
+   it pads the cards' focus ring and every control stays inside its own card
+   (styles.css). */
+.composer-tray {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.composer-tray > .attachment-pills {
+  --att-h: calc(var(--tap) + var(--space-1));
+  --tray-fade-start: 0px;
+  --tray-fade-end: 0px;
+  /* Held to the row's bottom edge: while the row opens or closes the cards
+     sit still on the text and only the edge above them travels. */
+  align-self: end;
   min-width: 0;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
+  scroll-padding-inline: var(--space-4);
   scrollbar-width: none;
 }
 
-.composer-simple > .attachment-pills::-webkit-scrollbar {
+.composer-tray > .attachment-pills::-webkit-scrollbar {
   display: none;
 }
 
-.composer-simple > .attachment-pills .attachment-pill {
-  max-width: min(260px, 70vw);
-  flex: 0 0 auto;
+/* A row scrolled away from an edge fades into it instead of cutting a card. */
+.composer-tray > .attachment-pills:is([data-overflow-start], [data-overflow-end]) {
+  mask-image: linear-gradient(to right, transparent, black var(--tray-fade-start), black calc(100% - var(--tray-fade-end)), transparent);
+}
+.composer-tray > .attachment-pills:is([data-overflow-start], [data-overflow-end]):dir(rtl) {
+  mask-image: linear-gradient(to left, transparent, black var(--tray-fade-start), black calc(100% - var(--tray-fade-end)), transparent);
+}
+.composer-tray > .attachment-pills[data-overflow-start] { --tray-fade-start: var(--space-6); }
+.composer-tray > .attachment-pills[data-overflow-end] { --tray-fade-end: var(--space-6); }
+
+/* Cards share the row before it scrolls: they narrow to a readable name, and
+   only then does the row scroll. */
+.composer-tray .attachment-pill {
+  flex: 0 1 auto;
+  min-width: min(148px, 60vw);
+  max-width: 236px;
+  padding-inline-start: var(--space-1);
   border-color: var(--hair-strong);
   background: var(--surface-overlay-hover);
   box-shadow: none;
 }
 
-.composer-simple > .attachment-pills .attachment-pill.att-tile {
+.composer-tray .attachment-pill :is(.att-icon, .att-thumb) {
+  width: calc(var(--att-h) - var(--space-3));
+  height: calc(var(--att-h) - var(--space-3));
+}
+
+.composer-tray .attachment-pill.att-tile {
+  flex: none;
+  min-width: 0;
   background: var(--sunken);
 }
 
-.composer-simple > .attachment-pills .attachment-open,
-.composer-simple > .attachment-pills .att-remove {
+.composer-tray .attachment-open,
+.composer-tray .att-remove {
   border: 0;
   box-shadow: none;
+}
+
+/* Remove shows on the card under the pointer or keyboard focus; touch keeps it. */
+@media (hover: hover) and (pointer: fine) {
+  .composer-tray .attachment-pill .att-remove {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .composer-tray .attachment-pill:is(:hover, :focus-within) .att-remove { opacity: 1; }
+}
+
+/* Opening and closing. The row's track eases between 0fr and 1fr, so the card
+   grows and shrinks with it: its top edge and the model line rise off the
+   cards, the editor and the rail stay where they are, and whatever sits above
+   the card (a new chat's project row, the transcript) follows the edge. The
+   row clips only while it moves. Closing takes the last card first. Reduced
+   motion switches at once (attachmentTray.ts settles without an animation). */
+.composer-tray[data-motion] {
+  overflow: clip;
+}
+.composer-tray[data-motion="open"] {
+  animation: composer-tray-open var(--motion-surface) var(--motion-ease) both;
+}
+.composer-tray[data-motion="close"] {
+  animation: composer-tray-close var(--motion-normal) var(--motion-ease) both;
+}
+/* The card settles into the slot once the edge has nearly cleared it (past
+   half the opening, when the eased edge has travelled ~85%), so the clip edge
+   never cuts a visible card; several cards follow one another. */
+.composer-tray[data-motion="open"] .attachment-pill {
+  animation: composer-tray-card-in var(--motion-normal) var(--motion-ease) both;
+  animation-delay: calc(var(--motion-surface) * 0.55 + min(var(--att-i, 0), 4) * var(--motion-fast) / 4);
+}
+.composer-tray[data-motion="close"] .attachment-pill {
+  animation: composer-tray-card-out var(--motion-fast) var(--motion-ease) both;
+}
+/* A card added to an open row enters in place. */
+.composer-tray .attachment-pill.att-fresh {
+  animation: composer-tray-card-in var(--motion-normal) var(--motion-ease) both;
+}
+@keyframes composer-tray-open {
+  from { grid-template-rows: minmax(0, 0fr); }
+}
+@keyframes composer-tray-close {
+  to { grid-template-rows: minmax(0, 0fr); }
+}
+@keyframes composer-tray-card-in {
+  from { opacity: 0; transform: translateY(var(--space-1)) scale(0.97); }
+}
+@keyframes composer-tray-card-out {
+  to { opacity: 0; transform: scale(0.97); }
 }
 
 /* Configuration row: the model and its pending effort share one quiet line
@@ -144,49 +231,26 @@
   display: none;
 }
 
-/* A running turn keeps Send and its alternatives inside one pill-shaped
-   control. The divider, neutral segment and elevation belong to the container;
-   neither child can read as a second round button. */
+/* Send, running delivery and Stop read one disc inside one touch box on any
+   coarse pointer: the margin holds the box's layout, so a clipping row keeps the
+   host's ::after target whole. */
+.composer-simple .composer-primary > :is(.send, .stop),
+.composer-simple .composer-send-split > .send {
+  margin: calc((max(var(--composer-action-size), var(--hit-min)) - var(--composer-action-size)) / 2);
+}
+
+/* A running turn with a draft: the same solid Send as at rest and a bare chevron
+   for its alternatives. No plate, contour or divider around the pair. */
 .composer-simple .composer-rail .composer-send-split {
   display: inline-flex;
-  align-items: stretch;
-  gap: 0;
-  min-height: var(--control-h);
-  border-radius: var(--radius-round);
-  background: var(--surface-overlay);
-  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--material-glass-border);
-  isolation: isolate;
-}
-
-.composer-simple .composer-rail .composer-send-split > :is(.send, .composer-send-options) {
-  height: var(--control-h);
-  border: 0;
-  box-shadow: none;
-}
-
-.composer-simple .composer-rail .composer-send-split > .send {
-  width: var(--tap);
-  min-width: var(--tap);
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-start-start-radius: var(--radius-round);
-  border-end-start-radius: var(--radius-round);
-  border-start-end-radius: 0;
-  border-end-end-radius: 0;
+  gap: 0;
 }
 
 .composer-simple .composer-rail .composer-send-split > .send > svg,
-.composer-simple .composer-rail .composer-send-split > .send > .context-liquid > .context-liquid-front > svg {
-  width: var(--icon-lg);
-  height: var(--icon-lg);
-}
-
-.composer-simple .composer-rail .composer-send-split > .composer-running-send > svg,
-.composer-simple .composer-rail .composer-send-split > .composer-running-send > .context-liquid > .context-liquid-front > svg {
-  width: var(--icon-xl);
-  height: var(--icon-xl);
+.composer-simple .composer-rail .composer-send-split > .composer-running-send > svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .composer-simple .composer-rail .composer-send-split > .send .composer-action-label {
@@ -195,36 +259,24 @@
 
 .composer-simple .composer-rail .composer-send-split > .composer-send-options {
   position: relative;
-  width: calc(var(--control-h-sm) + var(--space-1));
-  min-width: calc(var(--control-h-sm) + var(--space-1));
+  width: max(calc(var(--control-h-sm) + var(--space-1)), var(--hit-min));
+  min-width: max(calc(var(--control-h-sm) + var(--space-1)), var(--hit-min));
+  height: max(var(--composer-action-size), var(--hit-min));
   display: grid;
   place-items: center;
   padding: 0;
-  border-start-start-radius: 0;
-  border-end-start-radius: 0;
-  border-start-end-radius: var(--radius-round);
-  border-end-end-radius: var(--radius-round);
-  background: var(--surface-overlay);
-  color: var(--text-dim);
-}
-
-.composer-simple .composer-rail .composer-send-split > .composer-send-options::before {
-  content: "";
-  position: absolute;
-  inset-block: var(--space-2);
-  inset-inline-start: 0;
-  inline-size: 1px;
-  background: color-mix(in srgb, var(--text) 12%, transparent);
-  pointer-events: none;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
 }
 
 .composer-simple .composer-rail .composer-send-split > .composer-send-options[aria-expanded="true"] {
-  background: var(--surface-overlay-hover);
   color: var(--text);
 }
 @media (hover: hover) {
   .composer-simple .composer-rail .composer-send-split > .composer-send-options:hover:not(:disabled) {
-    background: var(--surface-overlay-hover);
     color: var(--text);
   }
 }
@@ -241,7 +293,7 @@
 
 .composer-simple .composer-rail .composer-send-split > button:focus-visible {
   outline: 2px solid var(--focus-ring);
-  outline-offset: -3px;
+  outline-offset: 2px;
 }
 
 /* The send menu stays anchored to the split control without a decorative
@@ -311,6 +363,14 @@
     padding-block: max(0px, calc((var(--composer-height) - var(--font-response-lh)) / 2));
     padding-inline: 0;
     line-height: var(--font-response-lh);
+  }
+  /* On a 320–360px phone the hint does not fit beside Add, the context pie,
+     approval and Send; the textarea clipped it mid-letter ("Напишіть F").
+     The hint itself ellipsizes instead (the draft text is unaffected). */
+  .composer-mobile.composer-collapsed .composer-card textarea::placeholder {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* The rail is one optical baseline. It is two blocks with one rhythm: Add
@@ -611,18 +671,6 @@ action off a narrow phone's composer. */
     display: none;
   }
 
-  /* Send, running delivery and Stop keep one final touch baseline. While a turn runs,
-     the primary and chevron remain two segments of the same 44px control. */
-  .composer-mobile .composer-primary > .send,
-  .composer-mobile .composer-send-split > .composer-running-send {
-    width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
-    min-height: var(--tap);
-    flex: 0 0 var(--tap);
-    padding: 0;
-  }
-
   .composer-mobile .composer-send-split {
     min-height: var(--tap);
     gap: 0;
@@ -638,12 +686,15 @@ action off a narrow phone's composer. */
     color: var(--muted);
   }
 
-  .composer-mobile > .attachment-pills {
-    padding-inline: 0;
+  /* A phone row scrolls rather than squeezing: each card keeps its width. */
+  .composer-mobile .composer-tray .attachment-pill {
+    flex: 0 0 auto;
+    max-width: min(200px, 60vw);
   }
 
-  .composer-mobile > .attachment-pills .attachment-pill {
-    max-width: min(220px, 68vw);
+  /* The resting row has no tray: a file engages the composer. */
+  .composer-mobile.composer-collapsed .composer-tray {
+    display: none;
   }
 }
 
@@ -875,16 +926,14 @@ action off a narrow phone's composer. */
 }
 
 /* Context liquid ------------------------------------------------------------
-   While a turn runs, its primary action (Stop, or the Send/queue segment) is
-   also the session's context gauge: an outline in the action's own solid
-   color while the context is empty, filling with that color as the context
-   grows and solid once it is full. The solid rules publish the colors as
-   --context-liquid-tone/-ink. ContextLiquid repeats the host glyph inside the
-   liquid, so the submerged part of the glyph flips to the ink color along the
-   same wave. --context-fill is registered, so a new usage sample pours the
-   level up instead of jumping. The drifting waves are activity semantics,
-   like a spinner; reduced-motion and low-resource modes keep a still level
-   through the global animation rules. */
+   While a turn runs, Stop is also the session's context gauge: a soft tonal
+   disc with no outline, its liquid rising as a slightly stronger tone. The
+   host publishes --context-liquid-tone/-ink. ContextLiquid repeats the host
+   glyph inside the liquid, so the submerged part of the glyph takes full ink
+   along the same wave and holds 3:1 on a full gauge. --context-fill is
+   registered, so a new usage sample pours the level up instead of jumping. The
+   drifting waves are activity semantics, like a spinner; reduced-motion and
+   low-resource modes keep a still level through the global animation rules. */
 @property --context-fill {
   syntax: "<percentage>";
   inherits: true;
@@ -899,33 +948,29 @@ action off a narrow phone's composer. */
   initial-value: 0%;
 }
 
-.composer-simple .composer-rail :is(.send, .stop).context-liquid-host {
+.composer-simple .composer-rail .stop.context-liquid-host {
+  --context-liquid-tone: var(--text);
+  --context-liquid-ink: var(--text);
   position: relative;
   isolation: isolate;
-  background: color-mix(in srgb, var(--context-liquid-tone) 7%, transparent);
-  color: var(--context-liquid-tone);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text-dim);
 }
 
+/* Stop is calm at rest and turns red only when it is about to act. */
 @media (hover: hover) {
-  .composer-simple .composer-rail :is(.send, .stop).context-liquid-host:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--context-liquid-tone) 14%, transparent);
+  .composer-simple .composer-rail .stop.context-liquid-host:hover:not(:disabled) {
+    --context-liquid-tone: var(--red);
+    --context-liquid-ink: var(--red);
+    background: var(--red-wash);
+    color: var(--red);
   }
 }
-
-/* The outline is its own layer so the shared focus ring keeps its box-shadow.
-   Inside the split it stays open toward the chevron segment. */
-.composer-simple .composer-rail :is(.send, .stop).context-liquid-host::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border: 1.5px solid var(--context-liquid-tone);
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-.composer-simple .composer-rail .composer-send-split > .context-liquid-host::after {
-  border-inline-end-width: 0;
+.composer-simple .composer-rail .stop.context-liquid-host:active:not(:disabled) {
+  --context-liquid-tone: var(--red);
+  --context-liquid-ink: var(--red);
+  background: var(--red-wash);
+  color: var(--red);
 }
 
 .context-liquid {
@@ -976,7 +1021,7 @@ action off a narrow phone's composer. */
   display: grid;
   place-items: center;
   border-radius: inherit;
-  background: var(--context-liquid-tone);
+  background: color-mix(in srgb, var(--context-liquid-tone) 13%, transparent);
   color: var(--context-liquid-ink);
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 300' preserveAspectRatio='none'%3E%3Cpath d='M0 150Q25 138 50 150T100 150V300H0Z'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 300' preserveAspectRatio='none'%3E%3Cpath d='M0 150Q25 138 50 150T100 150V300H0Z'/%3E%3C/svg%3E");
@@ -991,7 +1036,7 @@ action off a narrow phone's composer. */
 
 .context-liquid-back {
   --context-liquid-level: calc(21% + var(--context-fill) * .6 - var(--context-liquid-swell));
-  opacity: .38;
+  opacity: .6;
   -webkit-mask-size: 52px 300%;
   mask-size: 52px 300%;
   animation: context-liquid-back 5.8s linear infinite, context-liquid-swell 3.4s ease-in-out infinite alternate;

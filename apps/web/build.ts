@@ -5,6 +5,8 @@ import { join, relative, resolve } from "node:path";
 import {
   browserBuildOptions,
   chunkNamesForBuild,
+  emitContentAddressedCopy,
+  emitFontAssets,
   shellModuleName,
   shellModuleUrl,
   uiFontScalePlugin,
@@ -171,7 +173,13 @@ const preloadUrls = [...new Set([
 const preloadTags = preloadUrls
   .map((url) => `    <link rel="modulepreload" href="${url}" />`)
   .join("\n");
-const htmlSource = await readFile(join(here, "src/index.html"), "utf8");
+// The launch veil's preload and <img> share one content-addressed URL: the
+// image is immutable, and a rebuild that leaves the mark unchanged keeps the
+// URL the browser already has (the manifest/apple-touch icons stay stable
+// because the OS, not the launch path, fetches them).
+const launchMark = await emitContentAddressedCopy(join(here, "icon-512.png"), dist);
+const htmlSource = (await readFile(join(here, "src/index.html"), "utf8"))
+  .replaceAll("/icon-512.png", `/${launchMark}`);
 const mainScriptTag = '<script type="module" src="/main.js"></script>';
 if (!htmlSource.includes(mainScriptTag)) throw new Error("index.html: main.js script tag not found for modulepreload injection");
 await writeFile(
@@ -186,7 +194,15 @@ const projectIconNames = (await readdir(projectIcons))
   .filter((name) => name.endsWith(".svg"))
   .sort();
 await cp(projectIcons, join(dist, "assets", "project-icons"), { recursive: true });
-await cp(fontsDir, join(dist, "assets", "fonts"), { recursive: true });
+const mainCssPath = join(dist, "main.css");
+await writeFile(
+  mainCssPath,
+  await emitFontAssets({
+    sourceDir: fontsDir,
+    targetDir: join(dist, "assets", "fonts"),
+    css: await readFile(mainCssPath, "utf8"),
+  }),
+);
 await writeFile(join(dist, "project-icons.json"), JSON.stringify(projectIconNames));
 await copyFile(join(here, "src", "assets", "completion.mp3"), join(dist, "assets", "completion.mp3"));
 // Package bundles carry their own notices in packages/<id>/dist/web.

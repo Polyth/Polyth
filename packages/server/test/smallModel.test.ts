@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { AgentRuntime, ModelRef } from "@polyth/contracts";
 import { createStore } from "@polyth/session";
 import {
+  compactionModelPreference,
   createSmallModelService,
   smallModelExecutionRoute,
   smallModelPreference,
@@ -24,6 +25,14 @@ test("account settings preserve the selected small model's harness", () => {
     modelID: "default",
   });
   assert.equal(smallModelPreference({ sessionDefaults: {} }), undefined);
+});
+
+test("compaction uses the session model unless the account chose the small model", () => {
+  assert.equal(compactionModelPreference({ sessionDefaults: { compactionModel: "small" } }), "small");
+  assert.equal(compactionModelPreference({ sessionDefaults: { compactionModel: "session" } }), "session");
+  assert.equal(compactionModelPreference({ sessionDefaults: { compactionModel: "huge" } }), "session");
+  assert.equal(compactionModelPreference({}), "session");
+  assert.equal(compactionModelPreference(null), "session");
 });
 
 test("small-model execution stays on the configured or session-owning harness", () => {

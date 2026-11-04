@@ -121,7 +121,7 @@ body:has(.statusbar) .notify-stack[data-shell="desktop"] { --notify-lift: calc(v
   inline-size: var(--notify-glyph-size);
   block-size: var(--notify-glyph-size);
   flex: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--notify-tone);
   /* The wash lit from above, ringed inside its own edge: a lens of the tone
      rather than a flat disc, and the ring never grows the glyph's footprint. */

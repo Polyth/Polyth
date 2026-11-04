@@ -1100,6 +1100,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           title: task.title ?? `Scheduled: ${task.prompt.slice(0, 48)}`,
           // The agent's own session: its page lists it, the session list does not.
           purpose: AGENT_SESSION_PURPOSE,
+          // Lists draw it as the agent's work, not as a person's chat.
+          origin: { source: AGENTS_PACKAGE_ID, wake: wake.trigger, label: task.title?.trim() || "Agent" },
           ...execution,
           ...profileOf(task),
         }));

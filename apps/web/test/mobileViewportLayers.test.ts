@@ -38,7 +38,8 @@ const ACCESSORY = 48;
 
 // `inset` is --keyboard-inset as mobileViewport.ts publishes it: the layout left below the band in a
 // Safari pan, the native keyboard height in a WebView that has already shrunk its layout.
-interface Engine { id: string; layout: number; visual: number; offset: number; keyboard: boolean; inset: number }
+// `dynamic`: the native app's frame, published once as its WebView's `100dvh` (no accessory band).
+interface Engine { id: string; layout: number; visual: number; offset: number; keyboard: boolean; inset: number; dynamic?: boolean }
 // How the keyboard reaches the page. Safari keeps the layout viewport tall and
 // pans the visual band inside it; a native-resize WebView shrinks the layout.
 const ENGINES: Engine[] = [
@@ -47,7 +48,12 @@ const ENGINES: Engine[] = [
   { id: "Safari, band panned to the layout bottom", layout: 844, visual: 508, offset: 336, keyboard: true, inset: 0 },
   { id: "Safari, no pan", layout: 844, visual: 508, offset: 0, keyboard: true, inset: 336 },
   { id: "native resize", layout: 508, visual: 508, offset: 0, keyboard: true, inset: 336 },
+  { id: "native resize, dynamic frame", layout: 508, visual: 508, offset: 0, keyboard: true, inset: 0, dynamic: true },
+  { id: "closed, dynamic frame", layout: 844, visual: 844, offset: 0, keyboard: false, inset: 0, dynamic: true },
 ];
+
+/** The accessory band the runtime adds below an open keyboard frame: WebKit only, never in the native app. */
+const accessoryFor = (engine: Engine, webkit: boolean) => (webkit && engine.keyboard && !engine.dynamic ? ACCESSORY : 0);
 
 interface Variant { name: string; webkit: boolean; contained: boolean }
 const VARIANTS: Variant[] = [
@@ -130,6 +136,15 @@ async function publish(page: Page, engine: Engine, width = WIDTH, webkit = false
   await page.setViewportSize({ width, height: engine.layout });
   await page.evaluate(({ e, webkit }) => {
     const root = document.documentElement;
+    document.body.dataset.keyboard = e.keyboard ? "open" : "closed";
+    document.body.dataset.band = e.visual < 420 ? "short" : "tall";
+    if (e.dynamic) {
+      for (const name of ["--visual-vh", "--visual-frame-height", "--visual-frame-bottom", "--visual-bottom", "--layer-frame-bottom"]) root.style.setProperty(name, "100dvh");
+      for (const name of ["--visual-frame-top", "--keyboard-inset", "--visual-offset"]) root.style.setProperty(name, "0px");
+      root.dataset.keyboardFrame = "native";
+      document.getAnimations().forEach((animation) => animation.finish());
+      return;
+    }
     const top = e.keyboard ? Math.max(0, e.offset) : 0;
     const height = e.keyboard ? e.visual : e.layout;
     root.style.setProperty("--visual-vh", `${e.visual}px`);
@@ -167,7 +182,7 @@ for (const variant of VARIANTS) for (const [name, family] of Object.entries(FAMI
         const frameBottom = engine.keyboard ? engine.offset + engine.visual : engine.layout;
         // The layer ends where the app chain ends: the measured frame, plus the
         // WebKit text-input accessory band while the keyboard is open.
-        const bottom = frameBottom + (variant.webkit && engine.keyboard ? ACCESSORY : 0);
+        const bottom = frameBottom + accessoryFor(engine, variant.webkit);
         const m = await page.evaluate(({ layer, head, scroller, probeX }) => {
           const box = (element: Element | null) => {
             if (!element) return null;
@@ -223,7 +238,7 @@ for (const variant of VARIANTS) {
       for (const engine of ENGINES) {
         await publish(page, engine, WIDTH, variant.webkit);
         const bandTop = engine.keyboard ? engine.offset : 0;
-        const bottom = (engine.keyboard ? engine.offset + engine.visual : engine.layout) + (variant.webkit && engine.keyboard ? ACCESSORY : 0);
+        const bottom = (engine.keyboard ? engine.offset + engine.visual : engine.layout) + accessoryFor(engine, variant.webkit);
         const m = await page.evaluate((probeX) => {
           const panel = document.querySelector(".widget-add-panel")!;
           const r = panel.getBoundingClientRect();

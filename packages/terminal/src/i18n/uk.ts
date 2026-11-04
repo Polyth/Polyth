@@ -75,6 +75,7 @@ export const uk: TerminalMessages = {
   "terminalview.swipeUpFor": "Проведіть угору: {key}",
   "terminalview.terminalTabName": "Назва вкладки термінала",
   "terminalview.terminalValue": "Термінал {title}",
+  "terminalview.title": "Термінал",
   "terminalview.textInput": "Поле введення тексту",
   "terminalview.textInputPlaceholder": "Введіть команду, Enter надсилає",
   "terminalview.toggleKeyboard": "Показати або сховати клавіатуру",

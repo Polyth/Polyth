@@ -33,6 +33,10 @@ export interface ActivateWebPackageOptions extends WebEntryLoaderOptions {
     dispose(): void;
   };
   isCurrent: () => boolean;
+  /** Decides when factory and installer run once the module has loaded, so a
+   *  caller can run several in one task. `install` never throws: a failure
+   *  rejects this activation. Default: as soon as the import resolves. */
+  scheduleInstall?: (install: () => void) => void;
 }
 
 const validAsset = (value: unknown): value is WebPackageAsset => {
@@ -172,29 +176,42 @@ export async function activateWebPackage(
       return empty;
     }
     const loaded = await importModule(asset.module) as { default?: unknown };
-    if (!options.isCurrent()) {
-      dispose();
-      return empty;
-    }
-    if (typeof loaded.default !== "function") {
-      throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
-    }
-    scope = options.createActivation(asset.id);
-    const installer = (loaded.default as WebPackageEntry)(scope.host);
-    if (typeof installer !== "function") {
-      throw new Error(`web entry for "${asset.id}" must return an installer`);
-    }
-    if (!options.isCurrent()) {
-      dispose();
-      return empty;
-    }
-    const returned = installer() as WebPackageInstaller | void;
-    cleanup = typeof returned === "function" ? returned : undefined;
-    if (!options.isCurrent()) {
-      dispose();
-      return empty;
-    }
-    return { dispose };
+    const install = (): PackageActivationHandle => {
+      if (!options.isCurrent()) {
+        dispose();
+        return empty;
+      }
+      if (typeof loaded.default !== "function") {
+        throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
+      }
+      scope = options.createActivation(asset.id);
+      const installer = (loaded.default as WebPackageEntry)(scope.host);
+      if (typeof installer !== "function") {
+        throw new Error(`web entry for "${asset.id}" must return an installer`);
+      }
+      if (!options.isCurrent()) {
+        dispose();
+        return empty;
+      }
+      const returned = installer() as WebPackageInstaller | void;
+      cleanup = typeof returned === "function" ? returned : undefined;
+      if (!options.isCurrent()) {
+        dispose();
+        return empty;
+      }
+      return { dispose };
+    };
+    const schedule = options.scheduleInstall;
+    if (!schedule) return install();
+    return await new Promise<PackageActivationHandle>((resolve, reject) => {
+      schedule(() => {
+        try {
+          resolve(install());
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
   } catch (error) {
     dispose();
     throw error;

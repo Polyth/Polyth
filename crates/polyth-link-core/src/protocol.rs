@@ -111,6 +111,11 @@ pub enum ControlMessage {
         version: u16,
         connection_id: String,
         grant_revision: u32,
+        /// The name the host's owner gave this server, so paired devices show
+        /// the current name rather than the one in their pairing ticket.
+        /// Older peers neither send nor read the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_label: Option<String>,
     },
     ConnectionRejected {
         code: String,
@@ -480,6 +485,41 @@ mod tests {
         };
         let (new, _) = decode_head::<WebSocketOpenV1>(&encode_head(&legacy).unwrap()).unwrap();
         assert!(!new.deflate);
+    }
+
+    #[test]
+    fn a_host_label_is_invisible_to_peers_that_predate_it() {
+        #[derive(Serialize, Deserialize)]
+        #[serde(tag = "type")]
+        enum OldControl {
+            ConnectionAccepted {
+                version: u16,
+                connection_id: String,
+                grant_revision: u32,
+            },
+        }
+        let accepted = ControlMessage::ConnectionAccepted {
+            version: PROTOCOL_VERSION,
+            connection_id: "c1".into(),
+            grant_revision: 2,
+            host_label: Some("Studio".into()),
+        };
+        let (old, _) = decode_head::<OldControl>(&encode_head(&accepted).unwrap()).unwrap();
+        let OldControl::ConnectionAccepted { connection_id, .. } = old;
+        assert_eq!(connection_id, "c1");
+        let legacy = OldControl::ConnectionAccepted {
+            version: PROTOCOL_VERSION,
+            connection_id: "c1".into(),
+            grant_revision: 2,
+        };
+        let (new, _) = decode_head::<ControlMessage>(&encode_head(&legacy).unwrap()).unwrap();
+        assert!(matches!(
+            new,
+            ControlMessage::ConnectionAccepted {
+                host_label: None,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -45,7 +45,7 @@ test("the conflict card carries the pull-request handoff", async () => {
   assert.equal(element.props.className, "msg github-conflict-card");
   assert.equal(JSON.stringify(element.props.children).includes("42"), true);
   assert.equal(JSON.stringify(element.props.children).includes("Rework session routing"), true);
-  assert.equal(JSON.stringify(element.props.children).includes("https://github.com/acme/polyth/pull/42"), true);
+  assert.match(JSON.stringify(element.props.children), /https:\/\/github\.com\/acme\/polyth\/pull\/42/);
 });
 
 test("the conflict card renders nothing for another timeline event", async () => {

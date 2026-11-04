@@ -12,22 +12,24 @@ async function withViewport(run: (env: {
     activeElement: { matches: () => boolean } | null;
     body: { dataset: Record<string, string>; appendChild: (node: unknown) => void };
     documentElement: { clientHeight: number; dataset: Record<string, string>; style: { setProperty: (name: string, value: string) => void } };
-    createElement: (tag: string) => { isConnected: boolean; offsetHeight: number; style: { cssText: string }; setAttribute: (name: string, value: string) => void };
+    createElement: (tag: string) => { isConnected: boolean; readonly offsetHeight: number; style: { cssText: string }; setAttribute: (name: string, value: string) => void };
   };
-  probe: { isConnected: boolean; offsetHeight: number; style: { cssText: string }; setAttribute: (name: string, value: string) => void };
+  /** The `100vh` probe. */
+  probe: { offsetHeight: number };
+  /** The `100dvh` probe (measured only in a native shell). */
+  dynamicProbe: { offsetHeight: number };
   styles: Map<string, string>;
+  /** Every frame variable write, in order. */
+  writes: string[];
   api: ViewportModule;
 }) => void | Promise<void>) {
   const previous = ["window", "document"].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
   const styles = new Map<string, string>();
+  const writes: string[] = [];
   const viewport = Object.assign(new EventTarget(), { height: 440, offsetTop: 0, pageTop: 0 as number | undefined });
   const win = Object.assign(new EventTarget(), { innerHeight: 844, innerWidth: 390, visualViewport: viewport as unknown, scrollY: 0 });
-  const probe = {
-    isConnected: true,
-    offsetHeight: 0,
-    style: { cssText: "" },
-    setAttribute: () => undefined,
-  };
+  const probe = { offsetHeight: 0 };
+  const dynamicProbe = { offsetHeight: 0 };
   const doc = Object.assign(new EventTarget(), {
     visibilityState: "visible",
     activeElement: null as { matches: () => boolean } | null,
@@ -35,9 +37,17 @@ async function withViewport(run: (env: {
     documentElement: {
       clientHeight: 844,
       dataset: {} as Record<string, string>,
-      style: { setProperty: (name: string, value: string) => { styles.set(name, value); } },
+      style: { setProperty: (name: string, value: string) => { styles.set(name, value); writes.push(`${name}: ${value}`); } },
     },
-    createElement: () => probe,
+    createElement: () => {
+      const element = {
+        isConnected: true,
+        style: { cssText: "" },
+        setAttribute: () => undefined,
+        get offsetHeight() { return element.style.cssText.includes("height:100dvh") ? dynamicProbe.offsetHeight : probe.offsetHeight; },
+      };
+      return element;
+    },
   });
   Object.defineProperty(globalThis, "window", { value: win, configurable: true, writable: true });
   Object.defineProperty(globalThis, "document", { value: doc, configurable: true, writable: true });
@@ -46,7 +56,7 @@ async function withViewport(run: (env: {
     const url = new URL("../src/mobileViewport.ts", import.meta.url);
     url.searchParams.set("resume-test", String(++sequence));
     const api = await import(url.href) as ViewportModule;
-    await run({ viewport, win, doc, probe, styles, api });
+    await run({ viewport, win, doc, probe, dynamicProbe, styles, writes, api });
   } finally {
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -419,6 +429,100 @@ test("only a shell that defers its resize gets a projected frame", async () => {
     assert.equal(styles.get("--visual-frame-bottom"), "844px");
     api.setNativeKeyboardInset(0);
     assert.equal(styles.get("--visual-frame-bottom"), "844px");
+  });
+});
+
+/** A native shell's WebView `height` tall: every reported viewport, and its
+ *  dynamic viewport, which follows the WebView. */
+function nativeWebView(env: Parameters<typeof nativeAppAtRest>[0] & { dynamicProbe: { offsetHeight: number } }, height: number) {
+  nativeAppAtRest(env, height);
+  env.dynamicProbe.offsetHeight = height;
+}
+
+const DYNAMIC_FRAME = ["--visual-vh", "--visual-frame-height", "--visual-frame-bottom", "--visual-bottom", "--layer-frame-bottom"];
+const ZERO_FRAME = ["--visual-frame-top", "--keyboard-inset", "--visual-offset"];
+
+test("a native shell publishes its frame once, as the WebView's dynamic viewport, and keyboard moves write nothing", async () => {
+  await withViewport((env) => {
+    const { win, viewport, doc, styles, writes, api } = env;
+    nativeWebView(env, 844);
+    api.startMobileViewport({ nativeFrame: true });
+    assert.equal(doc.documentElement.dataset.keyboardFrame, "native");
+    for (const name of DYNAMIC_FRAME) assert.equal(styles.get(name), "100dvh", name);
+    for (const name of ZERO_FRAME) assert.equal(styles.get(name), "0px", name);
+
+    // Android: the window insets resize the WebView around the plugin's event.
+    writes.length = 0;
+    doc.activeElement = { matches: () => true };
+    api.setNativeKeyboardInset(336);
+    nativeWebView(env, 508);
+    win.dispatchEvent(new Event("resize"));
+    viewport.dispatchEvent(new Event("resize"));
+    assert.equal(doc.body.dataset.keyboard, "open");
+    assert.equal(doc.body.dataset.keyboardSource, "native");
+    assert.equal(api.getViewportMetrics().height, 508, "React still reads the band, without a settle wait");
+    doc.activeElement = null;
+    api.setNativeKeyboardInset(0);
+    nativeWebView(env, 844);
+    win.dispatchEvent(new Event("resize"));
+    assert.equal(doc.body.dataset.keyboard, "closed");
+    assert.deepEqual(writes, [], "the WebView resize moved the frame; nothing was written to <html>");
+    assert.equal(doc.documentElement.dataset.keyboardFrame, "native");
+  });
+});
+
+test("an iOS field's keyboard takes pixels at once, the dynamic viewport once the WebView has resized, and closes without a write", async () => {
+  await withViewport((env) => {
+    const { win, doc, styles, writes, api } = env;
+    nativeWebView(env, 844);
+    api.startMobileViewport({ nativeFrame: true });
+    // keyboardWillShow for a Settings or navigator field: its layer takes the
+    // band before the plugin's deferred resize (one restyle, as before).
+    api.setNativeKeyboardInset(336, { followKeyboard: true });
+    assert.equal(styles.get("--visual-frame-bottom"), "508px");
+    assert.equal(styles.get("--keyboard-inset"), "336px");
+    assert.equal(doc.documentElement.dataset.keyboardFrame, "open");
+    // The resize lands while the keyboard stands still: the frame is the
+    // WebView again, in the same geometry.
+    nativeWebView(env, 508);
+    win.dispatchEvent(new Event("resize"));
+    for (const name of DYNAMIC_FRAME) assert.equal(styles.get(name), "100dvh", name);
+    for (const name of ZERO_FRAME) assert.equal(styles.get(name), "0px", name);
+    assert.equal(doc.documentElement.dataset.keyboardFrame, "native");
+    assert.equal(doc.body.dataset.keyboard, "open");
+
+    // keyboardWillHide: no closed projection to restyle the app with.
+    writes.length = 0;
+    api.setNativeKeyboardInset(0, { followKeyboard: true });
+    assert.equal(doc.body.dataset.keyboard, "closed");
+    assert.deepEqual(writes, [], "the closing keyboard writes nothing");
+    nativeWebView(env, 844);
+    win.dispatchEvent(new Event("resize"));
+    assert.deepEqual(writes, [], "nor does the WebView growing back");
+    assert.equal(doc.documentElement.dataset.keyboardFrame, "native");
+  });
+});
+
+test("the dynamic viewport stands for the frame only where it measures the same", async () => {
+  // A native shell whose dvh does not follow its WebView, or cannot be measured.
+  for (const dynamic of [900, 0]) {
+    await withViewport((env) => {
+      const { doc, styles, api } = env;
+      nativeAppAtRest(env, 844);
+      env.dynamicProbe.offsetHeight = dynamic;
+      api.startMobileViewport({ nativeFrame: true });
+      assert.equal(styles.get("--visual-frame-bottom"), "844px", `dvh ${dynamic}`);
+      assert.equal(doc.documentElement.dataset.keyboardFrame, "closed");
+    });
+  }
+  // A browser keeps pixels even where dvh happens to match: Safari's dvh
+  // ignores the keyboard.
+  await withViewport((env) => {
+    const { doc, styles, api } = env;
+    nativeWebView(env, 844);
+    api.startMobileViewport();
+    assert.equal(styles.get("--visual-frame-bottom"), "844px");
+    assert.equal(doc.documentElement.dataset.keyboardFrame, "closed");
   });
 });
 

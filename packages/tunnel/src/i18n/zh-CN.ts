@@ -97,6 +97,7 @@ export const zhCN: TunnelMessages = {
   "tunnel.hero.title": "这台电脑",
   "tunnel.hero.pairFirst": "已准备好配对你的第一部手机。",
   "tunnel.hero.connected": "当前连接：{online}/{total}",
+  "tunnel.hero.serverName": "手机上显示的名称",
   "tunnel.hero.address": "地址",
   "tunnel.hero.copyAddress": "复制地址",
   "tunnel.hero.signIn": "登录",
