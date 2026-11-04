@@ -1,4 +1,5 @@
-import type { RouteHandler } from "../http.ts";
+import type { NotificationRecord } from "@polyth/contracts";
+import type { RouteHandler, RouteRequest } from "../http.ts";
 import type { NotificationStore } from "../notifications.ts";
 
 const MAX_IDS = 200;
@@ -26,32 +27,60 @@ function parseIds(raw: unknown): string[] {
 
 const ACTION_SEGMENTS = new Set(["read", "read-all", "clear"]);
 
-export function notificationRoutes(notifications: NotificationStore): RouteHandler {
+/** Projects the caller can open now. A row whose project is outside this set
+ *  (access revoked, project removed or limited away) is not shown or counted;
+ *  it stays retained, so regaining access brings it back. */
+export type VisibleNotificationProjects = (space: RouteRequest["space"]) => Promise<ReadonlySet<string>>;
+
+export function notificationRoutes(notifications: NotificationStore, visibleProjects?: VisibleNotificationProjects): RouteHandler {
   return async (rc) => {
     if (rc.path !== "/api/notifications" && !rc.path.startsWith("/api/notifications/")) return false;
     const account = accountOf(rc);
+    const visible = async (): Promise<((record: NotificationRecord) => boolean) | null> => {
+      if (!visibleProjects) return null;
+      const projects = await visibleProjects(rc.space);
+      return (record) => projects.has(record.projectId);
+    };
+    // The unread counter covers only rows the caller can see.
+    const unreadOf = async (shown: (record: NotificationRecord) => boolean): Promise<number> =>
+      (await notifications.list(account)).items.reduce((n, r) => n + (!r.read && shown(r) ? 1 : 0), 0);
     if (rc.path === "/api/notifications" && rc.method === "GET") {
-      rc.json(200, await notifications.list(account, parseAfter(rc.url.searchParams.get("after"))));
+      const after = parseAfter(rc.url.searchParams.get("after"));
+      const shown = await visible();
+      if (!shown) {
+        rc.json(200, await notifications.list(account, after));
+        return true;
+      }
+      const all = (await notifications.list(account)).items.filter(shown);
+      rc.json(200, {
+        items: all.filter((r) => r.ts > after),
+        unread: all.reduce((n, r) => n + (r.read ? 0 : 1), 0),
+      });
       return true;
     }
     const byId = rc.path.match(/^\/api\/notifications\/([^/]+)$/);
     // Action segments are not notification ids; their other methods fall through.
     if (byId && rc.method === "GET" && !ACTION_SEGMENTS.has(byId[1]!)) {
       const record = await notifications.get(account, byId[1]!);
-      if (!record) rc.json(404, { error: "not-found", message: "notification not found" });
+      const shown = await visible();
+      if (!record || (shown && !shown(record))) rc.json(404, { error: "not-found", message: "notification not found" });
       else rc.json(200, record);
       return true;
     }
+    const withVisibleUnread = async <T extends { unread: number }>(result: T): Promise<T> => {
+      const shown = await visible();
+      return shown ? { ...result, unread: await unreadOf(shown) } : result;
+    };
     if (rc.path === "/api/notifications/read" && rc.method === "POST") {
-      rc.json(200, await notifications.read(account, parseIds((await rc.body()).ids)));
+      rc.json(200, await withVisibleUnread(await notifications.read(account, parseIds((await rc.body()).ids))));
       return true;
     }
     if (rc.path === "/api/notifications/read-all" && rc.method === "POST") {
-      rc.json(200, await notifications.readAll(account));
+      rc.json(200, await withVisibleUnread(await notifications.readAll(account)));
       return true;
     }
     if (rc.path === "/api/notifications/clear" && rc.method === "POST") {
-      rc.json(200, await notifications.clear(account));
+      rc.json(200, await withVisibleUnread(await notifications.clear(account)));
       return true;
     }
     return false;

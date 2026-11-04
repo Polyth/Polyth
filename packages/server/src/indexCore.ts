@@ -3401,7 +3401,7 @@ export async function boot(opts: BootOptions = {}) {
     runtimeDiagnosticsRoutes(runtimeDiagnostics),
     pushRoutes(push),
     nativePushRoutes(nativePush),
-    notificationRoutes(notifications),
+    notificationRoutes(notifications, async (space) => new Set((await spaceServices(space).projects.list()).map((p) => p.id))),
     browseRoutes(),
     iconifyRoutes(),
     releasesRoutes(),

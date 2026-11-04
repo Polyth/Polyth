@@ -1034,6 +1034,11 @@ export function createWsGateway(
         const account = currentNotificationAccount(ws, sub);
         if (!account || account.userId !== recipient.userId || account.spaceId !== recipient.spaceId) continue;
         if (!allowWsCapability(sub.principal, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
+        // Same rule as `/api/notifications`: a row from a project the
+        // recipient can no longer open (removed or limited away) is not shown.
+        try { spaces?.guard.assertProject({ spaceId: account.spaceId }, record.projectId); }
+        catch { continue; }
+        if (!projectVisibleToUser(account.userId, record.projectId)) continue;
         send(ws, { type: "notification/added", notification: record });
       }
     },

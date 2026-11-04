@@ -471,7 +471,9 @@ the optional caller-named `endpoint` expired; other devices' endpoints never
 leave the server; never creates a notification-centre row), `/api/notifications` (NTF-01: GET
 `{items, unread}` oldest-first from the server-owned inbox in
 `data/notifications.json`, optional `after=<ts>` cursor over strictly
-increasing timestamps while `unread` stays global; POST `read {ids}`,
+increasing timestamps while `unread` stays global; rows whose project the
+caller can no longer open (not in its scoped `projects.list()`) are left out of
+`items`, `unread` and `GET /:id` but retained; POST `read {ids}`,
 `read-all`, `clear` — bodies carry opaque notification ids only, never a
 project/session scope; rows are recorded at the push notifier's send sink,
 newest 200 retained FIFO; a package may take over the routine turn
@@ -494,8 +496,10 @@ Client → server: `subscribe {sessionId, afterSeq}`, `browser/subscribe
 
 Server → client: `event {event: SessionEvent}` (gap-fill then live, seq-deduped),
 `projection {session}`, `notification/added {notification: NotificationRecord}`
-(NTF-01: unfiltered global fan-out after the inbox commit and before web push —
-never buffered into gap-fill state; REST `after=<ts>` owns reconnect catch-up),
+(NTF-01: fan-out after the inbox commit and before web push to the recipient's
+sockets only, skipping a row whose project is outside the recipient's Space or
+account project limits, as on `/api/notifications` — never buffered into
+gap-fill state; REST `after=<ts>` owns reconnect catch-up),
 `browser/frame {revision, mime, data}`, `browser/event`,
 `dictation/state|ack|transcript|error`, `error {code}`.
 

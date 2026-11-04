@@ -250,8 +250,8 @@ test("restart retains rows and read state exactly", async () => {
 
 // ---- routes ------------------------------------------------------------------
 
-function routeHarness(store: NotificationStore) {
-  const routes = notificationRoutes(store);
+function routeHarness(store: NotificationStore, visibleProjects?: () => ReadonlySet<string>) {
+  const routes = notificationRoutes(store, visibleProjects && (async () => visibleProjects()));
   const call = async (method: string, path: string, body: Record<string, unknown> = {}) => {
     let status = 0;
     let payload: unknown;
@@ -308,6 +308,28 @@ test("read/read-all/clear routes respond with typed counters", async () => {
   const cleared = await call("POST", "/api/notifications/clear");
   assert.deepEqual(cleared.payload, { cleared: 2, unread: 0 });
   assert.deepEqual((await call("POST", "/api/notifications/clear")).payload, { cleared: 0, unread: 0 });
+});
+
+test("rows from a project the caller cannot open are neither listed nor counted", async () => {
+  const store = createNotificationStore({ file: tmpFile() });
+  const mine = await store.add(input(1, { sessionId: "ses_mine", projectId: "p_mine" }));
+  const gone = await store.add(input(2, { sessionId: "ses_gone", projectId: "p_gone" }));
+  let projects = new Set(["p_mine"]);
+  const { call } = routeHarness(store, () => projects);
+
+  const listed = (await call("GET", "/api/notifications")).payload as { items: NotificationRecord[]; unread: number };
+  assert.deepEqual(listed.items.map((r) => r.id), [mine.id]);
+  assert.equal(listed.unread, 1);
+  const cursor = (await call("GET", `/api/notifications?after=${mine.ts}`)).payload as { items: NotificationRecord[]; unread: number };
+  assert.deepEqual(cursor, { items: [], unread: 1 });
+  assert.equal((await call("GET", `/api/notifications/${gone.id}`)).status, 404);
+  assert.deepEqual((await call("POST", "/api/notifications/read", { ids: [mine.id] })).payload, { updated: 1, unread: 0 });
+
+  // Hidden, not deleted: regaining the project brings the row back.
+  projects = new Set(["p_mine", "p_gone"]);
+  const back = (await call("GET", "/api/notifications")).payload as { items: NotificationRecord[]; unread: number };
+  assert.deepEqual(back.items.map((r) => r.id), [mine.id, gone.id]);
+  assert.equal(back.unread, 1);
 });
 
 test("invalid after and malformed/oversized ids raise typed invalid-input with a field", async () => {
