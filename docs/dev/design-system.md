@@ -482,7 +482,7 @@ a tab cut at the border with nothing hinting at more. Strips that opt into
   `apps/web/src/messageActionLayout.ts`) may reveal on hover or keyboard focus
   only with a fine pointer; touch resolves to an always-visible bar or the
   More menu. Each action is placed on the bar, in the More menu or off, in a
-  user-chosen order (Settings > Chat). Faded controls keep their space; the
+  user-chosen order (Settings > Chat > Buttons and bars). Faded controls keep their space; the
   reveal animates opacity only. Package `session.message.actions`
   contributions are entries of the same layout (`pkg:<contribution id>`), so
   every button under a message can be reordered, moved or turned off; only a

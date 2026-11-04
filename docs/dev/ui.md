@@ -2369,8 +2369,9 @@ and repeats that summary, the active pins and those messages; nothing is sent
 until the user sends it. Package timeline events inside a rewound range remain
 hidden with that branch.
 
-**Action grouping and Thinking separators:** Chat settings exposes matching
-segmented selectors for Action blocks and Thinking blocks. Grouped mode projects
+**Action grouping and Thinking separators:** Chat settings exposes a *Group steps
+into one block* switch under Agent steps and a segmented selector under Thinking.
+Grouped mode projects
 tool/task work into activity cards. A card's header is named by the actions
 inside it (`activityTitle.ts`): up to three of the most significant kinds
 (changes, tests, commands, delegation, then reads, searches, web, tools,
@@ -2449,7 +2450,7 @@ column, the task text in the step-name voice, then its kind (`Task
 completed`, …) in the quiet preview voice, which gives way first on a narrow
 line. The contract is pinned in `apps/web/test/executionUi.test.ts`.
 
-**Activity block looks:** Chat settings → *Activity block style*
+**Activity block looks:** Chat settings → *Agent steps*
 (`UiSettings.activityBlockStyle`, published as `body[data-activity-style]`)
 picks how the steps are held together. Everything above is the default
 `thread`. The others keep the same rows, rhythm and plate-free column and drop
@@ -2492,7 +2493,7 @@ theme and wallpaper.
 The edited-files bar shares the status line's chat frame (start edge and
 width), so nothing jumps when a turn ends and both line up with the composer
 at every width.
-Chat settings → *Status above the composer* (`composerStatusStyle`,
+Chat settings → Composer → *Status above the composer* (`composerStatusStyle`,
 `body[data-composer-status-style]`) picks `line` (the base), `tab` or
 `capsule` (a centred hairline pill that hugs its words; the open file list
 sits in a hairline frame). `tab` is the composer's **header stack**: bottom
@@ -2713,7 +2714,7 @@ The request and the plan stay one column, so a short request never leaves a
 hole beside a long plan.
 
 The surface reads the live render model for context, token usage, separate cache
-reads/writes, cost, ChatMetrics-compatible session duration, and task-plan
+reads/writes, cost, session duration, and task-plan
 progress. The content panel labels the cached last user message as a latest
 request excerpt, never as an agent-authored summary. Missing usage samples
 display unavailable values rather than invented zeroes; reported zero remains
@@ -3533,7 +3534,9 @@ empty or error markup.
   `Section tone="danger"`. A page with more than ~6 rows has sections.
 - **Rows.** `Row({ label, hint?, layout?, top?, disabled? })` for one setting
   (control right, one shared control column). `layout="stacked"` puts a
-  full-width control under the label (textareas, long lists, templates).
+  full-width control under the label (textareas, long lists, templates). Only
+  a `DisclosureRow` opening onto its one setting omits the label: its head
+  already names it.
   `ReadonlyRow({ label, value, mono?, action? })` for facts. Add/edit forms use
   `FormField({ label, hint?, error?, optional? })` — visible labels, never
   placeholder-only fields.
@@ -3549,9 +3552,25 @@ empty or error markup.
   the controls. `HighlightedText` marks search words (shared with
   `textMatch.ts`). Quiet buttons inside a row take the raised step so they
   stay visible on the list surface.
+- **Rows that open in place.** A long page reads as a summary with
+  `DisclosureRow({ label, value, open, animate?, onToggle, onOpened?, rowId?, children })`
+  inside an `ItemList`: one line with the name and the current value, the
+  settings under it when open, and their hints only there. The page keeps one
+  row open at a time. A closed row renders no settings, so nothing in it carries
+  `data-settings-item` on the head: a search hit or deep link arrives as the
+  page's `settingsTarget`, the page opens the owning row with `animate={false}`,
+  and the routed-target effect then lands on the setting at its final position.
+  `control` instead of `children` keeps a setting that fits on the line in the
+  same geometry (then `itemId` sits on the row). The panel grows on its grid
+  track and clips only during the motion, so focus rings survive at rest.
+  `onOpened` fires when it has finished growing: measure then, since a fixed
+  delay races a slow first render of the settings inside.
 - **Control vocabulary.** Boolean → `Toggle` (never a lone checkbox).
   ≤4 mutually exclusive options → `Seg`. More options → `Select` (from
   `components/ui`). Several independent choices of one kind → `CheckGroup`.
+  A choice easier seen than described (the interface style, Chat's level of
+  detail and step style) → tiles drawn in the option's own look on
+  `.shell-look-option`, with an inset-shadow schematic in theme tokens.
   Mutually exclusive options whose consequences each need a sentence (the
   approval levels in Settings → Permissions, Judgment routes) → a radio list
   on the item-list surface: one row per option with its title and one-line
@@ -3607,9 +3626,9 @@ boot settles (`whenPackagesSettled`) the nav shows a skeleton instead of a
 partial list. Search matches page titles, `SETTINGS_PAGE_KEYWORDS` page
 synonyms (`settings/registry.ts`) and registered items, and groups results
 under their page (capped). An item hit focuses and flashes its row; when the
-row is not rendered (it sits behind one of the page's own tabs), the hit is
-handed to the page as its `settingsTarget` so the page can reveal it, and the
-routed-target effect then scrolls to it. Mod+K or `/` focuses the settings search while
+row is not rendered (it sits behind one of the page's own tabs or a closed
+`DisclosureRow`), the hit is handed to the page as its `settingsTarget` so the
+page can reveal it, and the routed-target effect then scrolls to it. Mod+K or `/` focuses the settings search while
 Settings is open; Escape clears a non-empty search, then goes back to the nav
 on phone, then closes. The header keeps a fixed slot for the package tour
 `?`, so the close button never moves. The `?` appears exactly when the
@@ -3624,6 +3643,41 @@ web-local `link: { settingsPage, label }` (`packages/onboarding/types.ts`);
 the overlay renders it as a button that completes the tour and calls
 `openSettingsPage`. The Providers & Models tour opens on such a step, pointing
 new accounts at Harnesses (installing more harnesses is optional).
+
+**Chat settings** (`settings/ChatSettingsPage.tsx`, model in
+`chatSettingsModel.ts`) read as a summary beside a live preview. *Level of
+detail* (Minimal / Balanced / Detailed) writes the look preferences together:
+step grouping and style, thinking, how each role's buttons reveal, and whether
+the prompt rail shows. It is derived from those preferences and never stored, so
+one hand-edited row reads as *Custom* with a Reset back to Balanced, which is the
+install defaults. A level leaves typing and sending alone, and never changes
+which buttons exist, where they sit or their order. Below it, three groups of
+`DisclosureRow`s (Conversation, Typing and sending, Buttons and bars) and a
+*More options* fold; `CHAT_ROW_ITEMS` and `CHAT_MORE_ITEMS` say which row owns
+each `chat.*` item, and a test holds that to the search registry. A registered
+label is the name the page shows, so search finds what the person reads.
+
+The preview (`ChatSettingsPreview.tsx`) is a sample conversation drawn from the
+same preferences, with the looks copied from "Activity block looks" and the
+composer status styles. It is not the real Timeline, so a new look needs its
+sample here too. While a row is open everything but the part it changes dims; a
+click on a part opens its row, as a pointer shortcut (`aria-hidden`, no focus
+stop), since every setting is reachable from its row. A setting with no look of
+its own shows its value as a note in the sample composer. The device choice
+follows the setting being changed: a phone-only title shows the phone. The layout
+follows the pane through a container query, not the viewport: from 760px the
+preview sits beside the rows and sticks; narrower it leads the page, and while a
+row is open it sticks above the page showing only the part in play, beside any
+context it needs. Opening a row holds its head in place while the rows around it
+change height, then, once it has grown, brings the whole row into view.
+
+The button editor (`MessageActionsEditor.tsx`) places a role's buttons in three
+lanes (bar, the More menu, hidden), which are views of one ordered list
+(`placeMessageAction`), so a hidden button keeps its slot. A mouse drags a chip
+from anywhere on it; a finger drags only by its grip, so a swipe on the chip still
+scrolls; arrows reorder and change lane from the keyboard; a click or Enter opens
+the chip's menu, which says what the button does and moves it without a drag. A
+bar-only package button has no menu lane.
 
 **Users and account settings.** There is no separate Access page. Settings →
 Users opens on the signed-in person's account card, then *People* (one grouped

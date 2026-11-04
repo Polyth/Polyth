@@ -44,7 +44,7 @@ export function sessionMessageCounts(model: Pick<RenderModel, "messages" | "vers
   return { all, visible };
 }
 
-/** The same first-message-to-last-activity wall-clock span used by ChatMetrics.
+/** The first-message-to-last-activity wall-clock span.
  * An empty session has no measurable duration, even if it has a creation time. */
 export function sessionDurationMs(
   session: Pick<SessionProjection, "createdAt"> | null,

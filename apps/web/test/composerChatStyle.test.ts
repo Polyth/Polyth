@@ -451,14 +451,13 @@ test("thinking uses a compact one-or-two-line separator, while tools keep the ac
 });
 
 test("chat settings expose grouped actions and constrained thinking modes", () => {
-  const settings = read("../src/components/settings/pages.tsx");
+  const settings = read("../src/components/settings/ChatSettingsPage.tsx");
   const prefs = read("../src/uiPrefs.ts");
 
   assert.match(settings, /itemId="chat\.actionBlocks"/);
   assert.ok(settings.indexOf('itemId="chat.actionBlocks"') < settings.indexOf('itemId="chat.thinking"'),
     "action grouping stays before its thinking-mode constraint");
-  assert.match(settings, /\["grouped", tr\("settings\.pages\.groupedActions"\)\]/);
-  assert.match(settings, /\["ungrouped", tr\("settings\.pages\.ungroupedActions"\)\]/);
+  assert.match(settings, /setUiSettings\(\{ actionGrouping: on \? "grouped" : "ungrouped" \}\)/);
   assert.match(settings, /itemId="chat\.thinking"/);
   assert.match(settings, /\["collapsed", tr\("settings\.pages\.collapsibleThinking"\)\]/);
   assert.match(settings, /\["expanded", tr\("settings\.pages\.expandedThinking"\)\]/);

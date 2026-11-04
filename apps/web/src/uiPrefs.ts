@@ -25,7 +25,6 @@ export type FollowUpBehavior = "steer" | "queue" | "interrupt";
 export type LargeTextPasteBehavior = "ask" | "attach" | "inline";
 export type NotificationKindPref = NotificationKind;
 export type MessageCopyFormat = "markdown" | "json";
-export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type TopRailAlignment = "center" | "left";
 export type GlassEffect = "off" | "matte" | "clear";
 /** How the top rail separates from the workspace below it: `shadow` keeps the
@@ -99,7 +98,6 @@ export const COMPOSER_STATUS_STYLES = ["line", "tab", "capsule"] as const;
 export type ComposerStatusStyle = typeof COMPOSER_STATUS_STYLES[number];
 export type MobileSessionTitleMode = "hidden" | "title" | "button";
 
-export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const MOBILE_SHORTCUT_IDS = [
   "session", "files", "browser", "goals", "git", "terminal",
   "notification-centre", "multirun", "workflow", "fusion", "walkthrough",
@@ -180,7 +178,6 @@ export interface UiSettings {
   /** Payload selected by the single message Copy action. */
   messageCopyFormat: MessageCopyFormat;
   /** Visible session-header metrics, in drag-configured order. */
-  headerMetrics: HeaderMetricId[];
   /** User-message quick actions: order, bar/menu placement, reveal. Package
    *  buttons are entries too (`pkg:<contribution id>`). */
   userMessageActions: MessageActionLayout<WithPackageActions<UserMessageActionId>>;
@@ -295,7 +292,6 @@ export const UI_DEFAULTS: UiSettings = {
   pinLatestPrompt: false,
   promptBookmarkDesktop: false,
   messageCopyFormat: "markdown",
-  headerMetrics: [...HEADER_METRIC_IDS],
   userMessageActions: USER_MESSAGE_ACTIONS_DEFAULT,
   assistantMessageActions: ASSISTANT_MESSAGE_ACTIONS_DEFAULT,
   showAnswerQuickActions: true,
@@ -461,7 +457,6 @@ export function parseUiSettings(raw: string | null): UiSettings {
       pinLatestPrompt: data.pinLatestPrompt === true,
       promptBookmarkDesktop: data.promptBookmarkDesktop === true,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",
-      headerMetrics: orderedIds(data.headerMetrics, HEADER_METRIC_IDS),
       userMessageActions: parseMessageActionLayout(data.userMessageActions, USER_MESSAGE_ACTION_IDS, UI_DEFAULTS.userMessageActions),
       // `responseActions` (an ordered id list) predates the shared layout and
       // is read only as a migration source.

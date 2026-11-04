@@ -89,9 +89,9 @@ test("defaults reveal both bars on hover, keep user actions on touch and answers
 });
 
 test("both roles configure through the same Settings editor and bar", () => {
-  const pages = read("../src/components/settings/pages.tsx");
-  assert.match(pages, /<MessageActionsEditor role="user" itemId="chat\.messageActions" \/>/);
-  assert.match(pages, /<MessageActionsEditor role="assistant" itemId="chat\.responseActions" \/>/);
+  const page = read("../src/components/settings/ChatSettingsPage.tsx");
+  assert.match(page, /<MessageActionsEditor role="user" itemId="chat\.messageActions"/);
+  assert.match(page, /<MessageActionsEditor role="assistant" itemId="chat\.responseActions"/);
   const css = read("../src/components/ChatChrome.css");
   // Hover reveal is opacity-only and an open menu keeps its bar visible.
   assert.match(css, /\.chat-action-bar\[data-reveal="hover"\]\s*\{[^}]*opacity:\s*0;/s);

@@ -10259,28 +10259,6 @@ min-height: var(--tap);
 .header-chat { border-color: var(--chat-border); background: var(--chat-surface); }
 /* The drawer trigger is a ui/IconButton; this only sets its tint. */
 .ui-icon-btn.header-drawer-btn { color: var(--text-dim); }
-.chat-metrics {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  flex: 0 1 auto;
-}
-.chat-metric {
-  min-width: 66px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
-  border-radius: var(--radius-control);
-  color: var(--muted);
-}
-.chat-metric-icon { display: grid; place-items: center; color: var(--muted); }
-.chat-metric-icon svg { width: 13px; height: 13px; }
-.chat-metric > span:last-child { min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
-.chat-metric small { color: var(--muted); font-size: var(--font-meta); }
-.chat-metric strong { color: var(--text); font: 650 var(--font-meta)/1.3 var(--mono); }
 
 /* Conversation, command cards, workspace state --------------------------- */
 .app .workspace { background: transparent; }
@@ -10460,8 +10438,6 @@ min-height: var(--tap);
 }
 .session-nav-current svg { width: 13px; height: 13px; color: var(--muted); }
 @media (max-width: 1100px) and (min-width: 961px) {
-.header-chat .chat-metric { min-width: 54px; padding-inline: 4px; }
-  .header-chat .chat-metric-icon { display: none; }
   .header-chat .view-switcher { min-width: 90px; }
 }
 
@@ -10487,17 +10463,6 @@ width: 44px;
 }
 
   .header-chat .header-spacer { display: none; }
-  .header-chat .chat-metrics { flex: 1 1 auto; justify-content: space-evenly; }
-  .header-chat .chat-metric {
-    min-width: 0;
-    gap: 3px;
-    flex: 1 1 0;
-    justify-content: center;
-    padding: 3px 1px;
-  }
-  .header-chat .chat-metric-icon { display: none; }
-  .header-chat .chat-metric small,
-  .header-chat .chat-metric strong { white-space: nowrap; }
   .timeline { --timeline-pad-top: 28px; --timeline-pad-bottom: 34px; padding-inline: 16px; gap: 20px; }
   .composer-chat { padding: 0 var(--screen-gutter) 14px; }
   .workspace { padding-bottom: 0; }
@@ -13662,7 +13627,7 @@ width: var(--tap);
 .prompt-nav-tick { width: 32.2px; height: 9.2px; }
 .prompt-nav-page { height: 32px; }
 
-.header-chat .chat-metric small, .header-chat .chat-metric strong, .package-tour-kicker, .package-tour-highlight > div > span, .package-tour-count, .package-tour-skip{
+.package-tour-kicker, .package-tour-highlight > div > span, .package-tour-count, .package-tour-skip{
 font-size: var(--font-meta);
 }
 
@@ -20101,6 +20066,81 @@ html[dir="rtl"] .settings-list-chevron > * { transform: scaleX(-1); }
   .settings-list-trailing, .settings-list-chevron { align-self: start; min-height: var(--control-h-sm); }
   .settings-list-select { align-self: start; min-height: var(--control-h-sm); align-items: center; }
   .settings-list-desc { margin-top: 0; }
+}
+
+/* DisclosureRow — one line of an ItemList that opens in place. The closed line
+   reads as a summary (name, current value, chevron); the opened settings sit on
+   a faint wash under it, so the page stays one list. The panel grows on its grid
+   track; its content clips only while that runs, so focus rings survive at rest.
+   A row with a `control` keeps the same geometry without opening. */
+.settings-disclosure { min-width: 0; transition: background-color var(--motion-normal) var(--motion-ease); }
+.settings-disclosure + .settings-disclosure { border-top: 1px solid var(--border-soft); }
+.settings-disclosure[data-open="true"] { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+.settings-disclosure-head {
+  width: 100%; min-width: 0; min-height: max(calc(30px + 2 * var(--density-pad, var(--space-2))), var(--hit-min));
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border: 0; border-radius: 0; background: transparent; color: var(--text);
+  font: inherit; text-align: start; cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.settings-disclosure-head.is-static { cursor: default; }
+@media (hover: hover) and (pointer: fine) {
+  .settings-disclosure-head:not(.is-static):hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
+  .settings-disclosure-head:not(.is-static):hover:where(:not(:disabled)) .settings-disclosure-chevron { color: var(--text-dim); }
+}
+.settings-disclosure-head:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.settings-disclosure-label {
+  flex: 1 1 auto; min-width: 0;
+  color: var(--text); font-size: var(--font-label); font-weight: 500; line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.settings-disclosure-value {
+  flex: 0 1 auto; min-width: 0; max-width: 62%;
+  color: var(--muted); font-size: var(--font-label); text-align: end;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.settings-disclosure[data-open="true"] .settings-disclosure-value { color: var(--text-dim); }
+.settings-disclosure-chevron {
+  flex: none; display: grid; place-items: center; color: var(--faint);
+  transition: transform var(--motion-normal) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.settings-disclosure[data-open="true"] .settings-disclosure-chevron { transform: rotate(180deg); }
+.settings-disclosure-control { flex: none; display: flex; justify-content: flex-end; min-width: 0; max-width: 72%; }
+.settings-disclosure-panel { display: grid; grid-template-rows: 1fr; }
+.settings-disclosure-body {
+  min-width: 0; min-height: 0;
+  display: grid; gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+.settings-disclosure[data-motion] .settings-disclosure-body { overflow: hidden; overflow: clip; }
+.settings-disclosure[data-motion="opening"] .settings-disclosure-panel { animation: settings-disclosure-open var(--motion-normal) var(--motion-ease) both; }
+.settings-disclosure[data-motion="closing"] .settings-disclosure-panel { animation: settings-disclosure-close var(--motion-fast) var(--motion-ease) both; }
+@keyframes settings-disclosure-open {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+@keyframes settings-disclosure-close {
+  from { grid-template-rows: 1fr; opacity: 1; }
+  to { grid-template-rows: 0fr; opacity: 0; }
+}
+/* Settings inside an opened row: the row is already a list line, so they drop
+   their own rule and tighten. One setting stacks its choice under its hint. */
+.settings-disclosure-body > .set-row { padding-block: var(--space-1); border-bottom: 0; }
+.settings-disclosure-body > .set-row.is-stacked { gap: var(--space-2); }
+.settings-disclosure-body > .set-row.is-stacked > .set-row-control { align-items: flex-start; }
+.settings-disclosure-body > .set-row.is-stacked .set-row-hint { margin-top: 0; }
+/* A row here is narrower than a page's, so its control may take more of it and
+   keep one line. A lone switch stays beside its label at every width. */
+.settings-disclosure-body > .set-row:not(.is-stacked) > .set-row-control { flex-shrink: 0; max-width: 66%; }
+.settings-disclosure-body > .set-row:has(> .set-row-control > .switch:only-child) { flex-direction: row; align-items: center; }
+.settings-disclosure-body > .set-row:has(> .set-row-control > .switch:only-child) > .set-row-control { width: auto; }
+@media (max-width: 700px) {
+  .settings-disclosure-body > .set-row:not(.is-stacked) > .set-row-control { flex-shrink: 1; max-width: 100%; }
+}
+@container settings-list (max-width: 520px) {
+  .settings-disclosure-value { max-width: 56%; }
 }
 
 /* Row typography + variants. Label 15px/500 text, hint one meta line. */

@@ -59,7 +59,7 @@ test("chat chrome does not expose a header overflow pin menu", () => {
 });
 
 test("prompt bookmark opens bounded conversation history using the desktop prompt styles", () => {
-  const settings = read("../src/components/settings/pages.tsx");
+  const settings = read("../src/components/settings/ChatSettingsPage.tsx");
   const prefs = read("../src/uiPrefs.ts");
   const timeline = read("../src/components/Timeline.tsx");
   const bookmark = read("../src/components/PromptBookmark.tsx");

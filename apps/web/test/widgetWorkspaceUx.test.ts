@@ -255,10 +255,9 @@ test("macOS and Windows keep native caption controls without stealing renderer c
 
 test("canvas widget settings live on the widget, not a settings customizer", async () => {
   const canvas = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
-  const chat = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");
+  const chat = await readFile(new URL("../src/components/settings/ChatSettingsPage.tsx", import.meta.url), "utf8");
   assert.match(canvas, /SchemaWidgetSettings|settingsRender/);
   assert.match(chat, /itemId="chat\.responseActions"/);
-  assert.match(chat, /itemId="chat\.headerMetrics"/);
 });
 
 test("buttons stay on shell surfaces while the canvas accepts only full widgets", async () => {

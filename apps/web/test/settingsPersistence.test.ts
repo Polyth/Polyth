@@ -214,16 +214,17 @@ test("saving either settings domain preserves the other domain byte-for-byte", (
   assert.equal(stored.get("polyth.settings")?.includes("Legacy name"), true, "migration source remains read-only");
 });
 
-test("header metric and response action layouts preserve order and reject unknown ids", () => {
+test("response action layouts preserve order and reject unknown ids", () => {
   const parsed = ui.parseUiSettings(JSON.stringify({
-    headerMetrics: ["cost", "tokens", "bogus", "cost"],
+    // Retired setting from older records: it must not survive a read.
+    headerMetrics: ["cost", "tokens"],
     assistantMessageActions: {
       items: [{ id: "pin", placement: "menu" }, { id: "copy", placement: "bar" }, { id: "unknown", placement: "bar" }],
       reveal: "always",
       touch: "bogus",
     },
   }));
-  assert.deepEqual(parsed.headerMetrics, ["cost", "tokens"]);
+  assert.equal("headerMetrics" in parsed, false);
   assert.deepEqual(parsed.assistantMessageActions.items.slice(0, 2), [
     { id: "pin", placement: "menu" },
     { id: "copy", placement: "bar" },
@@ -232,7 +233,6 @@ test("header metric and response action layouts preserve order and reject unknow
   assert.equal(parsed.assistantMessageActions.reveal, "always");
   assert.equal(parsed.assistantMessageActions.touch, "menu");
   const defaults = ui.parseUiSettings(null);
-  assert.deepEqual(defaults.headerMetrics, [...ui.HEADER_METRIC_IDS]);
   assert.deepEqual(defaults.assistantMessageActions, ui.UI_DEFAULTS.assistantMessageActions);
   assert.deepEqual(defaults.userMessageActions, ui.UI_DEFAULTS.userMessageActions);
 });

@@ -64,7 +64,7 @@ export interface SlotRegistration {
 }
 
 /** `meta.messageAction` on a `session.message.actions` contribution. The
- *  button then appears in Settings > Chat > Quick actions beside the built-in
+ *  button then appears in Settings > Chat > Buttons and bars beside the built-in
  *  ones, where the user orders it and places it on the bar, in the "More"
  *  menu, or off. Without it the host still lists the button by its id. */
 export interface MessageActionSlotMeta {

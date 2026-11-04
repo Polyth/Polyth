@@ -37,7 +37,7 @@ export const LOOK_UI_KEYS = [
   "mobileSessionTitle", "mobileShortcuts", "showTechnicalButtons", "showDictate", "showAutoApprove", "showGoals",
   "showQuickActions", "activityBlockStyle", "composerStatusStyle", "thinkingDisplayMode", "actionGrouping",
   "statusBar", "showMessageActions", "showAnswerQuickActions", "pinLatestPrompt", "promptBookmarkDesktop",
-  "promptNavigator", "promptNavigatorSide", "headerMetrics", "topRailAlignment", "topRailSurface", "shellLayout",
+  "promptNavigator", "promptNavigatorSide", "topRailAlignment", "topRailSurface", "shellLayout",
   "shellBarStyle", "floatingColumns", "shellToolsDock", "shellActionsDock", "shellTitle", "topRailSize",
   "rightRailSize", "leftRailSize", "railSpacing",
 ] as const satisfies readonly (keyof UiSettings)[];
