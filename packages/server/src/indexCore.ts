@@ -159,6 +159,7 @@ import { oneShot } from "./oneshot.ts";
 import {
   createSmallModelService,
   smallModelExecutionRoute,
+  compactionModelPreference,
   smallModelPreference,
   summarizeSessionFirst,
 } from "./smallModel.ts";
@@ -2845,13 +2846,15 @@ export async function boot(opts: BootOptions = {}) {
     modelCatalogStale: (signal) => { runtimeCatalog.modelsStale(signal); },
     // Polyth-owned compaction summarizes with the session's own model, as a
     // harness compaction would; the owning account's small model (else
-    // POLYTH_SMALL_MODEL) is the fallback (or goes first, when the session's
-    // model is out of quota).
+    // POLYTH_SMALL_MODEL) is the fallback. The small model goes first when
+    // the account chose it in Settings → Sessions → Compaction model, or when
+    // the session's model is out of quota.
     compactionSummary: async ({ projection, runtime: sessionRuntime, model, systemPrompt, prompt, maxOutputTokens, smallModelFirst }) => {
       const project = await projects.get(projection.projectId);
       const userId = await sessionAccountId(projection, "compaction small model");
+      const preferSmall = userId ? compactionModelPreference(clientSettings.get(userId).settings) === "small" : false;
       return summarizeSessionFirst({
-        ...(smallModelFirst ? { smallModelFirst: true } : {}),
+        ...(smallModelFirst || preferSmall ? { smallModelFirst: true } : {}),
         ...(sessionRuntime ? { sessionRuntime } : {}),
         sessionRoute: { ...(model ? { model } : {}), ...(projection.resolvedHarnessId ? { harnessId: projection.resolvedHarnessId } : {}) },
         fallbackRoute: smallModelExecutionRoute(resolveSmallModel(userId), projection),

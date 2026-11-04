@@ -367,6 +367,17 @@ export default function SessionsPage() {
             onPick={(smallModel) => setSessionDefaults({ smallModel })}
           />
         </Row>
+        <Row label={tr("settings.sessionspage.compactionModel")} hint={tr("settings.sessionspage.compactionModelHint")} itemId="sessions.compaction-model">
+          <Seg
+            label={tr("settings.sessionspage.compactionModel")}
+            value={defaults.compactionModel ?? "session"}
+            options={[
+              ["session", tr("settings.sessionspage.compactionModelSession")],
+              ["small", tr("settings.sessionspage.compactionModelSmall")],
+            ]}
+            onChange={(compactionModel) => setSessionDefaults({ compactionModel })}
+          />
+        </Row>
         <Row label={tr("settings.sessionspage.changesWalkthroughModel")} hint={tr("settings.sessionspage.modelUsedWhenGeneratingAChangesWalkthrough")}>
           <SessionModelPicker
             value={defaults.walkthroughModel}

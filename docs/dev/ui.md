@@ -1640,7 +1640,7 @@ icon or provenance, so a row reserves the icon track only when it renders one.
 **Built-in host actions:** a few built-in commands are host actions, not
 prompts. `/compact` compacts the conversation — the active runtime's native
 compaction, or Polyth's own summary-and-fresh-leg compaction when the runtime
-has none — and renders the same expandable context-compacted block as the
+has none or its native one refuses or fails — and renders the same expandable context-compacted block as the
 Context rail control; it never creates a session, echoes the command, or
 spends a model turn. The Compact controls (context pie, Context rail, "Compact
 before proceeding") show for every agent session. While a compaction runs the

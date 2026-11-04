@@ -579,7 +579,13 @@ native compaction when it declares one. A runtime that finishes in the
 background (Claude Code) confirms `compactOperation` with
 `completion: "pending"`; sends then queue (reason `compaction`) until it
 reports `session/compacted` or the `session/compaction-failed` runtime event
-(persisted with `strategy: "runtime"`), with a 10-minute backstop. Otherwise
+(persisted with `strategy: "runtime"`), with a 10-minute backstop. A
+person's compaction (`compact`) that the harness refuses (e.g. Claude Code's
+"Not enough messages to compact" on a short native leg; not a busy
+`conflict`) or fails in the background continues as the Polyth compaction
+below, so a requested compaction never dead-ends on the harness; the
+background failure is then persisted with `fallback: "polyth"` and the queue
+stays held until the Polyth compaction ends. Otherwise
 Polyth compacts itself
 (`compactWithFreshLegLocked` in `packages/server/src/sessions.ts`, helpers in
 `packages/session/src/compaction.ts`): it records `session/compaction-requested`
@@ -591,7 +597,11 @@ history since the last summary-bearing compaction. The summary runs first on
 the session's own wired runtime through its direct completion only, because a
 session-bound harness (Antigravity) cannot lend a project-scoped runtime; a
 project runtime is used only when that runtime has no direct completion or
-for the small-model fallback. A rate-limit resume's "Compact before
+for the small-model fallback. Settings → Sessions → Compaction model
+(`sessionDefaults.compactionModel`: `session` default, `small`; read per
+owning account by `compactionModelPreference`) can put the small model first
+for every Polyth-owned compaction, with the session's model as its fallback;
+a harness's native compaction always uses its own model. A rate-limit resume's "Compact before
 proceeding" asks the small model first (`smallModelFirst`), and falls back to
 this Polyth compaction when the runtime's native one fails. A same-harness fresh leg
 (the rewind replacement path: release proof, fresh native session, epoch

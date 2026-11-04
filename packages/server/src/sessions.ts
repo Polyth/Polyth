@@ -4330,6 +4330,9 @@ export function createSessionService(deps: {
   // so a crash or a lost event cannot leave a session wedged behind it.
   const compactions = new Map<string, ReturnType<typeof setTimeout> | undefined>();
   const NATIVE_COMPACTION_MAX_MS = 10 * 60_000;
+  /** Sessions whose background native compaction, when it fails, is replaced
+   *  by a Polyth compaction (see `compactLocked`'s `fallback`). */
+  const nativeCompactionFallbacks = new Set<string>();
   const beginCompaction = (sessionId: string, maxMs?: number): void => {
     clearTimeout(compactions.get(sessionId));
     const timer = maxMs === undefined ? undefined : setTimeout(() => {
@@ -4342,6 +4345,7 @@ export function createSessionService(deps: {
     compactions.set(sessionId, timer);
   };
   const endCompaction = (sessionId: string): void => {
+    nativeCompactionFallbacks.delete(sessionId);
     if (!compactions.has(sessionId)) return;
     clearTimeout(compactions.get(sessionId));
     compactions.delete(sessionId);
@@ -4366,7 +4370,7 @@ export function createSessionService(deps: {
    *  be finishing in the background (see `compactionSettled`). */
   const compactLocked = async (
     sessionId: string,
-    options: { forResume?: boolean; model?: ModelRef; background?: boolean } = {},
+    options: { forResume?: boolean; model?: ModelRef; background?: boolean; fallback?: boolean } = {},
   ): Promise<"native" | "polyth" | "fresh-epoch"> => {
     const { proj } = await assertMutable(sessionId);
     // A replaced runtime has no native context left to compact. Recovering the
@@ -4420,10 +4424,13 @@ export function createSessionService(deps: {
       // `session/compacted` or a failure reports its end. Registered before
       // the log is read, so an end landing in between still releases it.
       beginCompaction(sessionId, NATIVE_COMPACTION_MAX_MS);
+      if (options.fallback && deps.compactionSummary) nativeCompactionFallbacks.add(sessionId);
       const requestSeq = prepared.operation.ownerEventSeq ?? 0;
-      const ended = (await store.events(sessionId)).some((event) => event.seq > requestSeq
+      const ended = (await store.events(sessionId)).findLast((event) => event.seq > requestSeq
         && (event.type === "session/compacted" || event.type === "session/compaction-failed"));
-      if (ended) endCompaction(sessionId);
+      if (ended?.type === "session/compaction-failed" && nativeCompactionFallbacks.delete(sessionId)) {
+        compactAfterNativeFailure(sessionId, String((ended.data as { error?: unknown }).error ?? ""));
+      } else if (ended) endCompaction(sessionId);
       else await publishCompactionState(sessionId, { active: true });
     }
     if (outcome.kind === "rejected") {
@@ -4439,8 +4446,44 @@ export function createSessionService(deps: {
       scheduleReconciliation(sessionId, proj, runtime, "mutation-outcome-unknown");
       throw outcomeError(outcome);
     }
-    if (outcome.kind === "rejected") throw outcomeError(outcome);
+    if (outcome.kind === "rejected") {
+      // The harness refused (e.g. Claude Code's "Not enough messages to
+      // compact" on a short native leg): Polyth summarizes canonical history
+      // instead, so a requested compaction never dead-ends on the harness.
+      if (options.fallback && deps.compactionSummary && outcome.code !== "conflict") {
+        await compactWithFreshLegLocked(sessionId, proj, runtime, options.model, {
+          background: options.background === true,
+        });
+        return "polyth";
+      }
+      throw outcomeError(outcome);
+    }
     return "native";
+  };
+
+  const compactAfterNativeFailure = (sessionId: string, nativeError: string): void => {
+    void withSessionLock(sessionId, async () => {
+      const { proj } = await assertMutable(sessionId);
+      if (proj.status !== "idle" || turnActive(sessionId)) {
+        throw Object.assign(new Error(`cannot compact while the session is ${proj.status}`), { code: "conflict" });
+      }
+      const runtime = await ensureWired(sessionId, proj);
+      await compactWithFreshLegLocked(sessionId, proj, runtime);
+    }).catch(async (error: unknown) => {
+      // Refused before it began (nothing to summarize, no fresh-leg support):
+      // the native failure stands. A failure past that point recorded itself.
+      if (compactions.has(sessionId)) {
+        await appendAndBroadcast(sessionId, "session/compaction-failed", {
+          strategy: "fresh-runtime-leg",
+          error: nativeError,
+        }, { ignorable: true }).catch(() => undefined);
+      }
+      console.error(`[polyth] compaction fallback failed for ${sessionId}`, error);
+    }).finally(() => {
+      if (!compactions.has(sessionId)) return;
+      void publishCompactionState(sessionId, { active: false }).catch(() => undefined);
+      endCompaction(sessionId);
+    });
   };
 
   /** Polyth-owned compaction for a runtime without a native one, shaped like
@@ -5469,6 +5512,7 @@ export function createSessionService(deps: {
           { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         if (sideEffects) {
+          nativeCompactionFallbacks.delete(sessionId);
           await publishCompactionState(sessionId, { active: false, lastAt: Date.now() });
           endCompaction(sessionId);
         }
@@ -5478,10 +5522,20 @@ export function createSessionService(deps: {
         await persist(
           sessionId,
           "session/compaction-failed",
-          { strategy: "runtime", error: ev.error ?? "the runtime could not compact the conversation" },
+          {
+            strategy: "runtime",
+            error: ev.error ?? "the runtime could not compact the conversation",
+            ...(sideEffects && nativeCompactionFallbacks.has(sessionId) && compactions.has(sessionId) ? { fallback: "polyth" } : {}),
+          },
           { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         if (sideEffects) {
+          // A requested compaction the harness could not finish continues as
+          // a Polyth one; the queue stays held until that ends.
+          if (nativeCompactionFallbacks.delete(sessionId) && compactions.has(sessionId)) {
+            compactAfterNativeFailure(sessionId, ev.error ?? "the runtime could not compact the conversation");
+            break;
+          }
           await publishCompactionState(sessionId, { active: false });
           endCompaction(sessionId);
         }
@@ -12433,7 +12487,7 @@ export function createSessionService(deps: {
       if (compactions.has(sessionId)) {
         throw Object.assign(new Error("the conversation is already being compacted"), { code: "conflict" });
       }
-      await withSessionLock(sessionId, () => compactLocked(sessionId, { background: true }));
+      await withSessionLock(sessionId, () => compactLocked(sessionId, { background: true, fallback: true }));
     },
 
     async cancelResume(sessionId) {

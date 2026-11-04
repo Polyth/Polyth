@@ -55,6 +55,8 @@ test("session defaults parser accepts only complete model references", () => {
     retentionAction: "delete",
     archiveRetentionDays: 90,
   });
+  assert.deepEqual(parseSessionDefaults('{"compactionModel":"small"}'), { compactionModel: "small" });
+  assert.deepEqual(parseSessionDefaults('{"compactionModel":"large"}'), {});
 });
 
 test("thinking preferences are model-scoped, corruption-safe, and deterministic", () => {

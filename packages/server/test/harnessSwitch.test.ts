@@ -35,7 +35,7 @@ function fixture(path = ":memory:", options: {
   compactionSummary?: Parameters<typeof createSessionService>[0]["compactionSummary"];
   /** Engines report native compaction that ends in the background with this
    *  outcome (as Claude's `/compact` does). */
-  nativeCompaction?: "compacted" | "failed";
+  nativeCompaction?: "compacted" | "failed" | "refused";
   /** Harnesses that declare `privateSessions`, and the Space preferences. */
   privateSessions?: { supported: string[]; preferences: Record<string, { privateSessions?: boolean }> };
   /** A harness whose runtime has no release hook (a remote Pi leg). */
@@ -126,6 +126,9 @@ function fixture(path = ":memory:", options: {
         ...(options.nativeCompaction ? {
           compactOperation: async () => {
             nativeCompactions.push(id);
+            if (options.nativeCompaction === "refused") {
+              return { kind: "rejected" as const, code: "native-failure", message: "Not enough messages to compact." };
+            }
             setTimeout(() => emit(options.nativeCompaction === "compacted"
               ? { type: "session/compacted", backendEventId: randomUUID(), summary: "NATIVE-SUMMARY" }
               : { type: "session/compaction-failed", error: "native compact failed" }), 30);
@@ -2420,6 +2423,43 @@ test("a runtime without native compaction compacts through a summary and a fresh
     await f.close();
   }
 });
+
+for (const nativeCompaction of ["refused", "failed"] as const) {
+  test(`a native compaction the harness ${nativeCompaction === "refused" ? "refuses" : "fails"} falls back to a Polyth one`, async () => {
+    const f = fixture(":memory:", {
+      nativeCompaction,
+      compactionSummary: async () => "## Goal\nFALLBACK-SUMMARY",
+    });
+    try {
+      const { id } = await f.sessions.create({ projectId: "p" });
+      await f.sessions.send(id, { text: "some work" });
+      f.engines.at(-1)!.complete();
+      await f.idle(id);
+      const before = (await f.store.projection(id))!;
+      await f.sessions.compact!(id);
+      await until(async () => (await f.store.events(id)).some((event) => event.type === "session/compacted"));
+
+      assert.deepEqual(f.nativeCompactions, ["fake-a"]);
+      const events = await f.store.events(id);
+      const failed = events.findLast((event) => event.type === "session/compaction-failed")!;
+      if (nativeCompaction === "failed") assert.equal(failed.data.fallback, "polyth");
+      else assert.equal(failed.data.strategy, "native");
+      const compacted = events.findLast((event) => event.type === "session/compacted")!;
+      assert.equal(compacted.data.source, "polyth");
+      assert.ok(failed.seq < compacted.seq);
+      assert.notEqual((await f.store.projection(id))!.backendSessionId, before.backendSessionId);
+      assert.equal((await f.sessions.runtimeFeatures!(id)).contextWindow?.compaction?.active, false);
+
+      await f.sessions.send(id, { text: "carry on" });
+      await until(async () => (f.engines.at(-1)?.requests.length ?? 0) > 0);
+      assert.match(f.engines.at(-1)!.requests.at(-1)!.text, /FALLBACK-SUMMARY/);
+      f.engines.at(-1)!.complete();
+      await f.idle(id);
+    } finally {
+      await f.close();
+    }
+  });
+}
 
 test("a failed compaction summary leaves the native context in place", async () => {
   const f = fixture(":memory:", {

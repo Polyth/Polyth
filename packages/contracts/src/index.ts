@@ -2618,7 +2618,8 @@ export interface SessionService {
    *  agent to carry on from where it was interrupted. Rejects `not-paused`. */
   continuePaused?(sessionId: string, options?: { source?: string }): Promise<SendResult>;
   /** Compact the conversation context: the runtime's native compaction when
-   * it has one, otherwise Polyth's own (summary + fresh native leg). Resolves
+   * it has one, otherwise Polyth's own (summary + fresh native leg); a native
+   * compaction the harness refuses or fails falls back to Polyth's. Resolves
    * once the compaction is under way; `session/compacted` or
    * `session/compaction-failed` records its outcome. */
   compact?(sessionId: string): Promise<void>;
