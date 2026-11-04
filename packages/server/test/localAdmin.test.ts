@@ -5,7 +5,7 @@ import { Socket } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AuthPrincipal, RequestIngress, RouteRequest } from "@polyth/contracts";
+import { REMOTE_CAPABILITY, type AuthPrincipal, type RequestIngress, type RouteRequest } from "@polyth/contracts";
 import { createAuthService } from "../src/auth.ts";
 import { createHttpHandler } from "../src/http.ts";
 import { settingsRoutes } from "../src/routes/settings.ts";
@@ -141,4 +141,15 @@ test("system info is denied to a non-loopback unauthenticated caller", async () 
   );
   assert.equal(remoteSession.code, 200);
   assert.equal(remoteSession.body?.dataDirLabel, "Polyth data directory");
+
+  const link: RequestIngress = { kind: "polyth-link", connectionId: "c1", transport: "direct" };
+  const device = (grants: string[]): AuthPrincipal => ({
+    kind: "paired-device", deviceId: "d1", deviceEndpointId: "e1", connectionId: "c1", transport: "direct", grants, grantRevision: 1,
+  });
+  const fullAccess = await invoke(device([REMOTE_CAPABILITY.deviceFullAccess]), link);
+  assert.equal(fullAccess.code, 200);
+  assert.equal(fullAccess.body?.dataDirLabel, "Polyth data directory");
+
+  const narrowed = await invoke(device([REMOTE_CAPABILITY.coreSessionsRead]), link);
+  assert.equal("error" in narrowed && narrowed.error.code, "forbidden");
 });

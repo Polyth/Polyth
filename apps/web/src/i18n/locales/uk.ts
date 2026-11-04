@@ -3235,6 +3235,7 @@ export const uk: AppMessages = {
   "settings.quickActions.sampleAgent": "Агент",
   "settingsview.commandLine": "Командний рядок",
   "settings.commandline.blurb": "Входьте в Polyth з терміналів і скриптів та керуйте їхніми правами.",
+  "settings.commandline.manageInBrowser": "Створювати й відкликати доступ та підтверджувати вхід із терміналів можна в браузері, де виконано вхід на цей сервер.",
   "settings.commandline.loadFailed": "Не вдалося завантажити доступ командного рядка",
   "settings.commandline.confirmTitle": "Підтвердьте вхід із термінала",
   "settings.commandline.confirmHint": "Виконайте «polyth login» у терміналі й введіть код, який він покаже.",

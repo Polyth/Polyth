@@ -3235,6 +3235,7 @@ export const bg: AppMessages = {
   "settings.quickActions.sampleAgent": "Агент",
   "settingsview.commandLine": "Команден ред",
   "settings.commandline.blurb": "Вписвайте терминали и скриптове в Polyth и управлявайте правата им.",
+  "settings.commandline.manageInBrowser": "Създавайте или отменяйте достъп и потвърждавайте вписвания от терминал в браузър с вход в този сървър.",
   "settings.commandline.loadFailed": "Достъпът през командния ред не можа да се зареди",
   "settings.commandline.confirmTitle": "Потвърждаване на вписване от терминал",
   "settings.commandline.confirmHint": "Изпълнете „polyth login“ в терминал, след което въведете показания код.",

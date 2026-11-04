@@ -31,6 +31,8 @@ export interface CliAccessState {
   profiles: Record<string, string[]>;
   trust: CliTrust;
   canManageTrust: boolean;
+  /** A paired phone's answer: it reads the list; changes need a signed-in browser. */
+  readOnly: boolean;
 }
 
 export interface CliDeviceRequest {
@@ -70,6 +72,7 @@ export async function loadCliAccess(): Promise<CliAccessState> {
     profiles: (body.profiles ?? { read: [], control: [] }) as Record<string, string[]>,
     trust: (body.trust ?? { mode: "off", revision: 0 }) as CliTrust,
     canManageTrust: body.canManageTrust === true,
+    readOnly: body.readOnly === true,
   };
 }
 

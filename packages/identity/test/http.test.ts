@@ -326,7 +326,7 @@ test('paired reads answer only the account views, read-only, for the account the
   assert.equal(me.value!.id, memberId); assert.equal(me.value!.login, 'olena'); assert.equal(me.value!.guardrails, null);
   assert.equal(read('/api/auth/accounts', 'usr_missing').status, 404);
 
-  for (const [url, method] of [['/api/auth/me', 'POST'], ['/api/auth/accounts', 'POST'], ['/api/auth/sessions', 'GET'], ['/api/auth/passkeys', 'GET'], ['/api/auth/accounts?x=1', 'GET']] as const) {
+  for (const [url, method] of [['/api/auth/me', 'POST'], ['/api/auth/accounts', 'POST'], ['/api/auth/cli', 'POST'], ['/api/auth/cli/tokens', 'POST'], ['/api/auth/cli/trust', 'POST'], ['/api/auth/sessions', 'GET'], ['/api/auth/passkeys', 'GET'], ['/api/auth/accounts?x=1', 'GET']] as const) {
     const refused = read(url, ownerId, method);
     assert.equal(refused.handled, false, `${method} ${url}`); assert.equal(refused.status, 0);
   }

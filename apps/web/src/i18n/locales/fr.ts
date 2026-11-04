@@ -3235,6 +3235,7 @@ export const fr: AppMessages = {
   "settings.quickActions.sampleAgent": "Agent",
   "settingsview.commandLine": "Ligne de commande",
   "settings.commandline.blurb": "Connectez des terminaux et des scripts à Polyth, et gérez leurs autorisations.",
+  "settings.commandline.manageInBrowser": "Créez ou révoquez des accès et approuvez les connexions de terminal dans un navigateur connecté à ce serveur.",
   "settings.commandline.loadFailed": "Impossible de charger l’accès en ligne de commande",
   "settings.commandline.confirmTitle": "Confirmer la connexion d’un terminal",
   "settings.commandline.confirmHint": "Exécutez « polyth login » dans un terminal, puis saisissez le code affiché.",

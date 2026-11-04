@@ -3235,6 +3235,7 @@ export const de: AppMessages = {
   "settings.quickActions.sampleAgent": "Agent",
   "settingsview.commandLine": "Befehlszeile",
   "settings.commandline.blurb": "Melden Sie Terminals und Skripte bei Polyth an und verwalten Sie deren Berechtigungen.",
+  "settings.commandline.manageInBrowser": "Zugänge erstellen oder widerrufen und Terminal-Anmeldungen bestätigen lässt sich in einem Browser, der bei diesem Server angemeldet ist.",
   "settings.commandline.loadFailed": "Befehlszeilenzugriff konnte nicht geladen werden",
   "settings.commandline.confirmTitle": "Terminal-Anmeldung bestätigen",
   "settings.commandline.confirmHint": "Führen Sie „polyth login“ im Terminal aus und geben Sie den angezeigten Code ein.",

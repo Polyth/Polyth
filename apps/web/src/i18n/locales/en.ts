@@ -3238,6 +3238,7 @@ export const en = {
   "settings.quickActions.sampleAgent": "Agent",
   "settingsview.commandLine": "Command line",
   "settings.commandline.blurb": "Sign terminals and scripts in to Polyth, and manage what they can do.",
+  "settings.commandline.manageInBrowser": "Create or revoke access and approve terminal sign-ins in a browser signed in to this server.",
   "settings.commandline.loadFailed": "Command-line access could not be loaded",
   "settings.commandline.confirmTitle": "Confirm a terminal sign-in",
   "settings.commandline.confirmHint": "Run “polyth login” in a terminal, then enter the code it shows.",

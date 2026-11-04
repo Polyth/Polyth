@@ -3235,6 +3235,7 @@ export const ar: AppMessages = {
   "settings.quickActions.sampleAgent": "الوكيل",
   "settingsview.commandLine": "سطر الأوامر",
   "settings.commandline.blurb": "تسجيل دخول الطرفيات والبرمجيات النصية إلى Polyth، وإدارة صلاحياتها.",
+  "settings.commandline.manageInBrowser": "أنشئ الوصول أو ألغِه ووافق على تسجيلات دخول الطرفية من متصفح مسجّل الدخول إلى هذا الخادم.",
   "settings.commandline.loadFailed": "تعذر تحميل إعدادات الوصول عبر سطر الأوامر",
   "settings.commandline.confirmTitle": "تأكيد تسجيل دخول الطرفية",
   "settings.commandline.confirmHint": "شغّل \"polyth login\" في الطرفية، ثم أدخل الرمز الذي يظهر لك.",

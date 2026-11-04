@@ -3235,6 +3235,7 @@ export const it: AppMessages = {
   "settings.quickActions.sampleAgent": "Agente",
   "settingsview.commandLine": "Riga di comando",
   "settings.commandline.blurb": "Autentica terminali e script in Polyth e gestisci le loro autorizzazioni.",
+  "settings.commandline.manageInBrowser": "Crea o revoca gli accessi e approva gli accessi da terminale in un browser connesso a questo server.",
   "settings.commandline.loadFailed": "Impossibile caricare l'accesso da riga di comando",
   "settings.commandline.confirmTitle": "Conferma l'accesso del terminale",
   "settings.commandline.confirmHint": "Esegui “polyth login” in un terminale, quindi inserisci il codice visualizzato.",

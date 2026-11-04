@@ -123,6 +123,16 @@ test("releases route surfaces upstream failures without throwing", async () => {
   assert.match(body.error, /GitHub API/);
 });
 
+test("releases route answers a full-access paired device and refuses a narrowed one", async () => {
+  const route = releasesRoutes({ fetchImpl: okFetch, repository: "acme/polyth" });
+  const call = (grants: string[]) => {
+    const { req } = request("/api/system/releases", okFetch);
+    return route({ ...req, principal: { kind: "paired-device", grants } } as unknown as RouteRequest);
+  };
+  assert.equal(await call(["device.full-access"]), true);
+  await assert.rejects(() => call(["core.sessions.read"]), /not allowed/);
+});
+
 test("releases route requires authentication and ignores other routes", async () => {
   const anonymous = request("/api/system/releases", okFetch, { principalKind: "anonymous" });
   await assert.rejects(() => anonymous.route(anonymous.req), /authentication required/);

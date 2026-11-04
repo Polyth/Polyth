@@ -3235,6 +3235,7 @@ export const pt: AppMessages = {
   "settings.quickActions.sampleAgent": "Agente",
   "settingsview.commandLine": "Linha de comandos",
   "settings.commandline.blurb": "Inicie sessão com terminais e scripts no Polyth e faça a gestão do que podem fazer.",
+  "settings.commandline.manageInBrowser": "Crie ou revogue acessos e aprove inícios de sessão de terminais num navegador com sessão iniciada neste servidor.",
   "settings.commandline.loadFailed": "Não foi possível carregar o acesso pela linha de comandos",
   "settings.commandline.confirmTitle": "Confirmar início de sessão do terminal",
   "settings.commandline.confirmHint": "Execute “polyth login” num terminal e, em seguida, introduza o código apresentado.",

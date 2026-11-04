@@ -3235,6 +3235,7 @@ export const pl: AppMessages = {
   "settings.quickActions.sampleAgent": "Agent",
   "settingsview.commandLine": "Wiersz poleceń",
   "settings.commandline.blurb": "Loguj terminale i skrypty do Polyth oraz zarządzaj ich uprawnieniami.",
+  "settings.commandline.manageInBrowser": "Dostęp utworzysz lub cofniesz, a logowania z terminala potwierdzisz w przeglądarce zalogowanej do tego serwera.",
   "settings.commandline.loadFailed": "Nie udało się wczytać dostępu z wiersza poleceń",
   "settings.commandline.confirmTitle": "Potwierdź logowanie terminala",
   "settings.commandline.confirmHint": "Uruchom „polyth login” w terminalu, a następnie wprowadź wyświetlony kod.",

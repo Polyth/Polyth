@@ -32,7 +32,7 @@ status, it takes the identity from the validated `/api/spaces` response
 (`user.id`); a human `ui-session` uses `/api/auth/accounts`. Account
 administration, passkeys and session listing still require a real human-session
 cookie. The one non-cookie identity read is a full-access paired device's own
-`GET /api/auth/accounts` / `GET /api/auth/me` over Link, which is read-only
+`GET /api/auth/accounts` / `GET /api/auth/me` / `GET /api/auth/cli` over Link, which is read-only
 (`canManage: false`, `readOnly: true`; see `docs/architecture/polyth-link.md`). The transport exception alone does not establish account identity, and
 a missing or suspended owner cannot unlock the browser.
 

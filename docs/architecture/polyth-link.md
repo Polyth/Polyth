@@ -35,8 +35,9 @@ or unauthenticated share link.
    `remoteAccess` manifests. Unknown routes are rejected before handlers.
    Of `/api/auth/*`, a paired device reaches `GET /api/auth/status` (core
    route, `core.health.read`); a full-access device also reads its own
-   account through `GET /api/auth/accounts` and `GET /api/auth/me` (see
-   Route matrix). All other browser identity HTTP stays public-only.
+   account through `GET /api/auth/accounts`, `GET /api/auth/me` and
+   `GET /api/auth/cli` (see Route matrix). All other browser identity HTTP
+   stays public-only.
 6. **Compression.** HTTP is relayed byte-for-byte, so the request
    allowlist forwards `Accept-Encoding` and the server's gzip (JSON above
    1 KiB, static text) crosses the link; `Content-Encoding` was already on
@@ -214,14 +215,21 @@ rotate, password, package install, secure-safe export, shutdown) are never
 grantable to guarded accounts or CLI tokens; the owner may grant them to a
 paired device. From the `/api/auth/*` tree, Link ingress answers
 `GET /api/auth/status`, and for a full-access device (an unguarded account)
-also `GET /api/auth/accounts` and `GET /api/auth/me` for the device's own
-account (`handlePairedRead` in `@polyth/identity`, gated in
-`packages/server/src/http.ts`). That account list is read-only: `canManage` is
-false and `readOnly: true` (`canManageInBrowser` for an owner) tells Settings →
-Users to send changes to a browser signed in to the server. Account changes,
-passkeys, sessions and every other identity route need a browser identity
-session (same origin, CSRF, owner re-authentication) and stay
-public-HTTP-only.
+also `GET /api/auth/accounts`, `GET /api/auth/me` and `GET /api/auth/cli` for
+the device's own account (`handlePairedRead` in `@polyth/identity`, gated in
+`packages/server/src/http.ts`). These answers are read-only: `readOnly: true`
+(with `canManage` and `canManageTrust` false, and `canManageInBrowser` for an
+owner on the account list) tells Settings → Users and Command line to send
+changes to a browser signed in to the server. Account and token changes,
+terminal sign-in approval, passkeys, sessions and every other identity route
+need a browser identity session (same origin, CSRF, owner re-authentication)
+and stay public-HTTP-only.
+
+A route that refuses paired devices itself must let a full-access device
+through (`principalHasFullAccess`), as `/api/system/info` and
+`/api/system/releases` (Settings → About) do; `principal.kind` alone does not
+say what the device may do. Its data directory stays a generic label off
+loopback.
 
 See `packages/server/src/remotePolicy.ts` and each package `serverEntry`.
 

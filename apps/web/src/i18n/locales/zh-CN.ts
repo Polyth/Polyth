@@ -3235,6 +3235,7 @@ export const zhCN: AppMessages = {
   "settings.quickActions.sampleAgent": "代理",
   "settingsview.commandLine": "命令行",
   "settings.commandline.blurb": "将终端和脚本登录到 Polyth，并管理它们可以执行的操作。",
+  "settings.commandline.manageInBrowser": "请在已登录此服务器的浏览器中创建或撤销访问权限，并批准终端登录。",
   "settings.commandline.loadFailed": "命令行访问无法加载",
   "settings.commandline.confirmTitle": "确认终端登录",
   "settings.commandline.confirmHint": "在终端中运行“polyth login”，然后输入它显示的代码。",

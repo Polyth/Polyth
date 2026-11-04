@@ -6,6 +6,7 @@ import { controlError, digest } from '@polyth/control-plane';
 import { newToken, validToken } from './validation.ts';
 import type { IdentitySession, IdentityUser } from './types.ts';
 import type { IdentityService } from './index.ts';
+import type { AccessTokenSummary } from './accessTokens.ts';
 
 const loopback = (address?: string): boolean => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '');
 
@@ -225,11 +226,20 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     usage: identity.limits.usage(user.id),
     permissions: identity.permissions.forUser(user.id).permissions,
   });
+  const cliBody = (tokens: readonly AccessTokenSummary[], canManageTrust: boolean) => {
+    const trust = identity.accessTokens.trust.get();
+    return {
+      tokens,
+      profiles: identity.accessTokens.profiles(),
+      trust: canManageTrust ? trust : { mode: trust.mode, revision: trust.revision },
+      canManageTrust,
+    };
+  };
   return {
     cookieName,
     requireHuman,
     /**
-     * `GET /api/auth/accounts` and `GET /api/auth/me` for an account the host
+     * `GET /api/auth/accounts`, `/me` and `/cli` for an account the host
      * authenticated without a browser session: a full-access paired device.
      * Only reads. Management and self-service need a browser identity session
      * (same origin, CSRF, owner re-authentication), so `canManage` stays false
@@ -238,7 +248,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
      */
     handlePairedRead(req: IncomingMessage, res: ServerResponse, userId: string): boolean {
       const path = req.url;
-      if (req.method !== 'GET' || (path !== '/api/auth/accounts' && path !== '/api/auth/me')) return false;
+      if (req.method !== 'GET' || (path !== '/api/auth/accounts' && path !== '/api/auth/me' && path !== '/api/auth/cli')) return false;
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -246,11 +256,13 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
       try {
         body = path === '/api/auth/me'
           ? meBody(identity.accounts.byUser.current(userId))
-          : {
-              ...accountsBody(userId, identity.accounts.byUser.list(userId), false),
-              readOnly: true,
-              ...(identity.accounts.byUser.isOwner(userId) ? { canManageInBrowser: true } : {}),
-            };
+          : path === '/api/auth/cli'
+            ? { ...cliBody(identity.accessTokens.byUser.list(userId), false), readOnly: true }
+            : {
+                ...accountsBody(userId, identity.accounts.byUser.list(userId), false),
+                readOnly: true,
+                ...(identity.accounts.byUser.isOwner(userId) ? { canManageInBrowser: true } : {}),
+              };
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
         const safeCode = typeof code === 'string' && Object.hasOwn(statusFor, code) ? code : 'internal-error';
@@ -316,14 +328,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             send(200, identity.permissions.get(token!, accountPermissionsPath.exec(path)![1]!));
           }
           else if (path === '/api/auth/cli') {
-            const canManageTrust = identity.accounts.canManage(token!);
-            const trust = identity.accessTokens.trust.get();
-            send(200, {
-              tokens: identity.accessTokens.list(token!),
-              profiles: identity.accessTokens.profiles(),
-              trust: canManageTrust ? trust : { mode: trust.mode, revision: trust.revision },
-              canManageTrust,
-            });
+            send(200, cliBody(identity.accessTokens.list(token!), identity.accounts.canManage(token!)));
           }
           else if (path === '/api/auth/passkeys') send(200, { passkeys: identity.passkeys.list(token!) });
           else if (path === '/api/auth/links') send(200, { links: linkService().list(token!) });

@@ -197,6 +197,14 @@ export function createAccessTokens(
     return { token, summary: summary(row) };
   };
 
+  const listFor = (userId: string): AccessTokenSummary[] => control.all<TokenRow>(
+    `SELECT t.* FROM access_tokens t JOIN principals p ON p.id=t.user_id
+      WHERE t.user_id=? AND t.revoked_at_ms IS NULL AND t.auth_epoch=p.auth_epoch
+        AND (t.expires_at_ms IS NULL OR t.expires_at_ms>?)
+      ORDER BY t.created_at_ms DESC, t.id`,
+    userId, now(),
+  ).map(summary);
+
   return {
     profiles(): Record<string, string[]> {
       const { profiles } = requirePolicy();
@@ -236,16 +244,11 @@ export function createAccessTokens(
 
     /** Tokens the signed-in person owns that can still be used. */
     list(sessionToken: string): AccessTokenSummary[] {
-      const actor = sessions.require(sessionToken);
-      const time = now();
-      return control.all<TokenRow>(
-        `SELECT t.* FROM access_tokens t JOIN principals p ON p.id=t.user_id
-          WHERE t.user_id=? AND t.revoked_at_ms IS NULL AND t.auth_epoch=p.auth_epoch
-            AND (t.expires_at_ms IS NULL OR t.expires_at_ms>?)
-          ORDER BY t.created_at_ms DESC, t.id`,
-        actor.userId, time,
-      ).map(summary);
+      return listFor(sessions.require(sessionToken).userId);
     },
+    /** The same read for an account the host authenticated without a browser
+     *  session (a full-access paired device). */
+    byUser: { list: listFor },
 
     /** Web UI: create an automation token. Requires a recent sign-in. */
     create(sessionToken: string, input: {
