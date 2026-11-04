@@ -15,6 +15,8 @@ import {
   promptRowLabel,
   promptRowTops,
   railWindow,
+  scrollbarRailBox,
+  scrollbarThickness,
   tickWidth,
 } from "../src/promptRail.ts";
 
@@ -115,6 +117,42 @@ test("rail inset ignores chrome beside the chat or covering most of it", () => {
   assert.equal(promptRailInset(viewport, [{ left: 320, right: 1300, top: 50, bottom: 850 }], "right"), RAIL_EDGE_GAP);
   // Hidden (zero-size) chrome costs nothing.
   assert.equal(promptRailInset(viewport, [{ left: 1300, right: 1300, top: 0, bottom: 0 }], "right"), RAIL_EDGE_GAP);
+});
+
+test("scrollbar thickness excludes the scroller borders and overlay scrollbars", () => {
+  // A classic 10px scrollbar inside a 4px launcher-strip lane border.
+  assert.equal(scrollbarThickness(1000, 986, 0, 4), 10);
+  // Overlay scrollbars (macOS, mobile) take no layout width.
+  assert.equal(scrollbarThickness(1000, 1000, 0, 0), 0);
+  // Borders only: no scrollbar, and no negative thickness.
+  assert.equal(scrollbarThickness(1000, 992, 0, 8), 0);
+  assert.equal(scrollbarThickness(1000, 1004, 0, 0), 0);
+});
+
+test("scrollbarRailBox follows the scrollbar edge and includes its border", () => {
+  assert.deepEqual(scrollbarRailBox(viewport, 10, "ltr", "right", 0, 0),
+    { left: 1290, right: 1300, top: 50, bottom: 850 });
+  assert.deepEqual(scrollbarRailBox(viewport, 10, "rtl", "left", 0, 0),
+    { left: 300, right: 310, top: 50, bottom: 850 });
+  // The rail on the free edge and overlay scrollbars get no box.
+  assert.equal(scrollbarRailBox(viewport, 10, "ltr", "left", 0, 0), null);
+  assert.equal(scrollbarRailBox(viewport, 10, "rtl", "right", 0, 0), null);
+  assert.equal(scrollbarRailBox(viewport, 0, "ltr", "right", 0, 0), null);
+  // The inline-end border (the launcher-strip lane) sits outside the scrollbar.
+  assert.deepEqual(scrollbarRailBox(viewport, 10, "ltr", "right", 0, 20),
+    { left: 1270, right: 1300, top: 50, bottom: 850 });
+});
+
+test("rail inset clears a classic scrollbar on its own edge only", () => {
+  const rightBar = scrollbarRailBox(viewport, 10, "ltr", "right", 0, 0)!;
+  assert.equal(promptRailInset(viewport, [rightBar], "right"), 10 + RAIL_EDGE_GAP);
+  assert.equal(promptRailInset(viewport, [rightBar], "left"), RAIL_EDGE_GAP);
+  const leftBar = scrollbarRailBox(viewport, 10, "rtl", "left", 0, 0)!;
+  assert.equal(promptRailInset(viewport, [leftBar], "left"), 10 + RAIL_EDGE_GAP);
+  assert.equal(promptRailInset(viewport, [leftBar], "right"), RAIL_EDGE_GAP);
+  // Chrome already reaching past the scrollbar is not counted twice.
+  const strip = { left: 1260, right: 1300, top: 0, bottom: 900 };
+  assert.equal(promptRailInset(viewport, [strip, rightBar], "right"), 40 + RAIL_EDGE_GAP);
 });
 
 test("prompt row labels read as sentences without rewriting code-like input", () => {

@@ -69,8 +69,11 @@ import {
   promptRailInset,
   promptRowLabel,
   railWindow,
+  scrollbarRailBox,
+  scrollbarThickness,
   tickWidth,
   type PromptRailSide,
+  type RailBox,
 } from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import { useTimelineCompanion, useTimelineSessionId } from "../timelineSession.ts";
@@ -1342,19 +1345,44 @@ function PromptNavigator({ prompts, side, onJump, containerRef, canLoadOlder, ol
   // (full-height strip, floating cluster, pinned pane beside the chat), and
   // the navigator collapses/expands, so the inset is measured, never a
   // constant. Every one of those changes resizes the viewport or the chrome.
+  // A classic scrollbar is drawn on the scroller's inline-end edge, where the
+  // rail would otherwise sit on top of it, so the measured thickness of a
+  // visible scrollbar is added for a rail on that same edge only.
   useLayoutEffect(() => {
     const nav = navRef.current;
     const viewport = nav?.parentElement;
     if (!nav || !viewport) return;
+    const scroller = containerRef.current;
     const shell = nav.closest(".app-shell") ?? nav.ownerDocument;
     const obstacles = Array.from(shell.querySelectorAll<HTMLElement>(".railbar, .sidebar"))
       .filter((element) => !element.contains(nav));
     const measure = () => {
-      setInset(promptRailInset(viewport.getBoundingClientRect(), obstacles.map((element) => element.getBoundingClientRect()), side));
+      const view = nav.ownerDocument.defaultView;
+      const style = scroller && view ? view.getComputedStyle(scroller) : null;
+      const viewportBox = viewport.getBoundingClientRect();
+      const boxes: RailBox[] = obstacles.map((element) => element.getBoundingClientRect());
+      const scrollbar = scroller && style
+        ? scrollbarRailBox(
+          viewportBox,
+          scrollbarThickness(
+            scroller.offsetWidth,
+            scroller.clientWidth,
+            Number.parseFloat(style.borderLeftWidth),
+            Number.parseFloat(style.borderRightWidth),
+          ),
+          style.direction,
+          side,
+          Number.parseFloat(style.borderLeftWidth),
+          Number.parseFloat(style.borderRightWidth),
+        )
+        : null;
+      if (scrollbar) boxes.push(scrollbar);
+      setInset(promptRailInset(viewportBox, boxes, side));
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(viewport);
+    if (scroller) observer?.observe(scroller);
     for (const element of obstacles) observer?.observe(element);
     const view = nav.ownerDocument.defaultView;
     view?.addEventListener("resize", measure);
@@ -1362,7 +1390,7 @@ function PromptNavigator({ prompts, side, onJump, containerRef, canLoadOlder, ol
       observer?.disconnect();
       view?.removeEventListener("resize", measure);
     };
-  }, [side]);
+  }, [side, containerRef]);
 
   // Scroll-spy: the active turn is the last prompt at/above the viewport
   // midline; at the very bottom the newest rendered prompt always wins (its

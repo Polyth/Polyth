@@ -127,7 +127,10 @@ test("rail edge offset is measured, mirrors for a left rail, and leaves the book
   assert.match(css, /@media \(max-width: 1100px\)\s*\{\s*\.prompt-nav\s*\{\s*display:\s*none;\s*\}\s*\.prompt-bookmark\[data-narrow="off"\]\s*\{\s*display:\s*none/);
   assert.match(css, /@media \(min-width: 1101px\)\s*\{\s*\.prompt-bookmark\[data-wide="off"\]\s*\{\s*display:\s*none/);
   assert.doesNotMatch(css, /:has\(> \.prompt-nav\) > \.prompt-bookmark/, "an enabled desktop bookmark must not be hidden by the rail");
-  assert.match(source, /promptRailInset\(viewport\.getBoundingClientRect\(\)/);
+  assert.match(source, /promptRailInset\(viewportBox, boxes, side\)/);
+  assert.match(source, /scrollbarRailBox\(/);
+  assert.match(source, /scrollbarThickness\(/);
+  assert.match(source, /observer\?\.observe\(scroller\)/, "the scroller is observed: a scrollbar appearing shrinks its content box");
   assert.match(source, /data-side=\{side\}/);
   assert.match(source, /side=\{prefs\.promptNavigatorSide\}/);
 });

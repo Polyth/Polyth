@@ -378,7 +378,14 @@ Chat). Its offset is measured, not a constant: `promptRailInset`
 launcher strip, the 961–1400px floating cluster, a slide-over pane), while
 in-flow chrome beside the chat (expanded/collapsed navigator, pinned pane) costs
 nothing. A ResizeObserver re-measures on every collapse/expand. A left rail also
-reserves its gutter in the transcript's left padding.
+reserves its gutter in the transcript's left padding. A classic (layout)
+scrollbar is measured separately (`scrollbarThickness`, `scrollbarRailBox` in
+the same module) and treated as chrome on the scroller's inline-end edge: the
+rail clears it only when it sits on that same side, overlay scrollbars cost
+nothing, and a launcher strip already reaching past the scrollbar is not
+counted twice. The scroller itself is observed too, because a scrollbar
+appearing or disappearing changes its content box without resizing the rail's
+viewport.
 
 The rail's hover panel and the bookmark peek share `.prompt-nav-row`: text two
 pixels above `--font-meta`, clamped to two lines, with no leading mark (the tape
