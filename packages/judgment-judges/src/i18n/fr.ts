@@ -236,7 +236,6 @@ export const fr: JudgmentJudgesMessages = {
   "judgesui.markerSkipped": "{name} ignoré",
   "judgesui.markerWithDetail": "{text} : {detail}",
   "judgesui.markerLikely": "{percent} probable",
-  "judgesui.markerLabelLikely": "{label}, {percent} probable",
   "judgesui.markerAria": "Judgment : {title}",
   "judgesui.markerVerify": "Demander à l’agent de vérifier",
   "judgesui.markerDraft": "Rédiger une relance",

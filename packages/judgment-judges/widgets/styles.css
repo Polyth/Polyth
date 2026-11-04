@@ -108,18 +108,140 @@
   .judges-table .judges-table-title { grid-column: 1 / -1; width: auto; max-width: none; white-space: normal; overflow-wrap: anywhere; color: var(--text); }
 }
 
-/* Timeline marker: a quiet note on the turn above it, left-aligned with the answer; highlighted when it needs the person. */
-.judges-marker { display: grid; justify-items: start; gap: 2px; min-width: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
-.judges-marker-body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; max-width: 100%; }
-/* Judge names are the person's own and may be long: they wrap as a tag rather than overflow as a pill. */
-.judges-marker .ui-badge { white-space: normal; overflow-wrap: anywhere; max-width: 100%; border-radius: var(--radius-control); }
-.judges-marker-detail { font-variant-numeric: tabular-nums; }
-.judges-marker-body > .ui-btn--ghost { margin-inline-start: calc(-1 * var(--space-1)); color: var(--text); }
-/* What the judge did with its owner's access: one quiet line per action; a failure reads in the danger ink. */
-.judges-marker-actions { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; max-width: 100%; }
-.judges-marker-action { padding-inline-start: var(--space-3); color: var(--text-dim); overflow-wrap: anywhere; }
+/* Timeline marker: the trace of a decision a judge made for its person (the
+   request card it may have answered is gone by then), as a quiet note in the
+   transcript like the paused notice: the theme's overlay tint and card
+   corners, no outline, so Borderless leaves it as is. Its edge is on the
+   prose edge and its content is inset like the chip activity pill's, so
+   under that pill the glyph and the name fall on the pill's columns. One head
+   line: the judge's glyph, its name and, on the trailing edge, its answer
+   with the request card's chance meter. Under the name, each thing it did
+   with a mark for its outcome, nested like an activity step, then the
+   follow-up; every line keeps one pitch. The glyph and the name step up for
+   attention (amber) and a failed action (red); the words carry the meaning.
+   Inks are the chat's text-safe roles. */
+.judges-marker {
+  --judges-marker-line-gap: 2px;
+  /* The smaller marks keep the 16px glyph's drawn stroke (Lucide 1.75 at 16px). */
+  --judges-marker-mark-size: 13px;
+  --judges-marker-mark-stroke: calc(1.75 * 16 / 13);
+  container: judges-marker / inline-size;
+  justify-self: start;
+  align-self: flex-start;
+  inline-size: min(100%, 32rem);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--judges-marker-line-gap) var(--conversation-row-gap);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  color: var(--muted);
+  font-size: var(--font-technical);
+  line-height: var(--font-technical-lh);
+}
+.judges-marker > :not(.judges-marker-mark) { grid-column: 2; min-width: 0; }
+/* The glyph sits on the head's first line, however far a long name wraps. */
+.judges-marker-mark {
+  grid-column: 1;
+  grid-row: 1;
+  inline-size: var(--icon-md);
+  block-size: var(--font-tool-label-lh);
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-dim);
+}
+.judges-marker[data-tone="warning"] .judges-marker-mark { color: var(--amber); }
+.judges-marker[data-tone="danger"] .judges-marker-mark { color: var(--red); }
+.judges-marker-head { grid-row: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: var(--space-3); }
+/* Judge names are the person's own and may be long: they wrap. The name
+   speaks in the activity summary's voice. */
+.judges-marker-title {
+  color: var(--text-dim);
+  font-size: var(--font-tool-label);
+  font-weight: 500;
+  line-height: var(--font-tool-label-lh);
+  overflow-wrap: anywhere;
+}
+.judges-marker[data-tone] .judges-marker-title { color: var(--text); }
+/* The words give the line its baseline (the meter has none) and the meter
+   sits on the line's middle, with or without an answer before it. */
+.judges-marker-detail { display: inline-flex; align-items: baseline; gap: var(--space-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.judges-marker-answer { color: var(--text-dim); }
+.judges-marker-meter {
+  position: relative;
+  flex: none;
+  align-self: center;
+  inline-size: 2.5rem;
+  block-size: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+}
+.judges-marker-meter::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: calc(var(--judges-marker-chance, 0) * 100%);
+  border-radius: inherit;
+  background: var(--muted);
+}
+/* What the judge did with its owner's access: one line per outcome, its mark
+   in an icon column under the name like an activity step's; a skip is
+   quiet, a failure reads in red. */
+.judges-marker-actions { display: grid; gap: var(--judges-marker-line-gap); margin: 0; padding: 0; list-style: none; }
+.judges-marker-action {
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--conversation-related-gap);
+  color: var(--text-dim);
+}
+.judges-marker-action-mark { block-size: var(--font-technical-lh); display: inline-grid; place-items: center; color: var(--muted); }
+.judges-marker :is(.judges-marker-action-mark, .judges-marker-follow) .ui-icon {
+  inline-size: var(--judges-marker-mark-size);
+  block-size: var(--judges-marker-mark-size);
+  stroke-width: var(--judges-marker-mark-stroke);
+}
+.judges-marker-action-text { overflow-wrap: anywhere; }
 .judges-marker-action[data-status="skipped"] { color: var(--muted); }
-.judges-marker-action[data-status="failed"] { color: var(--danger); }
+.judges-marker-action[data-status="failed"],
+.judges-marker-action[data-status="failed"] .judges-marker-action-mark { color: var(--red); }
+/* The follow-up is a ghost action laid on an outcome line: its glyph in the
+   icon column (in the accent, the card's one action), its words on the
+   outcomes' edge, one line tall. The hover band reaches a little around it
+   and the touch box out to the hit size. */
+.judges-marker-follow { display: flex; }
+.judges-marker-follow > .ui-btn--ghost {
+  --judges-follow-band: 3px;
+  --judges-follow-inset: calc((var(--icon-md) - var(--judges-marker-mark-size)) / 2);
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--conversation-related-gap);
+  margin: calc(-1 * var(--judges-follow-band)) calc(-1 * var(--space-1));
+  padding: var(--judges-follow-band) calc(var(--space-1) + var(--judges-follow-inset)) var(--judges-follow-band) var(--space-1);
+  border: 0;
+  color: var(--text-dim);
+  font-size: var(--font-technical);
+  font-weight: 500;
+  line-height: var(--font-technical-lh);
+}
+.judges-marker-follow > .ui-btn--ghost .ui-icon { margin-inline: var(--judges-follow-inset); color: var(--accent-text); }
+.judges-marker-follow > .ui-btn--ghost::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block: min(0px, calc((100% - var(--hit-min)) / 2));
+}
+/* A narrow column puts the answer under the name and drops the meter. */
+@container judges-marker (max-width: 20rem) {
+  .judges-marker-head { grid-template-columns: minmax(0, 1fr); }
+  .judges-marker-meter { display: none; }
+}
 
 /* A permission judge's note inside a request's card, just above its decisions: the
    verdict as a tag, the judge, and its chance that the request is safe as a short meter;

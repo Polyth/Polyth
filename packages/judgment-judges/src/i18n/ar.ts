@@ -236,7 +236,6 @@ export const ar: JudgmentJudgesMessages = {
   "judgesui.markerSkipped": "تم تخطي: {name}",
   "judgesui.markerWithDetail": "{text}: {detail}",
   "judgesui.markerLikely": "احتمال {percent}",
-  "judgesui.markerLabelLikely": "{label}، احتمال {percent}",
   "judgesui.markerAria": "Judgment: {title}",
   "judgesui.markerVerify": "اطلب من الوكيل التحقق",
   "judgesui.markerDraft": "صياغة متابعة",

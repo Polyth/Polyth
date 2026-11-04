@@ -302,6 +302,28 @@ html[data-theme-style="liquid-glass"] .ui-btn--danger {
 html[data-theme-style="liquid-glass"] .ui-btn--danger:active:not(:disabled) {
   background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 12%), transparent);
 }
+/* The transcript's inline Stop is the same tinted capsule: this style draws
+   no outlines, so it gives up the red line the other styles keep (in
+   Borderless too). Its size and corner stay the shared Stop's. */
+html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger {
+  --execution-stop-line: transparent;
+  background: color-mix(in srgb, var(--red) var(--lg-tint), transparent);
+  color: var(--red);
+}
+@media (hover: hover) {
+  html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger:hover:not(:disabled) {
+    --execution-stop-line: transparent;
+    background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 6%), transparent);
+  }
+}
+html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger:focus-visible:not(:disabled) {
+  --execution-stop-line: transparent;
+  background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 6%), transparent);
+}
+html[data-theme-style="liquid-glass"] .execution-stop.ui-btn.ui-btn--danger:active:not(:disabled) {
+  --execution-stop-line: transparent;
+  background: color-mix(in srgb, var(--red) calc(var(--lg-tint) + 12%), transparent);
+}
 /* Default button: the flat accent capsule; pressing darkens it. */
 html[data-theme-style="liquid-glass"] .ui-btn--primary {
   background: var(--accent);

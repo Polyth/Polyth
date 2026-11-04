@@ -2440,7 +2440,8 @@ Nothing after the block waits for it: the next thought, answer or block renders
 the moment it arrives. Everything that describes the line follows the words on
 screen, not the newest event: the block's accessible name always contains the
 visible line, and a command the line names gets its Stop beside the line
-(outside its button) only once it has run for 700 ms, so short steps never
+(outside its button; drawn per style as in [styles](styles.md#theme-layers),
+the pill's twin beside a Chip or Air pill) only once it has run for 700 ms, so short steps never
 flash it; an open block shows the step's own Stop instead, a delegated agent is
 stopped from its session, and a Stop that leaves while focused hands focus to
 the line. Lines are never a touch target. Reduced motion, the low-resource

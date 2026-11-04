@@ -1565,7 +1565,19 @@ body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop {
   grid-template-columns: minmax(0, max-content) auto;
   justify-content: start;
 }
-body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop > .activity-live-stop { margin-inline-start: 8px; }
+body[data-shell-look="air"]:not(#\#) .activity-group.has-live-stop > .activity-live-stop {
+  align-self: stretch;
+  margin-inline-start: 8px;
+}
+/* The pill's twin: its height and side room, lifted with it, in the red
+   wash. */
+body[data-shell-look="air"]:not(#\#) .activity-live-stop > .execution-stop.ui-btn {
+  padding-inline: 14px;
+}
+body[data-shell-look="air"]:not(#\#) .activity-live-stop > .execution-stop.ui-btn:not(:disabled) {
+  box-shadow: var(--look-shadow) !important;
+}
+body[data-shell-look="air"]:not(#\#) .activity-live-stop > .execution-stop.ui-btn::after { inset-block: 0; }
 
 body[data-shell-look="air"]:not(#\#) .activity-group.open {
   background: var(--look-island) !important;

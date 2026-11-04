@@ -990,6 +990,20 @@ A style recipe must read the colour roles (`--accent`, `--accent-ink`,
 `--bg`…), never a hard-coded palette colour, so it draws any scheme; neutral
 ink alphas (black/white strokes, fills, shadows) are part of the style.
 
+**The transcript's inline Stop** (`.execution-stop`, a running command's Stop
+beside the live activity line or in a step row) is a transcript control, not a
+push button. Under every style it is a capsule at `--control-h-sm` (the
+style's compact height) with red ink: a red outline with no fill or drop
+under Classic, macOS and Fluent (the variant class `.ui-btn--danger` lifts
+its rule over their push-button plates, bevels and corners, and Fluent's
+Borderless edge rule exempts it), the kit's tinted red capsule without a line
+under Liquid Glass, and the interface style's red wash in its control corner
+under an interface style. Beside a drawn pill (the Chip activity style under
+the Standard interface style, and Air's pill) it takes the pill's full height
+and side room, so the two read as one strip. A style that draws it its own way
+names `.execution-stop.ui-btn.ui-btn--danger` and sets `--execution-stop-line`
+(the outline Borderless keeps) instead of repainting `.ui-btn--danger`.
+
 ## Liquid Glass theme style
 
 `liquid-glass` (style **macOS 27** — the base style and the default of a fresh

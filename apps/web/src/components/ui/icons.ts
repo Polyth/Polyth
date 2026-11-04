@@ -223,6 +223,7 @@ export {
   ShieldCheck as ShieldIcon,
   ShieldAlert as ShieldAlertIcon,
   Shield as ShieldEmptyIcon,
+  Scale as JudgeIcon,
   Server as ServerIcon,
   Database as DatabaseIcon,
   Loader as LoaderIcon,

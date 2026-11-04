@@ -15637,10 +15637,15 @@ color: var(--text);
   gap: var(--space-2);
 }
 .execution-summary-line > .execution-summary { min-width: 0; flex: 1 1 auto; }
-/* Inline command stop: a red outline with no fill, one of the few contours
-   in the transcript. Red stays the meaning; nothing else around it is boxed.
-   Its outline is a deliberate exception to Borderless appearance. */
-.execution-stop.ui-btn {
+/* Inline command stop: a red outline capsule with no fill, one of the few
+   contours in the transcript. Red stays the meaning; nothing else around it
+   is boxed. Its outline is a deliberate exception to Borderless appearance.
+   It is a transcript control, not a push button: the variant class lifts
+   these rules over the platform styles' push-button plates, bevels, drops
+   and corners (macOS, Fluent, Liquid Glass), so a style that draws it its
+   own way says so by name (liquidGlassTheme.css), and the interface styles
+   keep their red wash through their !important layer. */
+.execution-stop.ui-btn.ui-btn--danger {
   position: relative;
   flex: none;
   min-height: var(--control-h-sm);
@@ -15660,20 +15665,25 @@ color: var(--text);
   position: absolute;
   inset: min(0px, calc((var(--hit-min) - var(--control-h-sm)) / -2));
 }
-.execution-stop.ui-btn:focus-visible:not(:disabled) {
+.execution-stop.ui-btn.ui-btn--danger:focus-visible:not(:disabled) {
   --execution-stop-line: color-mix(in srgb, var(--red) 62%, transparent);
   background: color-mix(in srgb, var(--red) 8%, transparent);
   color: var(--red);
 }
 @media (hover: hover) {
-  .execution-stop.ui-btn:hover:not(:disabled) {
+  .execution-stop.ui-btn.ui-btn--danger:hover:not(:disabled) {
     --execution-stop-line: color-mix(in srgb, var(--red) 62%, transparent);
     background: color-mix(in srgb, var(--red) 8%, transparent);
     color: var(--red);
   }
 }
+.execution-stop.ui-btn.ui-btn--danger:active:not(:disabled) {
+  --execution-stop-line: color-mix(in srgb, var(--red) 62%, transparent);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  color: var(--red);
+}
 .execution-stop.ui-btn .ui-icon { color: currentColor; }
-.execution-stop.ui-btn[aria-busy="true"] {
+.execution-stop.ui-btn.ui-btn--danger[aria-busy="true"] {
   --execution-stop-line: color-mix(in srgb, var(--red) 52%, transparent);
   background: color-mix(in srgb, var(--red) 6%, transparent);
 }
@@ -18536,6 +18546,14 @@ body[data-activity-style="chip"] .activity-group.has-live-stop {
   justify-content: start;
 }
 body[data-activity-style="chip"] .activity-group.has-live-stop > .activity-live-stop { margin-inline-start: var(--space-2); }
+/* Beside the outlined pill the Stop is its twin: the pill's height, so the
+   two capsules read as one strip instead of a small tag next to a big one.
+   Already a full touch box, it reaches no further up or down. (An
+   interface style flattens the pill to a line, so there it stays compact;
+   Air pairs it with its own pill.) */
+body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="standard"]) .activity-group.has-live-stop > .activity-live-stop { align-self: stretch; }
+body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="standard"]) .activity-live-stop > .execution-stop.ui-btn.ui-btn--danger { padding-inline: var(--space-3); }
+body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="standard"]) .activity-live-stop > .execution-stop.ui-btn::after { inset-block: 0; }
 
 /* Margin: where the conversation frame leaves a gutter (wider than the
    compact shell, which pads by at least --gutter), the icons hang in it and

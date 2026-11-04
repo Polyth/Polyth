@@ -236,7 +236,6 @@ export const uk: JudgmentJudgesMessages = {
   "judgesui.markerSkipped": "{name}: пропущено",
   "judgesui.markerWithDetail": "{text}: {detail}",
   "judgesui.markerLikely": "імовірність {percent}",
-  "judgesui.markerLabelLikely": "{label}, імовірність {percent}",
   "judgesui.markerAria": "Judgment: {title}",
   "judgesui.markerVerify": "Попросити агента перевірити",
   "judgesui.markerDraft": "Чернетка продовження",
