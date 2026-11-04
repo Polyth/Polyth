@@ -2416,7 +2416,9 @@ fill.
 **The live line:** a block is one row, live or not. While it is the tail of a
 working turn (nothing follows it yet), its summary line names the step in
 progress — the step's glyph, its name and quiet preview, exactly as the folded
-step reads (`ActivityTicker.tsx`, `activityTicker.ts`). Each new step takes
+step reads (`ActivityTicker.tsx`, `activityTicker.ts`). On a narrow line only
+the preview gives way; the name stays whole (a runaway tool name is capped at
+60% of the line). Each new step takes
 the line's place in it: the old words rise away as the new ones rise in, in one
 grid cell, transform and opacity only, so the block never adds, removes or
 resizes a row while it works (the leaving words are out of flow, so a look whose

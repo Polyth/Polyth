@@ -18385,7 +18385,17 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   gap: var(--space-2);
   overflow: hidden;
 }
-.activity-group .activity-ticker-step strong { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; }
+/* The step's name is the anchor of the line and never gives way to the
+   preview: WebKit still shrank a weighted `0 1 auto` name to "Sear…" on a
+   393pt phone. Only a runaway tool name is capped, so its preview keeps room. */
+.activity-group .activity-ticker-step strong {
+  flex: none;
+  max-inline-size: 60%;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .activity-group .activity-ticker-line .activity-ticker-preview {
   flex: 0 1000 auto;
   min-width: 0;
