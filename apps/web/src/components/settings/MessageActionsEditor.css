@@ -71,7 +71,7 @@
 .mqa-preview-line {
   display: block;
   block-size: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--hair-strong);
 }
 
@@ -104,7 +104,7 @@
 .mqa-preview-logo {
   inline-size: var(--icon-md);
   block-size: var(--icon-md);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: linear-gradient(135deg, var(--accent), var(--accent-line));
 }
 

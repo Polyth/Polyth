@@ -311,8 +311,11 @@ test("every look radius follows Corner rounding: no literal corner but pills and
     }
   }
   assert.deepEqual(literal, []);
-  // --look-round is the platform styles' divisor, so rounding 9 draws these radii.
-  assert.match(css, /--look-round: calc\(var\(--corner-radius-scale\) \/ 1\.8\);/);
+  // --look-round is the platform styles' divisor, so rounding 9 draws these
+  // radii; the last notch adds one step so a look's maximum reads as maximum.
+  assert.match(css, /--look-round: calc\(var\(--corner-radius-scale\) \/ 1\.8 \+ var\(--corner-max\) \* 1\.5\);/);
+  // A look's pill squares with the setting rather than staying a frozen 999px.
+  assert.doesNotMatch(css, /radius:\s*999px/);
 });
 
 test("Monolith column corners do not reference the rail radius Floating columns derive from them", async () => {

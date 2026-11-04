@@ -656,7 +656,7 @@
 :is(.usage-clean-mix-legend, .usage-clean-split-legend) > li > i {
   width: 10px;
   height: 10px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--usage-tone);
 }
 
@@ -1052,7 +1052,7 @@
   block-size: 24px;
   display: grid;
   place-items: center;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--text-dim);
   background: var(--surface-overlay);
   font-size: var(--font-meta);
@@ -1504,7 +1504,7 @@
 .usage-clean-harness-swatch {
   width: 10px;
   height: 10px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--usage-tone);
 }
 
@@ -1828,7 +1828,7 @@
   height: 5px;
   margin-top: var(--space-2);
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: var(--surface-overlay);
 }
 
@@ -2072,7 +2072,7 @@
   display: inline-flex;
   align-items: center;
   padding: 1px var(--space-2);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   font-size: var(--font-meta);
   line-height: 1.5;
   white-space: nowrap;

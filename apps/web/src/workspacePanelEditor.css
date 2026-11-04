@@ -53,7 +53,7 @@
   place-items: center;
   width: var(--tap);
   height: var(--tap);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--accent-ink);
   background: var(--accent);
   box-shadow: 0 8px 18px -10px var(--accent);
@@ -118,7 +118,7 @@
   width: calc(var(--tap) + var(--space-3));
   height: calc(var(--tap) + var(--space-3));
   margin-bottom: var(--space-1);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--accent);
   background: var(--accent-wash);
 }
@@ -345,7 +345,7 @@
   height: var(--icon-xl);
   padding: 0;
   border: 2px solid var(--material-glass-strong);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--red-ink);
   background: var(--red);
   box-shadow: var(--shadow-sm);

@@ -296,8 +296,8 @@ test("a running turn uses a split only for sendable drafts and keeps Stop standa
   );
   assert.match(
     styles,
-    /\.composer-simple \.composer-stop-primary\s*\{[^}]*width:\s*44px;[^}]*border-radius:\s*50%;/s,
-    "the composer Stop remains a compact round action",
+    /\.composer-simple \.composer-stop-primary\s*\{[^}]*width:\s*44px;[^}]*border-radius:\s*var\(--radius-round\);/s,
+    "the composer Stop remains a compact action in the pill corner",
   );
   assert.match(
     css,

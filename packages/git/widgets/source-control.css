@@ -156,7 +156,9 @@
   border-radius: var(--radius-control);
   background: var(--sunken);
 }
-.source-segmented .ui-btn {
+/* Doubled class: past a platform style's capsule .ui-btn, so a segment stays
+   concentric with its track. */
+.source-segmented .ui-btn.ui-btn {
   min-height: calc(var(--control-h-sm) - 6px);
   border-color: transparent;
   border-radius: calc(var(--radius-control) - 2px);

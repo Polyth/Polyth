@@ -189,6 +189,17 @@
 
   /* One scalable radius vocabulary: controls → cards → surfaces → sheets. */
   --corner-radius-scale: 1;
+  /* 1 only at the last Corner rounding notch (uiPrefs.ts). There every platform
+     style leaves its native radii for one shared, fully rounded geometry, so
+     "maximum" looks the same size of round on Fluent, Big Sur and macOS 27. */
+  --corner-max: 0;
+  --radius-max-control: calc(22px * var(--corner-max));
+  --radius-max-card: calc(22px * var(--corner-max));
+  --radius-max-surface: calc(26px * var(--corner-max));
+  --radius-max-sheet: calc(32px * var(--corner-max));
+  --radius-max-float: calc(28px * var(--corner-max));
+  --radius-max-menu: calc(20px * var(--corner-max));
+  --radius-max-pill: calc(999px * var(--corner-max));
   --radius-control: calc(8px * var(--corner-radius-scale));
   --radius-card: calc(10px * var(--corner-radius-scale));
   --radius-surface: calc(12px * var(--corner-radius-scale));
@@ -198,8 +209,15 @@
   --radius-dock: calc(23px * var(--corner-radius-scale));
   --radius-composer: var(--radius-sheet);
   --radius-bubble: calc(18px * var(--corner-radius-scale));
-  /* Fully rounded. A pill stays a pill at every corner-radius setting. */
-  --radius-round: 999px;
+  /* A pill: anything capsule-shaped that a person reads as a control, tag or
+     track. Full at the default rounding, squares with the setting, and each
+     platform style sets how far its own pills go (a Fluent chip is not a
+     capsule). --radius-circle is a shape that carries meaning and stays round
+     at every setting: spinners, avatars, radios, status dots. */
+  --radius-round: max(calc(14px * var(--corner-radius-scale)), var(--radius-max-pill));
+  --radius-circle: 999px;
+  /* A switch track and its thumb square together, on every platform style. */
+  --radius-switch: calc(5.6px * var(--corner-radius-scale));
 
   /* Deprecated radius aliases. Do not use in new CSS. */
   --radius: var(--radius-control);

@@ -199,8 +199,8 @@ body[data-desktop-low-resource="true"] .session-activity-details {
 .session-activity-task-mark.is-done { color: color-mix(in srgb, var(--green) 74%, var(--muted)); }
 .session-activity-task-mark.is-failed { color: var(--red); }
 .session-activity-task-mark.is-active { box-shadow: 0 0 0 2px var(--accent); border-radius: var(--radius-round); }
-.session-activity-task-mark.is-active i { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-round); background: var(--accent); }
-.session-activity-task-mark.is-pending { width: calc(var(--icon-md) - 4px); height: calc(var(--icon-md) - 4px); margin: 2px; box-shadow: 0 0 0 1px var(--muted); border-radius: var(--radius-round); }
+.session-activity-task-mark.is-active i { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-circle); background: var(--accent); }
+.session-activity-task-mark.is-pending { width: calc(var(--icon-md) - 4px); height: calc(var(--icon-md) - 4px); margin: 2px; box-shadow: 0 0 0 1px var(--muted); border-radius: var(--radius-circle); }
 
 /* Wider surfaces (the desktop overview spans the chat column) reflow the
    figures instead of stretching them: four across, then at a full chat

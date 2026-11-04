@@ -228,7 +228,7 @@
   /* A ring, not a border: Hide interface borders (on by default) clears
    * every border colour. */
   box-shadow: 0 0 0 2px var(--art-status-rail);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--green);
   animation: shell-intro-dot-in 360ms var(--motion-ease) 260ms 1 both;
 }
@@ -336,7 +336,7 @@
   min-height: 0;
   padding: 0;
   border: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   /* --hair-strong is a hairline tint, too faint for a 7px mark on glass. */
   background: color-mix(in srgb, var(--text) 26%, transparent);
   transition: width var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease);

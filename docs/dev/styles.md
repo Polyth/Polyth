@@ -295,6 +295,14 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | Token | Purpose |
 | --- | --- |
 | `--corner-radius-scale` | User-selected multiplier applied to scalable geometry: `cornerRadiusScale(rounding)` in `uiPrefs.ts` — rounding ÷ 5 for 0–9 (the default 9 = 1.8), 2.7 at 10, so the last notch is a visible 1.5× step. Platform styles and interface styles divide it by 1.8 (`--lg-round`, `--fluent-round`, `--macos-round`, `--look-round`) so the default draws their native radii. |
+| `--corner-max` | `1` only at the last rounding notch, else `0`. Opens the `--radius-max-*` floors below: each platform style's roles are `max(native × round, --radius-max-*)`, so maximum is one shared rounded geometry instead of 1.5× a style's native radii (Fluent's 8px composer would stop at 12px beside a full pill). `--look-round` gains `1.5 × --corner-max` for the same reason. |
+| `--radius-max-control` | 22px, controls at the last notch, `0` otherwise. |
+| `--radius-max-card` | 22px, cards, activity and bubbles at the last notch, `0` otherwise. |
+| `--radius-max-surface` | 26px, panels at the last notch, `0` otherwise. |
+| `--radius-max-sheet` | 32px, sheets and dialogs at the last notch, `0` otherwise. |
+| `--radius-max-float` | 28px, composer, islands and docks at the last notch, `0` otherwise. |
+| `--radius-max-menu` | 20px, menus at the last notch, `0` otherwise. |
+| `--radius-max-pill` | 999px, pills at the last notch, `0` otherwise. |
 | `--radius-control` | Buttons, fields, chips, and compact controls. |
 | `--radius-card` | Cards and bounded empty states. |
 | `--radius-surface` | Panels and substantial surfaces. |
@@ -304,7 +312,10 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | `--radius-dock` | Active status docks and floating persistent layers. |
 | `--radius-composer` | Composer-specific radius when its geometry needs an independent role. |
 | `--radius-bubble` | Chat bubbles of people talking in a session. |
-| `--radius-round` | Fully rounded pill; stays circular at every corner-radius setting. |
+| `--radius-round` | A pill: chips, tags, tracks, capsule and icon buttons. Full at the default rounding on macOS 27, squares with the setting, and each platform style sets its reach (Fluent 8px, Big Sur 12px, macOS 27 25px), so a pill keeps its neighbours' corner. Fully round at the last notch. |
+| `--radius-circle` | A shape that carries meaning and stays round at every setting: spinners, avatars, radios, status dots, swatches. Not for anything a person reads as a button. |
+| `--radius-switch` | A switch's track and thumb: full at the default rounding on every platform style, and they square together. |
+| `--look-pill-radius` | An interface style's pill (Air, Obsidian). Squares with the setting the same way. |
 | `--radius` | Deprecated alias of `--radius-control`. |
 | `--radius-sm` | Deprecated alias of `--radius-control`. |
 | `--radius-md` | Deprecated alias of `--radius-card`. |
@@ -312,7 +323,10 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | `--radius-xl` | Deprecated alias of `--radius-surface`. |
 
 Use only the semantic radius roles in new CSS. `50%` and `999px` are reserved
-for circles and pills. General controls retain the 8/10/12/16px calm scale;
+for true circles; a pill is `--radius-round`. Neighbours in one row share a role
+(the phone's navigation island takes `--radius-island`, like the action island
+beside it), and a child inside a track or card is never rounder than its parent
+(`.source-segmented`). General controls retain the 8/10/12/16px calm scale;
 conversation activity, floating islands/docks, and the composer use their
 dedicated semantic roles. A surface pinned inside the transcript (the
 permissions request card) is a transcript card and takes `--radius-card`, not
@@ -712,7 +726,7 @@ desktop plate, and `--look-select-mark` adds a bar on its leading edge.
 - Corners follow **Corner rounding**: every look radius is written at the
   default rounding as `calc(<n>px * var(--look-round))` (`--look-round` =
   `--corner-radius-scale / 1.8`, like the platform styles' divisors), never as
-  a literal length; pills (`999px`) and square corners (`0`) stay as they are.
+  a literal length; square corners (`0`) stay as they are, and pills take `--look-pill-radius`, which follows the setting too.
 - The base glass is set with `!important` and borderless mode clears every
   border with `!important`, so look overrides are `!important`. Lines a look
   draws on purpose restate their colour.
@@ -857,15 +871,15 @@ and the absence of colour literals.
   navigator takes `--look-column-radius` (every look sets one: Paper and
   Editorial their float corner, the Monoliths their rail corner, Line 6px, Air
   22px, Obsidian 18px, all at default rounding), else `--radius-surface`; a
-  floating launcher strip takes `--look-strip-radius` (Obsidian's 999px
-  capsule), then the column radius, then `--radius-surface`, so both floating
+  floating launcher strip takes `--look-strip-radius` (Obsidian's
+  pill), then the column radius, then `--radius-surface`, so both floating
   columns share one corner. A flush column squares its window-side corners
   and rounds both inner ones with `--look-rail-radius` (square in Line and
   Editorial), the slab bar between the columns with the
   column radius. Line and Editorial columns have no fill, so when they float the
   look closes their hairline on every side.
 - Under a look the island is painted by `shellLooks.css` in the look's float
-  material (`--look-float*`, like a menu) as a 999px capsule, and the controls
+  material (`--look-float*`, like a menu) as a pill, and the controls
   inside drop the look's control plates. On any style the controls inside the
   capsule also drop borderless mode's restored contour, so the capsule is the
   only surface.

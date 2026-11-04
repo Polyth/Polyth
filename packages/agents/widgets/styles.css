@@ -603,7 +603,7 @@
   font-variant-numeric: tabular-nums;
 }
 .agents-page .agent-legend li { display: inline-flex; align-items: center; gap: 6px; }
-.agents-page .agent-legend li::before { content: ""; width: 8px; height: 8px; border-radius: var(--radius-round); background: var(--swatch); }
+.agents-page .agent-legend li::before { content: ""; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--swatch); }
 .agents-page .agent-legend b { color: var(--text); font-weight: 600; }
 .agents-page .agent-cache-runs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .agents-page .agent-cache-runs li {
@@ -1896,7 +1896,7 @@
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text-dim);
 }
@@ -1909,7 +1909,7 @@
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--composer-green, var(--accent));
   color: var(--accent-ink);
   box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green, var(--accent)) 80%, transparent);

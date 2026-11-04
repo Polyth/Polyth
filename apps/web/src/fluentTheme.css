@@ -11,17 +11,18 @@ html[data-theme-style="fluent"] {
   /* Two radii, as in Windows 11: 4px for in-page controls and rows, 8px for
      everything that frames or floats (cards, flyouts, dialogs, the composer).
      Rounding is measured from its default (9 → scale 1.8, uiPrefs.ts),
-     which draws these radii exactly; lower squares them, higher rounds a
-     little past Fluent. */
+     which draws these radii exactly; lower squares them, and the last notch
+     takes the shared rounded geometry (--radius-max-*, tokens.css). */
   --fluent-round: calc(var(--corner-radius-scale) / 1.8);
-  --radius-control: calc(4px * var(--fluent-round));
-  --radius-card: calc(8px * var(--fluent-round));
-  --radius-surface: calc(8px * var(--fluent-round));
-  --radius-sheet: calc(8px * var(--fluent-round));
-  --radius-activity: calc(4px * var(--fluent-round));
-  --radius-island: calc(8px * var(--fluent-round));
-  --radius-dock: calc(8px * var(--fluent-round));
-  --radius-composer: calc(8px * var(--fluent-round));
+  --radius-control: max(calc(4px * var(--fluent-round)), var(--radius-max-control));
+  --radius-card: max(calc(8px * var(--fluent-round)), var(--radius-max-card));
+  --radius-surface: max(calc(8px * var(--fluent-round)), var(--radius-max-surface));
+  --radius-sheet: max(calc(8px * var(--fluent-round)), var(--radius-max-sheet));
+  --radius-activity: max(calc(4px * var(--fluent-round)), var(--radius-max-card));
+  --radius-island: max(calc(8px * var(--fluent-round)), var(--radius-max-float));
+  --radius-dock: max(calc(8px * var(--fluent-round)), var(--radius-max-float));
+  --radius-composer: max(calc(8px * var(--fluent-round)), var(--radius-max-float));
+  --radius-round: max(calc(8px * var(--fluent-round)), var(--radius-max-pill));
 
   /* 32px is the Windows standard control, 40px a list row; compact controls
      keep their --hit-min floor on coarse pointers. */

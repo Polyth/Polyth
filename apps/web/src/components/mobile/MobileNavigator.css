@@ -705,7 +705,7 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   inset-inline-end: 8px;
   width: 5px;
   height: 5px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--accent);
 }
 
@@ -1431,7 +1431,7 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   width: 18px;
   height: 18px;
   border: 1.5px solid color-mix(in srgb, var(--muted) 70%, transparent);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--accent-ink);
 }
 .mobile-nav-select-mark.is-selected {
@@ -1675,7 +1675,7 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   height: 14px;
   border: 1.8px solid color-mix(in srgb, var(--accent) 24%, transparent);
   border-top-color: var(--accent);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   animation: mobile-nav-spin .9s linear infinite;
 }
 
@@ -1707,7 +1707,7 @@ body[data-hide-borders="true"] .mobile-nav-running-ring {
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: currentColor;
   color: var(--accent);
 }

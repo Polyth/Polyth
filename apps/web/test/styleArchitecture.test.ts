@@ -137,6 +137,34 @@ test("runtime CSS does not introduce unscaled radius literals", async () => {
   }
 });
 
+test("Corner rounding reaches every pill, and the last notch is one geometry on every platform style", async () => {
+  const [tokens, fluent, macos, glass, styles, composer] = await Promise.all([
+    read("../src/tokens.css"),
+    read("../src/fluentTheme.css"),
+    read("../src/macosTheme.css"),
+    read("../src/liquidGlassTheme.css"),
+    read("../src/styles.css"),
+    read("../src/composerAdaptive.css"),
+  ]);
+  // A pill squares with the setting; only --radius-circle keeps its shape.
+  assert.match(tokens, /--radius-round:\s*max\(calc\(14px \* var\(--corner-radius-scale\)\), var\(--radius-max-pill\)\)/);
+  assert.match(tokens, /--radius-circle:\s*999px/);
+  for (const [css, round] of [[fluent, "--fluent-round"], [macos, "--macos-round"], [glass, "--lg-round"]] as const) {
+    for (const [role, max] of [
+      ["control", "control"], ["card", "card"], ["surface", "surface"], ["sheet", "sheet"],
+      ["island", "float"], ["dock", "float"], ["composer", "float"], ["round", "pill"],
+    ]) {
+      assert.match(css, new RegExp(`--radius-${role}:\\s*max\\(calc\\(\\d+px \\* var\\(${round}\\)\\), var\\(--radius-max-${max}\\)\\)`), `${round} ${role}`);
+    }
+  }
+  // Controls beside the composer's edge never freeze into a circle of their own.
+  assert.match(styles, /\.composer-simple \.composer-rail \.send \{[^}]*border-radius:\s*var\(--radius-round\)/);
+  assert.match(styles, /\.composer-simple \.composer-stop-primary \{[^}]*border-radius:\s*var\(--radius-round\)/);
+  assert.match(composer, /\.composer-running-send \{[^}]*border-radius:\s*var\(--radius-round\)/);
+  // The navigation island takes the corner of the action island it sits beside.
+  assert.doesNotMatch(styles, /\.mobile-float-navigation \{ border-radius/);
+});
+
 test("shared style behavior is owned by core instead of copied across packages", async () => {
   const [styles, entries] = await Promise.all([
     read("../src/styles.css"),

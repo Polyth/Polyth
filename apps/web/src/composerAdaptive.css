@@ -750,7 +750,7 @@ action off a narrow phone's composer. */
     background: transparent;
     /* Every look's split turns the running segment into a circle; a look that
        fills the action solidly (paper, editorial) keeps its own fill. */
-    border-radius: 999px;
+    border-radius: var(--radius-round);
   }
 
   .composer-mobile .composer-rail .composer-send-split > .composer-running-send.context-liquid-host::after {

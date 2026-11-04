@@ -69,7 +69,7 @@
   inline-size: 1.4em;
   block-size: 1.4em;
   margin-inline-end: var(--space-1);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--surface-overlay);
   font-size: var(--font-meta);
 }

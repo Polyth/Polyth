@@ -44,11 +44,12 @@
   --look-blur: none;
   --look-float-blur: none;
   /* Corner rounding reaches every look: its radii are drawn at the default
-     rounding (9, scale 1.8) and follow the slider from square to the last,
-     rounder notch, as the platform styles' own radii do. Pills stay pills.
+     rounding (9, scale 1.8) and follow the slider from square to the last
+     notch, as the platform styles' own radii do. A look's pill squares with it.
      (Declared after --look-veil: shellLooks.test.ts pins the block's first
      token as the veil ladder's entry point.) */
-  --look-round: calc(var(--corner-radius-scale) / 1.8);
+  --look-round: calc(var(--corner-radius-scale) / 1.8 + var(--corner-max) * 1.5);
+  --look-pill-radius: calc(25px * var(--look-round));
   --look-line: color-mix(in srgb, var(--text) 13%, transparent);
   /* Quiet text uses the theme's own contrast-checked inks, never an alpha of
      --text: an alpha mix loses contrast over every lighter backdrop. */
@@ -346,7 +347,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail 
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail .composer-send-split > .send {
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
 }
 
 /* These looks separate the two segments by two pixels, so the running disc
@@ -622,7 +623,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-ses
   width: 3px;
   height: calc(var(--icon-md) + 2px);
   margin-block-start: calc((var(--icon-md) + 2px) / -2);
-  border-radius: 999px;
+  border-radius: var(--look-pill-radius);
   background: var(--look-select-mark);
   pointer-events: none;
 }
@@ -719,7 +720,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .app > .header 
   backdrop-filter: var(--look-float-blur) !important;
   border: 1px solid var(--look-float-edge) !important;
   box-shadow: var(--look-float-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .app > .header > .shell-island :is(.view-switcher-pill, .header-control, .ui-icon-btn, .capability-launcher, .desktop-session-status-trigger) {
@@ -1436,7 +1437,7 @@ body[data-shell-look="line"]:not(#\#) :is(.mobile-float-navigation, .mobile-floa
 body[data-shell-look="air"]:not(#\#) {
   /* Fields (1f): every input takes Air's field (--look-field, below, the
      composer's) in its pill. */
-  --look-field-radius: 999px;
+  --look-field-radius: var(--look-pill-radius);
   /* The corner of floating full-height columns (shellLayout.css). */
   --look-column-radius: calc(22px * var(--look-round));
   --look-island-solid: var(--elevated);
@@ -1461,11 +1462,11 @@ body[data-shell-look="air"]:not(#\#) {
   --look-scrim-blur: blur(8px);
   --look-shell-blur: var(--look-blur);
   --look-select: var(--accent-wash);
-  --look-select-radius: 999px;
+  --look-select-radius: var(--look-pill-radius);
   --look-control: var(--look-island);
   --look-control-edge: var(--look-shadow);
   --look-control-blur: var(--look-blur);
-  --look-control-radius: 999px;
+  --look-control-radius: var(--look-pill-radius);
   --look-rail-edge: transparent;
   --look-rail-seam: color-mix(in srgb, var(--text) 6%, transparent);
   --look-rail-shadow: var(--look-shadow);
@@ -1555,7 +1556,7 @@ body[data-shell-look="air"]:not(#\#) .activity-group > .ui-run-summary {
   max-width: 100%;
   background: var(--look-island) !important;
   box-shadow: var(--look-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   padding-inline: 12px 14px !important;
 }
 
@@ -1642,7 +1643,7 @@ body[data-shell-look="air"]:not(#\#) .mobile-nav-place {
 }
 
 body[data-shell-look="air"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
-  border-radius: 999px;
+  border-radius: var(--look-pill-radius);
   background: var(--accent-wash);
   color: var(--accent);
   box-shadow: none;
@@ -1651,13 +1652,13 @@ body[data-shell-look="air"]:not(#\#) .mobile-navigator .project-glyph:not(:has(>
 body[data-shell-look="air"]:not(#\#) .mobile-nav-search {
   background: var(--look-island) !important;
   box-shadow: var(--look-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
 }
 
 body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
   background: var(--look-island) !important;
   box-shadow: var(--look-shadow) !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   backdrop-filter: var(--look-blur) !important;
 }
 
@@ -1676,7 +1677,7 @@ body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float
     width: calc(var(--icon-xl) + var(--space-3));
     height: calc(var(--icon-xl) + var(--space-3));
     padding: calc(var(--space-2) - 1px);
-    border-radius: 999px;
+    border-radius: var(--look-pill-radius);
     background: var(--accent-wash);
   }
 }
@@ -2165,10 +2166,10 @@ body[data-shell-look="obsidian"]:not(#\#) {
   /* Fields (1f): the navigator's search sets the field for every input. */
   --look-field: color-mix(in srgb, var(--text) 5%, transparent);
   --look-field-edge: inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
-  --look-field-radius: 999px;
+  --look-field-radius: var(--look-pill-radius);
   /* The corner of floating full-height columns (shellLayout.css). */
   --look-column-radius: calc(18px * var(--look-round));
-  --look-strip-radius: 999px;
+  --look-strip-radius: var(--look-pill-radius);
   --look-fill-a: calc(var(--look-a) * 0.86);
   --look-fill: color-mix(in srgb, var(--panel) 74%, transparent);
   --look-fill-strong: color-mix(in srgb, var(--panel) 88%, transparent);
@@ -2194,8 +2195,8 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-option-edge: color-mix(in srgb, var(--text) 8%, transparent);
   --look-select: color-mix(in srgb, var(--accent) 13%, transparent);
   --look-select-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
-  --look-select-radius: 999px;
-  --look-control-radius: 999px;
+  --look-select-radius: var(--look-pill-radius);
+  --look-control-radius: var(--look-pill-radius);
   --look-rail: var(--look-fill-overlay);
   --look-rail-blur: var(--look-glass-blur);
   --look-rail-edge: color-mix(in srgb, var(--text) 12%, transparent);
@@ -2301,7 +2302,7 @@ body[data-shell-look="obsidian"]:not(#\#) .sidebar {
 body[data-shell-look="obsidian"]:not(#\#) .railbar {
   --rail-strip-gutter-start: calc(var(--space-3) / 2);
   --rail-strip-gutter-end: calc(var(--space-3) / 2);
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   margin-block: 0 10px !important;
   margin-inline: 0 10px !important;
   height: auto !important;
@@ -2390,14 +2391,14 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.send:not(:disabled), .ui-btn--pri
 
 body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions, .mobile-nav-search) {
   border: 1px solid transparent !important;
-  border-radius: 999px !important;
+  border-radius: var(--look-pill-radius) !important;
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
 }
 
 /* A project's mark is a polished accent disc. */
 body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
-  border-radius: 999px;
+  border-radius: var(--look-pill-radius);
   background: linear-gradient(135deg, var(--accent-hi), var(--accent));
   color: var(--accent-ink);
   box-shadow: inset 0 1px 0 color-mix(in srgb, white 28%, transparent), 0 4px 12px -6px var(--accent);

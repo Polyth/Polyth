@@ -163,8 +163,8 @@ test("the phone running primary keeps one inset contour, a look-owned fill and t
   ]);
   assert.match(
     adaptive,
-    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-running-send\s*\{[^}]*background:\s*transparent;[^}]*border-radius:\s*999px;/s,
-    "the running primary drops the half-pill fill and keeps one round tap box",
+    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-running-send\s*\{[^}]*background:\s*transparent;[^}]*border-radius:\s*var\(--radius-round\);/s,
+    "the running primary drops the half-pill fill and keeps one tap box in the pill corner",
   );
   assert.match(
     adaptive,

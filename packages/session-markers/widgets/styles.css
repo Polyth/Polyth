@@ -181,7 +181,7 @@ html:is([data-theme-style="macos"], [data-theme-style="liquid-glass"]) .ui-menu 
   height: var(--control-h-sm);
   padding: 0;
   border: 0;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--session-markers-tone);
   cursor: pointer;
 }

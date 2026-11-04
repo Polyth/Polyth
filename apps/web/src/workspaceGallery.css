@@ -454,7 +454,7 @@ html[dir="rtl"] .workspace-gallery-back .ui-icon { transform: scaleX(-1); }
   place-items: center;
   width: calc(var(--icon-sm) + var(--space-1));
   height: calc(var(--icon-sm) + var(--space-1));
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--accent);
   background: var(--accent-wash);
   transition:
@@ -667,7 +667,7 @@ html[dir="rtl"] .workspace-gallery-back .ui-icon { transform: scaleX(-1); }
   width: calc(var(--tap) + var(--space-3));
   height: calc(var(--tap) + var(--space-3));
   margin-bottom: var(--space-1);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--muted);
   background: var(--surface-overlay);
 }

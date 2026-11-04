@@ -101,7 +101,10 @@ scale — see "Type surfaces" in `docs/dev/styles.md`.
 - **Radius** (the calm scale, all × `--corner-radius-scale`):
   controls 8px (`--radius-control`), cards 10px (`--radius-card`),
   substantial panels 12px (`--radius-surface`), sheets/dialogs/composer 16px
-  (`--radius-sheet`/`--radius-composer`). `999px`/`50%` only for pills/circles.
+  (`--radius-sheet`/`--radius-composer`). Pills are `--radius-round` and square
+  with the setting; `--radius-circle`/`50%` only for true circles (spinners,
+  avatars, radios, status dots). The last rounding notch is one shared rounded
+  geometry on every platform style (`--corner-max`, [styles](styles.md#radius)).
 - **Shadows** climb with detachment: `--shadow-sm` cards, `--shadow-md`
   (= `--overlay-shadow`) popovers/menus, `--shadow-lg` modals/sheets. Never
   hand-rolled `box-shadow` colors.

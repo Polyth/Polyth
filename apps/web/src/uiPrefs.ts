@@ -614,6 +614,7 @@ export function applyUiSettings(s: UiSettings = settings): void {
   // a scale set on <body> would never reach them. Do not publish a second
   // runtime radius vocabulary here.
   document.documentElement.style?.setProperty("--corner-radius-scale", String(cornerRadiusScale(s.rounding)));
+  document.documentElement.style?.setProperty("--corner-max", s.rounding >= 10 ? "1" : "0");
 }
 
 /** The radius multiplier a rounding setting publishes. 0..9 is linear

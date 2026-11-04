@@ -63,7 +63,7 @@
   block-size: auto;
   background: none;
   box-shadow: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
 }
 .ca-glyph[data-size="bare"][data-color="neutral"] { color: currentColor; }
 
@@ -84,7 +84,7 @@
   animation: ca-sweep 1.15s linear infinite;
   pointer-events: none;
 }
-.ca-glyph[data-size="bare"] .ca-glyph-ring { inset: -6px; border-radius: var(--radius-round); }
+.ca-glyph[data-size="bare"] .ca-glyph-ring { inset: -6px; border-radius: var(--radius-circle); }
 .ca-glyph:is([data-state="running"], [data-state="chat"], [data-state="starting"]) {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--ca-tint) 40%, transparent),
@@ -604,7 +604,7 @@
   font-weight: 500;
 }
 .custom-actions .ca-recent-latest-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.custom-actions .ca-recent-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: var(--radius-round); background: var(--faint); }
+.custom-actions .ca-recent-dot { flex: none; inline-size: 6px; block-size: 6px; border-radius: var(--radius-circle); background: var(--faint); }
 .custom-actions .ca-recent-latest[data-status="running"] .ca-recent-dot { background: var(--accent); }
 .custom-actions .ca-recent-latest[data-status="succeeded"] .ca-recent-dot { background: var(--green); }
 .custom-actions .ca-recent-latest:is([data-status="failed"], [data-status="error"]) .ca-recent-dot { background: var(--red); }

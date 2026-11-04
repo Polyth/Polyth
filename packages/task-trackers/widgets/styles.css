@@ -134,7 +134,7 @@
   width: 6px;
   height: 6px;
   flex: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--faint);
 }
 
@@ -268,7 +268,7 @@
   width: 6px;
   height: 6px;
   flex: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--amber);
   content: "";
 }
@@ -433,7 +433,7 @@
 .tt-column-dot {
   width: 8px;
   height: 8px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--faint);
 }
 
@@ -2831,7 +2831,7 @@
 .tt-agent-sessions i {
   width: 8px;
   height: 8px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--muted);
 }
 
@@ -3515,7 +3515,7 @@
   width: 8px;
   height: 8px;
   margin-inline: 4px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--muted);
 }
 
@@ -3917,7 +3917,7 @@
   width: 28px;
   height: 28px;
   flex: none;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
 }
 
 .tt-comment-avatar-img {
@@ -4271,7 +4271,7 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
   flex: none;
   place-items: center;
   overflow: hidden;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   color: var(--accent);
   background: var(--accent-wash);
   font-size: 10px;
@@ -4330,7 +4330,7 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
   height: 20px;
   padding: 0 4px;
   place-items: center;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   box-shadow: 0 0 0 2px var(--elevated);
   color: var(--muted);
   background: var(--surface-overlay-strong);

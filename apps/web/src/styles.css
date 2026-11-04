@@ -777,7 +777,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   width: 8px;
   height: 8px;
   border: 2px solid var(--panel);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--green);
 }
 .sidebar-project-rail-status.attention { background: var(--amber); }
@@ -2876,7 +2876,7 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -2887,7 +2887,7 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--surface-overlay-strong);
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
@@ -3153,7 +3153,7 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   height: calc(var(--icon-md) + var(--space-1));
   flex: none;
   place-items: center;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--accent-wash);
   color: var(--accent-hi);
 }
@@ -4409,7 +4409,7 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
 .setup-step-dot {
   width: 6px;
   height: 6px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: color-mix(in srgb, var(--text) 16%, transparent);
   transition: width var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease);
 }
@@ -4599,7 +4599,7 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   border: 1.5px solid color-mix(in srgb, var(--text) 30%, transparent);
   color: var(--accent-ink);
   transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
@@ -4797,13 +4797,13 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 /* switch — the visual track never grows for touch; a transparent centered
    hit box extends the target to --hit-min on coarse pointers. */
 .switch {
-  width: 38px; height: 22px; border-radius: var(--radius-round); padding: 0; flex: none;
+  width: 38px; height: 22px; border-radius: var(--radius-switch); padding: 0; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: 0; position: relative;
 }
 .switch-track {
   display: block; flex: none; width: 38px; height: 22px; padding: 2px;
-  border-radius: var(--radius-round); background: var(--raised); border: 1px solid var(--hair);
+  border-radius: var(--radius-switch); background: var(--raised); border: 1px solid var(--hair);
   transition: background var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
 }
 .switch::after {
@@ -4825,7 +4825,7 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
   .switch:hover:not(:disabled):not([aria-checked="true"]) .switch-track { border-color: var(--border); }
 }
 .switch i {
-  display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--muted);
+  display: block; width: 16px; height: 16px; border-radius: var(--radius-switch); background: var(--muted);
   transition: transform var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
@@ -5397,7 +5397,7 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .user-row-chevron { flex: 0 0 auto; width: var(--icon-md); height: var(--icon-md); color: var(--faint); }
 .user-avatar {
   display: grid; place-items: center; flex: 0 0 auto;
-  width: 36px; height: 36px; border-radius: var(--radius-round);
+  width: 36px; height: 36px; border-radius: var(--radius-circle);
   background: var(--raised); border: 1px solid var(--hair);
   font-size: var(--font-label); font-weight: 650; color: var(--text);
 }
@@ -5639,7 +5639,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 /* A non-default view (hidden folders shown) marks the ⋯ trigger. */
 .folder-options[data-active]::before {
   position: absolute; top: 5px; inset-inline-end: 5px; width: 6px; height: 6px;
-  border-radius: var(--radius-round); background: var(--accent); content: "";
+  border-radius: var(--radius-circle); background: var(--accent); content: "";
 }
 .folder-list {
   height: min(46vh, 360px); margin: 0 18px; overflow: auto; padding: 5px;
@@ -6292,7 +6292,7 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   box-shadow: var(--material-glass-highlight), var(--shadow-md);
 }
 .attachment-preview-dialog :is(.attachment-preview-close, .attachment-preview-nav) {
-  width: var(--control-h-lg); height: var(--control-h-lg); border-radius: 50%;
+  width: var(--control-h-lg); height: var(--control-h-lg); border-radius: var(--radius-round);
   transition: transform var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
@@ -10179,7 +10179,7 @@ min-height: var(--tap);
   inset-block-start: calc(var(--space-3) + var(--icon-lg) / 2 + var(--space-1) - 3px);
   inline-size: 6px;
   block-size: 6px;
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: transparent;
 }
 .ntc-row.unread .ntc-dot { background: var(--notify-tone, var(--accent)); }
@@ -10396,7 +10396,7 @@ min-height: var(--tap);
   height: 40px;
   min-width: 40px;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--composer-green);
   color: var(--accent-ink);
   box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green) 80%, transparent);
@@ -10818,7 +10818,7 @@ color: var(--green);
   min-width: 44px;
   height: 44px;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
 }
 .composer-simple .composer-stop-primary .composer-action-label { display: none; }
 
@@ -10897,7 +10897,7 @@ color: var(--green);
 .package-tour-foot { display: flex; align-items: center; gap: 10px; padding: 14px 24px 6px; }
 .package-tour-dots { display: flex; align-items: center; gap: 6px; margin-right: auto; }
 .package-tour-dot {
-  width: 7px; height: 7px; padding: 0; border: none; border-radius: var(--radius-round);
+  width: 7px; height: 7px; padding: 0; border: none; border-radius: var(--radius-circle);
   background: var(--hair-strong); transition: width var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease);
 }
 @media (hover: hover) {
@@ -13967,9 +13967,6 @@ color: var(--muted);
     min-height: max(var(--tap), var(--mobile-island-height));
   }
   .mobile-float-navigation, .mobile-float-actions { display: inline-grid; grid-auto-flow: column; padding: 0; overflow: hidden; }
-  /* Scoped past the shared .ui-glass-island radius so the single-button
-     navigation island stays a circle. */
-  .mobile-session-floats > .mobile-float-navigation { border-radius: var(--radius-round); }
   .mobile-float-navigation button, .mobile-float-actions button { width: var(--tap); display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-dim); }
   .mobile-float-navigation svg, .mobile-float-actions svg { width: var(--icon-lg); height: var(--icon-lg); }
   /* The new chat's edit mode: the actions island holds one text Done
