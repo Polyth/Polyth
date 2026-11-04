@@ -385,20 +385,6 @@ html[dir="rtl"] .chat-preview-thought:not([data-open]) svg { transform: scaleX(-
 .chat-preview-composer-wrap { display: grid; gap: var(--space-1); }
 .chat-preview-status { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .chat-preview-status i { flex: none; width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--green); }
-/* Tab: a chip of the composer's pending stack, at the card's width and corner. */
-.chat-preview-composer-wrap[data-status-style="tab"] .chat-preview-status {
-  min-height: 28px;
-  padding-inline: var(--space-3);
-  border-radius: var(--radius-composer);
-  background: var(--material-glass-strong);
-  box-shadow: inset 0 0 0 1px var(--borderless-edge);
-}
-.chat-preview-composer-wrap[data-status-style="capsule"] .chat-preview-status {
-  justify-self: center;
-  padding: 2px var(--space-3);
-  border-radius: var(--radius-round);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
-}
 .chat-preview-composer {
   display: flex;
   align-items: center;

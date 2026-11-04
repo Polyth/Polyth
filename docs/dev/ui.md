@@ -1820,8 +1820,7 @@ client-side). Nothing is fetched until the cache cannot fill the next page.
 A narrowed list (status filter or Selected) that matches nothing renders an
 empty line; an empty default list renders nothing.
 
-**Context liquid:** the running primary (Stop, or the Send now / queued-save
-segment) is also the session's context gauge. Desktop and phone session titles
+**Context liquid:** Stop is also the session's context gauge. Desktop and phone session titles
 show no provider logo or context indicator (the former donut and logo modes and
 their settings are gone); the session status popover/overview still reports
 context percent and tokens. Chat settings
@@ -1833,17 +1832,18 @@ Missing or invalid values (including the retired `logo`) use `title`. Visible
 attention cues add a leading status dot; live announcements remain
 available when the control is hidden. Header clearance follows the chosen
 mode and text size. `ContextLiquid` derives the session's context gauge and
-renders inside the button: an outline in the action's own
-solid color while the context is empty, a gently drifting liquid of that color
-rising with usage, solid when full. Unknown usage stays an outline. The model
+renders inside Stop: a soft tonal disc with no outline while the context is
+empty, a gently drifting liquid of a slightly stronger tone rising with usage.
+Unknown usage stays the plain disc. The model
 context limit still gives fresh sessions an estimated `~0%` gauge before the
 selected harness reports live occupancy; an explicit unknown/compaction sample
-remains unknown rather than being treated as zero. The solid
-rules in `styles.css` publish `--context-liquid-tone/-ink`, so the fill follows
-the same desktop/phone colors as the solid action; a copy of the glyph inside
-the liquid switches the submerged part to the ink color along the wave, and
+remains unknown rather than being treated as zero. Stop publishes
+`--context-liquid-tone/-ink`; a copy of the glyph inside
+the liquid takes full ink along the wave, so it holds 3:1 on a full gauge, and
 any rule that sizes the host glyph through a child combinator must also size
-that copy. The level transitions through the registered `--context-fill`;
+that copy. Stop is neutral at rest and turns red only on hover or press. Send is
+always a solid disc with no ring or glow, in every look, including the running
+Send beside its bare chevron, where the context pie reports the level. The level transitions through the registered `--context-fill`;
 reduced-motion and low-resource modes keep a still level. The idle Send stays
 solid. On phones the running primary draws its contour as one complete 40px
 disc centred in the 44px tap box, and the split's divider is centred in the
@@ -2471,60 +2471,54 @@ Every outline is a `--borderless-edge` shadow or background, never a border,
 so Borderless keeps it. The look is pure body-level CSS, so switching it
 restyles every block already in the transcript without a re-render.
 
-**Status above the composer:** the live agent status (`AgentStatusDock`, also
-used for the spawn status and on the Agents page) and the git package's edited
-files (`PendingChangesBar`) are lines of text, not cards: no plate, shadow or
-glass. The status reads mark · action, then the files tally and the elapsed
-time. The mark (the harness logo) says which agent works; the model or harness
-name is never written out, only the mark's tooltip, so the short line keeps
-its room for the action. Light moving through the action's words and an accent
-dot on the mark say "live"; reduced motion and low-resource mode keep the
-words still. The action outranks the rest: at 600 px or less the files tally
-steps aside. No interface look turns the line into a card or re-pads it:
-its shape and inset come from the status style below (Tab and Capsule keep
-the mark and time off their rounded edge). Under the status or edited files
-the composer's stack (queued messages, then the box) keeps `--space-2` of
-air, the gap the queued messages keep from the box (in Tab the row's own gap
-stands in for it). Folded, the edited
-files are one summary line whose title carries the count. Open, the files
-hang from the same thread as activity steps, and Undo / Review are text actions (Review in the
-text-safe `--chat-ink-accent`). Their quiet inks follow the wallpaper wash
-([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset
-theme and wallpaper.
-The edited-files bar shares the status line's chat frame (start edge and
-width), so nothing jumps when a turn ends and both line up with the composer
-at every width.
-Chat settings → Composer → *Status above the composer* (`composerStatusStyle`,
-`body[data-composer-status-style]`) picks `line` (the base), `tab` or
-`capsule` (a centred hairline pill that hugs its words; the open file list
-sits in a hairline frame). `tab` is the composer's **header stack**: bottom
-to top, the suggested next prompt is the card's own first row (Composer
-renders it inside `.composer-card` only in this style), queued prompts stand
-above the card, and the status or edited-files line and the subagent island
-on top. The header has no surface: the card's edge, highlight, corners,
-shadow and focus wrap it in every platform style and look, and a hairline
-parts it from the model line (`--composer-header-rule`, content-wide via
-`--composer-header-rule-inset`, fading over `--composer-header-rule-fade`,
-one device pixel; Line draws it edge to edge like its other rules). The model
-line sits as far below the hairline as the header's content above it. The
-rows above the card are chips of the pending stack: the queued prompt's
-material, edge and corner (`--composer-tray-fill` / `-filter` / `-edge`,
-`--radius-composer-tray`; each non-Standard look sets them to its option chip,
-`shellLooks.css` 3c), the card's width, one height (`--composer-stack-row`,
-40px, a touch target plus edges on touch) and one gap (`--composer-stack-gap`).
-Everything sits on one grid measured from the card's outer edge: marks are
-centred on the model logo's column (`--composer-stack-mark`), labels start at
-the model name (`--composer-stack-text`), trailing glyphs and text end where
-the marks start (`--composer-stack-end`), and trailing controls share one size
-(`--composer-stack-control`). A touch grip keeps its 44px target as an
-invisible extension over the prompt's first letters. On the phone's resting
-row the header takes its own line and the row keeps its height. Known limit:
-the phone card's own Add control sits a few pixels off the model logo's
-column (its resting and engaged rails pad differently), so the header lines
-up with the model line, not with Add. The
-status style, not the look, owns the shape of these lines: no look turns them
-into in-flow cards. Pinned in `apps/web/test/composerChatStyle.test.ts`,
-`apps/web/test/shellLooks.test.ts` and
+**The pending stack above the composer:** everything that waits on the composer
+is lines of text, not cards, with the composer card as the one surface. Top to
+bottom: the agent's status or the edited files, any subagents hanging from them,
+the queued prompts and the suggested next prompt. No line paints a plate, border,
+shadow or glass in any platform style or look. Everything sits on one grid
+measured from the card's outer edge: marks are centred on the model logo's column
+(`--composer-stack-mark`), labels start at the model name
+(`--composer-stack-text`), trailing glyphs end where the marks start
+(`--composer-stack-end`). A line reads `--composer-stack-row` tall; on touch, a line
+that opens something keeps its full target by reaching up into the timeline's
+bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
+([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset theme and
+wallpaper.
+
+The status (`AgentStatusDock`, also used for the spawn status and on the Agents
+page) reads mark · action, then the files tally and the elapsed time. The mark (the
+harness logo) says which agent works; the model or harness name is never written
+out, only the mark's tooltip, so the short line keeps its room for the action.
+Light moving through the action's words and an accent dot on the mark say "live";
+reduced motion and low-resource mode keep the words still. The action outranks the
+rest: at 600 px or less the files tally steps aside.
+
+The edited files (`PendingChangesBar`) share the status line's chat frame, so nothing
+jumps when a turn ends. Folded, they are one summary line whose title carries the
+count. Open, the files hang from the same thread as activity steps, and Undo / Review
+are text actions (Review in the text-safe `--chat-ink-accent`). In a bar 420 px or
+narrower the head keeps one line with its chevron and the actions close the list, on
+the line with "N more".
+
+**Queued prompts:** a row is the prompt's text on the text column with `↳` on the mark
+column; past two rows the rest fold behind "N more". Where the pointer hovers, a row's
+handle replaces `↳` and its actions (send now, remove, edit) stand over its end, so
+the text keeps the whole width at rest; focus brings them too. Dragging shows an
+insertion line on the side the row will land. Alt+↑/↓ moves a row from anywhere on it,
+plain arrows from its focused handle. In the phone shell, or without a hover, the rows
+are plain text and the whole block is one target of at least 44 px that opens the queue
+sheet (`ResponsiveOverlay`): a tap on the text edits, the handle drags on pointer
+events, and send now and remove are full-size. A row taken into the composer keeps its
+place as "Editing in the message box below · Cancel"; Esc does the same on a keyboard.
+A paused or stalled queue leads with a service row of words whose Resume is always
+visible.
+
+The suggested next prompt is one line above the card: the whole line takes it as an
+editable draft, × dismisses it, Tab is the keyboard shortcut.
+
+Pinned in `apps/web/test/composerPendingStack.test.ts` (geometry and paint in a real
+browser, every look), `apps/web/test/composerChatStyle.test.ts`,
+`apps/web/test/shellLooks.test.ts`, `apps/web/test/queuedMessageList.test.ts` and
 `packages/git/test/sourceControlVisualGrammar.test.ts`.
 
 **A watched pull request above the composer:** while the chat watches a pull
@@ -2659,9 +2653,7 @@ named by the same `liveAction.ts` as the agent's own line. In a container of
 own, rows drop the chevron (the row itself opens the chat) and a running row
 leaves the model out so its action and time stay readable. The agent's own
 logo wears its harness profile's color, as the composer's model chip does.
-The island is text on the canvas in every look (the line inside keeps no
-plate); the Capsule status style frames the whole island and Tab makes it a
-row of the composer's header stack. State
+The island is text on the canvas in every look, on the pending stack's grid. State
 comes from the canonical child projections (`parentId`) rolled up through
 grandchildren (`apps/web/src/subagentActivity.ts`), the same source as the
 navigator's disclosure pill. Pinned in `apps/web/test/subagentBranch.test.ts`.

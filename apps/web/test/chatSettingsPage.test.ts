@@ -209,8 +209,7 @@ test("the sample follows the corner rule: controls square with the setting, only
   }
   assert.match(page, /\.chat-preview-send \{[^}]*border-radius:\s*var\(--radius-round\)/);
   assert.match(page, /\.chat-preview-status i \{[^}]*border-radius:\s*var\(--radius-circle\)/);
-  assert.match(page, /\[data-status-style="tab"\] \.chat-preview-status \{[^}]*border-radius:\s*var\(--radius-composer\)/,
-    "Tab is a chip of the composer's stack, as the real status line is");
+  assert.doesNotMatch(page, /data-status-style/, "the status line has one look: text with no plate, as the real one");
 });
 
 test("thinking kept in the activity block lights the steps in the preview", () => {

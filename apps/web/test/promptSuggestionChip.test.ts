@@ -192,23 +192,17 @@ test("a composer.suggestion source offers on the same chip with no rail widget; 
   }
 });
 
-test("the Tab status style makes the suggestion the card's own first row, and it still only fills the draft", async () => {
-  // styles.css "Tab: the composer's header stack": inside the card it shares
-  // the card's edge, corners and focus instead of imitating them.
-  const previous = getUiSettings().composerStatusStyle;
-  setUiSettings({ composerStatusStyle: "tab" });
-  const view = await mount("suggestion-header");
+test("the suggestion is a line above the card, and it still only fills the draft", async () => {
+  const view = await mount("suggestion-line");
   try {
     const chip = view.chip();
     assert.ok(chip, "an idle empty composer offers the suggestion");
-    assert.equal(chip.parentElement?.classList.contains("composer-card"), true, "the chip is a row of the card");
-    assert.equal(chip.parentElement?.firstElementChild, chip, "the card's first row");
-    assert.equal(view.host.querySelectorAll(".composer-suggestion").length, 1, "never two chips");
+    assert.equal(chip.parentElement?.classList.contains("composer-card"), false, "it stands above the card");
+    assert.equal(view.host.querySelectorAll(".composer-suggestion").length, 1, "never two");
     await act(async () => { chip.querySelector<HTMLButtonElement>(".composer-suggestion-use")!.click(); });
     assert.equal(view.input.value, SUGGESTION, "the suggestion becomes an editable draft");
-    assert.equal(view.chip() === null, true, "the header leaves once the draft has text");
+    assert.equal(view.chip() === null, true, "the line leaves once the draft has text");
   } finally {
     await view.unmount();
-    setUiSettings({ composerStatusStyle: previous });
   }
 });

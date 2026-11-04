@@ -904,7 +904,6 @@ test("setUiSettings persists and applies visual data attributes", () => {
     quickActions: "true",
     mobileSessionTitle: UI_DEFAULTS.mobileSessionTitle,
     activityStyle: UI_DEFAULTS.activityBlockStyle,
-    composerStatusStyle: UI_DEFAULTS.composerStatusStyle,
     topRailSurface: UI_DEFAULTS.topRailSurface,
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());

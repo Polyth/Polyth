@@ -160,7 +160,8 @@ test("Corner rounding reaches every pill, and the last notch is one geometry on 
   // Controls beside the composer's edge never freeze into a circle of their own.
   assert.match(styles, /\.composer-simple \.composer-rail \.send \{[^}]*border-radius:\s*var\(--radius-round\)/);
   assert.match(styles, /\.composer-simple \.composer-stop-primary \{[^}]*border-radius:\s*var\(--radius-round\)/);
-  assert.match(composer, /\.composer-running-send \{[^}]*border-radius:\s*var\(--radius-round\)/);
+  // The running Send is that same .send: no corner of its own to freeze.
+  assert.doesNotMatch(composer, /\.composer-running-send[^{]*\{[^}]*border-radius/);
   // The navigation island takes the corner of the action island it sits beside.
   assert.doesNotMatch(styles, /\.mobile-float-navigation \{ border-radius/);
 });

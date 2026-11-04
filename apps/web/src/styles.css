@@ -2702,36 +2702,25 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   }
 }
 .composer-input { position: relative; }
-/* The harness's suggested next prompt is one chip on the composer's pending
-   writing stack (beside queued prompts), never text inside the editor: the
-   chip takes it as an editable draft, × dismisses it, Tab is the keyboard
-   shortcut. It hugs its text and wraps to two lines before it ellipsises. */
+/* The harness's suggested next prompt is one line of the pending stack above
+   the composer (beside queued prompts), never text inside the editor: the line
+   takes it as an editable draft, × dismisses it, Tab is the keyboard shortcut.
+   It wraps to two lines before it ellipsises. */
 .composer-suggestion {
-  display: flex; align-items: center; gap: var(--space-1);
-  inline-size: fit-content; max-inline-size: 100%; min-inline-size: 0; box-sizing: border-box;
-  margin: 0 0 var(--space-2);
-  padding: var(--space-1); padding-inline-start: 0;
-  background: var(--material-glass-strong);
-  border: 1px solid var(--material-glass-border);
-  border-radius: var(--radius-composer);
-  color: var(--text);
-}
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .composer-suggestion {
-    background: radial-gradient(140% 140% at 50% 50%,
-      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent) 0%,
-      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-edge), transparent) 100%);
-    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-    background-clip: padding-box;
-  }
+  display: flex; align-items: center;
+  min-inline-size: 0; box-sizing: border-box;
+  margin: 0 0 var(--space-1);
+  padding-inline-end: calc(var(--composer-stack-end) - (max(var(--composer-stack-control), var(--hit-min)) - var(--icon-sm)) / 2);
+  color: var(--text-dim);
 }
 .composer-suggestion-use {
-  flex: 0 1 auto; min-inline-size: 0;
-  display: flex; align-items: center; gap: var(--space-2);
-  min-block-size: max(var(--control-h-sm), var(--hit-min));
-  margin: 0; padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
-  border: 0; border-radius: calc(var(--radius-composer) - var(--space-1));
+  flex: 1 1 auto; min-inline-size: 0;
+  display: flex; align-items: center;
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  min-block-size: max(var(--composer-stack-row), var(--hit-min));
+  margin: 0; padding: var(--space-1);
+  padding-inline-start: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  border: 0; border-radius: var(--radius-control);
   background: none; color: inherit; text-align: start;
   font: inherit; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -2743,31 +2732,28 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 }
 .composer-suggestion-use:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 .composer-suggestion-use:is(:active, :focus-visible):where(:not(:disabled)) .composer-suggestion-text { color: var(--text); }
-.composer-suggestion-use:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
+.composer-suggestion-use:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .composer-suggestion-icon { flex: none; color: var(--accent); }
 .composer-suggestion-text {
+  flex: 1 1 auto;
   min-inline-size: 0; color: var(--text-dim);
   transition: color var(--motion-fast) var(--motion-ease);
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
   overflow: hidden; overflow-wrap: anywhere;
-  font-size: var(--font-response); line-height: var(--font-response-lh);
+  font-size: var(--font-composer-stack); line-height: 1.35;
 }
 .composer-suggestion-key {
   flex: none;
-  padding: 0 var(--space-1); border: 1px solid var(--border-soft); border-radius: var(--radius-control);
-  background: var(--sunken); color: var(--text-dim);
+  color: var(--faint);
   font-family: var(--mono); font-size: var(--font-meta); line-height: 1.5;
 }
 .composer-suggestion .composer-suggestion-dismiss {
   flex: none; color: var(--muted);
-  inline-size: max(var(--control-h-sm), var(--hit-min)); block-size: max(var(--control-h-sm), var(--hit-min));
-  border-radius: calc(var(--radius-composer) - var(--space-1));
+  inline-size: max(var(--composer-stack-control), var(--hit-min)); block-size: max(var(--composer-stack-control), var(--hit-min));
+  border-radius: var(--radius-control);
 }
-/* Touch has no Tab key; the × keeps its full tap target and the use target
-   runs up to it instead of leaving a padded gap. */
+/* Touch has no Tab key. */
 @media (pointer: coarse) {
-  .composer-suggestion { gap: 0; }
-  .composer-suggestion-use { padding-inline-end: 0; }
   .composer-suggestion-key { display: none; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -5734,86 +5720,247 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .composer-focus-help { width: 100%; display: flex; justify-content: space-between; gap: var(--space-3); }
 .composer-delivery { background: var(--accent-wash); border-color: var(--accent-line); }
 
-/* ---------- queued message rows ---------- */
+/* ---------- queued prompts ---------- */
+/* Quiet rows of the pending stack above the composer, not cards: the prompt on
+   the text column under the status line's words and `↳` on the mark column. A
+   pointer that hovers brings a row's handle and actions over it. On touch the
+   whole block is one target that opens the queue sheet, which holds the same
+   actions at full size. A row taken into the composer keeps its place with a
+   way out; past two rows the rest fold away. */
 .queue-list {
-  width: 100%; max-width: 100%; overflow: hidden;
+  position: relative;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-2);
+  margin: 0 0 var(--space-1);
+}
+.queue-block { position: relative; min-width: 0; }
+.queue-prompts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.queue-prompts[data-expanded] {
+  max-block-size: 40dvh;
+  overflow-y: auto;
 }
 .queue-chip {
+  position: relative;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--control-h);
-  padding: var(--space-2) var(--space-3);
-  /* A queued prompt is the composer's pending writing stack. It shares the
-     composer's Quiet Glass material, writing type role and corner role so the
-     user's transparency, font-size and rounding settings apply here too. */
-  background: var(--material-glass-strong);
-  border: 1px solid var(--material-glass-border);
-  border-radius: var(--radius-composer);
-  color: var(--text);
+  min-block-size: var(--composer-stack-row);
+  padding-inline: var(--composer-stack-text) var(--composer-stack-end);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
 }
-.queue-chip.dragging { opacity: 0.5; }
+.queue-chip.dragging { opacity: 0.45; }
 /* A row folding away after it left for the chat (queueLaunchMotion.ts): its
    slot closes to nothing, so the floor and clipping give way for the fold. */
-.queue-chip.queue-chip-leaving { min-height: 0; overflow: hidden; pointer-events: none; }
-.queue-chip.drag-over { border-color: var(--accent); background: var(--accent-wash); }
-/* The opaque material above is the fallback. Capable, full-resource clients
-   tint and blur it like the composer card; drag-over opts out so its accent
-   wash is not repainted by the glass gradient. */
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"])
-    .queue-chip:not(.drag-over) {
-     background: radial-gradient(140% 140% at 50% 50%,
-       color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent) 0%,
-       color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-edge), transparent) 100%);
-    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-    background-clip: padding-box;
-  }
+.queue-chip.queue-chip-leaving { min-block-size: 0; overflow: hidden; pointer-events: none; }
+/* The drop target is an insertion line on the side the row will land. */
+.queue-chip[data-drop]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  block-size: 2px;
+  background: var(--accent);
+  pointer-events: none;
 }
+.queue-chip[data-drop="before"]::after { inset-block-start: 0; }
+.queue-chip[data-drop="after"]::after { inset-block-end: 0; }
+.queue-chip .queue-mark,
 .queue-chip .queue-grip {
-  flex: none;
-  align-self: stretch;
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  inline-size: var(--icon-sm);
   display: grid;
   place-items: center;
-  min-width: max(var(--icon-md), var(--hit-min));
-  min-height: max(var(--icon-md), var(--hit-min));
-  margin-inline-start: calc(var(--space-1) * -1);
+  color: var(--faint);
+}
+.queue-chip .queue-grip {
+  opacity: 0;
   color: var(--muted);
+  border-radius: var(--radius-control);
   cursor: grab;
   touch-action: none;
 }
-.queue-chip .queue-grip:hover { color: var(--text); }
-.queue-chip.dragging .queue-grip { cursor: grabbing; }
-.queue-chip.held .queue-grip { cursor: default; }
+.queue-chip.dragging .queue-grip { opacity: 1; cursor: grabbing; }
+.queue-chip.dragging .queue-mark { opacity: 0; }
+.queue-chip .queue-grip:focus-visible { opacity: 1; outline: 2px solid var(--focus-ring); outline-offset: 0; }
+.queue-chip:has(.queue-grip:focus-visible) .queue-mark { opacity: 0; }
 .queue-chip .queue-text {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-response);
+  font-size: var(--font-composer-stack);
   line-height: var(--font-response-lh);
 }
-/* The queue cannot drain until the runtime recovers: the explanation wraps
-   instead of truncating, and its marker is a status, not a drag handle. */
-.queue-chip.queue-chip-stalled .queue-grip { color: var(--warning); cursor: default; }
-.queue-chip .queue-text.queue-text-wrap { white-space: normal; text-wrap: pretty; }
+.queue-chip .queue-text.queue-text-wrap { white-space: normal; text-wrap: pretty; line-height: 1.35; }
 .queue-chip .queue-actions {
   flex: none;
   display: flex;
   align-items: center;
-  gap: var(--space-1);
   margin-inline-start: auto;
 }
+.queue-chip .queue-actions .ui-icon-btn {
+  inline-size: var(--composer-stack-control);
+  block-size: var(--composer-stack-control);
+}
+/* A prompt's actions stand over its row at the end column, so the text keeps
+   the whole width at rest and only gives way while they show. */
+.queue-chip[role="listitem"] .queue-actions {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: calc(var(--composer-stack-end) - (var(--composer-stack-control) - var(--icon-sm)) / 2);
+}
+.queue-chip[role="listitem"]:focus-within .queue-text { padding-inline-end: calc(3 * var(--composer-stack-control)); }
+.queue-chip[role="listitem"]:not(:hover, :focus-within) .queue-actions { opacity: 0; pointer-events: none; }
+@media (hover: hover) {
+  .queue-chip[role="listitem"]:hover:where(:not(.queue-chip-leaving)) { background: var(--surface-overlay-hover); }
+  .queue-chip[role="listitem"]:hover .queue-text { padding-inline-end: calc(3 * var(--composer-stack-control)); }
+  .queue-chip[role="listitem"]:hover .queue-grip { opacity: 1; }
+  .queue-chip[role="listitem"]:hover .queue-mark { opacity: 0; }
+  .queue-chip[role="listitem"]:hover .queue-grip:hover:where(:not(:disabled)) { color: var(--text); }
+}
+/* Service rows are words: the queue is paused or cannot drain until the runtime
+   recovers, the explanation wraps, and its way forward is always there as a
+   text action. Their marks are statuses, not drag handles. */
+.queue-chip[role="status"] { min-block-size: max(var(--composer-stack-row), var(--hit-min)); padding-block: 2px; }
+.queue-chip.queue-chip-stalled .queue-mark { color: var(--amber); }
+.queue-chip.queue-chip-editing .queue-mark { color: var(--chat-ink-accent, var(--accent-text)); }
+.queue-list .queue-chip .queue-action-word {
+  position: relative;
+  min-block-size: var(--composer-stack-control);
+  padding-inline: var(--space-1);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--chat-ink-accent, var(--accent-text));
+  font-size: var(--font-composer-stack);
+  font-weight: 550;
+  white-space: nowrap;
+}
+.queue-list .queue-chip .queue-action-word::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 50%;
+  block-size: max(100%, var(--hit-min));
+  transform: translateY(-50%);
+}
+.queue-fold {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-block-size: var(--composer-stack-control);
+  margin: 0;
+  margin-inline-start: calc(var(--composer-stack-text) - var(--space-1));
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  cursor: pointer;
+}
+button.queue-fold:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+@media (hover: hover) { button.queue-fold:hover:where(:not(:disabled)) { color: var(--text); } }
+/* Touch: the block is one target, however short. */
+.queue-list[data-touch] .queue-block {
+  min-block-size: var(--hit-min);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.queue-list[data-touch] .queue-prompts { padding-inline-end: calc(var(--icon-sm) + var(--space-1)); }
+.queue-open {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+  padding-inline-end: var(--composer-stack-end);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.queue-open:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+.queue-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* The queue sheet: whole prompts and full targets, on demand. */
+.queue-sheet {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-block-end: var(--space-2);
+}
+.queue-sheet-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--radius-card);
+}
+.queue-sheet-row[data-lifted] {
+  z-index: 1;
+  background: var(--elevated);
+  box-shadow: var(--shadow-md);
+}
+.queue-sheet-grip {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: max(var(--control-h-sm), var(--hit-min));
+  block-size: max(var(--control-h-sm), var(--hit-min));
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  cursor: grab;
+}
+/* The drag owns the finger: the shell's control rule would hand it to panning. */
+.queue-sheet-row .queue-sheet-grip { touch-action: none; }
+.queue-sheet-row[data-lifted] .queue-sheet-grip { cursor: grabbing; }
+.queue-sheet-grip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.queue-sheet-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-block-size: max(var(--control-h-sm), var(--hit-min));
+  margin: 0;
+  padding: var(--space-1);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+}
+.queue-sheet-text > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.queue-sheet-text:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.queue-sheet-row .queue-held { align-self: center; padding-inline: var(--space-1); }
 
 /* ---------- shared Markdown renderer ---------- */
 .md-para { margin: 0 0 var(--prose-gap); text-wrap: pretty; }
@@ -7435,7 +7582,6 @@ color: var(--text-dim);
   /* Compact composer: the rail keeps one row; chips shrink first. */
   .composer { border-top: 0; padding-inline: 8px; }
   .composer-actions .icon-btn { width: 44px; height: 44px; font-size: 20px; }
-  .composer-actions .send, .composer-actions .stop { min-height: 44px; }
 
   /* Hero and stage: wrapped, reachable, no clipped primary action. */
   .hero h2 { font-size: clamp(22px, 8vw, 30px); }
@@ -7653,7 +7799,6 @@ color: var(--text-dim);
 @media (max-height: 560px) and (max-width: 480px) and (pointer: fine) {
 .composer-config .picker-chip { height: 32px; }
   .composer-actions .icon-btn { width: 32px; height: 32px; font-size: 15px; }
-  .composer-actions .send, .composer-actions .stop { min-height: 32px; }
   .composer-add-trigger { min-height: 32px; min-width: 32px; }
 }
 
@@ -7837,11 +7982,6 @@ color: var(--text-dim);
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2) var(--space-2);
   }
-  .widget-card-body > .widget-conversation .composer-simple .composer-rail .send {
-    width: max(40px, var(--hit-min));
-    min-width: max(40px, var(--hit-min));
-    height: max(40px, var(--hit-min));
-  }
 }
 @container conversation-widget (max-height: 280px) {
   .widget-card-body > .widget-conversation .composer {
@@ -7858,11 +7998,6 @@ color: var(--text-dim);
   .widget-card-body > .widget-conversation .composer-rail {
     min-height: max(calc(40px * var(--density-scale)), var(--hit-min));
     padding: 2px var(--space-1) var(--space-1);
-  }
-  .widget-card-body > .widget-conversation .composer-simple .composer-rail .send {
-    width: max(36px, var(--hit-min));
-    min-width: max(36px, var(--hit-min));
-    height: max(36px, var(--hit-min));
   }
 }
 @container conversation-widget (max-width: 420px) {
@@ -8742,220 +8877,25 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   position: relative; z-index: var(--z-shell); flex: none; min-width: 0; pointer-events: none;
 }
 .conversation-composer-dock > * { pointer-events: auto; }
-/* Under the status / edited-files line the composer's stack (queued
-   messages, then the box) keeps a step of air, the gap the queued messages
-   keep from the box, so the line never touches it. */
-.conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar) > .composer {
-  padding-block-start: var(--space-2);
-}
-/* Tab: the composer's header stack. Bottom to top: the suggested next prompt
-   is the card's own header row (Composer renders it inside the card), queued
-   prompts stand above the card, and the agent's status, its subagents or the
-   edited files on top. The header has no surface of its own: the card's
-   edge, highlight, corners, shadow and focus wrap it in every style and
-   look, and a hairline parts it from the model line. Above the card every
-   row is a chip of the composer's pending stack: the queued prompt's
-   material, edge and corner, the card's width, one row height and one gap.
-
-   One grid, measured from the card's outer edge, so nothing drifts from row
-   to row: every leading mark is centred on the model logo's column
-   (--composer-stack-mark: the card's 1px edge, its 16px inset, the trigger's
-   1px edge and half the 16px logo), every label starts where the model name
-   does (--composer-stack-text: the trigger's 6px gap after the logo), and
-   the trailing glyphs end where the leading ones start (--composer-stack-end).
-   A row's padding is that column less the row's own 1px edge and half its
-   mark or control. Looks restate the chip material through the tray tokens
-   (shellLooks.css 3c); the edited-files bar takes the grid in the git
-   package's styles. */
-body[data-composer-status-style="tab"] {
-  --composer-stack-mark: calc(var(--space-4) + 2px + var(--icon-sm) / 2);
-  --composer-stack-text: calc(var(--composer-stack-mark) + var(--icon-sm) / 2 + 6px);
-  --composer-stack-end: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
-  --composer-stack-row: calc(max(38px, var(--hit-min)) + 2px);
-  --composer-stack-control: max(28px, var(--hit-min));
-  --composer-stack-gap: var(--space-2);
-  --composer-tray-fill: var(--material-glass-strong);
-  --composer-tray-filter: none;
-  --composer-tray-edge: var(--material-glass-border);
-  --radius-composer-tray: var(--radius-composer);
-  /* The header's hairline: the content's width (glyph column to glyph
-     column), fading in and out over its ends. */
-  --composer-header-rule: color-mix(in srgb, var(--text) 18%, transparent);
-  --composer-header-rule-inset: calc(var(--composer-stack-end) - 1px);
-  --composer-header-rule-fade: var(--space-6);
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  body[data-composer-status-style="tab"]:not([data-glass="off"]):not([data-desktop-low-resource="true"]) {
-    --composer-tray-fill: radial-gradient(140% 140% at 50% 50%,
-      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent) 0%,
-      color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-edge), transparent) 100%);
-    --composer-tray-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-  }
-}
-/* The composer drops the density's top padding under a status row; the
-   row's own gap stands in for it. */
-body[data-composer-status-style="tab"] .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar, .subagent-island) > .composer {
+/* The pending stack above the composer: lines of text, not cards. Top to bottom,
+   the agent's status or the edited files with any subagents, the queued prompts
+   and the suggested next prompt, then the composer card, the one surface here.
+   No line paints a plate, border, shadow or glass in any style or look, and all
+   of them share one grid (--composer-stack-*, tokens.css). The chat inks keep
+   them readable on any wallpaper. Under a status line the composer drops its
+   density's top padding: the line's own row is the air. */
+.conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar, .subagent-island) > .composer {
   padding-block-start: 0;
 }
-
-/* Status rows: the agent's line and its subagent island. */
-body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > :is(.agent-status-dock, .subagent-island) {
-  box-sizing: border-box;
-  width: calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)));
-  margin-block: 0 var(--composer-stack-gap);
-  margin-inline-start: var(--conversation-frame-inline-start, var(--conversation-chrome-inset));
-  margin-inline-end: var(--conversation-frame-inline-end, var(--conversation-chrome-inset));
-  border: 1px solid var(--composer-tray-edge);
-  border-radius: var(--radius-composer-tray);
-  background: var(--composer-tray-fill);
-  background-clip: padding-box;
-  -webkit-backdrop-filter: var(--composer-tray-filter);
-  backdrop-filter: var(--composer-tray-filter);
-  box-shadow: none;
-}
-body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .agent-status-dock {
-  min-height: var(--composer-stack-row);
-  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
-  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--icon-md) / 2) calc(var(--composer-stack-end) - 1px);
-}
-/* The island's own line keeps the same columns: the island pads by the
-   column less the line's inset, and its rows start where the line's words
-   do. */
-body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .subagent-island {
-  --branch-line-row: calc(var(--composer-stack-row) - 2px);
-  --branch-inset: calc(var(--space-1) + var(--icon-md) + var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
-  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--space-1) - var(--icon-md) / 2) calc(var(--composer-stack-end) - 1px - var(--space-1));
-}
-body[data-composer-status-style="tab"] .subagent-island .subagent-island-line > .agent-status-dock {
+:is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .agent-status-dock {
+  --agent-status-row: calc(var(--composer-stack-row) + var(--composer-stack-reach));
+  margin-block-start: calc(-1 * var(--composer-stack-reach));
+  padding-block: var(--composer-stack-reach) 0;
+  padding-inline: calc(var(--composer-stack-mark) - var(--icon-md) / 2) var(--composer-stack-end);
   column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
 }
-/* While the agent works its row's top edge takes the accent. */
-body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .agent-status-dock:not(.agent-status-dock--idle),
-body[data-composer-status-style="tab"] :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .subagent-island:has(.agent-status-dock:not(.agent-status-dock--idle)) {
-  border-block-start-color: color-mix(in srgb, var(--accent) 45%, var(--composer-tray-edge));
-}
-
-/* Queued prompts: chips of the same row, the grip on the mark column, the
-   prompt on the text column, the last action on the end column. A touch
-   grip keeps its full target as an invisible extension over the chip's
-   padding and the prompt's first letters, which take no tap of their own. */
-body[data-composer-status-style="tab"] .composer-chat > .queue-list {
-  gap: var(--composer-stack-gap);
-  margin-block-end: var(--composer-stack-gap);
-}
-body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip {
-  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
-  padding-block: 0;
-  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--icon-md) / 2) calc(var(--composer-stack-end) - 1px - (var(--composer-stack-control) - var(--icon-sm)) / 2);
-  border-radius: var(--radius-composer-tray);
-}
-body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip:not(.queue-chip-leaving) {
-  min-height: var(--composer-stack-row);
-}
-body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-grip {
-  position: relative;
-  align-self: center;
-  width: var(--icon-md);
-  min-width: var(--icon-md);
-  height: var(--icon-md);
-  min-height: var(--icon-md);
-  margin: 0;
-}
-body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-grip::before {
-  content: "";
-  position: absolute;
-  z-index: 1;
-  inset: calc((var(--icon-md) - max(var(--icon-md), var(--hit-min))) / 2);
-}
-body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-actions {
-  gap: var(--space-1);
-}
-body[data-composer-status-style="tab"] .composer-chat > .queue-list > .queue-chip .queue-actions :is(button, .ui-icon-btn) {
-  width: var(--composer-stack-control);
-  min-width: var(--composer-stack-control);
-  height: var(--composer-stack-control);
-  min-height: var(--composer-stack-control);
-  margin-block: 0;
-  padding: 0;
-}
-
-/* The suggested next prompt: the card's header row. The use target runs
-   from the mark column to the dismiss control; × ends on the end column. */
-body[data-composer-status-style="tab"] .composer-card > .composer-suggestion {
-  position: relative;
-  order: -1;
-  flex: none;
-  box-sizing: border-box;
-  inline-size: auto;
-  max-inline-size: none;
-  min-block-size: calc(var(--composer-stack-row) - 1px);
-  margin: 0;
-  padding-block: 0 1px;
-  padding-inline: calc(var(--composer-stack-mark) - 1px - var(--icon-sm) / 2 - var(--space-2)) calc(var(--composer-stack-end) - 1px - (var(--composer-stack-control) - var(--icon-sm)) / 2);
-  gap: var(--space-1);
-  border: 0;
-  border-radius: 0;
-  background: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  box-shadow: none;
-}
-body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use {
-  flex: 1 1 auto;
-  min-block-size: var(--composer-stack-control);
-  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-control);
-}
-/* A row of the card, not a button on it: hover and press brighten the
-   prompt instead of laying a plate across the card's top. */
-body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active):where(:not(:disabled)) {
-  background: none;
-}
-body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-use > .composer-suggestion-key {
-  margin-inline-start: calc(var(--space-2) - (var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2));
-}
-body[data-composer-status-style="tab"] .composer-card > .composer-suggestion > .composer-suggestion-dismiss {
-  inline-size: var(--composer-stack-control);
-  block-size: var(--composer-stack-control);
-  border-radius: var(--radius-control);
-}
-/* The model line under the header stands as far below the hairline as the
-   header's content stands above it (the model trigger is 30px tall, or a
-   touch target). */
-body[data-composer-status-style="tab"] .composer-card:has(> .composer-suggestion) > .composer-config-row {
-  padding-block-start: calc((var(--composer-stack-row) - 2px - max(30px, var(--hit-min))) / 2);
-}
-/* The hairline under the header: one device pixel, inset to the content's
-   width and fading in and out at its ends. */
-body[data-composer-status-style="tab"] .composer-card > .composer-suggestion::after {
-  content: "";
-  position: absolute;
-  inset-inline: var(--composer-header-rule-inset);
-  inset-block-end: 0;
-  block-size: 1px;
-  background: linear-gradient(90deg, transparent, var(--composer-header-rule) var(--composer-header-rule-fade), var(--composer-header-rule) calc(100% - var(--composer-header-rule-fade)), transparent);
-  pointer-events: none;
-}
-@media (min-resolution: 2dppx) {
-  body[data-composer-status-style="tab"] .composer-card > .composer-suggestion::after {
-    transform: scaleY(0.5);
-    transform-origin: 50% 100%;
-  }
-}
-/* The phone's resting row lays its controls out in one line: the header
-   takes a line of its own above them, edge to edge, and the row keeps its
-   resting height under it. */
-body[data-composer-status-style="tab"] .composer-mobile.composer-collapsed .composer-card:has(> .composer-suggestion) {
-  flex-wrap: wrap;
-  row-gap: 0;
-  padding-block-end: calc((var(--composer-height) - 2px - var(--tap)) / 2);
-}
-body[data-composer-status-style="tab"] .composer-mobile.composer-collapsed .composer-card > .composer-suggestion {
-  flex: 0 0 calc(100% + 2 * var(--space-2));
-  margin-inline: calc(-1 * var(--space-2));
-  margin-block-end: calc((var(--composer-height) - 2px - var(--tap)) / 2);
-}
+.conversation-composer-dock .agent-status-dock-state { font-size: var(--font-composer-stack); }
+.conversation-composer-dock .agent-status-dock-time { color: var(--faint); }
 /* Full widgets placed "Above the composer" share the composer's column. */
 .conversation-composer-dock > .placed-slot-widget {
   padding-inline: max(var(--gutter), calc((100% - var(--chat-measure)) / 2));
@@ -10372,17 +10312,29 @@ min-height: var(--tap);
 .composer-simple .composer-actions { gap: var(--space-3); }
 .composer-simple .composer-config { gap: var(--space-2); }
 .composer-simple .composer-rail .send {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
+  width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  flex: 0 0 var(--composer-action-size);
   padding: 0;
   border-radius: var(--radius-round);
   background: var(--composer-green);
   color: var(--accent-ink);
-  box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green) 80%, transparent);
-  /* A running action fills with its solid colors (composerAdaptive.css). */
+  box-shadow: none;
   --context-liquid-tone: var(--composer-green);
-  --context-liquid-ink: var(--accent-ink);
+}
+/* The action reads one size everywhere; a touch target grows past its edge. */
+.composer-simple .composer-rail :is(.send, .stop)::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--composer-action-size) - max(var(--composer-action-size), var(--hit-min))) / 2);
+  border-radius: inherit;
+}
+/* An empty composer's Send is a quiet disc on every look and pointer. */
+.composer-simple .composer-rail .send:disabled {
+  background: var(--control-disabled-bg);
+  color: var(--control-disabled-ink);
+  box-shadow: none;
 }
 @media (hover: hover) {
   .composer-simple .composer-rail .send:hover:not(:disabled) {
@@ -10776,14 +10728,13 @@ color: var(--green);
   border-radius: var(--radius-card);
   background: color-mix(in srgb, var(--red) 9%, var(--elevated));
   color: var(--red);
-  --context-liquid-tone: var(--red);
-  --context-liquid-ink: var(--red-ink);
 }
-.composer-stop-primary svg { width: 15px; height: 15px; fill: currentColor; }
+.composer-stop-primary svg { width: 14px; height: 14px; fill: currentColor; }
 .composer-simple .composer-stop-primary {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
+  width: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  flex: 0 0 var(--composer-action-size);
   padding: 0;
   border-radius: var(--radius-round);
 }
@@ -12735,9 +12686,6 @@ width: var(--tap);
   .composer-mobile .composer-actions svg { width: 20px; height: 20px; stroke-width: 1.8; }
   .composer-mobile .composer-rail .send,
   .composer-mobile .composer-rail .stop {
-    width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
     padding: 0;
     border: 0;
   border-radius: var(--radius-round);
@@ -12745,10 +12693,8 @@ width: var(--tap);
     color: var(--bg);
     box-shadow: none;
     --context-liquid-tone: var(--text);
-    --context-liquid-ink: var(--bg);
   }
-  .composer-mobile .composer-rail .send svg,
-  .composer-mobile .composer-rail .stop svg { width: 18px; height: 18px; }
+  .composer-mobile .composer-rail .send svg { width: 18px; height: 18px; }
   .composer-mobile .composer-send-options {
     width: var(--tap);
     min-width: var(--tap);
@@ -12756,8 +12702,8 @@ width: var(--tap);
   }
   /* §16: a disabled send is quiet, never a heavy grey block. */
   .composer-mobile .composer-rail .send:disabled {
-    background: color-mix(in srgb, var(--text) 10%, transparent);
-    color: var(--faint);
+    background: var(--control-disabled-bg);
+    color: var(--control-disabled-ink);
   }
   .composer-mobile .composer-action-label { display: none; }
 
@@ -13433,23 +13379,6 @@ width: 100%; min-height: var(--tap);
     inset-block-start: 0;
     place-items: start end;
     padding: var(--space-1);
-  }
-  .queue-chip button {
-    width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
-    min-height: var(--tap);
-    display: inline-grid;
-    place-items: center;
-    margin-block: -6px;
-    padding: 0;
-  }
-  .queue-chip .queue-grip {
-    width: var(--tap);
-    min-width: var(--tap);
-    height: var(--tap);
-    min-height: var(--tap);
-    margin-block: -6px;
   }
   .msg.assistant .msg-action-btn,
   .focus-conversation .msg.assistant .msg-action-btn,
@@ -18114,9 +18043,9 @@ html[dir="rtl"] .reasoning-preview {
 .ui-run-summary-copy small { flex: none; color: var(--muted); font-size: var(--font-response-meta); line-height: var(--font-response-meta-lh); }
 .ui-run-summary-diff { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--font-response-meta); white-space: nowrap; }
 
-/* The live agent status above the composer. Its look (a line, a tab on the
-   composer edge or a capsule; Chat settings) belongs to the primitive in
-   components/ui/AgentStatusDock.css. The chat frame below sets its width. */
+/* The live agent status above the composer: a line of the pending stack
+   ("The pending stack above the composer"; the primitive is
+   components/ui/AgentStatusDock.css). The chat frame below sets its width. */
 .agent-status-dock {
   width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
   margin-inline: auto;
@@ -18183,7 +18112,7 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   --chat-wash-faint: 54%;
   --chat-wash-hue: 60%;
 }
-:is(.timeline, .conversation-composer-dock > :not(.composer)) {
+:is(.timeline, .conversation-composer-dock > :not(.composer), .composer-chat > :is(.queue-list, .composer-suggestion)) {
   --text-dim: var(--chat-ink-dim);
   --muted: var(--chat-ink-muted);
   --faint: var(--chat-ink-faint);
@@ -20698,9 +20627,6 @@ body[data-hide-borders="true"] .session-lead-spinner {
 }
 /* The running composer action's contour is its context gauge, not a surface
    boundary: it keeps the action's tone when borders are hidden. */
-body[data-hide-borders="true"] .composer-simple .composer-rail :is(.send, .stop).context-liquid-host::after {
-  border-color: var(--context-liquid-tone) !important;
-}
 
 body[data-hide-borders="true"] :focus-visible {
   border-color: var(--accent-line) !important;

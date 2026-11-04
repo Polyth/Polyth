@@ -47,7 +47,7 @@ test("edited-files rows use compact technical type instead of editor code size",
     styles,
     /\.pending-changes-file\s*\{[^}]*font:\s*400 var\(--font-meta\) \/ 1\.4 var\(--mono\)/s,
   );
-  assert.match(styles, /\.pending-changes-file\s*\{[^}]*min-height:\s*var\(--control-h-sm\)/s);
+  assert.match(styles, /\.pending-changes-file\s*\{[^}]*min-height:\s*max\(var\(--composer-stack-row, var\(--control-h-sm\)\), min\(var\(--hit-min\), var\(--control-h-sm\)\)\)/s);
   assert.doesNotMatch(styles, /\.pending-changes-file-name\s*\{[^}]*font-size:\s*var\(--font-code\)/s);
   assert.match(styles, /\.pending-changes-file::after\s*\{[^}]*var\(--hit-min\)/s);
 });
@@ -62,12 +62,12 @@ test("edited files above the composer are a borderless line in every look", () =
   assert.match(styles, /\.pending-changes-list::before \{[^}]*background:\s*var\(--borderless-edge\)/s);
   // The bar shares the chat frame with the agent status line it replaces.
   assert.match(styles, /\.pending-changes-bar \{[^}]*margin-inline-start:\s*var\(--conversation-frame-inline-start, auto\)/s);
-  // Tab: a status row of the composer's header stack, on the stack's grid:
-  // mark column, text column, end column, in the queued prompt's material.
-  assert.match(styles, /body\[data-composer-status-style="tab"\][^{]*> \.pending-changes-bar \{[^}]*--pending-changes-row:\s*calc\(var\(--composer-stack-row\) - 2px\);[^}]*background:\s*var\(--composer-tray-fill\)/s);
-  assert.match(styles, /\.pending-changes-bar--collapsed > \.ui-run-summary \{[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - 1px - var\(--pending-changes-mark\) \/ 2\) calc\(var\(--composer-stack-end\) - 1px\)/s);
-  assert.match(styles, /\.pending-changes-bar \.pending-changes-list \{[^}]*padding-inline-start:\s*calc\(var\(--pending-changes-mark\) \/ 2 \+ var\(--composer-stack-text\) - var\(--composer-stack-mark\)\)/s);
-  assert.match(styles, /body\[data-composer-status-style="capsule"\] \.pending-changes-bar--collapsed > \.ui-run-summary \{[^}]*width:\s*fit-content;[^}]*box-shadow:\s*inset 0 0 0 1px var\(--borderless-edge\)/s);
+  // It stands on the host's pending stack: mark column, text column, end column.
+  assert.match(styles, /\.pending-changes-bar--collapsed > \.ui-run-summary \{[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark, 13px\) - var\(--pending-changes-mark\) \/ 2\) var\(--composer-stack-end, var\(--space-1\)\)/s);
+  assert.match(styles, /\.pending-changes-list \{[^}]*padding-inline:\s*var\(--composer-stack-text,/s);
+  // A narrow bar keeps its head on one line; the words close the list.
+  assert.match(styles, /@container pending-changes \(max-width: 420px\) \{[^}]*"lead lead toggle"[^}]*"more words words"/s);
+  assert.doesNotMatch(styles, /data-composer-status-style|--composer-tray-/, "one look");
 });
 
 test("narrow Source Control header wraps by unit instead of clipping mid-word", () => {

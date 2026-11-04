@@ -120,10 +120,8 @@ test("the agent status above the composer is a borderless line, not glass", () =
   assert.match(dock, /\.agent-status-dock-content \{[^}]*display:\s*flex;[^}]*align-items:\s*baseline/s);
   // The action takes the line's room.
   assert.match(dock, /\.agent-status-dock-state \{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*6ch/s);
-  // The composer's stack keeps a step of air under the status, except under
-  // a Tab, whose rows keep their own gap.
-  assert.match(css, /\.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar\) > \.composer \{\s*padding-block-start: var\(--space-2\);\s*\}/);
-  assert.match(css, /body\[data-composer-status-style="tab"\] \.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar, \.subagent-island\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
+  // Under a status line the composer drops its top padding: the line's own row is the air.
+  assert.match(css, /\.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar, \.subagent-island\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
   assert.match(dock, /@media \(max-width: 600px\) \{\s*\.agent-status-dock \.agent-status-dock-secondary \{ display: none; \}/);
   assert.match(dock, /@media \(prefers-reduced-motion: reduce\) \{\s*\.agent-status-dock-state \{ animation: none;/);
 });
@@ -547,53 +545,50 @@ test("timeline vertical runway is represented by flex spacers instead of scroll-
 });
 
 
-test("queued message rows follow the composer's material, type and corner roles", () => {
+test("queued prompts are quiet lines: no plate, and their actions wait for hover or focus", () => {
   const css = read("../src/styles.css");
-
-  const chipStart = css.indexOf(".queue-chip {");
-  const chip = css.slice(chipStart, css.indexOf("}", chipStart));
-  assert.match(chip, /background:\s*var\(--material-glass-strong\)/);
-  assert.match(chip, /border:\s*1px solid var\(--material-glass-border\)/);
-  assert.match(chip, /border-radius:\s*var\(--radius-composer\)/);
-
-  const textStart = css.indexOf(".queue-chip .queue-text {");
-  const text = css.slice(textStart, css.indexOf("}", textStart));
-  assert.match(text, /font-size:\s*var\(--font-response\)/);
-  assert.match(text, /line-height:\s*var\(--font-response-lh\)/);
-
-  // The opaque material above is the fallback; the live glass pass is guarded
-  // so transparency, low-resource and reduced-motion settings stay readable.
-  assert.match(
-    css,
-    /@supports \(\(-webkit-backdrop-filter: blur\(1px\)\) or \(backdrop-filter: blur\(1px\)\)\)[\s\S]*?body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)[\s\S]*?\.queue-chip:not\(\.drag-over\)[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/,
-  );
+  const looks = read("../src/shellLooks.css");
+  const section = css.slice(css.indexOf("/* ---------- queued prompts ---------- */"), css.indexOf("/* ---------- shared Markdown renderer ---------- */"));
+  assert.ok(section.length > 0, "queued prompts section");
+  const chip = section.slice(section.indexOf(".queue-chip {"), section.indexOf("}", section.indexOf(".queue-chip {")));
+  assert.match(chip, /min-block-size:\s*var\(--composer-stack-row\)/);
+  assert.match(chip, /padding-inline:\s*var\(--composer-stack-text\) var\(--composer-stack-end\)/);
+  assert.doesNotMatch(section, /material-glass|backdrop-filter/, "a row has no glass of its own");
+  assert.doesNotMatch(chip, /background|border:/, "a row has no plate or edge at rest");
+  assert.doesNotMatch(looks, /\.queue-chip[^{]*\{[^}]*(?:--look-option|look-card-radius)/s, "no look turns a row back into a chip");
+  // A prompt's actions stand over its row, so its text keeps the width at rest,
+  // and they are reachable by keyboard.
+  assert.match(section, /\.queue-chip\[role="listitem"\] \.queue-actions \{[^}]*position:\s*absolute;/s);
+  assert.match(section, /\.queue-chip\[role="listitem"\]:not\(:hover, :focus-within\) \.queue-actions \{ opacity: 0; pointer-events: none; \}/);
+  // A service row's way forward is always there, and on touch it is a word, not a clipped icon button.
+  assert.doesNotMatch(css, /\.queue-chip button\s*\{/);
+  assert.match(section, /\.queue-action-word::after \{[^}]*block-size:\s*max\(100%, var\(--hit-min\)\)/s);
+  // The drop target is a line, not a wash.
+  assert.match(section, /\.queue-chip\[data-drop\]::after \{[^}]*background:\s*var\(--accent\)/s);
+  // Touch: one target for the block, however short.
+  assert.match(section, /\.queue-list\[data-touch\] \.queue-block \{[^}]*min-block-size:\s*var\(--hit-min\)/s);
 });
 
-test("Tab status style: one grid from the card's edge, the suggestion as the card's header row", () => {
+test("the pending stack above the composer: one grid and no surface but the card", () => {
   const css = read("../src/styles.css");
-  const stack = css.slice(css.indexOf("/* Tab: the composer's header stack."), css.indexOf('/* Full widgets placed "Above the composer"'));
-  assert.ok(stack.length > 0, "header stack section");
+  const tokens = read("../src/tokens.css");
+  const looks = read("../src/shellLooks.css");
   // The grid is derived from the card: the model logo's column, the model
-  // name's column, and the mirrored end; one row height and one gap.
-  assert.match(stack, /--composer-stack-mark:\s*calc\(var\(--space-4\) \+ 2px \+ var\(--icon-sm\) \/ 2\);/);
-  assert.match(stack, /--composer-stack-text:\s*calc\(var\(--composer-stack-mark\) \+ var\(--icon-sm\) \/ 2 \+ 6px\);/);
-  assert.match(stack, /--composer-stack-end:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-sm\) \/ 2\);/);
-  assert.match(stack, /--composer-stack-row:\s*calc\(max\(38px, var\(--hit-min\)\) \+ 2px\);/);
-  // Every row pads by the column less its own edge and half its mark.
-  assert.match(stack, /> \.agent-status-dock \{[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - 1px - var\(--icon-md\) \/ 2\) calc\(var\(--composer-stack-end\) - 1px\)/s);
-  assert.match(stack, /> \.queue-chip \{[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - 1px - var\(--icon-md\) \/ 2\)/s);
-  assert.match(stack, /\.queue-chip:not\(\.queue-chip-leaving\) \{[^}]*min-height:\s*var\(--composer-stack-row\)/s);
-  // A touch grip keeps its full target as an invisible extension.
-  assert.match(stack, /\.queue-grip::before \{[^}]*inset:\s*calc\(\(var\(--icon-md\) - max\(var\(--icon-md\), var\(--hit-min\)\)\) \/ 2\)/s);
-  // The suggestion is the card's first row with no surface of its own.
-  assert.match(stack, /\.composer-card > \.composer-suggestion \{[^}]*order:\s*-1;[^}]*border:\s*0;[^}]*background:\s*none;[^}]*box-shadow:\s*none;/s);
-  // Its hairline: content-wide, fading at its ends, one device pixel.
-  assert.match(stack, /\.composer-card > \.composer-suggestion::after \{[^}]*inset-inline:\s*var\(--composer-header-rule-inset\);[^}]*linear-gradient\(90deg, transparent, var\(--composer-header-rule\) var\(--composer-header-rule-fade\)/s);
-  assert.match(stack, /@media \(min-resolution: 2dppx\) \{[^}]*\.composer-suggestion::after \{[^}]*scaleY\(0\.5\)/s);
-  // The model line sits as far below the hairline as the header's content above.
-  assert.match(stack, /:has\(> \.composer-suggestion\) > \.composer-config-row \{[^}]*padding-block-start:\s*calc\(\(var\(--composer-stack-row\) - 2px - max\(30px, var\(--hit-min\)\)\) \/ 2\)/s);
-  // The phone's resting row keeps its height under the header.
-  assert.match(stack, /\.composer-mobile\.composer-collapsed \.composer-card:has\(> \.composer-suggestion\) \{[^}]*flex-wrap:\s*wrap;/s);
-  // No header imitation is left: the card itself frames it.
-  assert.doesNotMatch(stack, /composer-tray-header|composer-tray-divider|border-start-start-radius:\s*0/);
+  // name's column, and the mirrored end; one row height.
+  assert.match(tokens, /--composer-stack-mark:\s*calc\(var\(--space-4\) \+ 2px \+ var\(--icon-sm\) \/ 2\);/);
+  assert.match(tokens, /--composer-stack-text:\s*calc\(var\(--composer-stack-mark\) \+ var\(--icon-sm\) \/ 2 \+ 6px\);/);
+  assert.match(tokens, /--composer-stack-end:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-sm\) \/ 2\);/);
+  assert.match(tokens, /--composer-stack-reach:\s*calc\(max\(var\(--composer-stack-row\), var\(--hit-min\)\) - var\(--composer-stack-row\)\);/);
+  const stack = css.slice(css.indexOf("/* The pending stack above the composer"), css.indexOf('/* Full widgets placed "Above the composer"'));
+  assert.ok(stack.length > 0, "pending stack section");
+  // The status line sits on the grid and reaches up to its touch target.
+  assert.match(stack, /> \.agent-status-dock \{[^}]*margin-block-start:\s*calc\(-1 \* var\(--composer-stack-reach\)\);[^}]*padding-block:\s*var\(--composer-stack-reach\) 0;[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-md\) \/ 2\) var\(--composer-stack-end\);/s);
+  assert.doesNotMatch(stack, /composer-tray|background|border:|backdrop-filter/, "no line paints a surface");
+  // The status styles are gone, along with their material and rules.
+  for (const source of [css, looks]) {
+    assert.doesNotMatch(source, /data-composer-status-style|--composer-tray-(?:fill|filter|edge)|--radius-composer-tray|--composer-header-rule/);
+  }
+  // The suggestion is a line of the stack, not a chip.
+  const suggestion = css.slice(css.indexOf(".composer-suggestion {"), css.indexOf("}", css.indexOf(".composer-suggestion {")));
+  assert.doesNotMatch(suggestion, /background|border:|backdrop-filter/);
 });

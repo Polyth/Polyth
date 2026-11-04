@@ -1209,7 +1209,9 @@ width: 100%;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-1);
+  /* On the columns of the host's pending stack above the composer. */
   padding: 0 var(--space-1);
+  padding-inline-start: calc(var(--composer-stack-mark, calc(var(--space-1) + var(--icon-md) / 2)) - var(--icon-md) / 2);
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: 1.2;

@@ -291,24 +291,15 @@ test("a running turn uses a split only for sendable drafts and keeps Stop standa
 
   assert.match(
     styles,
-    /\.composer-rail \.composer-stop-primary\s*\{[^}]*min-width:\s*78px;[^}]*background:\s*color-mix\(in srgb, var\(--red\) 9%, var\(--elevated\)\);/s,
-    "standalone Stop keeps its previous primary silhouette",
-  );
-  assert.match(
-    styles,
-    /\.composer-simple \.composer-stop-primary\s*\{[^}]*width:\s*44px;[^}]*border-radius:\s*var\(--radius-round\);/s,
+    /\.composer-simple \.composer-stop-primary\s*\{[^}]*width:\s*var\(--composer-action-size\);[^}]*border-radius:\s*var\(--radius-round\);/s,
     "the composer Stop remains a compact action in the pill corner",
   );
   assert.match(
     css,
-    /\.composer-simple \.composer-rail \.composer-send-split\s*\{[^}]*gap:\s*0;[^}]*box-shadow:\s*var\(--shadow-sm\), inset/s,
-    "the split owns one continuous divider and elevation",
+    /\.composer-simple \.composer-rail \.composer-send-split\s*\{[^}]*align-items:\s*center;[^}]*gap:\s*0;/s,
+    "the pair is a solid Send and a bare chevron",
   );
-  assert.match(
-    css,
-    /\.composer-simple \.composer-rail \.composer-send-split > \.composer-send-options::before\s*\{[^}]*inline-size:\s*1px;/s,
-    "the neutral segment has one internal divider",
-  );
+  assert.doesNotMatch(css, /\.composer-send-options::before/, "no divider between them");
   assert.doesNotMatch(css, /\.composer-send-menu::after/, "the send submenu has no decorative diamond pointer");
   assert.match(
     css,

@@ -151,8 +151,7 @@ test("chat, context and agent activity share human model presentation", () => {
   assert.doesNotMatch(statusCss, /\.agent-status-dock-primary strong/);
   assert.match(statusCss, /\.agent-status-dock-primary \{[^}]*line-height:\s*1\.2/s);
   assert.match(statusCss, /\.agent-status-dock-secondary \{[^}]*line-height:\s*1\.2/s);
-  assert.match(statusCss, /body\[data-composer-status-style="tab"\] \.agent-status-dock \{/);
-  assert.match(statusCss, /body\[data-composer-status-style="capsule"\] \.agent-status-dock \{[^}]*width:\s*fit-content/s);
+  assert.doesNotMatch(statusCss, /data-composer-status-style/, "the status line has one look");
   assert.match(statusDock, /title=\{model\}/);
 });
 

@@ -514,7 +514,7 @@ test("edited-files card keeps compact technical paths on a phone-width dock", { 
   await page.setContent(`
     <style>${css}</style>
     <section class="ui-glass-dock ui-glass-dock--strong pending-changes-bar" style="width: min(100% - 24px, 420px); margin: 12px auto;">
-      <div class="pending-changes-head">
+      <div class="pending-changes-body">
         <div class="pending-changes-lead">
           <span class="pending-changes-icon"></span>
           <div class="pending-changes-copy">
@@ -522,7 +522,6 @@ test("edited-files card keeps compact technical paths on a phone-width dock", { 
             <span class="pending-change-stats"><span class="additions">+68</span><span class="deletions">-24</span></span>
           </div>
         </div>
-      </div>
       <div class="pending-changes-list">
         <button type="button" class="pending-changes-file">
           <span class="pending-changes-file-name">apps/web/src/components/Timeline.tsx</span>
@@ -534,6 +533,7 @@ test("edited-files card keeps compact technical paths on a phone-width dock", { 
         <button type="button" class="pending-changes-file">
           <span class="pending-changes-file-name">apps/web/test/composerChatStyle.test.ts</span>
         </button>
+      </div>
       </div>
     </section>
   `);

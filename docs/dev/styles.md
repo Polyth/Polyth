@@ -46,7 +46,7 @@ list — other docs link here instead of restating it.
 | `--border` | Structural boundary. |
 | `--border-soft` | Decorative separator that does not identify a control. |
 | `--contour` | The theme's one contour: the edge every glass surface and shell control draws (both rails, the top rail card, header capsules and glyph buttons, the session title, the composer, menus, popovers, help tags, dialogs, sheets and the sessions peek). Resolved on the root, so *Hide interface borders* cannot thin it; each style recipe sets it to its own stroke, and `--material-glass-border` is this token. |
-| `--borderless-edge` | Subtle 12% ink line for intentional lines inside content that survive *Hide interface borders*: the chat activity thread, the outlines of the activity and composer-status looks, the lock screen's fields and a file drop target. Not a surface contour; use `--contour` for those. |
+| `--borderless-edge` | Subtle 12% ink line for intentional lines inside content that survive *Hide interface borders*: the chat activity thread, the outlines of the activity looks, the lock screen's fields and a file drop target. Not a surface contour; use `--contour` for those. |
 | `--control-border` | Recognizable input, button, and interactive-card boundary; stronger on light themes. |
 | `--surface-divider` | Divider between adjacent surfaces. |
 | `--hair` | Lowest-emphasis hairline. |
@@ -77,8 +77,8 @@ glass would otherwise paint under a translucent contour sets
 of its own bright fill and every contour reads at the same weight.
 Affordances keep their edge: a checkbox keeps its outline and a file drop target
 its dashed `--borderless-edge`. The few intentional contours in a transcript keep
-theirs too: the agent activity thread, the Ledger hairlines, the Chip and
-Capsule outlines, the edited-files thread and the subagent branch's thread
+theirs too: the agent activity thread, the Ledger hairlines, the Chip
+outline, the edited-files thread and the subagent branch's thread
 (mixed toward the accent or amber) are backgrounds or inset shadows drawn from
 `--borderless-edge`, and the inline command Stop keeps its red
 outline through an explicit `!important` exception. Markdown structure is
@@ -210,7 +210,10 @@ when the locale switches between LTR and RTL.
 | `--activity-row-height` | Density-scaled compact activity/tool row height. |
 | `--agent-dock-height` | Density-scaled expanded active-agent dock height. |
 | `--composer-height` | Density-scaled resting conversation composer height. |
-| `--composer-action-size` | Density-scaled visible send/stop action size. |
+| `--composer-action-size` | Density-scaled visible send/stop action size. The disc reads this size on every pointer; a touch target grows past its edge through `::after`. |
+| `--composer-stack-mark`, `--composer-stack-text`, `--composer-stack-end` | The columns of the pending stack above the composer, measured from the composer card's outer edge: marks are centred on the model logo's column, labels start at the model name, trailing glyphs end where the marks start. Packages that draw a line there (planner, code hosting, git) use them with a fallback. |
+| `--composer-stack-row`, `--composer-stack-control` | One line's height in that stack and the size of a control on it. |
+| `--composer-stack-reach` | How far a line that opens something reaches up into the timeline's bottom space to keep its full touch target while it reads one row tall: 0 on fine pointers. |
 | `--composer-max-input-height` | Font-scaled five-line composer input ceiling. |
 | `--package-window-header-h` | Shared compact package-window header height. |
 | `--package-window-resize-hit` | In-frame resize hit area; host-owned, never package-overridden. |
@@ -371,6 +374,7 @@ interior-facing corners and seams.
 | `--font-tool-label-lh` | Compact tool label line height. |
 | `--font-technical` | File path, command, and technical value role. |
 | `--font-technical-lh` | Technical value line height. |
+| `--font-composer-stack` | Lines of the pending stack above the composer: status, queued prompts, edited files, suggested prompt. |
 | `--font-response-meta` | Response and activity metadata role. |
 | `--font-response-meta-lh` | Response metadata line height. |
 | `--font-code` | Code-surface role for blocks, diffs and the editor (follows `--editor-font-size` and pairs with `--mono`). Inline code inside conversation prose keeps the sentence's own caliber. |
@@ -653,9 +657,8 @@ is uploaded again.
 
 Every look covers the header, navigator, rails, conversation and composer,
 in-flow cards (agent question, isolated-changes card, empty states; the
-agent status, subagent and edited-files lines keep the shape *Status above the
-composer* gives them, and a look only restates the Tab header stack's chip
-material and header rule, [ui](ui.md)) and floating surfaces (toasts, menus, tooltips,
+lines of the pending stack above the composer stay text in every look,
+[ui](ui.md)) and floating surfaces (toasts, menus, tooltips,
 dialogs, Settings, the workspace customize panel). The shared block is
 organised by role, not by component, so a control a platform style paints at
 class strength joins a role instead of getting a rule of its own:

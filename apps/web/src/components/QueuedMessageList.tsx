@@ -1,19 +1,58 @@
-// Queued follow-up messages: drag reorder and removal. Editing belongs
-// in the main composer, which keeps the queued item's original position.
-import { type DragEvent as ReactDragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+// Queued follow-up messages: quiet lines above the composer. A pointer that
+// hovers brings a row's handle and actions over it; on touch the whole block
+// opens the queue sheet with the same actions at full size. Editing belongs in
+// the main composer, which keeps the queued item's original position; its row
+// stays in place meanwhile with a way out.
+import {
+  type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { QueueItemDto, SessionEvent } from "@polyth/contracts";
 import { queuePausedAfterUserInterrupt } from "@polyth/session/queue-pause";
 import { api } from "@polyth/session/web-api";
 import { setUiError, usePendingSends, useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
 import { markQueuedPromptLaunch, playQueueChipExit, queueChipExitAvailable } from "../queueLaunchMotion.ts";
+import { useShellMode } from "../responsiveShell.ts";
 import { tr } from "../i18n/index.ts";
 import Button from "./ui/Button.tsx";
 import IconButton from "./ui/IconButton.tsx";
 import Icon from "./ui/Icon.tsx";
-import { DeleteIcon, DragHandleIcon, EditIcon, EnterIcon, PauseIcon, PlayIcon, WarningIcon } from "./ui/icons.ts";
+import ResponsiveOverlay from "./ui/ResponsiveOverlay.tsx";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  DeleteIcon,
+  DragHandleIcon,
+  EditIcon,
+  EnterIcon,
+  MoreIcon,
+  PauseIcon,
+  PlayIcon,
+  QueueNextIcon,
+  WarningIcon,
+} from "./ui/icons.ts";
 
 const QUEUE_DRAG_TYPE = "application/x-polyth-queued-message";
+/** Rows shown before the rest fold away behind "N more". */
+const QUEUE_PREVIEW_ROWS = 2;
+
+const HOVERLESS_QUERY = "(hover: none)";
+function subscribeHoverless(listener: () => void): () => void {
+  const query = window.matchMedia?.(HOVERLESS_QUERY);
+  query?.addEventListener?.("change", listener);
+  return () => query?.removeEventListener?.("change", listener);
+}
+const readHoverless = (): boolean => window.matchMedia?.(HOVERLESS_QUERY)?.matches ?? false;
 
 /** Move one item to the target item's position without changing its metadata. */
 export function moveQueuedItem(
@@ -94,11 +133,201 @@ export function queueStalledOnRecovery(
 
 type LeavingChip = { item: QueueItemDto; index: number; launch: boolean; animation: Animation | null; started: boolean };
 
+/** The queue on demand: whole prompts and full-size targets. A tap on the text
+ *  edits, the handle drags (pointer events, so touch and mouse behave alike) and
+ *  arrow keys on the handle move a row one place. */
+function QueueSheet({
+  open,
+  onClose,
+  anchorRef,
+  items,
+  shown,
+  busy,
+  onEdit,
+  onSteer,
+  onRemove,
+  onReorder,
+  onMoveBy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  anchorRef: RefObject<HTMLElement | null>;
+  /** The whole queue, the source of a reorder. */
+  items: readonly QueueItemDto[];
+  /** The rows this list shows, in order. */
+  shown: readonly QueueItemDto[];
+  busy: boolean;
+  onEdit?: (item: QueueItemDto) => void;
+  onSteer?: (item: QueueItemDto) => void;
+  onRemove: (id: string) => void;
+  onReorder: (next: QueueItemDto[], movedId: string) => void;
+  onMoveBy: (id: string, delta: number) => void;
+}) {
+  const [preview, setPreview] = useState<QueueItemDto[] | null>(null);
+  const [liftedId, setLiftedId] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const gesture = useRef<{ pointerId: number; id: string; stop: () => void } | null>(null);
+  const shownIds = new Set(shown.map((item) => item.id));
+  const rows = preview ? preview.filter((item) => shownIds.has(item.id)) : shown;
+
+  // A drag owns the finger, also where touch-action alone does not hold it.
+  useEffect(() => {
+    if (!open) return;
+    const keep = (event: TouchEvent) => { if (gesture.current && event.cancelable) event.preventDefault(); };
+    document.addEventListener("touchmove", keep, { passive: false });
+    return () => document.removeEventListener("touchmove", keep);
+  }, [open]);
+  // Closing the sheet or leaving the session mid-drag ends the gesture unsaved.
+  useEffect(() => {
+    if (open) return;
+    gesture.current?.stop();
+    gesture.current = null;
+    setLiftedId(null);
+    setPreview(null);
+  }, [open]);
+  useEffect(() => () => { gesture.current?.stop(); }, []);
+
+  // The gesture listens on the window: reordering re-inserts the row, so the
+  // handle that took the press cannot be relied on to see the release.
+  const startReorder = (id: string, event: ReactPointerEvent<HTMLElement>) => {
+    if (busy || gesture.current) return;
+    event.preventDefault();
+    const { pointerId } = event;
+    let current: QueueItemDto[] = [...items];
+    const onMove = (move: PointerEvent) => {
+      if (move.pointerId !== pointerId) return;
+      const elements = [...(listRef.current?.querySelectorAll<HTMLElement>("[data-sheet-row]") ?? [])];
+      const from = elements.findIndex((element) => element.dataset.sheetRow === id);
+      // A row takes a neighbour's place once the finger passes that row's middle,
+      // so rows of different heights cannot swap back and forth.
+      let target: string | undefined;
+      for (const [at, element] of elements.entries()) {
+        if (at === from || element.dataset.sheetHeld !== undefined) continue;
+        const rect = element.getBoundingClientRect();
+        const middle = rect.top + rect.height / 2;
+        if (at < from && move.clientY < middle) { target = element.dataset.sheetRow; break; }
+        if (at > from && move.clientY > middle) target = element.dataset.sheetRow;
+      }
+      if (!target) return;
+      current = moveQueuedItem(current, id, target);
+      setPreview(current);
+    };
+    const onEnd = (end: PointerEvent) => {
+      if (end.pointerId !== pointerId) return;
+      gesture.current?.stop();
+      gesture.current = null;
+      setLiftedId(null);
+      setPreview(null);
+      if (end.type === "pointerup" && current.some((item, at) => item.id !== items[at]?.id)) onReorder(current, id);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onEnd);
+    gesture.current = {
+      pointerId,
+      id,
+      stop: () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onEnd);
+        window.removeEventListener("pointercancel", onEnd);
+      },
+    };
+    setLiftedId(id);
+    setPreview(current);
+  };
+  const keyMove = (id: string, event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    onMoveBy(id, event.key === "ArrowUp" ? -1 : 1);
+  };
+
+  return (
+    <ResponsiveOverlay
+      open={open}
+      onClose={onClose}
+      title={tr("queuedmessagelist.sheetTitleValue", { length: shown.length })}
+      phone="sheet"
+      anchorRef={anchorRef}
+      side="up"
+      align="end"
+      sheetSize="auto"
+    >
+      <div ref={listRef} className="queue-sheet" role="list">
+        {rows.map((item, at) => {
+          const n = at + 1;
+          const text = item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text;
+          return (
+            <div
+              key={item.id}
+              className="queue-sheet-row"
+              role="listitem"
+              data-sheet-row={item.id}
+              data-sheet-held={item.heldForReview ? "" : undefined}
+              data-lifted={liftedId === item.id ? "" : undefined}
+            >
+              {item.heldForReview ? <span className="queue-sheet-grip" aria-hidden="true" /> : (
+                <span
+                  className="queue-sheet-grip"
+                  role="button"
+                  tabIndex={0}
+                  aria-keyshortcuts="ArrowUp ArrowDown"
+                  data-owns-swipe=""
+                  aria-label={tr("queuedmessagelist.reorderQueuedMessageValue", { value: n })}
+                  onPointerDown={(event) => startReorder(item.id, event)}
+                  onKeyDown={(event) => keyMove(item.id, event)}
+                >
+                  <Icon icon={DragHandleIcon} size="sm" />
+                </span>
+              )}
+              <button
+                type="button"
+                className="queue-sheet-text"
+                aria-label={tr("queuedmessagelist.editQueuedMessageValue", { value: n })}
+                disabled={busy || !onEdit}
+                onClick={() => onEdit?.(item)}
+              >
+                <span>{text}</span>
+              </button>
+              {item.heldForReview && !item.hiddenUserMessage && (
+                <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>
+              )}
+              {!item.heldForReview && (
+                <IconButton
+                  className="queue-steer"
+                  icon={EnterIcon}
+                  label={tr("queuedmessagelist.steer")}
+                  size="md"
+                  variant="ghost"
+                  pressed={item.delivery === "steer"}
+                  busy={busy}
+                  disabled={busy || !onSteer}
+                  onClick={() => onSteer?.(item)}
+                />
+              )}
+              <IconButton
+                className="queue-remove"
+                icon={DeleteIcon}
+                label={tr("queuedmessagelist.removeQueuedMessageValue", { value: n })}
+                size="md"
+                variant="ghost"
+                busy={busy}
+                disabled={busy}
+                onClick={() => onRemove(item.id)}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </ResponsiveOverlay>
+  );
+}
+
 export default function QueuedMessageList({
   sessionId,
   editingId = null,
   launchingId = null,
   onEdit,
+  onCancelEdit,
   onSteer,
   onItemsChange,
 }: {
@@ -108,6 +337,8 @@ export default function QueuedMessageList({
    *  already in the timeline). Hidden at once, not after the queue re-read. */
   launchingId?: string | null;
   onEdit?: (item: QueueItemDto) => void;
+  /** Ends the composer's edit of the row in `editingId`, leaving it as it was. */
+  onCancelEdit?: () => void;
   onSteer?: (item: QueueItemDto) => void | Promise<void>;
   onItemsChange?: (sessionId: string, items: QueueItemDto[]) => void;
 }) {
@@ -115,8 +346,14 @@ export default function QueuedMessageList({
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [, setExitTick] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const shellMode = useShellMode();
+  const hoverless = useSyncExternalStore(subscribeHoverless, readHoverless, () => false);
+  // No pointer to hover with, or no room for a row's actions: one sheet instead.
+  const touchQueue = shellMode === "phone" || hoverless;
   const scope = useMemo(() => ({
     alive: true,
     request: 0,
@@ -128,12 +365,15 @@ export default function QueuedMessageList({
     launched: new Map<string, "active" | "ended">(),
     lastLaunchingId: null as string | null,
     rendered: [] as QueueItemDto[],
+    foldedAway: new Set<string>(),
     leaving: new Map<string, LeavingChip>(),
   }), [sessionId]);
   useEffect(() => {
     scope.alive = true;
     setItems([]);
     setBusyId(null);
+    setExpanded(false);
+    setSheetOpen(false);
     return () => { scope.alive = false; scope.request++; };
   }, [scope]);
   // queue/* events bump the model version; refetch on any event activity
@@ -196,6 +436,8 @@ export default function QueuedMessageList({
   if (queueChipExitAvailable()) {
     scope.rendered.forEach((item, index) => {
       if (visibleIds.has(item.id) || item.id === editingId || scope.leaving.has(item.id)) return;
+      // A row hidden by the fold has no slot to close.
+      if (scope.foldedAway.has(item.id)) return;
       const launch = departed.has(item.id) || scope.launched.has(item.id);
       scope.leaving.set(item.id, { item, index, launch, animation: null, started: false });
     });
@@ -222,16 +464,30 @@ export default function QueuedMessageList({
     }
   });
 
+  // An emptied queue closes the sheet for good: the next prompt must not reopen it.
+  const queueEmpty = visibleItems.length === 0;
+  useEffect(() => { if (queueEmpty) setSheetOpen(false); }, [queueEmpty]);
+
   const resumable = visibleItems.find((item) => !item.heldForReview) ?? null;
   const queuePaused = resumable !== null
     && queuePausedAfterUserInterrupt(events ?? [], visibleItems);
   const queueStalled = resumable !== null && !queuePaused
     && queueStalledOnRecovery(events ?? [], visibleItems);
-  if (visibleItems.length === 0 && scope.leaving.size === 0) return null;
-  const rows: Array<{ item: QueueItemDto; leaving: boolean }> = visibleItems.map((item) => ({ item, leaving: false }));
+  const editingItem = editingId ? items.find((item) => item.id === editingId && item.sessionId === sessionId) ?? null : null;
+  if (visibleItems.length === 0 && scope.leaving.size === 0 && !editingItem) return null;
+  const editingBefore = editingItem ? visibleItems.filter((item) => item.position < editingItem.position).length : 0;
+  // A row edited from below the fold unfolds the list, so its place reads true.
+  const foldedAway = !expanded && visibleItems.length > QUEUE_PREVIEW_ROWS && editingBefore <= QUEUE_PREVIEW_ROWS
+    ? new Set(visibleItems.slice(QUEUE_PREVIEW_ROWS).map((item) => item.id))
+    : null;
+  scope.foldedAway = foldedAway ?? new Set();
+  const rows: Array<{ item: QueueItemDto; leaving?: boolean; editing?: boolean }> = visibleItems
+    .filter((item) => !foldedAway?.has(item.id))
+    .map((item) => ({ item }));
   for (const chip of [...scope.leaving.values()].sort((a, b) => a.index - b.index)) {
     rows.splice(Math.min(chip.index, rows.length), 0, { item: chip.item, leaving: true });
   }
+  if (editingItem) rows.splice(Math.min(editingBefore, rows.length), 0, { item: editingItem, editing: true });
 
   const persistOrder = async (next: QueueItemDto[], movedId: string) => {
     if (scope.busy) return;
@@ -269,6 +525,33 @@ export default function QueuedMessageList({
     setDropTargetId(null);
     if (!sourceId || sourceId === targetId) return;
     void persistOrder(moveQueuedItem(items, sourceId, targetId), sourceId);
+  };
+
+  // moveQueuedItem takes the target's index, so dragging down lands after it.
+  const dropSide = (targetId: string): "before" | "after" =>
+    items.findIndex((item) => item.id === draggedId) < items.findIndex((item) => item.id === targetId) ? "after" : "before";
+
+  /** One place up or down among the prompts that can move. */
+  const moveBy = (id: string, delta: number) => {
+    const movable = visibleItems.filter((item) => !item.heldForReview);
+    const at = movable.findIndex((item) => item.id === id);
+    const target = at < 0 ? undefined : movable[at + delta];
+    if (!target) return;
+    setExpanded(true);
+    // Reordering re-inserts keyed rows, which can blur what the keyboard is on.
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void persistOrder(moveQueuedItem(items, id, target.id), id).finally(() => {
+      if (focused?.isConnected && document.activeElement !== focused) focused.focus();
+    });
+  };
+
+  // Alt+arrows from anywhere on a row; plain arrows on its focused handle.
+  const moveFromKey = (id: string, event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    if (!event.altKey && !(event.target as HTMLElement).classList.contains("queue-grip")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    moveBy(id, event.key === "ArrowUp" ? -1 : 1);
   };
 
   const remove = async (id: string) => {
@@ -312,149 +595,200 @@ export default function QueuedMessageList({
     }
   };
 
+  const hiddenCount = foldedAway?.size ?? 0;
+  const canFold = visibleItems.length > QUEUE_PREVIEW_ROWS && (expanded || hiddenCount > 0);
+  const resumeRow = (className: string, mark: typeof PauseIcon, text: string, wrap: boolean) => resumable && (
+    <div className={`queue-chip ${className}`} role="status" aria-live="polite">
+      <span className="queue-mark" aria-hidden="true">
+        <Icon icon={mark} size="sm" />
+      </span>
+      <span className={`queue-text${wrap ? " queue-text-wrap" : ""}`}>{text}</span>
+      <div className="queue-actions" onPointerDown={(event) => event.stopPropagation()}>
+        <Button
+          className="queue-action-word"
+          size="sm"
+          variant="ghost"
+          iconStart={PlayIcon}
+          busy={busyId === resumable.id}
+          disabled={busyId !== null || !onSteer}
+          onClick={() => void steer(resumable)}
+        >
+          {tr("common.resume")}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
-    <div ref={listRef} className="queue-list" role="list" aria-label={tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}>
-      {queuePaused && resumable && (
-        <div className="queue-chip" role="status" aria-live="polite">
-          <span className="queue-grip" aria-hidden="true">
-            <Icon icon={PauseIcon} size="sm" />
-          </span>
-          <span className="queue-text">
-            {tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}
-          </span>
-          <div
-            className="queue-actions"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <Button
-              size="sm"
-              variant="ghost"
-              iconStart={PlayIcon}
-              busy={busyId === resumable.id}
-              disabled={busyId !== null || !onSteer}
-              onClick={() => void steer(resumable)}
-            >
-              {tr("common.resume")}
-            </Button>
-          </div>
-        </div>
-      )}
-      {queueStalled && resumable && (
-        <div className="queue-chip queue-chip-stalled" role="status" aria-live="polite">
-          <span className="queue-grip" aria-hidden="true">
-            <Icon icon={WarningIcon} size="sm" />
-          </span>
-          <span className="queue-text queue-text-wrap">
-            {tr("queuedmessagelist.stalledOnRecovery")}
-          </span>
-          <div
-            className="queue-actions"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <Button
-              size="sm"
-              variant="ghost"
-              iconStart={PlayIcon}
-              busy={busyId === resumable.id}
-              disabled={busyId !== null || !onSteer}
-              onClick={() => void steer(resumable)}
-            >
-              {tr("common.resume")}
-            </Button>
-          </div>
-        </div>
-      )}
-      {rows.map(({ item, leaving }) => {
-        if (leaving) {
-          return (
-            <div key={item.id} data-queue-id={item.id} className="queue-chip queue-chip-leaving" aria-hidden="true" inert>
-              <span className="queue-grip">
-                <Icon icon={DragHandleIcon} size="sm" />
-              </span>
-              <span className="queue-text">
-                {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text}
-              </span>
-            </div>
-          );
-        }
-        const n = visibleItems.indexOf(item) + 1;
-        const busy = busyId !== null;
-        const reorderLabel = tr("queuedmessagelist.reorderQueuedMessageValue", { value: n });
-        return (
-          <div
-            key={item.id}
-            data-queue-id={item.id}
-            className={`queue-chip${draggedId === item.id ? " dragging" : ""}${dropTargetId === item.id ? " drag-over" : ""}${item.heldForReview ? " held" : ""}`}
-            role="listitem"
-            onDragEnd={() => { setDraggedId(null); setDropTargetId(null); }}
-            onDragOver={(event) => {
-              if (!draggedId || draggedId === item.id) return;
-              event.preventDefault();
-              if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-              setDropTargetId(item.id);
-            }}
-            onDragLeave={() => { if (dropTargetId === item.id) setDropTargetId(null); }}
-            onDrop={(event) => drop(item.id, event)}
-          >
-            <span
-              className="queue-grip"
-              draggable={!item.heldForReview}
-              aria-label={reorderLabel}
-              title={reorderLabel}
-              onDragStart={(event) => {
-                if (item.heldForReview) {
+    <div ref={listRef} className="queue-list" data-touch={touchQueue ? "" : undefined}>
+      {queuePaused && resumeRow("queue-chip-paused", PauseIcon, tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length }), false)}
+      {queueStalled && resumeRow("queue-chip-stalled", WarningIcon, tr("queuedmessagelist.stalledOnRecovery"), true)}
+      <div className="queue-block">
+        <div
+          className="queue-prompts"
+          role="list"
+          aria-label={tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}
+          data-expanded={expanded && canFold ? "" : undefined}
+        >
+          {rows.map(({ item, leaving, editing }) => {
+            if (leaving) {
+              return (
+                <div key={item.id} data-queue-id={item.id} className="queue-chip queue-chip-leaving" aria-hidden="true" inert>
+                  <span className="queue-mark">
+                    <Icon icon={QueueNextIcon} size="sm" />
+                  </span>
+                  <span className="queue-text">
+                    {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text}
+                  </span>
+                </div>
+              );
+            }
+            if (editing) {
+              return (
+                <div key={item.id} className="queue-chip queue-chip-editing" role="listitem">
+                  <span className="queue-mark" aria-hidden="true">
+                    <Icon icon={EditIcon} size="sm" />
+                  </span>
+                  <span className="queue-text">{tr("queuedmessagelist.editingInComposer")}</span>
+                  {onCancelEdit && (
+                    <Button
+                      className="queue-action-word"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onCancelEdit()}
+                    >
+                      {tr("common.cancel")}
+                    </Button>
+                  )}
+                </div>
+              );
+            }
+            const n = visibleItems.indexOf(item) + 1;
+            const busy = busyId !== null;
+            const reorderLabel = tr("queuedmessagelist.reorderQueuedMessageValue", { value: n });
+            return (
+              <div
+                key={item.id}
+                data-queue-id={item.id}
+                data-drop={dropTargetId === item.id ? dropSide(item.id) : undefined}
+                className={`queue-chip${draggedId === item.id ? " dragging" : ""}${dropTargetId === item.id ? " drag-over" : ""}${item.heldForReview ? " held" : ""}`}
+                role="listitem"
+                onKeyDown={item.heldForReview ? undefined : (event) => moveFromKey(item.id, event)}
+                onDragEnd={() => { setDraggedId(null); setDropTargetId(null); }}
+                onDragOver={(event) => {
+                  if (!draggedId || draggedId === item.id) return;
                   event.preventDefault();
-                  return;
-                }
-                startDrag(item.id, event);
-              }}
+                  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+                  setDropTargetId(item.id);
+                }}
+                onDragLeave={() => { if (dropTargetId === item.id) setDropTargetId(null); }}
+                onDrop={(event) => drop(item.id, event)}
+              >
+                <span className="queue-mark" aria-hidden="true">
+                  <Icon icon={QueueNextIcon} size="sm" />
+                </span>
+                {!touchQueue && !item.heldForReview && (
+                  <span
+                    className="queue-grip"
+                    role="button"
+                    tabIndex={0}
+                    draggable
+                    aria-keyshortcuts="ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown"
+                    aria-label={reorderLabel}
+                    title={reorderLabel}
+                    onDragStart={(event) => startDrag(item.id, event)}
+                  >
+                    <Icon icon={DragHandleIcon} size="sm" />
+                  </span>
+                )}
+                <span className="queue-text" title={item.hiddenUserMessage ? undefined : item.text}>
+                  {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text}
+                </span>
+                {item.heldForReview && !item.hiddenUserMessage && (
+                  <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>
+                )}
+                {!touchQueue && (
+                  <div
+                    className="queue-actions"
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    {!item.heldForReview && (
+                      <IconButton
+                        className="queue-steer"
+                        icon={EnterIcon}
+                        label={tr("queuedmessagelist.steer")}
+                        size="sm"
+                        variant="ghost"
+                        pressed={item.delivery === "steer"}
+                        busy={busy}
+                        disabled={busy || !onSteer}
+                        onClick={() => void steer(item)}
+                      />
+                    )}
+                    <IconButton
+                      className="queue-remove"
+                      icon={DeleteIcon}
+                      label={tr("queuedmessagelist.removeQueuedMessageValue", { value: n })}
+                      size="sm"
+                      variant="ghost"
+                      busy={busy}
+                      disabled={busy}
+                      onClick={() => void remove(item.id)}
+                    />
+                    <IconButton
+                      className="queue-edit"
+                      icon={EditIcon}
+                      label={tr("queuedmessagelist.editQueuedMessageValue", { value: n })}
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy || !onEdit}
+                      onClick={() => { if (!scope.busy) onEdit?.(item); }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {canFold && (touchQueue
+          ? hiddenCount > 0 && <span className="queue-fold">{tr("queuedmessagelist.moreValue", { count: hiddenCount })}</span>
+          : (
+            <button
+              type="button"
+              className="queue-fold"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((open) => !open)}
             >
-              <Icon icon={DragHandleIcon} size="sm" />
-            </span>
-            <span className="queue-text" title={item.hiddenUserMessage ? undefined : item.text}>
-              {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text}
-            </span>
-            {item.heldForReview && !item.hiddenUserMessage && (
-              <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>
-            )}
-            <div
-              className="queue-actions"
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              {!item.heldForReview && (
-                <IconButton
-                  className="queue-steer"
-                  icon={EnterIcon}
-                  label={tr("queuedmessagelist.steer")}
-                  size="sm"
-                  pressed={item.delivery === "steer"}
-                  busy={busy}
-                  disabled={busy || !onSteer}
-                  onClick={() => void steer(item)}
-                />
-              )}
-              <IconButton
-                className="queue-remove"
-                icon={DeleteIcon}
-                label={tr("queuedmessagelist.removeQueuedMessageValue", { value: n })}
-                size="sm"
-                variant="ghost"
-                busy={busy}
-                disabled={busy}
-                onClick={() => void remove(item.id)}
-              />
-              <IconButton
-                className="queue-edit"
-                icon={EditIcon}
-                label={tr("queuedmessagelist.editQueuedMessageValue", { value: n })}
-                size="sm"
-                disabled={busy || !onEdit}
-                onClick={() => { if (!scope.busy) onEdit?.(item); }}
-              />
-            </div>
-          </div>
-        );
-      })}
+              {expanded ? tr("queuedmessagelist.showLess") : tr("queuedmessagelist.moreValue", { count: hiddenCount })}
+              <Icon icon={expanded ? ChevronUpIcon : ChevronDownIcon} size="sm" />
+            </button>
+          ))}
+        {touchQueue && visibleItems.length > 0 && (
+          <button
+            type="button"
+            className="queue-open"
+            aria-label={tr("queuedmessagelist.openQueueValue", { length: visibleItems.length })}
+            onClick={() => setSheetOpen(true)}
+          >
+            <Icon icon={MoreIcon} size="sm" />
+          </button>
+        )}
+      </div>
+      {touchQueue && (
+        <QueueSheet
+          open={sheetOpen && visibleItems.length > 0}
+          onClose={() => setSheetOpen(false)}
+          anchorRef={listRef}
+          items={items}
+          shown={visibleItems}
+          busy={busyId !== null}
+          {...(onEdit ? { onEdit: (item: QueueItemDto) => { setSheetOpen(false); if (!scope.busy) onEdit(item); } } : {})}
+          {...(onSteer ? { onSteer: (item: QueueItemDto) => { setSheetOpen(false); void steer(item); } } : {})}
+          onRemove={(id) => void remove(id)}
+          onReorder={(next, movedId) => void persistOrder(next, movedId)}
+          onMoveBy={moveBy}
+        />
+      )}
     </div>
   );
 }

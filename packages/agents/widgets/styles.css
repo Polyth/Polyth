@@ -1912,7 +1912,6 @@
   border-radius: var(--radius-round);
   background: var(--composer-green, var(--accent));
   color: var(--accent-ink);
-  box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green, var(--accent)) 80%, transparent);
 }
 @media (hover: hover) {
   .agents-page .agent-composer .agent-composer-send:hover:not(:disabled) { background: var(--accent-hi); }

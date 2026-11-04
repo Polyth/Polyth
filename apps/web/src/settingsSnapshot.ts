@@ -35,7 +35,7 @@ export const LOOK_UI_KEYS = [
   // What the first screen is made of: phone header and composer buttons,
   // message chrome, the rails and the shell layout.
   "mobileSessionTitle", "mobileShortcuts", "showTechnicalButtons", "showDictate", "showAutoApprove", "showGoals",
-  "showQuickActions", "activityBlockStyle", "composerStatusStyle", "thinkingDisplayMode", "actionGrouping",
+  "showQuickActions", "activityBlockStyle", "thinkingDisplayMode", "actionGrouping",
   "statusBar", "showMessageActions", "showAnswerQuickActions", "pinLatestPrompt", "promptBookmarkDesktop",
   "promptNavigator", "promptNavigatorSide", "topRailAlignment", "topRailSurface", "shellLayout",
   "shellBarStyle", "floatingColumns", "shellToolsDock", "shellActionsDock", "shellTitle", "topRailSize",

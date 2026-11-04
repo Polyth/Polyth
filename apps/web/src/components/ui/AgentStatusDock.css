@@ -3,10 +3,9 @@
    works and the model's name is only its tooltip: the line is short and
    keeps its room for the action. It has no plate, border, shadow or glass;
    what says "live" is light moving through the action's words and the
-   accent dot on the mark. The look is chosen in Chat settings
-   (body[data-composer-status-style]): `line` is this base, `tab` makes it
-   a row of the composer's header stack, `capsule` hugs it in a centred
-   outlined pill. The chat frame in styles.css owns the width. */
+   accent dot on the mark. Above the composer it is a line of the pending
+   stack, on that stack's grid (styles.css, "The pending stack above the
+   composer"); the chat frame there owns the width. */
 .agent-status-dock {
   --agent-status-row: max(32px, var(--hit-min));
   position: relative;
@@ -135,23 +134,3 @@ body[data-desktop-low-resource="true"] .agent-status-dock-state { animation: non
 /* Idle: the agent ended its own turn (its subagents still work). The same
    line holds still: no dot on the mark, no light through the words. */
 .agent-status-dock--idle .agent-status-dock-state { animation: none; background: none; color: var(--muted); }
-
-/* Tab: the line is a row of the composer's header stack, which owns its
-   material, edges and geometry (styles.css, "Tab: the composer's header
-   stack"). */
-body[data-composer-status-style="tab"] .agent-status-dock { padding-inline: var(--space-3); }
-
-/* Capsule: a centred pill that hugs its words, outlined in accent while the
-   agent works. The outline is a shadow so Borderless keeps it. */
-body[data-composer-status-style="capsule"] .agent-status-dock {
-  width: fit-content;
-  max-width: min(var(--chat-measure), calc(100% - 2 * var(--conversation-chrome-inset)));
-  min-height: max(30px, var(--hit-min));
-  margin-inline: auto;
-  margin-block-end: var(--space-2);
-  padding-inline: var(--space-3);
-  border-radius: var(--radius-round);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
-}
-body[data-composer-status-style="capsule"] .agent-status-dock-content,
-body[data-composer-status-style="capsule"] .agent-status-dock-primary { flex: 0 1 auto; }

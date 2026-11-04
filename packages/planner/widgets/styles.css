@@ -1066,12 +1066,9 @@
    watched pull request lines: a mark, when the next run comes, what it is,
    its cadence and how many more. It opens upward into the chat's planned
    tasks so the line stays under the pointer. No plate while folded; inks
-   come from the chat frame, so a wallpaper's wash reaches it. Chat settings
-   → Status above the composer picks the look (body[data-composer-status-style]):
-   `line` is this base, `tab` sets the open list in a tray rising from the
-   composer's edge, `capsule` hugs the folded line in a centred hairline pill
-   and frames the open list. Outlines are inset shadows so Hide interface
-   borders keeps them. */
+   come from the chat frame, so a wallpaper's wash reaches it. It starts on the
+   columns of the host's pending stack above the composer, with fallbacks for
+   a host without them. */
 .planner-chat {
   --planner-chat-row: max(32px, var(--hit-min));
   container: planner-chat / inline-size;
@@ -1099,6 +1096,7 @@
   min-height: var(--planner-chat-row);
   margin: 0;
   padding: 0 var(--space-2);
+  padding-inline-start: calc(var(--composer-stack-mark, calc(var(--space-2) + var(--icon-md) / 2)) - var(--icon-md) / 2 - var(--space-1));
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -1304,37 +1302,6 @@ button.planner-chat-foot-open:focus-visible { outline: 2px solid var(--focus-rin
   .planner-chat-task-tools { grid-column: 2; grid-row: 1 / span 2; }
   .planner-chat-task-run { display: none; }
   .planner-chat-foot > span { display: none; }
-}
-
-/* Status above the composer → Tab: the open list spans the composer's
-   width in the material of its header stack (the host's --composer-tray-*
-   tokens: the composer's fill, blur, contour and corner in every look and
-   style). */
-body[data-composer-status-style="tab"] .planner-chat-panel {
-  border: 1px solid var(--composer-tray-edge, transparent);
-  border-radius: var(--radius-composer-tray, var(--radius-card));
-  background: var(--composer-tray-fill, color-mix(in srgb, var(--text) 5%, transparent));
-  background-clip: padding-box;
-  -webkit-backdrop-filter: var(--composer-tray-filter, none);
-  backdrop-filter: var(--composer-tray-filter, none);
-}
-/* Capsule: folded, a centred pill that hugs its words; open, the list sits
-   in a hairline frame. */
-body[data-composer-status-style="capsule"] .planner-chat-line { justify-content: center; padding: 0 0 var(--space-2); }
-body[data-composer-status-style="capsule"] .planner-chat-toggle {
-  flex: 0 1 auto;
-  min-height: max(30px, var(--hit-min));
-  padding-inline: var(--space-3);
-  border-radius: var(--radius-round);
-  box-shadow: inset 0 0 0 1px var(--borderless-edge);
-}
-body[data-composer-status-style="capsule"] .planner-chat-more { margin-inline-start: 0; }
-body[data-composer-status-style="capsule"] .planner-chat-cadence + .planner-chat-chevron,
-body[data-composer-status-style="capsule"] .planner-chat-title + .planner-chat-chevron { margin-inline-start: var(--space-1); }
-body[data-composer-status-style="capsule"] .planner-chat-panel {
-  border-radius: calc(var(--radius-card) + 6px);
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--borderless-edge);
 }
 
 /* Where a planned run arrived: a centred line between hairlines, like the

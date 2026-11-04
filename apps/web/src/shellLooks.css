@@ -340,33 +340,14 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-card:
   border-inline-color: var(--look-focus-side) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail .composer-send-split {
-  background: transparent !important;
-  box-shadow: none !important;
-  gap: 2px;
-}
-
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-rail .composer-send-split > .send {
-  border-radius: var(--look-pill-radius) !important;
-}
-
-/* These looks separate the two segments by two pixels, so the running disc
-   already sits two pixels further from the divider: shift it one pixel less
-   than the standard phone inset to keep even space on both sides. */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-mobile .composer-rail .composer-send-split > .composer-send-options::before {
-  inset-inline-start: calc((var(--tap) - var(--icon-sm)) / 4 - 2px);
-}
-
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-send-options {
-  background: transparent !important;
-  box-shadow: none !important;
   color: var(--look-ink-dim) !important;
 }
 
-/* Option chips: queued prompts, attachments, the New-session shortcuts and
-   their customize trigger, the harness's prompt suggestion and the add
-   menu's tiles are one quiet chip, not the base's elevated or glass pill. */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.queue-chip:not(.drag-over), .attachment-pill, .starter-chip, .hero-customize-trigger, .composer-suggestion, .add-menu-tile) {
+/* Option chips: attachments, the New-session shortcuts and their customize
+   trigger and the add menu's tiles are one quiet chip, not the base's elevated
+   or glass pill. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.attachment-pill, .starter-chip, .hero-customize-trigger, .add-menu-tile) {
   background: var(--look-option) !important;
   backdrop-filter: none !important;
   border: 1px solid var(--look-option-edge) !important;
@@ -396,14 +377,17 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.msg .bubbl
   background: var(--look-hover) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .queue-chip {
-  border-radius: var(--look-card-radius) !important;
+/* The pending stack above the composer stays lines of text in every look: a
+   queued prompt hovers in the look's hover, and the suggested prompt takes the
+   look's quiet ink and hovers and presses the same way. Focus stays visible
+   through the base outline, so its ink returns to the normal text colour with
+   hover. */
+@media (hover: hover) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .queue-chip[role="listitem"]:hover:where(:not(.queue-chip-leaving)) {
+    background: var(--look-hover) !important;
+  }
 }
 
-/* The suggested prompt is the same pending writing stack as a queued prompt:
-   its text takes the look's quiet ink, and the use target hovers and presses
-   in the look's hover, not the base overlay. Focus stays visible through the
-   base outline, so its ink returns to the normal text colour with hover. */
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-text {
   color: var(--look-ink-dim) !important;
 }
@@ -775,57 +759,6 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.questio
   box-shadow: var(--look-card-shadow) !important;
 }
 
-/* 3c. The Tab status style's header stack (styles.css). Its rows above the
-   composer are chips of the pending stack, so they take the look's queued
-   prompt chip (option fill and edge, card corner) through the tray tokens.
-   The suggestion is the card's header row: it leaves the option chip and
-   its hover to the card, and its hairline takes the look's rule. */
-
-body[data-shell-look]:not([data-shell-look="standard"])[data-composer-status-style="tab"]:not(#\#) {
-  --composer-tray-fill: var(--look-option);
-  --composer-tray-filter: none;
-  --composer-tray-edge: var(--look-option-edge);
-  --radius-composer-tray: var(--look-card-radius);
-}
-
-body[data-shell-look="paper"][data-composer-status-style="tab"]:not(#\#),
-body[data-shell-look="editorial"][data-composer-status-style="tab"]:not(#\#) {
-  --composer-header-rule: var(--look-line);
-}
-
-/* Line draws every rule of its composer edge to edge; so does the header. */
-body[data-shell-look="line"][data-composer-status-style="tab"]:not(#\#) {
-  --composer-header-rule: var(--look-line);
-  --composer-header-rule-inset: 0px;
-  --composer-header-rule-fade: 0px;
-}
-
-body[data-shell-look="monolith"][data-composer-status-style="tab"]:not(#\#),
-body[data-shell-look="monolith-reverse"][data-composer-status-style="tab"]:not(#\#) {
-  --composer-header-rule: var(--look-edge);
-}
-
-body[data-shell-look="obsidian"][data-composer-status-style="tab"]:not(#\#) {
-  --composer-header-rule: color-mix(in srgb, var(--accent) 26%, color-mix(in srgb, var(--text) 12%, transparent));
-}
-
-body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion,
-body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion:hover {
-  background: none !important;
-  backdrop-filter: none !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-
-body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion > :is(.composer-suggestion-use, .composer-suggestion-dismiss) {
-  border-radius: var(--look-select-radius) !important;
-}
-
-body[data-composer-status-style="tab"][data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .composer-card > .composer-suggestion > .composer-suggestion-use:is(:hover, :active):where(:not(:disabled)) {
-  background: none !important;
-}
-
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-option) {
   background: var(--look-option) !important;
   border: 1px solid var(--look-option-edge) !important;
@@ -1118,15 +1051,13 @@ body[data-shell-look="paper"]:not(#\#) :is(.composer-rail .chip, .composer-rail 
 }
 
 /* The send button keeps the control corner in every state, idle included. */
-body[data-shell-look="paper"]:not(#\#) .send {
+body[data-shell-look="paper"]:not(#\#) :is(.send, .stop) {
   border-radius: var(--look-control-radius) !important;
 }
 
 body[data-shell-look="paper"]:not(#\#) .send:not(:disabled) {
   background: var(--text) !important;
   color: var(--bg) !important;
-  box-shadow: none !important;
-  transform: scale(0.82);
 }
 
 /* Phone. */
@@ -1354,9 +1285,8 @@ body[data-shell-look="line"]:not(#\#) .composer-rail {
   border-top: 1px solid var(--look-line) !important;
 }
 
-body[data-shell-look="line"]:not(#\#) .send {
+body[data-shell-look="line"]:not(#\#) :is(.send, .stop) {
   border-radius: var(--look-r) !important;
-  box-shadow: none !important;
 }
 
 /* Phone. */
@@ -1612,10 +1542,6 @@ body[data-shell-look="air"]:not(#\#) .composer-card {
   box-shadow: var(--look-shadow-lift) !important;
   backdrop-filter: var(--look-blur) !important;
   border-radius: calc(28px * var(--look-round)) !important;
-}
-
-body[data-shell-look="air"]:not(#\#) .send:not(:disabled) {
-  box-shadow: 0 8px 18px -8px var(--accent) !important;
 }
 
 /* Phone. */
@@ -1891,10 +1817,6 @@ body[data-shell-look="monolith"]:not(#\#) .composer-card {
   border-radius: calc(16px * var(--look-round)) !important;
 }
 
-body[data-shell-look="monolith"]:not(#\#) .send:not(:disabled) {
-  box-shadow: none !important;
-}
-
 /* Phone. */
 
 /* Project names are the backdrop's labels: denser, heavier, on a flat mark. */
@@ -2132,10 +2054,6 @@ body[data-shell-look="monolith-reverse"]:not(#\#) .composer-card {
   backdrop-filter: var(--look-blur) !important;
   box-shadow: var(--look-raise), 0 1px 0 0 color-mix(in srgb, white 6%, transparent) inset !important;
   border-radius: calc(18px * var(--look-round)) !important;
-}
-
-body[data-shell-look="monolith-reverse"]:not(#\#) .send:not(:disabled) {
-  box-shadow: none !important;
 }
 
 /* Phone. */
@@ -2396,6 +2314,9 @@ body[data-shell-look="obsidian"]:not(#\#) .composer-card {
 
 body[data-shell-look="obsidian"]:not(#\#) :is(.send:not(:disabled), .ui-btn--primary:not(:disabled)) {
   background: linear-gradient(135deg, var(--accent-hi), var(--accent)) !important;
+}
+
+body[data-shell-look="obsidian"]:not(#\#) .ui-btn--primary:not(:disabled) {
   box-shadow: 0 0 0 1px color-mix(in srgb, white 18%, transparent) inset, 0 8px 22px -6px var(--accent) !important;
 }
 
@@ -2661,14 +2582,13 @@ body[data-shell-look="editorial"]:not(#\#) .composer-config .config-chip {
 }
 
 /* The send button keeps the control corner in every state, idle included. */
-body[data-shell-look="editorial"]:not(#\#) .send {
+body[data-shell-look="editorial"]:not(#\#) :is(.send, .stop) {
   border-radius: var(--look-control-radius) !important;
 }
 
 body[data-shell-look="editorial"]:not(#\#) .send:not(:disabled) {
   background: var(--text) !important;
   color: var(--look-paper-solid) !important;
-  box-shadow: none !important;
 }
 
 /* Phone. */

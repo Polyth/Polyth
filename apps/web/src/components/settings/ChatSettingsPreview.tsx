@@ -199,7 +199,7 @@ export function ChatSettingsPreview({ focus, device, onDevice, note, onPick }: C
             </Part>
           </div>
           <Part id="composer" focus={focus} onPick={onPick}>
-            <div className="chat-preview-composer-wrap" data-status-style={ui.composerStatusStyle}>
+            <div className="chat-preview-composer-wrap">
               <div className="chat-preview-status">
                 <i />
                 <span>{tr("settings.chatPage.sampleStatus")}</span>

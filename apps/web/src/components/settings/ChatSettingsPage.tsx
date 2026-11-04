@@ -267,11 +267,6 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
     ["attach", tr("composer.largePasteAttach")],
     ["inline", tr("composer.largePasteInline")],
   ];
-  const statusOptions: Array<[typeof ui.composerStatusStyle, string]> = [
-    ["line", tr("settings.pages.composerStatusLine")],
-    ["tab", tr("settings.pages.composerStatusTab")],
-    ["capsule", tr("settings.pages.composerStatusCapsule")],
-  ];
   const mobileTitleOptions: Array<[typeof ui.mobileSessionTitle, string]> = [
     ["hidden", tr("settings.pages.mobileSessionTitleHidden")],
     ["title", tr("settings.pages.mobileSessionTitleOnly")],
@@ -308,7 +303,7 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
   const composerValue = [
     ui.showDictate ? tr("settings.chatPage.valueDictation") : "",
     ui.showQuickActions ? tr("settings.pages.composerQuickActions") : "",
-  ].filter(Boolean).join(" · ") || optionLabel(statusOptions, ui.composerStatusStyle);
+  ].filter(Boolean).join(" · ") || tr("common.none");
   const bookmarkOn = ui.pinLatestPrompt || ui.promptBookmarkDesktop;
   const navigationValue = [
     ui.promptNavigator === "off"
@@ -508,14 +503,6 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                 <MessageActionsEditor role="assistant" itemId="chat.responseActions" onDevice={setDevice} />
               </DisclosureRow>
               <DisclosureRow {...rowProps("composer")} label={tr("settings.pages.composerGroup")} value={composerValue}>
-                <Row label={tr("settings.pages.composerStatusStyle")} hint={tr("settings.pages.composerStatusStyleHint")} itemId="chat.composerStatusStyle">
-                  <Seg
-                    label={tr("settings.pages.composerStatusStyle")}
-                    value={ui.composerStatusStyle}
-                    options={statusOptions}
-                    onChange={(composerStatusStyle) => setUiSettings({ composerStatusStyle })}
-                  />
-                </Row>
                 <Row label={tr("settings.pages.dictationButton")} hint={tr("settings.pages.dictationButtonHint")} itemId="chat.showDictate">
                   <Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label={tr("settings.pages.dictationButton")} />
                 </Row>

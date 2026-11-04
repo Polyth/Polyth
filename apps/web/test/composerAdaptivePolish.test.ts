@@ -92,7 +92,11 @@ test("running send and contributed composer actions stay compact and borderless"
     /\.composer-mobile\.composer-collapsed \.composer-actions > \.composer-extensions\s*\{\s*display:\s*none;\s*\}/s,
     "the resting row carries no contributed trailing control beside Send",
   );
-  assert.match(css, /\.composer-mobile \.composer-send-split > \.composer-running-send[\s\S]*?width:\s*var\(--tap\)/);
+  assert.match(
+    css,
+    /\.composer-simple \.composer-send-split > \.send \{\s*margin:\s*calc\(\(max\(var\(--composer-action-size\), var\(--hit-min\)\) - var\(--composer-action-size\)\) \/ 2\);/,
+    "the running primary reads one disc inside its touch box",
+  );
   assert.match(css, /\.composer-simple \.composer-rail \.send,[\s\S]*?border:\s*0;/);
 });
 
@@ -155,36 +159,25 @@ test("expanded phone composer uses one compact spacing and control rhythm", asyn
   );
 });
 
-test("the phone running primary keeps one inset contour, a look-owned fill and the 16px gutter", async () => {
-  const [adaptive, styles, rail] = await Promise.all([
+test("the running primary is one solid disc beside a bare chevron, with no ring and a touch target past its edge", async () => {
+  const [adaptive, styles, rail, looks] = await Promise.all([
     read("../src/composerAdaptive.css"),
     read("../src/styles.css"),
     read("../src/components/mobile/MobileComposerRail.css"),
+    read("../src/shellLooks.css"),
   ]);
-  assert.match(
-    adaptive,
-    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-running-send\s*\{[^}]*background:\s*transparent;[^}]*border-radius:\s*var\(--radius-round\);/s,
-    "the running primary drops the half-pill fill and keeps one tap box in the pill corner",
-  );
-  assert.match(
-    adaptive,
-    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-running-send\.context-liquid-host::after\s*\{[^}]*inset:\s*2px;[^}]*border-inline-end-width:\s*1\.5px;/s,
-    "the phone contour closes as a 40px disc two pixels clear of the divider",
-  );
-  assert.match(
-    adaptive,
-    /\.composer-mobile \.composer-send-split > \.composer-running-send > \.context-liquid\s*\{\s*inset:\s*2px;\s*\}/s,
-    "the gauge fill is clipped to the same 40px disc",
-  );
-  assert.match(
-    adaptive,
-    /\.composer-mobile \.composer-rail \.composer-send-split > \.composer-send-options::before\s*\{[^}]*inset-inline-start:\s*calc\(\(var\(--tap\) - var\(--icon-sm\)\) \/ 4 - 1px\);/s,
-    "the phone divider is centred between the 40px disc and the chevron, not flush with the disc",
-  );
+  const split = adaptive.slice(adaptive.indexOf("/* A running turn with a draft"), adaptive.indexOf("/* The send menu stays anchored"));
+  assert.ok(split.length > 0, "split section");
+  assert.doesNotMatch(split, /box-shadow:(?!\s*none)|::before|surface-overlay|material-glass/, "no plate, contour or divider around the pair");
+  assert.match(split, /\.composer-send-options \{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
+  // No outline layer is left, on any look or in Borderless.
+  assert.doesNotMatch(adaptive, /context-liquid-host::after/);
+  assert.doesNotMatch(styles, /context-liquid-host::after/);
+  assert.doesNotMatch(looks, /composer-send-split|send:not\(:disabled\) \{[^}]*box-shadow:[^;]*var\(--accent\)/s, "no look brings a plate or a glow back");
   assert.match(
     styles,
-    /body\[data-hide-borders="true"\] \.composer-simple \.composer-rail :is\(\.send, \.stop\)\.context-liquid-host::after\s*\{\s*border-color:\s*var\(--context-liquid-tone\) !important;/s,
-    "the state contour survives borderless appearance",
+    /\.composer-simple \.composer-rail :is\(\.send, \.stop\)::after \{[^}]*inset:\s*calc\(\(var\(--composer-action-size\) - max\(var\(--composer-action-size\), var\(--hit-min\)\)\) \/ 2\);/s,
+    "the action reads one size and its target grows past the edge",
   );
   assert.match(
     rail,

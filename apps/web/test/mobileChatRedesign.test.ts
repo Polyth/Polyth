@@ -412,7 +412,7 @@ test("session edited-file labels stay collapsed until the user opens the dock", 
   );
   assert.match(
     gitCss,
-    /\.pending-changes-file\s*\{[^}]*min-height:\s*var\(--control-h-sm\)/s,
+    /\.pending-changes-file\s*\{[^}]*min-height:\s*max\(var\(--composer-stack-row, var\(--control-h-sm\)\), min\(var\(--hit-min\), var\(--control-h-sm\)\)\)/s,
     "visible file rows stay compact; coarse pointers grow the tap box separately",
   );
   assert.match(

@@ -93,9 +93,6 @@ export type SessionActivityDetailsMode = "tabs" | "all";
 /** How agent activity blocks draw in the transcript (docs/dev/ui.md). */
 export const ACTIVITY_BLOCK_STYLES = ["thread", "ledger", "chip", "margin"] as const;
 export type ActivityBlockStyle = typeof ACTIVITY_BLOCK_STYLES[number];
-/** How the agent status and edited-files line above the composer draws. */
-export const COMPOSER_STATUS_STYLES = ["line", "tab", "capsule"] as const;
-export type ComposerStatusStyle = typeof COMPOSER_STATUS_STYLES[number];
 export type MobileSessionTitleMode = "hidden" | "title" | "button";
 
 export const MOBILE_SHORTCUT_IDS = [
@@ -159,7 +156,6 @@ export interface UiSettings {
   /** Activity block look: thread, ledger, chip or hanging margin icons. */
   activityBlockStyle: ActivityBlockStyle;
   /** Above-composer status and edited files: line, tab or capsule. */
-  composerStatusStyle: ComposerStatusStyle;
   /** Phone session title: hidden, transparent, or a full glass button. */
   mobileSessionTitle: MobileSessionTitleMode;
   /** Prompt navigator rail. Settings expose it as on (`auto`) / off;
@@ -284,7 +280,6 @@ export const UI_DEFAULTS: UiSettings = {
   thinkingDisplayMode: "collapsed",
   sessionActivityDetails: "all",
   activityBlockStyle: "thread",
-  composerStatusStyle: "line",
   mobileSessionTitle: "hidden",
   promptNavigator: "auto",
   promptNavigatorSide: "left",
@@ -445,9 +440,6 @@ export function parseUiSettings(raw: string | null): UiSettings {
       activityBlockStyle: ACTIVITY_BLOCK_STYLES.includes(data.activityBlockStyle as ActivityBlockStyle)
         ? data.activityBlockStyle as ActivityBlockStyle
         : UI_DEFAULTS.activityBlockStyle,
-      composerStatusStyle: COMPOSER_STATUS_STYLES.includes(data.composerStatusStyle as ComposerStatusStyle)
-        ? data.composerStatusStyle as ComposerStatusStyle
-        : UI_DEFAULTS.composerStatusStyle,
       // The retired `logo` mode falls back to the plain title.
       mobileSessionTitle: data.mobileSessionTitle === "hidden" || data.mobileSessionTitle === "button"
         ? data.mobileSessionTitle : "title",
@@ -569,7 +561,6 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.chatwidth = s.chatWidth;
   b.dataset.mobileSessionTitle = s.mobileSessionTitle;
   b.dataset.activityStyle = s.activityBlockStyle;
-  b.dataset.composerStatusStyle = s.composerStatusStyle;
   b.dataset.technical = String(s.showTechnicalButtons);
   b.dataset.dictate = String(s.showDictate);
   b.dataset.autoApprove = String(s.showAutoApprove);

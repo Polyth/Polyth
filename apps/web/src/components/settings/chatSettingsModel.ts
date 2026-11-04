@@ -97,7 +97,7 @@ export const CHAT_ROW_ITEMS = {
   paste: ["chat.largePaste"],
   userActions: ["chat.messageActions"],
   replies: ["chat.responseActions"],
-  composer: ["chat.composerStatusStyle", "chat.showDictate", "chat.showQuickActions"],
+  composer: ["chat.showDictate", "chat.showQuickActions"],
   navigation: ["chat.promptNavigator", "chat.promptNavigatorSide", "chat.pinLatestPrompt", "chat.promptBookmarkDesktop", "chat.pinLatestPromptPosition"],
   header: ["chat.mobileSessionTitle"],
 } as const;

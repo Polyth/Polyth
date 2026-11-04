@@ -592,7 +592,7 @@ test("390px audited actions expose 44px targets and scrolling question tabs", { 
       <label class="question-option" data-audit="question-option"><input type="radio">Option</label>
       <div class="question-actions"><button class="ui-btn ui-btn--sm" data-audit="question-action">Next</button></div>
       <span class="attachment-pill"><button class="att-remove" data-audit="attachment-remove">×</button></span>
-      <div class="queue-chip"><span></span><span></span><span></span><span></span><button data-audit="queue-edit">Edit</button><button>×</button></div>
+      <div class="queue-list" data-touch><div class="queue-block" data-audit="queue-block"><button class="queue-open">⋯</button></div></div>
       <article class="msg assistant"><div class="msg-meta"><div class="msg-actions"><button class="msg-action-btn" data-audit="assistant-action">Copy</button></div></div></article>
       <button class="sheet-search-clear" data-audit="sheet-search-clear">×</button>
       <button class="pane-tab-close" data-audit="editor-tab-close">×</button>

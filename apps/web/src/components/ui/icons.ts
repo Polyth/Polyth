@@ -159,6 +159,7 @@ export {
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
   CornerDownLeft as EnterIcon,
+  CornerDownRight as QueueNextIcon,
   // workspace objects that appear inside action controls
   House as HomeIcon,
   Folder as FolderIcon,

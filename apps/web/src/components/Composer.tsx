@@ -4068,7 +4068,7 @@ function ComposerBody({
       runningHasSend ? (
         <div className="composer-send-split">
           <button
-            className={`send composer-delivery${queueEdit ? "" : " composer-running-send"} context-liquid-host`}
+            className={`send composer-delivery${queueEdit ? "" : " composer-running-send"}`}
             onPointerDown={onPrimaryPointerDown}
             onPointerUp={onPrimaryPointerUp}
             onPointerCancel={onPrimaryPointerCancel}
@@ -4082,7 +4082,6 @@ function ComposerBody({
           >
             {runningPrimaryGlyph}
             <span className="composer-action-label">{runningPrimaryLabel}</span>
-            <ContextLiquid key={session?.id} gauge={contextGauge}>{runningPrimaryGlyph}</ContextLiquid>
           </button>
           <Menu
             label={tr("composer.moreActiveRunActions")}
@@ -4237,10 +4236,8 @@ function ComposerBody({
 
   // The suggested next prompt (harness or Session Assist) is never text in the
   // editor: the whole chip takes it as an editable draft, × (or Esc) dismisses
-  // it, Tab is the shortcut. It sits on the composer's pending writing stack
-  // above the card, or, in the Tab status style, is the card's own header row
-  // (styles.css, "Tab: the composer's header stack").
-  const suggestionInCard = uiPrefs.composerStatusStyle === "tab";
+  // it, Tab is the shortcut. It is a line of the pending stack above the card
+  // (styles.css, "The pending stack above the composer").
   const suggestionChip = promptSuggestion ? (
     <div className="composer-suggestion" role="group" aria-label={tr("composer.promptSuggestionLabel")}>
       <button
@@ -4304,6 +4301,7 @@ function ComposerBody({
           editingId={queueEdit?.sessionId === session.id ? queueEdit.id : null}
           launchingId={steeringQueuedId}
           onEdit={beginQueuedEdit}
+          onCancelEdit={cancelQueuedEdit}
           onSteer={steerQueuedItem}
           onItemsChange={updateQueuedItems}
         />
@@ -4312,7 +4310,7 @@ function ComposerBody({
           chat whatever the rail shows, so hiding a rail button never turns
           suggestions off. They draw nothing and offer through composerDraft. */}
       {session && !peopleOnly && <SlotHost slot="composer.suggestion" context={slotContext} />}
-      {!suggestionInCard && suggestionChip}
+      {suggestionChip}
       <GlassDock
         className={`composer-card${selectingConversation ? " is-choosing-messages" : ""}${activeMode ? " is-composer-mode" : ""}`}
         {...(activeMode ? { "data-composer-mode": activeMode.id } : {})}
@@ -4327,7 +4325,6 @@ function ComposerBody({
             (reason) => setUiError(tr("composer.couldNotAttach", { reason })));
         }}
       >
-      {suggestionInCard && suggestionChip}
       {dropHint && (
         <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
       )}

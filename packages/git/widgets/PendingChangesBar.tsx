@@ -197,9 +197,7 @@ export default function PendingChangesBar() {
   const canUndo = selected.dirtyPaths.length > 0 && Boolean(projectId);
   const moreLabel = filesExpanded
     ? tr("pendingchangesbar.showLess")
-    : overflow === 1
-      ? tr("pendingchangesbar.showMoreFile")
-      : tr("pendingchangesbar.showMoreFilesValue", { count: overflow });
+    : tr("pendingchangesbar.moreValue", { count: overflow });
 
   if (working) {
     return (
@@ -266,7 +264,7 @@ export default function PendingChangesBar() {
 
   return (
     <section className="pending-changes-bar" aria-label={title}>
-      <div className="pending-changes-head">
+      <div className="pending-changes-body">
         <div className="pending-changes-lead">
           <span className="pending-changes-icon" aria-hidden="true">
             <Icon icon={FileDiffIcon} size="sm" />
@@ -298,41 +296,42 @@ export default function PendingChangesBar() {
           >
             {tr("pendingchangesbar.review")}
           </Button>
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={ChevronDownIcon}
-            label={tr("pendingchangesbar.collapse")}
-            onClick={() => setDetailsOpen(false)}
-          />
         </div>
-      </div>
-      <div className="pending-changes-list">
-        {visible.map((path) => (
-          <button
-            key={path}
-            type="button"
-            className="pending-changes-file"
-            title={path}
-            onClick={() => openChanges(path)}
-          >
-            <span className="pending-changes-file-name">{path}</span>
-            {fileStats?.[path] && <DiffTotals stats={fileStats[path]!} />}
-          </button>
-        ))}
-      </div>
-      {overflow > 0 && (
-        <Button
+        <IconButton
+          className="pending-changes-toggle"
           variant="ghost"
           size="sm"
-          className="pending-changes-more"
-          iconEnd={filesExpanded ? ChevronUpIcon : ChevronDownIcon}
-          aria-expanded={filesExpanded}
-          onClick={() => setFilesExpanded((open) => !open)}
-        >
-          {moreLabel}
-        </Button>
-      )}
+          icon={ChevronDownIcon}
+          label={tr("pendingchangesbar.collapse")}
+          onClick={() => setDetailsOpen(false)}
+        />
+        <div className="pending-changes-list">
+          {visible.map((path) => (
+            <button
+              key={path}
+              type="button"
+              className="pending-changes-file"
+              title={path}
+              onClick={() => openChanges(path)}
+            >
+              <span className="pending-changes-file-name">{path}</span>
+              {fileStats?.[path] && <DiffTotals stats={fileStats[path]!} />}
+            </button>
+          ))}
+        </div>
+        {overflow > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="pending-changes-more"
+            iconEnd={filesExpanded ? ChevronUpIcon : ChevronDownIcon}
+            aria-expanded={filesExpanded}
+            onClick={() => setFilesExpanded((open) => !open)}
+          >
+            {moreLabel}
+          </Button>
+        )}
+      </div>
     </section>
   );
 }

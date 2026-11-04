@@ -740,7 +740,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.equal(view.container.textContent?.includes(leftover), false);
     const more = view.container.querySelector<HTMLButtonElement>(".pending-changes-more");
     assert.ok(more, "show-more control is available");
-    assert.match(more.textContent ?? "", /Show 1 more file/);
+    assert.match(more.textContent ?? "", /1 more/);
     assert.equal(more.getAttribute("aria-expanded"), "false");
     await act(async () => { more.click(); });
     assert.deepEqual(
@@ -755,7 +755,7 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
       ["src/a.ts", "src/b.ts", "src/c.ts"],
     );
     assert.equal(more.getAttribute("aria-expanded"), "false");
-    assert.match(more.textContent ?? "", /Show 1 more file/);
+    assert.match(more.textContent ?? "", /1 more/);
 
     const firstFile = view.container.querySelector<HTMLButtonElement>(".pending-changes-file");
     assert.ok(firstFile);

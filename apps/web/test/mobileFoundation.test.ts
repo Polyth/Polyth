@@ -270,7 +270,7 @@ test("phone touch targets and bottom sheets retain audit geometry", async () => 
   assert.match(css, /\.ui-btn\s*\{[^}]*min-height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)/s);
   assert.match(css, /\.ui-icon-btn::after\s*\{[^}]*width:\s*max\(100%, var\(--hit-min\)\)[^}]*height:\s*max\(100%, var\(--hit-min\)\)/s);
   assert.match(finalPhoneRules, /\.attachment-pill \.att-remove\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
-  assert.match(finalPhoneRules, /\.queue-chip button\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
+  assert.match(css, /\.queue-list\[data-touch\] \.queue-block\s*\{[^}]*min-block-size:\s*var\(--hit-min\)/s);
   assert.match(finalPhoneRules, /\.msg\.assistant \.msg-action-btn,[\s\S]*?\.msg\.assistant \.msg-actions-entry\s*\{[^}]*min-height:\s*var\(--tap\)/);
   assert.match(css, /\.sheet-search-clear\s*\{[^}]*width:\s*var\(--tap\)[^}]*height:\s*var\(--tap\)/s);
   // P2-W3A: config chips (model/agent/effort) share one phone touch box.

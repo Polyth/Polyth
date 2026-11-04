@@ -161,7 +161,7 @@
   --activity-row-height: calc(48px * var(--density-scale));
   --agent-dock-height: calc(68px * var(--density-scale));
   --composer-height: calc(56px * var(--density-scale));
-  --composer-action-size: calc(42px * var(--density-scale));
+  --composer-action-size: calc(36px * var(--density-scale));
   /* `--composer-max-input-height` is declared with the type roles below: it is
      a font-derived ceiling, so it has to read the surface's own type size. */
   /* Host-owned package-window seam. Packages consume these values and never
@@ -171,6 +171,18 @@
   /* Density seam: 0px on fine pointers; core styles raise it to --tap on
      coarse pointers so hit areas grow without enlarging control visuals. */
   --hit-min: 0px;
+  /* The pending stack above the composer (styles.css): its one grid, measured
+     from the composer card's outer edge so nothing drifts from line to line.
+     Marks are centred on the model logo's column, labels start at the model
+     name, trailing glyphs end where the marks start. A line reads one row
+     tall; on touch, a line that opens something keeps its full target by
+     reaching up into the timeline's bottom space. */
+  --composer-stack-mark: calc(var(--space-4) + 2px + var(--icon-sm) / 2);
+  --composer-stack-text: calc(var(--composer-stack-mark) + var(--icon-sm) / 2 + 6px);
+  --composer-stack-end: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  --composer-stack-row: 28px;
+  --composer-stack-control: 26px;
+  --composer-stack-reach: calc(max(var(--composer-stack-row), var(--hit-min)) - var(--composer-stack-row));
 
   /* icon size scale (UI action glyphs) */
   --icon-sm: 16px;
@@ -458,6 +470,8 @@
   --font-tool-label-lh: calc(18px * var(--text-scale, 1));
   --font-technical: calc(13.25px * var(--text-scale, 1));
   --font-technical-lh: calc(18px * var(--text-scale, 1));
+  /* Lines of the pending stack above the composer: status, queue, edited files. */
+  --font-composer-stack: calc(13px * var(--text-scale, 1));
   --font-response-meta: calc(12.25px * var(--text-scale, 1));
   --font-response-meta-lh: calc(16px * var(--text-scale, 1));
   /* Geometry derived from those roles belongs to the same surface: prose
