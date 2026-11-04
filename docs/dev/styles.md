@@ -298,7 +298,7 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | Token | Purpose |
 | --- | --- |
 | `--corner-radius-scale` | User-selected multiplier applied to scalable geometry: `cornerRadiusScale(rounding)` in `uiPrefs.ts` — rounding ÷ 5 for 0–9 (the default 9 = 1.8), 2.7 at 10, so the last notch is a visible 1.5× step. Platform styles and interface styles divide it by 1.8 (`--lg-round`, `--fluent-round`, `--macos-round`, `--look-round`) so the default draws their native radii. |
-| `--corner-max` | `1` only at the last rounding notch, else `0`. Opens the `--radius-max-*` floors below: each platform style's roles are `max(native × round, --radius-max-*)`, so maximum is one shared rounded geometry instead of 1.5× a style's native radii (Fluent's 8px composer would stop at 12px beside a full pill). `--look-round` gains `1.5 × --corner-max` for the same reason. |
+| `--corner-max` | `1` only at the last rounding notch, else `0`. Opens the `--radius-max-*` floors below: each platform style's roles are `max(native × round, --radius-max-*)`, so maximum is one shared rounded geometry instead of 1.5× a style's native radii (Fluent's 8px composer would stop at 12px beside a full pill). Interface styles have no such floors, so `--look-round` stays the same divisor (`--corner-radius-scale / 1.8`) and reaches 1.5× at the last notch; adding `1.5 × --corner-max` on top would double that step to 3× and make an already large look radius absurd. |
 | `--radius-max-control` | 22px, controls at the last notch, `0` otherwise. |
 | `--radius-max-card` | 22px, cards, activity and bubbles at the last notch, `0` otherwise. |
 | `--radius-max-surface` | 26px, panels at the last notch, `0` otherwise. |

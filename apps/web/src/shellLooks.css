@@ -48,7 +48,7 @@
      notch, as the platform styles' own radii do. A look's pill squares with it.
      (Declared after --look-veil: shellLooks.test.ts pins the block's first
      token as the veil ladder's entry point.) */
-  --look-round: calc(var(--corner-radius-scale) / 1.8 + var(--corner-max) * 1.5);
+  --look-round: calc(var(--corner-radius-scale) / 1.8);
   --look-pill-radius: calc(25px * var(--look-round));
   --look-line: color-mix(in srgb, var(--text) 13%, transparent);
   /* Quiet text uses the theme's own contrast-checked inks, never an alpha of
