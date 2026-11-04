@@ -497,6 +497,14 @@ and stops early once a recency window is satisfied. Rows open read-only, and
 restore (`bulkSessions("restore")`) or permanent delete work singly or on a
 selection. Pure rules live in `apps/web/src/archivedSessions.ts`.
 
+Session confirmation follows intent and activity. Row-menu and swipe actions
+ask first; holding Shift over a wide desktop row reveals the quick
+archive/delete buttons, which are deliberate: an idle row acts immediately —
+including archive even while the *Confirm before archiving sessions* preference
+is on — while a session that is working, waiting, reconciling, unknown, epoch
+pending or holding pending questions/approvals still confirms. A delete that
+also removes a package-owned isolation workspace always confirms.
+
 Session and project verbs are optimistic: delete, archive, restore (single and
 bulk), rename, pin and labels for sessions, rename and close for projects, and
 queued-message removal reflect the action before the server answers. Session

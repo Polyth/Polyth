@@ -27,6 +27,7 @@ import {
   needsDestructiveConfirm,
   renameSessionTitle,
   toggleSessionPin,
+  type ArchiveSessionOptions,
 } from "../../sessionActions.ts";
 import { copyText, firstUserTextCached } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
@@ -260,9 +261,11 @@ function SessionRow({
 
   useEffect(() => () => cancelLongPress(), []);
 
-  const quickArchive = async () => {
+  // Shift-hover quick actions are deliberate (modifier held), so they skip the
+  // soft "confirm archive" preference prompt. Live agent activity still asks.
+  const quickArchive = async (options?: ArchiveSessionOptions) => {
     const label = s.title || tr("sidebar.sessionlist.session");
-    void archiveSessionWithPolicy(s)
+    void archiveSessionWithPolicy(s, options)
       .then((archived) => {
         if (!archived) return;
         successFeedback();
@@ -727,7 +730,9 @@ function SessionRow({
               className="session-quick-btn"
               title={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
               aria-label={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
-              onClick={quickArchive}
+              onClick={shiftQuick && swipeX === null && !swipeRevealed
+                ? () => void quickArchive({ deliberate: true })
+                : () => void quickArchive()}
             ><Icon.download /></button>
           )}
           <button
