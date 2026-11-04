@@ -567,6 +567,12 @@ each look as a token schematic in the active theme, standing like a window on
 the background in use. A look restyles the shell only: picking one
 (`pickShellLook`) never changes the workspace background the person chose.
 
+A look's strip geometry (the margins and rim Air and Obsidian give `.railbar`) belongs
+to the wide shell. A compact shell shows a package window as a full-screen layer and
+floats no strip, so `shellLooks.css` resets those margins and borders there. An idle
+rail host with no strip is `display: none` even while closed windows stay mounted in
+it, so it never takes room from the chat. `chatFrameGeometry.test.ts` measures both.
+
 The Appearance page runs from the whole to the parts: **Look**, **Color**
 (mode, the one searchable scheme picker, accent, skin import), **Controls**
 (`themeStyle`, see "Theme layers"), **Background and surfaces** (the

@@ -16875,7 +16875,7 @@ html[dir="rtl"] .reasoning-preview {
   .msg.assistant .bubble { font-size: var(--font-body); line-height: 1.6; }
   .execution-summary.tool-disclosure {
     min-height: 36px;
-    grid-template-columns: 18px minmax(0, 1fr) auto 67px 14px;
+    grid-template-columns: 18px minmax(0, 1fr) auto 67px 16px;
     gap: 5px;
     padding-inline: 0;
   }
@@ -17839,6 +17839,11 @@ html[dir="rtl"] .reasoning-preview {
    removed so its glass/border chrome never shows as an empty sliver. */
 .app:has(> .app-shell > .railbar[data-rail-strip="none"]) { --rail-strip-width-right: 0px; }
 .railbar:empty { display: none; }
+/* A closed window stays mounted (and hidden) to keep its state, so the host is
+   no longer :empty. With no strip and no pane on screen it still has nothing
+   to show, and in flow its look's margins and borders would take that room
+   from the chat beside it. */
+.railbar[data-rail-motion="idle"][data-rail-strip="none"] { display: none; }
 
 /* The launcher strip owns the viewport edge; scrolling belongs to the pane
    beside it, never underneath the strip. */
@@ -18032,7 +18037,7 @@ html[dir="rtl"] .reasoning-preview {
 /* The chevron owns the last track even when there is no diff to show, so
    every summary's chevron lines up at the same edge. */
 .ui-run-summary > .ui-run-summary-chevron { grid-column: -2 / -1; }
-.ui-run-summary-mark { width: var(--icon-md); height: var(--icon-md); display: grid; place-items: center; color: var(--muted); }
+.ui-run-summary-mark { flex: none; width: var(--icon-md); height: var(--icon-md); display: grid; place-items: center; color: var(--muted); }
 .ui-run-summary[data-state="active"] .ui-run-summary-mark,
 .ui-run-summary[data-state="completed"] .ui-run-summary-mark { color: var(--green); }
 .ui-run-summary[data-state="waiting"] .ui-run-summary-mark { color: var(--amber); }
@@ -18326,6 +18331,20 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   align-self: center;
   display: inline-flex;
   margin-inline-end: var(--activity-bleed);
+}
+/* Every block's chevron ends on the same edge, so Stop stands before it and
+   nothing on the line moves when Stop arrives. The chevron stays part of the
+   line's button; the block is its containing box because a folded summary is
+   not positioned. Where the summary is a pill that hugs its words (chip, Air),
+   the chevron stays in the pill and Stop follows it. */
+:where(body:not([data-activity-style="chip"], [data-shell-look="air"])) .activity-group.has-live-stop > .ui-run-summary > .ui-run-summary-chevron {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: var(--activity-bleed);
+  margin-block: auto;
+}
+:where(body:not([data-activity-style="chip"], [data-shell-look="air"])) .activity-group.has-live-stop > .activity-live-stop {
+  margin-inline-end: calc(var(--activity-bleed) + var(--icon-sm) + var(--conversation-row-gap));
 }
 
 /* Reduced motion and low-resource mode keep the same line: it changes in
@@ -18664,6 +18683,17 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   :is(.stage-new, .focus-conversation):dir(rtl) {
     --conversation-frame-inline-start: max(var(--conversation-chrome-inset), var(--safe-right-clear));
     --conversation-frame-inline-end: max(var(--conversation-chrome-inset), var(--safe-left-clear));
+  }
+  /* This frame is not capped by the reading measure, so neither is the status
+     line: it ends with the composer under it. */
+  .agent-status-dock {
+    width: calc(100% - var(--conversation-frame-inline-start) - var(--conversation-frame-inline-end));
+  }
+  /* The bookmark rests under the floating session actions: the same frame edge,
+     the same diameter, so its icon stands under theirs. */
+  .prompt-bookmark {
+    --prompt-bookmark-size: max(var(--tap), var(--mobile-island-height));
+    inset-inline: var(--conversation-frame-inline-start) var(--conversation-frame-inline-end);
   }
 }
 @media (max-width: 620px) {

@@ -433,6 +433,18 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railb
   align-self: stretch !important;
 }
 
+/* A compact shell shows a package window as a full-screen layer and floats no
+   strip, so the island a look gives its strip (Air, Obsidian) never reaches it:
+   those margins and borders left the layer short of the screen's edges. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar {
+    margin: 0 !important;
+  }
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:not([data-side-strip]) {
+    border-width: 0 !important;
+  }
+}
+
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > :is(.rail-dynamic, .plugin-strip) {
   background: var(--look-rail) !important;
   backdrop-filter: var(--look-rail-blur) !important;
@@ -991,10 +1003,6 @@ body[data-shell-look="paper"]:not(#\#) .md-code-block {
   border-radius: var(--look-select-radius) !important;
 }
 
-body[data-shell-look="paper"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="paper"]:not(#\#) .activity-group .ui-run-summary-copy strong {
   font-weight: 500;
 }
@@ -1220,10 +1228,14 @@ body[data-shell-look="line"]:not(#\#) .md-code-block {
 /* The rule sits on the touch box's bottom edge: no touch trim under it. */
 body[data-shell-look="line"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
 
+/* The rule runs from frame edge to frame edge: this block does not bleed. */
+body[data-shell-look="line"]:not(#\#) .activity-group {
+  --activity-bleed: 0px;
+}
+
 body[data-shell-look="line"]:not(#\#) .activity-group > .ui-run-summary {
   border-radius: 0 !important;
   border-bottom: 1px solid var(--look-line-strong) !important;
-  padding-inline: 2px !important;
 }
 
 body[data-shell-look="line"]:not(#\#) .activity-group:not(.open) > .ui-run-summary {
@@ -1479,6 +1491,14 @@ body[data-shell-look="air"]:not(#\#) .md-code-block {
 /* The pill (and the open block's island) fill the row's whole touch box:
    no touch trim, so they keep the full gap to the rows around them. */
 body[data-shell-look="air"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+
+/* The pill's edge stands on the frame; the thread and the steps follow the
+   mark and the title inside it. */
+body[data-shell-look="air"]:not(#\#) .activity-group {
+  --activity-bleed: 0px;
+  --activity-thread-x: calc(12px + var(--icon-md) / 2 - .5px);
+  --activity-step-inset: calc(12px + var(--icon-md) + var(--space-2));
+}
 
 body[data-shell-look="air"]:not(#\#) .activity-group > .ui-run-summary {
   width: auto !important;
@@ -1766,30 +1786,12 @@ body[data-shell-look="monolith"]:not(#\#) .md-code-block {
   border-radius: calc(12px * var(--look-round)) !important;
 }
 
-body[data-shell-look="monolith"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="monolith"]:not(#\#) .activity-group .ui-run-summary-copy strong {
   font-weight: 550;
 }
 
-body[data-shell-look="monolith"]:not(#\#) .activity-group.open .activity-group-items {
-  position: relative;
-}
-
 body[data-shell-look="monolith"]:not(#\#) .activity-group.open .activity-group-items::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 8px;
-  top: 0;
-  bottom: 10px;
-  width: 1px;
   background: color-mix(in srgb, var(--text) 16%, transparent);
-}
-
-body[data-shell-look="monolith"]:not(#\#) .activity-group .execution-summary {
-  padding-inline-start: 22px !important;
 }
 
 body[data-shell-look="monolith"]:not(#\#) .execution-status-icon {
@@ -1840,7 +1842,7 @@ body[data-shell-look="monolith"]:not(#\#) :is(.mobile-float-navigation, .mobile-
   border-radius: calc(14px * var(--look-round)) !important;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   body[data-shell-look="monolith"]:not(#\#) .app {
     background: var(--look-sheet) !important;
     --look-canvas-blur: var(--look-blur);
@@ -2005,30 +2007,12 @@ html.light body[data-shell-look="monolith-reverse"]:not(#\#) .md-code-block {
   background: color-mix(in srgb, var(--look-plane-solid) 70%, transparent) !important;
 }
 
-body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group .ui-run-summary-copy strong {
   font-weight: 550;
 }
 
-body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group.open .activity-group-items {
-  position: relative;
-}
-
 body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group.open .activity-group-items::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 8px;
-  top: 0;
-  bottom: 10px;
-  width: 1px;
   background: color-mix(in srgb, var(--text) 16%, transparent);
-}
-
-body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group .execution-summary {
-  padding-inline-start: 22px !important;
 }
 
 body[data-shell-look="monolith-reverse"]:not(#\#) .execution-status-icon {
@@ -2074,7 +2058,7 @@ body[data-shell-look="monolith-reverse"]:not(#\#) :is(.mobile-float-navigation, 
   border-radius: calc(14px * var(--look-round)) !important;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   body[data-shell-look="monolith-reverse"]:not(#\#) .app {
     background: var(--look-well) !important;
   }
@@ -2270,30 +2254,12 @@ body[data-shell-look="obsidian"]:not(#\#) .question-option:has(input:checked) {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent), 0 0 18px -8px var(--accent) !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="obsidian"]:not(#\#) .activity-group .ui-run-summary-mark {
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--green) 60%, transparent));
 }
 
-body[data-shell-look="obsidian"]:not(#\#) .activity-group.open .activity-group-items {
-  position: relative;
-}
-
 body[data-shell-look="obsidian"]:not(#\#) .activity-group.open .activity-group-items::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 8px;
-  top: 0;
-  bottom: 10px;
-  width: 1px;
   background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 0%, transparent));
-}
-
-body[data-shell-look="obsidian"]:not(#\#) .activity-group .execution-summary {
-  padding-inline-start: 22px !important;
 }
 
 body[data-shell-look="obsidian"]:not(#\#) .execution-status-icon {
@@ -2492,10 +2458,6 @@ body[data-shell-look="editorial"]:not(#\#) .msg.assistant .bubble p.md-para > st
 body[data-shell-look="editorial"]:not(#\#) .md-code-block {
   background: color-mix(in srgb, var(--text) 4%, transparent) !important;
   border-radius: calc(4px * var(--look-round)) !important;
-}
-
-body[data-shell-look="editorial"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
 }
 
 body[data-shell-look="editorial"]:not(#\#) .activity-group .ui-run-summary-copy strong {

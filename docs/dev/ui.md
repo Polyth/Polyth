@@ -358,7 +358,9 @@ persisted field keeps its migration name) and `promptBookmarkDesktop` for wide
 windows; both default off. The component mounts when either is on and carries
 `data-narrow="off"`/`data-wide="off"` so CSS hides it on the disabled side. The
 bookmark sits at the conversation's inline edge below the
-phone menu and remains available while the latest prompt is visible. It opens
+phone menu and remains available while the latest prompt is visible. In a compact
+shell it rests on the conversation frame with the floats' diameter, so its icon
+stands under the last floating action; that frame is also the area it drags within. It opens
 a compact shared `Popover` with the desktop navigator's material, type and rows,
 safe-area/keyboard collision handling, outside dismissal and Escape support.
 Both prompt-history panels use the menu text size. Opening focuses a prompt;
@@ -2435,11 +2437,19 @@ runs. Steps are separated by rhythm alone (34 px rows,
 `--hit-min` on touch). A finished step shows its duration but no tick, since
 the block's own mark says done; failures and running steps keep their glyph.
 The summary title (weight 500) never truncates; its counts give way first.
+Every look keeps this geometry: the mark starts and the chevron ends on the prose
+edges, the thread hangs from the mark's centre (`--activity-thread-x`), and steps
+start on the title column. A look that draws a rule or a pill on the summary (Line,
+Air) sets `--activity-bleed: 0px` so its edge stands on the frame instead of resetting
+the summary's padding. `chatFrameGeometry.test.ts` measures this in every look.
 An open summary pins to the top while its steps scroll. It does so only where
 `container-type: scroll-state` exists, and it takes the readable glass only
 while `scroll-state(stuck: top)` holds. Elsewhere it stays in flow rather than
 sitting bare on the steps. The inline command Stop is a red outline with no
-fill.
+fill. Beside a live line it stands before the chevron, which keeps the column
+every block's chevron uses, so nothing on the line moves when Stop arrives; where
+the summary is a pill that hugs its words (chip, Air) the chevron stays in the pill
+and Stop follows it.
 
 **The live line:** a block is one row, live or not. While it is the tail of a
 working turn (nothing follows it yet), its summary line names the step in
@@ -2498,7 +2508,10 @@ shadow or glass in any platform style or look. Everything sits on one grid
 measured from the card's outer edge: marks are centred on the model logo's column
 (`--composer-stack-mark`), labels start at the model name
 (`--composer-stack-text`), trailing glyphs end where the marks start
-(`--composer-stack-end`). A line reads `--composer-stack-row` tall; on touch, a line
+(`--composer-stack-end`). The phone's resting row, which shows no model line,
+stands on the same grid: Add centres on the marks' column and the Stop/Send disc
+ends with the trailing column. In the compact shell's uncapped frame the status line
+spans the composer's full width. A line reads `--composer-stack-row` tall; on touch, a line
 that opens something keeps its full target by reaching up into the timeline's
 bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
 ([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset theme and

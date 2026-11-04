@@ -150,7 +150,8 @@
   justify-content: center;
 }
 
-.mobile-composer-primary { min-width: var(--tap); }
+/* The disc stands in the middle of its tap box under any pointer. */
+.mobile-composer-primary { min-width: var(--tap); display: flex; justify-content: center; }
 
 /* Arranging: the leading run wraps instead of scrolling, so every button
    is in reach, while the run beside Send stays on the first row. */
@@ -254,7 +255,13 @@
   align-items: center;
   gap: var(--space-1);
   min-height: var(--composer-height);
-  padding: 0 var(--space-2);
+  /* The row stands on the pending stack's grid, past the 1px card edge: Add
+     centres on the marks' column (where the engaged card's model logo stands)
+     and the Stop/Send disc, centred in its tap box, ends with the trailing column. */
+  padding-block: 0;
+  padding-inline:
+    calc(var(--composer-stack-mark) - var(--tap) / 2 - 1px)
+    calc(var(--composer-stack-end) - (var(--tap) - var(--composer-action-size)) / 2 - 1px);
 }
 
 .composer-mobile.composer-mobile-grid.composer-collapsed :is(.composer-config-row, .mobile-composer-editor) { display: none; }
