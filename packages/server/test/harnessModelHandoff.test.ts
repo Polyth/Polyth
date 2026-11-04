@@ -40,9 +40,15 @@ const B_MODELS: ModelDescriptor[] = [
   { providerID: "prov-b", modelID: "b-think", name: "B Think", variants: ["quick", "thorough"], defaultVariant: "quick", capabilities: ["input:text", "input:file"] },
 ];
 
+/** Harness L: freezes model/effort at native launch, like a `--effort` CLI. */
+const L_MODELS: ModelDescriptor[] = [
+  { providerID: "prov-l", modelID: "l-think", name: "L Think", variants: ["low", "high"], defaultVariant: "low", capabilities: ["input:text"] },
+];
+
 const CAPABILITIES: Record<string, Partial<RuntimeCapabilities>> = {
   "fake-a": { attachments: { modalities: { file: "native", image: "native" } } },
   "fake-b": { attachments: { modalities: { file: "emulated", image: "native", pdf: "unsupported" } } },
+  "fake-locked": { launchLocked: true },
 };
 
 function fixture(files: Record<string, Uint8Array>) {
@@ -58,8 +64,8 @@ function fixture(files: Record<string, Uint8Array>) {
   const executing = new Set<string>();
   const reads: string[] = [];
 
-  const provider = (id: string, models: ModelDescriptor[]): HarnessProvider => ({
-    descriptor: { id, name: id === "fake-a" ? "Engine A" : "Engine B", integration: "fake", priority: id === "fake-a" ? 0 : 1 },
+  const provider = (id: string, models: ModelDescriptor[], locked = false): HarnessProvider => ({
+    descriptor: { id, name: id === "fake-a" ? "Engine A" : id === "fake-b" ? "Engine B" : "Engine L", integration: "fake", priority: id === "fake-a" ? 0 : 1 },
     staticFeatures: {
       streaming: true, permissions: false, questions: false, compaction: false, subagents: false,
       ...CAPABILITIES[id],
@@ -79,11 +85,28 @@ function fixture(files: Record<string, Uint8Array>) {
       let order = 0;
       let lastCreateId = "";
       const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
-      const create = async (_request: { sessionId: string }, operationId: string) => {
+      // A launch-locked leg resolves the provider default effort when the
+      // caller states only a model, exactly as `agy` does.
+      const launchModelFor = (ref: HarnessContext["model"]): HarnessContext["model"] => {
+        if (!ref) return undefined;
+        const descriptor = models.find((candidate) => candidate.providerID === ref.providerID && candidate.modelID === ref.modelID);
+        return ref.variant === undefined && descriptor?.defaultVariant
+          ? { ...ref, variant: descriptor.defaultVariant }
+          : ref;
+      };
+      const create = async (request: { sessionId: string } & Partial<CanonicalTurnRequest>, operationId: string) => {
         nativeId = randomUUID();
         lastCreateId = operationId;
+        if (locked) runtime.launchModel = launchModelFor(request.model ?? context.model);
         accepted.push({ operationId, mutationKind: "session-reset", backendSessionId: nativeId, receipt: nativeId });
-        return { kind: "confirmed" as const, value: { backendSessionId: nativeId }, receipt: nativeId };
+        return {
+          kind: "confirmed" as const,
+          value: {
+            backendSessionId: nativeId,
+            ...(locked && runtime.launchModel ? { launch: { model: runtime.launchModel } } : {}),
+          },
+          receipt: nativeId,
+        };
       };
       const runtime: AgentRuntime & {
         complete(): void;
@@ -92,7 +115,10 @@ function fixture(files: Record<string, Uint8Array>) {
         launchModel: HarnessContext["model"];
       } = {
         harnessId: id,
-        launchModel: context.model,
+        launchModel: launchModelFor(context.model),
+        ...(locked ? {
+          launchSelection: () => runtime.launchModel ? { model: runtime.launchModel } : undefined,
+        } : {}),
         requests: [],
         capabilities: async () => ({
           streaming: true, permissions: false, questions: false, compaction: false, subagents: false,
@@ -103,7 +129,11 @@ function fixture(files: Record<string, Uint8Array>) {
         agents: async () => [],
         ensureSession: async (input) => nativeId = input.backendSessionId ?? nativeId,
         createSessionOperation: create,
-        resetSessionOperation: create,
+        // Exact native history cannot be replaced on a launch-locked leg; the
+        // restart transaction must create a fresh session instead.
+        resetSessionOperation: locked
+          ? async () => ({ kind: "rejected" as const, code: "unsupported", message: "start a new session" })
+          : create,
         sessions: async () => nativeId ? [{ id: nativeId, operationId: lastCreateId, title: "fake", createdAt: 0, updatedAt: 0 }] : [],
         history: async () => [],
         endpoint: async () => endpoint,
@@ -115,6 +145,15 @@ function fixture(files: Record<string, Uint8Array>) {
           permissions: [], questions: [], events: [], acceptedOperations: accepted,
         }),
         async startTurnOperation(request, operationId) {
+          if (locked) {
+            const launch = runtime.launchModel;
+            const differentModel = Boolean(request.model && launch
+              && (request.model.providerID !== launch.providerID || request.model.modelID !== launch.modelID));
+            const differentEffort = Boolean(request.model?.variant && request.model.variant !== launch?.variant);
+            if (differentModel || differentEffort) {
+              return { kind: "rejected", code: "unsupported", message: "model and effort are launch-time settings" };
+            }
+          }
           runtime.requests.push(request);
           executing.add(authorityId);
           order++;
@@ -150,6 +189,7 @@ function fixture(files: Record<string, Uint8Array>) {
 
   registry.register(provider("fake-a", A_MODELS));
   registry.register(provider("fake-b", B_MODELS));
+  registry.register(provider("fake-locked", L_MODELS, true));
   const pool = createHarnessPool({
     registry,
     legacyHarnessId: "fake-a",
@@ -254,6 +294,34 @@ test("a model and variant chosen on one harness never reach the next one", async
   assert.doesNotMatch(JSON.stringify(engineA.requests), /b-think/);
   engineB.complete();
   await f.idle(id);
+  await f.close();
+});
+
+test("a launch-locked harness gets a fresh leg for a changed effort instead of a failed turn", async () => {
+  const f = fixture({});
+  const { id } = await f.sessions.create({
+    projectId: "p",
+    harness: { mode: "pinned", harnessId: "fake-locked" },
+    model: { providerID: "prov-l", modelID: "l-think" },
+  });
+  await f.sessions.send(id, { text: "first", model: { providerID: "prov-l", modelID: "l-think", variant: "low" } });
+  const first = f.engineFor("fake-locked").at(-1)!;
+  assert.equal(first.launchModel?.variant, "low", "the leg launches with the effort its first turn states");
+  assert.deepEqual(first.requests.at(-1)!.model, { providerID: "prov-l", modelID: "l-think", variant: "low" });
+  first.complete();
+  await f.idle(id);
+
+  // The composer now asks for another effort. The runtime would refuse that at
+  // launch-locked admission, so the server replaces the idle leg first and the
+  // turn runs on a leg that was actually launched with `high`.
+  await f.sessions.send(id, { text: "second", model: { providerID: "prov-l", modelID: "l-think", variant: "high" } });
+  const latest = f.engineFor("fake-locked").at(-1)!;
+  assert.equal(latest.launchModel?.variant, "high", "the replacement leg launches with the new effort");
+  assert.deepEqual(latest.requests.at(-1)!.model, { providerID: "prov-l", modelID: "l-think", variant: "high" });
+  assert.equal(first.requests.length, 1, "the old leg never received a selection it was not launched with");
+  latest.complete();
+  await f.idle(id);
+  assert.equal((await f.store.projection(id))?.status, "idle", "no turn was recorded as failed");
   await f.close();
 });
 

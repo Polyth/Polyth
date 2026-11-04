@@ -7450,6 +7450,20 @@ export function createSessionService(deps: {
           // epoch. Do not let the queued turn use the pre-replacement object.
           rt = await ensureWired(sessionId, proj);
         }
+        // Queued work carries no per-send model: the eventual turn uses the
+        // session's persisted selection. A launch-locked runtime must therefore
+        // be re-launched with that selection before the head is reserved.
+        const launchAligned = await alignLaunchSelectionUnderLock(
+          sessionId,
+          proj,
+          rt ?? await ensureWired(sessionId, proj),
+          proj.model,
+          proj.agent,
+        );
+        if (launchAligned) {
+          proj = launchAligned.projection;
+          rt = launchAligned.runtime;
+        }
         const reserved = await broadcastTail(
           sessionId,
           () => deps.queue!.reserveQueueHead({ sessionId, mutationKind: "turn-submit" }),
@@ -8273,6 +8287,20 @@ export function createSessionService(deps: {
             input.memory,
             input.author,
         );
+      }
+      // A launch-locked runtime (e.g. Antigravity) freezes model/effort/agent
+      // at native creation. Apply the next turn's selection by replacing the
+      // idle leg first, instead of admitting a turn the runtime must refuse.
+      const launchAligned = await alignLaunchSelectionUnderLock(
+        sessionId,
+        current,
+        rt,
+        input.model ?? current.model,
+        input.agent ?? current.agent,
+      );
+      if (launchAligned) {
+        current = launchAligned.projection;
+        rt = launchAligned.runtime;
       }
       return admitTurnCore(sessionId, current, rt, input, reserved, clientRequestFingerprint);
     });
@@ -9573,6 +9601,9 @@ export function createSessionService(deps: {
   const restartRuntimeUnderLock = async (
     sessionId: string,
     source: "user" | "send-recovery",
+    /** What the replacement leg must launch with. A launch-locked runtime
+     *  ignores a per-turn change, so the new leg is created with it instead. */
+    launch?: RuntimeLaunchSelection,
   ): Promise<SessionProjection> => {
     const projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -9594,6 +9625,7 @@ export function createSessionService(deps: {
     const selection = projection.harness ?? { mode: "auto" as const };
     const transition: HarnessTransition = {
       id: randomUUID(), selection, targetHarnessId: harnessId, timing: "stop-now", phase: "requested",
+      ...(launch?.model || launch?.agent ? { launch } : {}),
     };
     await commitHarnessIntent(sessionId, { harnessTransition: transition }, "harness/switch-requested", {
       transitionId: transition.id,
@@ -9617,6 +9649,46 @@ export function createSessionService(deps: {
       }
       throw error;
     }
+  };
+
+  const launchSelectionMatches = (
+    launch: RuntimeLaunchSelection,
+    model: ModelRef | undefined,
+    agent: string | undefined,
+  ): boolean => {
+    if (agent !== undefined && launch.agent !== agent) return false;
+    if (!model) return true;
+    if (!launch.model
+      || model.providerID !== launch.model.providerID
+      || model.modelID !== launch.model.modelID) return false;
+    // An unstated effort inherits the launched one (adapters compare the same
+    // way); only an explicit different effort needs a fresh native leg.
+    return model.variant === undefined || model.variant === launch.model.variant;
+  };
+
+  /** A launch-locked runtime freezes model/effort/agent when its native session
+   * is created. A changed selection is next-leg intent, not a refused turn:
+   * release the current leg and create its successor with that selection.
+   * Never stops running work; `undefined` means nothing has to change. */
+  const alignLaunchSelectionUnderLock = async (
+    sessionId: string,
+    projection: SessionProjection,
+    runtime: AgentRuntime,
+    model: ModelRef | undefined,
+    agent: string | undefined,
+  ): Promise<{ projection: SessionProjection; runtime: AgentRuntime } | undefined> => {
+    if (!runtime.launchSelection || !projection.runtimeBinding?.backendSessionId) return undefined;
+    if (projection.status === "archived" || projection.harnessTransition) return undefined;
+    if (turnActive(sessionId) || admitting.has(sessionId)) return undefined;
+    const capabilities = await cachedCapabilities(runtime).catch(() => undefined);
+    if (capabilities?.launchLocked !== true) return undefined;
+    const launch = runtime.launchSelection();
+    if (!launch || launchSelectionMatches(launch, model, agent)) return undefined;
+    const next = await restartRuntimeUnderLock(sessionId, "user", {
+      ...(model ? { model } : {}),
+      ...(agent !== undefined ? { agent } : {}),
+    });
+    return { projection: next, runtime: await ensureWired(sessionId, next) };
   };
 
   const commitHarnessIntent = async (sessionId: string, patch: Partial<SessionProjection>, type: string, data: JsonObject) => {

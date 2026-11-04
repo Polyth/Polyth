@@ -3994,6 +3994,11 @@ export interface RuntimeCapabilities {
   contextOccupancy?: TelemetryQuality;
   /** The harness can predict the next user prompt after a turn. */
   promptSuggestions?: boolean;
+  /** Model, effort and agent are frozen when the native session is created (a
+   *  CLI launch). A selection change is not a per-turn option: it needs a fresh
+   *  native leg launched with that selection. Runtimes that set this also
+   *  report their live launch through `AgentRuntime.launchSelection()`. */
+  launchLocked?: boolean;
 }
 
 // Harnesses construct AgentRuntime; they never own canonical sessions.
@@ -4859,6 +4864,11 @@ export interface AgentRuntime {
    * idempotently re-verifiable for the supplied binding incarnation. */
   releaseExecution?(binding: RuntimeSessionBinding, operationId: string): Promise<MutationOutcome<ExecutionReleaseProof>>;
   capabilities(): Promise<RuntimeCapabilities>;
+  /** What the live native leg was actually launched with. Set only by a
+   *  launch-locked runtime: the server compares it with the next turn's
+   *  selection and starts a fresh leg instead of sending a turn the runtime
+   *  would refuse. Absent means no exact selection is known. */
+  launchSelection?(): RuntimeLaunchSelection | undefined;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
   /** Every provider the backend currently exposes (id + name only) — for the

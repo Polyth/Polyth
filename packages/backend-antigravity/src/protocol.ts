@@ -28,6 +28,9 @@ export const ANTIGRAVITY_CAPABILITIES = {
   streaming: true, permissions: true, questions: true, compaction: false,
   subagents: false, steering: true, resume: true, usage: true, cost: false,
   fork: false, mcp: true, title: "native", contextOccupancy: "derived",
+  // `agy` takes --model/--effort/--agent only at launch; a changed selection
+  // needs a fresh native leg (the server restarts it before the next turn).
+  launchLocked: true,
   attachments: { modalities: {
     file: "emulated", image: "emulated", pdf: "emulated",
     audio: "emulated", url: "emulated",
