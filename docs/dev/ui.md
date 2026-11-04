@@ -1564,6 +1564,15 @@ menus (a Conversations drill-in) and its conversation's heads, and names the
 agent in the header of its own session in Chat (`session.header.status`); a
 working agent's row shows its own glyph with a travelling arc rather than the
 chat spinner.
+A session an automation started without a person carries
+`SessionProjection.origin` (`SessionOrigin`: owning package `source`, the
+`wake` that started it — schedule, heartbeat, event, manual or alert — and a
+display `label`). Trusted server code sets it through `CreateSessionInput.origin`
+(the HTTP create route never accepts it); it is part of the summary fields and is
+not inherited by forks or delegated children. The Agents runner sets it on an
+agent's own sessions (label = agent name) and Monitoring on its incident chats
+(`monitoring`/`alert`/"Monitoring"). Lists use it to leave automation out on
+request and to draw it as automation rather than as a person's chat.
 
 Session grouping and order live in the list options' **Sessions** section as
 two drill-in rows, **Group by** and **Sort by**, each naming its current
@@ -1779,16 +1788,26 @@ no heading and no chrome of its own. Its options live under the Recent row of
 the Customize panel: count 3/5/8/12, Show
 All/Active/Unread (Active = working, needs approval/reply, reconciling),
 Subagent sessions (children with `parentId`, off by default because the
-navigator nests them), Projects Current/All/Selected (checkbox list; picking
+navigator nests them), Agent sessions (off by default: sessions an automation
+started — an `origin`, a `purpose` a package claims for its own list, or a
+child of one — are machinery the owning package already shows), Projects
+Current/All/Selected (checkbox list; picking
 Selected starts from the project in view; rows from another project show its
 name), and text size S/M/L relative to `--font-label`. Choices live in
 `heroWidgetPrefs.recent`. Selection is the pure
 `selectHeroRecentSessions` (`apps/web/src/heroRecent.ts`) over sessions in the
-client store. The count sets the list's height, not its length: the rows
-scroll inside it, a bottom sentinel reveals another `heroRecentPageSize` rows,
+client store, with `isAutomatedSession` deciding automation. Shown automated
+rows read as automation, not as the person's chats: the lead mark is a tinted
+tile (`--accent-wash`/`--accent-text`) holding the glyph for what woke it
+(schedule/heartbeat/event/alert, or the agent mark for a legacy claimed
+session), a muted meta after the title names it (`Monitoring · Alert`, or just
+`Agent`), and the wake label is the row mark's accessible name; `working` keeps
+the spinner and `needs-approval` the shield, so an automation waiting on the
+person is never hidden. The count sets the list's height, not its length: the
+rows scroll inside it, a bottom sentinel reveals another `heroRecentPageSize` rows,
 and once the cached matches run out it pages older summaries through
 `useSessionSummaryPages` with `heroRecentSummaryQuery` (server-side project
-narrowing only for exactly one project; status/subagent filters stay
+narrowing only for exactly one project; status/subagent/automation filters stay
 client-side). Nothing is fetched until the cache cannot fill the next page.
 A narrowed list (status filter or Selected) that matches nothing renders an
 empty line; an empty default list renders nothing.

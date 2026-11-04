@@ -55,6 +55,7 @@ import {
   SESSION_PURPOSE_CONVERSATION,
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
+  normalizeSessionOrigin,
 } from "@polyth/contracts";
 import { sessionMentionCandidates, sessionAudience } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -10895,6 +10896,10 @@ export function createSessionService(deps: {
       if (input.purpose !== undefined && (typeof input.purpose !== "string" || !SESSION_PURPOSE_ID.test(input.purpose))) {
         throw Object.assign(new Error("purpose must be a short lowercase id"), { code: "invalid-input" });
       }
+      const origin = input.origin === undefined ? undefined : normalizeSessionOrigin(input.origin);
+      if (origin === null) {
+        throw Object.assign(new Error("origin needs a package id, a known wake and a label"), { code: "invalid-input" });
+      }
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
       const projectProfileId = project.defaults?.agentProfileId ?? undefined;
@@ -11057,6 +11062,7 @@ export function createSessionService(deps: {
         // spawned, not for whoever writes to the parent later.
         ...(parent?.actor ? { actor: { ...parent.actor, via: "delegation" as const } } : {}),
         ...(input.purpose ? { purpose: input.purpose } : {}),
+        ...(origin ? { origin } : {}),
         ...(inheritedAutoAccept !== "off" ? autoAcceptFlags(inheritedAutoAccept) : {}),
         title: input.title || "New session",
         titleSource: input.title && !isPlaceholderTitle(input.title, sessionId) ? "manual" : "placeholder",
@@ -11081,6 +11087,7 @@ export function createSessionService(deps: {
             title: projection.title, projectId: project.id,
             harness: harness as unknown as JsonObject,
             ...(input.purpose ? { purpose: input.purpose } : {}),
+            ...(origin ? { origin: origin as unknown as JsonObject } : {}),
             ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
             workspace: sessionWorkspace as unknown as JsonObject,
             ...(input.isolation ? { isolation: input.isolation as unknown as JsonObject } : {}),
@@ -12563,8 +12570,9 @@ export function createSessionService(deps: {
 
         const now = Date.now();
         // A fork belongs to whoever forked it: the source's draft, pin and
-        // acting person are someone else's and never carry over.
-        const { draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, ...forkable } = proj;
+        // acting person are someone else's and never carry over, and no
+        // automation started it.
+        const { draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin, ...forkable } = proj;
         const projection: SessionProjection = {
           ...forkable, id: forkId, parentId: sessionId, title,
           status: "reconciling",

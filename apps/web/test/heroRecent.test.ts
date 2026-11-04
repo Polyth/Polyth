@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import type { SessionProjection } from "@polyth/contracts";
-import { heroRecentIsNarrowed, heroRecentPageSize, heroRecentProjectIds, heroRecentSummaryQuery, selectHeroRecentSessions } from "../src/heroRecent.ts";
+import { heroRecentIsNarrowed, heroRecentPageSize, heroRecentProjectIds, heroRecentSummaryQuery, isAutomatedSession, selectHeroRecentSessions } from "../src/heroRecent.ts";
 import {
   defaultHeroWidgetPrefs,
   getHeroWidgetPrefs,
@@ -72,6 +72,72 @@ test("project scope spans the current project, every project, or a chosen set", 
   assert.deepEqual([...heroRecentProjectIds(prefs(), null)!], []);
 });
 
+test("automated sessions are left out by default and shown on request", () => {
+  const rows = [
+    ...SESSIONS,
+    session("agent-run", { lastTurnAt: NOW - 400, origin: { source: "agents", wake: "schedule", label: "Watcher" } }),
+    session("legacy-agent", { lastTurnAt: NOW - 410, purpose: "agent" }),
+    session("incident", { lastTurnAt: NOW - 420, origin: { source: "monitoring", wake: "alert", label: "Monitoring" } }),
+    session("agent-child", { lastTurnAt: NOW - 430, parentId: "legacy-agent" }),
+  ];
+  const claimed = new Set(["agent"]);
+  // Hidden by default; an unclaimed legacy purpose is plain metadata, so
+  // only the live claim makes those rows automation.
+  assert.deepEqual(ids(selectHeroRecentSessions(rows, prefs(), "p1", NOW)), ["legacy-agent", "new", "mid"]);
+  assert.deepEqual(ids(selectHeroRecentSessions(rows, prefs(), "p1", NOW, 3, claimed)), ["new", "mid", "working"]);
+  // Shown when asked; a parentless legacy agent session needs the claim.
+  assert.deepEqual(
+    ids(selectHeroRecentSessions(rows, prefs({ automated: true }), "p1", NOW)),
+    ["agent-run", "legacy-agent", "incident"],
+  );
+  assert.deepEqual(
+    ids(selectHeroRecentSessions(rows, prefs({ automated: true }), "p1", NOW, 6, claimed)),
+    ["agent-run", "legacy-agent", "incident", "new", "mid", "working"],
+  );
+  // A child is automation through its parent, and still a subagent row.
+  assert.deepEqual(
+    ids(selectHeroRecentSessions(rows, prefs({ automated: true, subagents: true }), "p1", NOW, 7, claimed)),
+    ["agent-run", "legacy-agent", "incident", "agent-child", "child", "new", "mid"],
+  );
+  assert.deepEqual(
+    ids(selectHeroRecentSessions(rows, prefs({ subagents: true }), "p1", NOW)),
+    ["legacy-agent", "agent-child", "child"],
+  );
+});
+
+test("isAutomatedSession reads origin, a claimed purpose, or an automated parent", () => {
+  const rows = [
+    session("agent-run", { origin: { source: "agents", wake: "heartbeat", label: "Watcher" } }),
+    session("legacy", { purpose: "agent" }),
+    session("ordinary", { purpose: "playground" }),
+    session("child-of-legacy", { parentId: "legacy" }),
+    session("grandchild", { parentId: "child-of-legacy" }),
+    session("loop-a", { parentId: "loop-b" }),
+    session("loop-b", { parentId: "loop-a" }),
+  ];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const claimed = new Set(["agent"]);
+  assert.equal(isAutomatedSession(rows[0]!, byId, claimed), true);
+  assert.equal(isAutomatedSession(rows[1]!, byId, claimed), true);
+  assert.equal(isAutomatedSession(rows[1]!, byId), false, "an unclaimed purpose is ordinary metadata");
+  assert.equal(isAutomatedSession(rows[2]!, byId, claimed), false);
+  assert.equal(isAutomatedSession(rows[3]!, byId, claimed), true, "a child follows its parent");
+  assert.equal(isAutomatedSession(rows[4]!, byId, claimed), true, "so does a grandchild");
+  assert.equal(isAutomatedSession(rows[5]!, byId, claimed), false, "a parent cycle terminates");
+});
+
+test("the automation preference normalizes like the subagent one", () => {
+  assert.deepEqual(normalizeHeroRecentPrefs({ automated: "yes" }), HERO_RECENT_DEFAULTS);
+  assert.deepEqual(normalizeHeroRecentPrefs({ automated: true }), { ...HERO_RECENT_DEFAULTS, automated: true });
+  assert.deepEqual(normalizeHeroRecentPrefs({ limit: 5 }), { ...HERO_RECENT_DEFAULTS, limit: 5 }, "an older payload keeps it off");
+  assert.equal(HERO_RECENT_DEFAULTS.automated, false);
+  assert.equal(isDefaultHeroRecentPrefs(prefs({ automated: true })), false);
+  setHeroRecentPrefs({ automated: true });
+  assert.equal(getHeroWidgetPrefs().recent.automated, true);
+  replaceHeroWidgetPrefs({ order: ["starters", "recent"], hidden: [], recent: { limit: 5 } });
+  assert.equal(getHeroWidgetPrefs().recent.automated, false);
+});
+
 test("preferences normalize untrusted values and survive older synced payloads", () => {
   assert.deepEqual(
     normalizeHeroRecentPrefs({ limit: 99, filter: "bogus", subagents: "yes", scope: "selected", projectIds: ["a", "a", 3, ""], size: "xl" }),
@@ -97,12 +163,22 @@ test("the Recent list has no heading or chrome; its options live in the screen's
   const body = surface.slice(surface.indexOf("function RecentSessions"), surface.indexOf("// UX-TIMELINE-LAYOUT-01"));
   assert.doesNotMatch(body, /hero-recent-head|<h3|SettingsButton|<button[^>]*hero-recent-settings/);
   assert.match(body, /selectHeroRecentSessions\(sessions, prefs, projectId,/);
+  // Automation is decided from the live claimed listing purposes.
+  assert.match(body, /useSyncExternalStore\(subscribeSessionListing, claimedListingPurposes, claimedListingPurposes\)/);
+  assert.match(body, /hero-recent-row--automated/);
+  assert.match(body, /hero-recent-status--automated/);
+  assert.match(body, /className="hero-recent-origin"/);
   // Scrolls within its configured height and pages older sessions on demand.
   assert.match(body, /"--hero-recent-rows": prefs\.limit/);
   assert.match(body, /useSessionSummaryPages\(summaryQuery, pagingEnabled\)/);
   assert.match(body, /className="hero-recent-more"/);
   assert.match(body, /data-size=\{prefs\.size\}/);
   assert.match(customize, /<HeroRecentOptions prefs=\{prefs\.recent\}/);
+  const settings = await readFile(new URL("../src/components/mobile/HeroRecentSettings.tsx", import.meta.url), "utf8");
+  const subagentsRow = settings.indexOf("hero-recent-subagents");
+  const automatedRow = settings.indexOf("hero-recent-automated");
+  assert.ok(subagentsRow > 0 && automatedRow > subagentsRow, "the Agent sessions switch follows Subagent sessions");
+  assert.match(settings, /checked=\{prefs\.automated\}/);
 });
 
 test("fixed screen pieces default on, normalize untrusted values and survive older synced payloads", () => {

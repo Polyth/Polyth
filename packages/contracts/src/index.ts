@@ -1340,6 +1340,35 @@ export interface ModelMessage {
  * `manual`/`native`/`generated` as final. */
 export type SessionTitleSource = "manual" | "native" | "generated" | "polyth" | "placeholder";
 
+/** What woke the automation that started a session. */
+export type SessionOriginWake = "schedule" | "heartbeat" | "event" | "manual" | "alert";
+export const SESSION_ORIGIN_WAKES: readonly SessionOriginWake[] = ["schedule", "heartbeat", "event", "manual", "alert"];
+
+/** A session a package's automation started without a person — an agent's
+ * own conversation, a monitoring incident chat. Lists use it to hide such
+ * sessions on request and to draw them as automation rather than as chats. */
+export interface SessionOrigin {
+  /** Owning package id, a short lowercase id (`agents`, `monitoring`). */
+  source: string;
+  /** What woke it when the session started. A long-lived agent conversation
+   * keeps the first wake; the owning package knows the later ones. */
+  wake: SessionOriginWake;
+  /** Who started it, as people know it: the agent's name, "Monitoring".
+   * Plain text, at most 80 characters. */
+  label: string;
+}
+
+/** A well-formed origin, or null. The label is trimmed, single-line and cut
+ * to 80 characters. */
+export function normalizeSessionOrigin(value: unknown): SessionOrigin | null {
+  const raw = value && typeof value === "object" ? value as Partial<Record<keyof SessionOrigin, unknown>> : null;
+  if (!raw || typeof raw.source !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(raw.source)) return null;
+  if (!SESSION_ORIGIN_WAKES.includes(raw.wake as SessionOriginWake)) return null;
+  const label = typeof raw.label === "string" ? raw.label.replace(/\s+/g, " ").trim().slice(0, 80).trim() : "";
+  if (!label) return null;
+  return { source: raw.source, wake: raw.wake as SessionOriginWake, label };
+}
+
 export interface CreateSessionInput {
   projectId: string;
   /** Advanced membership selection; omitted means all Project repositories. */
@@ -1358,6 +1387,9 @@ export interface CreateSessionInput {
   /** Immutable package-owned session kind (for example `playground`).
    * Omitted means an ordinary chat. See `SessionProjection.purpose`. */
   purpose?: string;
+  /** Internal seam: the automation that starts this session when no person
+   * does. HTTP session-create must not accept it. See `SessionProjection.origin`. */
+  origin?: SessionOrigin;
   worktreeId?: string;
   /** absolute path of a git worktree; when set the session's runtime uses it as cwd */
   worktreePath?: string;
@@ -2260,6 +2292,10 @@ export interface SessionProjection {
    * and receives that package's per-turn context; forks inherit it. Absent
    * means an ordinary chat. */
   purpose?: string;
+  /** The automation that started this session without a person. Set once at
+   * creation by trusted server code, never accepted over HTTP and never
+   * inherited by forks or delegated children. Absent on ordinary chats. */
+  origin?: SessionOrigin;
   /** Snapshot of this session's repository membership and checkout roots. */
   workspace?: SessionWorkspace;
   /** Absence on legacy sessions is migrated to Auto with the bundled harness. */
@@ -2846,7 +2882,7 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview"] as const satisfies readonly (keyof SessionProjection)[];
 
 export interface SessionSummaryQuery {
   projectId?: string;

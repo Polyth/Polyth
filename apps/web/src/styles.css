@@ -11858,7 +11858,8 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   color: var(--faint);
   font-size: max(11px, calc(var(--hero-recent-font) * .867));
 }
-.hero-recent-project {
+.hero-recent-project,
+.hero-recent-origin {
   flex: 0 1 auto;
   max-width: 34%;
   min-width: 0;
@@ -12283,6 +12284,29 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .hero-recent-title--unread { color: var(--text); font-weight: 700; }
 .hero-recent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hero-recent-time { flex: none; color: var(--faint); font-size: max(11px, calc(var(--hero-recent-font) * .8)); }
+/* Automation rows are machinery, not the person's own chats: a wake glyph in
+   a tinted tile instead of the hollow status circle, a muted wake label after
+   the title (Monitoring · Alert), and a quieter title until hovered. A live
+   state keeps its status mark: a working automation still spins, one waiting
+   on the person still shows the approval shield. */
+.hero-recent-status--automated {
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  /* Drawn one step larger than the status column but laid out in it, so the
+     titles of every row still start on one line. */
+  margin-inline: calc((var(--icon-sm) - var(--icon-md)) / 2);
+  border-radius: calc(var(--radius-control) * .6);
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.hero-recent-row--automated .hero-recent-title { color: var(--muted); }
+.hero-recent-row--automated .hero-recent-title--unread { color: var(--text); }
+@media (hover: hover) {
+  .hero-recent-row--automated:hover:where(:not(:disabled)) .hero-recent-title { color: var(--text); }
+}
 
 /* Sticky interaction zone: context + composer, always above the keyboard. */
 .hero-dock {

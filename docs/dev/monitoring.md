@@ -99,6 +99,27 @@ prohibit bypassing denials, changing their own policy and following instructions
 embedded in logs. Other execution tools retain their own authorization boundary;
 Monitoring policy is not a system-wide shell sandbox.
 
+## Warnings, agents and incident chats
+
+`src/alerts.ts` samples every minute the projects whose policy grants agents
+metrics or services access. A warning is news only when it appears: the first
+sample after start is a baseline, and a warning type seen within the last
+15 minutes (`ALERT_CLEAR_MS`) is the same episode, so a threshold that flaps
+never alerts twice. A project with an agent waking on Monitoring gets an agent
+event instead of a chat. Otherwise the project gets one `sysadmin` incident
+chat per incident: it stays the project's incident until no warning of any
+type was seen for 2 hours (`INCIDENT_QUIET_MS`), and later alerts inside that
+window only notify on it — no new chat, no new turn. A chat the person archived
+or deleted inside the window stays closed; an unreadable session state counts
+as open, so uncertainty never opens a duplicate. Incident chats carry
+`origin` `{source: "monitoring", wake: "alert", label: "Monitoring"}` so lists
+draw them as automation. The incident state (`sessionId`, `openedAt`,
+`lastWarningAt` per project; nothing else) survives restarts in Space-owned
+storage at `packages/monitoring/incidents.json` (`src/incidents.ts`; writes
+throttled to one per 5 minutes while a warning persists; a damaged file is
+empty state). At most `INCIDENT_CHAT_LIMIT` incident chats are inside their
+window at once across the instance.
+
 ## Verification
 
 Run the package's behavior and security tests with Node type stripping:
