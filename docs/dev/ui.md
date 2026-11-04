@@ -3909,7 +3909,12 @@ Opening a folder adds or activates the Project and focuses the composer; there
 is no classification question.
 
 **Sidebar project presentations.** Tree mode nests sessions under expandable
-projects. Clicking a project in the phone navigator, desktop tree, or Project
+projects. A fresh install starts in Tree (`SIDEBAR_VIEW_MODE_DEFAULT`,
+`sidebarPrefs.ts`), and a shell whose rail would have no icon to show — a
+registry with no project, or only the lone Personal project — presents the
+tree whatever was saved, so the left edge is never an empty strip; the layout
+menu then leaves out the Project rail choice until a project exists. Clicking a
+project in the phone navigator, desktop tree, or Project
 rail only toggles its sessions; it never activates the project, changes the
 current session, or closes the navigator. The rail's browsed project is local
 presentation state, independent of the active workspace. Opening a session or
@@ -4177,9 +4182,12 @@ the same column; when the actions are hidden it stays at the navigator's foot
 so its menu remains reachable. A fresh install starts `bare` with
 **Floating columns**, the tools in the launcher strip (`end`) and the header
 actions plus the account at the foot of the navigator (`start`), where the
-docked Settings stands in for the rail's own gear — one Settings button. A
+docked Settings stands in for the rail's own gear — one Settings button. It
+also starts with the bare chat title hidden (`shellTitle: "hidden"`): no top
+bar and no title line over the conversation, the active chat being named by
+its navigator row; Settings → Appearance puts the title back. A
 saved record without these fields keeps the window it was built with
-(`classic`, actions `end`). Docked groups are the
+(`classic`, actions `end`, the title over the chat). Docked groups are the
 bar's own components (`CapabilityNav`, `HeaderActionsRail`, `UserMenu`)
 rendered once through `ShellDock` in `Sidebar` and
 `ContextRail`, so order, customisation and drag targets stay the same; a

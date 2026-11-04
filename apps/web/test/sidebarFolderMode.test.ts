@@ -174,8 +174,8 @@ for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact 
   });
 }
 
-test("parseSidebarViewMode starts fresh installs on the project rail; setter persists and round-trips", () => {
-  assert.equal(parseSidebarViewMode(null), "rail");
+test("parseSidebarViewMode starts fresh installs on the project tree; setter persists and round-trips", () => {
+  assert.equal(parseSidebarViewMode(null), "tree", "a rail with no project icon is an empty strip");
   assert.equal(parseSidebarViewMode("bogus"), "tree");
   assert.equal(parseSidebarViewMode("list"), "tree", "removed project list migrates to the tree");
   assert.equal(parseSidebarViewMode("folders"), "tree", "legacy folder mode migrates");
@@ -185,6 +185,34 @@ test("parseSidebarViewMode starts fresh installs on the project rail; setter per
   setSidebarViewMode("rail");
   assert.equal(getSidebarViewMode(), "rail");
   assert.equal(localStorage.getItem(VIEW_MODE_KEY), "rail");
+});
+
+test("a lone Personal project presents the tree instead of an empty project rail", async () => {
+  const personal: Project = { id: "personal", path: "/spaces/s/personal/p", name: "Personal", createdAt: 1, personal: true };
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [personal]);
+  store.activateProject("personal");
+  store.setSessions("personal", [{ id: "p1", projectId: "personal", title: "A personal chat", status: "idle", createdAt: now, updatedAt: now }]);
+  store.setSidebarOpen(true);
+  // A stored rail preference must not leave a rail that names nothing: the
+  // Personal project draws no rail icon (personalProject.ts).
+  setSidebarViewMode("rail");
+  shellWidth = 1400;
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+    assert.equal(container.querySelector(".sidebar-project-rail") === null, true, "no empty strip beside the chats");
+    assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /A personal chat/,
+      "the personal chats read as the flat tree");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    store.setSessions("personal", []);
+    setSidebarViewMode("tree");
+    store.setSidebarOpen(false);
+  }
 });
 
 test("parseShowDateGroups starts fresh installs without headings; setter persists and round-trips", () => {

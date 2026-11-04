@@ -86,6 +86,8 @@ const LEGACY_MOBILE_SHORTCUTS = ["files", "git", "terminal", "browser", "notific
  *  the account and actions in the navigator's column became the default. */
 const LEGACY_SHELL_LAYOUT: ShellLayout = "classic";
 const LEGACY_SHELL_ACTIONS_DOCK: ShellDockSide = "end";
+/** Records saved before the title moved off the bare bar keep their line. */
+const LEGACY_SHELL_TITLE: ShellTitlePlacement = "chat";
 export type ActionGrouping = "grouped" | "ungrouped";
 export type ThinkingDisplayMode = "collapsed" | "expanded" | "activity";
 export type SessionActivityDetailsMode = "tabs" | "all";
@@ -307,7 +309,9 @@ export const UI_DEFAULTS: UiSettings = {
   floatingColumns: true,
   shellToolsDock: "end",
   shellActionsDock: "start",
-  shellTitle: "chat",
+  // A fresh window draws no top bar at all: the active chat is named by its
+  // navigator row. Settings can put the title back over the chat.
+  shellTitle: "hidden",
   topRailSize: RAIL_SIZE_DEFAULT,
   rightRailSize: 90,
   leftRailSize: RAIL_SIZE_DEFAULT,
@@ -477,7 +481,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       floatingColumns: typeof data.floatingColumns === "boolean" ? data.floatingColumns : UI_DEFAULTS.floatingColumns,
       shellToolsDock: oneOf(data.shellToolsDock, SHELL_DOCK_SIDES, UI_DEFAULTS.shellToolsDock),
       shellActionsDock: oneOf(data.shellActionsDock, SHELL_DOCK_SIDES, LEGACY_SHELL_ACTIONS_DOCK),
-      shellTitle: oneOf(data.shellTitle, SHELL_TITLE_PLACEMENTS, UI_DEFAULTS.shellTitle),
+      shellTitle: oneOf(data.shellTitle, SHELL_TITLE_PLACEMENTS, LEGACY_SHELL_TITLE),
       // The discrete topRailIconSize/rightRailIconSize records predate the
       // sliders; read them as a migration source only.
       topRailSize: parseRailSize(data.topRailSize ?? (data as { topRailIconSize?: unknown }).topRailIconSize),

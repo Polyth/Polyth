@@ -271,11 +271,16 @@ export default function Sidebar() {
   // The persisted project tree/rail presentation applies to every shell. The
   // compact drawer renders the same project rail beside the browsed project's
   // sessions; only the desktop-only collapse geometry below stays wide-only.
+  // A rail needs project icons: a lone Personal project (personalProject.ts)
+  // and an empty registry draw none, so the rail would rest as an empty strip
+  // beside the chats. Those shells present the tree instead.
+  const railHasIcons = soloPersonal === null && orderedProjects.length > 0;
+  const presentedViewMode: SidebarViewMode = projectsOnly || railHasIcons ? viewMode : "tree";
   const effectiveViewMode = projectsOnly
     ? "rail" as const
-    : collapsed && viewMode === "tree"
+    : collapsed && presentedViewMode === "tree"
       ? "rail" as const
-      : viewMode;
+      : presentedViewMode;
   // Rail view collapses only the sessions column — the project icon rail keeps its
   // width. Every other presentation still collapses to the thin rail.
   const railView = effectiveViewMode === "rail";
@@ -704,16 +709,20 @@ export default function Sidebar() {
       id: "layout-tree",
       label: tr("sidebar.layoutTree"),
       kind: "radio",
-      checked: viewMode === "tree",
+      checked: presentedViewMode === "tree",
       onSelect: () => chooseSidebarViewMode("tree"),
     },
-    {
-      id: "layout-rail",
-      label: tr("sidebar.projectRail"),
-      kind: "radio",
-      checked: viewMode === "rail",
-      onSelect: () => chooseSidebarViewMode("rail"),
-    },
+    // Without project icons the rail is an empty strip, so the choice is not
+    // offered until a project exists (the tree is shown meanwhile).
+    ...(railHasIcons || projectsOnly
+      ? [{
+          id: "layout-rail",
+          label: tr("sidebar.projectRail"),
+          kind: "radio" as const,
+          checked: presentedViewMode === "rail",
+          onSelect: () => chooseSidebarViewMode("rail"),
+        }]
+      : []),
   ];
   const filterEntries: MenuEntry[] = [
     { heading: tr("sidebarprefs.sessions") },
