@@ -12,6 +12,7 @@ import { guardedRole, guardrailsForUser } from "./accountGuardrails.ts";
 import { limitsForUser } from "./accountLimits.ts";
 import type { HarnessAccess } from "./accountPermissions.ts";
 import type { PersonHarnessDefault } from "./personHarnessDefault.ts";
+import type { SessionPeopleOpener } from "./spaceScope.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { createSessionPeople, peopleDirectory } from "./sessionPeople.ts";
 import { createSpaceGuard, createSpaceServices } from "./spaceScope.ts";
@@ -28,6 +29,7 @@ export interface CanonicalSpaceGatewayOptions {
   now?: () => number;
   harnessAccess?: HarnessAccess;
   personHarnessDefault?: PersonHarnessDefault;
+  sharing?: () => SessionPeopleOpener | undefined;
 }
 
 type AuthoritativeSpaceContext = SpaceContext & {
@@ -97,6 +99,7 @@ export function createCanonicalSpaceGateway(opts: CanonicalSpaceGatewayOptions):
     sessions: opts.sessions,
     guard,
     people,
+    ...(opts.sharing ? { sharing: opts.sharing } : {}),
     ...(opts.harnessAccess ? { harnessAccess: opts.harnessAccess } : {}),
     ...(opts.personHarnessDefault ? { personHarnessDefault: opts.personHarnessDefault } : {}),
   });

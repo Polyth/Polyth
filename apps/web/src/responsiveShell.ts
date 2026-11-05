@@ -83,6 +83,13 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
+/** A mouse or trackpad drives this screen. On touch, moving focus off an input
+ *  closes the keyboard, so a caller that steers focus asks here first. */
+export function primaryPointerIsFine(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    && window.matchMedia("(pointer: fine)").matches;
+}
+
 /** Current shell mode for non-React callers (native Back, imperative gestures). */
 export function getShellMode(): ShellMode {
   return snapshot();

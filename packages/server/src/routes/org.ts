@@ -1,6 +1,7 @@
 // Organization routes: session rename/organize, folders,
 // labels, bulk archive/restore with partial-failure reporting, richer search.
-import type { BulkSessionResult, PersonMessageInput } from "@polyth/contracts";
+import type { BulkSessionResult, PersonMessageInput, PersonMessageShare } from "@polyth/contracts";
+import { isSessionAccessLevel } from "@polyth/contracts";
 import type { Store } from "@polyth/session";
 import type { RouteHandler } from "../http.ts";
 import type { SpaceServicesFor } from "../spaceScope.ts";
@@ -8,6 +9,11 @@ import { foldText, matchWorkspaces } from "../search.ts";
 
 /** Per-session cap on transcript snippets returned by `/api/search/sessions`. */
 const MESSAGE_MATCHES_PER_SESSION = 4;
+
+const shareEntries = (raw: unknown): PersonMessageShare[] => (Array.isArray(raw) ? raw : []).flatMap((entry) => {
+  const { userId, access } = (entry ?? {}) as { userId?: unknown; access?: unknown };
+  return typeof userId === "string" && isSessionAccessLevel(access) ? [{ userId, access }] : [];
+});
 
 interface SessionSearchResultDto {
   sessionId: string;
@@ -118,10 +124,30 @@ export function orgRoutes(deps: {
         ...(Array.isArray(b.mentions) ? { mentions: b.mentions.map(String) } : {}),
         ...(b.carryToAgent === true ? { carryToAgent: true } : {}),
         ...(typeof b.replyToSeq === "number" ? { replyToSeq: b.replyToSeq } : {}),
+        ...(Array.isArray(b.shareWith) ? { shareWith: shareEntries(b.shareWith) } : {}),
+        ...(Array.isArray(b.requestAccessFor) ? { requestAccessFor: b.requestAccessFor.map(String) } : {}),
         ...(typeof b.clientOperationId === "string" ? { clientOperationId: b.clientOperationId } : {}),
       };
       const result = await sessions.postPersonMessage(m[1]!, input);
       json(200, result);
+      return true;
+    }
+    m = path.match(/^\/api\/sessions\/([^/]+)\/person-messages\/(\d+)\/access$/);
+    if (m && method === "POST") {
+      if (!sessions.decidePersonAccess) { json(501, { error: "unsupported" }); return true; }
+      const b = await body();
+      if (b.decision !== "share" && b.decision !== "decline") {
+        json(400, { error: "invalid-input", message: "decision must be share or decline" });
+        return true;
+      }
+      if (b.access !== undefined && !isSessionAccessLevel(b.access)) {
+        json(400, { error: "invalid-input", message: "access must be an access level" });
+        return true;
+      }
+      json(200, await sessions.decidePersonAccess(m[1]!, Number(m[2]), {
+        decision: b.decision,
+        ...(b.access !== undefined ? { access: b.access } : {}),
+      }));
       return true;
     }
     m = path.match(/^\/api\/sessions\/([^/]+)\/conversation\/start$/);

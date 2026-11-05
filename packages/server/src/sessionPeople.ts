@@ -4,8 +4,8 @@
 // The person always comes from the authenticated Space context, never from a
 // request body. A system context (agents over the control socket, background
 // package work) is nobody: it writes no author and never borrows a member.
-import type { SessionPerson, SessionPersonState, SessionProjection, SpaceContext } from "@polyth/contracts";
-import { normalizeSessionPerson, sessionDraftPreview } from "@polyth/contracts";
+import type { PersonAccessRequest, PersonMessageShare, SessionEvent, SessionPerson, SessionPersonState, SessionProjection, SpaceContext } from "@polyth/contracts";
+import { isSessionAccessLevel, normalizeSessionPerson, sessionDraftPreview } from "@polyth/contracts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 
 /** Session-store surface for per-person views. Optional so lightweight test
@@ -81,6 +81,32 @@ export function admittedAuthor(
   }
   const name = directory.name(person.userId);
   return { ...person, ...(name ? { name } : {}) };
+}
+
+/** The people a message opens the chat to: each once, the author never. */
+export function personMessageShares(raw: unknown, authorId: string): PersonMessageShare[] {
+  const shares = new Map<string, PersonMessageShare>();
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    const { userId, access } = (entry ?? {}) as { userId?: unknown; access?: unknown };
+    if (typeof userId !== "string" || !userId.trim() || userId === authorId || shares.has(userId)) continue;
+    if (!isSessionAccessLevel(access)) {
+      throw Object.assign(new Error("Invalid access level"), { code: "invalid-input" });
+    }
+    shares.set(userId, { userId, access });
+  }
+  return [...shares.values()];
+}
+
+/** A `person/message`'s access request, when it carries a well-formed one. */
+export function personAccessRequestOf(event: Pick<SessionEvent, "data">): PersonAccessRequest | undefined {
+  const raw = (event.data as { accessRequest?: { people?: unknown; approver?: unknown } }).accessRequest;
+  if (!raw || typeof raw !== "object") return undefined;
+  const approver = normalizeSessionPerson(raw.approver);
+  const people = (Array.isArray(raw.people) ? raw.people : []).flatMap((value) => {
+    const person = normalizeSessionPerson(value);
+    return person ? [person] : [];
+  });
+  return approver && people.length > 0 ? { people, approver } : undefined;
 }
 
 /** Pre-v21 drafts were shared; they now belong only to the session's owner.

@@ -631,12 +631,60 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   header ("With Ann, Max", each name in its colour — the chat's legend), the
   message card and the notification centre.
 - **Mentions**: the composer `@` list shows a "People" group (who can open
-  the chat: identity mark, full name, access) before files. Picking a person
-  inserts `@FirstName`, or `@First_Last` when another person here shares the
-  first name (`mentionTokenFor`); deleting the token drops the mention. A
-  private chat lists nobody; when its `@` list is empty and the Space has
-  other members (the sharing DTO's `people`), the owner sees one quiet line,
-  "This chat is private…", with a "Share…" button that opens sharing.
+  the chat: identity mark, full name, access), then a "Not in this chat yet"
+  group (the rest of the Space, name only), then files. Everyone can be
+  mentioned, in a private chat too. Picking a person inserts `@FirstName`, or
+  `@First_Last` when another person listed shares the first name
+  (`mentionTokenFor`); deleting the token drops the mention. The outside list
+  (`GET …/sharing/outsiders`) is read when a mention starts, not when the chat
+  opens. A new chat, with no session yet, asks `GET /api/sharing/new-chat`
+  instead and works the same way.
+- **Mentioning someone outside the chat**: one plateless line of the pending
+  stack above the composer (`MentionAccessLine.tsx`, decisions in
+  `composer/people.ts`) asks once, with a wrapping sentence, a primary action
+  and ×, and never blocks typing:
+  - It says "{names} can't see this chat yet" with "Share"; for someone who may
+    not share, "{names} can't see this chat. {name} can share it" with "Ask";
+    with nobody able to share (`action: "none"`) it only says so and the
+    message still goes.
+  - Answering sends and opens nothing: the answer takes effect with the
+    message, so a token deleted from the draft has opened nothing. The line
+    then says what the message will do, with a level menu (share only; "Can
+    view" by default, "Can collaborate" in a conversation) and × to undo. In a
+    line under 34rem wide the menu takes its own row under the words, so they
+    are never squeezed into a column.
+  - × on the question leaves the words as plain text and tells nobody; the
+    message stays in people mode, because words written for a person must not
+    become a prompt by being declined.
+  - A send with a question open sends nothing: the line pulses and, with a fine
+    pointer, focus moves to its action, so a habitual Enter cannot open a
+    private chat. Focus stays put on touch, where moving it would close the
+    keyboard. The Send label already names whoever the message will reach.
+  - Switching to Agent removes the line: nobody will be told.
+  - If what the sender can do changes meanwhile, a given answer is cleared and
+    the question returns: "ask" never becomes "share" by itself. A person given
+    access meanwhile simply stops being an outsider.
+  - It names the personal MCP servers the chat's agent would stop loading when
+    sharing would take a private chat out of private
+    (`personalMcpDetachedOnShare`).
+  - Mentions and answers live with the open composer, not the draft: a restored
+    draft comes back as plain words, so it can neither notify anyone nor open a
+    chat.
+  - A send owns its words from the moment it leaves. The message's own event can
+    arrive before the response and, in an empty chat, replace the new-chat
+    composer with the transcript's. So the draft empties at send and no blur,
+    autosave or unmount writes those words back; a failed send gives them back;
+    and the server consumes a stored draft still holding them
+    (`consumeAdmittedDraft`), as it does for a prompt. On a mouse or trackpad
+    screen the writer stays in the input across that swap.
+  - In a new chat, Send makes the chat for the message, with no agent turn and
+    no model needed: the chat holds the words as its draft, the message goes,
+    then the chat opens. Making it can take seconds and there is no echo, so the
+    words stay in the field and Send reads "Creating…". An unanswered question
+    makes no chat. If the chat cannot be made everything stays where it was; if
+    only the message fails, the chat opens with the words in place. "Pass to the
+    agent" is not offered there; choosing Agent makes it an ordinary first prompt.
+    The chat's first words to a person name it, as a first prompt would.
 - **People mode** (a collaborator mentions someone): the model/effort row
   steps aside and one quiet line above the editor holds a People | Agent
   segmented choice (radio semantics; People by default) and, with
@@ -680,6 +728,13 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   prompt recall, title, queue or activity grouping. Attachment cards stack
   under the bubble in the same read-only form a prompt uses, wrapped inside
   the bubble's column so they never widen the row.
+  A message that asks to open the chat to someone carries one quiet note under
+  the bubble, for the two people it concerns (`PersonAccessNote`): the asker
+  reads "Asked {name} to share this chat", the person asked reads "Asks to
+  share with {names}" with "Share" and "Not now", and both then read "Shared
+  with {names}" or "Not shared with {names}". Everyone else sees only the
+  message. A name in a pending request is plain text; it becomes a mention chip
+  once the chat opens to them.
   `conversation/session-started` is a centered link row with the agent glyph
   that opens the new chat.
 - **Navigator**: an `@` mark while `attention.mentions` is set; conversations
@@ -708,7 +763,10 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
     the reader (idempotent `clientOperationId`) and marks the chat read; a
     started reply keeps the card (sticky) until it is sent or cleared,
     "Reply sent" shows briefly, a failure keeps the words. Escape clears a
-    draft, then closes the card. Lifetimes: 8 s (`message`), 10 s
+    draft, then closes the card. A request to open the chat to someone replaces
+    the reply field with "Share" and "Not now" and says "Asks to share with
+    {names}" (a failure keeps the card); the same answer stays available under
+    the message in the chat. Lifetimes: 8 s (`message`), 10 s
     (`mention`); the desktop stack widens to 360px while one shows. Plus the
     completion sound and, with "Only in background" off, the OS alert, when
     the kind is chosen in Settings → Notifications;

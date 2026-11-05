@@ -10,6 +10,7 @@ import { tr } from "../i18n/index.ts";
 import { activeBrowserAccountId } from "../accountStorage.ts";
 import { assignPersonTones, personToneOf } from "../personIdentity.ts";
 import { personInitials, useSessionPeople } from "../sessionPeople.ts";
+import Button from "../components/ui/Button.tsx";
 import IconButton from "../components/ui/IconButton.tsx";
 import Icon from "../components/ui/Icon.tsx";
 import { ArrowUpIcon, ChatIcon, CheckIcon, MentionIcon } from "../components/ui/icons.ts";
@@ -87,7 +88,9 @@ export default function ConversationCard({
           {latest && <time className="notify-conversation-time" dateTime={new Date(latest.ts).toISOString()}>{whenLabel(latest.ts, Date.now())}</time>}
         </span>
         <span className="notify-conversation-where">
-          {mention && <span className="notify-conversation-mentioned">{tr("notify.people.mentionedYou")}</span>}
+          {notice.accessRequest
+            ? <span className="notify-conversation-mentioned"><bdi>{tr("notify.people.asksToShare", { names: notice.accessRequest.names })}</bdi></span>
+            : mention && <span className="notify-conversation-mentioned">{tr("notify.people.mentionedYou")}</span>}
           {single
             ? <bdi className="notify-conversation-chat">{notice.chat}</bdi>
             : <span>{tr("notify.people.newMessages", { count: notice.count })}</span>}
@@ -107,7 +110,8 @@ export default function ConversationCard({
         </span>
       </button>
       {close}
-      {notice.reply && (
+      {notice.accessRequest && <AccessDecision decide={notice.accessRequest.decide} onDone={onClose} />}
+      {notice.reply && !notice.accessRequest && (
         <ReplyField
           record={record}
           placeholder={single && authors[0]
@@ -135,6 +139,40 @@ function ConversationAvatar({ author, tones, mention }: { author: Author | undef
         : <span className="person-mark notify-conversation-mark is-empty"><Icon icon={ChatIcon} size="md" /></span>}
       {mention && <span className="notify-conversation-badge"><Icon icon={MentionIcon} size="sm" /></span>}
     </span>
+  );
+}
+
+/** The answer to a request to open this chat to someone. It is an ordinary
+ *  answer: the chat keeps the same two choices under the message for later. */
+function AccessDecision({ decide, onDone }: { decide(decision: "share" | "decline"): Promise<void>; onDone(): void }) {
+  const [busy, setBusy] = useState<"share" | "decline" | null>(null);
+  const [failed, setFailed] = useState(false);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => { live.current = false; };
+  }, []);
+  const answer = (decision: "share" | "decline") => {
+    setBusy(decision);
+    setFailed(false);
+    void decide(decision).then(onDone, () => {
+      if (!live.current) return;
+      setBusy(null);
+      setFailed(true);
+    });
+  };
+  return (
+    <div className="notify-access">
+      <span className="notify-access-actions">
+        <Button size="sm" variant="primary" busy={busy === "share"} disabled={busy !== null} onClick={() => answer("share")}>
+          {tr("composer.people.access.share")}
+        </Button>
+        <Button size="sm" variant="ghost" busy={busy === "decline"} disabled={busy !== null} onClick={() => answer("decline")}>
+          {tr("timeline.personAccess.notNow")}
+        </Button>
+      </span>
+      {failed && <span className="notify-reply-error" role="alert">{tr("timeline.personAccess.failed")}</span>}
+    </div>
   );
 }
 

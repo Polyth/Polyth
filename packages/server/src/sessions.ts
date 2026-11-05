@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { selectAgentToolSessionOwner } from "./agentToolSession.ts";
-import { ownsLegacySessionState } from "./sessionPeople.ts";
+import { ownsLegacySessionState, personAccessRequestOf, personMessageShares } from "./sessionPeople.ts";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import {
   emptyStreamCheckpoints,
@@ -37,6 +37,7 @@ import type {
   RuntimeSession, SendResult, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef, SessionWorkspace, MemoryNarrowing,
   SessionService, SessionPersistence, SessionWorkspaceSelection, UserTurnInput, WorkspaceMutationScope, WorkspaceContext,
   SessionPerson, SessionPersonScope, TurnAdmission,
+  PersonAccessDecisionResult, PersonAccessOutcome, PersonAccessRequest, PersonAccessResolvedData,
   PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto,
   CreateConversationInput, StartSessionFromConversationInput, StartSessionFromConversationResult,
   RuntimeCapabilities,
@@ -49,6 +50,7 @@ import {
   readErrorDiagnostics,
   runtimeBatchAdmitsTurnContent,
   runtimeEventHasTurnContent,
+  PERSON_ACCESS_RESOLVED_EVENT,
   PERSON_MESSAGE_EVENT,
   PERSON_MESSAGE_MAX_CHARS,
   PERSON_MESSAGE_MAX_MENTIONS,
@@ -57,7 +59,7 @@ import {
   SESSION_PAUSE_ENDED_EVENT,
   normalizeSessionOrigin,
 } from "@polyth/contracts";
-import { sessionMentionCandidates, sessionAudience } from "./sessionSharing.ts";
+import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
@@ -911,7 +913,8 @@ export function createSessionService(deps: {
     /** A `person/message` was appended. `mentions` are the kept mentioned
      *  people (kind `mention`); `audience`, only for a conversation, is every
      *  other person who can open it and has not muted it (kind `message`).
-     *  The author is never in either list. */
+     *  The author is never in either list. `accessRequest` asks its approver,
+     *  who is in neither list, to open the chat to its people. */
     personMessage?(input: {
       sessionId: string;
       seq: number;
@@ -919,6 +922,7 @@ export function createSessionService(deps: {
       text: string;
       mentions: SessionPerson[];
       audience: SessionPerson[];
+      accessRequest?: PersonAccessRequest;
     }): void;
   };
   /** Hard ceiling for one runtime tool execution. A hung tool is aborted and
@@ -13613,6 +13617,15 @@ export function createSessionService(deps: {
           { code: "invalid-input" },
         );
       }
+      const shareWith = personMessageShares(input.shareWith, author.userId);
+      const requestAccessFor = [...new Set((Array.isArray(input.requestAccessFor) ? input.requestAccessFor : [])
+        .filter((id) => typeof id === "string" && id.trim() && id !== author.userId))];
+      if (shareWith.length > PERSON_MESSAGE_MAX_MENTIONS || requestAccessFor.length > PERSON_MESSAGE_MAX_MENTIONS) {
+        throw Object.assign(
+          new Error(`a message may name at most ${PERSON_MESSAGE_MAX_MENTIONS} people`),
+          { code: "invalid-input" },
+        );
+      }
       const resultFromEvent = (event: SessionEvent): PersonMessageResult => {
         const data = event.data as { mentions?: unknown };
         const mentionIds = Array.isArray(data.mentions)
@@ -13621,7 +13634,8 @@ export function createSessionService(deps: {
               return typeof person?.userId === "string" ? [person.userId] : [];
             })
           : [];
-        return { seq: event.seq, mentions: mentionIds };
+        const requested = personAccessRequestOf(event)?.people.map((person) => person.userId);
+        return { seq: event.seq, mentions: mentionIds, ...(requested ? { requested } : {}) };
       };
       const findPrior = async (): Promise<SessionEvent | undefined> => {
         if (!clientOperationId) return undefined;
@@ -13657,6 +13671,17 @@ export function createSessionService(deps: {
             throw Object.assign(new Error("reply target must be a person message in this session"), { code: "invalid-input" });
           }
         }
+        const attachments = await prepareAttachments(proj, input.attachments, sessionId);
+        // Everything that can refuse the message has run, so a chat never
+        // opens for a message that then fails; and it opens before the mention
+        // is decided, so nobody is told about a chat they cannot open. A
+        // refusal here records nothing.
+        if (shareWith.length > 0) {
+          if (!admission?.openChatTo) {
+            throw Object.assign(new Error("sharing is unavailable"), { code: "unsupported" });
+          }
+          await admission.openChatTo(shareWith);
+        }
         // Only people who can open this session may be mentioned or notified.
         // On a single-person install there is no access decision to make, so
         // mention ids are kept as given (never a foreign-tenant list).
@@ -13673,7 +13698,18 @@ export function createSessionService(deps: {
           const name = nameById.get(userId);
           mentions.push({ userId, ...(name ? { name } : {}) });
         }
-        const attachments = await prepareAttachments(proj, input.attachments, sessionId);
+        // A request only stands for people outside the chat, and only when
+        // someone can answer it; anything else is dropped without a trace.
+        let accessRequest: PersonAccessRequest | undefined;
+        if (requestAccessFor.length > 0 && proj.spaceId && canonicalSecurity()) {
+          const outside = new Map(sessionOutsiders(proj.spaceId, sessionId, author.userId).map((person) => [person.userId, person] as const));
+          const people = requestAccessFor.flatMap((id) => {
+            const person = outside.get(id);
+            return person ? [person] : [];
+          });
+          const approver = people.length > 0 ? sessionShareApprover(proj.spaceId, sessionId, author.userId) : undefined;
+          if (approver) accessRequest = { people, approver };
+        }
         const data: JsonObject = {
           text,
           ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
@@ -13681,10 +13717,35 @@ export function createSessionService(deps: {
           mentions: mentions.map((mention) => ({ ...mention })),
           ...(carryToAgent ? { carryToAgent: true } : {}),
           ...(replyToSeq !== undefined ? { replyToSeq } : {}),
+          ...(accessRequest ? { accessRequest: accessRequest as unknown as JsonObject } : {}),
           ...(clientOperationId ? { clientOperationId } : {}),
         };
         const message = await appendAndBroadcast(sessionId, PERSON_MESSAGE_EVENT, data);
-        for (const mention of mentions) {
+        // Written in the same composer as a prompt and consumed the same way:
+        // a reload or another device must not offer the sent words again.
+        try {
+          await consumeAdmittedDraft(sessionId, author, [text]);
+        } catch (error) {
+          console.warn("[polyth] person message draft consume failed", error);
+        }
+        // A chat whose first words went to a person has no prompt to name it. A
+        // conversation with no title of its own reads as its people's names.
+        if (proj.purpose !== SESSION_PURPOSE_CONVERSATION && isPlaceholderTitle(proj.title, sessionId)) {
+          const title = titleFromPrompt(text);
+          if (title && !isPlaceholderTitle(title, sessionId)) {
+            try {
+              await appendAndBroadcast(sessionId, "session/metadata-changed", { title, source: "polyth" }, { ignorable: true });
+              await applyProjection(sessionId, (current) => (isPlaceholderTitle(current.title, sessionId)
+                ? { ...current, title, titleSource: "polyth" as const }
+                : current));
+            } catch (error) {
+              console.warn("[polyth] person message title failed", error);
+            }
+          }
+        }
+        // The approver has something to do here, so the chat wears the same
+        // mark as a mention until they read it.
+        for (const mention of accessRequest ? [...mentions, accessRequest.approver] : mentions) {
           try {
             await personStateStore.setPersonMentionSeq?.(sessionId, mention.userId, message.seq);
           } catch (error) {
@@ -13709,6 +13770,7 @@ export function createSessionService(deps: {
         let messageAudience: SessionPerson[] = [];
         if (proj.purpose === SESSION_PURPOSE_CONVERSATION && audience.length > 0) {
           const mentioned = new Set(mentions.map((mention) => mention.userId));
+          if (accessRequest) mentioned.add(accessRequest.approver.userId);
           messageAudience = audience
             .filter((member) => member.userId !== author.userId && !mentioned.has(member.userId))
             .filter((member) => {
@@ -13724,13 +13786,109 @@ export function createSessionService(deps: {
             author: { ...author },
             // An attachment-only message still says what arrived.
             text: text || (attachments ?? []).map((attachment) => attachment.name).join(", "),
-            mentions,
+            // The approver hears about the message once, as the request.
+            mentions: accessRequest ? mentions.filter((mention) => mention.userId !== accessRequest.approver.userId) : mentions,
             audience: messageAudience,
+            ...(accessRequest ? { accessRequest } : {}),
           });
         } catch (error) {
           console.warn("[polyth] person message notification failed", error);
         }
         return resultFromEvent(message);
+      });
+    },
+
+    async decidePersonAccess(sessionId, messageSeq, input, admission): Promise<PersonAccessDecisionResult> {
+      const by = normalizeSessionPerson(admission?.author);
+      if (!by?.userId) {
+        throw Object.assign(new Error("an answer needs a person"), { code: "invalid-input" });
+      }
+      const decision = input?.decision;
+      if (decision !== "share" && decision !== "decline") {
+        throw Object.assign(new Error("decision must be share or decline"), { code: "invalid-input" });
+      }
+      const access = input.access ?? "view";
+      if (!isSessionAccessLevel(access)) {
+        throw Object.assign(new Error("access must be an access level"), { code: "invalid-input" });
+      }
+      return withSessionLock(sessionId, async () => {
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (proj.status === "archived") {
+          throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
+        }
+        const target = await eventAt(sessionId, messageSeq);
+        const request = target?.type === PERSON_MESSAGE_EVENT ? personAccessRequestOf(target) : undefined;
+        if (!target || !request) {
+          throw Object.assign(new Error("that message asks for no access"), { code: "not-found" });
+        }
+        // Whoever answers first decides; a repeat gets that answer back.
+        const through = await store.latestSeq(sessionId).catch(() => 0);
+        const answers = store.eventsOfTypes
+          ? await store.eventsOfTypes(sessionId, [PERSON_ACCESS_RESOLVED_EVENT], messageSeq, through, 500)
+          : (await store.events(sessionId, messageSeq)).filter((event) => event.type === PERSON_ACCESS_RESOLVED_EVENT);
+        const prior = answers.find((event) => (event.data as { messageSeq?: unknown }).messageSeq === messageSeq);
+        if (prior) {
+          const data = prior.data as unknown as PersonAccessResolvedData;
+          return { outcome: data.outcome, people: data.people.map((person) => person.userId) };
+        }
+        if (decision === "share") {
+          if (!admission?.openChatTo) {
+            throw Object.assign(new Error("sharing is unavailable"), { code: "unsupported" });
+          }
+          await admission.openChatTo(request.people.map((person) => ({ userId: person.userId, access })));
+        }
+        const audience = proj.spaceId && canonicalSecurity() ? sessionAudience(proj.spaceId, sessionId) : [];
+        const people = decision === "share"
+          ? request.people.filter((person) => audience.some((member) => member.userId === person.userId))
+          : request.people;
+        const outcome: PersonAccessOutcome = decision === "share" ? "shared" : "declined";
+        const data: PersonAccessResolvedData = {
+          messageSeq,
+          outcome,
+          by: { ...by },
+          people: people.map((person) => ({ ...person })),
+        };
+        const answer = await appendAndBroadcast(sessionId, PERSON_ACCESS_RESOLVED_EVENT, data as unknown as JsonObject);
+        if (outcome === "shared") {
+          // The mention they missed reaches them now, as if just written.
+          for (const person of people) {
+            try {
+              await personStateStore.setPersonMentionSeq?.(sessionId, person.userId, messageSeq);
+            } catch (error) {
+              console.warn("[polyth] person mention cursor failed", error);
+            }
+          }
+          try {
+            await applyProjection(sessionId, (current) => ({
+              ...current,
+              updatedAt: Math.max(current.updatedAt ?? 0, answer.time),
+            }));
+          } catch (error) {
+            console.warn("[polyth] person message projection refresh failed", error);
+          }
+          const message = target.data as { author?: unknown; text?: unknown; attachments?: unknown };
+          const author = normalizeSessionPerson(message.author);
+          if (author?.userId) {
+            try {
+              deps.notify?.personMessage?.({
+                sessionId,
+                seq: messageSeq,
+                author: { ...author },
+                text: (typeof message.text === "string" && message.text)
+                  || (Array.isArray(message.attachments) ? message.attachments : [])
+                    .map((attachment) => (attachment as { name?: unknown }).name)
+                    .filter((name) => typeof name === "string")
+                    .join(", "),
+                mentions: people,
+                audience: [],
+              });
+            } catch (error) {
+              console.warn("[polyth] person message notification failed", error);
+            }
+          }
+        }
+        return { outcome, people: people.map((person) => person.userId) };
       });
     },
 

@@ -582,7 +582,7 @@ export function canonicalSessionService(
     "rewind", "clearRewind", "runShell", "compact", "replySecret", "rename", "requestAutomaticTitle", "organize",
     "queueList", "queueEditStart", "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove",
     "pinContext", "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch",
-    "saveDraft", "markRead", "postPersonMessage", "setPersonMute", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
+    "saveDraft", "markRead", "postPersonMessage", "decidePersonAccess", "setPersonMute", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
     "switchHarness", "cancelHarnessSwitch", "restartRuntime", "updateWorkspace", "patchWorkspace", "withWorkspaceMutation",
   ]);
   const readableMethodNames = new Set<PropertyKey>(["debug", "clientMutationStatus", "mentionCandidates"]);

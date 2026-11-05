@@ -20,7 +20,6 @@ import {
   isActiveSessionSpawning,
   lastSeq,
   newSessionOrigin,
-  openSessionSharing,
   openSettingsPage,
   setUiError,
   setNewSessionIsolation,
@@ -33,6 +32,7 @@ import {
   useStore,
   workspaceProjectId,
   COMPOSER_INPUT_SELECTOR,
+  activateSession,
 } from "../store.ts";
 import {
   sendMessage,
@@ -58,7 +58,13 @@ import {
   type Worktree,
 } from "@polyth/session/web-api";
 import { loadDraft, saveDraft, syncDraftToServer, cancelDraftSync, flushDraftToServer, saveDraftToServerNow } from "../utils.ts";
-import { sessionDraftPreview } from "@polyth/contracts";
+import {
+  sessionDraftPreview,
+  type NewChatPeopleDto,
+  type SessionAccessLevel,
+  type SessionMentionCandidateDto,
+  type SessionMentionOutsidersDto,
+} from "@polyth/contracts";
 import type { ComposerAddMenuItem, ComposerContributionContext, ComposerDraftContext, ComposerMode, ComposerSuggestionOffer } from "@polyth/web-sdk";
 import SlotHost from "./slots/SlotHost.tsx";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
@@ -205,7 +211,7 @@ import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaul
 import { newChatPersonDefault, newChatRouteChosen, usePersonHarnessDefault } from "../personHarnessDefault.ts";
 import { contextTokensUsed } from "../reduce.ts";
 import { effectiveAttachmentSupport, attachmentModality } from "@polyth/contracts";
-import { useShellMode } from "../responsiveShell.ts";
+import { primaryPointerIsFine, useShellMode } from "../responsiveShell.ts";
 import {
   getGuardrails, guardedModelSwitcherVisible, guardedShellAllowed, useGuardrails,
 } from "../guardrails.ts";
@@ -232,7 +238,7 @@ import { executionRepositoryOf, normalizeRepositoryScope, primaryRepositoryIdOf 
 import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
 import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, type MenuEntry } from "./ui/index.ts";
-import { canCollaborateSession, canManageSession, loadSessionSharing, ownerName } from "../sessionSharing.ts";
+import { canCollaborateSession, ownerName } from "../sessionSharing.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { pickNativeFiles, readNativeStagedFile, removeNativeStagedFile } from "@polyth/mobile/native";
@@ -248,12 +254,14 @@ import {
   beginConversationSelection, endConversationSelection, openConversationStart, useConversationSelection,
 } from "../conversationSelection.ts";
 import {
-  cachedMentionCandidates, forgetPersonMessageOperation, loadMentionCandidates, personInitials, personMessageOperationId,
-  postPersonMessage,
+  cachedMentionOutsiders, forgetPersonMessageOperation, loadMentionCandidates, loadMentionOutsiders, loadNewChatPeople, personInitials, personMessageOperationId,
+  postPersonMessage, useSessionPeople,
 } from "../sessionPeople.ts";
 import {
-  conversationSendLabel, livePersonMentions, peopleModeActive, peopleSendLabel, showCarryToAgent, type ComposerPersonMention,
+  addressedMentions, awaitingAccessAnswer, conversationSendLabel, defaultMentionLevel, livePersonMentions, mentionAccessLine,
+  peopleModeActive, peopleSendLabel, personMessageRecipients, showCarryToAgent, withoutGrantedAnswers, type ComposerPersonMention,
 } from "../composer/people.ts";
+import MentionAccessLine from "./MentionAccessLine.tsx";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
 // session change (including a fresh spawn), and each mount refetched both
@@ -296,6 +304,9 @@ const sendSurfaceKey = (sessionId: string | null, projectId: string | null | und
 // input and holds draft persistence until the admission settles. The new-chat
 // surface stays per instance: a fresh new chat in the same project must not
 // wait for an earlier chat's creation.
+/** The chat whose composer is leaving with its writer inside it. New chat and
+ *  transcript composers swap in one commit and share no instance. */
+let composerFocusCarry: string | null = null;
 const admittingSessions = new Map<string, number>();
 const admissionListeners = new Set<() => void>();
 let admissionVersion = 0;
@@ -851,6 +862,9 @@ const ComposerFileInput = memo(function ComposerFileInput({ inputRef, onFiles, a
     />
   );
 });
+
+const EMPTY_MENTION_LEVELS: readonly SessionAccessLevel[] = [];
+const EMPTY_MENTION_CANDIDATES: SessionMentionCandidateDto[] = [];
 
 export default function Composer(props: { variant?: "docked" | "widget" }) {
   // Primitive selector: the wrapper re-renders only when access changes.
@@ -1482,6 +1496,11 @@ function ComposerBody({
     setCfg(next);
   }, [session, effectiveDraftHarness, cfg, routeCatalog.ready, routeCatalog.models, routeCatalog.agents, profiles, activeProjectId]);
 
+  // The words of a person message on its way. The send owns them, so nothing
+  // writes them back into the draft: not a blur, not the autosave, and not this
+  // composer's unmount when the first message of an empty chat replaces it.
+  const peopleSendingTextRef = useRef<string | null>(null);
+
   // Blur commits the local copy. An unchanged blur must not restart the idle
   // server timer; toolbar taps can otherwise generate needless broadcasts.
   // Session/page lifecycle transitions still flush the dirty draft.
@@ -1495,6 +1514,7 @@ function ComposerBody({
       ? (nav.snapshot()?.text ?? inputRef.current?.getText() ?? committedTextRef.current)
       : inputRef.current?.getText() ?? committedTextRef.current;
     const draft = editing?.sessionId === id ? editing.draftBefore : live;
+    if (draft.trim() === peopleSendingTextRef.current) return;
     const inFlight = hasInFlightPrompt(getState(), id) || sessionAdmitting(id);
     const submittedRevision = submittedDraftRevisionRef.current?.sessionId === id
       ? submittedDraftRevisionRef.current.revision
@@ -1674,6 +1694,17 @@ function ComposerBody({
   useLayoutEffect(() => () => {
     const input = inputRef.current;
     if (input) rememberComposerSelection(sessionScopeKeyRef.current, input.getText(), input.getSelection());
+    // The same swap must not throw the writer out of the input. On touch the
+    // keyboard has its own rules, so only a mouse or trackpad screen carries it.
+    const active = document.activeElement;
+    const nextChat = getState().activeSessionId ?? sessionIdRef.current;
+    if (nextChat && primaryPointerIsFine() && active?.hasAttribute("data-composer-input") && rootRef.current?.contains(active)) {
+      composerFocusCarry = nextChat;
+      queueMicrotask(() => { composerFocusCarry = null; });
+    }
+  }, []);
+  useLayoutEffect(() => {
+    if (composerFocusCarry !== null && composerFocusCarry === sessionIdRef.current) inputRef.current?.focus();
   }, []);
 
   // Debounced local persistence while typing (refresh-safe). Server sync runs
@@ -1685,6 +1716,7 @@ function ComposerBody({
     const scopeKey = scopedDraftCacheKey(id);
     const t = setTimeout(() => {
       if (scopedDraftCacheKey(id) !== scopeKey) return;
+      if (text.trim() === peopleSendingTextRef.current) return;
       if (loadDraft(id) !== text) {
         saveDraft(id, text);
         syncDraftToServer(id, text);
@@ -1740,33 +1772,67 @@ function ComposerBody({
 
   // ---- people talking in this session ---------------------------------------
   // Candidates are cached per session; a picker open renders the cached list
-  // and refreshes it. A draft session has no session id, so it has no People
-  // group and stays on the ordinary prompt path.
+  // and refreshes it. A new chat has no session yet, so the server answers for
+  // the chat it would become.
   const sessionIdForPeople = session?.id ?? null;
-  const [mentionCandidates, setMentionCandidates] = useState(() =>
-    sessionIdForPeople ? cachedMentionCandidates(sessionIdForPeople) : []);
+  const sessionCandidates = useSessionPeople(sessionIdForPeople);
+  // The rest of the Space is read when someone starts a mention: most chats
+  // never need it, and a list kept up to date here would cost every open.
+  const [mentionOutsiders, setMentionOutsiders] = useState<SessionMentionOutsidersDto | NewChatPeopleDto | null>(() =>
+    sessionIdForPeople ? cachedMentionOutsiders(sessionIdForPeople) : null);
+  const mentionOutsidersRef = useRef(mentionOutsiders);
+  mentionOutsidersRef.current = mentionOutsiders;
   useEffect(() => {
-    if (!sessionIdForPeople) {
-      setMentionCandidates([]);
-      return;
-    }
-    setMentionCandidates(cachedMentionCandidates(sessionIdForPeople));
-    let live = true;
-    void loadMentionCandidates(sessionIdForPeople, { refresh: true })
-      .then((items) => { if (live) setMentionCandidates(items); })
-      .catch(() => { /* keep the cached list; the picker never empties on a failed refresh */ });
-    return () => { live = false; };
-  }, [sessionIdForPeople]);
+    setMentionOutsiders(sessionIdForPeople ? cachedMentionOutsiders(sessionIdForPeople) : null);
+  }, [sessionIdForPeople, activeProjectId]);
+  const mentionCandidates = sessionIdForPeople
+    ? sessionCandidates
+    : (mentionOutsiders as NewChatPeopleDto | null)?.inside ?? EMPTY_MENTION_CANDIDATES;
+  const refreshMentionPeople = useCallback((sessionId: string) => {
+    void loadMentionCandidates(sessionId, { refresh: true }).catch(() => { /* keep the last known people */ });
+    void loadMentionOutsiders(sessionId)
+      .then((value) => { if (sessionIdRef.current === sessionId) setMentionOutsiders(value); })
+      .catch(() => { /* without it the picker offers the people in the chat */ });
+  }, []);
 
-  // The picker shows each person in their colour in this chat.
-  const mentionTones = useMemo(
-    () => assignPersonTones([activeBrowserAccountId(), ...mentionCandidates.map((candidate) => candidate.userId)]),
-    [mentionCandidates],
-  );
+  // The picker shows each person in their colour in this chat. Someone outside
+  // has none yet: they get what they would wear beside everyone, and nobody in
+  // the chat changes colour for it.
+  const mentionTones = useMemo(() => {
+    const inChat = [activeBrowserAccountId(), ...mentionCandidates.map((candidate) => candidate.userId)];
+    const outside = (mentionOutsiders?.people ?? []).map((person) => person.userId);
+    return new Map([...assignPersonTones([...inChat, ...outside]), ...assignPersonTones(inChat)]);
+  }, [mentionCandidates, mentionOutsiders]);
 
   const [personMentions, setPersonMentions] = useState<ComposerPersonMention[]>([]);
   const personMentionsRef = useRef(personMentions);
   personMentionsRef.current = personMentions;
+  // Someone given access in the meantime (here or elsewhere) is simply in the chat.
+  useEffect(() => {
+    const inside = new Set(mentionCandidates.map((candidate) => candidate.userId));
+    setPersonMentions((current) => current.some((mention) => mention.outside && inside.has(mention.userId))
+      ? current.map(({ outside, accessAnswer, ...mention }) => inside.has(mention.userId)
+        ? mention
+        : { ...mention, ...(outside ? { outside } : {}), ...(accessAnswer ? { accessAnswer } : {}) })
+      : current);
+  }, [mentionCandidates]);
+  // What the reader can do about outsiders moved under them: ask again.
+  const mentionAction = mentionOutsiders?.action;
+  const answeredActionRef = useRef(mentionAction);
+  useEffect(() => {
+    const previous = answeredActionRef.current;
+    answeredActionRef.current = mentionAction;
+    if (previous && previous !== mentionAction) setPersonMentions(withoutGrantedAnswers);
+  }, [mentionAction]);
+  const [chosenMentionLevel, setChosenMentionLevel] = useState<SessionAccessLevel | null>(null);
+  const mentionLevels = mentionOutsiders?.levels ?? EMPTY_MENTION_LEVELS;
+  const mentionLevel = chosenMentionLevel && mentionLevels.includes(chosenMentionLevel)
+    ? chosenMentionLevel
+    : defaultMentionLevel(mentionLevels, conversation);
+  const mentionLevelRef = useRef(mentionLevel);
+  mentionLevelRef.current = mentionLevel;
+  const [mentionAccessAttention, setMentionAccessAttention] = useState(0);
+  const mentionAccessPrimaryRef = useRef<HTMLButtonElement>(null);
   const [agentMentionOverride, setAgentMentionOverride] = useState(false);
   const [carryToAgent, setCarryToAgent] = useState(false);
   const carryToAgentRef = useRef(carryToAgent);
@@ -1796,7 +1862,25 @@ function ComposerBody({
   peopleModeRef.current = peopleMode;
   const carryControlVisible = !peopleOnly && personMentions.length > 0
     && showCarryToAgent(session, viewOnlyComposer);
-  const peopleLabel = conversation ? conversationSendLabel(personMentions) : peopleSendLabel(personMentions);
+  const addressedPeople = addressedMentions(personMentions, mentionOutsiders?.action);
+  // A new chat's first message waits for the chat itself, which takes seconds
+  // and has no echo to show for them.
+  const peopleLabel = peopleSending && !sessionIdForPeople
+    ? tr("conversation.creating")
+    : conversation ? conversationSendLabel(addressedPeople) : peopleSendLabel(addressedPeople);
+  const mentionAccess = mentionAccessLine(personMentions, mentionOutsiders?.action, peopleMode);
+  const answerOutsideMentions = useCallback((answer: "granted" | "skipped" | null) => {
+    // Keyboard answers return to the words; a pointer never left them.
+    if (document.activeElement === mentionAccessPrimaryRef.current) inputRef.current?.focus();
+    setPersonMentions((current) => current.map(({ accessAnswer, ...mention }) => {
+      if (!mention.outside) return { ...mention, ...(accessAnswer ? { accessAnswer } : {}) };
+      // A question covers everyone it names; a later answer leaves earlier ones be.
+      const decided = answer === null ? accessAnswer === "granted" : !accessAnswer;
+      if (!decided) return { ...mention, ...(accessAnswer ? { accessAnswer } : {}) };
+      return { ...mention, ...(answer ? { accessAnswer: answer } : {}) };
+    }));
+    setMentionAccessAttention(0);
+  }, []);
 
   const addPersonMention = useCallback((mention: ComposerPersonMention) => {
     setPersonMentions((current) => current.some((item) => item.userId === mention.userId)
@@ -1804,6 +1888,16 @@ function ComposerBody({
       : [...current, mention]);
     setAgentMentionOverride(false);
     setCarryToAgent(false);
+  }, []);
+
+  // A habitual Enter must never open a private chat: it brings the question
+  // forward and sends nothing. Moving focus would close a phone's keyboard.
+  const peopleSendAwaitsAnswer = useCallback(() => {
+    if (awaitingAccessAnswer(personMentionsRef.current, mentionOutsidersRef.current?.action).length === 0) return false;
+    setMentionAccessAttention((value) => value + 1);
+    announce(tr("composer.people.access.needsAnswer"));
+    if (primaryPointerIsFine()) mentionAccessPrimaryRef.current?.focus();
+    return true;
   }, []);
 
   const sendPeopleMessage = useCallback((override?: string) => {
@@ -1814,48 +1908,71 @@ function ComposerBody({
     // attachment alone is a complete message.
     const attachmentsAtSend = target ? pendingAttachments(target) : [];
     if (!target || (raw === "" && attachmentsAtSend.length === 0) || peopleSendingRef.current) return;
-    const mentions = personMentionsRef.current.map((mention) => ({ userId: mention.userId, name: mention.name }));
+    if (peopleSendAwaitsAnswer()) return;
+    const recipients = personMessageRecipients(personMentionsRef.current, mentionOutsidersRef.current?.action, mentionLevelRef.current);
+    const opensChat = Boolean(recipients.shareWith?.length);
     const carry = carryToAgentRef.current && !peopleOnly;
-    const operationKey = [target, raw, attachmentsAtSend.map((attachment) => attachment.id).join(","), mentions.map((mention) => mention.userId).join(","), carry ? "carry" : ""].join("\u0000");
+    const operationKey = [target, raw, attachmentsAtSend.map((attachment) => attachment.id).join(","), JSON.stringify(recipients), carry ? "carry" : ""].join("\u0000");
     const clientOperationId = personMessageOperationId(operationKey);
     peopleSendingRef.current = true;
     setPeopleSending(true);
     const scopeKeyAtSend = scopedDraftCacheKey(target);
     const textAtSend = raw;
+    // The message's own event can reach this client before the response, and in
+    // an empty chat that event swaps this composer for the transcript's. The
+    // newcomer reads the draft as it mounts, so the words leave it now.
+    peopleSendingTextRef.current = raw;
+    pendingLocalTextRef.current = null;
+    saveDraft(target, "");
+    cancelDraftSync(target);
     void postPersonMessage(target, {
       text: raw,
       ...(attachmentsAtSend.length > 0 ? { attachments: attachmentsAtSend } : {}),
-      ...(mentions.length > 0 ? { mentions: mentions.map((mention) => mention.userId) } : {}),
+      ...recipients,
       ...(carry ? { carryToAgent: true } : {}),
       clientOperationId,
     }).then(() => {
       forgetPersonMessageOperation(operationKey);
-      if (getState().activeSessionId !== target || scopedDraftCacheKey(target) !== scopeKeyAtSend) return;
+      if (opensChat) refreshMentionPeople(target);
+      if (scopedDraftCacheKey(target) !== scopeKeyAtSend) return;
+      // Only the pills that travelled go away; a new attachment added while
+      // the request was in flight belongs to the next message. Pills belong to
+      // the chat, so this holds whichever composer shows it by now.
+      const currentAttachments = pendingAttachments(target);
+      if (currentAttachments.length === attachmentsAtSend.length
+        && currentAttachments.every((attachment, index) => attachment.id === attachmentsAtSend[index]?.id)) {
+        clearAttachments(target);
+      }
+      if (getState().activeSessionId !== target) return;
       // The editor may still hold composition whitespace around the sent
       // words; compare the committed text, not its raw spelling.
       if ((inputRef.current?.getText() ?? "").trim() !== textAtSend) return;
       setText("");
       inputRef.current?.replaceText("");
       setPersonMentions([]);
+      setChosenMentionLevel(null);
+      setMentionAccessAttention(0);
       setAgentMentionOverride(false);
       setCarryToAgent(false);
-      // Only the pills that travelled go away; a new attachment added while
-      // the request was in flight belongs to the next message.
-      const currentAttachments = pendingAttachments(target);
-      if (currentAttachments.length === attachmentsAtSend.length
-        && currentAttachments.every((attachment, index) => attachment.id === attachmentsAtSend[index]?.id)) {
-        clearAttachments(target);
-      }
       saveDraft(target, "");
       cancelDraftSync(target);
     }).catch((error) => {
-      // Keep the draft (and the operation id) so retry is idempotent.
+      // The words did not leave: the draft takes them back (the operation id
+      // stays, so a retry is idempotent) unless newer typing has replaced them.
+      // A refused share usually means the rules moved, so the line must say
+      // what is true now.
+      if (raw && scopedDraftCacheKey(target) === scopeKeyAtSend && loadDraft(target) === "") {
+        saveDraft(target, raw);
+        syncDraftToServer(target, raw);
+      }
       setUiError(friendlyError(tr("composer.people.sendFailed"), error));
+      if (recipients.shareWith || recipients.requestAccessFor) refreshMentionPeople(target);
     }).finally(() => {
+      peopleSendingTextRef.current = null;
       peopleSendingRef.current = false;
       setPeopleSending(false);
     });
-  }, [peopleOnly, text]);
+  }, [peopleOnly, peopleSendAwaitsAnswer, refreshMentionPeople, text]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -2072,6 +2189,20 @@ function ComposerBody({
   const [acToken, setAcToken] = useState<PromptToken | null>(null);
   const [acIndex, setAcIndex] = useState(0);
   const acTokenRef = useRef<PromptToken | null>(null);
+  const startedMention = acToken?.kind === "file";
+  useEffect(() => {
+    if (!startedMention) return;
+    if (sessionIdForPeople) {
+      refreshMentionPeople(sessionIdForPeople);
+    } else if (activeProjectId) {
+      const scopeKey = scopedDraftCacheKey(null);
+      void loadNewChatPeople(activeProjectId)
+        .then((value) => {
+          if (sessionIdRef.current === null && scopedDraftCacheKey(null) === scopeKey) setMentionOutsiders(value);
+        })
+        .catch(() => { /* without it the picker offers files alone */ });
+    }
+  }, [startedMention, sessionIdForPeople, activeProjectId, refreshMentionPeople]);
   const fileSearchSeq = useRef(0);
   const [fileSearch, setFileSearch] = useState<{ query: string; phase: "pending" | "done"; hits: Array<{ path: string; kind: "file" | "dir" }> }>(
     { query: "", phase: "done", hits: [] },
@@ -2407,6 +2538,11 @@ function ComposerBody({
     // create a second chat (the cleared field alone does not stop pills).
     if (creatingSession || sendPending || sendPendingRef.current || isActiveSessionSpawning(getState()) || compactPending) return;
     if (!parkAsDraft && session?.status === "epoch-pending" && session.runtimeControl === "borrowed") return;
+    // A new chat's message to people makes its chat below and starts no turn, so
+    // like a parked draft it needs neither a model nor a command.
+    const firstPeopleMessage = peopleModeRef.current && !queueEdit && !parkAsDraft;
+    if (firstPeopleMessage && (peopleSendingRef.current || peopleSendAwaitsAnswer())) return;
+    const noTurn = parkAsDraft || firstPeopleMessage;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const target = sessionIdRef.current;
     if (parkAsDraft && queueEdit) return;
@@ -2464,7 +2600,7 @@ function ComposerBody({
       return;
     }
     // A parked draft is text, never a shell command or a host action.
-    const command = !parkAsDraft && guardedShellAllowed(getGuardrails()) ? shellCommand(t) : null;
+    const command = !noTurn && guardedShellAllowed(getGuardrails()) ? shellCommand(t) : null;
     const hasPills = command === null && attachments.length > 0;
     if (!t && !hasPills) {
       if (emptySteerItem) void steerQueuedItem(emptySteerItem);
@@ -2479,7 +2615,7 @@ function ComposerBody({
     // `/compact` is a host action: it runs the runtime's native compaction (the
     // durable `session/compacted` block) instead of spending a model turn that
     // echoed the command and answered in prose. It never creates a session.
-    if (!parkAsDraft && command === null && commandCatalog.state === "available"
+    if (!noTurn && command === null && commandCatalog.state === "available"
       && isCompactCommand(t, commandCatalog.items, selectedCommandRef.current)) {
       if (!startCompact(target)) return;
       // The command produced no user turn; clear the composer it was typed in.
@@ -2489,7 +2625,7 @@ function ComposerBody({
       promptHistoryNav.reset();
       return;
     }
-    if (command === null && modelAbsenceBlocksSend && !hostOnlyExtensionCommand && !parkAsDraft) {
+    if (command === null && modelAbsenceBlocksSend && !hostOnlyExtensionCommand && !noTurn) {
       // Never a silent no-op: pressing Enter while the model catalog is empty
       // (backend still starting / restarting) surfaces the same guidance as
       // the composer banner instead of appearing to swallow the message. A
@@ -2502,7 +2638,7 @@ function ComposerBody({
       );
       return;
     }
-    if (command === null && profileMissing && !hostOnlyExtensionCommand && !parkAsDraft) return;
+    if (command === null && profileMissing && !hostOnlyExtensionCommand && !noTurn) return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
     // Keep text/pills in the scoped draft until admission is authoritative.
@@ -2620,7 +2756,7 @@ function ComposerBody({
     // canonical `user/message` still establishes the fact and replaces this row
     // the moment it lands. A queued prompt is excluded because it belongs to
     // the queue list, and a shell command produces no user turn at all.
-    const echoId = command === null && delivery !== "queue" && !hiddenUserMessage && !parkAsDraft
+    const echoId = command === null && delivery !== "queue" && !hiddenUserMessage && !noTurn
       ? beginPendingSend({
         sessionId: target,
         text: t,
@@ -2873,6 +3009,80 @@ function ComposerBody({
           }
         })
         .finally(() => markSendPending(surface, false));
+    } else if (activeProjectId && firstPeopleMessage) {
+      // The chat exists first and holds the words as its draft, so nothing can
+      // lose them; then the message goes, with no turn, and only then does the
+      // chat open. Nothing here disables the input: the writer stays in it. If
+      // the message fails the chat opens anyway, words in place, ready to send.
+      const projectId = activeProjectId;
+      const recipients = personMessageRecipients(personMentionsRef.current, mentionOutsidersRef.current?.action, mentionLevelRef.current);
+      const stillOnNewChat = () => {
+        const current = getState();
+        return current.activeProjectId === projectId
+          && current.activeSessionId === null
+          && scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend);
+      };
+      let created: string | undefined;
+      peopleSendingRef.current = true;
+      setPeopleSending(true);
+      void (async () => {
+        created = await createNewChat(projectId, () => false);
+        assertScopeStillCurrent();
+        const scope = { ...reliabilityScopeAtSend, projectId, sessionId: created };
+        stageTargetDraft(created, scope);
+        await flushClientPersistence();
+        clearNewSessionDraft(projectId, reliabilityScopeAtSend);
+        if (scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)) {
+          clearAttachments(null);
+        }
+        clearDraftExecutionConfig(projectId);
+        if (newSessionAutoApprove !== "inherit") {
+          assertScopeStillCurrent();
+          await api.autoAcceptSet(created, newSessionAutoApprove);
+          setNewSessionAutoApprove("inherit");
+        }
+        setNewSessionGoal(false);
+        assertScopeStillCurrent();
+        const operationKey = [created, t, atts.map((attachment) => attachment.id).join(","), JSON.stringify(recipients)].join("\u0000");
+        await postPersonMessage(created, {
+          text: t,
+          ...(atts.length > 0 ? { attachments: atts } : {}),
+          ...recipients,
+          clientOperationId: personMessageOperationId(operationKey),
+        });
+        forgetPersonMessageOperation(operationKey);
+        clearAttachments(created);
+        updateScopedDraftRecord(created, { text: "", dirty: true, attachments: [], conflict: undefined }, scope);
+        if (!stillOnNewChat()) return;
+        // Whatever was typed while it travelled continues in the chat.
+        const later = inputRef.current?.getText() ?? "";
+        if (later.trim() !== t) saveDraft(created, later);
+        setText("");
+        inputRef.current?.replaceText("");
+        setPersonMentions([]);
+        setChosenMentionLevel(null);
+        setMentionAccessAttention(0);
+        setAgentMentionOverride(false);
+        activateSession(created);
+      })()
+        .catch((error) => {
+          const transport = isTransportFailure(error);
+          if (transport) reconnectSync();
+          if (!created) {
+            setUiError(transport || isMutationOutcomeUnknown(error)
+              ? `${tr("composer.newChatNotConfirmed")}: ${tr("composer.newChatOutcomeUnknown")}`
+              : friendlyError(tr("composer.people.sendFailed"), error));
+            return;
+          }
+          syncDraftToServer(created, t, { ...reliabilityScopeAtSend, projectId, sessionId: created });
+          if (stillOnNewChat()) activateSession(created);
+          refreshMentionPeople(created);
+          setUiError(friendlyError(tr("composer.people.sendFailed"), error));
+        })
+        .finally(() => {
+          peopleSendingRef.current = false;
+          setPeopleSending(false);
+        });
     } else if (activeProjectId) {
       const spawnHarnessId = creationHarness?.mode === "pinned"
         ? creationHarness.harnessId
@@ -2984,7 +3194,8 @@ function ComposerBody({
           if (admitting) markSendPending(admitting, false);
         });
     }
-    if (!target || command !== null) {
+    // A message to people has no echo: its words stay until it lands, or fail.
+    if ((!target && !firstPeopleMessage) || command !== null) {
       clearComposerNow();
       promptHistoryNav.reset();
     }
@@ -2999,7 +3210,7 @@ function ComposerBody({
     newSessionAutoApprove, newSessionGoal, newSessionIntent, commandCatalog, compactPending,
     catalogHarnessId, routeCatalog.harnessName, runtimeFeatures?.capabilities.steering,
     draftExecution, draftRoute, profiles, activeProject?.defaults?.harness, newChatPersonHarness,
-    sendPeopleMessage, submitMode,
+    sendPeopleMessage, peopleSendAwaitsAnswer, refreshMentionPeople, submitMode,
   ]);
   useEffect(() => { sendRef.current = send; }, [send]);
 
@@ -3154,32 +3365,15 @@ function ComposerBody({
     if (!activeProjectId) return null;
     const fresh = fileSearch.query === acToken.path;
     return mentionAndFileAutocomplete(
-      sessionIdForPeople ? mentionCandidates : [],
+      mentionCandidates,
       acToken.path,
       fresh ? fileSearch.phase : "pending",
       fresh && fileSearch.phase === "done" ? fileSearch.hits : [],
+      mentionOutsiders?.people ?? [],
     );
   })();
   const acOptions = acView?.options ?? [];
   const acSel = acOptions.length > 0 ? Math.min(acIndex, acOptions.length - 1) : -1;
-  // `@` offers only people who can open the chat, so a private chat lists
-  // nobody. When the Space has other members, an empty list says why and
-  // opens sharing instead of staying silent.
-  const privateMentionSessionId = acView?.kind === "file" && acOptions.length === 0
-    && !peopleOnly && !conversation && mentionCandidates.length === 0
-    && session?.sharing?.visibility === "private" && canManageSession(session)
-    ? session.id : null;
-  const [spacePeople, setSpacePeople] = useState<{ sessionId: string; count: number } | null>(null);
-  useEffect(() => {
-    if (!privateMentionSessionId || spacePeople?.sessionId === privateMentionSessionId) return;
-    let live = true;
-    void loadSessionSharing(privateMentionSessionId)
-      .then((dto) => { if (live) setSpacePeople({ sessionId: privateMentionSessionId, count: dto.people.length }); })
-      .catch(() => { /* no hint without a known audience */ });
-    return () => { live = false; };
-  }, [privateMentionSessionId, spacePeople?.sessionId]);
-  const privateMentionHint = privateMentionSessionId !== null
-    && spacePeople?.sessionId === privateMentionSessionId && spacePeople.count > 0;
   const acGroups = acView?.kind === "cmd" || acView?.kind === "file"
     ? groupAutocompleteOptions(acOptions)
     : [];
@@ -4080,7 +4274,7 @@ function ComposerBody({
     {startSessionEntry}
     <button
       className="send composer-people-send"
-      onClick={() => sendPeopleMessage()}
+      onClick={() => (sessionIdRef.current ? sendPeopleMessage() : send())}
       aria-label={peopleLabel}
       title={peopleLabel}
       disabled={peopleSendDisabled}
@@ -4351,6 +4545,20 @@ function ComposerBody({
           suggestions off. They draw nothing and offer through composerDraft. */}
       {session && !peopleOnly && <SlotHost slot="composer.suggestion" context={slotContext} />}
       {suggestionChip}
+      {mentionAccess && mentionOutsiders && (
+        <MentionAccessLine
+          line={mentionAccess}
+          outsiders={mentionOutsiders}
+          tones={mentionTones}
+          level={mentionLevel}
+          attention={mentionAccessAttention}
+          primaryRef={mentionAccessPrimaryRef}
+          onAnswer={() => answerOutsideMentions("granted")}
+          onSkip={() => answerOutsideMentions("skipped")}
+          onUndo={() => answerOutsideMentions(null)}
+          onLevel={setChosenMentionLevel}
+        />
+      )}
       <GlassDock
         className={`composer-card${selectingConversation ? " is-choosing-messages" : ""}${activeMode ? " is-composer-mode" : ""}`}
         {...(activeMode ? { "data-composer-mode": activeMode.id } : {})}
@@ -4524,7 +4732,7 @@ function ComposerBody({
           <div className="ac-popup" data-kind={acView.kind}>
             {/* With people listed the groups name themselves; a "Files" title
                 above the People group would mislabel it. */}
-            {!acGroups.some((group) => group.id === "people") && <div className="ac-header">
+            {!acGroups.some((group) => group.id === "people" || group.id === "people-outside") && <div className="ac-header">
               <span className="ac-header-title">{acView.kind === "cmd" ? tr("composer.discovery.actions") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}</span>
               {acView.kind === "cmd" && acView.resultCount !== undefined && (
                 <span className="ac-count" aria-label={tr("composer.discovery.valueAvailable", { value: acView.resultCount })}>{acView.resultCount}</span>
@@ -4541,17 +4749,6 @@ function ComposerBody({
                   >
                     {tr("composer.createASnippet")}</Button>
                 )}
-              </div>
-            )}
-            {privateMentionHint && session && (
-              <div className="ac-status ac-private-hint">
-                <span>{tr("composer.people.privateHint")}</span>
-                <Button
-                  size="sm"
-                  className="ac-create-snippet"
-                  onClick={() => { setAcToken(null); openSessionSharing(session.id); }}
-                >
-                  {tr("sharing.share")}</Button>
               </div>
             )}
             {acOptions.length > 0 && (

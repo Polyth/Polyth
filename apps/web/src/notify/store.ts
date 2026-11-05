@@ -50,6 +50,12 @@ export interface ConversationNotice {
   open(): void;
   /** Posts a reply as the reader; rejects when it did not go through. */
   reply?(text: string): Promise<void>;
+  /** Someone asks the reader to open this chat to these people. */
+  accessRequest?: {
+    names: string;
+    /** Records the reader's answer; rejects when it did not go through. */
+    decide(decision: "share" | "decline"): Promise<void>;
+  };
 }
 
 /** Packages show web-sdk kinds; the shell may also show the people kinds

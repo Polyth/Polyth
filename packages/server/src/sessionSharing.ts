@@ -9,9 +9,13 @@ import {
   isSessionAccessLevel,
   isSessionVisibility,
   roleAtLeast,
+  SESSION_ACCESS_LEVELS,
   sessionAccessAtLeast,
   type SessionAccessLevel,
   type SessionMentionCandidateDto,
+  type NewChatPeopleDto,
+  type SessionMentionOutsidersDto,
+  type PersonMessageShare,
   type SessionPerson,
   type SessionProjection,
   type SessionSharingDto,
@@ -62,22 +66,30 @@ export function sessionAccess(
   sessionId: string,
   lifecycles?: readonly ResourceLifecycle[],
 ): SessionAccess | undefined {
+  const result = resourceAccessOf(principalId, spaceId, sessionId, lifecycles);
+  if (!result || result.resource.kind !== "session") return undefined;
+  return { resource: result.resource, level: result.level };
+}
+
+function resourceAccessOf(
+  principalId: string,
+  spaceId: string,
+  resourceId: string,
+  lifecycles?: readonly ResourceLifecycle[],
+) {
   const security = canonicalSecurity();
   if (!security) return undefined;
   const orgId = orgOfSpace(spaceId);
   if (!orgId) return undefined;
-  let result;
   try {
-    result = security.resourceAccess.access({
-      resourceId: sessionId, principalId, orgId, spaceId, ...(lifecycles ? { lifecycles } : {}),
+    return security.resourceAccess.access({
+      resourceId, principalId, orgId, spaceId, ...(lifecycles ? { lifecycles } : {}),
     });
   } catch (cause) {
     // Malformed ids are indistinguishable from unknown ones.
     if ((cause as { code?: unknown } | null)?.code === "invalid-input") return undefined;
     throw cause;
   }
-  if (!result || result.resource.kind !== "session") return undefined;
-  return { resource: result.resource, level: result.level };
 }
 
 /** The row whose sharing a session follows: itself, unless it is a delegated
@@ -218,6 +230,51 @@ export function sessionMentionCandidates(
     .map(({ userId, name, access }) => ({ userId, ...(name ? { name } : {}), access }));
 }
 
+/** Active Space members who cannot open a chat, the reader excluded. */
+export function sessionOutsiders(
+  spaceId: string,
+  sessionId: string,
+  excludeUserId?: string,
+): Array<{ userId: string; name?: string }> {
+  if (!sessionId || !canonicalSecurity()) return [];
+  const out: Array<{ userId: string; name?: string }> = [];
+  for (const member of spaceMembers(spaceId)) {
+    if (member.userId === excludeUserId || sessionAccess(member.userId, spaceId, sessionId)) continue;
+    const name = humanName(member.userId);
+    out.push({ userId: member.userId, ...(name ? { name } : {}) });
+  }
+  return out;
+}
+
+/** The person who can open a chat to more people, `excludeUserId` aside: its
+ *  owner when able, else the first member who is. Undefined when nobody is:
+ *  Space admins get nothing on a private chat, so a policy that stops members
+ *  from sharing can leave one with no way out. */
+export function sessionShareApprover(
+  spaceId: string,
+  sessionId: string,
+  excludeUserId?: string,
+): SessionPerson | undefined {
+  const security = canonicalSecurity();
+  if (!security || !sessionId) return undefined;
+  let row: CanonicalResource | undefined;
+  try {
+    row = security.resources.resource(sessionId);
+  } catch {
+    return undefined;
+  }
+  if (!row || row.kind !== "session" || row.spaceId !== spaceId) return undefined;
+  const root = shareRoot(row);
+  const policy = security.sharing.policy(spaceId);
+  const able = spaceMembers(spaceId).filter((member) => {
+    if (member.userId === excludeUserId || !roleAtLeast(member.role, "member")) return false;
+    if (!roleAtLeast(member.role, "admin") && !policy.membersMayShare) return false;
+    return sessionAccess(member.userId, spaceId, root.id)?.level === "manage";
+  });
+  const chosen = able.find((member) => member.userId === root.ownerPrincipalId) ?? able[0];
+  return chosen ? person(chosen.userId) : undefined;
+}
+
 /** One row as one person sees it, or undefined when they cannot open it. */
 export function rowForReader(
   row: SessionProjection,
@@ -316,6 +373,14 @@ export interface SessionSharingDeps {
 export interface SessionSharingService {
   state(ctx: SpaceContext, sessionId: string): SessionSharingDto;
   update(ctx: SpaceContext, sessionId: string, input: SessionSharingUpdate): Promise<SessionSharingDto>;
+  /** Who cannot open this chat and what the reader can do about it. */
+  outsiders(ctx: SpaceContext, sessionId: string): SessionMentionOutsidersDto;
+  /** The same for a chat this person would start in a project. */
+  newChatPeople(ctx: SpaceContext, projectId: string): NewChatPeopleDto;
+  /** Adds people to a chat under the caller's own sharing rights; a delegated
+   *  subagent's chat opens through the chat it follows. People who can already
+   *  open it and ids that are not active members change nothing. */
+  addPeople(ctx: SpaceContext, sessionId: string, people: readonly PersonMessageShare[]): Promise<void>;
   policy(ctx: SpaceContext): SpaceSharingPolicyDto;
   setPolicy(ctx: SpaceContext, input: Record<string, unknown>): SpaceSharingPolicyDto;
 }
@@ -336,12 +401,16 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
   };
 
   /** What this person may change on a chat they can open. */
-  const limits = (ctx: SpaceContext, access: SessionAccess) => {
+  const limits = (ctx: SpaceContext, access: SessionAccess) => rulesFor(
+    ctx,
+    access.level,
+    access.resource.visibility === "inherit" && !!access.resource.accessParentId,
+  );
+  const rulesFor = (ctx: SpaceContext, level: SessionAccessLevel, inherited: boolean) => {
     const policy = policyFor(ctx.spaceId);
-    const inherited = access.resource.visibility === "inherit" && !!access.resource.accessParentId;
     const person = !!ctx.userId && !isSystemContext(ctx);
     const admin = roleAtLeast(ctx.role, "admin");
-    const canShare = person && !inherited && access.level === "manage" && roleAtLeast(ctx.role, "member");
+    const canShare = person && !inherited && level === "manage" && roleAtLeast(ctx.role, "member");
     const mayWiden = canShare && (admin || policy.membersMayShare);
     const maxGrant: SessionAccessLevel | null = !mayWiden ? null : admin ? "manage" : policy.maxMemberAccess;
     const allowedVisibilities: SessionVisibility[] = ["private"];
@@ -484,6 +553,87 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     return state(ctx, sessionId);
   };
 
+  /** The chat whose sharing decides this one, as the reader may change it. */
+  const rootRules = (ctx: SpaceContext, access: SessionAccess) => {
+    const root = shareRoot(access.resource);
+    const rootAccess = root.id === access.resource.id ? access : sessionAccess(ctx.userId, ctx.spaceId, root.id);
+    return { root, rules: rootAccess ? limits(ctx, rootAccess) : undefined };
+  };
+
+  const outsiders = (ctx: SpaceContext, sessionId: string): SessionMentionOutsidersDto => {
+    // Without canonical identity there is one person and nobody to mention.
+    if (!canonicalSecurity()) return { people: [], action: "none", levels: [] };
+    const access = readable(ctx, sessionId);
+    const people = sessionOutsiders(ctx.spaceId, sessionId, ctx.userId);
+    const { root, rules } = rootRules(ctx, access);
+    if (rules?.mayWiden && rules.maxGrant) {
+      const { maxGrant } = rules;
+      const opensPrivateChat = effectiveVisibility(access.resource) === "private";
+      return {
+        people,
+        action: "share",
+        levels: SESSION_ACCESS_LEVELS.filter((level) => sessionAccessAtLeast(maxGrant, level)),
+        ...(opensPrivateChat && root.ownerPrincipalId === ctx.userId && deps.hasPersonalMcpServers?.(ctx.userId)
+          ? { personalMcpDetachedOnShare: true }
+          : {}),
+      };
+    }
+    const approver = sessionShareApprover(ctx.spaceId, sessionId, ctx.userId);
+    return approver
+      ? { people, action: "request", levels: [], approver }
+      : { people, action: "none", levels: [] };
+  };
+
+  const newChatPeople = (ctx: SpaceContext, projectId: string): NewChatPeopleDto => {
+    if (!canonicalSecurity()) return { people: [], inside: [], action: "none", levels: [] };
+    const projectAccess = (userId: string) => {
+      const result = resourceAccessOf(userId, ctx.spaceId, projectId);
+      return result?.resource.kind === "project" ? result : undefined;
+    };
+    if (!projectId || !projectAccess(ctx.userId)) throw notFound();
+    // A chat that starts private reaches nobody; one that follows its project
+    // reaches whoever can open that project.
+    const startsPrivate = defaultSessionVisibility(ctx) === "private";
+    const people: NewChatPeopleDto["people"] = [];
+    const inside: NewChatPeopleDto["inside"] = [];
+    for (const member of spaceMembers(ctx.spaceId)) {
+      if (member.userId === ctx.userId) continue;
+      const name = humanName(member.userId);
+      const named = { userId: member.userId, ...(name ? { name } : {}) };
+      const level = startsPrivate ? undefined : projectAccess(member.userId)?.level;
+      if (level) inside.push({ ...named, access: level });
+      else people.push(named);
+    }
+    // Its owner-to-be holds `manage`, and with nobody else inside there is
+    // nobody to ask if they may not share it.
+    const { mayWiden, maxGrant } = rulesFor(ctx, "manage", false);
+    if (!mayWiden || !maxGrant) return { people, inside, action: "none", levels: [] };
+    return {
+      people,
+      inside,
+      action: "share",
+      levels: SESSION_ACCESS_LEVELS.filter((level) => sessionAccessAtLeast(maxGrant, level)),
+      ...(startsPrivate && deps.hasPersonalMcpServers?.(ctx.userId) ? { personalMcpDetachedOnShare: true } : {}),
+    };
+  };
+
+  const addPeople = async (ctx: SpaceContext, sessionId: string, people: readonly PersonMessageShare[]): Promise<void> => {
+    const access = readable(ctx, sessionId);
+    const { root } = rootRules(ctx, access);
+    const outside = new Set(sessionOutsiders(ctx.spaceId, root.id, ctx.userId).map((member) => member.userId));
+    const newcomers = people.filter((entry) => outside.has(entry.userId));
+    if (newcomers.length === 0) return;
+    const current = state(ctx, root.id);
+    await update(ctx, root.id, {
+      visibility: current.visibility === "private" ? "restricted" : current.visibility,
+      grants: [
+        ...current.grants.map(({ userId, access: level }) => ({ userId, access: level })),
+        ...newcomers.map(({ userId, access: level }) => ({ userId, access: level })),
+      ],
+      expectedRevision: current.revision,
+    });
+  };
+
   const policyDto = (ctx: SpaceContext): SpaceSharingPolicyDto => {
     const record = policyFor(ctx.spaceId);
     return {
@@ -499,6 +649,9 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
   return {
     state,
     update,
+    outsiders,
+    newChatPeople,
+    addPeople,
     policy: policyDto,
     setPolicy(ctx, input) {
       if (!canonicalSecurity()) {

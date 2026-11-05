@@ -37,6 +37,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: Timeline } = await import("../src/components/Timeline.tsx");
 const { activateProject, activateSession, applyEvent, getState, reduceSessionModel, setSessions } = await import("../src/store.ts");
+const { tr } = await import("../src/i18n/index.ts");
 
 const ANN = { userId: "usr_ann", name: "Ann Lee" };
 const BEA = { userId: "usr_bea", name: "Bea" };
@@ -142,4 +143,84 @@ test("a person message shows the attachments it carried", async () => {
   } finally {
     await view.unmount();
   }
+});
+
+async function mountRequest(sessionId: string, approver: typeof ANN, author: typeof ANN, resolved?: "shared" | "declined") {
+  const request = { people: [{ userId: "u-cara", name: "Cara Bell" }], approver };
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  await act(async () => {
+    activateProject("family");
+    setSessions("family", [{ id: sessionId, projectId: "family", title: "Talk", status: "idle", createdAt: 1, updatedAt: 1 }]);
+    activateSession(sessionId);
+    applyEvent({
+      id: `${sessionId}-1`, sessionId, seq: 1, time: start, type: "person/message",
+      data: { text: "@Cara look", author, mentions: [], accessRequest: request } as JsonObject, v: 1,
+    } satisfies SessionEvent);
+    if (resolved) {
+      applyEvent({
+        id: `${sessionId}-2`, sessionId, seq: 2, time: start + 1, type: "person/access-resolved",
+        data: { messageSeq: 1, outcome: resolved, by: approver, people: request.people } as JsonObject, v: 1,
+      } satisfies SessionEvent);
+    }
+    root.render(createElement(Timeline, { model: reduceSessionModel(sessionId, getState().events[sessionId] ?? []) }));
+  });
+  return {
+    host,
+    note: () => host.querySelector(".person-message-access")?.textContent ?? null,
+    buttons: () => [...host.querySelectorAll(".person-message-access button")].map((button) => button.textContent),
+    async unmount() {
+      await act(async () => { activateSession(null); setSessions("family", []); });
+      await act(async () => root.unmount());
+      host.remove();
+    },
+  };
+}
+
+test("whoever was asked answers under the message; the answer goes to the server", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; body: unknown }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "POST") calls.push({ url, body: JSON.parse(String(init.body)) });
+    return new Response(url.includes("/access") ? '{"outcome":"shared","people":["u-cara"]}' : "{}", { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  const view = await mountRequest("asked-chat", ANN, BEA);
+  try {
+    assert.deepEqual(view.buttons(), [tr("composer.people.access.share"), tr("timeline.personAccess.notNow")]);
+    assert.match(view.note() ?? "", /Cara/);
+    await act(async () => {
+      view.host.querySelector<HTMLButtonElement>(".person-message-access .is-primary")!.click();
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    assert.deepEqual(calls.map((call) => call.body), [{ decision: "share" }]);
+    assert.match(calls[0]!.url, /\/api\/sessions\/asked-chat\/person-messages\/1\/access$/);
+  } finally {
+    await view.unmount();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("whoever asked follows the request; everyone else sees only the message", async () => {
+  const mine = await mountRequest("asking-chat", BEA, ANN);
+  assert.equal(mine.note(), tr("timeline.personAccess.asked", { name: "Bea" }));
+  assert.deepEqual(mine.buttons(), []);
+  await mine.unmount();
+
+  const others = await mountRequest("third-chat", BEA, CY);
+  assert.equal(others.note(), null);
+  await others.unmount();
+});
+
+test("the answer replaces the request, for both of them", async () => {
+  const shared = await mountRequest("shared-chat", BEA, ANN, "shared");
+  assert.equal(shared.note(), tr("timeline.personAccess.shared", { names: "Cara" }));
+  assert.equal(shared.host.querySelector(".person-mention")?.textContent, "@Cara", "the name is a mention now");
+  await shared.unmount();
+
+  const declined = await mountRequest("declined-chat", ANN, BEA, "declined");
+  assert.equal(declined.note(), tr("timeline.personAccess.declined", { names: "Cara" }));
+  assert.deepEqual(declined.buttons(), []);
+  await declined.unmount();
 });

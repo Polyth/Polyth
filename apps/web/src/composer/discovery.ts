@@ -513,7 +513,7 @@ export type AutocompletePresentationKind = "command" | "skill" | "settings" | "p
 export interface AutocompletePresentation {
   kind: AutocompletePresentationKind;
   kindLabel: string;
-  groupId: "people" | "project" | "space" | "personal" | "builtin" | "plugins" | "agent" | "customize" | "files";
+  groupId: "people" | "people-outside" | "project" | "space" | "personal" | "builtin" | "plugins" | "agent" | "customize" | "files";
   groupLabel: string;
   /** More specific provenance inside the group, such as OpenCode or a package id. */
   sourceLabel?: string;
@@ -525,8 +525,9 @@ export interface AutocompleteOption extends AutocompleteItem {
   presentation?: AutocompletePresentation;
   argumentHint?: string;
   destination?: { pageId: "commands" | "skills" | "behavior" };
-  /** A person picked from the People group; the composer records the id. */
-  person?: { userId: string; name: string; token: string };
+  /** A person picked from a people group; the composer records the id.
+   *  `outside`: they cannot open the chat yet, so the composer asks. */
+  person?: { userId: string; name: string; token: string; outside?: boolean };
 }
 
 export interface AutocompleteGroup {
@@ -555,7 +556,8 @@ export function commandInputName(command: ComposerCommand): string {
 }
 
 const COMMAND_GROUP_ORDER: Record<AutocompletePresentation["groupId"], number> = {
-  people: -1,
+  people: -2,
+  "people-outside": -1,
   project: 0,
   space: 1,
   personal: 2,
@@ -584,6 +586,7 @@ const sourceName = (value: string): string => {
 
 const groupLabel = (groupId: AutocompletePresentation["groupId"]): string => {
   if (groupId === "people") return tr("composer.people.group");
+  if (groupId === "people-outside") return tr("composer.people.outsideGroup");
   if (groupId === "files") return tr("composer.files");
   if (groupId === "project") return tr("mobile.sessioncontextbar.project");
   if (groupId === "space") return tr("spaces.title");
@@ -835,9 +838,13 @@ export function snippetAutocomplete(
   return { kind: "snip", options, status: null };
 }
 
+/** A person a chat does not reach yet: a Space member who cannot open it. */
+export type MentionOutsider = { userId: string; name?: string };
+
 export function peopleAutocomplete(
   candidates: readonly SessionMentionCandidateDto[],
   query: string,
+  outsiders: readonly MentionOutsider[] = [],
 ): AutocompleteOption[] {
   const normalized = query.trim().toLocaleLowerCase();
   const presentation: AutocompletePresentation = {
@@ -846,15 +853,24 @@ export function peopleAutocomplete(
     groupId: "people",
     groupLabel: tr("composer.people.group"),
   };
-  const everyone = candidates.map((candidate) => candidate.name?.trim() || candidate.userId);
-  return candidates
-    .filter((candidate) => {
-      if (!normalized) return true;
-      return (candidate.name ?? "").toLocaleLowerCase().includes(normalized)
-        || candidate.userId.toLocaleLowerCase().includes(normalized);
-    })
-    .map((candidate) => {
-      const name = candidate.name?.trim() || candidate.userId;
+  const outsidePresentation: AutocompletePresentation = {
+    kind: "person",
+    kindLabel: tr("composer.people.outsideGroup"),
+    groupId: "people-outside",
+    groupLabel: tr("composer.people.outsideGroup"),
+  };
+  // The two lists come from separate requests: someone just given access can
+  // briefly be in both, and belongs with the people who can open the chat.
+  const inside = new Set(candidates.map((candidate) => candidate.userId));
+  const outside = outsiders.filter((person) => !inside.has(person.userId));
+  const nameOf = (person: MentionOutsider): string => person.name?.trim() || person.userId;
+  const everyone = [...candidates, ...outside].map(nameOf);
+  const matches = (person: MentionOutsider): boolean => !normalized
+    || (person.name ?? "").toLocaleLowerCase().includes(normalized)
+    || person.userId.toLocaleLowerCase().includes(normalized);
+  return [
+    ...candidates.filter(matches).map((candidate): AutocompleteOption => {
+      const name = nameOf(candidate);
       const token = mentionTokenFor(name, everyone);
       return {
         id: autocompleteOptionId("person", candidate.userId),
@@ -864,19 +880,35 @@ export function peopleAutocomplete(
         presentation,
         person: { userId: candidate.userId, name, token },
       };
-    });
+    }),
+    // The heading says what they have in common, so a row is only a name.
+    ...outside.filter(matches).map((person): AutocompleteOption => {
+      const name = nameOf(person);
+      const token = mentionTokenFor(name, everyone);
+      return {
+        id: autocompleteOptionId("person", person.userId),
+        label: name,
+        detail: "",
+        value: `${token} `,
+        presentation: outsidePresentation,
+        person: { userId: person.userId, name, token, outside: true },
+      };
+    }),
+  ];
 }
 
-/** One @ picker: People first, then project files. A mention candidate list
- *  the route could not answer leaves the file results untouched. */
+/** One @ picker: the people who can open the chat, then the rest of the Space,
+ *  then project files. A list the route could not answer leaves the file
+ *  results untouched. */
 export function mentionAndFileAutocomplete(
   people: readonly SessionMentionCandidateDto[],
   query: string,
   phase: "idle" | "pending" | "done",
   hits: Array<{ path: string; kind: "file" | "dir" }>,
+  outsiders: readonly MentionOutsider[] = [],
 ): AutocompleteViewState {
   const fileView = fileAutocomplete(query, phase, hits);
-  const peopleOptions = peopleAutocomplete(people, query);
+  const peopleOptions = peopleAutocomplete(people, query, outsiders);
   if (peopleOptions.length === 0) return fileView;
   return {
     ...fileView,

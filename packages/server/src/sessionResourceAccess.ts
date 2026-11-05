@@ -24,6 +24,7 @@ const METHOD_ACCESS: Readonly<Record<string, SessionAccessLevel>> = {
   clientMutationStatus: "view", queueList: "view", autoAcceptGet: "view", memoryPolicyGet: "view",
   runtimeFeatures: "view", saveDraft: "view", markRead: "view", fork: "view",
   postPersonMessage: "view", mentionCandidates: "view", setPersonMute: "view",
+  decidePersonAccess: "manage",
   startSessionFromConversation: "collaborate",
 
   send: "collaborate", abort: "collaborate", pause: "collaborate", continuePaused: "collaborate", replyPermission: "collaborate", replyQuestion: "collaborate",

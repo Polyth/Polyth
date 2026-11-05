@@ -7,7 +7,7 @@ import type { SessionSharingService } from "../sessionSharing.ts";
 
 export function sharingRoutes(sharing: SessionSharingService): RouteHandler {
   return async (rc) => {
-    const { path, method, body, json } = rc;
+    const { path, method, url, body, json } = rc;
     const session = path.match(/^\/api\/sessions\/([^/]+)\/sharing$/);
     if (session) {
       if (method === "GET") {
@@ -19,6 +19,15 @@ export function sharingRoutes(sharing: SessionSharingService): RouteHandler {
         return true;
       }
       return false;
+    }
+    const outsiders = path.match(/^\/api\/sessions\/([^/]+)\/sharing\/outsiders$/);
+    if (outsiders && method === "GET") {
+      json(200, sharing.outsiders(rc.space, outsiders[1]!));
+      return true;
+    }
+    if (path === "/api/sharing/new-chat" && method === "GET") {
+      json(200, sharing.newChatPeople(rc.space, url.searchParams.get("projectId") ?? ""));
+      return true;
     }
     if (path === "/api/sharing/policy") {
       if (method === "GET") {

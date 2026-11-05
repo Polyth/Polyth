@@ -33,6 +33,45 @@ test("person/message reduces to a person-message row with author, mentions and m
   assert.equal(row.replyToSeq, 7);
 });
 
+test("an access request stays on its message, and its answer settles it", () => {
+  const bea = { userId: "u-bea", name: "Bea" };
+  const ann = { userId: "u-ann", name: "Ann" };
+  const cara = { userId: "u-cara", name: "Cara" };
+  const asking = ev(1, "person/message", {
+    text: "@Cara look", author: bea, mentions: [],
+    accessRequest: { people: [cara], approver: ann },
+  });
+  const pending = buildModel([asking]).messages[0] as { accessRequest?: unknown; mentions: unknown[] };
+  assert.deepEqual(pending.accessRequest, { people: [cara], approver: ann });
+  assert.deepEqual(pending.mentions, []);
+
+  const shared = buildModel([asking, ev(2, "person/access-resolved", { messageSeq: 1, outcome: "shared", by: ann, people: [cara] })]);
+  assert.equal(shared.messages.length, 1, "an answer is no row of its own");
+  const settled = shared.messages[0] as { accessRequest?: { outcome?: string }; mentions: unknown[] };
+  assert.equal(settled.accessRequest?.outcome, "shared");
+  assert.deepEqual(settled.mentions, [cara], "the name now reads as a mention");
+
+  const declined = buildModel([asking, ev(2, "person/access-resolved", { messageSeq: 1, outcome: "declined", by: ann, people: [cara] })]);
+  const refused = declined.messages[0] as { accessRequest?: { outcome?: string }; mentions: unknown[] };
+  assert.equal(refused.accessRequest?.outcome, "declined");
+  assert.deepEqual(refused.mentions, []);
+});
+
+test("a malformed request or an answer without its message changes nothing", () => {
+  const model = buildModel([
+    ev(1, "person/message", { text: "a", mentions: [], accessRequest: { people: "nobody", approver: null } }),
+    ev(2, "person/message", { text: "b", mentions: [], accessRequest: { people: [], approver: { userId: "u" } } }),
+    ev(3, "person/access-resolved", { messageSeq: 1, outcome: "maybe" }),
+    ev(4, "person/access-resolved", { messageSeq: 99, outcome: "shared", people: [{ userId: "u" }] }),
+    ev(5, "person/access-resolved", { messageSeq: 2, outcome: "shared", people: [{ userId: "u" }] }),
+  ]);
+  assert.equal(model.messages.length, 2);
+  for (const message of model.messages) {
+    assert.equal((message as { accessRequest?: unknown }).accessRequest, undefined);
+    assert.deepEqual((message as { mentions: unknown[] }).mentions, []);
+  }
+});
+
 test("conversation/session-started reduces to a link card with validated fields", () => {
   const model = buildModel([
     ev(1, "conversation/session-started", {

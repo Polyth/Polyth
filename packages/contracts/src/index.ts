@@ -1537,6 +1537,38 @@ export interface PersonMessageData {
   carryToAgent?: boolean;
   /** Seq of the `person/message` this replies to. */
   replyToSeq?: number;
+  /** People the message names who cannot open the chat, and who was asked to
+   *  open it for them. They are told only if the chat is opened to them, by
+   *  a later `person/access-resolved`. */
+  accessRequest?: PersonAccessRequest;
+}
+
+/** Someone without the right to share named people who cannot open the chat. */
+export interface PersonAccessRequest {
+  /** Space members who could not open the chat when the message was sent. */
+  people: SessionPerson[];
+  /** Who may open it: the owner when they are able to, else someone who is. */
+  approver: SessionPerson;
+}
+
+/** Event type of the answer to a message's `accessRequest`. Never model-visible
+ *  and never a prompt; old clients ignore the unknown type. */
+export const PERSON_ACCESS_RESOLVED_EVENT = "person/access-resolved" as const;
+export type PersonAccessOutcome = "shared" | "declined";
+export interface PersonAccessResolvedData {
+  /** The `person/message` whose request this answers. */
+  messageSeq: number;
+  outcome: PersonAccessOutcome;
+  /** Server-stamped from the authenticated person, never from input. */
+  by: SessionPerson;
+  /** `shared`: those who can open the chat now. `declined`: those asked for. */
+  people: SessionPerson[];
+}
+
+/** One person a chat is opened to together with a message. */
+export interface PersonMessageShare {
+  userId: string;
+  access: SessionAccessLevel;
 }
 
 /** What a client may supply for a `person/message`. */
@@ -1551,6 +1583,14 @@ export interface PersonMessageInput {
   mentions?: string[];
   carryToAgent?: boolean;
   replyToSeq?: number;
+  /** Open the chat to these people with this message, under the sender's own
+   *  sharing rights: refused as a whole if they do not allow it, in which case
+   *  no message is recorded. People who can already open it are skipped; ids
+   *  that are not active Space members are dropped without a trace. */
+  shareWith?: PersonMessageShare[];
+  /** Ask whoever can share to open the chat to these people (user ids). Ids
+   *  that are not people outside the chat are dropped without a trace. */
+  requestAccessFor?: string[];
   /** Opaque client UUID: a retry with the same id returns the first result. */
   clientOperationId?: string;
 }
@@ -1559,6 +1599,28 @@ export interface PersonMessageResult {
   seq: number;
   /** Mentioned user ids that were kept. */
   mentions: string[];
+  /** User ids the chat was asked to be opened to. */
+  requested?: string[];
+}
+
+/** Answer to a message's `accessRequest`. */
+export interface PersonAccessDecisionInput {
+  decision: "share" | "decline";
+  /** Access for `share`; `view` when absent. */
+  access?: SessionAccessLevel;
+}
+
+export interface PersonAccessDecisionResult {
+  outcome: PersonAccessOutcome;
+  /** User ids the outcome is about. */
+  people: string[];
+}
+
+/** Server-set by the Space-scoped facade: never from a request body. */
+export interface PersonMessageAdmission extends TurnAdmission {
+  /** Opens the chat to these people under the acting person's own sharing
+   *  rights, or throws. */
+  openChatTo?(people: readonly PersonMessageShare[]): Promise<void>;
 }
 
 /** A person who can be mentioned in a session (the reader excluded). */
@@ -1566,6 +1628,31 @@ export interface SessionMentionCandidateDto {
   userId: string;
   name?: string;
   access: SessionAccessLevel;
+}
+
+/** `GET /api/sessions/:id/sharing/outsiders`: the Space members who cannot open
+ *  the chat, and what the reader can do about that. Any reader of the chat may
+ *  ask; the names are the ones `GET …/sharing` already gives them. */
+export interface SessionMentionOutsidersDto {
+  people: Array<{ userId: string; name?: string }>;
+  /** `share`: the reader opens the chat themselves. `request`: `approver` is
+   *  asked to. `none`: nobody can right now, so a mention stays plain text. */
+  action: "share" | "request" | "none";
+  /** `share`: access levels the reader may give, lowest first. */
+  levels: SessionAccessLevel[];
+  /** `request`: who is asked. */
+  approver?: SessionPerson;
+  /** `share`: opening this private chat stops its agent loading the reader's
+   *  personal MCP servers (Spaces §14.6). */
+  personalMcpDetachedOnShare?: boolean;
+}
+
+/** `GET /api/sharing/new-chat?projectId=`: the same answer for a chat that does
+ *  not exist yet, read as its owner-to-be. `action` is never `request`: nobody
+ *  else could open a chat before it is opened to them. */
+export interface NewChatPeopleDto extends SessionMentionOutsidersDto {
+  /** Those the chat reaches as soon as it exists, by the Space's default audience. */
+  inside: SessionMentionCandidateDto[];
 }
 
 /** Package-free purpose of a people-first session: no runtime, no agent;
@@ -2797,7 +2884,9 @@ export interface SessionService {
    *  allowed while a turn runs. Needs `view`; `carryToAgent` needs
    *  `collaborate`. Notifies mentioned people (kind `mention`) and, in a
    *  conversation, every unmuted participant (kind `message`). */
-  postPersonMessage?(sessionId: string, input: PersonMessageInput, admission?: TurnAdmission): Promise<PersonMessageResult>;
+  postPersonMessage?(sessionId: string, input: PersonMessageInput, admission?: PersonMessageAdmission): Promise<PersonMessageResult>;
+  /** Answers a message's `accessRequest`; a repeat returns the first answer. */
+  decidePersonAccess?(sessionId: string, messageSeq: number, input: PersonAccessDecisionInput, admission?: PersonMessageAdmission): Promise<PersonAccessDecisionResult>;
   /** People the reader may mention here: those who can open the session. */
   mentionCandidates?(sessionId: string, person?: SessionPersonScope): Promise<SessionMentionCandidateDto[]>;
   /** Mute/unmute one conversation for one person: only mentions notify. */
@@ -7354,6 +7443,8 @@ export type NotificationRecord = {
   author?: { userId: string; name: string };
   /** People kinds: the chat's title when the row was made. */
   chat?: string;
+  /** Someone asks the recipient to open this chat to these people. */
+  accessRequest?: { messageSeq: number; people: Array<{ userId: string; name: string }> };
 };
 
 // Well-known capability keys

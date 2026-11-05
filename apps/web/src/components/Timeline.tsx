@@ -40,7 +40,7 @@ import {
 } from "../messageActions.ts";
 import { applyComposerSeed, discardComposerSeed, loadSeedRecord } from "../drafts.ts";
 import { activeBrowserAccountId } from "../accountStorage.ts";
-import { mentionTokensOf, personInitials, useSessionPeople } from "../sessionPeople.ts";
+import { decidePersonAccess, firstNamesList, mentionTokensOf, personInitials, useSessionPeople } from "../sessionPeople.ts";
 import { assignPersonTones, personToneOf } from "../personIdentity.ts";
 import { canCollaborateSession } from "../sessionSharing.ts";
 import {
@@ -137,7 +137,7 @@ import { normalizeQuestions, questionAnswerDraft, type AnswerMap } from "../ques
 import ExecutionRow, { ComposerShellRow, ExecutionIcon, useCollapsePresence, useExecutionStop, useExecutionSummary, type ExecutionSummary } from "./ExecutionRow.tsx";
 import ActivityTicker, { useTickerKey } from "./ActivityTicker.tsx";
 import { useSettledFlag } from "../activityTicker.ts";
-import { BotIcon, Button, CheckIcon, ChevronRightIcon, Icon as UiIcon, IconButton, Notice, RunSummary, StopIcon, Tooltip, type RunSummaryState } from "./ui/index.ts";
+import { BotIcon, Button, CheckIcon, ChevronRightIcon, CloseIcon, Icon as UiIcon, IconButton, Notice, RunSummary, StopIcon, Tooltip, type RunSummaryState } from "./ui/index.ts";
 import { PlayIcon } from "./ui/icons.ts";
 import PausedMark from "./PausedMark.tsx";
 import type { TurnLimitState } from "../reduce.ts";
@@ -1040,8 +1040,69 @@ function PersonMessageView({ m, entering = false }: { m: PersonMessageMsg; enter
           <span>{m.delivered ? tr("timeline.carryDelivered") : tr("timeline.carryPending")}</span>
         </div>
       )}
+      {m.accessRequest && <PersonAccessNote m={m} request={m.accessRequest} own={own} />}
     </div>
     </>
+  );
+}
+
+/** A message that asks to open the chat to people it names. Only the two people
+ *  it concerns see this: whoever asked follows it here, and whoever was asked
+ *  answers here, durably, when the alert is long gone. */
+function PersonAccessNote({ m, request, own }: {
+  m: PersonMessageMsg;
+  request: NonNullable<PersonMessageMsg["accessRequest"]>;
+  own: boolean;
+}) {
+  const sessionId = useTimelineSessionId();
+  const [busy, setBusy] = useState<"share" | "decline" | null>(null);
+  const [failed, setFailed] = useState(false);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => { live.current = false; };
+  }, []);
+  const asked = request.approver.userId === activeBrowserAccountId();
+  if (!own && !asked) return null;
+  const locale = getLocale();
+  const names = firstNamesList(request.people.map((person) => person.name ?? person.userId), locale);
+  if (request.outcome) {
+    return (
+      <div className="person-message-access">
+        <UiIcon icon={request.outcome === "shared" ? CheckIcon : CloseIcon} size="sm" />
+        <span>{tr(request.outcome === "shared" ? "timeline.personAccess.shared" : "timeline.personAccess.declined", { names })}</span>
+      </div>
+    );
+  }
+  if (!asked) {
+    return (
+      <div className="person-message-access">
+        <span>{tr("timeline.personAccess.asked", { name: firstNamesList([request.approver.name ?? request.approver.userId], locale) })}</span>
+      </div>
+    );
+  }
+  const answer = (decision: "share" | "decline") => {
+    if (!sessionId || busy) return;
+    setBusy(decision);
+    setFailed(false);
+    // The reducer takes the answer from the event, so success has nothing to do.
+    void decidePersonAccess(sessionId, m.eventSeq, { decision }).catch(() => {
+      if (live.current) setFailed(true);
+    }).finally(() => {
+      if (live.current) setBusy(null);
+    });
+  };
+  return (
+    <div className="person-message-access" role="group" aria-label={tr("timeline.personAccess.asks", { names })}>
+      <span>{tr("timeline.personAccess.asks", { names })}</span>
+      <button type="button" className="mention-access-action is-primary" disabled={busy !== null} onClick={() => answer("share")}>
+        {tr("composer.people.access.share")}
+      </button>
+      <button type="button" className="mention-access-action" disabled={busy !== null} onClick={() => answer("decline")}>
+        {tr("timeline.personAccess.notNow")}
+      </button>
+      {failed && <span className="person-message-access-error" role="alert">{tr("timeline.personAccess.failed")}</span>}
+    </div>
   );
 }
 
@@ -1229,6 +1290,7 @@ function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
   }
   if (a.kind === "person-message" && b.kind === "person-message") {
     return a.text === b.text && a.carryToAgent === b.carryToAgent && a.replyToSeq === b.replyToSeq
+      && a.accessRequest?.outcome === b.accessRequest?.outcome && !a.accessRequest === !b.accessRequest
       && a.delivered === b.delivered && a.continuation === b.continuation
       && a.continued === b.continued && a.timeBreak === b.timeBreak
       && a.author?.userId === b.author?.userId && a.author?.name === b.author?.name

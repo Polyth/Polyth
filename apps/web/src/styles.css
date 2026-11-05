@@ -2760,6 +2760,87 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   .composer-suggestion { animation: composer-suggestion-in var(--motion-normal) var(--motion-ease) both; }
 }
 @keyframes composer-suggestion-in { from { opacity: 0; transform: translate3d(0, 4px, 0); } to { opacity: 1; transform: none; } }
+/* A mentioned person who cannot open the chat: one plateless line of the pending
+   stack, on its grid. The sentence and its action read as one; × ends the line.
+   The sentence is the question, so it wraps rather than ellipsises. */
+.mention-access {
+  min-inline-size: 0; box-sizing: border-box;
+  margin: 0 0 var(--space-1);
+  padding-inline-start: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  padding-inline-end: calc(var(--composer-stack-end) - (max(var(--composer-stack-control), var(--hit-min)) - var(--icon-sm)) / 2);
+  color: var(--chat-ink-dim);
+  font-size: var(--font-composer-stack);
+}
+.mention-access-row {
+  display: flex; align-items: center;
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  min-block-size: var(--composer-stack-row);
+}
+.mention-access-mark.person-mark {
+  --person-mark: var(--icon-sm);
+  flex: none;
+  inline-size: var(--icon-sm); block-size: var(--icon-sm);
+  font-size: calc(var(--icon-sm) * .62);
+}
+.mention-access-check { display: inline-grid; flex: none; place-items: center; color: var(--chat-ink-green); }
+.mention-access-text { flex: 0 1 auto; min-inline-size: 0; line-height: 1.25; overflow-wrap: anywhere; text-wrap: pretty; }
+.mention-access[data-attention] .mention-access-text {
+  color: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-dim), var(--text));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mention-access { animation: composer-suggestion-in var(--motion-normal) var(--motion-ease) both; }
+  .mention-access[data-attention] .mention-access-text { animation: mention-access-nudge var(--motion-surface) var(--motion-ease); }
+}
+@keyframes mention-access-nudge { 0% { opacity: .35; } 100% { opacity: 1; } }
+.mention-access-action {
+  display: inline-flex; flex: none; align-items: center; gap: 2px;
+  min-block-size: max(var(--composer-stack-control), var(--hit-min));
+  padding: 0 var(--space-1);
+  border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--chat-ink-dim);
+  font: inherit; font-weight: 550; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.mention-access-action.is-primary { color: var(--chat-ink-accent); }
+.mention-access-action:disabled { opacity: .6; cursor: default; }
+@media (hover: hover) {
+  .mention-access-action:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.mention-access-action:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+.mention-access-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.mention-access-level.is-static { flex: none; font-weight: 550; }
+.mention-access .mention-access-dismiss {
+  flex: none; margin-inline-start: auto; color: var(--chat-ink-muted);
+  inline-size: max(var(--composer-stack-control), var(--hit-min)); block-size: max(var(--composer-stack-control), var(--hit-min));
+  border-radius: var(--radius-control);
+}
+/* The level menu is about as wide as its sentence. Where the two do not fit side
+   by side it takes a row under the words, rather than squeezing them into a
+   column one word wide; the × stays beside the first line. */
+.mention-access { container-type: inline-size; }
+@container (max-width: 34rem) {
+  .mention-access[data-state="granted"] .mention-access-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 0;
+  }
+  .mention-access[data-state="granted"] .mention-access-text { grid-area: 1 / 2; }
+  .mention-access[data-state="granted"] .mention-access-dismiss { grid-area: 1 / 3; }
+  .mention-access[data-state="granted"] .mention-access-level {
+    grid-area: 2 / 2;
+    justify-self: start;
+    margin-block-start: calc(var(--space-2) * -1);
+    margin-inline-start: calc(var(--space-1) * -1);
+  }
+}
+.mention-access-note {
+  margin: 0;
+  padding-inline-start: calc(var(--composer-stack-text) - var(--composer-stack-mark) + var(--icon-sm) / 2);
+  padding-inline-end: var(--space-1);
+  color: var(--chat-ink-muted);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
 .composer-mode-label {
   color: var(--accent); font-size: var(--font-meta); font-weight: 600; padding: 6px 10px 0;
 }
@@ -10431,6 +10512,8 @@ min-height: var(--tap);
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* The base Send holds a fixed disc through flex-basis, which beats `width`. */
+  flex: 0 1 auto;
   width: auto;
   max-inline-size: 220px;
   padding-inline: 12px 15px;
@@ -12795,6 +12878,13 @@ width: var(--tap);
     color: var(--control-disabled-ink);
   }
   .composer-mobile .composer-action-label { display: none; }
+  /* Without its label the people Send is the same disc as any other. */
+  .composer-mobile .composer-rail .send.composer-people-send {
+    flex: 0 0 var(--composer-action-size);
+    width: var(--composer-action-size);
+    padding-inline: 0;
+    justify-content: center;
+  }
 
   /* Fresh and in-conversation chats use this same composer gutter. */
   .composer-chat.composer-mobile {
@@ -20963,7 +21053,8 @@ body.desktop-app .lock-screen {
   grid-template-columns: auto 0 minmax(0, 1fr);
   grid-template-areas:
     "check mark line"
-    "check .    note";
+    "check .    note"
+    "check .    access";
   align-items: end;
   border-radius: var(--radius-card);
 }
@@ -21142,6 +21233,23 @@ body.desktop-app .lock-screen {
 }
 .person-message.is-own .person-message-carry { justify-self: end; }
 .person-message-carry[data-delivered] { color: var(--muted); }
+/* Asking to open the chat to someone: for the person asking and the person
+   asked, on the same line as the rest of the bubble's notes. */
+.person-message-access {
+  grid-area: access;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: start;
+  gap: 0 var(--space-1);
+  margin-block-start: var(--space-1);
+  padding-inline: calc(var(--person-tail-w) + var(--space-3));
+  color: var(--chat-ink-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.person-message.is-own .person-message-access { justify-self: end; justify-content: flex-end; }
+.person-message-access-error { flex-basis: 100%; color: var(--chat-ink-red); }
 /* A bubble that just arrived rises from its tail corner. */
 @media (prefers-reduced-motion: no-preference) {
   .msg.person-message.is-entering .person-message-text {

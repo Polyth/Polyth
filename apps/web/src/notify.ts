@@ -29,7 +29,8 @@ import {
   recordChat,
   type PeopleThread,
 } from "./peopleAlerts.ts";
-import { forgetPersonMessageOperation, personMessageOperationId, postPersonMessage } from "./sessionPeople.ts";
+import { getLocale } from "./i18n/index.ts";
+import { decidePersonAccess, firstNamesList, forgetPersonMessageOperation, personMessageOperationId, postPersonMessage } from "./sessionPeople.ts";
 
 export function requestNotifyPermission(): void {
   if (isNativeMobile()) {
@@ -347,6 +348,15 @@ function showPeopleCard(record: NotificationRecord): void {
       mention: thread.mention,
       open: () => { void openSession(sessionId).catch(() => undefined); },
       reply: (text) => replyFromCard(sessionId, text),
+      ...(thread.accessRequest ? {
+        accessRequest: {
+          names: firstNamesList(thread.accessRequest.people.map((person) => person.name), getLocale()),
+          decide: async (decision: "share" | "decline") => {
+            await decidePersonAccess(sessionId, thread.accessRequest!.messageSeq, { decision });
+            markPeopleRead(sessionId);
+          },
+        },
+      } : {}),
     },
     onDismiss: () => { peopleThreads.delete(sessionId); },
   });

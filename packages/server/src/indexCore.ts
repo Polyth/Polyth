@@ -777,6 +777,13 @@ export async function boot(opts: BootOptions = {}) {
   // allowlists). Called at request time, after the harness registry below
   // exists; descriptors read their account record live.
   const harnessAccess = () => harnessAccessOf(harnesses.providers().map((provider) => provider.descriptor));
+  // Its seams resolve per call: everything they reach is composed further down.
+  const sessionSharing = createSessionSharingService({
+    projection: (sessionId) => store.projection(sessionId),
+    accessChanged: (projections, formerReaders) => broadcast.sessionAccessChanged?.(projections, formerReaders),
+    hasPersonalMcpServers: (userId) => mcp.hasPersonalServers(userId),
+    leftPrivate: (spaceId, chats) => personalMcpReprovision?.leftPrivate(spaceId, chats),
+  });
   const { gateway: spaceGateway } = await createSpaceGateway({
     dataDir,
     registry: projects,
@@ -785,6 +792,7 @@ export async function boot(opts: BootOptions = {}) {
       if (!sessionsRef) throw new Error("session service is not composed yet");
       return sessionsRef;
     },
+    sharing: () => sessionSharing,
     // Read per call, after the harness registry below exists.
     harnessAccess,
     // harness-runtime owns the person's saved default; resolved per create.
@@ -2352,7 +2360,7 @@ export async function boot(opts: BootOptions = {}) {
   const deliverToRecipient = async (
     recipient: NotificationAccount,
     payload: PushPayload,
-    people?: Pick<NotificationRecord, "author" | "chat">,
+    people?: Pick<NotificationRecord, "author" | "chat" | "accessRequest">,
   ): Promise<void> => {
     const { key, projectId } = payload;
     if (!key || !payload.sessionId || !projectId) {
@@ -2386,6 +2394,7 @@ export async function boot(opts: BootOptions = {}) {
     text: string;
     mentions: Array<{ userId: string; name?: string }>;
     audience: Array<{ userId: string; name?: string }>;
+    accessRequest?: { approver: { userId: string }; people: Array<{ userId: string; name?: string }> };
   }): Promise<void> => {
     const target = await store.projection(input.sessionId);
     if (!target || !target.spaceId) return;
@@ -2393,11 +2402,17 @@ export async function boot(opts: BootOptions = {}) {
     const authorName = input.author.name?.trim() || input.author.userId;
     const sessionTitle = target.title || "Session";
     const excerpt = plainTextExcerpt(input.text, 200);
-    const deliver = (person: { userId: string }, kind: "mention" | "message"): void => {
+    const deliver = (
+      person: { userId: string },
+      kind: "mention" | "message",
+      asked?: NonNullable<NotificationRecord["accessRequest"]>["people"],
+    ): void => {
       // Recheck at delivery: content never reaches someone outside the audience.
       if (!sessionAccess(person.userId, spaceId, input.sessionId)) return;
       // Read like a messenger: who and where in the title, the words in the body.
-      const title = kind === "mention" ? `${authorName} mentioned you · ${sessionTitle}` : `${authorName} · ${sessionTitle}`;
+      const title = asked
+        ? `${authorName} asks you to share · ${sessionTitle}`
+        : kind === "mention" ? `${authorName} mentioned you · ${sessionTitle}` : `${authorName} · ${sessionTitle}`;
       const payload: PushPayload = {
         kind,
         sessionId: input.sessionId,
@@ -2406,20 +2421,32 @@ export async function boot(opts: BootOptions = {}) {
         // One notification per chat: the service worker stacks a burst into
         // it (`chat`/`line`) instead of piling up one alert per message.
         tag: `polyth-people-${input.sessionId}`,
-        key: `person-message:${input.sessionId}:${input.seq}:${kind}`,
+        key: `person-message:${input.sessionId}:${input.seq}:${asked ? "access-request" : kind}`,
         projectId: target.projectId,
         chat: plainTextExcerpt(sessionTitle, 100),
         line: plainTextExcerpt(`${authorName}: ${excerpt}`, 160),
       };
       // The inbox row also names the author and chat, so a client can draw
       // who wrote it (identity colour, monogram) without parsing the title.
-      const people = { author: { userId: input.author.userId, name: authorName }, chat: plainTextExcerpt(sessionTitle, 100) };
+      // A request is a `mention`: it needs the same urgency and alert routing,
+      // and a client that predates it still shows the message.
+      const people = {
+        author: { userId: input.author.userId, name: authorName },
+        chat: plainTextExcerpt(sessionTitle, 100),
+        ...(asked ? { accessRequest: { messageSeq: input.seq, people: asked } } : {}),
+      };
       void deliverToRecipient({ userId: person.userId, spaceId }, payload, people).catch((error) => {
         console.error("[polyth] person message notification failed", error);
       });
     };
     for (const person of input.mentions) deliver(person, "mention");
     for (const person of input.audience) deliver(person, "message");
+    if (input.accessRequest) {
+      deliver(input.accessRequest.approver, "mention", input.accessRequest.people.map((person) => ({
+        userId: person.userId,
+        name: person.name?.trim() || person.userId,
+      })));
+    }
   };
   const pushNotifier = createPushNotifier({
     send: async (payload) => {
@@ -3429,12 +3456,7 @@ export async function boot(opts: BootOptions = {}) {
     }),
     sessionRetentionRoutes(spaceServices, releaseArchivedCheckouts),
     promptHistoryRoutes({ spaces: spaceServices, store }),
-    sharingRoutes(createSessionSharingService({
-      projection: (sessionId) => store.projection(sessionId),
-      accessChanged: (projections, formerReaders) => broadcast.sessionAccessChanged?.(projections, formerReaders),
-      hasPersonalMcpServers: (userId) => mcp.hasPersonalServers(userId),
-      leftPrivate: (spaceId, chats) => personalMcpReprovision?.leftPrivate(spaceId, chats),
-    })),
+    sharingRoutes(sessionSharing),
     agentSessionRoutes({
       spaces: spaceServices,
       store,
