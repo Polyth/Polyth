@@ -151,6 +151,12 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   Notifications that arrive inside a live turn stay with that turn
   (`packages/backend-claude/test/streamingAdmission.test.ts`,
   `packages/server/test/runtimeFeaturesHardening.test.ts`).
+  `ScheduleWakeup` is disallowed: a firing wake is a plain queued prompt with no
+  task notification to hand off, so its loop would be refused and interrupted
+  while the agent waits for it. `CronCreate`, `CronDelete` and `CronList` go with
+  it; recorded cron prompts were never delivered, though that path was not
+  traced. The CLI still lists `/loop`, which depends on these tools. Recurring
+  work belongs to the `agents` package's schedules.
   Bookkeeping no turn owns — capability, command and context telemetry, session
   compaction — is never turn content and is not gated. Requests
   (`permission/requested`, `question/asked`) are never gated either: they stay

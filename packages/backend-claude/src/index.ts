@@ -22,6 +22,11 @@ import { CLAUDE_QUESTION_DISMISSED, CLAUDE_QUESTION_TOOL, CLAUDE_QUESTION_UNREAD
 const UNADMITTED_INTERRUPT_AFTER = 25;
 /** How long a turn waits for an interrupted unadmitted loop to finish. */
 const UNADMITTED_SETTLE_MS = 10_000;
+/** A firing `ScheduleWakeup` is a plain queued prompt with no task notification
+ *  to hand off as a Polyth wake, so its loop is refused and interrupted while
+ *  the agent waits for it. The cron tools make the same promise of a later
+ *  prompt and go with it. */
+const NATIVE_SCHEDULING_TOOLS = ["ScheduleWakeup", "CronCreate", "CronDelete", "CronList"];
 /** A `/compact` reports its outcome in a status message; the CLI's closing
  *  `result` normally follows at once. Stop waiting for it after this long. */
 const COMPACTION_RESULT_GRACE_MS = 5_000;
@@ -624,8 +629,8 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     // Agent beta keeps read/browser interaction available but
                     // removes every native workspace mutation escape hatch.
                     disallowedTools: agentBetaEnabled()
-                        ? ["Agent", "Task", "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
-                        : ["Agent", "Task"],
+                        ? ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS, "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
+                        : ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS],
                     ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
                     ...(overlay?.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
                     ...(overlay?.plugins ? { plugins: overlay.plugins } : {}),
