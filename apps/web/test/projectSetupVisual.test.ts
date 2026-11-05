@@ -32,11 +32,15 @@ test("new-project step 1 scrolls from General to the actions as one region", asy
 
   // Editor and the primary action live inside the same scroll container.
   assert.match(setupTsx, /<div className="project-setup-scroll">\s*(?:\{[^}]*\}\s*)?<ProjectCompositionEditor[^>]*\/>\s*<div className="project-setup-actions">/);
-  // Both steps close from the top-end X. Step 1 keeps only Continue in its
-  // footer, so dismissing it never means going Back for a bottom Cancel.
-  assert.match(setupTsx, /<div className="project-setup-intro">[\s\S]*?<IconButton icon=\{CloseIcon\} label=\{tr\("common\.close"\)\} onClick=\{cancel\} \/>\s*<\/div>/);
-  assert.match(setupTsx, /<div className="project-setup-actions">\s*<Button variant="primary"[^>]*>[\s\S]*?<\/div>/);
+  // Both steps close from the top-end X, on the title line, and step 1 keeps
+  // only Continue in its footer (a compact primary matching step 2's), so
+  // dismissing it never means going Back for a bottom Cancel.
+  assert.match(setupTsx, /<div className="project-setup-heading">\s*<h2>[\s\S]*?<IconButton icon=\{CloseIcon\} label=\{tr\("common\.close"\)\} onClick=\{cancel\} \/>/);
+  assert.match(setupTsx, /<div className="project-setup-actions">\s*<Button size="sm" variant="primary"[^>]*>[\s\S]*?<\/div>/);
   assert.doesNotMatch(setupTsx, /<div className="project-setup-actions">\s*<Button[^>]*onClick=\{cancel\}/);
+  // The picker is step 2 of the same flow: same eyebrow, same hint slot.
+  assert.match(setupTsx, /stepLabel: tr\("projectcomposition\.setupStep2"\)/);
+  assert.match(setupTsx, /subtitle: tr\("projectcomposition\.pickerHint"\)/);
   assert.match(setupCss, /\.project-setup-scroll \{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s);
   // The expanded Workspace list must not become a nested scroll box here:
   // in a half-height window it collapsed to 0px.

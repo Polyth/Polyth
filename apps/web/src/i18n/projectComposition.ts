@@ -45,7 +45,8 @@ const en = {
   "projectcomposition.setupTitle": "Set up your project",
   "projectcomposition.setupHint": "Pick one or more. Polyth shows the tools that fit this kind of work first. It only changes what you see, and you can change it later.",
   "projectcomposition.setupStep": "New project · Step 1 of 2",
-  "projectcomposition.pickerSubtitle": "Step 2 of 2 · Choose the folder with your files.",
+  "projectcomposition.setupStep2": "New project · Step 2 of 2",
+  "projectcomposition.pickerHint": "Choose the folder with your files.",
   "projectcomposition.createdNotResolved": "The project was created but could not be resolved. Refresh projects and try again.",
   "projectcomposition.interfaceTitle": "Interface across projects",
   "projectcomposition.interfaceHint": "Rail buttons, header tabs, widgets, Canvas, and the phone Workspace panel and composer buttons. Only your own view changes.",
@@ -119,7 +120,8 @@ export const projectCompositionLocales = {
     "projectcomposition.setupTitle": "Налаштуй проєкт",
     "projectcomposition.setupHint": "Обери один або кілька. Polyth насамперед покаже інструменти для такої роботи. Це змінює лише те, що ти бачиш, і це можна змінити згодом.",
     "projectcomposition.setupStep": "Новий проєкт · Крок 1 з 2",
-    "projectcomposition.pickerSubtitle": "Крок 2 з 2 · Обери папку з твоїми файлами.",
+    "projectcomposition.setupStep2": "Новий проєкт · Крок 2 з 2",
+    "projectcomposition.pickerHint": "Обери папку з твоїми файлами.",
     "projectcomposition.createdNotResolved": "Проєкт створено, але його не вдалося знайти в реєстрі. Онови список проєктів і спробуй ще раз.",
   }),
   de: locale({
@@ -145,7 +147,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Erneut versuchen",
     "projectcomposition.setupTitle": "Projekt einrichten",
     "projectcomposition.setupStep": "Neues Projekt · Schritt 1 von 2",
-    "projectcomposition.pickerSubtitle": "Schritt 2 von 2 · Wähle den Ordner mit deinen Dateien.",
+    "projectcomposition.setupStep2": "Neues Projekt · Schritt 2 von 2",
+    "projectcomposition.pickerHint": "Wähle den Ordner mit deinen Dateien.",
   }),
   fr: locale({
     "projectcomposition.whatAreYouWorkingOn": "Sur quoi travailles-tu ?",
@@ -170,7 +173,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Réessayer",
     "projectcomposition.setupTitle": "Configurer ton projet",
     "projectcomposition.setupStep": "Nouveau projet · Étape 1 sur 2",
-    "projectcomposition.pickerSubtitle": "Étape 2 sur 2 · Choisissez le dossier avec vos fichiers.",
+    "projectcomposition.setupStep2": "Nouveau projet · Étape 2 sur 2",
+    "projectcomposition.pickerHint": "Choisissez le dossier avec vos fichiers.",
   }),
   pl: locale({
     "projectcomposition.whatAreYouWorkingOn": "Nad czym pracujesz?",
@@ -195,7 +199,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Spróbuj ponownie",
     "projectcomposition.setupTitle": "Skonfiguruj projekt",
     "projectcomposition.setupStep": "Nowy projekt · Krok 1 z 2",
-    "projectcomposition.pickerSubtitle": "Krok 2 z 2 · Wybierz folder z Twoimi plikami.",
+    "projectcomposition.setupStep2": "Nowy projekt · Krok 2 z 2",
+    "projectcomposition.pickerHint": "Wybierz folder z Twoimi plikami.",
   }),
   "pt-BR": locale({
     "projectcomposition.whatAreYouWorkingOn": "No que você está trabalhando?",
@@ -220,7 +225,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Tentar novamente",
     "projectcomposition.setupTitle": "Configurar seu projeto",
     "projectcomposition.setupStep": "Novo projeto · Etapa 1 de 2",
-    "projectcomposition.pickerSubtitle": "Passo 2 de 2 · Escolha a pasta com seus arquivos.",
+    "projectcomposition.setupStep2": "Novo projeto · Etapa 2 de 2",
+    "projectcomposition.pickerHint": "Escolha a pasta com seus arquivos.",
   }),
   it: locale({
     "projectcomposition.whatAreYouWorkingOn": "Su cosa stai lavorando?",
@@ -245,7 +251,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Riprova",
     "projectcomposition.setupTitle": "Configura il progetto",
     "projectcomposition.setupStep": "Nuovo progetto · Passo 1 di 2",
-    "projectcomposition.pickerSubtitle": "Passo 2 di 2 · Scegli la cartella con i tuoi file.",
+    "projectcomposition.setupStep2": "Nuovo progetto · Passo 2 di 2",
+    "projectcomposition.pickerHint": "Scegli la cartella con i tuoi file.",
   }),
   es: locale({
     "projectcomposition.whatAreYouWorkingOn": "¿En qué estás trabajando?",
@@ -270,7 +277,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Reintentar",
     "projectcomposition.setupTitle": "Configura tu proyecto",
     "projectcomposition.setupStep": "Nuevo proyecto · Paso 1 de 2",
-    "projectcomposition.pickerSubtitle": "Paso 2 de 2 · Elige la carpeta con tus archivos.",
+    "projectcomposition.setupStep2": "Nuevo proyecto · Paso 2 de 2",
+    "projectcomposition.pickerHint": "Elige la carpeta con tus archivos.",
   }),
   "zh-CN": locale({
     "projectcomposition.whatAreYouWorkingOn": "你在做什么？",
@@ -295,7 +303,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "重试",
     "projectcomposition.setupTitle": "设置你的项目",
     "projectcomposition.setupStep": "新项目 · 第 1 步，共 2 步",
-    "projectcomposition.pickerSubtitle": "第 2 步，共 2 步 · 选择存放你文件的文件夹。",
+    "projectcomposition.setupStep2": "新项目 · 第 2 步，共 2 步",
+    "projectcomposition.pickerHint": "选择存放你文件的文件夹。",
   }),
   bg: locale({
     "projectcomposition.whatAreYouWorkingOn": "По какво работиш?",
@@ -320,7 +329,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Опитай отново",
     "projectcomposition.setupTitle": "Настрой проекта",
     "projectcomposition.setupStep": "Нов проект · Стъпка 1 от 2",
-    "projectcomposition.pickerSubtitle": "Стъпка 2 от 2 · Избери папката с твоите файлове.",
+    "projectcomposition.setupStep2": "Нов проект · Стъпка 2 от 2",
+    "projectcomposition.pickerHint": "Избери папката с твоите файлове.",
   }),
   ar: locale({
     "projectcomposition.whatAreYouWorkingOn": "ما الذي تعمل عليه؟",
@@ -345,7 +355,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "إعادة المحاولة",
     "projectcomposition.setupTitle": "إعداد مشروعك",
     "projectcomposition.setupStep": "مشروع جديد · الخطوة 1 من 2",
-    "projectcomposition.pickerSubtitle": "الخطوة 2 من 2 · اختر المجلد الذي يحوي ملفاتك.",
+    "projectcomposition.setupStep2": "مشروع جديد · الخطوة 2 من 2",
+    "projectcomposition.pickerHint": "اختر المجلد الذي يحوي ملفاتك.",
   }),
   pt: locale({
     "projectcomposition.whatAreYouWorkingOn": "Em que estás a trabalhar?",
@@ -370,7 +381,8 @@ export const projectCompositionLocales = {
     "projectcomposition.retry": "Tentar novamente",
     "projectcomposition.setupTitle": "Configura o projeto",
     "projectcomposition.setupStep": "Novo projeto · Passo 1 de 2",
-    "projectcomposition.pickerSubtitle": "Passo 2 de 2 · Escolha a pasta com os seus ficheiros.",
+    "projectcomposition.setupStep2": "Novo projeto · Passo 2 de 2",
+    "projectcomposition.pickerHint": "Escolha a pasta com os seus ficheiros.",
   }),
 } satisfies LocaleBundle;
 

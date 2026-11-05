@@ -36,34 +36,37 @@
   z-index: 1;
 }
 
+/* Step head: flow eyebrow, then the title row (title + the one close
+   affordance), then the hint across the content column. Both steps render
+   this exact stack, so the title, the X and the text column never move when
+   the flow advances. */
 .project-setup-intro {
-  display: flex;
-  gap: var(--space-2);
+  display: grid;
   flex: none;
-  align-items: flex-start;
-  justify-content: space-between;
+  gap: var(--space-1);
   min-width: 0;
   margin: 0;
   padding: var(--space-5) var(--space-5) var(--space-4);
   border-bottom: 1px solid var(--hair);
 }
 
-/* The one close affordance of step 1 sits where step 2's X sits: top end of
-   the dialog head, aligned with the step label rather than the heading. */
-.project-setup-intro-copy {
-  display: grid;
-  flex: 1 1 auto;
-  gap: var(--space-1);
+.project-setup-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
   min-width: 0;
 }
 
-.project-setup-intro > .ui-icon-btn {
+.project-setup-heading > .ui-icon-btn {
   flex: none;
-  margin-block-start: calc(var(--space-1) * -1);
-  margin-inline-end: calc(var(--space-2) * -1);
+  /* Optically centred on the first title line instead of hanging above it. */
+  margin-block-start: -6px;
 }
 
 .project-setup-intro h2 {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   color: var(--text);
   font-size: var(--font-heading);
@@ -82,6 +85,11 @@
 }
 
 .project-setup-step {
+  display: flex;
+  align-items: center;
+  /* One icon-control line, like step 2's Back row: the title and the X keep
+     their exact position when the flow advances. */
+  min-height: var(--control-h-sm);
   width: max-content;
   max-width: 100%;
   color: var(--accent);
@@ -234,7 +242,7 @@ body[data-desktop-low-resource="true"] :is(
   }
 
   .project-setup-intro {
-    gap: var(--space-2);
+    gap: var(--space-1);
     padding:
       max(var(--space-3), var(--safe-top))
       max(var(--space-3), var(--safe-right))
@@ -243,9 +251,8 @@ body[data-desktop-low-resource="true"] :is(
     border-bottom-color: color-mix(in srgb, var(--material-glass-border) 72%, transparent);
   }
 
-  .project-setup-intro > .ui-icon-btn {
-    margin-block-start: 0;
-    margin-inline-end: calc(var(--space-1) * -1);
+  .project-setup-heading > .ui-icon-btn {
+    margin-block-start: -4px;
   }
 
   .project-setup-intro h2 {
@@ -303,8 +310,8 @@ body[data-desktop-low-resource="true"] :is(
   }
 
   .folder-dialog .folder-list {
-    margin-inline-start: max(var(--space-2), var(--safe-left));
-    margin-inline-end: max(var(--space-2), var(--safe-right));
+    margin-inline-start: max(var(--space-3), var(--safe-left));
+    margin-inline-end: max(var(--space-3), var(--safe-right));
     border-radius: var(--radius-card);
   }
 

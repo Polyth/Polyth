@@ -1110,12 +1110,24 @@ window stays usable. Continue opens step 2, `ProjectFolderDialog` with
 `onBack`. Back keeps the chosen directions. Settings reuse the same picker
 without `onBack`.
 
-Both steps are dismissed from the same place: one X in the dialog's top-end
-corner. Step 1 has no bottom Cancel — its footer carries only Continue, so the
-way out does not move between steps and the footer never competes with the
-primary action. The X is never the opening focus (`initialFocus` is the first
-`.project-direction-card`), so Enter on an open step 1 does not dismiss it;
-Escape still closes every step.
+Both steps render one head grid and one footer bar, so nothing jumps when the
+flow advances (`apps/web/test/projectFlowLayout.test.ts` measures it):
+
+- **Head.** A flow eyebrow (`.project-setup-step` / `.folder-dialog-step`,
+  `projectcomposition.setupStep` and `setupStep2`), then the title line with
+  the one close control at the end column, then the hint. Both label rows are
+  one icon-control line tall, so the title and the X keep their exact offset
+  from the dialog's top edge on every step, and both titles, contents and
+  primary actions share one content column (24px gutters on desktop, 12px on
+  phones).
+- **Back.** Step 2 leads its eyebrow row with Back, never beside the title, so
+  the title and the X never shift. Back keeps the chosen directions.
+- **Footer.** Step 1 has no bottom Cancel: its footer carries only the compact
+  Continue (same height as the picker's primary action) and Back is the only
+  way to the previous step. Escape closes every step.
+- **Focus.** The X is never the opening focus (`initialFocus` is the first
+  `.project-direction-card`), so Enter on an open step 1 does not dismiss it.
+  On step 2 the folder list keeps that role.
 
 When the account uses one interface for every project (Settings → Projects →
 Interface across projects, `projectInterfaceScope.ts`), directions shape

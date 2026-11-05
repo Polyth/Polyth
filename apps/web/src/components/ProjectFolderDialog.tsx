@@ -119,6 +119,7 @@ export default function ProjectFolderDialog({
   confirmLabel,
   title = tr("projectfolderdialog.openAProject"),
   subtitle = tr("projectfolderdialog.chooseLocalFolder"),
+  stepLabel,
 }: {
   onClose: () => void;
   /** Called after the project has been added/activated. */
@@ -132,6 +133,9 @@ export default function ProjectFolderDialog({
   confirmLabel?: string;
   title?: string;
   subtitle?: string;
+  /** Flow position ("New project · Step 2 of 2") shown as the head eyebrow,
+   *  exactly where step 1 shows its own. Absent outside a multi-step flow. */
+  stepLabel?: string;
 }) {
   const [path, setPath] = useState("");
   const [pathInput, setPathInput] = useState("");
@@ -457,19 +461,33 @@ export default function ProjectFolderDialog({
       resolveRestoreFocus={resolveRestoreFocus}
     >
       <div
-        className="folder-dialog-body"
+        className={`folder-dialog-body${stepLabel ? " folder-dialog-body-stepped" : ""}`}
         data-source-armed={armedSource?.id}
         onKeyDown={onDialogKeyDown}
       >
-        <div className="folder-dialog-head">
-          {onBack && (
-            <IconButton icon={BackIcon} variant="quiet" className="folder-back" label={tr("common.back")} disabled={busy} onClick={onBack} />
+        <div className={`folder-dialog-head${stepLabel ? " folder-dialog-head-stepped" : ""}`}>
+          {/* A stepped flow keeps one stable column: the flow label on the
+              first line (with Back leading it on every step after the first),
+              then the title with the one close affordance. Back never moves
+              the title or the X between steps. */}
+          {stepLabel && (
+            <div className="folder-dialog-step-row">
+              {onBack && (
+                <IconButton icon={BackIcon} className="folder-back" label={tr("common.back")} disabled={busy} onClick={onBack} />
+              )}
+              <span className="folder-dialog-step">{stepLabel}</span>
+            </div>
           )}
-          <div className="folder-dialog-heading">
-            <div className="folder-dialog-title">{title}</div>
-            <div className="folder-dialog-subtitle">{subtitle}</div>
+          <div className="folder-dialog-head-row">
+            {!stepLabel && onBack && (
+              <IconButton icon={BackIcon} variant="quiet" className="folder-back" label={tr("common.back")} disabled={busy} onClick={onBack} />
+            )}
+            <div className="folder-dialog-heading">
+              <div className="folder-dialog-title">{title}</div>
+              <div className="folder-dialog-subtitle">{subtitle}</div>
+            </div>
+            <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
           </div>
-          <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
         </div>
 
         {/* A `solo` alternative source (e.g. SSH) drives its own browser, so

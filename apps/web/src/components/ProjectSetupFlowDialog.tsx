@@ -110,7 +110,10 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
         onClose={pickerClosed}
         onOpened={projectOpened}
         onBack={sharedInterface ? undefined : backToCompose}
-        {...(sharedInterface ? {} : { subtitle: tr("projectcomposition.pickerSubtitle") })}
+        {...(sharedInterface ? {} : {
+          stepLabel: tr("projectcomposition.setupStep2"),
+          subtitle: tr("projectcomposition.pickerHint"),
+        })}
       />
     );
   }
@@ -148,19 +151,19 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
           Step 1 keeps only Continue in its footer, so the way out never moves
           and the bottom bar never competes with the primary action. */}
       <div className="project-setup-intro">
-        <div className="project-setup-intro-copy">
-          <span className="project-setup-step">{tr("projectcomposition.setupStep")}</span>
+        <span className="project-setup-step">{tr("projectcomposition.setupStep")}</span>
+        <div className="project-setup-heading">
           <h2>{tr("projectcomposition.whatAreYouWorkingOn")}</h2>
-          <p>{tr("projectcomposition.setupHint")}</p>
+          <IconButton icon={CloseIcon} label={tr("common.close")} onClick={cancel} />
         </div>
-        <IconButton icon={CloseIcon} label={tr("common.close")} onClick={cancel} />
+        <p className="project-setup-hint">{tr("projectcomposition.setupHint")}</p>
       </div>
       {/* One scroll region from the directions down to the actions: a short
           window must not trap the expanded Workspace list in its own box. */}
       <div className="project-setup-scroll">
         <ProjectCompositionEditor value={composition} onChange={setComposition} purposeHeading={false} />
         <div className="project-setup-actions">
-          <Button variant="primary" iconEnd={ChevronRightIcon} onClick={continueToPicker}>{tr("common.continue")}</Button>
+          <Button size="sm" variant="primary" iconEnd={ChevronRightIcon} onClick={continueToPicker}>{tr("common.continue")}</Button>
         </div>
       </div>
     </Dialog>

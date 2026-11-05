@@ -5579,13 +5579,41 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-dialog-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; container-type: inline-size; }
 .folder-list[aria-busy="true"] { opacity: 0.6; pointer-events: none; }
 .folder-dialog-head {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  display: flex; flex-direction: column; gap: 0;
   padding: 16px 18px 6px;
 }
+.folder-dialog-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
 .folder-dialog-heading { flex: 1; min-width: 0; }
-.folder-dialog-head > .folder-back { margin-inline-start: -6px; }
+.folder-dialog-head-row > .folder-back { margin-inline-start: -6px; }
+/* In a stepped flow the close control centres on the first title line. */
+.folder-dialog-body-stepped .folder-dialog-head-row > .ui-icon-btn { margin-block-start: -6px; }
 .folder-dialog-title { font-size: var(--font-window-title); font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; }
 .folder-dialog-subtitle { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); margin-top: 3px; }
+/* Stepped picker (project setup step 2): the same eyebrow → title → hint
+   stack step 1 uses, on the same content column. */
+.folder-dialog-step {
+  color: var(--accent);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+.folder-dialog-head-stepped { gap: 2px; }
+.folder-dialog-step-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  /* The row is the Back control's height; the label sits on its centre line. */
+  min-height: var(--control-h-sm);
+}
+.folder-dialog-step-row > .folder-back { margin-inline-start: calc(var(--space-2) * -1); }
+.folder-dialog-head-stepped .folder-dialog-head-row { margin-block-start: 2px; }
+@media (min-width: 701px) {
+  .folder-dialog-body-stepped :is(.folder-dialog-head, .folder-toolbar, .folder-foot) { padding-inline: var(--space-5); }
+  .folder-dialog-body-stepped .folder-dialog-head { padding-block-start: var(--space-5); }
+  .folder-dialog-body-stepped :is(.folder-list, .folder-error) { margin-inline: var(--space-5); }
+}
 .folder-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 18px 10px; }
 .folder-toolbar .ui-icon-btn { flex-shrink: 0; }
 .folder-location { gap: 4px; padding-bottom: 4px; }
@@ -13175,7 +13203,8 @@ width: 100%; min-height: var(--tap);
   .folder-dialog-body { overflow: hidden; }
   .folder-dialog-head {
     flex: none;
-    padding: max(12px, var(--safe-top)) 14px 8px;
+    /* One phone gutter: head, toolbar, list and foot all start/end here. */
+    padding: max(12px, var(--safe-top)) var(--space-3) 8px;
   }
   .folder-toolbar {
     flex: none;
@@ -13199,7 +13228,8 @@ width: 100%; min-height: var(--tap);
     height: auto;
     min-height: 120px;
     flex: 1;
-    margin-inline: 8px;
+    /* Same gutter as the head, toolbar and foot above/below it. */
+    margin-inline: var(--space-3);
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
