@@ -14,6 +14,7 @@ const css = [
   "../../../apps/web/src/components/ui/WorkspaceSurfaceHeader.css",
   "../widgets/styles.css",
   "../widgets/source-control.css",
+  "../widgets/source-control-phone.css",
   "../widgets/repository-scope.css",
   "../../code-hosting/widgets/styles.css",
   "../../files/widgets/styles.css",
@@ -737,4 +738,56 @@ test("phone Source Control keeps the clean card, transport and tabs readable in 
   } finally {
     await phone.close();
   }
+});
+
+test("the phone overview fits every width, keeps tap-size rows and its layers are opaque", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const view: Page = page;
+  for (const width of [320, 390]) {
+    await view.setViewportSize({ width, height: 700 });
+    await view.setContent(`<style>${css}</style>
+      <div style="height:700px;display:flex;flex-direction:column">
+        <div class="git-page git-phone" data-density="compact">
+          <div class="git-phone-scroll">
+            <header class="git-phone-summary">
+              <h2 class="git-phone-title">12 files changed</h2>
+              <p class="git-phone-meta">not committed</p>
+              <button class="git-phone-branch"><span class="git-phone-branch-label">Isolated branch · based on a-really-long-integration-target-branch-name</span></button>
+            </header>
+            <div class="git-phone-files">${Array.from({ length: 30 }, (_, i) => `<div><button class="git-phone-file"><span class="git-phone-file-copy"><span class="git-phone-file-name">a-very-long-file-name-that-should-truncate-${i}.tsx</span><span class="git-phone-file-directory">packages/some/really/deep/directory/that/also/truncates/</span></span><span class="git-file-linestat"><span class="additions">+1234</span><span class="deletions">−567</span></span></button></div>`).join("")}</div>
+            <nav class="git-phone-nav"><button class="git-phone-row"><span class="git-phone-row-label">History</span><span class="git-phone-row-value">12</span></button></nav>
+          </div>
+          <footer class="git-phone-dock"><button class="ui-btn ui-btn--primary ui-btn--lg git-phone-primary" style="min-height:48px">Commit 12 files</button></footer>
+        </div>
+      </div>
+      <div class="sheet-backdrop"><div class="sheet git-phone-layer"><div class="sheet-head"><h2 class="sheet-title">a.ts</h2></div><div class="sheet-body"><div class="git-page git-phone-page">x</div></div></div></div>`);
+    const geometry = await view.evaluate(() => {
+      const rect = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+      const scroll = document.querySelector<HTMLElement>(".git-phone-scroll")!;
+      const dock = rect(".git-phone-dock");
+      const before = dock.top;
+      scroll.scrollTop = scroll.scrollHeight;
+      const layer = getComputedStyle(document.querySelector(".git-phone-layer")!);
+      return {
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        scrollOverflow: scroll.scrollWidth - scroll.clientWidth,
+        rowHeights: [...document.querySelectorAll<HTMLElement>(".git-phone-file, .git-phone-row, .git-phone-branch")].map((row) => row.getBoundingClientRect().height),
+        tap: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--tap")),
+        dockBottom: dock.bottom,
+        dockStayed: rect(".git-phone-dock").top === before,
+        lastRowReachable: rect(".git-phone-row").bottom <= before + 1,
+        layerFilter: layer.backdropFilter,
+        layerBackground: layer.backgroundColor,
+        layerWidth: document.querySelector(".git-phone-layer")!.getBoundingClientRect().width,
+      };
+    });
+    assert.ok(geometry.overflow <= 0 && geometry.scrollOverflow <= 0, `${width}px: nothing runs past the screen (${geometry.overflow}, ${geometry.scrollOverflow})`);
+    assert.ok(geometry.rowHeights.every((height) => height >= geometry.tap), `${width}px: every row is a tap target: ${geometry.rowHeights.join(", ")}`);
+    assert.ok(Math.abs(geometry.dockBottom - 700) <= 1, `${width}px: the action stays at the thumb (${geometry.dockBottom})`);
+    assert.ok(geometry.dockStayed && geometry.lastRowReachable, `${width}px: the list scrolls behind the action, all the way`);
+    assert.equal(geometry.layerFilter, "none", "a layer of code is not glass");
+    assert.doesNotMatch(geometry.layerBackground, /rgba\(.*, 0(\.\d+)?\)|transparent/, "and the window under it does not show through");
+    assert.equal(geometry.layerWidth, width, "a layer covers the window");
+  }
+  await view.setViewportSize({ width: 320, height: 720 });
 });

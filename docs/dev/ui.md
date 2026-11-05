@@ -1284,6 +1284,48 @@ agent draft actions. The failure reason and remote stay together; conflict
 counts remain visible alongside the recovery hint. Without a remote failure,
 the conflict recovery region appears only on Changes.
 
+On a phone (`useShellMode() === "phone"`) `GitView` presents through
+`GitPhoneView`, which owns placement only: every request and mutation stays in
+`GitView`, and `phoneOverview.ts` decides the state without touching the DOM.
+The first screen answers what changed and what happens next:
+
+- A title and one line (`5 files changed`, `+84 −12 · not committed`), then the
+  branch row in plain words (`Isolated branch · based on devel`). There are no
+  tabs, no Working tree / Branch vs base switch and no diff options.
+- The branch row opens a sheet (a `Menu`): the exact branch name with copy,
+  Sync, Fetch, Pull, Push, *Compare with*, Remote and Repository when there is a
+  choice, Refresh, and the identity slot. Status is already polled, so Refresh
+  is the only manual one and there is no pull-to-refresh gesture.
+- Files are always listed, one row per path; a partly staged file is one row.
+  History, Branches and Stashes are rows below them.
+- One primary action sits at the thumb and follows the state: **Commit N files**
+  with uncommitted work; **Integrate into …** for an isolated branch with
+  committed work (`useLanding`, shared with `LandingBar`); **Push/Pull/Sync** for
+  an ordinary branch out of step with its upstream; **Resolve with agent** for a
+  conflict; nothing when there is nothing to do. ⋯ holds what is rarer in that
+  state (stash, revert all, the integration target, stop the merge).
+
+Committing does not ask for staging first. An untouched index means everything
+is included; a non-empty index was chosen on purpose (hunks staged here, another
+device, an agent), so only those files are, and a partly staged file commits its
+staged part, which its row says. The commit sheet's file list and each file's
+*Include* button change that; `commitStagePlan` applies the difference to the
+index just before the commit (and before *Generate*, so the message describes
+what will go in). A failed commit leaves the sheet and message in place.
+
+A file, Compare, History, Branches, Stashes and Conflicts are full-screen layers
+built on `Sheet` (`dismiss="back"`, `.git-phone-layer`): opaque, moving by the
+phone stack's grammar, covering the window's head so there is one Back and one
+title. In the installed app a swipe pops them; in a phone browser the browser
+keeps that gesture (`swipeHost.ts`). A file layer has its options behind ⋯ (wrap
+lines, ignore whitespace, which part of a partly staged file, copy path, revert),
+previous and next, and Include or Mark resolved; hunk actions stay on the hunks.
+Diffs are unified with one line number per row, and wrap by default through their
+own `phoneWrap` preference. The log has no lane graph on a phone, and its branch
+filter moves to the layer's ⋯. A cold open always lands on the first screen, while
+a link to a file (`gitDiffPath`) and the isolation card's review hand-offs open
+their layer directly. The all-repositories overview is unchanged.
+
 Settings → Source control (`GitSettings.tsx`) is one page with five
 `SettingsTabs`, one per job: **Accounts** (default), **This project** (only with
 an active project), **Workflow**, **Display** and **Space** (only for Space

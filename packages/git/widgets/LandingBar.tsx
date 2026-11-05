@@ -24,7 +24,8 @@ import { createIsolationClient } from "./isolationClient.ts";
 const isolationClient = createIsolationClient();
 const branchDiffClient = createBranchDiffClient();
 
-type Tone = "ok" | "neutral" | "warn" | "danger";
+export type LandingTone = "ok" | "neutral" | "warn" | "danger";
+type Tone = LandingTone;
 type Check = { tone: Tone; text: string };
 
 /** What the check line knows beyond the status: read only for the recorded
@@ -46,16 +47,109 @@ const sameTarget = (a: { branch: string; path: string }, b: { branch: string; pa
  * Push on. The chat's isolation card stays the compact form of the same
  * state; both read the server's status, so a choice made here shows there.
  */
-export default function LandingBar({ host, projectId, sessionId, repositoryId, uncommitted, onReviewConflicts }: {
+export default function LandingBar({ host, projectId, sessionId, repositoryId, uncommitted, onReviewConflicts }: LandingInput & {
+  /** Open the Conflicts review; absent while it is already open. */
+  onReviewConflicts?: () => void;
+}) {
+  const landing = useLanding({ ...(host ? { host } : {}), projectId, sessionId, ...(repositoryId ? { repositoryId } : {}), uncommitted });
+  if (!landing) return null;
+  const { check, conflict, stranded, shownBranch, entries, choosing, setChoosing, busy, canChoose, canIntegrate, integrate, integrateLabel } = landing;
+  const chip = (
+    <span className="git-landing-target-name mono" title={shownBranch}>{shownBranch}</span>
+  );
+
+  return (
+    <section className="git-landing" aria-label={tr("landing.title")} data-tone={check.tone}>
+      <div className="git-landing-route">
+        <span className="git-landing-label">{tr("landing.integrateInto")}</span>
+        <Menu
+          label={tr("landing.chooseBranch")}
+          title={tr("landing.title")}
+          phonePresentation="sheet"
+          entries={entries}
+          open={choosing}
+          onOpenChange={setChoosing}
+        >
+          {(trigger) => (
+            <Button
+              {...trigger}
+              size="sm"
+              variant="quiet"
+              className="git-landing-target"
+              iconStart={BranchIcon}
+              iconEnd={ChevronDownIcon}
+              busy={busy === "retarget"}
+              disabled={busy === "merge"}
+            >
+              {chip}
+            </Button>
+          )}
+        </Menu>
+      </div>
+      <p className="git-landing-check" data-tone={check.tone} role="status">
+        {check.tone === "ok" && <Icon icon={CheckIcon} size="sm" />}
+        {(check.tone === "warn" || check.tone === "danger") && <Icon icon={WarningIcon} size="sm" />}
+        <span>{check.text}</span>
+      </p>
+      {(!conflict || onReviewConflicts) && <div className="git-landing-action">
+        {conflict ? (
+          <Button size="md" variant="primary" block iconStart={WarningIcon} onClick={onReviewConflicts}>
+            {tr("landing.reviewConflicts")}
+          </Button>
+        ) : stranded ? (
+          // Nothing takes the work by default: choosing where is the way on.
+          <Button size="md" variant="primary" block iconStart={BranchIcon} disabled={!canChoose} onClick={() => setChoosing(true)}>
+            {tr("landing.chooseBranchAction")}
+          </Button>
+        ) : (
+          <Button
+            size="md"
+            variant="primary"
+            block
+            className="git-landing-primary"
+            iconStart={CombineIcon}
+            busy={busy === "merge"}
+            disabled={!canIntegrate}
+            onClick={integrate}
+          >
+            {integrateLabel}
+          </Button>
+        )}
+      </div>}
+    </section>
+  );
+}
+
+export interface LandingInput {
   host?: WebPackageHost;
   projectId: string;
   sessionId: string;
   repositoryId?: string;
   /** Files the working tree changes now: integrating commits them first. */
   uncommitted: number;
-  /** Open the Conflicts review; absent while it is already open. */
-  onReviewConflicts?: () => void;
-}) {
+}
+
+export interface LandingModel {
+  check: Check;
+  conflict: boolean;
+  /** No branch takes the work by default: choosing one is the way on. */
+  stranded: boolean;
+  shownBranch: string;
+  /** The target choice and the push switch, as one menu. */
+  entries: MenuEntry[];
+  choosing: boolean;
+  setChoosing: (open: boolean) => void;
+  busy: "merge" | "retarget" | null;
+  canChoose: boolean;
+  canIntegrate: boolean;
+  /** The server lets an agent resolve this conflict. */
+  canResolve: boolean;
+  integrate: () => void;
+  integrateLabel: string;
+}
+
+/** The landing's state and actions, for every surface that presents it. */
+export function useLanding({ host, projectId, sessionId, repositoryId, uncommitted }: LandingInput): LandingModel | null {
   const session = useStore((state) => state.sessions.find((candidate) => candidate.id === sessionId) ?? null);
   const isolation: SessionIsolation | null = session?.isolation?.kind === "git-worktree" ? session.isolation : null;
   const working = session ? isolationBlocksUserMutation(session.status) : false;
@@ -225,68 +319,19 @@ export default function LandingBar({ host, projectId, sessionId, repositoryId, u
       onSelect: () => setGitPrefs({ pushAfterIntegrate: !push }, projectId),
     },
   ];
-  const chip = (
-    <span className="git-landing-target-name mono" title={shownBranch}>{shownBranch}</span>
-  );
-
-  return (
-    <section className="git-landing" aria-label={tr("landing.title")} data-tone={check.tone}>
-      <div className="git-landing-route">
-        <span className="git-landing-label">{tr("landing.integrateInto")}</span>
-        <Menu
-          label={tr("landing.chooseBranch")}
-          title={tr("landing.title")}
-          phonePresentation="sheet"
-          entries={entries}
-          open={choosing}
-          onOpenChange={setChoosing}
-        >
-          {(trigger) => (
-            <Button
-              {...trigger}
-              size="sm"
-              variant="quiet"
-              className="git-landing-target"
-              iconStart={BranchIcon}
-              iconEnd={ChevronDownIcon}
-              busy={busy === "retarget"}
-              disabled={busy === "merge"}
-            >
-              {chip}
-            </Button>
-          )}
-        </Menu>
-      </div>
-      <p className="git-landing-check" data-tone={check.tone} role="status">
-        {check.tone === "ok" && <Icon icon={CheckIcon} size="sm" />}
-        {(check.tone === "warn" || check.tone === "danger") && <Icon icon={WarningIcon} size="sm" />}
-        <span>{check.text}</span>
-      </p>
-      {(!conflict || onReviewConflicts) && <div className="git-landing-action">
-        {conflict ? (
-          <Button size="md" variant="primary" block iconStart={WarningIcon} onClick={onReviewConflicts}>
-            {tr("landing.reviewConflicts")}
-          </Button>
-        ) : stranded ? (
-          // Nothing takes the work by default: choosing where is the way on.
-          <Button size="md" variant="primary" block iconStart={BranchIcon} disabled={!canChoose} onClick={() => setChoosing(true)}>
-            {tr("landing.chooseBranchAction")}
-          </Button>
-        ) : (
-          <Button
-            size="md"
-            variant="primary"
-            block
-            className="git-landing-primary"
-            iconStart={CombineIcon}
-            busy={busy === "merge"}
-            disabled={!ready || working || busy !== null || delegatedPending || suggestion?.reason === "target-overlap"}
-            onClick={integrate}
-          >
-            {push ? tr("landing.integrateAndPush", { branch: shownBranch }) : tr("isolation.integrateInto", { branch: shownBranch })}
-          </Button>
-        )}
-      </div>}
-    </section>
-  );
+  return {
+    check,
+    conflict,
+    stranded,
+    shownBranch,
+    entries,
+    choosing,
+    setChoosing,
+    busy,
+    canChoose,
+    canIntegrate: ready && !working && busy === null && !delegatedPending && suggestion?.reason !== "target-overlap",
+    canResolve: conflict && status.actions?.canResolve === true && !working && busy === null,
+    integrate,
+    integrateLabel: push ? tr("landing.integrateAndPush", { branch: shownBranch }) : tr("isolation.integrateInto", { branch: shownBranch }),
+  };
 }

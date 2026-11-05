@@ -54,7 +54,7 @@ test("git prefs parse, persist, and split diffs align replacement runs", () => {
     },
   });
   assert.deepEqual(parseGitPrefs("bad"), {
-    layout: "unified", ignoreWhitespace: false, wrap: false, changesView: "tree",
+    layout: "unified", ignoreWhitespace: false, wrap: false, phoneWrap: true, changesView: "tree",
     density: "compact", lineStats: "numbers", logGraph: true, dateStyle: "relative",
     pushAfterIntegrate: true,
   });

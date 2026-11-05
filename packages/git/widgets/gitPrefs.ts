@@ -12,6 +12,8 @@ export interface GitPrefs {
   layout: "unified" | "split";
   ignoreWhitespace: boolean;
   wrap: boolean;
+  /** The same choice on a phone, where a long line otherwise means sideways scrolling. */
+  phoneWrap: boolean;
   changesView: "flat" | "tree";
   /** Row rhythm of every Source Control list: one scanning line or two. */
   density: "compact" | "comfortable";
@@ -46,6 +48,7 @@ export const GIT_PREFS_DEFAULTS: GitPrefs = {
   layout: "unified",
   ignoreWhitespace: false,
   wrap: false,
+  phoneWrap: true,
   changesView: "tree",
   density: "compact",
   lineStats: "numbers",
@@ -81,6 +84,7 @@ export function parseGitPrefOverrides(raw: string | null): Partial<GitPrefs> {
   if (data.layout === "split" || data.layout === "unified") out.layout = data.layout;
   if (typeof data.ignoreWhitespace === "boolean") out.ignoreWhitespace = data.ignoreWhitespace;
   if (typeof data.wrap === "boolean") out.wrap = data.wrap;
+  if (typeof data.phoneWrap === "boolean") out.phoneWrap = data.phoneWrap;
   if (data.changesView === "flat" || data.changesView === "tree") out.changesView = data.changesView;
   if (data.density === "compact" || data.density === "comfortable") out.density = data.density;
   if (data.lineStats === "numbers" || data.lineStats === "bar" || data.lineStats === "hidden") out.lineStats = data.lineStats;

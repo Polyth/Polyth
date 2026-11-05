@@ -342,6 +342,9 @@ All from `apps/web/src/components/ui` (see `index.ts`):
   close button; body owns overflow. `AlertDialog` stays for confirm/prompt.
 - `ResponsiveOverlay` — §8. `Sheet`/`SheetRow`/`SheetSection` re-exported for
   direct phone-surface composition.
+  `Sheet` takes `headerTrailing` for controls in its title row that are not one
+  text `action` (a ⋯ `Menu`), and `swipeBack` for a `dismiss="back"` destination
+  that follows a finger from the edge in hosts that own that gesture.
 - `Tabs` + `TabPanel` — `tabs/value/onChange/label`, arrow-key navigation,
   `idBase` links panels. The selected tab keeps its fill under the stuck
   `:hover` touch leaves on the tapped tab: the global touch reset that

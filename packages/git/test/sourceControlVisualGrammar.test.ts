@@ -132,7 +132,8 @@ test("Source Control keeps nested chrome quiet and follows the transparency pref
 });
 
 test("clean changes use the shared empty state inside the list without nested chrome", () => {
-  const list = gitView.slice(gitView.indexOf('<div className="git-change-groups">'), gitView.indexOf('<section className="git-detail-pane"'));
+  const groups = gitView.indexOf('<div className="git-change-groups">');
+  const list = gitView.slice(groups, gitView.indexOf('<section className="git-detail-pane"', groups));
   // The default variant: a Look repaints compact/panel states as cards, which
   // would nest a second card inside the pane. A clean tree reads as done.
   const clean = /all\.length === 0 && <EmptyState([\s\S]*?)\n\s*\/>\}/.exec(list)?.[1] ?? "";

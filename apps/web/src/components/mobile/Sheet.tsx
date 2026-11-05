@@ -29,6 +29,9 @@ import { BackIcon, CloseIcon } from "../ui/icons.ts";
 import { tr } from "../../i18n/index.ts";
 import type { LayerStackPhase } from "../../mobileLayerStack.ts";
 import { attachSheetDrag, SHEET_DISMISS_DISTANCE } from "../../sheetDrag.ts";
+import { swipeZoneInHost } from "../../shellSwipe.ts";
+import { useEdgeSwipeBack } from "../../useEdgeSwipeBack.ts";
+import { useUiSettings } from "../../uiPrefs.ts";
 import { useExitGhost } from "../../exitGhost.ts";
 
 /** Drag distance (CSS px) past which a slow release dismisses the sheet (see sheetDrag.ts). */
@@ -70,6 +73,8 @@ export interface SheetProps {
   search?: SheetSearch;
   /** Trailing control in the title row (e.g. Edit / Done for reordering). */
   action?: SheetAction;
+  /** Trailing controls of the title row that are not one text action (a ⋯ menu). */
+  headerTrailing?: ReactNode;
   /** Pinned footer (e.g. "Create a starter…"). */
   footer?: ReactNode;
   className?: string;
@@ -81,6 +86,9 @@ export interface SheetProps {
   closing?: boolean;
   /** Full-screen navigation destinations use Back; transient sheets use Close. */
   dismiss?: "close" | "back";
+  /** A Back destination that follows a finger from the edge, as a package window
+   *  does (the layer's own CSS plays the rest, reading `--stack-from`). */
+  swipeBack?: boolean;
   /** Explicit focus destination after every close path. */
   restoreFocusRef?: RefObject<HTMLElement | null>;
   /** Phone layer-stack role (see the header comment). Omitted for ordinary sheets. */
@@ -105,12 +113,14 @@ export default function Sheet({
   headerLeading,
   search,
   action,
+  headerTrailing,
   footer,
   className,
   size = "auto",
   origin = "bottom",
   closing = false,
   dismiss = "close",
+  swipeBack = false,
   restoreFocusRef,
   stackPhase,
   peeking = false,
@@ -178,6 +188,14 @@ export default function Sheet({
       onDismiss: () => { if (!closingRef.current) onCloseRef.current(); },
     });
   }, [draggable, origin]);
+
+  const swipeZone = swipeZoneInHost(useUiSettings().swipeNavigation);
+  useEdgeSwipeBack({
+    enabled: swipeBack && dismiss === "back" && !closing && !inactive && swipeZone !== null,
+    ...(swipeZone ? { zone: swipeZone } : {}),
+    layer: () => panelRef.current,
+    onBack: () => onCloseRef.current(),
+  });
 
   // Reopened during its exit: whatever a drag handed to that exit is spent.
   useEffect(() => {
@@ -298,6 +316,7 @@ export default function Sheet({
               {action.label}
             </button>
           )}
+          {headerTrailing}
           {dismiss === "close" && (
             <button type="button" className="sheet-close" aria-label={tr("mobile.sheet.closeValue", { title: title })} onClick={() => { if (!closing) onClose(); }}>
               <Icon icon={CloseIcon} size="lg" />

@@ -1,0 +1,512 @@
+/* Source Control on a phone (GitPhoneView). Answer first, one primary action at
+   the thumb, the rest one step away. Hierarchy comes from type and hairlines;
+   every target is a full-width row or a --tap control. Package-owned, scoped to
+   its own classes. The layers portal to <body>, so they carry `.git-page` again. */
+
+.git-page.git-phone {
+  gap: 0;
+  height: 100%;
+  padding: 0;
+}
+
+.git-phone-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-block-end: var(--space-4);
+}
+
+/* ── The answer ─────────────────────────────────────────────────────────── */
+
+.git-phone-summary {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+  padding: var(--space-5) var(--screen-gutter) var(--space-3);
+}
+.git-phone-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-title);
+  font-weight: 650;
+  line-height: var(--font-title-lh);
+  letter-spacing: -.015em;
+  overflow-wrap: anywhere;
+}
+.git-phone-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.4;
+}
+.git-phone-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: 1.4;
+}
+.git-phone-check[data-tone="warn"] { color: var(--amber); }
+.git-phone-check[data-tone="danger"] { color: var(--red); }
+.git-phone-check .ui-icon { flex: none; margin-block-start: 1px; }
+.git-phone-meta .git-file-linestat,
+.git-phone-compare-meta .git-file-linestat,
+.git-phone-file-meta .git-file-linestat {
+  display: inline-flex;
+  gap: var(--space-1);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  vertical-align: baseline;
+}
+
+/* The branch row: one sentence, and the door to remote and account. */
+.git-phone-branch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  min-height: var(--tap);
+  margin-block-start: var(--space-1);
+  margin-inline-start: calc(var(--space-2) * -1);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-label);
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.git-phone-branch > .ui-icon { flex: none; color: var(--muted); }
+/* Two lines before an ellipsis: the base it names is the point of the sentence. */
+.git-phone-branch-label {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.git-phone-branch:where(:not(:disabled)):active,
+.git-phone-row:where(:not(:disabled)):active,
+.git-phone-file:where(:not(:disabled)):active { background: var(--surface-overlay-hover); }
+
+/* ── Rows ───────────────────────────────────────────────────────────────── */
+
+.git-phone-files {
+  display: flex;
+  flex-direction: column;
+  border-block-start: 1px solid var(--hair);
+}
+.git-phone-files > * + * { border-block-start: 1px solid var(--hair); }
+
+.git-phone-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: calc(var(--tap) + var(--space-3));
+  padding: var(--space-2) var(--screen-gutter);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.git-phone-file-copy {
+  display: grid;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: 1px;
+}
+.git-phone-file-name {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 550;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-phone-file-directory {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-phone-file .git-file-linestat { flex: none; }
+.git-phone-file-note {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.git-phone-file-note[data-tone="danger"] { color: var(--red); font-weight: 550; }
+/* Left out of the commit: still listed, still openable, plainly quieter. */
+.git-phone-file[data-excluded="true"] .git-phone-file-name { color: var(--text-dim); font-weight: 400; }
+.git-phone-file[data-excluded="true"] .source-status { opacity: .55; }
+
+.git-phone-nav {
+  display: flex;
+  flex-direction: column;
+  border-block: 1px solid var(--hair);
+  margin-block-start: var(--space-4);
+}
+.git-phone-files + .git-phone-nav { margin-block-start: 0; border-block-start: 1px solid var(--hair); }
+
+.git-phone-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: calc(var(--tap) + var(--space-1));
+  padding: var(--space-1) var(--screen-gutter);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-label);
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.git-phone-row > .ui-icon:first-child { flex: none; color: var(--muted); }
+.git-phone-row-label {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-phone-row-value {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-phone-row-chevron { flex: none; color: var(--faint); }
+[dir="rtl"] .git-phone-row-chevron,
+[dir="rtl"] .git-phone-file-foot > .ui-icon-btn .ui-icon { transform: scaleX(-1); }
+
+/* ── The dock ───────────────────────────────────────────────────────────── */
+
+.git-phone-dock {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--screen-gutter) max(var(--space-2), var(--safe-bottom));
+  border-block-start: 1px solid var(--hair);
+  background: var(--bg);
+}
+.git-phone-dock > .git-phone-primary { flex: 1 1 0; min-width: 0; }
+/* A second primary would otherwise glow through the commit sheet's glass. */
+.git-phone[data-commit-open="true"] .git-phone-dock { visibility: hidden; }
+.git-phone-dock > .ui-icon-btn { flex: none; }
+.git-phone .git-feedback { padding: 0 var(--screen-gutter) var(--space-3); }
+.git-phone > .git-phone-scroll > .source-inline-status { margin: 0 var(--screen-gutter) var(--space-3); }
+
+/* ── Branch sheet (a Menu; these are its header and footer) ─────────────── */
+
+.git-phone-branch-head {
+  display: grid;
+  gap: var(--space-1);
+  padding: 0 var(--space-4) var(--space-3);
+  border-block-end: 1px solid var(--hair);
+  margin-block-end: var(--space-1);
+}
+.git-phone-branch-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.git-phone-branch-name > .mono {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--font-label);
+  line-height: 1.35;
+}
+.git-phone-branch-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.4;
+}
+.git-phone-branch-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  margin-block-start: var(--space-1);
+  padding: var(--space-1) var(--space-4);
+  border-block-start: 1px solid var(--hair);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+}
+.git-phone-branch-identity > :last-child { min-width: 0; }
+.git-phone-branch-identity .source-control-identity-compact-label { display: none; }
+
+/* ── Commit sheet ───────────────────────────────────────────────────────── */
+
+.git-page.git-phone-sheet {
+  gap: var(--space-2);
+  padding: 0 0 var(--space-2);
+  overflow: visible;
+}
+.git-phone-commit-field {
+  display: grid;
+  margin: 0 var(--screen-gutter);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+}
+.git-phone-commit-field:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--focus-wash); }
+.git-page .git-phone-commit-field .git-commit-msg {
+  width: 100%;
+  min-height: 0;
+  padding: var(--space-3);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--font-body);
+  line-height: 1.45;
+  resize: none;
+}
+.git-phone-commit-field-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-2);
+}
+.git-phone-sheet > .git-phone-row { padding-inline: var(--screen-gutter); }
+.git-phone-commit-files {
+  display: flex;
+  flex-direction: column;
+  padding-inline: var(--screen-gutter);
+}
+.git-phone-commit-file { min-height: calc(var(--tap) + var(--space-1)); align-items: center; }
+.git-phone-commit-actions {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--screen-gutter) 0;
+}
+
+/* ── Full-screen layers ─────────────────────────────────────────────────────
+   Built on Sheet (focus, Escape, Back) but moving by the phone stack's grammar:
+   in from the inline-end edge and back out, over the window it replaces. */
+
+.sheet-backdrop:has(> .git-phone-layer) {
+  padding-top: 0;
+  background: transparent;
+}
+/* Opaque like the window it covers: code is read here. The doubled selector
+   outranks the glass that every `.sheet` otherwise gets from the theme. */
+body .sheet-backdrop > .git-phone-layer.git-phone-layer.sheet {
+  width: 100%;
+  max-width: none;
+  height: var(--visual-vh, 100dvh);
+  max-height: none;
+  padding-bottom: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: var(--shadow-stack-edge);
+  animation: stack-in var(--motion-stack) var(--motion-stack-ease) backwards;
+}
+body .sheet-backdrop > .git-phone-layer.git-phone-layer.sheet:focus-visible { outline: none; }
+.sheet-backdrop[data-exit-ghost="sheet"]:has(> .git-phone-layer) { animation: none !important; }
+.sheet-backdrop[data-exit-ghost="sheet"] > .git-phone-layer.sheet {
+  animation: stack-out var(--stack-out-settle, var(--motion-stack)) var(--motion-stack-ease) both !important;
+}
+.git-phone-layer .sheet-grabber { display: none; }
+.git-phone-layer .sheet-head {
+  flex: none;
+  min-height: calc(var(--tap) + var(--space-2));
+  padding: var(--safe-top) var(--screen-gutter) 0;
+  gap: var(--space-1);
+  border-block-end: 1px solid var(--hair);
+}
+.git-phone-layer .sheet-body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.git-phone-layer .sheet-foot {
+  flex: none;
+  padding: var(--space-2) var(--screen-gutter) max(var(--space-2), var(--safe-bottom));
+  border-block-start: 1px solid var(--hair);
+  background: var(--bg);
+}
+.git-page.git-phone-page {
+  flex: 1 1 0;
+  gap: var(--space-3);
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* File layer */
+.git-phone-file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: var(--space-2) var(--screen-gutter) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.4;
+}
+.git-phone-file-meta-path { min-width: 0; overflow-wrap: anywhere; }
+.git-phone-page .source-diff,
+.git-phone-page > .git-diff { margin-inline: 0; }
+.git-page.git-phone-page .git-diff-page { border-inline: 0; border-radius: 0; }
+/* One number per line: two columns of them take a fifth of a phone's width. */
+.git-page.git-phone-page .git-diff-ln { white-space: nowrap; border-inline-end: 1px solid var(--hair); }
+.git-page.git-phone-page .git-diff-ln + .git-diff-ln { inset-inline-start: 0; }
+.git-page.git-phone-page .git-diff-line:not(.diff-del) > .git-diff-ln:has(+ .git-diff-ln),
+.git-page.git-phone-page .diff-del > .git-diff-ln + .git-diff-ln,
+.git-page.git-phone-page .diff-hunk > .git-diff-ln--hunk { display: none; }
+.git-page.git-phone-page .git-diff-hunk-text {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  padding-inline-start: var(--space-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-page.git-phone-page .source-inline-status,
+.git-page.git-phone-page .review-draft,
+.git-page.git-phone-page .review-list { margin-inline: var(--screen-gutter); }
+.git-phone-file-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.git-phone-file-position {
+  margin-inline-start: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.git-phone-file-action { display: flex; justify-content: flex-end; flex: 1 1 0; min-width: 0; }
+
+/* History: rows and search, no lane graph; the layer's Back leads out of a commit. */
+.git-phone-page .git-mobile-detail-head { display: none !important; }
+.git-page.git-phone-page .git-master-detail { flex: 1 1 auto; border: 0; border-radius: 0; background: transparent; }
+.git-page.git-phone-page .git-master-pane { overflow: visible; border: 0; background: transparent; }
+.git-page.git-phone-page .git-detail-pane { overflow: visible; padding: 0; background: transparent; }
+.git-page.git-phone-page .git-log-toolbar { padding: var(--space-2) var(--screen-gutter); border: 0; background: transparent; }
+.git-page.git-phone-page .git-log-toolbar .source-search { flex: 1 1 100%; }
+.git-page.git-phone-page .git-graph-row {
+  min-height: calc(var(--tap) + var(--space-3));
+  padding-inline: var(--screen-gutter);
+  border-block-start: 1px solid var(--hair);
+}
+.git-page.git-phone-page .git-graph-row .source-avatar { display: none; }
+.git-page.git-phone-page .git-graph-sha { display: none; }
+.git-page.git-phone-page .git-commit-detail-head { padding: var(--space-3) var(--screen-gutter) 0; }
+.git-page.git-phone-page .git-commit-detail-meta .git-sha { display: none; }
+.git-page.git-phone-page .source-commit-files-head { padding: var(--space-2) var(--screen-gutter); }
+.git-page.git-phone-page .git-load-more { margin: var(--space-2) var(--screen-gutter) var(--space-4); }
+
+/* Branches and stashes: the same page, inside the layer's margins. */
+.git-page.git-phone-page .git-resource-page {
+  gap: var(--space-4);
+  padding: var(--space-3) var(--screen-gutter) calc(var(--space-5) + var(--safe-bottom));
+  overflow: visible;
+}
+.git-page.git-phone-page :is(.git-resource-card, .git-stash-composer) {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.git-page.git-phone-page .git-current-branch {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.git-page.git-phone-page .git-current-branch-glyph { display: none; }
+.git-page.git-phone-page .git-current-branch > .tag { display: none; }
+.git-page.git-phone-page .git-current-branch-copy strong { overflow-wrap: anywhere; white-space: normal; }
+.git-page.git-phone-page .git-branch-section { border: 0; border-radius: 0; background: transparent; }
+.git-page.git-phone-page .git-stash-list { gap: 0; border-block-start: 1px solid var(--hair); }
+.git-page.git-phone-page .git-stash-card {
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: var(--space-2) 0;
+  border: 0;
+  border-block-end: 1px solid var(--hair);
+  border-radius: 0;
+  background: transparent;
+}
+.git-page.git-phone-page .git-stash-icon { display: none; }
+.git-page.git-phone-page .git-stash-copy { flex: 1 1 0; }
+
+/* Compare */
+.git-page.git-phone-page .git-branch-review {
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+}
+.git-phone-base { border-block-end: 1px solid var(--hair); }
+.git-phone-compare-meta {
+  margin: 0;
+  padding: var(--space-3) var(--screen-gutter);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.git-page.git-phone-page .git-branch-review-columns {
+  display: block;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.git-page.git-phone-page .git-branch-review-detail { padding: 0; }
+.git-page.git-phone-page .git-branch-review-hunks { padding: var(--space-2) var(--screen-gutter); }
+.git-page.git-phone-page .git-branch-review-detail > .git-phone-file-foot {
+  position: sticky;
+  bottom: 0;
+  padding: var(--space-2) var(--screen-gutter) max(var(--space-2), var(--safe-bottom));
+  border-block-start: 1px solid var(--hair);
+  background: var(--bg);
+}
+.git-page.git-phone-page .git-branch-review > .empty-state,
+.git-page.git-phone-page .git-branch-review-columns ~ .review-list,
+.git-page.git-phone-page .git-branch-review-foot { margin-inline: var(--screen-gutter); }
+.git-page.git-phone-page .git-branch-review-loading { padding: var(--space-3) var(--screen-gutter); }
+.git-page.git-phone-page .git-branch-review > .ui-empty-state,
+.git-page.git-phone-page .git-branch-review > [class*="empty"] { margin: var(--space-4) var(--screen-gutter); }
+
+.git-phone-picker { display: flex; flex-direction: column; }

@@ -601,7 +601,8 @@ account-wide defaults edited under Settings → Source Control → Display and
 synced through `package.git.preferences`: changes as folder tree or list,
 line counts as numbers/bar/hidden, compact or comfortable density, default
 diff layout, wrap, ignore whitespace, commit graph and relative or calendar
-dates. The page's view menu edits the same defaults. Diff toolbars (layout,
+dates. A phone wraps diffs by its own `phoneWrap` (on by default) and is always
+unified. The page's view menu edits the same defaults. Diff toolbars (layout,
 wrap, ignore whitespace) store a per-workspace override of only the keys they
 changed; everything else is inherited, so a later account change still reaches
 that workspace.
@@ -626,6 +627,9 @@ write and apply; a key deleted later never makes the stored state unreadable.
 
 Source Control offers Working tree and Branch vs base review. Isolated sessions
 default to Branch vs base; a deliberate scope choice is remembered per project.
+A phone has no scope switch: its first screen lists the working tree (or, with
+nothing uncommitted, what an isolated branch has to land) and opens Compare and
+Conflicts as layers ([ui.md](ui.md#4-the-seams-in-detail)).
 Review changes opens Branch scope. While the session's isolation is in
 conflict, a third Conflicts scope shows the conflict preview: the file list,
 then per region a "Line N" header, context, the target branch's lines and this
