@@ -828,6 +828,13 @@ export function createSessionService(deps: {
     projection: SessionProjection;
     releaseExecution(cwd: string): Promise<void>;
   }) => void | Promise<void>;
+  /** Package-owned removal of the isolated checkouts of an archived session
+   * tree, keeping the sessions (Settings → Sessions → Cleanup). Runs outside any
+   * session lock. `releaseExecution` is `cleanupSessionResources`' proof. */
+  releaseArchivedCheckouts?: (info: {
+    sessionId: string;
+    releaseExecution(sessionId: string, cwd: string, options?: { sharer?: boolean }): Promise<void>;
+  }) => void | Promise<void>;
   /** Drop volatile provisioning for one session-lifetime harness after this
    *  session released its execution occupancy. Physical-runtime targets are
    *  released only when the physical runtime is evicted. */
@@ -9951,6 +9958,16 @@ export function createSessionService(deps: {
     && !sessionRuntime.get(projection.id)
     && !turnActive(projection.id) && !admitting.has(projection.id);
 
+  /** Moves without an execution release: a session that never ran, or an
+   *  archived one at rest whose checkout is gone, as when the Cleanup settings
+   *  released the checkout it shared. Nothing can run in a directory that no
+   *  longer exists, and the next epoch replaces the old binding. */
+  const isRelocatableAsMetadata = (projection: SessionProjection): boolean => {
+    if (isUnmaterializedRelocatable(projection)) return true;
+    const directory = projection.runtimeBinding?.location.directory ?? projection.worktreePath;
+    return isArchivedAtRest(projection) && directory !== undefined && !existsSync(directory);
+  };
+
   /** Archived, or waiting for a runtime epoch that has not started: in both no
    *  runtime is attached and the next execution starts from a fresh native
    *  session in whatever checkout the workspace names. */
@@ -9958,6 +9975,17 @@ export function createSessionService(deps: {
     (projection.status === "archived" || projection.status === "epoch-pending")
     && !sessionRuntime.get(projection.id)
     && !turnActive(projection.id) && !admitting.has(projection.id);
+
+  /** A nested isolation's target branch left with its parent's checkout. */
+  const releasedTargetBranch = (isolation: SessionIsolation): string | null =>
+    isolation.targetBranch && !isManagedIsolationBranch(isolation.targetBranch) ? isolation.targetBranch : null;
+
+  /** A workspace row whose isolated checkout is gone works on its target again. */
+  const releaseVanishedRow = (row: SessionWorkspace["repositories"][number]): SessionWorkspace["repositories"][number] => {
+    const record = row.isolation;
+    if (record?.kind !== "git-worktree" || !record.targetPath || existsSync(record.worktreePath)) return row;
+    return { ...row, path: record.targetPath, state: "ready", isolation: undefined, branch: releasedTargetBranch(record) ?? undefined };
+  };
 
   /** Dropping the record of an isolated checkout that no longer exists (its
    *  worktree was removed outside Polyth) also moves the session's execution
@@ -9968,12 +9996,12 @@ export function createSessionService(deps: {
     workspace: SessionWorkspace | undefined;
     scalar: Parameters<WorkspaceMutationScope["commit"]>[1];
   } | undefined> => {
-    const isolation = current.isolation;
+    const executionRow = current.workspace?.repositories
+      .find((row) => row.repositoryId === current.workspace?.executionRepositoryId);
+    const isolation = current.isolation ?? executionRow?.isolation;
     if (isolation?.kind !== "git-worktree" || !isAtRestForVanishedRelease(current)) return undefined;
     if (existsSync(isolation.worktreePath) || !isolation.targetPath) return undefined;
     const source = resolve(isolation.worktreePath);
-    const executionRow = current.workspace?.repositories
-      .find((row) => row.repositoryId === current.workspace?.executionRepositoryId);
     const executesThere = executionRow
       ? resolve(executionRow.path) === source
       : current.worktreePath !== undefined && resolve(current.worktreePath) === source;
@@ -9981,12 +10009,12 @@ export function createSessionService(deps: {
     const project = await projects.get(current.projectId);
     if (!project || project.remote) return undefined;
     const destination = isolation.targetPath;
-    const branch = isolation.targetBranch || undefined;
+    const branch = releasedTargetBranch(isolation);
     const workspace = current.workspace && cloneWorkspace(current.workspace);
     if (workspace) {
       workspace.repositories = workspace.repositories.map((row) => row.repositoryId === workspace.executionRepositoryId
-        ? { ...row, path: destination, state: "ready" as const, isolation: undefined, ...(branch ? { branch } : {}) }
-        : row);
+        ? { ...row, path: destination, state: "ready" as const, isolation: undefined, branch: branch ?? undefined }
+        : releaseVanishedRow(row));
       workspace.revision = (workspace.revision ?? 0) + 1;
       // The destination must be a registered checkout of this project.
       await validateWorkspacePaths({ projects, worktrees: deps.worktrees }, project, workspace);
@@ -9996,7 +10024,7 @@ export function createSessionService(deps: {
       scalar: {
         isolation: null,
         worktreePath: resolve(destination) === resolve(project.path) ? null : destination,
-        ...(branch ? { branch } : {}),
+        branch,
       },
     };
   };
@@ -10035,7 +10063,7 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("cannot release isolation during active execution"), { code: "conflict" });
       }
     } else if (!metadataOnly) await assertWorkspaceMutationSafe(current);
-    else if (!isUnmaterializedRelocatable(current)) {
+    else if (!isRelocatableAsMetadata(current)) {
       throw Object.assign(new Error("cannot relocate a session with a runtime execution"), { code: "conflict" });
     }
     const next: SessionProjection = { ...current, workspace, updatedAt: Date.now() };
@@ -10083,7 +10111,7 @@ export function createSessionService(deps: {
       throw Object.assign(new Error("Corrupt isolation evidence requires explicit repair"), { code: "conflict" });
     }
     const unmaterializedRelocation = input.relocateManagedCheckout === true && !afterRelease
-      && isUnmaterializedRelocatable(projection);
+      && isRelocatableAsMetadata(projection);
     if (projection.status === "archived" && !unmaterializedRelocation) {
       throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
     }
@@ -10392,6 +10420,114 @@ export function createSessionService(deps: {
     if (mutationFailure !== undefined) throw mutationFailure;
     return finalized ?? (await store.projection(sessionId)) ?? next;
   };
+
+  /** Prove nothing still executes in a checkout before it is removed: the exact
+   *  persisted binding's authority confirms its release. Undefined when the
+   *  session has no execution to release. `shared` skips the sole-user check for
+   *  a caller that already proved everyone else on this checkout is leaving too;
+   *  `optional` accepts a harness with nothing to say about this binding. */
+  const proveCheckoutExecutionReleased = async (input: {
+    projection: SessionProjection;
+    runtime: AgentRuntime | undefined;
+    cwd: string;
+    operation: string;
+    shared?: boolean;
+    optional?: boolean;
+  }): Promise<{ cwd: string; harnessId: string | undefined } | undefined> => {
+    const { projection: proj, runtime: rt } = input;
+    const sessionId = proj.id;
+    const persisted = proj.runtimeBinding;
+    if (!persisted) {
+      if (rt) {
+        throw Object.assign(new Error("runtime identity is missing; workspace release cannot be proven"), {
+          code: "outcome-unknown",
+        });
+      }
+      return undefined;
+    }
+    const ownedPaths = [persisted.location.directory, proj.isolation?.worktreePath,
+      ...(proj.workspace?.repositories.map((row) => row.isolation?.worktreePath) ?? [])];
+    if (!ownedPaths.some((path) => path && resolve(path) === resolve(input.cwd))) {
+      throw Object.assign(new Error("checkout release is outside the session workspace"), { code: "invalid-input" });
+    }
+    const binding: RuntimeSessionBinding = {
+      canonicalSessionId: sessionId,
+      backendSessionId: persisted.backendSessionId,
+      authorityId: persisted.authorityId,
+      generation: persisted.generation,
+      continuity: persisted.continuity,
+      location: persisted.location,
+    };
+    const operationId = [
+      input.operation,
+      sessionId,
+      binding.authorityId,
+      String(binding.generation),
+      binding.backendSessionId,
+    ].join(":");
+    const exclusive = input.shared || ([proj.isolation, ...(proj.workspace?.repositories.map((row) => row.isolation) ?? [])]
+      .some((isolation) => isolation?.kind === "git-worktree" && resolve(isolation.worktreePath) === resolve(binding.location.directory))
+      && (await workspaceDependents(binding.location.directory, sessionId)).length === 0);
+    let outcome = exclusive ? await runtimes.releaseSessionExecution?.(proj, binding, operationId) : undefined;
+    if (outcome?.kind === "rejected"
+      && (outcome.code === "unsupported" || outcome.code === "not-found")) {
+      outcome = undefined;
+    }
+    if (!outcome && rt?.releaseExecution) {
+      outcome = await boundedRuntimeAwait(rt.releaseExecution(binding, operationId), operationId);
+    }
+    if (!outcome) {
+      if (input.optional) return undefined;
+      throw Object.assign(new Error("the current harness cannot prove workspace release"), {
+        code: "unsupported",
+      });
+    }
+    if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+    if (
+      outcome.value.authorityId !== binding.authorityId
+      || outcome.value.generation !== binding.generation
+      || outcome.value.backendSessionId !== binding.backendSessionId
+    ) {
+      throw Object.assign(new Error("workspace release proof does not match the deleted session"), {
+        code: "stale-evidence",
+      });
+    }
+    return { cwd: binding.location.directory, harnessId: proj.resolvedHarnessId ?? rt?.harnessId };
+  };
+
+  /** Only for an archived session at rest: its runtime lease was retired with
+   *  the archive, and no later turn can start while it stays archived. */
+  const releaseArchivedExecution = (sessionId: string, cwd: string, options: { sharer?: boolean } = {}): Promise<void> =>
+    withSessionLock(sessionId, async () => {
+      const projection = await store.projection(sessionId);
+      if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (!isArchivedAtRest(projection)) {
+        throw Object.assign(new Error("the session is not at rest in the archive"), { code: "conflict" });
+      }
+      // `shared` releases a whole authority, which a project checkout's other
+      // sessions may be using. Only the isolated checkout being removed qualifies.
+      const project = await projects.get(projection.projectId);
+      if (project && projectRepositories(project).some((row) => resolve(row.path) === resolve(cwd))) {
+        throw Object.assign(new Error("a project checkout is never released as an isolated one"), { code: "invalid-input" });
+      }
+      const released = await proveCheckoutExecutionReleased({
+        projection,
+        runtime: undefined,
+        cwd,
+        operation: "session-archive-workspace-release",
+        shared: true,
+        ...(options.sharer ? { optional: true } : {}),
+      });
+      if (!released) return;
+      try {
+        if (released.harnessId) {
+          await deps.onHarnessTargetReleased?.({ sessionId, projectId: projection.projectId, cwd: released.cwd, harnessId: released.harnessId });
+        }
+        await deps.onSessionReleased?.({ sessionId, projectId: projection.projectId, cwd: released.cwd });
+      } catch {
+        // Volatile provisioning cleanup cannot undo a proven execution release.
+      }
+    });
 
   let serviceDisposed = false;
 
@@ -13070,65 +13206,17 @@ export function createSessionService(deps: {
               projection: proj,
               releaseExecution: async (releaseCwd) => {
                 if (releaseCompleted) return;
-                const persisted = proj.runtimeBinding;
-                if (!persisted) {
-                  if (rt) {
-                    throw Object.assign(new Error("runtime identity is missing; workspace release cannot be proven"), {
-                      code: "outcome-unknown",
-                    });
-                  }
-                  releaseCompleted = true;
-                  return;
+                const released = await proveCheckoutExecutionReleased({
+                  projection: proj,
+                  runtime: rt,
+                  cwd: releaseCwd,
+                  operation: "session-delete-workspace-release",
+                });
+                if (released) {
+                  workspaceExecutionReleased = true;
+                  releasedWorkspaceCwd = released.cwd;
+                  releasedWorkspaceHarnessId = released.harnessId;
                 }
-                const ownedPaths = [persisted.location.directory, proj.isolation?.worktreePath,
-                  ...(proj.workspace?.repositories.map((row) => row.isolation?.worktreePath) ?? [])];
-                if (!ownedPaths.some((path) => path && resolve(path) === resolve(releaseCwd))) {
-                  throw Object.assign(new Error("checkout release is outside the session workspace"), { code: "invalid-input" });
-                }
-                const binding: RuntimeSessionBinding = {
-                  canonicalSessionId: sessionId,
-                  backendSessionId: persisted.backendSessionId,
-                  authorityId: persisted.authorityId,
-                  generation: persisted.generation,
-                  continuity: persisted.continuity,
-                  location: persisted.location,
-                };
-                const operationId = [
-                  "session-delete-workspace-release",
-                  sessionId,
-                  binding.authorityId,
-                  String(binding.generation),
-                  binding.backendSessionId,
-                ].join(":");
-                const exclusive = [proj.isolation, ...(proj.workspace?.repositories.map((row) => row.isolation) ?? [])]
-                  .some((isolation) => isolation?.kind === "git-worktree" && resolve(isolation.worktreePath) === resolve(binding.location.directory))
-                  && (await workspaceDependents(binding.location.directory, sessionId)).length === 0;
-                let outcome = exclusive ? await runtimes.releaseSessionExecution?.(proj, binding, operationId) : undefined;
-                if (outcome?.kind === "rejected"
-                  && (outcome.code === "unsupported" || outcome.code === "not-found")) {
-                  outcome = undefined;
-                }
-                if (!outcome && rt?.releaseExecution) {
-                  outcome = await boundedRuntimeAwait(rt.releaseExecution(binding, operationId), operationId);
-                }
-                if (!outcome) {
-                  throw Object.assign(new Error("the current harness cannot prove workspace release"), {
-                    code: "unsupported",
-                  });
-                }
-                if (outcome.kind !== "confirmed") throw outcomeError(outcome);
-                if (
-                  outcome.value.authorityId !== binding.authorityId
-                  || outcome.value.generation !== binding.generation
-                  || outcome.value.backendSessionId !== binding.backendSessionId
-                ) {
-                  throw Object.assign(new Error("workspace release proof does not match the deleted session"), {
-                    code: "stale-evidence",
-                  });
-                }
-                workspaceExecutionReleased = true;
-                releasedWorkspaceCwd = binding.location.directory;
-                releasedWorkspaceHarnessId = proj.resolvedHarnessId ?? rt?.harnessId;
                 releaseCompleted = true;
               },
             });
@@ -13420,6 +13508,13 @@ export function createSessionService(deps: {
       });
     },
 
+    async releaseArchivedCheckouts(sessionId) {
+      if (!deps.releaseArchivedCheckouts) {
+        throw Object.assign(new Error("isolated workspace cleanup is unavailable"), { code: "unsupported" });
+      }
+      await deps.releaseArchivedCheckouts({ sessionId, releaseExecution: releaseArchivedExecution });
+    },
+
     async patchIsolation(sessionId, isolation) {
       return withSessionLock(sessionId, async () => {
         const current = await store.projection(sessionId);
@@ -13438,16 +13533,16 @@ export function createSessionService(deps: {
           const vanished = await vanishedIsolationRelease(current);
           if (vanished) return commitWorkspaceUnderLock(sessionId, vanished.workspace, vanished.scalar, "vanished-release");
         }
+        // Isolation cleanup may drop the record of an archived session whose
+        // checkout is gone; anything else stays active-only.
+        const archivedRelease = isolation === null && current.status === "archived";
         const workspace = current.workspace && cloneWorkspace(current.workspace);
         if (workspace) {
           workspace.repositories = workspace.repositories.map((row) => row.repositoryId === workspace.executionRepositoryId
             ? { ...row, isolation: isolation ?? undefined }
-            : row);
+            : archivedRelease ? releaseVanishedRow(row) : row);
           workspace.revision = (workspace.revision ?? 0) + 1;
         }
-        // Isolation cleanup may drop the record of an archived session whose
-        // checkout is gone; anything else stays active-only.
-        const archivedRelease = isolation === null && current.status === "archived";
         return commitWorkspaceUnderLock(sessionId, workspace, { isolation }, archivedRelease ? "archived-release" : false);
       });
     },

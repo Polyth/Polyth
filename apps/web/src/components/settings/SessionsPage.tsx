@@ -130,6 +130,7 @@ export default function SessionsPage() {
   const defaults = useSessionDefaults();
   const retentionDays = defaults.retentionDays ?? 30;
   const retentionAction: RetentionAction = defaults.retentionAction ?? "archive";
+  const skipIsolated = defaults.retentionSkipIsolated !== false;
   const archiveRetentionDays = defaults.archiveRetentionDays ?? 30;
   const autoCleanup = settings.autoCleanupExpiredSessions;
   const defaultAgent = defaults.defaultAgent
@@ -232,13 +233,13 @@ export default function SessionsPage() {
   useEffect(() => {
     let live = true;
     setEligible(null);
-    void api.sessionRetention(retentionDays)
+    void api.sessionRetention(retentionDays, "sessions", { skipIsolated })
       .then((summary) => {
         if (live) setEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0);
       })
       .catch(() => { if (live) setEligible(0); });
     return () => { live = false; };
-  }, [retentionDays]);
+  }, [retentionDays, skipIsolated]);
 
   useEffect(() => {
     let live = true;
@@ -255,15 +256,16 @@ export default function SessionsPage() {
   useEffect(() => {
     if (!autoCleanup) return;
     const timer = setInterval(() => {
-      void api.sessionRetention(retentionDays)
+      void api.sessionRetention(retentionDays, "sessions", { skipIsolated })
         .then((summary) => setEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0))
         .catch(() => {});
     }, 60_000);
     return () => clearInterval(timer);
-  }, [autoCleanup, retentionDays]);
+  }, [autoCleanup, retentionDays, skipIsolated]);
 
   // Each of these starts permanent deletion that nobody confirms later, so the
-  // person confirms it here. Archiving can be undone and needs no question.
+  // person confirms it here. Archiving can be undone and needs no question,
+  // unless it takes isolated work with it; that has its own question below.
   const confirmAutoDelete = () => confirmAlert(
     tr("settings.sessionspage.confirmAutoCleanupDelete", { count: eligible ?? 0 }),
     { title: tr("settings.sessionspage.autoCleanup"), confirmLabel: tr("settings.sessionspage.autoCleanupDeleteConfirm"), destructive: true },
@@ -277,6 +279,14 @@ export default function SessionsPage() {
   const changeRetentionAction = async (action: RetentionAction) => {
     if (action === "delete" && autoCleanup && !await confirmAutoDelete()) return;
     setSessionDefaults({ retentionAction: action });
+  };
+
+  const changeSkipIsolated = async (skip: boolean) => {
+    if (!skip && !await confirmAlert(
+      tr("settings.sessionspage.confirmCleanIsolated"),
+      { title: tr("settings.sessionspage.skipIsolated"), confirmLabel: tr("settings.sessionspage.cleanIsolatedConfirm"), destructive: true },
+    )) return;
+    setSessionDefaults({ retentionSkipIsolated: skip });
   };
 
   const changeRetentionDays = async (days: number) => {
@@ -297,7 +307,7 @@ export default function SessionsPage() {
     )) return;
     setBusy(true);
     try {
-      const result = await api.runSessionRetention(retentionDays, retentionAction);
+      const result = await api.runSessionRetention(retentionDays, retentionAction, { skipIsolated });
       setEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
       if (result.failed.length > 0) {
         setUiError(tr(retentionAction === "delete"
@@ -504,6 +514,19 @@ export default function SessionsPage() {
               ["delete", tr("common.delete")],
             ]}
             onChange={(value) => void changeRetentionAction(value as RetentionAction)}
+          />
+        </Row>
+        <Row
+          label={tr("settings.sessionspage.skipIsolated")}
+          hint={tr(skipIsolated
+            ? "settings.sessionspage.skipIsolatedOnHint"
+            : "settings.sessionspage.skipIsolatedOffHint")}
+          itemId="sessions.retentionSkipIsolated"
+        >
+          <Toggle
+            on={skipIsolated}
+            onChange={(skip) => void changeSkipIsolated(skip)}
+            label={tr("settings.sessionspage.skipIsolated")}
           />
         </Row>
         <Row

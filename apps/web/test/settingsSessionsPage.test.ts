@@ -40,8 +40,8 @@ const {
 const { default: SessionsPage } = await import("../src/components/settings/SessionsPage.tsx");
 const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
 const { setRoleKind } = await import("../src/rolePrefs.ts");
-const { resolveAlert } = await import("../src/alerts.ts");
-const { getSessionDefaults, setSessionDefaults } = await import("../src/sessionDefaults.ts");
+const { resolveAlert, useAlert } = await import("../src/alerts.ts");
+const { getSessionDefaults, parseSessionDefaults, setSessionDefaults } = await import("../src/sessionDefaults.ts");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
   id: "s", projectId: "p", title: "session", status: "idle",
@@ -199,6 +199,79 @@ test("large navigator defaults require an explicit performance confirmation", as
     await act(async () => { root.unmount(); });
     container.remove();
   }
+});
+
+test("isolated sessions are skipped until the person accepts what cleaning them removes", async () => {
+  setSessionDefaults({ retentionAction: "archive", retentionDays: 30, retentionSkipIsolated: undefined });
+  const requests: Array<{ url: string; body?: string }> = [];
+  const originalFetch = globalThis.fetch;
+  const stubbed = originalFetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    requests.push({ url: String(input), ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+    return ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ days: 30, cutoff: 1, eligibleCount: 2, succeeded: [], failed: [] }),
+      text: async () => "",
+    });
+  }) as unknown as typeof fetch;
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const toggle = () => container.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Skip isolated sessions"]')!;
+  let shownAlert: string | undefined;
+  const AlertProbe = () => { shownAlert = useAlert()?.message; return null; };
+  const countRequests = () => requests.filter(({ url }) => url.includes("/api/session-retention") && url.includes("target=sessions"));
+  try {
+    await act(async () => { root.render(createElement("div", null, createElement(SessionsPage), createElement(AlertProbe))); });
+    await act(async () => { await Promise.resolve(); });
+
+    // On by default, and the count on screen leaves isolated sessions out.
+    assert.equal(toggle().getAttribute("aria-checked"), "true");
+    assert.match(container.textContent ?? "", /Sessions with their own checkout stay, with their changes\./);
+    assert.ok(countRequests().length > 0);
+    assert.ok(countRequests().every(({ url }) => !url.includes("skipIsolated")), "an older server sees the same request");
+
+    // Declining changes nothing.
+    await act(async () => { toggle().click(); });
+    assert.match(shownAlert ?? "", /including changes that were never merged\. This cannot be undone\./);
+    await act(async () => { resolveAlert(false); });
+    assert.equal(getSessionDefaults().retentionSkipIsolated, undefined);
+    assert.equal(toggle().getAttribute("aria-checked"), "true");
+
+    // Accepting counts them, and the button acts on what it counted.
+    await act(async () => { toggle().click(); });
+    await act(async () => { resolveAlert(true); });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(getSessionDefaults().retentionSkipIsolated, false);
+    assert.equal(toggle().getAttribute("aria-checked"), "false");
+    assert.match(container.textContent ?? "", /Their checkouts and branches are removed, including changes that were never merged\./);
+    assert.ok(countRequests().at(-1)?.url.includes("skipIsolated=false"));
+    const archiveNow = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Archive now");
+    assert.ok(archiveNow);
+    await act(async () => { archiveNow.click(); });
+    await act(async () => { await Promise.resolve(); });
+    const run = requests.find(({ body }) => body?.includes("\"action\":\"archive\""));
+    assert.equal(JSON.parse(run!.body!).skipIsolated, false);
+
+    // Going back to skipping needs no question.
+    await act(async () => { toggle().click(); });
+    assert.equal(getSessionDefaults().retentionSkipIsolated, true);
+  } finally {
+    globalThis.fetch = stubbed;
+    setSessionDefaults({ retentionSkipIsolated: undefined });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("the setting survives the synced record's parser only as a real boolean", () => {
+  assert.equal(parseSessionDefaults(JSON.stringify({ retentionSkipIsolated: false })).retentionSkipIsolated, false);
+  assert.equal(parseSessionDefaults(JSON.stringify({ retentionSkipIsolated: true })).retentionSkipIsolated, true);
+  assert.equal("retentionSkipIsolated" in parseSessionDefaults(JSON.stringify({ retentionSkipIsolated: "false" })), false);
+  assert.equal("retentionSkipIsolated" in parseSessionDefaults("{}"), false);
 });
 
 test("automatic cleanup: archiving needs no question, unattended deletion always does", async () => {

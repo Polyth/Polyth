@@ -4,6 +4,7 @@ import type { SessionEvent, SessionProjection } from "@polyth/contracts";
 import {
   archivedSessionRetentionSummary,
   isPristineSessionLog,
+  sessionOwnsIsolatedCheckout,
   sessionRetentionSummary,
 } from "@polyth/session";
 
@@ -50,7 +51,7 @@ test("retention skips sessions someone still expects to come back to", () => {
     { ...session("agent-thread", "idle", old), purpose: "agent" },
     session("kept-by-person", "idle", old),
   ];
-  const { eligible } = sessionRetentionSummary(rows, 30, now, new Set(["kept-by-person"]));
+  const { eligible } = sessionRetentionSummary(rows, 30, now, { keep: new Set(["kept-by-person"]) });
   assert.deepEqual(eligible.map((item) => item.id), ["plain", "blank-draft", "unread", "finished-workflow"]);
 });
 
@@ -151,4 +152,96 @@ test("pristine check is fail-closed for turns, activity, and unknown events", ()
   ]), false);
   assert.equal(isPristineSessionLog([]), false);
   assert.equal(isPristineSessionLog([event("reconciliation/completed")]), false);
+});
+
+const isolation = (state = "active"): NonNullable<SessionProjection["isolation"]> => ({
+  kind: "git-worktree",
+  state,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  worktreePath: "/repo-polyth-isolate/x",
+  worktreeBranch: "polyth/isolate/x",
+  targetPath: "/repo",
+  targetBranch: "main",
+  baseCommit: "abc",
+} as NonNullable<SessionProjection["isolation"]>);
+
+test("isolated sessions are skipped unless someone explicitly says otherwise", () => {
+  const now = 100 * DAY;
+  const old = now - 90 * DAY;
+  const rows: SessionProjection[] = [
+    session("plain", "idle", old),
+    { ...session("isolated", "idle", old), isolation: isolation() },
+    {
+      ...session("other-repository", "idle", old),
+      workspace: { repositories: [{ repositoryId: "r", alias: "r", path: "/x", isolation: isolation() }] } as unknown as SessionProjection["workspace"],
+    },
+    // One isolated member holds the tree it belongs to.
+    session("parent", "idle", old),
+    { ...session("isolated-child", "idle", old), parentId: "parent", isolation: isolation() },
+    session("archived-parent", "idle", old),
+    { ...session("archived-isolated-child", "archived", old), parentId: "archived-parent", isolation: isolation() },
+    // Running in someone else's checkout is not owning one.
+    { ...session("borrowed", "idle", old), worktreePath: "/some/worktree" },
+  ];
+  const ids = (options?: Parameters<typeof sessionRetentionSummary>[3]) =>
+    sessionRetentionSummary(rows, 30, now, options).eligible.map((item) => item.id);
+  assert.deepEqual(ids(), ["plain", "borrowed"], "the default leaves isolated work alone");
+  assert.deepEqual(ids({ skipIsolated: true }), ["plain", "borrowed"]);
+  assert.deepEqual(ids({ skipIsolated: false }), [
+    "plain", "isolated", "other-repository", "parent", "isolated-child", "archived-parent", "borrowed",
+  ]);
+  assert.equal(sessionOwnsIsolatedCheckout(rows[1]!), true);
+  assert.equal(sessionOwnsIsolatedCheckout(rows[2]!), true);
+  assert.equal(sessionOwnsIsolatedCheckout(rows[7]!), false);
+});
+
+test("an archived session's leftover checkout expires like anything else", () => {
+  const now = 100 * DAY;
+  const old = now - 90 * DAY;
+  const rows: SessionProjection[] = [
+    { ...session("left-behind", "archived", old), isolation: isolation() },
+    { ...session("archived-yesterday", "archived", now - DAY), isolation: isolation() },
+    { ...session("pinned", "archived", old), isolation: isolation(), pinned: { position: 0 } },
+    { ...session("kept", "archived", old), isolation: isolation() },
+    session("no-checkout", "archived", old),
+    // Its tree is cleaned up from the expired parent, not counted a second time.
+    session("parent", "idle", old),
+    { ...session("archived-child", "archived", old), parentId: "parent", isolation: isolation() },
+    // A recent member holds the tree, and the archived checkout with it.
+    session("busy-parent", "idle", now - DAY),
+    { ...session("archived-child-of-busy", "archived", old), parentId: "busy-parent", isolation: isolation() },
+  ];
+  const summary = sessionRetentionSummary(rows, 30, now, { skipIsolated: false, keep: new Set(["kept"]) });
+  assert.deepEqual(summary.checkouts.map((item) => item.id), ["left-behind"]);
+  assert.deepEqual(summary.eligible.map((item) => item.id), ["parent"]);
+  assert.deepEqual(sessionRetentionSummary(rows, 30, now, { skipIsolated: true }).checkouts, []);
+});
+
+test("a merge that may be half published is nobody's to clean up", () => {
+  const now = 100 * DAY;
+  const old = now - 90 * DAY;
+  const rows: SessionProjection[] = [
+    { ...session("cleanup-pending", "idle", old), isolation: isolation("cleanup-pending") },
+    { ...session("corrupt", "idle", old), isolation: { ...isolation(), state: "nonsense" } as unknown as SessionProjection["isolation"] },
+    { ...session("archived-corrupt", "archived", old), isolation: { ...isolation(), state: "nonsense" } as unknown as SessionProjection["isolation"] },
+    session("parent", "idle", old),
+    {
+      ...session("publishing-child", "idle", old),
+      parentId: "parent",
+      isolation: {
+        ...isolation("publishing"),
+        publish: {
+          expectedTargetSha: "a".repeat(40),
+          resultCommit: "b".repeat(40),
+          snapshotSha: "c".repeat(40),
+          targetRef: "refs/heads/main",
+        },
+      } as unknown as SessionProjection["isolation"],
+    },
+    // The legacy shape before any irreversible intent is safely active.
+    { ...session("legacy-merging", "idle", old), isolation: isolation("merging") },
+  ];
+  const summary = sessionRetentionSummary(rows, 30, now, { skipIsolated: false });
+  assert.deepEqual(summary.eligible.map((item) => item.id), ["cleanup-pending", "legacy-merging"]);
+  assert.deepEqual(summary.checkouts, []);
 });

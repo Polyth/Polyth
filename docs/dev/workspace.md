@@ -212,10 +212,11 @@ read-only, so recovery cannot run for it. Startup releases its isolation record
 only when nothing the record names can still hold work: the checkout directory
 is gone, and the isolate branch is gone or already contained in the target
 branch (a hand merge that kept the branch; the branch itself is left in place).
-When a discard or deletion finds the checkout already gone (`rm -rf` or
+When a discard finds the checkout already gone (`rm -rf` or
 `git worktree remove` by hand), it prunes Git's stale entry and deletes the
 isolate branch only if its tip is still the base commit or is contained in the
-target branch; a branch with commits of its own stays.
+target branch; a branch with commits of its own stays. Deleting the session goes
+further: nothing will read that branch again, so it goes too.
 A checkout deleted with `rm -rf` instead of `git worktree remove` leaves Git's
 stale worktree entry listed until a prune; the missing directory is the
 evidence, so that entry does not hold the record. The same release
@@ -230,6 +231,18 @@ registered. A restore or the next runtime epoch then starts there instead of in
 the missing path. An in-flight publication or corrupt record is kept. A live
 checkout or a branch with unmerged commits is kept too: restore the session to
 merge or discard it.
+
+A session that is leaving (deleted, or cleaned up by Settings → Sessions → Cleanup
+when "Skip isolated sessions" is off) proves ownership by its marker, branch name
+and path alone (`sessionLeaving`): an agent's rebase past the recorded base, a
+retarget that did not finish or a checkout left detached mid-rebase no longer
+strand it. A renamed branch still refuses, since that is how a preserved checkout
+leaves Polyth. The cleanup's archive action removes the same resources as a delete
+but keeps the sessions: `releaseArchivedCheckouts` walks an archived tree deepest
+first, carries the media its chats show to the target checkout, then moves every
+session off the removed checkouts as metadata. It refuses a session not at rest in
+the archive, a user outside the tree and a merge that has not settled. See the
+`expiredSessionCleanup.ts` entry in [architecture](architecture.md).
 
 Runtime epoch recovery checks that a session executing in its managed isolated
 worktree still has that directory before it records a `session-reset` intent. A

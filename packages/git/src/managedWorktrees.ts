@@ -83,6 +83,16 @@ export type OwnedWorktreeInspection =
   | { status: "missing" }
   | { status: "unowned"; reason: OwnershipFailureReason };
 
+/** The canonical session is going away (deleted, or its checkout released by
+ *  the Cleanup settings), so nothing will publish from this checkout again and
+ *  nothing will read its branch. Ownership still has to be proven, but only that:
+ *  an agent's rebase or an interrupted retarget does not make the checkout
+ *  anyone else's, and a branch with commits of its own goes too. A renamed branch
+ *  still refuses: that is how a preserved checkout says it left Polyth. */
+export interface SessionLeavingOption {
+  sessionLeaving?: boolean;
+}
+
 export interface OwnedWorktreeRef {
   sessionId: string;
   worktreePath: string;
@@ -481,7 +491,7 @@ export function createManagedWorktrees(git: GitService) {
    * but only a branch that holds nothing unique: its tip is the recorded base
    * or already reached the target branch. A branch with commits of its own is
    * the session's only copy of that work and stays. */
-  const releaseVanishedBranch = async (root: string, ref: OwnedWorktreeRef): Promise<void> => {
+  const releaseVanishedBranch = async (root: string, ref: OwnedWorktreeRef, options: SessionLeavingOption = {}): Promise<void> => {
     if (!isManagedBranch(ref.worktreeBranch) || ref.worktreeBranch !== isolateBranchName(ref.sessionId)) return;
     await git.worktrees.prune(root).catch(() => undefined);
     const head = await git.revParse(root, `refs/heads/${ref.worktreeBranch}`).catch(() => undefined);
@@ -491,7 +501,7 @@ export function createManagedWorktrees(git: GitService) {
     const target = ref.targetBranch
       ? await git.revParse(root, ref.targetBranch).catch(() => undefined)
       : undefined;
-    const holdsNothing = head === ref.baseCommit
+    const holdsNothing = options.sessionLeaving || head === ref.baseCommit
       || (target !== undefined && await git.isAncestor(root, head, target).catch(() => false));
     if (!holdsNothing) {
       log("cleanup-branch-kept", { sessionId: ref.sessionId, branch: ref.worktreeBranch, reason: "unmerged-commits" });
@@ -502,7 +512,7 @@ export function createManagedWorktrees(git: GitService) {
     }
   };
 
-  const inspectOwned = async (root: string, ref: OwnedWorktreeRef): Promise<OwnedWorktreeInspection> => {
+  const inspectOwned = async (root: string, ref: OwnedWorktreeRef, options: SessionLeavingOption = {}): Promise<OwnedWorktreeInspection> => {
     const expectedBranch = isolateBranchName(ref.sessionId);
     const anchor = await placementAnchor(git, root);
     if (ref.worktreeBranch !== expectedBranch || !isManagedBranch(ref.worktreeBranch)
@@ -514,7 +524,9 @@ export function createManagedWorktrees(git: GitService) {
       ? { status: "unowned", reason: "not-listed" }
       : { status: "missing" };
     if (!existsSync(ref.worktreePath)) return { status: "missing" };
-    if (listed.isMain || listed.branch !== ref.worktreeBranch
+    // An agent stopped mid-rebase leaves its own checkout detached.
+    const detachedWhileLeaving = options.sessionLeaving === true && listed.branch === null;
+    if (listed.isMain || (listed.branch !== ref.worktreeBranch && !detachedWhileLeaving)
       || !samePath(await realpath(ref.worktreePath), ref.worktreePath)) {
       return { status: "unowned", reason: "branch-mismatch" };
     }
@@ -524,6 +536,9 @@ export function createManagedWorktrees(git: GitService) {
     if (marker.kind === "integration") return { status: "unowned", reason: "wrong-kind" };
     if (marker.sessionId !== ref.sessionId) return { status: "unowned", reason: "session-mismatch" };
     if (marker.worktreeBranch !== ref.worktreeBranch) return { status: "unowned", reason: "branch-mismatch" };
+    if (options.sessionLeaving) {
+      return { status: "owned", worktree: { path: listed.path, branch: ref.worktreeBranch, head: listed.head, meta: marker } };
+    }
     if ((ref.targetPath !== undefined && !samePath(marker.targetPath, ref.targetPath))
       || (ref.targetBranch !== undefined && marker.targetBranch !== ref.targetBranch
         && marker.retargetedFrom !== ref.targetBranch)) {
@@ -533,7 +548,7 @@ export function createManagedWorktrees(git: GitService) {
       || !(await git.isAncestor(root, marker.baseCommit, listed.head))) {
       return { status: "unowned", reason: "base-mismatch" };
     }
-    return { status: "owned", worktree: { path: listed.path, branch: listed.branch, head: listed.head, meta: marker } };
+    return { status: "owned", worktree: { path: listed.path, branch: ref.worktreeBranch, head: listed.head, meta: marker } };
   };
 
   /** Claim a planned creation. A receipt left by a create that crashed before
@@ -781,10 +796,11 @@ export function createManagedWorktrees(git: GitService) {
       }
     },
 
-    async removeOwned(root: string, ref: OwnedWorktreeRef): Promise<RemoveOwnedResult> {
-      const inspection = await inspectOwned(root, ref);
+    async removeOwned(root: string, ref: OwnedWorktreeRef, options: SessionLeavingOption = {}): Promise<RemoveOwnedResult> {
+      const inspection = await inspectOwned(root, ref, options);
       if (inspection.status === "missing") {
-        await releaseVanishedBranch(root, ref);
+        await releaseVanishedBranch(root, ref, options);
+        if (options.sessionLeaving) await removeEmptyParent(ref.worktreePath);
         return { status: "already-gone" };
       }
       if (inspection.status === "unowned") {
@@ -795,8 +811,12 @@ export function createManagedWorktrees(git: GitService) {
         });
         return inspection;
       }
+      // A detached checkout's HEAD says nothing about where its branch points.
+      const branchTip = options.sessionLeaving
+        ? await git.readRef(root, `refs/heads/${ref.worktreeBranch}`)
+        : inspection.worktree.head;
       await git.worktrees.remove(root, { path: inspection.worktree.path, deleteBranch: false, force: true });
-      if (!await git.deleteRef(root, `refs/heads/${ref.worktreeBranch}`, inspection.worktree.head)) {
+      if (branchTip && !await git.deleteRef(root, `refs/heads/${ref.worktreeBranch}`, branchTip)) {
         throw invalid("owned branch cleanup failed");
       }
       await git.worktrees.prune(root);

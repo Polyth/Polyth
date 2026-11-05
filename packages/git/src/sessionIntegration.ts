@@ -210,6 +210,35 @@ export interface IsolationConflictPreview extends GitMergeConflicts {
   recorded: string[];
 }
 
+/** Core's proof that nothing still executes in a checkout about to go. `sharer`:
+ *  the session only ran in a checkout another tree member owns. A delete would
+ *  tombstone it without proof, so having nothing to prove does not stop the
+ *  owner's cleanup; an execution that cannot be confirmed as ended still does. */
+export type ReleaseArchivedExecution = (
+  sessionId: string,
+  cwd: string,
+  options?: { sharer?: boolean },
+) => Promise<void>;
+
+function subtreeDeepestFirst(rootId: string, rows: readonly SessionProjection[]): SessionProjection[] {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const childrenOf = new Map<string, SessionProjection[]>();
+  for (const row of rows) {
+    if (row.parentId) childrenOf.set(row.parentId, [...childrenOf.get(row.parentId) ?? [], row]);
+  }
+  const order: SessionProjection[] = [];
+  const seen = new Set<string>();
+  const visit = (id: string): void => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    for (const child of childrenOf.get(id) ?? []) visit(child.id);
+    const row = byId.get(id);
+    if (row) order.push(row);
+  };
+  visit(rootId);
+  return order;
+}
+
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
 
 /** Mark a merge failure that provably left the target branch untouched. The
@@ -1274,6 +1303,165 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         message: error instanceof Error ? error.message : String(error),
       });
     }
+  };
+
+  /** An absent path is enough to prove that there is no filesystem resource
+   *  left to release. If a path still exists, Git inspection must succeed and
+   *  prove ownership; a transient Git error is never downgraded to "missing".
+   *  Every repository is inspected before any one is removed, so a foreign or
+   *  replaced checkout cannot cause a partial destructive cleanup. */
+  const inspectLeavingCheckouts = async (session: SessionProjection, rows: ReturnType<typeof isolationWorkspaceRows>) => {
+    const inspected = await Promise.all(rows.map(async (row) => ({
+      row,
+      source: await filesystemPathExists(row.isolation.worktreePath)
+        ? await managed.inspectOwned(row.isolation.targetPath, ownedRef(session.id, row.isolation), { sessionLeaving: true })
+        : { status: "missing" as const },
+    })));
+    const unowned = inspected.find((entry) => entry.source.status === "unowned");
+    if (unowned && unowned.source.status === "unowned") {
+      throw err(
+        "conflict",
+        `refusing to delete an isolation workspace whose ownership is not proven (${unowned.source.reason})`,
+      );
+    }
+    return inspected;
+  };
+
+  /** Everything Polyth made for a session's checkouts: their processes, the
+   *  integration worktrees, the checkouts with their branches and Git entries,
+   *  the emptied parent folders and the merge receipts. */
+  const removeLeavingCheckouts = async (
+    session: SessionProjection,
+    inspected: Awaited<ReturnType<typeof inspectLeavingCheckouts>>,
+  ): Promise<void> => {
+    const closed = new Set<string>();
+    for (const entry of inspected) {
+      // A checkout that is already gone can still have utility runtimes
+      // and terminals whose cwd points at it.
+      if (closed.has(entry.row.isolation.worktreePath)) continue;
+      await closeProcesses(entry.row.isolation.worktreePath);
+      closed.add(entry.row.isolation.worktreePath);
+    }
+    // The repository itself may be gone, and took all of this with it.
+    const repositories = new Map<string, boolean>();
+    for (const root of new Set(inspected.map((entry) => entry.row.isolation.targetPath))) {
+      repositories.set(root, await git.isRepo(root));
+    }
+    // Integration worktrees are also Polyth-owned resources for this
+    // session. Remove them before the sources so a later failure never
+    // leaves a live canonical session pointing at an already-deleted cwd.
+    for (const [root, present] of repositories) {
+      if (present) await managed.pruneIntegrationsForSession(root, session.id);
+    }
+    for (const entry of inspected) {
+      if (!repositories.get(entry.row.isolation.targetPath)) continue;
+      // A checkout removed by hand still leaves Git's entry and its branch.
+      const removed = await managed.removeOwned(entry.row.isolation.targetPath, ownedRef(session.id, entry.row.isolation), { sessionLeaving: true });
+      if (removed.status === "unowned" && entry.source.status === "owned") {
+        throw err("conflict", `isolation ownership changed during deletion (${removed.reason})`);
+      }
+    }
+    for (const entry of inspected) await releaseIsolationRefs(session.id, entry.row.isolation);
+  };
+
+  /** A target that is itself a managed branch left with its own checkout. */
+  const branchAfterRelease = (isolation: SessionIsolation): string | null => {
+    const branch = isolation.targetBranch ? localBranchName(isolation.targetBranch) : "";
+    return branch && !isManagedBranch(branch) ? branch : null;
+  };
+
+  /** Point an archived session at the checkouts that replaced the ones just
+   *  removed. Their directories are gone, so core moves this as metadata. */
+  const relocateArchivedSharer = async (
+    sharerId: string,
+    released: readonly SessionIsolation[],
+  ): Promise<void> => {
+    if (!deps.sessions.rebindWorkspace) return;
+    const current = await deps.sessions.snapshot(sharerId);
+    const releasedAt = (path: string | undefined) =>
+      path ? released.find((isolation) => samePath(isolation.worktreePath, path)) : undefined;
+    const workspace = current.workspace && {
+      ...current.workspace,
+      repositories: current.workspace.repositories.map((row) => {
+        const isolation = releasedAt(row.path);
+        return isolation
+          ? { ...row, path: resolve(isolation.targetPath), state: "ready" as const, branch: branchAfterRelease(isolation) ?? undefined }
+          : row;
+      }),
+    };
+    const execution = releasedAt(current.workspace?.repositories
+      .find((row) => row.repositoryId === current.workspace?.executionRepositoryId)?.path ?? current.worktreePath);
+    await deps.sessions.rebindWorkspace(sharerId, {
+      ...(workspace ? { workspace } : {}),
+      expectedWorkspaceRevision: current.workspace?.revision ?? 0,
+      ...(execution ? { worktreePath: resolve(execution.targetPath), branch: branchAfterRelease(execution) } : {}),
+      relocateManagedCheckout: true,
+    });
+  };
+
+  const releaseArchivedMember = async (
+    sessionId: string,
+    tree: readonly SessionProjection[],
+    releaseExecution: ReleaseArchivedExecution,
+  ): Promise<void> => {
+    const session = await deps.sessions.snapshot(sessionId);
+    const rows = isolationWorkspaceRows(session);
+    if (rows.length === 0) return;
+    if (session.status !== "archived") throw err("conflict", "only an archived session's checkouts can be released");
+    if ([session.isolation, ...rows.map((row) => row.isolation)].some((record) => {
+      if (!record) return false;
+      const { state } = normalizeIsolationContract(record);
+      return state === "merging" || state === "publishing" || state === "corrupt";
+    })) {
+      throw err("conflict", "a merge from this isolated workspace has not settled");
+    }
+    const inspected = await inspectLeavingCheckouts(session, rows);
+    const released = rows.map((row) => row.isolation);
+    // Tree members are all at rest and leave this checkout together; anyone
+    // else still needs it, whatever state they are in.
+    const members = new Set(tree.map((member) => member.id));
+    const sharers = new Map<string, SessionProjection>();
+    for (const isolation of released) {
+      for (const dependent of await sourceDependentsAt(session.id, isolation.worktreePath)) {
+        if (!members.has(dependent.id)) {
+          throw err("conflict", "another session still depends on an isolated workspace; delete or move it first");
+        }
+        sharers.set(dependent.id, dependent);
+      }
+    }
+    // Only an execution in a checkout that is going needs proof. A discard that
+    // stopped at cleanup-pending already moved this session to its target, where
+    // a release could reach other sessions' runtimes.
+    for (const member of [session, ...sharers.values()]) {
+      const directory = member.runtimeBinding?.location.directory;
+      if (directory && released.some((isolation) => samePath(isolation.worktreePath, directory))) {
+        await releaseExecution(member.id, directory, member.id === session.id ? {} : { sharer: true });
+      }
+    }
+    // These chats stay readable, so what they show must outlive the checkout.
+    for (const entry of inspected) {
+      if (entry.source.status !== "owned") continue;
+      await preserveReferencedMedia([session.id, ...sharers.keys()], session.projectId, entry.row.isolation.worktreePath, resolve(entry.row.isolation.targetPath));
+    }
+    await removeLeavingCheckouts(session, inspected);
+    await persist(session.id, null);
+    for (const sharerId of sharers.keys()) {
+      await relocateArchivedSharer(sharerId, released).catch((error: unknown) => {
+        // Its checkout is gone either way; it can still be read or deleted.
+        isolationLog("child-rebind-failed", {
+          sessionId: session.id,
+          childSessionId: sharerId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+    await notice(session.id, "isolation/discarded", { targetBranch: rows[0]!.isolation.targetBranch, cleanup: true });
+    isolationLog("archived-checkouts-released", {
+      sessionId: session.id,
+      projectId: session.projectId,
+      repositories: rows.map((row) => row.repositoryId).join(","),
+      sharers: sharers.size,
+    });
   };
 
   const finishCleanup = async (sessionId: string): Promise<SessionProjection> => {
@@ -2789,25 +2977,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       return withSession(session.id, async () => {
         const rows = isolationWorkspaceRows(session);
         if (rows.length === 0) throw err("invalid-input", "session is not isolated");
-        // An absent path is enough to prove that there is no filesystem
-        // resource left to release. If a path still exists, Git inspection
-        // must succeed and prove ownership; a transient Git error is never
-        // downgraded to "missing". Inspect every repository before deleting
-        // any one so a foreign or replaced checkout cannot cause a partial
-        // destructive cleanup.
-        const inspected = await Promise.all(rows.map(async (row) => ({
-          row,
-          source: await filesystemPathExists(row.isolation.worktreePath)
-            ? await managed.inspectOwned(row.isolation.targetPath, ownedRef(session.id, row.isolation))
-            : { status: "missing" as const },
-        })));
-        const unowned = inspected.find((entry) => entry.source.status === "unowned");
-        if (unowned && unowned.source.status === "unowned") {
-          throw err(
-            "conflict",
-            `refusing to delete an isolation workspace whose ownership is not proven (${unowned.source.reason})`,
-          );
-        }
+        const inspected = await inspectLeavingCheckouts(session, rows);
         for (const entry of inspected) {
           const dependents = await sourceDependentsAt(session.id, entry.row.isolation.worktreePath);
           if (dependents.length > 0) {
@@ -2819,27 +2989,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         // filesystem disappeared; otherwise a live runtime can still access
         // sibling owned repositories while deletion proceeds.
         await releaseExecution(session.worktreePath ?? (await projectOf(session.projectId)).path);
-        const closed = new Set<string>();
-        for (const entry of inspected) {
-          // A checkout that is already gone can still have utility runtimes
-          // and terminals whose cwd points at it.
-          if (closed.has(entry.row.isolation.worktreePath)) continue;
-          await closeProcesses(entry.row.isolation.worktreePath);
-          closed.add(entry.row.isolation.worktreePath);
-        }
-        // Integration worktrees are also Polyth-owned resources for this
-        // session. Remove them before the sources so a later failure never
-        // leaves a live canonical session pointing at an already-deleted cwd.
-        const roots = new Set(rows.map((row) => row.isolation.targetPath));
-        for (const root of roots) await managed.pruneIntegrationsForSession(root, session.id);
-        for (const entry of inspected) {
-          if (entry.source.status !== "owned") continue;
-          const removed = await managed.removeOwned(entry.row.isolation.targetPath, ownedRef(session.id, entry.row.isolation));
-          if (removed.status === "unowned") {
-            throw err("conflict", `isolation ownership changed during deletion (${removed.reason})`);
-          }
-        }
-        for (const row of rows) await releaseIsolationRefs(session.id, row.isolation);
+        await removeLeavingCheckouts(session, inspected);
         isolationLog("session-delete-cleanup", {
           sessionId: session.id,
           projectId: session.projectId,
@@ -2847,6 +2997,22 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
           status: inspected.some((entry) => entry.source.status === "owned") ? "removed" : "already-gone",
         });
       });
+    },
+
+    /** The Cleanup settings' archive: every isolated checkout of an archived
+     *  session tree goes the way a delete takes it, but the sessions stay,
+     *  archived, on the checkouts their work targeted, so a restore continues
+     *  from canonical history. Deepest first, so nested work is gone before the
+     *  checkout it merges into. A failure keeps what is left and stays retryable. */
+    async releaseArchivedCheckouts(
+      rootSessionId: string,
+      releaseExecution: ReleaseArchivedExecution,
+    ): Promise<void> {
+      const root = await deps.sessions.snapshot(rootSessionId);
+      const tree = subtreeDeepestFirst(root.id, await deps.sessions.list(root.projectId));
+      for (const member of tree) {
+        await withSession(member.id, () => releaseArchivedMember(member.id, tree, releaseExecution));
+      }
     },
 
     async getStatus(sessionId: string, events?: readonly SessionEvent[]): Promise<IsolationStatusDto> {

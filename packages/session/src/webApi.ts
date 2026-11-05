@@ -2011,14 +2011,15 @@ export const api = {
     jfetch<ReviewFlowStateDto>(`/api/sessions/${encodeURIComponent(sessionId)}/review-flow/${action}`, { method: "POST" }),
 
 
-  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions") =>
+  /** Isolated sessions count only with an explicit `skipIsolated: false`. */
+  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions", options: { skipIsolated?: boolean } = {}) =>
     jfetch<SessionRetentionDto>(
-      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}`,
+      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}${options.skipIsolated === false ? "&skipIsolated=false" : ""}`,
     ),
-  runSessionRetention: (days: number, action: SessionRetentionAction = "archive") =>
+  runSessionRetention: (days: number, action: SessionRetentionAction = "archive", options: { skipIsolated?: boolean } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { days, action }),
+      json("POST", { days, action, ...(options.skipIsolated === false ? { skipIsolated: false } : {}) }),
     ),
   deleteArchivedSessions: (days: number) =>
     jfetch<SessionRetentionResultDto>(

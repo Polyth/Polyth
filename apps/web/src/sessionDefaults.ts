@@ -16,6 +16,9 @@ export interface SessionDefaults {
   compactionModel?: "session" | "small";
   retentionDays?: number;
   retentionAction?: "archive" | "delete";
+  /** Cleanup leaves isolated sessions alone unless this is `false`. The server
+   *  reads the same field, and an older client that drops it only skips more. */
+  retentionSkipIsolated?: boolean;
   archiveRetentionDays?: number;
 }
 
@@ -60,6 +63,9 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
     const retentionAction = data?.retentionAction === "archive" || data?.retentionAction === "delete"
       ? data.retentionAction
       : undefined;
+    const retentionSkipIsolated = typeof data?.retentionSkipIsolated === "boolean"
+      ? data.retentionSkipIsolated
+      : undefined;
     return {
       ...(defaultModel ? { defaultModel } : {}),
       ...(defaultThinking ? { defaultThinking } : {}),
@@ -69,6 +75,7 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
       ...(compactionModel ? { compactionModel } : {}),
       ...(retentionDays ? { retentionDays } : {}),
       ...(retentionAction ? { retentionAction } : {}),
+      ...(retentionSkipIsolated !== undefined ? { retentionSkipIsolated } : {}),
       ...(archiveRetentionDays ? { archiveRetentionDays } : {}),
     };
   } catch {

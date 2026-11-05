@@ -105,3 +105,95 @@ test("a child its parent's cascade already removed counts as cleaned up", async 
     failed: [{ id: "broken", code: "conflict" }],
   });
 });
+
+test("isolated sessions count and go only when the request explicitly says so", async () => {
+  const isolation = {
+    kind: "git-worktree",
+    state: "active",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    worktreePath: "/repo-polyth-isolate/x",
+    worktreeBranch: "polyth/isolate/x",
+    targetPath: "/repo",
+    targetBranch: "main",
+    baseCommit: "abc",
+  } as unknown as SessionProjection["isolation"];
+  const old = now - 40 * DAY;
+  const rows: SessionProjection[] = [
+    { id: "plain", projectId: "p", title: "plain", status: "idle", createdAt: 1, updatedAt: old },
+    { id: "isolated", projectId: "p", title: "isolated", status: "idle", createdAt: 1, updatedAt: old, isolation },
+    { id: "parent", projectId: "p", title: "parent", status: "idle", createdAt: 1, updatedAt: old },
+    { id: "isolated-child", projectId: "p", title: "child", status: "idle", createdAt: 1, updatedAt: old, parentId: "parent", isolation },
+    { id: "left-behind", projectId: "p", title: "left", status: "archived", createdAt: 1, updatedAt: old, isolation },
+  ];
+  const calls: string[] = [];
+  const run = async (
+    query: string,
+    body: Record<string, unknown>,
+    method: "GET" | "POST",
+    release: ((id: string) => Promise<void>) | undefined = async (id) => { calls.push(`release:${id}`); },
+  ) => {
+    const route = sessionRetentionRoutes(() => ({
+      sessions: {
+        list: async () => rows,
+        archive: async (id: string) => { calls.push(`archive:${id}`); },
+        delete: async (id: string) => { calls.push(`delete:${id}`); },
+      },
+    } as unknown as SpaceServices), release);
+    let response: { eligibleCount: number; failed: unknown[] } | undefined;
+    await route({
+      space: fakeSpaceContext(),
+      path: "/api/session-retention",
+      method,
+      url: new URL(`http://localhost/api/session-retention?days=30${query}`),
+      body: async () => ({ days: 30, ...body }),
+      json: (_status: number, value: typeof response) => { response = value; },
+    } as never);
+    return response!;
+  };
+
+  assert.equal((await run("", {}, "GET")).eligibleCount, 1, "an older client's request leaves them out");
+  assert.equal((await run("&skipIsolated=false", {}, "GET")).eligibleCount, 5);
+
+  await run("", { action: "delete" }, "POST");
+  assert.deepEqual(calls.splice(0), ["delete:plain"]);
+
+  await run("", { action: "archive", skipIsolated: false }, "POST");
+  assert.deepEqual(calls.splice(0), [
+    "archive:plain",
+    "archive:isolated", "release:isolated",
+    "archive:parent", "release:parent",
+    "archive:isolated-child", "release:isolated-child",
+    // Archiving first is what checks this person may touch it.
+    "archive:left-behind", "release:left-behind",
+  ]);
+
+  await run("", { action: "delete", skipIsolated: false }, "POST");
+  assert.deepEqual(calls.splice(0), [
+    "delete:plain", "delete:isolated", "delete:parent", "delete:isolated-child",
+    "archive:left-behind", "release:left-behind",
+  ], "an archived session's chat stays for the Archive section");
+
+  const failing = await run("", { action: "archive", skipIsolated: false }, "POST", async (id) => {
+    if (id === "isolated") throw Object.assign(new Error("no"), { code: "conflict" });
+  });
+  assert.deepEqual(failing.failed, [{ id: "isolated", code: "conflict" }]);
+  calls.splice(0);
+});
+
+test("without a way to remove checkouts the route always skips isolated sessions", async () => {
+  const rows: SessionProjection[] = [{
+    id: "isolated", projectId: "p", title: "i", status: "idle", createdAt: 1, updatedAt: now - 40 * DAY,
+    isolation: { kind: "git-worktree", state: "active", createdAt: "2026-01-01T00:00:00.000Z", worktreePath: "/w", worktreeBranch: "b", targetPath: "/r", targetBranch: "main", baseCommit: "a" } as unknown as SessionProjection["isolation"],
+  }];
+  const route = sessionRetentionRoutes(() => ({ sessions: { list: async () => rows } } as unknown as SpaceServices));
+  let response: { eligibleCount: number } | undefined;
+  await route({
+    space: fakeSpaceContext(),
+    path: "/api/session-retention",
+    method: "GET",
+    url: new URL("http://localhost/api/session-retention?days=30&skipIsolated=false"),
+    body: async () => ({}),
+    json: (_status: number, value: typeof response) => { response = value; },
+  } as never);
+  assert.equal(response?.eligibleCount, 0);
+});

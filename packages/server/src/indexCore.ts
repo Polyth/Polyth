@@ -2911,6 +2911,20 @@ export async function boot(opts: BootOptions = {}) {
       }
       await isolation.cleanupForSessionDelete(projection, releaseExecution);
     },
+    releaseArchivedCheckouts: async ({ sessionId, releaseExecution }) => {
+      const isolation = svc<{
+        releaseArchivedCheckouts(
+          sessionId: string,
+          release: (sessionId: string, cwd: string, options?: { sharer?: boolean }) => Promise<void>,
+        ): Promise<void>;
+      }>("isolation");
+      if (!isolation) {
+        throw Object.assign(new Error("git isolation cleanup is unavailable"), {
+          code: "unsupported",
+        });
+      }
+      await isolation.releaseArchivedCheckouts(sessionId, releaseExecution);
+    },
     updateIsolatedWorkspace: async (sessionId, selection) => {
       const isolation = svc<{ updateIsolatedWorkspace: NonNullable<SessionDeps["updateIsolatedWorkspace"]> }>("isolation");
       if (!isolation) throw Object.assign(new Error("git isolation membership service is unavailable"), { code: "unsupported" });
@@ -3206,9 +3220,16 @@ export async function boot(opts: BootOptions = {}) {
   };
   // "Clean up automatically" in Settings → Sessions. Nothing here runs before
   // its first timer, well after boot recovery.
+  const releaseArchivedCheckouts = (sessionId: string): Promise<void> => {
+    if (!sessionsImpl?.releaseArchivedCheckouts) {
+      throw Object.assign(new Error("isolated workspace cleanup is unavailable"), { code: "unsupported" });
+    }
+    return sessionsImpl.releaseArchivedCheckouts(sessionId);
+  };
   const expiredSessionCleanup = startExpiredSessionCleanup({
     spaceIds: () => spaceGateway.store.allSpaces().map((space) => space.id),
     sessionsFor: (spaceId) => spaceServices(spaceGateway.resolveInternal(spaceId)).sessions,
+    releaseCheckouts: releaseArchivedCheckouts,
     policy: createExpiredSessionPolicy(sessionAccounts),
     keep: (spaceId, sessionIds) => sessionsKeptByPeople(sessionIds, sessionAccounts.members(spaceId), store.personStates),
     stopped: isShuttingDown,
@@ -3385,7 +3406,7 @@ export async function boot(opts: BootOptions = {}) {
         return brief.trim().split(/\s+/).slice(0, 20).join(" ");
       },
     }),
-    sessionRetentionRoutes(spaceServices),
+    sessionRetentionRoutes(spaceServices, releaseArchivedCheckouts),
     promptHistoryRoutes({ spaces: spaceServices, store }),
     sharingRoutes(createSessionSharingService({
       projection: (sessionId) => store.projection(sessionId),

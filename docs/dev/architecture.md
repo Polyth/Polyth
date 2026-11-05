@@ -345,10 +345,29 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   tree rooted in a package-owned session (`purpose`) is never a candidate. The
   sweep also keeps trees with queued delivery or touched since the list, and
   another member's pin or draft. A `delete` choice archives instead when the tree
-  owns a checkout or is in an uncertain state (`unknown`, `epoch-pending`), so
-  unattended deletion can never take unmerged work or a possibly live turn. The
+  is in an uncertain state (`unknown`, `epoch-pending`), so unattended deletion can
+  never take a possibly live turn. Isolated sessions are skipped, whole tree,
+  unless the same person set `sessionDefaults.retentionSkipIsolated: false`; an
+  older client that drops the field only skips more, and a session with no recorded
+  account needs every member to agree. When they are not skipped nothing stays
+  behind: `delete` goes through `cleanupForSessionDelete`, and `archive` archives
+  the tree and then calls `SessionService.releaseArchivedCheckouts`, which removes
+  the same resources (execution, terminals and utility runtimes, integration
+  worktrees, the checkout with its links, the branch even with commits of its own,
+  Git's worktree entry, the receipt ref, an emptied parent folder) while the
+  sessions stay archived, moved to the checkouts their work targeted, so a restore
+  continues from canonical history without that work. Children that shared the
+  checkout move with it. An archived session past the period that still holds a
+  checkout is released the same way and its chat stays. Removal needs the same
+  proof as a delete: an execution not confirmed as ended, a user outside the tree,
+  an unproven owner or a merge that has not settled (`merging`, `publishing`,
+  `corrupt`, which hold the tree) keep the checkout, and the next pass retries.
+  Left on purpose: `refs/polyth/isolation-repair/*` (they back up the target
+  checkout's work, not the session's), a checkout whose branch was renamed (how a
+  preserved checkout leaves Polyth), and files the providers own, such as Claude
+  Code's `~/.claude/projects/<cwd>` transcripts, which that CLI prunes itself. The
   web page asks for confirmation before anything that starts or widens unattended
-  deletion.
+  deletion, including cleaning isolated sessions.
 - `http.ts` — core REST (health, projects, sessions, models/agents) + `RouteHandler`
   chain + static bundle. Feature packages never edit this file. F16: one auth gate
   runs before all routing — every `/api` path 401s without a session cookie except

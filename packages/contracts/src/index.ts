@@ -2730,6 +2730,11 @@ export interface SessionService {
     from: string;
     to: string;
   }): Promise<SessionProjection>;
+  /** Remove every isolated checkout of an archived session tree, with its branch
+   *  and everything else Polyth made for it; the sessions stay archived on the
+   *  checkouts their work targeted. Host-only cleanup: no Space or package facade
+   *  exposes it, and a caller checks access by archiving the tree first. */
+  releaseArchivedCheckouts?(sessionId: string): Promise<void>;
   /** Persist isolation metadata without changing runtime cwd. */
   patchIsolation?(sessionId: string, isolation: SessionIsolation | null): Promise<SessionProjection>;
   /**
