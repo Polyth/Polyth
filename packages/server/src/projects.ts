@@ -176,6 +176,7 @@ function gitRepositoryRoot(path: string): Promise<string> {
       encoding: "utf8",
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
     }, (error, stdout) => {
       if (error || !String(stdout).trim()) {
@@ -195,7 +196,7 @@ function gitRepositoryRoot(path: string): Promise<string> {
  * credentials) never enter a projected Project, error, or diagnostic. */
 async function repositoryIdentity(root: string): Promise<string[]> {
   const run = (args: string[]) => new Promise<string>((done) => {
-    execFile(resolveExecutable("git", { overrideEnv: GIT_BINARY_ENV }), ["-C", root, ...args], { encoding: "utf8", timeout: 10_000, maxBuffer: 128 * 1024,
+    execFile(resolveExecutable("git", { overrideEnv: GIT_BINARY_ENV }), ["-C", root, ...args], { encoding: "utf8", timeout: 10_000, maxBuffer: 128 * 1024, windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" } },
     (error, stdout) => done(error ? "" : String(stdout)));
   });

@@ -803,6 +803,9 @@ const createWindow = async (): Promise<void> => {
   // hidden-title-bar window must never grow an in-window menu bar.
   if (process.platform !== "darwin") window.setMenuBarVisibility(false);
   window.webContents.on("context-menu", (_event, params) => showContextMenu(window, params));
+  // With the stall log above this tells a frozen server from a frozen page.
+  window.on("unresponsive", () => log("Window page stopped responding"));
+  window.on("responsive", () => log("Window page is responding again"));
   window.webContents.setWindowOpenHandler(({ url }) => { if (safeExternalUrl(url)) void shell.openExternal(url); return { action: "deny" }; });
   window.webContents.on("will-navigate", (event, url) => { if (isLocalNavigation(url)) return; event.preventDefault(); if (safeExternalUrl(url)) void shell.openExternal(url); });
   window.webContents.on("render-process-gone", (_event, details) => {
@@ -1203,6 +1206,9 @@ const startServer = async (preferredPort?: number): Promise<void> => {
   serverLifecycle = await boot({
     port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
     desktopOwnerChannel: true,
+    onEventLoopStall: (stall) => {
+      log(`Event loop blocked for ${(stall.blockedMs / 1000).toFixed(1)}s (rss ${Math.round(process.memoryUsage().rss / 1_048_576)} MB)`);
+    },
     ...(bundledOpenCode ? { opencode: { bin: binary, binarySource: "bundled" as const } } : {}),
   });
   log(`Polyth server started at ${baseUrl}`);

@@ -104,6 +104,7 @@ import {
   pendingPackageContext,
   pendingPersonMessageAttachments,
   planRuntimeEpochRecovery,
+  runtimeEpochRecoveryPending,
   recoveredUserText,
   unrestoredCompactionSeq,
   contextPressureText,
@@ -6261,7 +6262,40 @@ export function createSessionService(deps: {
     }
   });
 
+  /** Every event of these types, through the indexed read: what a send needs
+   *  to look up must not cost a parse of the session's whole log. */
+  const eventsOfTypeList = async (sessionId: string, types: readonly string[]): Promise<SessionEvent[]> => {
+    if (!store.eventsOfTypes) {
+      const wanted = new Set(types);
+      return (await store.events(sessionId)).filter((event) => wanted.has(event.type));
+    }
+    const through = await store.latestSeq(sessionId);
+    const found: SessionEvent[] = [];
+    for (let after = 0; ;) {
+      const page = await store.eventsOfTypes(sessionId, types, after, through, 500);
+      found.push(...page);
+      if (page.length < 500) return found;
+      after = page.at(-1)!.seq;
+    }
+  };
+
   const dialogueThrough = (events: readonly SessionEvent[]) => effectiveHistory([...events]).events.filter((event) => !event.ignorable && (event.type === "user/message" || event.type === "assistant/message")).at(-1)?.seq ?? 0;
+
+  /** Whether the dialogue moved past what the native leg has seen. Asked on every
+   *  send with no rewind pending, when the usual answer is one indexed query. */
+  const runtimeLegIsStale = async (sessionId: string, canonicalThroughSeq: number | undefined): Promise<boolean> => {
+    if (canonicalThroughSeq !== undefined && store.eventsOfTypes) {
+      const newer = await store.eventsOfTypes(
+        sessionId,
+        ["user/message", "assistant/message"],
+        canonicalThroughSeq,
+        await store.latestSeq(sessionId),
+        1,
+      );
+      if (newer.length === 0) return false;
+    }
+    return canonicalThroughSeq !== dialogueThrough(await store.events(sessionId));
+  };
 
   const runtimeFor = async (projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime> => {
     const runtime = runtimes.forSession
@@ -7518,6 +7552,10 @@ export function createSessionService(deps: {
   ) => {
     if (!events.some((event) => event.type === "runtime/epoch-replaced" || event.type === "session/snapshot-imported")) return null;
     const operations = await durable.operations(sessionId);
+    // The marker stays in the log for good; only the first confirmed prompt of an
+    // epoch carries the recovery. Every later send must stop here, before any of
+    // the work below: it would hold the server (and on the desktop, the window).
+    if (!includeRestored && !runtimeEpochRecoveryPending(events, operations)) return null;
     const heldQueueIds = new Set(
       (await deps.queue?.queueList(sessionId) ?? [])
         .filter((item) => item.heldForReview)
@@ -7529,7 +7567,6 @@ export function createSessionService(deps: {
     const proj = await store.projection(sessionId);
     const sensitiveEnv = Object.entries(process.env).filter(([key, value]) => value && /TOKEN|SECRET|PASSWORD|API_KEY|AUTHORIZATION/i.test(key)).map(([, value]) => value!);
     const sanitize = (value: string) => redactContinuity(deps.secureSafe?.redact?.(value) ?? value, sensitiveEnv);
-    const safeEvents = events.map((event) => ({ ...event, data: JSON.parse(JSON.stringify(event.data, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as JsonObject }));
     const project = proj ? await projects.get(proj.projectId) : undefined;
     const workspace = proj && project
       ? await continuityWorkspace(await executionCwd(proj, project), Boolean(project.remote))
@@ -7537,7 +7574,8 @@ export function createSessionService(deps: {
     const safeWorkspace = workspace ? JSON.parse(JSON.stringify(workspace, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as typeof workspace : undefined;
     const safeWorkflow = workflow ? JSON.parse(JSON.stringify(workflow, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as typeof workflow : undefined;
     return planRuntimeEpochRecovery({
-      events: safeEvents,
+      events,
+      sanitize,
       ...(safeWorkspace ? { workspace: safeWorkspace } : {}),
       operations,
       heldQueueIds,
@@ -8034,7 +8072,7 @@ export function createSessionService(deps: {
       ...(input.author ? { author: input.author as unknown as JsonObject } : {}),
     };
     let operation = reserved?.operation;
-    const existingEvents = await store.events(sessionId);
+    const existingEvents = await eventsOfTypeList(sessionId, ["user/message", "queue/enqueued", "context/memory-prepared"]);
     type MemoryDeliveryMode = "structured-context" | "text" | "unsupported";
     type MemoryDeliveryStatus = "confirmed" | "degraded" | "unsupported" | "failed";
     const appendMemoryDeliveryReceipt = async (
@@ -8042,7 +8080,7 @@ export function createSessionService(deps: {
       transportReceipt?: string,
     ): Promise<void> => {
       if (!deps.memory) return;
-      const events = await store.events(sessionId);
+      const events = await eventsOfTypeList(sessionId, ["context/memory-prepared", "context/memory-delivery"]);
       const prepared = events.find((event) =>
         event.type === "context/memory-prepared"
         && (event.data as { operationId?: unknown }).operationId === operation?.operationId,
@@ -9437,6 +9475,39 @@ export function createSessionService(deps: {
    * the old harness keeps the chat, its binding and generation, and nothing is
    * started or replayed. A shutdown keeps the intent durable instead, and a
    * transition already past release keeps its own failed/retry path. */
+  const releaseIdleDetachedExecution = async (
+    sessionId: string,
+    projection: SessionProjection,
+    transition: HarnessTransition,
+  ): Promise<MutationOutcome<ExecutionReleaseProof> | undefined> => {
+    const binding = projection.runtimeBinding;
+    if (
+      transition.timing === "stop-now"
+      || projection.status !== "idle"
+      || sessionRuntime.has(sessionId)
+      || turnActive(sessionId)
+      || !binding?.backendSessionId
+      || !runtimes.releaseSessionExecution
+      || (await durable.operations(sessionId)).some(isRuntimeOperationBlocking)
+    ) return undefined;
+    const harnessId = projection.resolvedHarnessId;
+    const shared = (await store.projections()).some((other) => other.id !== sessionId
+      && (other.runtimeBinding?.authorityId === binding.authorityId
+        || (other.runtimeBinding?.location.directory === binding.location.directory
+          && other.resolvedHarnessId === harnessId)));
+    if (shared) return undefined;
+    const outcome = await boundedRuntimeAwait(Promise.resolve(runtimes.releaseSessionExecution(projection, {
+      canonicalSessionId: sessionId,
+      backendSessionId: binding.backendSessionId,
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      continuity: binding.continuity,
+      location: binding.location,
+    }, transition.id)), transition.id).catch(() => undefined);
+    // Anything less than proof takes the ordinary path with a live runtime.
+    return outcome?.kind === "confirmed" ? outcome : undefined;
+  };
+
   const finishHarnessSwitchUnderLock = async (
     sessionId: string,
     retryFailed = false,
@@ -9504,7 +9575,11 @@ export function createSessionService(deps: {
       if (transition.timing === "after-turn" && turnActive(sessionId)) return projection;
       let old: AgentRuntime | undefined;
       let epochPendingError: unknown;
-      try {
+      // An idle chat whose old harness is no longer running here has nothing to
+      // reconcile. Starting that harness only to stop it would add its whole
+      // launch to the switch, so release its authority directly when possible.
+      let released: MutationOutcome<ExecutionReleaseProof> | undefined = await releaseIdleDetachedExecution(sessionId, projection, transition);
+      if (!released) try {
         old = await runtimeFor(projection, cwd);
         if (transition.timing === "stop-now") {
           await abortTurnUnderLock(sessionId, "user", "Stopped to change harness", "harness-switch");
@@ -9537,8 +9612,9 @@ export function createSessionService(deps: {
         continuity: oldBinding.continuity,
         location: oldBinding.location,
       };
-      let released: MutationOutcome<ExecutionReleaseProof> | undefined;
-      if (epochPendingError) {
+      if (released) {
+        // Proven above, without a runtime.
+      } else if (epochPendingError) {
         // A same-harness transition only asks for a fresh native leg on the
         // harness already in use. When the retired epoch cannot be released
         // for this session alone, the owned-epoch recovery a send uses gives
@@ -9690,7 +9766,7 @@ export function createSessionService(deps: {
       // has no native history to reset and uses the fresh create seam.
       const sameHarness = transition.targetHarnessId === (projection.resolvedHarnessId ?? target.harnessId);
       stage = "creating-native-session";
-      const events = await store.events(sessionId);
+      const events = await eventsOfTypeList(sessionId, ["harness/native-create-requested"]);
       const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);
       let operation = intent ? (await durable.operations(sessionId)).find((op) => op.ownerEventSeq === intent.seq) : undefined;
       // A rejected create is settled: the target gave a definitive
@@ -11975,7 +12051,7 @@ export function createSessionService(deps: {
       if (!proj.harnessTransition && proj.runtimeLeg && proj.status === "idle" && !turnActive(sessionId)
         && (await logFacts(sessionId)).rewind === null
         && !await blockingOperation(sessionId) && proj.runtimeLeg.bootstrap !== "continuity"
-        && proj.runtimeLeg.canonicalThroughSeq !== dialogueThrough(await store.events(sessionId))) {
+        && await runtimeLegIsStale(sessionId, proj.runtimeLeg.canonicalThroughSeq)) {
         proj = await withSessionLock(sessionId, async () => {
           await commitHarnessIntent(sessionId, { harnessTransition: { id: randomUUID(), selection: proj!.harness ?? { mode: "auto" }, targetHarnessId: proj!.resolvedHarnessId!, timing: "after-turn", phase: "requested" } }, "harness/switch-requested", { reason: "native history is stale", targetHarnessId: proj!.resolvedHarnessId! });
           return finishHarnessSwitchUnderLock(sessionId);

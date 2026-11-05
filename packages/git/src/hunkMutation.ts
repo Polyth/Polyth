@@ -82,6 +82,7 @@ export function createHunkPatchRunner(
             cwd: root,
             env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
             maxBuffer: 8 * 1024 * 1024,
+            windowsHide: true,
           },
           (error, _stdout, stderr) => {
             if (!error) {

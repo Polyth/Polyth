@@ -82,7 +82,7 @@ import {
 } from "@polyth/plugins";
 import { createProjectService } from "./projects.ts";
 import { createPermissionWaitingBus } from "./permissionWaiting.ts";
-import { watchEventLoopStalls } from "./eventLoopStall.ts";
+import { defaultStallReport, watchEventLoopStalls, type EventLoopStall } from "./eventLoopStall.ts";
 import {
   createSpaceGateway,
   spaceCookieHeader,
@@ -235,6 +235,9 @@ export interface BootOptions {
    * owner has no credential). Other hosts leave it unset.
    */
   desktopOwnerChannel?: boolean;
+  /** Told about each event-loop stall as well. A packaged desktop app has no
+   *  console, so without this its log never shows why the window froze. */
+  onEventLoopStall?: (stall: EventLoopStall) => void;
 }
 
 /** Keep protocol identity behind the runtime pool's stable facade, including
@@ -3586,7 +3589,9 @@ export async function boot(opts: BootOptions = {}) {
   if (process.platform !== "win32") chmodSync(controlSocketPath, 0o600);
   console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${publicListeningPort}  data=${dataDir}`);
   console.log(`[polyth] agent control on ${controlSocketPath}`);
-  const stopStallWatch = watchEventLoopStalls();
+  const stopStallWatch = watchEventLoopStalls(opts.onEventLoopStall
+    ? { report: (stall) => { defaultStallReport(stall); opts.onEventLoopStall?.(stall); } }
+    : {});
   void sessionWatches.recover().catch((error) => {
     console.error("[polyth] session watch recovery failed", error);
   });

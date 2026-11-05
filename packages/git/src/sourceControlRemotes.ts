@@ -27,7 +27,7 @@ const systemGitExec: GitRemoteExec = (cwd, args) =>
     execFile(
       resolveGitBinary(),
       args,
-      { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 1_000_000 },
+      { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 1_000_000, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
           reject(Object.assign(new Error(String(stderr || error.message).trim()), { cause: error }));

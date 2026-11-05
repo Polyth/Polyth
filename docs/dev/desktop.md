@@ -329,6 +329,19 @@ green with "Awake" while held; a click toggles keep-awake). The decision is
 window has loaded count as work; source-inspected and unit-tested, not
 device-verified.
 
+## Diagnosing a frozen window
+
+The server runs inside Electron's main process, so anything that holds its thread
+also stops the window: synchronous store reads, a synchronous process start, a long
+JSON parse. `polyth-desktop.log` in the app's `desktop` user-data folder tells the
+cases apart:
+
+- `Event loop blocked for …s` means the server held the main thread.
+- `Window page stopped responding` means the page itself froze while the main
+  process kept running.
+- Neither line during a freeze points outside this process: harness children, the
+  disk or a scanner. Compare with Task Manager while it happens.
+
 ## Low-resource mode
 
 Desktop settings includes an opt-in low-resource mode for older machines. It

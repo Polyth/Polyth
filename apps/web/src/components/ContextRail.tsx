@@ -186,7 +186,7 @@ export function useRailSurfaceModel(): RailSurfaceModel {
   // instead of fetching a fresh per-session copy on every spawn/switch.
   const gitStatus = useGitStatus(
     projectId,
-    model.turn?.status === "working",
+    model.turn?.status === "working" ? "turn" : false,
     session?.worktreePath ? session.id : null,
   );
   const ctx: RailSurfaceContext = {

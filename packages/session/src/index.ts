@@ -73,6 +73,7 @@ import {
   buildRuntimeEpochRecoveryContext,
   compactionSummariesFromEvents,
   dialogueFromMessages,
+  workStateFromEvents,
 } from "./recovery.ts";
 import { effectiveHistory, recoveredUserText } from "./history.ts";
 import { polythCompactionForEpoch } from "./compaction.ts";
@@ -338,6 +339,7 @@ export {
   dialogueFromMessages,
   escapeRecoveryText,
   formatRecoveryDialogueLine,
+  workStateFromEvents,
 } from "./recovery.ts";
 export type {
   RuntimeEpochRecoveryAttachment,
@@ -5341,11 +5343,13 @@ export interface RuntimeEpochRecoveryPlan {
   omittedPins: number;
   omittedKnowledge: number;
   omittedSummaries: number;
+  shortenedMessages: number;
   sectionsCapped: string[];
   sectionChars: {
     intent: number;
     durable: number;
     summaries: number;
+    work: number;
     dialogue: number;
   };
 }
@@ -5358,6 +5362,8 @@ export interface PlanRuntimeEpochRecoveryInput {
   includeWorkflow?: boolean;
   /** Diagnostics may recompute stats after a confirmed restore. */
   includeRestored?: boolean;
+  /** Removes secrets the host knows about from what the recovery text selects. */
+  sanitize?: (text: string) => string;
   workflow?: {
     objective?: string;
     pinned?: readonly PinnedMessageContext[];
@@ -5449,32 +5455,46 @@ export function selectConfirmedEpochRecoveryEvents(input: {
     });
 }
 
-export function planRuntimeEpochRecovery(
-  input: PlanRuntimeEpochRecoveryInput,
-): RuntimeEpochRecoveryPlan | null {
-  const epochMarkers = input.events.filter((event) => event.type === "runtime/epoch-replaced" || event.type === "session/snapshot-imported");
-  const marker = epochMarkers.at(-1);
-  if (!marker) return null;
-  const snapshot = marker.type === "session/snapshot-imported";
-  const epoch = snapshot ? 0 : Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
-  if (!Number.isSafeInteger(epoch) || (!snapshot && epoch <= 0)) return null;
+const latestEpochMarker = (events: readonly SessionEvent[]): SessionEvent | undefined =>
+  events.findLast((event) => event.type === "runtime/epoch-replaced" || event.type === "session/snapshot-imported");
 
+/** True while the newest runtime epoch still owes its first confirmed prompt the
+ *  recovered context. Costs one pass over the events and no copying, so an
+ *  ordinary send after a switch pays for nothing it will not use. */
+export function runtimeEpochRecoveryPending(
+  events: readonly SessionEvent[],
+  operations: readonly DurableOperation[],
+): boolean {
+  const marker = latestEpochMarker(events);
+  if (!marker) return false;
+  const epoch = marker.type === "session/snapshot-imported"
+    ? 0
+    : Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
   const operationByOwnerSeq = new Map(
-    input.operations
+    operations
       .filter((operation) => operation.ownerEventSeq !== undefined)
       .map((operation) => [operation.ownerEventSeq!, operation]),
   );
-  const alreadyRestored = input.events.some((event) => {
+  return !events.some((event) => {
     if (event.type !== "user/message") return false;
     const metadata = (event.data as {
       runtimeEpochRecovery?: { markerSeq?: unknown; epoch?: unknown };
     }).runtimeEpochRecovery;
-    if (Number(metadata?.markerSeq) !== marker.seq || Number(metadata?.epoch) !== epoch) {
-      return false;
-    }
-    return operationByOwnerSeq.get(event.seq)?.state === "confirmed";
+    return Number(metadata?.markerSeq) === marker.seq
+      && Number(metadata?.epoch) === epoch
+      && operationByOwnerSeq.get(event.seq)?.state === "confirmed";
   });
-  if (alreadyRestored && !input.includeRestored) return null;
+}
+
+export function planRuntimeEpochRecovery(
+  input: PlanRuntimeEpochRecoveryInput,
+): RuntimeEpochRecoveryPlan | null {
+  const marker = latestEpochMarker(input.events);
+  if (!marker) return null;
+  const snapshot = marker.type === "session/snapshot-imported";
+  const epoch = snapshot ? 0 : Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
+  if (!Number.isSafeInteger(epoch) || (!snapshot && epoch <= 0)) return null;
+  if (!input.includeRestored && !runtimeEpochRecoveryPending(input.events, input.operations)) return null;
 
   const includeWorkflow = input.includeWorkflow !== false;
   const safeEvents = selectConfirmedEpochRecoveryEvents({
@@ -5505,7 +5525,8 @@ export function planRuntimeEpochRecovery(
     ...(input.workflow?.agent ? { agent: input.workflow.agent } : {}),
     knowledge: attachedKnowledge(safeEvents),
     summaries: compaction ? [compaction.summary] : compactionSummariesFromEvents(safeEvents),
-  });
+    work: workStateFromEvents(safeEvents),
+  }, input.sanitize ? { sanitize: input.sanitize } : {});
   return {
     epoch,
     markerSeq: marker.seq,
@@ -5516,6 +5537,7 @@ export function planRuntimeEpochRecovery(
     omittedPins: built.omittedPins,
     omittedKnowledge: built.omittedKnowledge,
     omittedSummaries: built.omittedSummaries,
+    shortenedMessages: built.shortenedMessages,
     sectionsCapped: built.sectionsCapped,
     sectionChars: built.sectionChars,
   };

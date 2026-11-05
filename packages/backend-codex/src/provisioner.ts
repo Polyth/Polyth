@@ -251,9 +251,17 @@ export function createCodexProvisioner(harnessId = "codex"): HarnessProvisioner 
           continue;
         }
         const values = secrets.mcpSecrets(item.capability.id);
+        // Polyth authorizes every call on its own tool server (agentTools.ts
+        // `invoke`), so asking through Codex as well would only add a second
+        // prompt. Any other server keeps Codex's approval, which reaches
+        // Polyth's permission flow as an MCP elicitation.
+        const approval: JsonObject = item.capability.id === "polyth.agent-tools"
+          ? { default_tools_approval_mode: "approve" }
+          : {};
         const transport: JsonObject = item.capability.transport.kind === "stdio"
           ? {
             enabled: true,
+            ...approval,
             startup_timeout_sec: CODEX_MCP_STARTUP_TIMEOUT_SEC,
             command: item.capability.transport.command,
             args: item.capability.transport.args,
@@ -261,6 +269,7 @@ export function createCodexProvisioner(harnessId = "codex"): HarnessProvisioner 
           }
           : {
             enabled: true,
+            ...approval,
             startup_timeout_sec: CODEX_MCP_STARTUP_TIMEOUT_SEC,
             url: item.capability.transport.url,
             http_headers: Object.fromEntries(item.capability.transport.headersSecretRefs.map((key) => [key, values[key] ?? ""])),

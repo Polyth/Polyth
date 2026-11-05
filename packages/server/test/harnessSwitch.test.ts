@@ -40,6 +40,8 @@ function fixture(path = ":memory:", options: {
   privateSessions?: { supported: string[]; preferences: Record<string, { privateSessions?: boolean }> };
   /** A harness whose runtime has no release hook (a remote Pi leg). */
   noReleaseHarness?: string;
+  /** Release a session's idle runtime on this schedule. */
+  idleSessionRuntimes?: Parameters<typeof createSessionService>[0]["idleSessionRuntimes"];
   /** After a turn, report idle by ordering evidence alone, as Pi does,
    *  instead of naming the create operation as its cause. */
   orderedStatusEvidence?: boolean;
@@ -259,6 +261,7 @@ function fixture(path = ":memory:", options: {
       ? { workspaceInstructionsEnabled: async () => options.workspaceInstructionsEnabled! }
       : {}),
     ...(options.compactionSummary ? { compactionSummary: options.compactionSummary } : {}),
+    ...(options.idleSessionRuntimes ? { idleSessionRuntimes: options.idleSessionRuntimes } : {}),
   });
   let sessions = makeSessions();
   const drain = () => new Promise((resolve) => setTimeout(resolve, 40));
@@ -2657,4 +2660,113 @@ test("private sessions apply to new conversations only and never to a harness wi
   } finally {
     await f.close();
   }
+});
+
+const idleRelease = { ttlMs: 0, maxIdle: 0, minIdleMs: 0, unusedIdleMs: 0, sweepMs: 5 };
+
+for (const outcome of ["confirmed", "refused"] as const) {
+  test(`switching an idle chat whose old harness is not running ${outcome === "confirmed" ? "starts only the target" : "falls back to a live release"}`, async (t) => {
+    const f = fixture(":memory:", { idleSessionRuntimes: idleRelease });
+    t.after(() => f.close());
+    const { id } = await f.sessions.create({ projectId: "p" });
+    await f.sessions.send(id, { text: "Earlier work" });
+    f.engines[0]!.complete();
+    await f.idle(id);
+    await until(async () => !f.pool.isSessionScoped?.(id));
+
+    const releases: string[] = [];
+    f.pool.releaseSessionExecution = async (_row, binding, operationId) => {
+      releases.push(operationId);
+      return outcome === "confirmed"
+        ? { kind: "confirmed", value: { authorityId: binding.authorityId, generation: binding.generation, backendSessionId: binding.backendSessionId! } }
+        : { kind: "rejected", code: "unsupported", message: "no durable proof here" };
+    };
+    const started = f.engines.filter((engine) => engine.harnessId === "fake-a").length;
+    if (outcome === "confirmed") {
+      const result = await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+      assert.equal(result.resolvedHarnessId, "fake-b");
+      assert.equal(result.harnessTransition, undefined);
+      assert.equal(releases.length, 1);
+      assert.equal(f.engines.filter((engine) => engine.harnessId === "fake-a").length, started, "the old harness was not started");
+      assert.equal((await f.store.events(id)).filter((event) => event.type === "harness/execution-released").length, 1);
+    } else {
+      // Without proof the ordinary path decides, and an unproven release keeps
+      // the chat where it is rather than starting a second executor.
+      await assert.rejects(f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }));
+      assert.ok(f.engines.filter((engine) => engine.harnessId === "fake-a").length > started, "the ordinary path used a live runtime");
+      const after = (await f.store.projection(id))!;
+      assert.equal(after.harnessTransition, undefined);
+      assert.equal(after.resolvedHarnessId, "fake-a");
+      assert.equal((await f.store.events(id)).some((event) => event.type === "harness/execution-released"), false);
+    }
+  });
+}
+
+test("a neighbour on the same route keeps the old harness's runtime path", async (t) => {
+  const f = fixture(":memory:", { idleSessionRuntimes: idleRelease });
+  t.after(() => f.close());
+  const one = await f.sessions.create({ projectId: "p" });
+  const other = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(one.id, { text: "Earlier work" });
+  f.engines[0]!.complete();
+  await f.idle(one.id);
+  await until(async () => !f.pool.isSessionScoped?.(one.id));
+  assert.equal((await f.store.projection(other.id))?.resolvedHarnessId, "fake-a");
+  let direct = 0;
+  f.pool.releaseSessionExecution = async () => { direct += 1; throw new Error("must not be used"); };
+  await f.sessions.switchHarness!(one.id, { mode: "pinned", harnessId: "fake-b" }).catch(() => undefined);
+  assert.equal(direct, 0, "another session on that route may still need the process");
+});
+
+test("a send reads the whole log once, however many times the runtime was switched", async (t) => {
+  const f = fixture();
+  t.after(() => f.close());
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "first" });
+  f.engines[0]!.complete();
+  await f.idle(id);
+  await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  const engine = f.engines.find((candidate) => candidate.harnessId === "fake-b")!;
+  await f.sessions.send(id, { text: "restores the recovery" });
+  assert.match(engine.requests.at(-1)!.text, /Recovery context/);
+  engine.complete();
+  await f.idle(id);
+
+  const read = f.store.events.bind(f.store);
+  let wholeLogReads = 0;
+  (f.store as { events: unknown }).events = (...args: Parameters<typeof read>) => {
+    const [, afterSeq, options] = args;
+    if (!afterSeq && !options?.limit) wholeLogReads += 1;
+    return read(...args);
+  };
+  await f.sessions.send(id, { text: "ordinary send after the switch" });
+  assert.doesNotMatch(engine.requests.at(-1)!.text, /Recovery context/, "the recovery travels once");
+  assert.equal(wholeLogReads, 1);
+  (f.store as { events: unknown }).events = read;
+  engine.complete();
+  await f.idle(id);
+});
+
+test("the fresh harness learns what the previous one did, not just what was said", async (t) => {
+  const f = fixture();
+  t.after(() => f.close());
+  const { id } = await f.sessions.create({ projectId: "p" });
+  await f.sessions.send(id, { text: "Migrate billing" });
+  const old = f.engines[0]!;
+  old.report({ type: "tool/call", callId: "w", tool: "Write", input: { file_path: "src/billing.ts", content: "SOURCE-STAYS" }, status: "running" });
+  old.report({ type: "tool/result", callId: "w", tool: "Write", output: "OUTPUT-STAYS" });
+  old.report({ type: "tool/call", callId: "c", tool: "bash", input: { command: "npm test" }, status: "running" });
+  old.report({ type: "tool/error", callId: "c", tool: "bash", error: "2 tests failed" });
+  old.complete();
+  await f.idle(id);
+  await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
+  await f.sessions.send(id, { text: "Carry on" });
+  const text = f.engines.find((engine) => engine.harnessId === "fake-b")!.requests.at(-1)!.text;
+  assert.match(text, /Files changed in this session/);
+  assert.match(text, /src\/billing\.ts/);
+  assert.match(text, /npm test → failed: 2 tests failed/);
+  assert.match(text, /another agent harness/);
+  assert.doesNotMatch(text, /SOURCE-STAYS|OUTPUT-STAYS/);
+  f.engines.at(-1)!.complete();
+  await f.idle(id);
 });

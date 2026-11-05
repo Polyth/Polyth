@@ -106,7 +106,7 @@ Source-inspected per adapter:
 | Harness | Reaches Polyth's decision point | Not covered |
 | --- | --- | --- |
 | Claude Code | Every `canUseTool` call (command or file path as the pattern). | Tools the SDK's `default` mode allows natively (read-only tools). |
-| Codex | Command and file-change approval requests. | Actions inside the `workspace-write` sandbox run without a request; only escalations ask, and a file-change request carries a reason rather than its paths. |
+| Codex | Command and file-change approval requests, and MCP tool approvals (`mcpServer/elicitation/request` marked `codex_approval_kind: "mcp_tool_call"`, as `mcp__<server>__<tool>`). | Actions inside the `workspace-write` sandbox run without a request; only escalations ask, and a file-change request carries a reason rather than its paths. An MCP tool annotated `readOnlyHint` runs without asking. Polyth's own tool server is launched with `default_tools_approval_mode = "approve"` because `invoke` in `agentTools.ts` authorizes each of its calls. A server's own elicitation form has no surface yet and is declined. Codex reports any error answer to the model as "user rejected MCP tool call", so this method must always answer. |
 | OpenCode | Native permission events (patterns and metadata). | Whatever the project's own OpenCode permission config allows natively. |
 | ACP (Cursor, Grok Build, oh-my-pi, fx, generic) | `session/request_permission`. | Only the tool-call kind and title are mapped, so risk is judged from the title. |
 | Antigravity | Every gated tool, through the PreToolUse bridge under the native launch bypass. | Workspace reads/edits and the turn's staged attachments, which the bridge allows itself. |
@@ -134,7 +134,7 @@ A synchronized native leg can be reattached where the adapter supports verified 
 
 1. Under the existing session lock, persist a switch intent containing the target, timing and transition ID. Fence new turn admission; new messages can queue.
 2. Default to finishing the active turn. “Stop and switch now” records explicit stop intent and uses existing abort machinery.
-3. Reconcile the old runtime. A local idle marker, abort acknowledgement, timeout, disconnected channel or missing PID is not a release proof. Unresolved operations remain unresolved.
+3. Reconcile the old runtime. A local idle marker, abort acknowledgement, timeout, disconnected channel or missing PID is not a release proof. Unresolved operations remain unresolved. An idle chat whose old runtime is no longer wired here, with no blocking operation and no other session on that authority or route, skips this step: `releaseSessionExecution` proves the release without starting the old harness only to stop it (`releaseIdleDetachedExecution`). Anything short of confirmed proof falls back to the live path.
 4. Require `releaseExecution` to confirm the exact old authority and generation. OpenCode's shared runtime barrier also rejects release while a neighbouring session on that authority is busy or unresolved. A requested transition that fails before this proof (no release hook, as on a remote Pi leg; a rejected, `unknown` or mismatched release; an abort acknowledgement alone; an unresolved operation; an unreachable runtime) is withdrawn at once with `harness/switch-cancelled` (`reason: "release-unproven"`, plus the error `code` and `message`) and the error reaches the caller. The old harness keeps the chat, its binding and generation; no target is created and nothing is replayed. Waiting for a running turn under `after-turn` timing is not a failure, and a server shutdown keeps the intent durable for the next start (`finishHarnessSwitchUnderLock`, `packages/server/src/sessions.ts`).
 5. Persist `harness/execution-released` before constructing the target runtime. Unwire the old runtime and evict its pool entry.
 6. Prepare target native creation through the existing durable operation journal. A different harness is constructed without the source harness's model identity; same-harness fresh legs retain compatible launch settings. Persist the provider's exact native receipt. A missing response is never retried speculatively; recovery requires a matching operation receipt, not a title or timestamp guess.
@@ -402,13 +402,16 @@ The accepted [owned-runtime recovery ADR](./owned-runtime-recovery.md) records t
 
 Epoch recovery, first Snapshot continuation and harness switching reuse the existing session recovery builder. Its limits remain 40 dialogue messages and 16,000 characters, with deterministic section budgets. Workspace collection is outside the pure builder.
 
+Only an epoch's first confirmed prompt carries the recovery, while the marker stays in the log for good. `runtimeEpochRecoveryPending` answers that before anything is copied, redacted or asked of Git, so later sends pay nothing for it. Redaction runs inside the builder on the selected input (`sanitize`), before any text is clipped, not over the whole log.
+
 The bundle contains:
 
 - Active canonical objective and current behavior/instructions; agent profile name/notes as intent, without its old model/account route.
 - Effective pinned user/assistant messages, attached knowledge and relevant persisted summaries.
-- Recent confirmed user/assistant text, respecting rewind/fork history, ignored events and durable mutation outcomes. Attachment names and MIME references can be retained; binary attachment translation is adapter-dependent.
+- Recent confirmed user/assistant text, respecting rewind/fork history, ignored events and durable mutation outcomes. Attachment names and MIME references can be retained; binary attachment translation is adapter-dependent. A long message keeps its opening and its ending with a marked cut, with more room for the person's words and the two newest messages, so one long report cannot push the conversation out.
+- Work state from the same confirmed events (`workStateFromEvents`): how the last turn ended and which tools have an unknown outcome, the open plan, unfinished subagents, recent commands with their failures, recent tool failures, files changed and read, and the session's first request once it has left the dialogue window. No file contents, and no tool output except a failure's own message.
 - Current cwd, and bounded Git branch, HEAD, dirty status and modified/untracked filenames when available. No repository copying and no diff bodies. Failed or remote Git inspection leaves unavailable facts absent.
-- An explicit statement that the workspace is authoritative and unconfirmed operations must not be assumed successful.
+- An explicit statement that the workspace is authoritative and unconfirmed operations must not be assumed successful, with a request to read only what the next step needs: a fresh runtime that re-reads everything repeats recorded work and spends its context on it.
 
 When the Behavior setting **Include workspace AGENTS.md** is enabled, the first
 admitted ordinary prompt on every fresh runtime leg also carries the active
