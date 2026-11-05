@@ -63,6 +63,15 @@ export function projectRoutes(
       return true;
     }
 
+    // "Only me" inside a shared project: the caller's own room, created when
+    // they first turn to it. The server picks the folder and the owner.
+    const roomMatch = path.match(/^\/api\/projects\/([^/]+)\/private-room$/);
+    if (roomMatch && method === "POST") {
+      if (!projects.ensurePrivateRoom) throw Object.assign(new Error("private rooms are unavailable"), { code: "not-supported" });
+      json(200, await projects.ensurePrivateRoom(decodeURIComponent(roomMatch[1]!)));
+      return true;
+    }
+
     const settingsMatch = path.match(/^\/api\/projects\/([^/]+)\/settings$/);
     if (settingsMatch && (method === "GET" || method === "PUT")) {
       if (!projects.getPresentationSettings || !projects.putPresentationSettings) {

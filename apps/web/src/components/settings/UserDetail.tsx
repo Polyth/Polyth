@@ -26,6 +26,8 @@ import {
   setAccountLimits,
   setAccountPermissions,
   setAccountStatus,
+  erasePrivateData,
+  privateDataBytes,
   type AccountChoice,
 } from "../../accounts.ts";
 import { grantSpaceMember, revokeSpaceMember, type CurrentSpaceAccess } from "../../spaceAccess.ts";
@@ -88,7 +90,7 @@ import {
   type LimitsDraft,
 } from "./usersModel.ts";
 import { isReauthCancelled, type WithReauth } from "./ownerReauth.tsx";
-import { getLocale, tr } from "../../i18n/index.ts";
+import { formatNumber, getLocale, tr } from "../../i18n/index.ts";
 
 type AccessChoice = SpaceRole | "none";
 
@@ -113,6 +115,13 @@ interface Props {
   welcome?: string | undefined;
 }
 
+const formatPrivateSize = (bytes: number): string => {
+  const [value, unit] = bytes >= 1024 ** 3 ? [bytes / 1024 ** 3, "gigabyte"]
+    : bytes >= 1024 ** 2 ? [bytes / 1024 ** 2, "megabyte"]
+      : [Math.max(bytes / 1024, bytes > 0 ? 0.1 : 0), "kilobyte"];
+  return formatNumber(value, { style: "unit", unit, maximumFractionDigits: 1 });
+};
+
 export default function UserDetail({ account, name, spaceAccess, withReauth, onBack, onChanged, onRemoved, welcome }: Props) {
   const [loadError, setLoadError] = useState<unknown>(null);
   const [limitsDto, setLimitsDto] = useState<AccountLimitsDto | null>(null);
@@ -126,6 +135,12 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
   const [harnesses, setHarnesses] = useState<HarnessChoice[] | null>(null);
   const [catalog, setCatalog] = useState<ModelDescriptor[] | null>(null);
 
+  const [privateBytes, setPrivateBytes] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    void privateDataBytes(account.id).then((bytes) => { if (live) setPrivateBytes(bytes); });
+    return () => { live = false; };
+  }, [account.id]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(
     welcome ? { tone: "success", text: welcome } : null,
@@ -280,6 +295,25 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
       onRemoved(tr("settings.users.disabledDone", { name }));
     } catch (cause) {
       if (!isReauthCancelled(cause)) setNotice({ tone: "error", text: accountErrorText(cause) });
+      setBusy(false);
+    }
+  };
+
+  const erasePrivate = async () => {
+    const ok = await confirmAlert(
+      tr("settings.users.privateDataEraseBody", { name }),
+      { title: tr("settings.users.privateDataEraseTitle", { name }), confirmLabel: tr("settings.users.privateDataErase") },
+    );
+    if (!ok) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await withReauth(() => erasePrivateData(account.id));
+      setNotice({ tone: "success", text: tr("settings.users.privateDataErased", { name }) });
+      setPrivateBytes(await privateDataBytes(account.id));
+    } catch (cause) {
+      if (!isReauthCancelled(cause)) setNotice({ tone: "error", text: accountErrorText(cause) });
+    } finally {
       setBusy(false);
     }
   };
@@ -755,9 +789,26 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
         </Section>
       )}
 
+      {privateBytes !== null && !account.current && (
+        <Section title={tr("settings.users.privateData")}>
+          <Row label={tr("settings.users.privateDataSize")} hint={tr("settings.users.privateDataSizeHint", { name })}>
+            <span>{formatPrivateSize(privateBytes)}</span>
+          </Row>
+        </Section>
+      )}
+
+      {account.status === "disabled" && (
+        <Section title={tr("settings.users.privateDataErase")} tone="danger">
+          <Row label={tr("settings.users.privateDataErase")} hint={tr("settings.users.privateDataHint", { name })}>
+            <Button size="sm" variant="danger" disabled={busy} onClick={() => void erasePrivate()}>{tr("settings.users.privateDataErase")}</Button>
+          </Row>
+        </Section>
+      )}
+
       {passwordOpen && (
         <PasswordDialog
           name={name}
+          intro={tr("settings.users.resetPasswordNotice", { name })}
           onClose={() => setPasswordOpen(false)}
           onSave={async (password) => {
             await withReauth(() => resetAccountPassword(account.id, password));

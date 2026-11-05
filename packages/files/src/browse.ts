@@ -27,7 +27,15 @@ export interface BrowseResult {
 export interface BrowseOptions {
   /** Include dot-directories. Default false. */
   hidden?: boolean;
+  /** Folders the picker never enters or lists: the server's own data. */
+  sealedRoots?: readonly string[];
 }
+
+const isSealedHostPath = (real: string, sealedRoots: readonly string[] | undefined): boolean =>
+  (sealedRoots ?? []).some((folder) => {
+    const rel = path.relative(folder, real);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  });
 
 /** Path prefixes that are never browsable: kernel/device pseudo-filesystems
  *  hold nothing a project picker should touch and can hang on read. */
@@ -67,6 +75,8 @@ export async function browseHost(rawPath?: string | null, opts: BrowseOptions = 
     throw browseError("not-found", `No such directory: ${abs}`);
   }
   if (isBlockedHostPath(real)) throw browseError("invalid-path", `Browsing ${real} is not allowed`);
+  // Reads exactly like a folder that isn't there.
+  if (isSealedHostPath(real, opts.sealedRoots)) throw browseError("not-found", `No such directory: ${abs}`);
   const st = await lstat(real);
   if (!st.isDirectory()) throw browseError("invalid-path", `Not a directory: ${abs}`);
 
@@ -83,14 +93,14 @@ export async function browseHost(rawPath?: string | null, opts: BrowseOptions = 
     if (ent.isSymbolicLink()) {
       try {
         const target = await realpath(childAbs);
-        if (isBlockedHostPath(target)) continue;
+        if (isBlockedHostPath(target) || isSealedHostPath(target, opts.sealedRoots)) continue;
         isDir = (await stat(target)).isDirectory();
       } catch {
         continue; // broken link
       }
     }
     if (!isDir) continue;
-    if (isBlockedHostPath(childAbs)) continue;
+    if (isBlockedHostPath(childAbs) || isSealedHostPath(childAbs, opts.sealedRoots)) continue;
     const entry: BrowseEntry = { name: ent.name, path: childAbs, hidden };
     try {
       const cs = await lstat(childAbs);
@@ -110,9 +120,9 @@ export async function browseHost(rawPath?: string | null, opts: BrowseOptions = 
 }
 
 /** Create a directory (recursively) on the host, for "create folder if missing". */
-export async function mkdirHost(rawPath: string): Promise<{ path: string }> {
+export async function mkdirHost(rawPath: string, opts: Pick<BrowseOptions, "sealedRoots"> = {}): Promise<{ path: string }> {
   const abs = resolveHostPath(rawPath);
-  if (isBlockedHostPath(abs)) throw browseError("invalid-path", `Creating ${abs} is not allowed`);
+  if (isBlockedHostPath(abs) || isSealedHostPath(abs, opts.sealedRoots)) throw browseError("invalid-path", `Creating ${abs} is not allowed`);
   await mkdir(abs, { recursive: true });
   return { path: abs };
 }

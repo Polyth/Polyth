@@ -53,6 +53,6 @@ test("delegated children and duplicate rows do not inflate a project", () => {
 
 test("the new-session context bar lists projects in recency order", async () => {
   const composer = await readFile(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
-  assert.match(composer, /useRecentlyActiveProjects\(projects, !session, spaceId\)/);
-  assert.match(composer, /projectChoices: ProjectContextChoice\[\] = rankedProjects\.map/);
+  assert.match(composer, /useRecentlyActiveProjects\(rootProjects\(projects\) as typeof projects, !session, spaceId\)/);
+  assert.match(composer, /projectChoices: ProjectContextChoice\[\] = \[\.\.\.activeRoom, \.\.\.rankedProjects\]\.map/);
 });

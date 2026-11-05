@@ -2,6 +2,7 @@
 // chrome of its own: these options open inline under the Recent sessions row
 // of the new chat's Customize panel (HeroCustomize.tsx). Every choice applies
 // immediately and syncs with the hero widget preferences.
+import { rootProjects } from "@polyth/contracts";
 import type { ReactNode } from "react";
 import { tr } from "../../i18n/index.ts";
 import { useStore } from "../../store.ts";
@@ -103,7 +104,7 @@ export function HeroRecentOptions({
       </SettingsRow>
       {prefs.scope === "selected" && (
         <div className="hero-recent-settings-projects" role="group" aria-labelledby="hero-recent-projects">
-          {projects.map((project) => (
+          {rootProjects(projects).map((project) => (
             <Checkbox
               key={project.id}
               checked={prefs.projectIds.includes(project.id)}

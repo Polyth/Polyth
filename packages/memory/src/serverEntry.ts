@@ -1,12 +1,14 @@
 import type { Disposable } from "@polyth/contracts";
 import {
+  SERVER_ACCOUNT_REMOVAL_BUS,
+  SERVER_PERSON_DATA_VOLUME,
   SERVER_TURN_COMPLETION_BUS,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { JUDGMENT_SERVICE } from "@polyth/judgment/server";
-import { createMemoryRuntimeService, createMemoryService, MEMORY_SCOPE_SERVICE, memoryRoutes, registerMemoryTool, type ScopedMemorySource } from "./service.ts";
+import { createMemoryRuntimeService, createMemoryService, erasePersonMemory, MEMORY_SCOPE_SERVICE, personMemoryBytes, memoryRoutes, registerMemoryTool, type ScopedMemorySource } from "./service.ts";
 import { REFLECT_DURABILITY_DESCRIPTOR, unregisterReflectDurability } from "./reflectService.ts";
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
@@ -25,6 +27,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey("memory.runtime"), createMemoryRuntimeService(host, service));
   let tool: Disposable | undefined;
   let completion: Disposable | undefined;
+  let accountRemoval: Disposable | undefined;
+  let dataVolume: Disposable | undefined;
   let unregisterUse: (() => void) | undefined;
   return {
     // Explicit local-only inventory; paired devices remain default-deny.
@@ -47,6 +51,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         void service.reflect.kick(event.sessionId).catch(() => undefined);
         return service.harvest.kick(event.sessionId);
       });
+      accountRemoval = host.services.get(SERVER_ACCOUNT_REMOVAL_BUS)?.subscribe(({ userId }) =>
+        erasePersonMemory(host, service, userId).then(() => undefined));
+      dataVolume = host.services.get(SERVER_PERSON_DATA_VOLUME)?.contribute((userId) => personMemoryBytes(host, service, userId));
       service.harvest.start();
     },
     async onDisable() {
@@ -54,6 +61,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       unregisterUse = undefined;
       unregisterReflectDurability();
       completion?.dispose(); completion = undefined;
+      accountRemoval?.dispose(); accountRemoval = undefined;
+      dataVolume?.dispose(); dataVolume = undefined;
       tool?.dispose(); tool = undefined;
       await service.harvest.stop();
     },

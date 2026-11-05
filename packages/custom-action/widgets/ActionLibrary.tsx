@@ -2,6 +2,7 @@
 // actions and the Space-wide ones as launcher tiles (or as rows in Settings),
 // recent runs, and the editor. Layout follows its container, so the same view
 // works docked beside Chat, full screen on a phone and inside Settings.
+import { rootProjects } from "@polyth/contracts";
 import { useEffect, useMemo, useState, type CSSProperties, type DragEvent } from "react";
 import { useStore } from "../../../apps/web/src/store.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
@@ -313,7 +314,7 @@ export default function ActionLibrary({
         <ProjectPicker
           label={tr("customaction.project")}
           ariaLabel={tr("customaction.projectPicker")}
-          projects={projects}
+          projects={rootProjects(projects) as typeof projects}
           value={projectId}
           onPick={pick}
           className="ca-project-picker"

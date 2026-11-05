@@ -996,7 +996,18 @@ launcher starts on the `top` or `right` rail; an unlisted kind starts it under
 More. Several directions take the most prominent rail any of them asks for. A
 capability without `defaultRails` keeps its `standardTier` where its package
 auto-places (`autoPlacesContribution`); an explicitly included package always
-gets a visible rail. A person's Personal project (`Project.personal`, §3.3) is
+gets a visible rail. A private room (`Project.parentProjectId`) is never a
+project of its own in any picker, list or rail: `rootProjects` removes it, and
+anything about the project (settings, appearance) resolves through
+`rootProjectId`. Under a project someone else can open (`sharedWith > 0`), the
+Shared / Only me switch (`PrivateRoomSwitch`) moves the person between the
+project and their room, and marks the lane they aren't in when a chat there is
+waiting, since its rows are hidden; someone working alone sees neither it nor My
+notes.
+`ChatAudienceLine`, above the composer of any chat in a Space with several
+people, says who can read it and which memory the agent has, and offers
+Continue privately, which starts a room chat quoting only the title. What was
+already said stays where it was. A person's Personal project (`Project.personal`, §3.3) is
 the `personal` kind whatever its composition says (`projectKinds(…, { personal })`,
 `RailPlanOptions`): only launchers that list `personal` start on a rail —
 today Files, Agents and Planner on the right rail, the top rail empty — and

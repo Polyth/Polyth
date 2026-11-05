@@ -65,3 +65,28 @@ test('non-owner can list only self and cannot create another identity', async t 
     login: 'mallory', name: 'Mallory', password: 'mallory test passphrase',
   }), { code: 'forbidden' });
 });
+
+test('an administrator setting a password stays on the record until the person sets their own', async t => {
+  const f = fixture(t);
+  const { owner } = await installed(f);
+  const account = await f.identity.accounts.createLocal(owner.token, {
+    login: 'alice',
+    name: 'Alice',
+    password: 'alice test passphrase',
+  });
+  assert.equal(f.identity.accounts.adminPasswordResetAt(account.id), undefined);
+
+  await f.identity.accounts.resetPassword(owner.token, account.id, 'chosen by the owner');
+  const reset = f.identity.accounts.adminPasswordResetAt(account.id);
+  assert.equal(typeof reset, 'number');
+  assert.equal(f.identity.accounts.adminPasswordResetAt(owner.session.userId), undefined, 'nobody else is flagged');
+
+  const login = await f.identity.credentials.login({ login: 'alice', password: 'chosen by the owner' });
+  assert.equal(f.identity.accounts.adminPasswordResetAt(account.id), reset, 'signing in does not clear it');
+
+  await f.identity.credentials.changePassword(login.token, 'chosen by alice herself');
+  assert.equal(f.identity.accounts.adminPasswordResetAt(account.id), undefined);
+
+  await f.identity.accounts.resetPassword(owner.token, account.id, 'chosen by the owner again');
+  assert.equal(typeof f.identity.accounts.adminPasswordResetAt(account.id), 'number', 'a later reset flags it again');
+});

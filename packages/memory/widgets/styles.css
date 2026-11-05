@@ -195,3 +195,48 @@ body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .pkg-memory
   .memory-reflect-confirm .memory-actions .memory-button { flex: 1 1 auto; }
 }
 .memory-model-picker { border: 0; margin: 0; padding: 0; min-width: 0; }
+
+/* ---- My notes: personal memory beside the shared records */
+.memory-mine-group { display: grid; gap: var(--space-2); }
+.memory-mine-group h4 { margin: 0; font-size: var(--font-label); font-weight: 600; }
+.memory-mine-empty { color: var(--muted); font-size: var(--font-meta); }
+.memory-mine-note,
+.memory-proposal {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+.memory-mine-note-copy,
+.memory-proposal-copy { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.memory-mine-note-copy span,
+.memory-proposal-copy span { color: var(--muted); }
+.memory-mine-note-copy small { color: var(--muted); font-size: var(--font-meta); }
+.memory-mine-editor { display: grid; gap: var(--space-2); }
+.memory-chat-scope { display: block; flex: 0 1 auto; color: var(--muted); font-size: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.memory-chat-scope::before { content: "·"; margin-inline-end: var(--space-1); }
+.memory-proposal-card {
+  display: grid;
+  width: 100%;
+  gap: var(--space-1);
+  /* The text edge of the pending stack it sits in. */
+  padding: var(--space-2) var(--composer-stack-end) var(--space-2) var(--composer-stack-text);
+  color: var(--text);
+  font-size: var(--font-body);
+}
+.memory-proposal-from { color: var(--muted); font-size: var(--font-meta); }
+.memory-proposal-card .memory-proposal { border-top: 0; padding-block: 0; }
+.memory-proposal-copy,
+.memory-mine-note-copy { flex: 1 1 0; }
+.memory-proposal > .memory-actions,
+.memory-mine-note > .memory-actions,
+.memory-mine > .memory-section-head > .memory-actions { flex: none; flex-wrap: nowrap; }
+@media (max-width: 480px) {
+  .memory-proposal,
+  .memory-mine-note { flex-direction: column; }
+  .memory-mine > .memory-section-head > .memory-actions { flex: 1 1 100%; flex-wrap: wrap; }
+  /* Under who reads the chat. */
+  .memory-chat-scope::before { content: none; }
+}

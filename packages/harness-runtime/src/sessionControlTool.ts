@@ -427,8 +427,19 @@ export function registerPolythSessionControl(
         };
       }
 
+      // In a chat others read, the agent can't reach what's private to one of
+      // them, not even for the person speaking: whatever it read would land in
+      // front of the rest. A chat private to its owner keeps full reach.
+      const callerPrivacy = ctx.sessionId && ctx.spaceId ? host.sessionPrivacy?.(ctx.spaceId, ctx.sessionId) : undefined;
+      const hidesPrivate = callerPrivacy !== undefined && !callerPrivacy.privateTo;
+      const privateProject = (project: Project): boolean => !!(project.personal || project.parentProjectId);
+      const privateChat = (session: SessionProjection): boolean =>
+        session.spaceId !== undefined && !!host.sessionPrivacy?.(session.spaceId, session.id)?.privateTo;
+
       if (action === "project.list") {
-        const projects = (await scoped.projects.list()).map(publicProject);
+        const projects = (await scoped.projects.list())
+          .filter((project) => !hidesPrivate || !privateProject(project))
+          .map(publicProject);
         return { output: JSON.stringify({ currentProjectId: ctx.projectId, projects }), metadata: { action } };
       }
 
@@ -443,7 +454,7 @@ export function registerPolythSessionControl(
         ? ctx.projectId
         : text(parameters.projectId) ?? ctx.projectId;
       const targetProject = await scoped.projects.get(targetProjectId);
-      if (!targetProject) return notFound("project not found in the current Space");
+      if (!targetProject || (hidesPrivate && privateProject(targetProject))) return notFound("project not found in the current Space");
 
       const targetSession = async (): Promise<SessionProjection> => {
         const sessionId = text(parameters.sessionId);
@@ -452,6 +463,7 @@ export function registerPolythSessionControl(
         if (session.projectId !== targetProjectId) {
           return notFound("session does not belong to the requested project");
         }
+        if (hidesPrivate && privateChat(session)) return notFound("session not found");
         return session;
       };
 
@@ -459,6 +471,7 @@ export function registerPolythSessionControl(
         const rows = (await scoped.sessions.list(targetProjectId))
           .filter((session) => session.projectId === targetProjectId)
           .filter((session) => action !== "agent.list" || session.parentId === ctx.sessionId)
+          .filter((session) => !hidesPrivate || !privateChat(session))
           .sort((a, b) => b.updatedAt - a.updatedAt);
         if (action === "session.list") {
           return {

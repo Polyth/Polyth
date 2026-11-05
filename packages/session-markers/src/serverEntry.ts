@@ -69,6 +69,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     personSpace: (userId, spaceId) => host.personSpaceContext?.(userId, spaceId),
     systemSpace: (spaceId) => host.systemSpaceContext(spaceId),
     projectName: async (space, projectId) => (await host.forSpace(space).projects.get(projectId))?.name,
+    ...(host.sessionPrivacy ? { sessionPrivacy: host.sessionPrivacy } : {}),
   });
   let capabilities: Disposable[] = [];
 

@@ -27,7 +27,9 @@ export type MemoryLayerGrant =
   | { layer: "project" }
   | { layer: "space" }
   | { layer: "agent"; agentId: string }
-  | { layer: "person"; userId: string };
+  /** With `projectId`: this person's notes in one project ("only me here").
+   * Without: their Space-wide notes about themselves ("about me"). */
+  | { layer: "person"; userId: string; projectId?: string };
 
 /** Who wrote a record. Absent on records saved before provenance existed. */
 export type MemoryAuthor =
@@ -100,6 +102,11 @@ export interface MemoryRecordDto {
   ownerId?: string;
   authoredBy?: MemoryAuthor;
   approvedBy?: MemoryApproval;
+  /** Who the note is about, as a name; a family project mixes several people. */
+  about?: string;
+  /** Set while the agent proposes this personal note for the shared memory.
+   * Only the person it belongs to can publish it. */
+  shareProposedAt?: number;
 }
 
 export interface MemoryListItemDto extends Omit<MemoryRecordDto, "body" | "sources" | "applicability"> {
@@ -129,6 +136,7 @@ export interface MemoryCreateInput {
   freshness?: MemoryFreshness;
   pinned?: boolean;
   userLocked?: boolean;
+  about?: string;
   idempotencyKey?: string;
   requestFingerprint?: string;
 }
@@ -137,7 +145,7 @@ export interface MemoryPatchInput {
   id: string;
   projectId: string;
   expectedRevision: number;
-  patch: Partial<Pick<MemoryRecordDto, "title" | "body" | "category" | "tags" | "aliases" | "applicability" | "sources" | "freshness" | "lifecycle" | "pinned" | "userLocked">>;
+  patch: Partial<Pick<MemoryRecordDto, "title" | "body" | "category" | "tags" | "aliases" | "applicability" | "sources" | "freshness" | "lifecycle" | "pinned" | "userLocked" | "about">>;
   idempotencyKey?: string;
   requestFingerprint?: string;
 }
@@ -167,6 +175,9 @@ export interface MemorySelectedItem {
   reason: string;
   text: string;
   truncated?: boolean;
+  /** Absent = `project`. A `person` record makes the chat personal context. */
+  layer?: MemoryLayer;
+  about?: string;
 }
 
 export interface MemoryContribution {

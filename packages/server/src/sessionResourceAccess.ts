@@ -22,7 +22,7 @@ import { rowForReader, rowsForReader, sessionAccess } from "./sessionSharing.ts"
 const METHOD_ACCESS: Readonly<Record<string, SessionAccessLevel>> = {
   snapshot: "view", events: "view", replayPage: "view", activate: "view", debug: "view",
   clientMutationStatus: "view", queueList: "view", autoAcceptGet: "view", memoryPolicyGet: "view",
-  runtimeFeatures: "view", saveDraft: "view", markRead: "view", fork: "view",
+  runtimeFeatures: "view", saveDraft: "view", markRead: "view", fork: "view", markPersonalContext: "manage",
   postPersonMessage: "view", mentionCandidates: "view", setPersonMute: "view",
   decidePersonAccess: "manage",
   startSessionFromConversation: "collaborate",

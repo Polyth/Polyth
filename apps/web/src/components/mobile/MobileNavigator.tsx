@@ -34,6 +34,8 @@ import { Icon } from "../../icons.tsx";
 import { isImeComposing } from "../input/editorCore.ts";
 import ProjectGlyph from "../ProjectGlyph.tsx";
 import { soloPersonalProject } from "../../personalProject.ts";
+import { rootProjectId, rootProjects } from "../../privateRoom.ts";
+import PrivateRoomSwitch from "../PrivateRoomSwitch.tsx";
 import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "../ConversationCreateDialog.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
@@ -804,7 +806,12 @@ export default function MobileNavigator() {
   const swipeZoneRef = useRef(swipeZone);
   swipeZoneRef.current = swipeZone;
   const registry = useStore((state) => state.projectRegistry);
-  const activeProjectId = useStore((state) => state.activeProjectId);
+  const workspaceId = useStore((state) => state.activeProjectId);
+  // On screen, a private room is its project; only its chats differ.
+  const activeRoom = registry.projects.find((candidate) => candidate.id === workspaceId && candidate.parentProjectId !== undefined);
+  const activeProjectId = activeRoom?.parentProjectId ?? workspaceId;
+  /** The lane of a project the person is in: its private room, or itself. */
+  const laneIdOf = (id: string): string => activeRoom?.parentProjectId === id ? activeRoom.id : id;
   const storeSessionId = useStore((state) => state.activeSessionId);
   // While a package page (an agent) owns the canvas, no chat row is current.
   const pageOpen = useStore((state) => state.activePage !== null);
@@ -819,7 +826,7 @@ export default function MobileNavigator() {
     profile.id === workbenchNavigation.activeProfileId && profile.sessionPurpose);
   const relativeTime = useStore((state) => state.settings.relativeTime);
   const defaultVisibleSessionCount = useStore((state) => state.settings.defaultVisibleSessionCount);
-  const projects = registry.projects;
+  const projects = rootProjects(registry.projects) as typeof registry.projects;
   // Only the personal project: its chats list open, with no project row.
   const soloPersonal = registry.status === "ready" ? soloPersonalProject(projects) : null;
   const [query, setQuery] = useState("");
@@ -958,8 +965,8 @@ export default function MobileNavigator() {
 
   useEffect(() => {
     if (!drawerOpen || !activeProjectId) return;
-    void ensureSessionsListed(activeProjectId);
-  }, [drawerOpen, activeProjectId]);
+    void ensureSessionsListed(workspaceId ?? activeProjectId);
+  }, [drawerOpen, activeProjectId, workspaceId]);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -1009,9 +1016,10 @@ export default function MobileNavigator() {
   // is up, that project unfolds and is scrolled into view, so the chat is found
   // where it lives. A fold or scroll the user makes afterwards stands.
   const shown = drawerOpen || peeking;
-  const currentProjectId = (activeSessionId
+  // A chat in Only me lives under its project: a room has no row of its own to unfold.
+  const currentProjectId = rootProjectId(registry.projects, (activeSessionId
     ? sessions.find((session) => session.id === activeSessionId)?.projectId
-    : undefined) ?? activeProjectId;
+    : undefined) ?? activeProjectId);
   const revealRef = useRef<{ projectId: string; sessionId: string | null; until: number } | null>(null);
   useEffect(() => {
     if (!shown || !currentProjectId) {
@@ -1409,7 +1417,7 @@ export default function MobileNavigator() {
             <div className="mobile-nav-empty">{tr("sidebar.noMatchingSessions")}</div>
           )}
           {shownProjects.map((project) => {
-            const all = projectSessions.get(project.id) ?? [];
+            const all = projectSessions.get(laneIdOf(project.id)) ?? [];
             const needle = query.trim().toLocaleLowerCase();
             const dated = all.filter((session) => sessionMatchesDateFilter(session, dateFilter));
             const projectMatches = `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle);
@@ -1642,7 +1650,7 @@ export default function MobileNavigator() {
                     <button
                       className="mobile-nav-project-action"
                       aria-label={tr("sidebar.newChatInValue", { value: project.name || project.path })}
-                      onClick={() => { startFreshSession(project.id); setSidebarOpen(false); }}
+                      onClick={() => { startFreshSession(laneIdOf(project.id)); setSidebarOpen(false); }}
                     >
                       <UiIcon icon={NewChatIcon} size="lg" />
                     </button>
@@ -1663,6 +1671,7 @@ export default function MobileNavigator() {
 
                 {expanded && (
                   <div className="mobile-nav-project-body">
+                    {!searchMode && !selectMode && <PrivateRoomSwitch project={project} />}
                     {!searchMode && (
                       <SlotHost
                         slot="sidebar.project.leading"

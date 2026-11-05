@@ -31,6 +31,8 @@ type StoredProject = Project & {
   internal?: PackageWorkspaceMarker;
   /** Principal whose personal project this is (`Project.personal`). */
   personalOwner?: string;
+  /** Principal whose private room this is (`Project.parentProjectId`). */
+  roomOwner?: string;
   presentation?: StoredProjectPresentationSettings;
   repositoryIdentities?: Record<string, string[]>;
 };
@@ -50,6 +52,8 @@ export interface ProjectProvisionInput {
   remote?: ProjectRemote;
   /** Provision `ownerId`'s personal project (local, directory created). */
   personalOwner?: string;
+  /** Provision `owner`'s private room in `parentId` (local, directory created). */
+  room?: { owner: string; parentId: string };
 }
 
 /** Project registry with tenancy. `ProjectService` methods on this object are
@@ -67,6 +71,19 @@ export interface ProjectRegistry extends ProjectService {
   spaceOfProject(id: string): string | undefined;
   /** A person's personal project in one Space, if it was provisioned. */
   personalProject(spaceId: string, ownerId: string): Project | undefined;
+  /** Any project by id, whoever owns it: server work only. */
+  projectById(id: string): Project | undefined;
+  /** A person's private room in one project, if it was provisioned. */
+  privateRoom(spaceId: string, parentId: string, ownerId: string): Project | undefined;
+  /** The project a room belongs to; undefined for anything else. */
+  parentOfRoom(id: string): string | undefined;
+  /** Every room and personal project one person owns, in any Space. Used when
+   *  their account goes. */
+  privateProjectsOwnedBy(ownerId: string): Project[];
+  /** Whether a local path lies in the server's own data. Only server-made
+   *  folders live there: registered by hand it would open every person's chats
+   *  and notes through the file views. */
+  holdsServerData(path: string): boolean;
   /** Whether a local path lies in personal-project storage, which only
    *  `provision({ personalOwner })` may register. Existence never matters. */
   reservedForPersonal(path: string): boolean;
@@ -357,6 +374,7 @@ const publicProject = (project: StoredProject): Project => {
     presentation: _presentation,
     repositoryIdentities: _repositoryIdentities,
     personalOwner: _personalOwner,
+    roomOwner: _roomOwner,
     ...visible
   } = project;
   return structuredClone(visible);
@@ -377,7 +395,26 @@ export function createProjectService(
       const rel = relative(root, candidate);
       return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && rel.split(sep)[1] === "personal";
     }));
+  const dataRoots = [...new Set([resolve(dataDir), canonicalExistingPath(resolve(dataDir))])];
   let items: StoredProject[] = [];
+  /** A room looks like its project: same name, appearance and composition. */
+  const presented = (project: StoredProject): Project => {
+    const visible = publicProject(project);
+    const parent = project.parentProjectId ? items.find((row) => row.id === project.parentProjectId) : undefined;
+    if (!parent) return visible;
+    const { color, icon, greeting, composition, defaults } = structuredClone(parent);
+    const { color: _color, icon: _icon, greeting: _greeting, composition: _composition, defaults: _defaults, ...own } = visible;
+    return {
+      ...own,
+      name: parent.name,
+      ...(color !== undefined ? { color } : {}),
+      ...(icon !== undefined ? { icon } : {}),
+      ...(greeting !== undefined ? { greeting } : {}),
+      ...(composition !== undefined ? { composition } : {}),
+      ...(defaults !== undefined ? { defaults } : {}),
+    };
+  };
+  const isRoom = (project: StoredProject): boolean => project.parentProjectId !== undefined;
   // An unreadable registry means the in-memory list is empty because we could
   // not read it, not because there are no projects. The first write would
   // otherwise replace the user's entire project registry with `[]`.
@@ -426,10 +463,11 @@ export function createProjectService(
     composition?: ProjectComposition,
     id: string = randomUUID(),
     personalOwner?: string,
+    room?: { owner: string; parentId: string },
   ): Promise<Project> => {
     const parsedComposition = composition === undefined ? undefined : parseProjectComposition(composition);
     const abs = resolve(path);
-    if (!personalOwner && insidePersonalStorage(abs)) {
+    if (!personalOwner && !room && insidePersonalStorage(abs)) {
       throw Object.assign(new Error("this folder is reserved for a personal project"), { code: "invalid-path" });
     }
     if (!existsSync(abs)) throw Object.assign(new Error(`path does not exist: ${abs}`), { code: "invalid-path" });
@@ -446,9 +484,10 @@ export function createProjectService(
       createdAt: Date.now(),
       ...(spaceId ? { spaceId } : {}),
       ...(personalOwner ? { personal: true as const, personalOwner, icon: PERSONAL_PROJECT_ICON } : {}),
+      ...(room ? { roomOwner: room.owner, parentProjectId: room.parentId } : {}),
     };
     persist([...items, project]);
-    return publicProject(project);
+    return presented(project);
   };
 
   const addRemote = async (
@@ -499,13 +538,18 @@ export function createProjectService(
     };
 
     return {
+      // Package workspaces and private rooms resolve by id for sessions and
+      // runtimes but are never a project on anyone's list.
       list: async () => items
-        .filter((project) => visible(project) && !isPackageWorkspace(project))
+        .filter((project) => visible(project) && !isPackageWorkspace(project) && !isRoom(project))
         .map(publicProject),
       get: async (id) => {
         const project = find(id);
-        return project ? publicProject(project) : undefined;
+        return project ? presented(project) : undefined;
       },
+      privateRooms: async (parentProjectId) => items
+        .filter((project) => visible(project) && project.parentProjectId === parentProjectId)
+        .map(presented),
       async add(path: string, name?: string, composition?: ProjectComposition) {
         return add(path, name, spaceId, composition);
       },
@@ -519,8 +563,16 @@ export function createProjectService(
         // A delete that names another tenant's project must not silently
         // succeed either — it removes nothing and says not-found. Internal
         // package workspaces cannot be removed through ProjectService.
-        const project = publicProject(requireUserProject(id));
-        persist(items.filter((p) => p.id !== id));
+        const stored = requireUserProject(id);
+        const project = publicProject(stored);
+        // A person's room outlives the project: it holds their private chats,
+        // and deleting a shared project is not a decision about those. It
+        // becomes an ordinary private project of theirs.
+        persist(items.filter((p) => p.id !== id).map((row) => {
+          if (row.parentProjectId !== id) return row;
+          const { parentProjectId: _parent, ...kept } = row;
+          return { ...kept, name: stored.name, detachedFromProjectId: id };
+        }));
         // Project deletion is canonical even if best-effort auxiliary cleanup
         // fails. Stores also resolve only existing project IDs, so a failed hook
         // can leave at most unreachable garbage, never a cross-tenant reference.
@@ -537,6 +589,9 @@ export function createProjectService(
 
       async update(id, patch: ProjectPatch): Promise<Project> {
         const existing = requireUserProject(id);
+        if (isRoom(existing)) {
+          throw Object.assign(new Error("a private room follows its project; change the project instead"), { code: "conflict" });
+        }
         if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
           throw Object.assign(new Error("project patch must be an object"), { code: "invalid-input" });
         }
@@ -553,6 +608,7 @@ export function createProjectService(
           if (repositoryPatch.action === "add") {
             const requestedPath = canonicalDirectory(repositoryPatch.path);
             const root = await gitRepositoryRoot(requestedPath);
+            if (insidePersonalStorage(root)) throw invalidRepository("this folder is reserved for a personal project");
             const identity = await repositoryIdentity(root);
             // Git validation is the only awaited part of this mutation. A
             // project can be edited or deleted while it runs, so re-authorize
@@ -715,10 +771,12 @@ export function createProjectService(
         return publicProject(project);
       },
       async getPresentationSettings(id): Promise<ProjectPresentationSettingsDto> {
-        return presentationDto(requireUserProject(id).presentation);
+        const own = requireUserProject(id);
+        return presentationDto(requireUserProject(own.parentProjectId ?? id).presentation);
       },
       async putPresentationSettings(id, input, expectedRevision): Promise<ProjectPresentationSettingsDto> {
-        const existing = requireUserProject(id);
+        const own = requireUserProject(id);
+        const existing = requireUserProject(own.parentProjectId ?? id);
         const project = structuredClone(existing);
         const settings = normalizeIncomingPresentationSettings(input);
         const current = presentationDto(project.presentation);
@@ -750,7 +808,7 @@ export function createProjectService(
         throw Object.assign(new Error("canonical project id and Space are required"), { code: "invalid-input" });
       }
       if (input.remote) {
-        if (input.personalOwner) throw Object.assign(new Error("a personal project is local"), { code: "invalid-input" });
+        if (input.personalOwner || input.room) throw Object.assign(new Error("a personal project is local"), { code: "invalid-input" });
         if (input.createDirectory) throw Object.assign(new Error("remote provisioning cannot create a local directory"), { code: "invalid-input" });
         return addRemote(input.path, input.remote, input.name, input.spaceId, input.id);
       }
@@ -762,15 +820,41 @@ export function createProjectService(
           throw Object.assign(new Error("personal project path is already registered"), { code: "conflict" });
         }
       }
-      if (input.createDirectory || input.personalOwner) mkdirSync(path, { recursive: true });
-      return add(path, input.name, input.spaceId, undefined, input.id, input.personalOwner);
+      if (input.room) {
+        const room = input.room;
+        const parent = items.find((p) => p.id === room.parentId && p.spaceId === input.spaceId);
+        if (!parent || isPackageWorkspace(parent) || isRoom(parent) || parent.personalOwner) {
+          throw Object.assign(new Error("project not found"), { code: "not-found" });
+        }
+        const existing = items.find((p) => p.roomOwner === room.owner && p.parentProjectId === room.parentId && p.spaceId === input.spaceId);
+        if (existing) return presented(existing);
+      }
+      if (input.createDirectory || input.personalOwner || input.room) mkdirSync(path, { recursive: true });
+      return add(path, input.name, input.spaceId, undefined, input.id, input.personalOwner, input.room);
     },
     spaceOfProject: (id) => items.find((p) => p.id === id)?.spaceId,
+    holdsServerData: (path) => {
+      const abs = resolve(path);
+      return [abs, canonicalExistingPath(abs)].some((candidate) => dataRoots.some((root) => {
+        const rel = relative(root, candidate);
+        return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+      }));
+    },
     reservedForPersonal: (path) => insidePersonalStorage(resolve(path)),
     personalProject(spaceId, ownerId) {
       const project = items.find((p) => p.personalOwner === ownerId && p.spaceId === spaceId);
       return project ? publicProject(project) : undefined;
     },
+    privateRoom(spaceId, parentId, ownerId) {
+      const project = items.find((p) => p.roomOwner === ownerId && p.parentProjectId === parentId && p.spaceId === spaceId);
+      return project ? presented(project) : undefined;
+    },
+    parentOfRoom: (id) => items.find((p) => p.id === id)?.parentProjectId,
+    projectById: (id) => {
+      const project = items.find((p) => p.id === id);
+      return project ? presented(project) : undefined;
+    },
+    privateProjectsOwnedBy: (ownerId) => items.filter((p) => p.roomOwner === ownerId || p.personalOwner === ownerId).map(presented),
     adoptIntoSpace(spaceId) {
       const orphans = items.filter((p) => !p.spaceId && !isPackageWorkspace(p));
       if (orphans.length === 0) return 0;

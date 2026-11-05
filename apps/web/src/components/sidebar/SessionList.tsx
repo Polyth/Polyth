@@ -13,6 +13,7 @@ import {
 import { canManageSession, sharingMarkerLabel } from "../../sessionSharing.ts";
 import { conversationUnread, hasMentionAttention, setSessionMuted, unreadBadgeText } from "../../sessionPeople.ts";
 import { useHasArchivedSessions } from "../../useHasArchivedSessions.ts";
+import { continuePrivately } from "../../privateRoom.ts";
 import { openSession, prefetchSessionTail, deleteSession, restoreSession, forkSession, ensureSessionsListed, refreshSessions, withOptimisticSessionChange } from "../../init.ts";
 import { markSessionPerformance } from "../../sessionPerformance.ts";
 import { collectSessionSummaries } from "../../sessionSummaryPages.ts";
@@ -406,6 +407,12 @@ function SessionRow({
       id: "fork",
       label: tr("sidebar.sessionlist.fork"),
       onSelect: () => void forkSession(s.id).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
+    } satisfies MenuEntry] : []),
+    // Someone else can read this chat: take the next words somewhere they can't.
+    ...(s.sharing?.shared && s.sharing.access !== "view" ? [{
+      id: "continue-private",
+      label: tr("privateRoom.continue"),
+      onSelect: () => void continuePrivately(s),
     } satisfies MenuEntry] : []),
     ...(splitAvailable ? [{
       id: "split",

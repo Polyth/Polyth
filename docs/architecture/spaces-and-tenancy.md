@@ -676,8 +676,9 @@ Known limits:
 
 Status: **stages 1–3 and 5 implemented** (source-inspected and
 unit/integration-tested; not live-verified against real providers or a running
-installation). Stage 4 (administration: break-glass, offboarding, audit) is
-**designed, not implemented**. The goal is
+installation). Stage 4 (administration) is **partly implemented**: what happens
+to private data is built (§14.5), installation ceilings and ownership transfer
+of shared work are not. The goal is
 full differentiation between people who share one installation: each person
 has their own chats, their own outside accounts (task trackers, GitHub,
 Google), and sharing that both the person and an administrator control.
@@ -698,8 +699,9 @@ Decisions (2026-10-13, product owner):
 |---|---|
 | Default visibility of a new chat in a shared Space | **Private** to its creator |
 | Whose account an agent uses in an outside service | **The person who sent the message** the turn answers |
-| Admin access to someone's private chat | **Break-glass**: audited, owner notified, time-limited |
+| Admin access to someone's private chat | **None**, not even break-glass (revised 2026-11-05; §14.5) |
 | Who connected accounts belong to | **The person**, enabled per Space (a Work Space never silently gets a personal GitHub) |
+| A person's notes inside a shared project | **Personal**: a private chat writes to them, a chat others read never reaches them; publishing is the person's own choice of exact text (2026-11-05; §14.6) |
 
 ### 14.2 Stage 1 — people in shared sessions (implemented)
 
@@ -924,19 +926,37 @@ unit/integration-tested; not live-verified):
   metadata-only `listFor(actorUserId)` and resolves with the turn's actor.
 - *Not yet*: the request's `existing` flag checks the Space only.
 
-### 14.5 Stage 4 — administration (designed)
+### 14.5 Stage 4 — administration (partly implemented)
+
+**Private data has no administrator path (implemented; decision 2026-11-05,
+replacing the break-glass and ownership-transfer designs).** Nobody but its owner
+opens a private chat, room or personal note through Polyth: `resourceAccess`
+already denied admins, and no grant or transfer can change that.
+
+| Seam | Behavior | Owner |
+|---|---|---|
+| Size | `GET /api/accounts/:id/private-data` → `{ bytes }`: chat history, room and personal-project folders, and what packages report through `SERVER_PERSON_DATA_VOLUME`. Instance owner only. No titles and no counts | `packages/server/src/routes/privateData.ts` |
+| Erase | `POST /api/accounts/:id/erase-private-data`: instance owner, a recent sign-in (`reauth-required` otherwise), and an account already `disabled`. Audited as `identity.private-data-erased`. If anything couldn't go it answers `erase-incomplete`, audited as `identity.private-data-erase-incomplete`, and can be run again. Unlisted in the remote policy, so a paired device is denied | same |
+| Account removal | Removing an account erases the same data: private chats (archived ones and ones that failed at startup too) with the attachments the person sent to them, rooms, personal project and folders first, then delivery routes, connected accounts, and package data through `SERVER_ACCOUNT_REMOVAL_BUS` (memory purges the person's notes, with history). The account is gone by then, so what can't be erased is logged, not retried | `indexCore.ts` `erasePerson` |
+| Data folder | Every person's data sits in the server's data folder, so it can't be opened as a project: `POST /api/projects` refuses a folder inside it (`holdsServerData`, the same answer whether or not it exists). A project at a parent folder is fine and doesn't show it: the file service's `sealedRoots` cover the tree, lists, search, reads, writes and absolute-path external reads, and the folder picker reads as if it weren't there. Only a folder the server made inside it (room, personal project, package workspace) sees its own files. A shell doesn't go through any of this (§14.7) | `packages/files`, `projects.ts`, `routes/browse.ts` |
+| Password reset | `/api/auth/me` carries `adminPasswordResetAt` while someone else's reset is newer than the person's own change, read from the append-only audit log. The shell shows a sticky notice the person can't dismiss, and the reset dialog tells the administrator it will | `identity/accounts.ts`, `PasswordResetNotice.tsx` |
+| Native import | Transcripts sit under the host's one OS account, whoever's chat they were. Only the instance owner may browse them (`ownerOnly` for anyone else), and never one behind a Polyth chat they can't open | `packages/session-import/src/serverEntry.ts` |
+
+**A password reset remains possible**: an instance owner can still set someone's
+password and sign in as them. The person finds out, nothing prevents it, and only
+per-person encryption would (not built).
+
+Designed, not built:
 
 - **Installation ceilings** (instance owner, or a new `sharing.manage`
   permission): e.g. no sharing for Protected accounts, no `space` visibility.
-- **Break-glass**: an admin opens a private chat only through an explicit,
-  reasoned, time-limited grant; it is audited and the owner is notified.
-- **Offboarding**: removing a member immediately voids their grants and stops
-  their accounts in that Space; their private chats move to a new owner the
-  admin picks, or are archived; a running turn they started is stopped and
-  their queued messages are dropped. Schedules they own already refuse to run
-  (stage 1).
-- **Audit**: share, grant, revoke, break-glass, ownership transfer and
-  credential use, with the actor and never a value.
+- **Offboarding of shared work**: removing a member immediately voids their
+  grants and stops their accounts in that Space; a chat others can read moves
+  to a new owner the admin picks, or is archived; a running turn they started
+  is stopped and their queued messages are dropped. Schedules they own already
+  refuse to run (stage 1).
+- **Audit view**: share, grant, revoke, ownership transfer and credential use,
+  with the actor and never a value.
 
 ### 14.6 Stage 5 — remaining stores (implemented)
 
@@ -950,10 +970,48 @@ that hold one person's data each have an owner (a person or the Space).
 | Handoff bundles | Visible to their creator and to whoever can open the source chat; legacy creatorless bundles to Space admins only |
 | Slash commands, snippets | `user` scope is personal (person storage) and overrides `project` (shared, admin-written). Expansion on send runs as the message's author. Legacy `~/.config/polyth` files are copied once to the instance owner only |
 
-"Remember" from a private chat defaulting to the person's memory is not built.
-The memory store already has a `person` layer (owner = user id, reached only
-through a server-minted layer grant; [memory](../dev/memory.md)), but nothing
-grants it to a session yet.
+**Personal notes and private rooms** (source-inspected and unit/integration-tested;
+live-verified against an isolated server, see below). The rule: what is personal
+sees what is shared, and what is shared never sees what is personal. Data moves
+from personal to shared only as text its owner confirmed.
+
+| Level | Who can read | Where it lives | When the agent reads it |
+|---|---|---|---|
+| Shared | Everyone who can open the project | The project and its `project` memory layer | Always |
+| Only me here | One person | A private room (`Project.parentProjectId`) with its own folder and chats, plus `person` records bound to the project | Only in a chat private to them |
+| About me | One person | `person` records with no project, across the Space | Only in a chat private to them |
+
+| Seam | Behavior | Owner |
+|---|---|---|
+| Private room | `POST /api/projects/:id/private-room` (`ensurePrivateRoom`): a real project owned by the caller with `private` visibility, in `personal/<person>/rooms/<project>`, created on first use. `list()` never returns it; `GET /api/projects` (`listForShell`) adds the reader's own rooms and `sharedWith`. Appearance and composition follow the parent, and it can't be edited directly. If the project is deleted the room becomes an ordinary private project (`detachedFromProjectId`) | `projects.ts`, `projectResourceAuthority.ts` |
+| Memory | A room shares its project's memory and policy (`service.scope`). `chatAccess` derives the layers from the chat's real audience (`host.sessionPrivacy`), never from a request or a model argument: a chat private to its owner gets `project` + that person's layers, any other chat gets `project` only | `packages/memory/src/service.ts` |
+| Writing | In a private chat of a project others can open, `memory_remember` and harvest write to the person's notes. Someone working alone keeps writing to the project. `target: "shared"` from such a chat stores a proposal, which only the person publishes, as a copy of exactly that text, so earlier personal revisions stay personal | same |
+| Who is speaking | Every admitted turn in a Space with two or more members persists `context/people-prepared` before delivery: who speaks, who reads, which memory applies. A retry resends the recorded block. A person joining someone else's running turn (steer) gets a one-line version. Names are reduced to letters and ordinary punctuation, so a display name can't close the block or read as a command | `sessionSharing.ts`, `sessions.ts` |
+| Whose fact | `about` on a record, labelled in the memory block (`· personal`, `· about Оля`). Harvest transcripts name each user line's author | `packages/knowledge/src/memory.ts` |
+| Reach | In a chat others read, `polyth`, `polyth_session_markers` and `memory_search_projects` hide rooms, personal projects and private chats; the last searches only projects every reader can open. `polyth_peer` stays inside one delegated tree | `sessionControlTool.ts`, `session-markers/agentTool.ts`, `service.ts` |
+| Staying private | A record with `layer: person` reaching the model sets `personalContext` on the chat and the chat it follows, before delivery. Such a chat and any chat in a room can only narrow: the harness's own context holds what the agent saw, so opening it would let the agent repeat that (`reason: personal-context` / `private-room`). A fork keeps the mark | `sessionSharing.ts` |
+| Old notes | Shared notes that came from a chat only this person could read are listed for them to make personal, moved with their history. Nothing moves by itself | `personalMemoryRoutes` |
+| Attachments | `_inbox` is left out of file listings, search, archives and folder routes however the path is spelled, so a private chat's attachments in a shared project open only by their unguessable name. Erasing a person's data removes the ones they sent (a fork's messages from someone else stay). Rooms have their own folder | `packages/files`, `routes/privateData.ts` |
+
+The generic `/api/memory` routes never grant the `person` layer; `/api/memory/personal*`
+takes the owner from the authenticated context and no request names one. Reflect's
+per-person proposals are unaffected, and its shared rules skip private chats.
+
+What this promises, and what it doesn't:
+
+| Who tries to read | How | Today |
+|---|---|---|
+| A member or Space admin | UI, API, search | Closed |
+| The instance owner | UI, API | Closed; they see one size (§14.5) |
+| The instance owner | Sets the password and signs in | Possible, and the person is told |
+| Another person's agent, or a terminal | Shell reads of files and databases | **Not closed**: every agent runs as one OS user (§14.7) |
+| Root, disk, backups | Direct file access | **Not closed**: nothing is encrypted per person |
+| The model provider | The account a chat runs through | **Not closed**: a shared account stays its owner's |
+
+So the interface says "Administrators can't read them through Polyth", never
+"nobody ever". A new chat is still private by default (§14.1), in the Shared lane
+too: it says so, and an admin who wants a family's chats readable by everyone sets
+the Space's default audience.
 
 **MCP servers have an owner** (source-inspected and unit/integration-tested;
 not live-verified with a real harness). Owner: `packages/server/src/mcp.ts`;

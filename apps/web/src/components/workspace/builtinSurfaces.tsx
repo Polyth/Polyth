@@ -60,6 +60,7 @@ import {
 import { tr } from "../../i18n/index.ts";
 import { projectGreetingParts } from "../../projectGreeting.ts";
 import { isPersonalProject } from "../../personalProject.ts";
+import { ChatAudienceLine } from "../ChatAudience.tsx";
 import { AgentStatusDock, BellIcon, BotIcon, Button, ClockIcon, HeartbeatIcon, Icon as UiIcon, PeopleIcon, ShieldAlertIcon, ZapIcon, type LucideIcon } from "../ui/index.ts";
 import { resolveSessionStatus } from "../../sessionStatus.ts";
 import ProviderLogo from "../../../../../packages/models/widgets/ProviderLogo.tsx";
@@ -817,6 +818,7 @@ function ChatSessionSurface() {
               <CustomizeZoneButton slot="session.composer.before" align="center" side="up" />
             </div>
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
+            {session && <ChatAudienceLine session={session} />}
             {/* The status zone. Delegated work outlives the agent's own turn:
                 its active subagents hang from whichever status line shows (the
                 git package's live dock, the startup dock or the live dock

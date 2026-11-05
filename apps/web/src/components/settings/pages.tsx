@@ -1,5 +1,7 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Projects, Agents, MCP, and About.
+import { rootProjects } from "@polyth/contracts";
+import { rootProjectId } from "../../privateRoom.ts";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
 import {
   openSettingsPage,
@@ -1633,8 +1635,9 @@ export function ProjectsPage() {
       : value,
     0,
   ), [sessions]);
-  const projects = useOrderedProjects(registryProjects, latestProjectActivity);
-  const activeProjectId = useStore((s) => s.activeProjectId);
+  const projects = useOrderedProjects(rootProjects(registryProjects) as typeof registryProjects, latestProjectActivity);
+  // A private room follows its project, so this page edits the project.
+  const activeProjectId = useStore((s) => rootProjectId(s.projectRegistry.projects, s.activeProjectId));
   const interfaceMode = useProjectInterfaceMode();
   const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
   const sessionDefaults = useSessionDefaults();

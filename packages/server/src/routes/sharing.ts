@@ -22,7 +22,7 @@ export function sharingRoutes(sharing: SessionSharingService): RouteHandler {
     }
     const outsiders = path.match(/^\/api\/sessions\/([^/]+)\/sharing\/outsiders$/);
     if (outsiders && method === "GET") {
-      json(200, sharing.outsiders(rc.space, outsiders[1]!));
+      json(200, await sharing.mentionAccess(rc.space, outsiders[1]!));
       return true;
     }
     if (path === "/api/sharing/new-chat" && method === "GET") {

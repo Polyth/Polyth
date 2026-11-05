@@ -237,6 +237,7 @@ import { projectRepositories } from "@polyth/contracts/workspace";
 import { executionRepositoryOf, normalizeRepositoryScope, primaryRepositoryIdOf } from "../composer/repositoryScope.ts";
 import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
+import { rootProjects } from "../privateRoom.ts";
 import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, type MenuEntry } from "./ui/index.ts";
 import { canCollaborateSession, ownerName } from "../sessionSharing.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
@@ -728,11 +729,14 @@ function useComposerLocation(session: SessionProjection | null, readLiveText?: (
   const primaryRepository = repositories.find((repository) => repository.id === primaryRepositoryId);
   const projectName = project?.name || project?.path || tr("composer.noProject");
   // A fresh chat lists the projects with the most recent chats first.
-  const rankedProjects = useRecentlyActiveProjects(projects, !session, spaceId);
-  const projectChoices: ProjectContextChoice[] = rankedProjects.map((candidate) => ({
+  const rankedProjects = useRecentlyActiveProjects(rootProjects(projects) as typeof projects, !session, spaceId);
+  // A chat being written in "Only me" stays there: its room is the current
+  // choice, named so the person can see where they are.
+  const activeRoom = project?.parentProjectId ? [project] : [];
+  const projectChoices: ProjectContextChoice[] = [...activeRoom, ...rankedProjects].map((candidate) => ({
     id: candidate.id,
-    label: candidate.name || candidate.path,
-    detail: candidate.name && !candidate.personal ? candidate.path : "",
+    label: candidate.parentProjectId ? `${candidate.name} · ${tr("privateRoom.onlyMe")}` : candidate.name || candidate.path,
+    detail: candidate.name && !candidate.personal && !candidate.parentProjectId ? candidate.path : "",
     icon: candidate.icon,
     color: candidate.color,
     remote: candidate.remote,
@@ -4142,6 +4146,9 @@ function ComposerBody({
     // widgets that act on the agent's turn (WidgetDef.agentOnly).
     agentless: peopleOnly,
     working,
+    // A chat only its owner reads, in a Space with other people: what a personal
+    // suggestion needs, and it can't exist anywhere else.
+    privateAmongOthers: session?.sharing?.multiPerson === true && session.sharing.shared !== true,
     autoApproveOn,
     autoApproveAll,
     setDraftAutoApprove: setNewSessionAutoApprove,

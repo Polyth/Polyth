@@ -1734,6 +1734,22 @@ export interface SessionSharingView {
   owner?: SessionPerson;
   /** Someone other than the reader can open this chat. */
   shared: boolean;
+  /** The Space has other members, so who reads a chat is worth saying. */
+  multiPerson?: boolean;
+}
+
+/** What a chat's memory and tools may reach. Server-derived: a private chat
+ *  reaches its owner's personal notes, any other chat never does. */
+export interface SessionPrivacy {
+  /** The one person who can open this chat, when that is the case. */
+  privateTo?: string;
+  /** Everyone who can open it. */
+  audience: SessionPerson[];
+  /** How many people can open the project it lives in; for a private room,
+   *  the project the room belongs to. */
+  projectAudience: number;
+  /** The chat lives in a person's private room. */
+  inPrivateRoom?: boolean;
 }
 
 /** A person a chat is shared with by name. */
@@ -1755,6 +1771,8 @@ export interface SessionSharePersonDto {
 export interface SessionSharingDto {
   sessionId: string;
   visibility: SessionVisibility;
+  /** Everyone who can open the chat, in member order. */
+  readers?: SessionPerson[];
   /** A delegated subagent: its sharing follows `parentSessionId`. */
   inherited: boolean;
   parentSessionId?: string;
@@ -2420,6 +2438,10 @@ export interface SessionProjection {
    *  outside services must act as this person and nobody else. Absent on
    *  sessions no person has written to since authorship shipped. */
   actor?: SessionPerson;
+  /** The agent of this chat, or one of its subagents, has read someone's
+   *  personal notes. The harness's own context now holds them, so the chat can
+   *  no longer be opened to others (Spaces §14.6). A fork keeps it. */
+  personalContext?: true;
   /** The reader's view of who can open this chat. Added per person on every
    *  read and broadcast; never persisted. Absent without canonical identity. */
   sharing?: SessionSharingView;
@@ -2880,6 +2902,8 @@ export interface SessionService {
    *  updated attention so navigator unread bold reflects what was viewed.
    *  With `person` the cursor is that person's own. */
   markRead?(sessionId: string, seq: number, person?: SessionPersonScope): Promise<void>;
+  /** Trusted server seam: this chat's agent read someone's personal notes. */
+  markPersonalContext?(sessionId: string): Promise<void>;
   /** Append a `person/message`. Never touches the runtime, queue or turn;
    *  allowed while a turn runs. Needs `view`; `carryToAgent` needs
    *  `collaborate`. Notifies mentioned people (kind `mention`) and, in a
@@ -3052,6 +3076,8 @@ export interface SessionPersistence {
    *  must treat turn closure as unproven. */
   lastTurnEventType?(sessionId: string): Promise<"started" | "stopped" | undefined>;
   latestSeq(sessionId: string): Promise<number>;
+  /** Bytes of this chat's stored history. Optional so fakes stay valid. */
+  eventBytes?(sessionId: string): Promise<number>;
   copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void>;
   upsertProjection(p: SessionProjection): Promise<void>;
   projection(sessionId: string): Promise<SessionProjection | undefined>;
@@ -5247,6 +5273,30 @@ export interface Project {
    *  run (`POST /api/projects/personal`). Only its owner can see it. While it
    *  is a person's only project the shell shows no project chrome at all. */
   personal?: true;
+  /** A person's private room ("Only me") inside this project: owner-only, with
+   *  its own folder and chats, shown under the project rather than beside it.
+   *  Appearance and composition follow the parent. `list()` never returns it. */
+  parentProjectId?: string;
+  /** A room whose project was deleted: now an ordinary private project, whose
+   *  personal notes stay bound to the old project id. */
+  detachedFromProjectId?: string;
+  /** How many other people can open this project. Only on the shell's own
+   *  list (`GET /api/projects`), which is per reader. */
+  sharedWith?: number;
+}
+
+const rootProjectLists = new WeakMap<readonly object[], readonly object[]>();
+/** The projects a person picks from: never the private rooms the shell's
+ *  registry also holds so a chat in one can find its project. The same input
+ *  array yields the same output array, so this is safe in a store selector. */
+export function rootProjects<T extends { parentProjectId?: string }>(projects: readonly T[]): readonly T[] {
+  const known = rootProjectLists.get(projects);
+  if (known) return known as readonly T[];
+  const roots = projects.some((project) => project.parentProjectId !== undefined)
+    ? projects.filter((project) => project.parentProjectId === undefined)
+    : projects;
+  rootProjectLists.set(projects, roots);
+  return roots;
 }
 
 /** Agent-oriented project inventory with session activity counts. */
@@ -5373,6 +5423,15 @@ export interface ProjectService {
    *  project: it is the first-run start, not a second project kind. Optional
    *  so old fakes remain valid. */
   ensurePersonal?(name?: string): Promise<Project>;
+  /** The caller's private room in a project they can open, created on first
+   *  use. Only a person has one; a room or a personal project has none. */
+  ensurePrivateRoom?(parentProjectId: string): Promise<Project>;
+  /** Rooms of one project this caller may open: their own, or every room for
+   *  trusted server work. Optional so old fakes remain valid. */
+  privateRooms?(parentProjectId: string): Promise<Project[]>;
+  /** `list()` plus the caller's own rooms, each with `sharedWith`: what the
+   *  shell's project registry holds. */
+  listForShell?(): Promise<Project[]>;
 }
 
 // ---------------------------------------------------------------- packages
@@ -5996,6 +6055,8 @@ export const UI_SLOTS = [
   "settings.harness.detail",
   "settings.packages.content",
   "session.footer",
+  "session.audience.details",
+  "settings.users.invite.notice",
   // Fresh-session widgets (starters, recents, or a plugin replacement). This
   // is deliberately a slot rather than a SessionHero import: idle-screen
   // information density is user-configurable and plugins can replace it.

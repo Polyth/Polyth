@@ -26,6 +26,8 @@ type Source = {
   imported: number;
   unsupported?: boolean;
   unavailable?: boolean;
+  /** Native transcripts sit under the host's one account: only its owner browses them. */
+  ownerOnly?: boolean;
 };
 
 const listId = (id: string) => `pkg-session-import-list-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -142,7 +144,7 @@ function ImportDialog({ projectId, onClose }: { projectId: string; onClose: () =
     },
     [sources, deferredQuery],
   );
-  const importable = visible.filter((source) => !source.unsupported && !source.unavailable);
+  const importable = visible.filter((source) => !source.unsupported && !source.unavailable && !source.ownerOnly);
   const available = importable.flatMap((source) => source.items);
   const allOn = available.length > 0 && available.every((item) => selected.has(item.ref));
 
@@ -305,7 +307,7 @@ function ImportDialog({ projectId, onClose }: { projectId: string; onClose: () =
                 )}
 
                 {visible.map((source) => {
-                  if (source.unsupported || source.unavailable) {
+                  if (source.unsupported || source.unavailable || source.ownerOnly) {
                     return (
                       <section key={source.id} className="pkg-session-import-group pkg-session-import-group--muted" aria-label={source.name}>
                         <header className="pkg-session-import-group-head">
@@ -318,9 +320,11 @@ function ImportDialog({ projectId, onClose }: { projectId: string; onClose: () =
                           <span className="pkg-session-import-count">—</span>
                         </header>
                         <p className="muted pkg-session-import-note">
-                          {source.unsupported
-                            ? tr("sessionimport.unsupportedValue", { name: source.name })
-                            : tr("sessionimport.unavailableValue", { name: source.name })}
+                          {source.ownerOnly
+                            ? tr("sessionimport.ownerOnlyValue", { name: source.name })
+                            : source.unsupported
+                              ? tr("sessionimport.unsupportedValue", { name: source.name })
+                              : tr("sessionimport.unavailableValue", { name: source.name })}
                         </p>
                       </section>
                     );

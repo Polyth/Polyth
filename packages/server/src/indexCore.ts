@@ -71,6 +71,7 @@ import {
   SERVER_TURN_STOPPED_BUS,
   SERVER_PERMISSION_WAITING_BUS,
   SERVER_ACCOUNT_REMOVAL_BUS,
+  SERVER_PERSON_DATA_VOLUME,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
   SERVER_BEHAVIOR_SECTIONS,
@@ -153,8 +154,9 @@ import {
 import { assistRoutes } from "./routes/assist.ts";
 import { promptHistoryRoutes } from "./routes/promptHistory.ts";
 import { sharingRoutes } from "./routes/sharing.ts";
-import { createSessionSharingService, privateSessionOwner, rowForReader, sessionAccess } from "./sessionSharing.ts";
-import { projectVisibleToUser } from "./accountLimits.ts";
+import { createSessionSharingService, privateSessionOwner, rowForReader, sessionAccess, sessionPrivacy } from "./sessionSharing.ts";
+import { erasePrivateChats, privateDataBytes, privateDataRoutes } from "./routes/privateData.ts";
+import { projectVisibleToUser, setPrivateRoomParentLookup } from "./accountLimits.ts";
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -770,6 +772,7 @@ export async function boot(opts: BootOptions = {}) {
     onRemoved: (project) => cleanupProjectCapabilities(project),
   });
   root.provide(CAP.projects, projects);
+  setPrivateRoomParentLookup((projectId) => projects.parentOfRoom(projectId));
 
   // --- tenancy boundary. Built as early as possible so that package hosts,
   // route wiring, and the WS gateway can only ever be handed SCOPED services.
@@ -785,6 +788,7 @@ export async function boot(opts: BootOptions = {}) {
     projection: (sessionId) => store.projection(sessionId),
     accessChanged: (projections, formerReaders) => broadcast.sessionAccessChanged?.(projections, formerReaders),
     hasPersonalMcpServers: (userId) => mcp.hasPersonalServers(userId),
+    isPrivateRoom: (projectId) => projects.parentOfRoom(projectId) !== undefined,
     leftPrivate: (spaceId, chats) => personalMcpReprovision?.leftPrivate(spaceId, chats),
   });
   const { gateway: spaceGateway } = await createSpaceGateway({
@@ -2655,6 +2659,13 @@ export async function boot(opts: BootOptions = {}) {
       return { dispose: () => { accountRemovedListeners.delete(listener); } };
     },
   });
+  const personDataMeasures = new Set<(userId: string) => number | Promise<number>>();
+  services.provide(SERVER_PERSON_DATA_VOLUME, {
+    contribute(measure) {
+      personDataMeasures.add(measure);
+      return { dispose: () => { personDataMeasures.delete(measure); } };
+    },
+  });
   const purposeContexts = new Map<string, (session: SessionProjection) => string>();
   services.provide(SESSION_PURPOSES, {
     register(purpose, context) {
@@ -2769,6 +2780,8 @@ export async function boot(opts: BootOptions = {}) {
         return undefined;
       }
     },
+    sessionPrivacy,
+    markPersonalContext: async (sessionId) => { await lazySessions.markPersonalContext?.(sessionId); },
     storageDir: dataDir,
     deployment: spaceGateway.deployment,
     spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),
@@ -3370,23 +3383,52 @@ export async function boot(opts: BootOptions = {}) {
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
 
+  /** Everything that was this one person's: nothing is handed to anyone, because
+   *  nobody but them could ever open it (Spaces §14.5). Their private chats and
+   *  rooms go first, while their ownership can still be read. */
+  const erasePerson = async (userId: string): Promise<{ failed: number }> => {
+    const { failed } = await erasePrivateChats(userId, {
+      projects,
+      deleteChat: async (session) => { await spaceServices(spaceGateway.resolveInternal(session.spaceId)).sessions.delete?.(session.id); },
+      store,
+      removeProject: (project) => spaceServices(spaceGateway.resolveInternal(project.spaceId)).projects.remove(project.id),
+    });
+    // Purge all durable delivery ownership before removing the credential;
+    // recreating the same stable account id must never adopt stale routes.
+    await notifications.removeAccount(userId);
+    push.removeAccount(userId);
+    await nativePush.removeAccount(userId);
+    // The person's connected accounts, secrets and enablement go with them.
+    people.removePerson(userId);
+    // Package-granted access (paired phones…) and package-held personal data
+    // such as memory notes end with the account.
+    const packages = await Promise.all([...accountRemovedListeners].map((listener) =>
+      Promise.resolve()
+        .then(() => listener({ userId }))
+        .then(() => 0, (error: unknown) => {
+          console.error("[polyth] package account removal listener failed", error);
+          return 1;
+        })));
+    return { failed: failed + packages.reduce<number>((sum, one) => sum + one, 0) };
+  };
   const staticCoreRoutes: RouteHandler[] = [
     async (request) => agentTools.route(request),
     authRoutes(auth, {
       onAccountRemoved: async (userId) => {
-        // Purge all durable delivery ownership before removing the credential;
-        // recreating the same stable account id must never adopt stale routes.
-        await notifications.removeAccount(userId);
-        push.removeAccount(userId);
-        await nativePush.removeAccount(userId);
-        // The person's connected accounts, secrets and enablement go with them.
-        people.removePerson(userId);
-        // Package-granted access (paired phones…) ends with the account.
-        await Promise.all([...accountRemovedListeners].map((listener) =>
-          Promise.resolve()
-            .then(() => listener({ userId }))
-            .catch((error) => console.error("[polyth] package account removal listener failed", error))));
+        const { failed } = await erasePerson(userId);
+        // The account is already gone, so nobody can retry from the page; what
+        // remains is unreadable through Polyth and this says it exists.
+        if (failed > 0) console.error(`[polyth] ${failed} item(s) of a removed account's private data could not be erased`);
       },
+    }),
+    privateDataRoutes({
+      erase: erasePerson,
+      volume: (userId) => privateDataBytes(userId, {
+        projects,
+        sessions: lazySessions,
+        store,
+        measures: personDataMeasures,
+      }),
     }),
     spaceRoutes({
       store: spaceGateway.store,
@@ -3487,7 +3529,7 @@ export async function boot(opts: BootOptions = {}) {
     pushRoutes(push),
     nativePushRoutes(nativePush),
     notificationRoutes(notifications, async (space) => new Set((await spaceServices(space).projects.list()).map((p) => p.id))),
-    browseRoutes(),
+    browseRoutes(dataDir),
     iconifyRoutes(),
     releasesRoutes(),
     async (request) => {

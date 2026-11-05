@@ -1028,6 +1028,9 @@ export const api = {
   /** The first-run personal project; the server chooses its folder. */
   ensurePersonalProject: (name?: string) =>
     jfetch<Project>("/api/projects/personal", json("POST", { name })),
+  /** The caller's own "Only me" room in a project; the server creates it. */
+  ensurePrivateRoom: (projectId: string) =>
+    jfetch<Project>(`/api/projects/${encodeURIComponent(projectId)}/private-room`, { method: "POST" }),
   cloneProject: (input: ProjectCloneInput | string, parentPath?: string) =>
     jfetch<Project>("/api/projects/clone", json("POST", typeof input === "string"
       ? { repository: input, parentPath: parentPath ?? "" }

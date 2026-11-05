@@ -48,6 +48,12 @@ import {
 /** `_inbox/` is an explicit project-root staging area for freshly attached
  *  files: uploads land here before any session/worktree owns the message. */
 export const INBOX_PREFIX = "_inbox/";
+/** Whether a requested folder is the attachment inbox or inside it, however the
+ *  path is spelled. */
+const isInboxFolder = (requested: string): boolean => {
+  const clean = path.posix.normalize(requested.replaceAll("\\", "/")).replace(/^(\.?\/)+/, "");
+  return clean === INBOX_PREFIX.slice(0, -1) || clean === INBOX_PREFIX || clean.startsWith(INBOX_PREFIX);
+};
 
 /** Attachment preparation seam consumed by the session service.
  *  Published so the composition root never imports this package. */
@@ -341,6 +347,12 @@ export function workspaceRoutes(deps: {
   return async ({ path, method, url, body, json, req, res }) => {
     if (!path.startsWith("/api/files")) return false;
     const query = (key: string) => url.searchParams.get(key);
+    // A private chat's attachments live here too: they open by name from their
+    // chat and are never listed for whoever else can open the project.
+    if ((path === "/api/files/tree" || path === "/api/files/list" || path === "/api/files/archive") && isInboxFolder(query("path") ?? "")) {
+      json(404, { error: "not-found", message: "path not found" });
+      return true;
+    }
     const rootOfQuery = () => rootOf(query("projectId"), query("sessionId"), query("repositoryId"));
     const rootOfBody = (input: Record<string, unknown>) =>
       rootOf(
@@ -604,7 +616,7 @@ export const FILES_REMOTE_ACCESS: RemoteAccessPolicy = {
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const externalReads = createExternalReadStore(packageDataDir(host));
-  const files = createFileService({ externalReads: externalReads.get });
+  const files = createFileService({ externalReads: externalReads.get, ...(host.storageDir ? { sealedRoots: () => [host.storageDir] } : {}) });
   host.services.provide(serverServiceKey<FileService>("files"), files);
   /** SSH transport binds late; resolve it per call so `materialize` reads and
    *  writes a remote project through the same remote FileService the routes use. */

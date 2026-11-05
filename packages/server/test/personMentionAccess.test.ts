@@ -94,6 +94,7 @@ async function harness(t: test.TestContext) {
     projection: (sessionId) => store.projection(sessionId),
     accessChanged: (rows) => { accessChanged.push(rows.map((row) => row.id)); },
     hasPersonalMcpServers: (userId) => userId === "usr_ann",
+    isPrivateRoom: (projectId) => projectId === "prj_room",
   });
 
   const resource = (input: { id: string; kind: "project" | "session"; owner: string; visibility: string; parentId?: string; accessParentId?: string }) => {
@@ -146,6 +147,7 @@ async function harness(t: test.TestContext) {
       decide: (sessionId: string, seq: number, input: Parameters<NonNullable<typeof service.decidePersonAccess>>[2]) =>
         service.decidePersonAccess!(sessionId, seq, input, admission(sessionId)),
       outsiders: (sessionId: string) => sharing.outsiders(context, sessionId),
+      mentionAccess: (sessionId: string) => sharing.mentionAccess(context, sessionId),
       newChat: (projectId: string) => sharing.newChatPeople(context, projectId),
     };
   };
@@ -522,4 +524,36 @@ test("a delegated subagent's chat opens through the chat it follows", async (t) 
   assert.deepEqual(result.mentions, ["usr_cara"]);
   assert.equal(h.levelOf("usr_cara", parent), "view");
   assert.equal(h.levelOf("usr_cara", "sess_child"), "view");
+});
+
+test("a chat that stays private offers no way to open it, and a client that tries anyway is refused", async (t) => {
+  const h = await harness(t);
+  const ann = h.as("usr_ann");
+
+  // A chat in Only me, and a new chat about to start there.
+  h.resource({ id: "prj_room", kind: "project", owner: "usr_ann", visibility: "private" });
+  await h.store.upsertProjection({ id: "sess_room", projectId: "prj_room", spaceId: "spc_home", title: "Mine", status: "idle", createdAt: 1, updatedAt: 1 } as never);
+  h.resource({ id: "sess_room", kind: "session", owner: "usr_ann", visibility: "private", parentId: "prj_room" });
+  const inRoom = await ann.mentionAccess("sess_room");
+  assert.equal(inRoom.action, "none");
+  assert.deepEqual(inRoom.levels, []);
+  assert.ok(inRoom.people.some((person) => person.userId === "usr_bea"), "still known to be outside, so a mention stays plain text");
+  assert.equal(ann.newChat("prj_room").action, "none");
+  assert.equal(ann.newChat("prj_home").action, "share", "the project itself is unaffected");
+  await assert.rejects(
+    ann.post("sess_room", { text: "hi @Bea", shareWith: [{ userId: "usr_bea", access: "view" }] }),
+    (error: { code?: string; reason?: string }) => error.code === "conflict" && error.reason === "private-room",
+  );
+  assert.equal(h.levelOf("usr_bea", "sess_room"), undefined);
+
+  // A chat whose agent has read her personal notes: only its projection knows.
+  const id = await h.chat("sess_notes", "usr_ann");
+  assert.equal((await ann.mentionAccess(id)).action, "share", "an ordinary private chat can still be opened");
+  await h.store.upsertProjection({ ...(await h.store.projection(id))!, personalContext: true });
+  assert.equal((await ann.mentionAccess(id)).action, "none");
+  await assert.rejects(
+    ann.post(id, { text: "hi @Bea", shareWith: [{ userId: "usr_bea", access: "view" }] }),
+    (error: { code?: string; reason?: string }) => error.code === "conflict" && error.reason === "personal-context",
+  );
+  assert.equal(h.levelOf("usr_bea", id), undefined);
 });

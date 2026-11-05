@@ -139,6 +139,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
   const localAccountId = (req: IncomingMessage): string | undefined =>
     loopbackTrusted && loopbackDirectSocket(req) ? options.resolveLocalAccountId?.(req) : undefined;
   const requireHuman = (req: IncomingMessage) => { transport(req); return identity.sessions.require(tokenOf(req)); };
+  /** The same, for what can't be undone: answers `reauth-required` unless the
+   *  person confirmed their password within the last few minutes. */
+  const requireRecentHuman = (req: IncomingMessage) => { transport(req); return identity.sessions.require(tokenOf(req), true); };
   // Local-only loopback trust means "this machine's own browser is the active
   // owner" (agent beta / local debug agent access). Reporting an authorized
   // local-user without a usable identity session would strand the browser UI on
@@ -225,6 +228,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     limits: identity.limits.forUser(user.id).limits,
     usage: identity.limits.usage(user.id),
     permissions: identity.permissions.forUser(user.id).permissions,
+    ...(identity.accounts.adminPasswordResetAt(user.id) !== undefined
+      ? { adminPasswordResetAt: identity.accounts.adminPasswordResetAt(user.id) }
+      : {}),
   });
   const cliBody = (tokens: readonly AccessTokenSummary[], canManageTrust: boolean) => {
     const trust = identity.accessTokens.trust.get();
@@ -238,6 +244,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
   return {
     cookieName,
     requireHuman,
+    requireRecentHuman,
     /**
      * `GET /api/auth/accounts`, `/me` and `/cli` for an account the host
      * authenticated without a browser session: a full-access paired device.

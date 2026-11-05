@@ -59,7 +59,7 @@ import {
   SESSION_PAUSE_ENDED_EVENT,
   normalizeSessionOrigin,
 } from "@polyth/contracts";
-import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover } from "./sessionSharing.ts";
+import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
@@ -2157,6 +2157,17 @@ export function createSessionService(deps: {
       console.error("[polyth] projection broadcast hydration failed", error);
       broadcast.projection(overlayProjection(proj));
     });
+  };
+
+  /** The agent of this chat read someone's personal notes. Durable, and marked
+   *  on the chat whose sharing this one follows too: what a subagent read
+   *  reaches its parent, and a fork of either keeps the mark. */
+  const markPersonalContext = async (sessionId: string): Promise<void> => {
+    for (const id of new Set([sessionId, sharingRootId(sessionId)])) {
+      const current = await store.projection(id);
+      if (!current || current.personalContext) continue;
+      await applyProjection(id, (latest) => latest.personalContext ? latest : { ...latest, personalContext: true });
+    }
   };
 
   const applyProjection = async (
@@ -8201,6 +8212,33 @@ export function createSessionService(deps: {
       turnWorkspace = recordedWorkspace;
     }
 
+    // Who is speaking, who reads this chat and which memory it has. Persisted
+    // before delivery; a retry sends the exact recorded block, so a changed
+    // audience never rewrites what an operation already told the model.
+    if (operation && !contextFree && input.keepAlive !== true) {
+      const recorded = existingEvents.find((event) =>
+        event.type === "context/people-prepared"
+        && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+      );
+      let peopleText = typeof (recorded?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
+        ? (recorded!.data as { modelVisibleText: string }).modelVisibleText
+        : undefined;
+      if (!recorded) {
+        const spaceId = proj.spaceId ?? (await projects.get(proj.projectId))?.spaceId;
+        const block = spaceId ? turnPeopleBlock(spaceId, sessionId, turnAuthor) : undefined;
+        if (block) {
+          await appendAndBroadcast(sessionId, "context/people-prepared", {
+            operationId: operation.operationId,
+            modelVisibleText: block.text,
+            ...(block.speaker ? { speaker: block.speaker as unknown as JsonObject } : {}),
+            readers: block.readers as unknown as JsonObject[],
+          }, { ignorable: true });
+          peopleText = block.text;
+        }
+      }
+      if (peopleText) projectedSections.push(peopleText);
+    }
+
     // Memory is prepared after the durable operation has an operationId, but
     // before runtime delivery. Retries recover the exact persisted package;
     // they never perform a second recall against changed project state.
@@ -8277,6 +8315,10 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("memory is required before this turn can run"), { code: "memory-required" });
       }
       if (memoryContribution.modelVisibleText) projectedSections.push(memoryContribution.modelVisibleText);
+      // Before delivery: once it is sent the harness holds it for good.
+      if (memoryContribution.selected.some((item) => (item as { layer?: unknown }).layer === "person")) {
+        await markPersonalContext(sessionId);
+      }
     }
 
     admitting.add(sessionId);
@@ -12456,6 +12498,13 @@ export function createSessionService(deps: {
             }
             // A person steering into a keep-alive makes it their turn.
             keepAliveTurns.delete(sessionId);
+            // Someone else's words joining this turn say whose they are, recorded
+            // before delivery like any fact the model sees.
+            const steerSpaceId = proj!.spaceId ?? (await projects.get(proj!.projectId))?.spaceId;
+            const steerPeople = input.author && input.author.userId !== proj!.actor?.userId && steerSpaceId
+              ? steerPeopleLine(steerSpaceId, sessionId, input.author)
+              : undefined;
+            const steerText = steerPeople ? `${steerPeople}\n\n${input.text}` : input.text;
             const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
               sessionId,
               mutationKind: "turn-steer",
@@ -12464,17 +12513,25 @@ export function createSessionService(deps: {
                 data: {
                   text: input.text,
                   delivery: "steer",
+                  ...(input.author ? { author: input.author as unknown as JsonObject } : {}),
                   ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
                 },
               },
             }));
+            if (steerPeople) {
+              await appendAndBroadcast(sessionId, "context/people-prepared", {
+                operationId: prepared.operation.operationId,
+                modelVisibleText: steerPeople,
+                speaker: input.author as unknown as JsonObject,
+              }, { ignorable: true });
+            }
             const outcome = await runPreparedOperation<Record<string, never>, boolean>(
               prepared.operation,
               async (operationId) => {
                 try {
                   const value = await (rt.steerOperation
-                    ? rt.steerOperation(sessionId, input.text, operationId, input.model, input.agent)
-                    : rt.steer!(sessionId, input.text, input.model, input.agent));
+                    ? rt.steerOperation(sessionId, steerText, operationId, input.model, input.agent)
+                    : rt.steer!(sessionId, steerText, input.model, input.agent));
                   if (isMutationOutcome<Record<string, never>>(value)) return value;
                   return value
                     ? { kind: "confirmed" as const, value: {} }
@@ -14605,6 +14662,7 @@ export function createSessionService(deps: {
       });
     },
 
+    markPersonalContext,
     async autoAcceptGet(sessionId) {
       const proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });

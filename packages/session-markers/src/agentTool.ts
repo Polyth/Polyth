@@ -23,6 +23,8 @@ export interface SessionMarkersToolDeps {
   /** Context for a turn with no acting person; limited to the calling chat. */
   systemSpace(spaceId: string): SpaceContext;
   projectName?(space: SpaceContext, projectId: string): Promise<string | undefined>;
+  /** Who a chat is private to, if anyone; undefined when nothing is known. */
+  sessionPrivacy?(spaceId: string, sessionId: string): { privateTo?: string } | undefined;
 }
 
 const ACTIONS = ["list", "markers", "get", "add", "remove"] as const;
@@ -126,6 +128,17 @@ export function createSessionMarkersTool(deps: SessionMarkersToolDeps): AgentCap
     if (!ACTIONS.includes(action)) throw invalidInput(`action must be one of ${ACTIONS.join(", ")}`);
     const { space, only } = scope(ctx);
     const self = ctx.sessionId;
+    // In a chat others read, the agent can't reach what's private to one of
+    // them, not even for the person speaking: the title would land in front of
+    // the rest. A chat private to its owner keeps full reach.
+    const spaceId = ctx.spaceId!;
+    const callerPrivacy = deps.sessionPrivacy?.(spaceId, self);
+    const isHidden = (sessionId: string): boolean =>
+      callerPrivacy !== undefined && !callerPrivacy.privateTo && !!deps.sessionPrivacy?.(spaceId, sessionId)?.privateTo;
+    const readable = async (): Promise<MarkersSnapshot> => {
+      const snapshot = await deps.service.snapshot(space);
+      return { ...snapshot, sessions: snapshot.sessions.filter((session) => !isHidden(session.sessionId)) };
+    };
     if (action === "markers") {
       const snapshot = await deps.service.snapshot(space);
       return {
@@ -134,8 +147,7 @@ export function createSessionMarkersTool(deps: SessionMarkersToolDeps): AgentCap
       };
     }
     if (action === "list") {
-      const snapshot = await deps.service.snapshot(space);
-      return { output: await listing(space, snapshot, input, self, only) };
+      return { output: await listing(space, await readable(), input, self, only) };
     }
     const named = Array.isArray(input.sessionIds)
       ? input.sessionIds.filter((id): id is string => typeof id === "string" && id.length > 0)
@@ -144,8 +156,9 @@ export function createSessionMarkersTool(deps: SessionMarkersToolDeps): AgentCap
     if (only && sessionIds.some((id) => id !== only)) {
       throw Object.assign(new Error("This turn acts for no person, so it can mark only its own chat"), { code: "forbidden" });
     }
+    if (sessionIds.some(isHidden)) throw Object.assign(new Error("session not found"), { code: "not-found" });
     if (action === "get") {
-      const snapshot = await deps.service.snapshot(space);
+      const snapshot = await readable();
       const sessions = snapshot.sessions.filter((session) => sessionIds.includes(session.sessionId));
       if (sessions.length === 0) return { output: `No markers on ${sessionIds.join(", ")}.` };
       const names = new Map<string, string | undefined>();

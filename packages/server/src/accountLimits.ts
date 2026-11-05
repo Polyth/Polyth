@@ -141,7 +141,7 @@ export function limitedSessionService(
 
   limited.create = async (input) => {
     const limits = current();
-    if (limits && !accountLimitAllowsProject(limits, input.projectId)) throw notFound();
+    if (limits && !accountMayUseProject(limits, input.projectId)) throw notFound();
     const harness = limits?.harnesses
       ? input.harness ? checkSelection(allowed, limits, input.harness) : defaultHarness(limits)
       : input.harness;
@@ -195,9 +195,9 @@ export function limitedSessionService(
     limited.summaries = async (input) => {
       const limits = current();
       if (!limits?.projects) return summaries(input);
-      if (input.projectId && !accountLimitAllowsProject(limits, input.projectId)) throw notFound();
+      if (input.projectId && !accountMayUseProject(limits, input.projectId)) throw notFound();
       const page = await summaries(input);
-      return { ...page, sessions: page.sessions.filter((session) => accountLimitAllowsProject(limits, session.projectId)) };
+      return { ...page, sessions: page.sessions.filter((session) => accountMayUseProject(limits, session.projectId)) };
     };
   }
   return limited;
@@ -218,6 +218,17 @@ export function limitedSessionsForActor(
  * policy; an account with a project list may not add projects, because a new
  * project could never be on the owner's list.
  */
+/** The project a private room belongs to. A room follows its project under an
+ *  owner-set project list: an account limited to a project keeps its own room
+ *  there, and loses it with the project. Set once by the composition root. */
+let parentOfRoom: (projectId: string) => string | undefined = () => undefined;
+export function setPrivateRoomParentLookup(lookup: (projectId: string) => string | undefined): void {
+  parentOfRoom = lookup;
+}
+export const privateRoomParent = (projectId: string): string | undefined => parentOfRoom(projectId);
+export const accountMayUseProject = (limits: AccountLimits | null, projectId: string): boolean =>
+  accountLimitAllowsProject(limits, parentOfRoom(projectId) ?? projectId);
+
 export function limitedProjectsForActor(
   ctx: SpaceContext,
   base: ProjectService,
@@ -238,6 +249,16 @@ export function limitedProjectsForActor(
   if (base.addRemote) {
     const addRemote = base.addRemote.bind(base);
     scoped.addRemote = (path, remote, name) => allowed(() => addRemote(path, remote, name));
+  }
+  if (base.ensurePrivateRoom) {
+    const ensurePrivateRoom = base.ensurePrivateRoom.bind(base);
+    // A room belongs to a project the account may use, so it stays allowed.
+    scoped.ensurePrivateRoom = (parentProjectId) => {
+      const limits = lookup(ctx.userId);
+      return limits?.projects && !accountLimitAllowsProject(limits, parentProjectId)
+        ? Promise.reject(Object.assign(new Error("project not found"), { code: "not-found" }))
+        : ensurePrivateRoom(parentProjectId);
+    };
   }
   if (base.ensurePersonal) {
     // A project-limited account works only where the owner put it.
@@ -262,5 +283,5 @@ export function limitedCatalog(
 /** WS fan-out: may this user see live updates of a project's chats? */
 export function projectVisibleToUser(userId: string | undefined, projectId: string): boolean {
   if (!userId) return true;
-  return accountLimitAllowsProject(limitsForUser(userId), projectId);
+  return accountMayUseProject(limitsForUser(userId), projectId);
 }

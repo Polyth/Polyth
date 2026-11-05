@@ -40,6 +40,7 @@ import { automaticSidebarRail, setAutomaticSidebarRail } from "./sidebarLayout.t
 import { setShellMirrored, shellDirectionFor, useDocumentDirection } from "./shellDirection.ts";
 import BackgroundQuickPicker from "./components/BackgroundPicker.tsx";
 import ConnectionFeedback from "./components/ConnectionFeedback.tsx";
+import PasswordResetNotice from "./components/PasswordResetNotice.tsx";
 import NotificationStack from "./notify/NotificationStack.tsx";
 import SlotHost from "./components/slots/SlotHost.ts";
 import { useUiSettings } from "./uiPrefs.ts";
@@ -185,6 +186,7 @@ export default function App() {
       </div>
       <BackgroundQuickPicker />
       <ConnectionFeedback />
+      <PasswordResetNotice />
       <SlotHost slot="app.layers" />
       <NotificationStack />
       <AlertDialog />

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ProjectService, RouteRequest, SessionService } from "@polyth/contracts";
@@ -150,5 +150,37 @@ test("_inbox keeps omitted and explicit primary uploads on project staging root"
       rm(primaryRoot, { recursive: true, force: true }),
       rm(secondaryRoot, { recursive: true, force: true }),
     ]);
+  }
+});
+
+test("the attachment inbox can't be browsed, however the path is spelled, and stays out of listings", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "polyth-inbox-browse-"));
+  try {
+    await writeFile(path.join(projectRoot, "project.txt"), "needle");
+    await mkdir(path.join(projectRoot, "_inbox"));
+    await writeFile(path.join(projectRoot, "_inbox", "1234-private.txt"), "needle");
+    const projects = { get: async (id: string) => id === "p1" ? { id, path: projectRoot, name: "repo" } : undefined } as unknown as ProjectService;
+    const route = workspaceRoutes({ projects, sessions: {} as unknown as SessionService, files: createFileService() });
+    const call = async (route_path: string, query: string) => {
+      let answer: { code: number; body: unknown } | undefined;
+      await route({
+        path: route_path, method: "GET",
+        url: new URL(`https://polyth.test${route_path}?projectId=p1&${query}`),
+        json: (code: number, body: unknown) => { answer = { code, body }; },
+      } as unknown as RouteRequest);
+      return answer!;
+    };
+    for (const spelled of ["_inbox", "_inbox/", "./_inbox", "/_inbox", "nested/../_inbox", "_inbox/sub", "x/../_inbox/sub"]) {
+      for (const endpoint of ["/api/files/tree", "/api/files/list"]) {
+        const answer = await call(endpoint, `path=${encodeURIComponent(spelled)}`);
+        assert.equal(answer.code, 404, `${endpoint} ${spelled}`);
+      }
+    }
+    const root = await call("/api/files/tree", "path=");
+    assert.equal(JSON.stringify(root.body).includes("_inbox"), false, "not listed");
+    const found = await call("/api/files/search-content", "q=needle");
+    assert.deepEqual((found.body as { hits: Array<{ path: string }> }).hits.map((hit) => hit.path), ["project.txt"], "not searched");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
   }
 });

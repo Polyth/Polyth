@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import { Window } from "happy-dom";
 import type { Project } from "@polyth/contracts";
-import { memoryApi, type MemoryPolicy } from "../src/client.ts";
+import { memoryApi, personalMemoryApi, type MemoryPolicy } from "../src/client.ts";
 
 register("../../../apps/web/test/tsxHooks.mjs", import.meta.url);
 
@@ -45,6 +45,9 @@ test("memory utility model is chosen in the shared picker and saved without gran
     blockWithoutMemory: false, reviewPolicy: "low-risk-auto-active", exclusions: { sessions: [], sources: [], paths: [] },
   };
   const writes: unknown[] = [];
+  // My notes reads on mount; nothing here is about it, so it has nothing to show.
+  const originalPersonalPage = personalMemoryApi.page;
+  personalMemoryApi.page = async () => ({ here: [], aboutMe: [], proposals: [], review: [], mode: "auto" });
   memoryApi.list = async () => ({ items: [], total: 0, policy });
   memoryApi.policy = async () => policy;
   memoryApi.updatePolicy = async (_id, patch) => {
@@ -81,6 +84,7 @@ test("memory utility model is chosen in the shared picker and saved without gran
     globalThis.fetch = originalFetch;
     await act(async () => root.unmount());
     Object.assign(memoryApi, originalApi);
+    personalMemoryApi.page = originalPersonalPage;
     await dom.happyDOM.close();
     for (const [name, descriptor] of originalGlobals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);

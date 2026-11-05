@@ -376,6 +376,35 @@ export async function setAccountPermissions(
   return result.body as unknown as AccountPermissionsDto;
 }
 
+/** Erase what only this disabled account could open. Instance owner only; the
+ *  owner never sees it first. */
+export async function erasePrivateData(accountId: string): Promise<void> {
+  const result = await authJson(`/api/accounts/${encodeURIComponent(accountId)}/erase-private-data`, {});
+  if (!result.response.ok) throw authFailure(result.response, result.body);
+}
+
+/** How much only this account can open: one number, never what it is. Null for
+ *  anyone but the instance owner. */
+export async function privateDataBytes(accountId: string): Promise<number | null> {
+  try {
+    const { bytes } = await request<{ bytes?: unknown }>(`/api/accounts/${encodeURIComponent(accountId)}/private-data`);
+    return typeof bytes === "number" ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/** When an administrator last set this person's password, while they haven't
+ *  set their own since. */
+export async function adminPasswordResetAt(): Promise<number | null> {
+  try {
+    const me = await request<{ adminPasswordResetAt?: unknown }>("/api/auth/me");
+    return typeof me.adminPasswordResetAt === "number" ? me.adminPasswordResetAt : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Guardrails and limits from one `/api/auth/me` answer (null = none): both
  *  ride on it, and boot needs both. Unreachable or older server → both null. */
 export async function currentAccountRestrictions(): Promise<{ guardrails: AccountGuardrails | null; limits: AccountLimits | null }> {

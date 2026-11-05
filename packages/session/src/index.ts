@@ -2717,6 +2717,12 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve(Number(row.s));
   }
 
+  function eventBytes(sessionId: string): Promise<number> {
+    const row = prep("SELECT COALESCE(SUM(LENGTH(CAST(data AS BLOB))), 0) AS size FROM events WHERE session_id = ?")
+      .get(sessionId) as { size: number };
+    return Promise.resolve(Number(row.size));
+  }
+
   // ------------------------------------------------------------- fork copy
 
   function copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void> {
@@ -4980,6 +4986,7 @@ export function createStore(dbPath: string): Store {
     hasEventOfType,
     lastTurnEventType,
     latestSeq,
+    eventBytes,
     eventsOfTypes,
     eventAt,
     workspaceReference,

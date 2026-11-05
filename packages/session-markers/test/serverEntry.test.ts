@@ -38,6 +38,7 @@ function fixture(t: TestContext) {
   };
   const registered: AgentCapabilityContribution[] = [];
   const disposed: string[] = [];
+  const privacy = new Map<string, { privateTo?: string }>();
   const registry = {
     register: (_owner: string, contribution: AgentCapabilityContribution) => {
       registered.push(contribution);
@@ -65,6 +66,7 @@ function fixture(t: TestContext) {
     }),
     store: { projection: async (id: string) => projections.get(id) },
     personSpaceContext: (userId: string, spaceId: string) => userId === "stranger" ? undefined : ctx(spaceId, userId),
+    sessionPrivacy: (_spaceId: string, sessionId: string) => privacy.get(sessionId),
     systemSpaceContext: (spaceId: string) => ctx(spaceId, "system"),
     services: { get: () => registry },
   } as unknown as ServerPackageHost;
@@ -83,7 +85,7 @@ function fixture(t: TestContext) {
     return { handled, status, body: payload as MarkersSnapshot & { error?: string; marker?: { id: string } } };
   };
   const storedFile = (spaceId: string) => join(root, spaceId, "packages/session-markers/markers.json");
-  return { pkg, call, projections, registered, disposed, storedFile };
+  return { pkg, call, projections, registered, disposed, storedFile, privacy };
 }
 
 const alice = ctx("space", "alice");
@@ -230,4 +232,26 @@ test("stored markers survive a restart of the package", async (t) => {
   const stored = JSON.parse(readFileSync(storedFile("space"), "utf8")) as { version: number; sessions: Record<string, unknown> };
   assert.equal(stored.version, 1);
   assert.deepEqual(Object.keys(stored.sessions), ["shared"]);
+});
+
+test("in a chat others read, the agent can't reach the speaker's private chats", async (t) => {
+  const { pkg, call, registered, privacy } = fixture(t);
+  await pkg.onEnable!();
+  privacy.set("shared", {});
+  privacy.set("alice-private", { privateTo: "alice" });
+  await call(alice, "POST", "/api/session-markers/apply", { sessionIds: ["shared", "alice-private"], add: [{ marker: "important" }] });
+  const tool = registered[1]!;
+  const run = (sessionId: string, input: Record<string, unknown>) =>
+    tool.execute!(input as never, { spaceId: "space", projectId: "space-project", cwd: "/tmp", sessionId, actorUserId: "alice" } as never);
+
+  const fromShared = await run("shared", { action: "list" });
+  assert.ok(!fromShared.output.includes("Alice only"), fromShared.output);
+  assert.ok(fromShared.output.includes("Fix login"));
+  for (const action of ["get", "add", "remove"]) {
+    await assert.rejects(run("shared", { action, sessionId: "alice-private", marker: "important" }), { code: "not-found" }, action);
+  }
+  await assert.rejects(run("shared", { action: "get", sessionIds: ["second", "alice-private"] }), { code: "not-found" }, "one hidden chat among several");
+
+  const fromPrivate = await run("alice-private", { action: "list" });
+  assert.ok(fromPrivate.output.includes("Alice only"), "a chat private to its owner keeps full reach");
 });

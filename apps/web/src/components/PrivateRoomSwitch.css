@@ -1,0 +1,72 @@
+.private-room-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  margin: var(--space-1) var(--space-2) var(--space-2);
+  padding: 2px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.private-room-switch-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: 0;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.private-room-switch-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.private-room-switch-option > .private-room-switch-waiting {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.private-room-switch-option[aria-pressed="true"] {
+  background: var(--elevated);
+  color: var(--text);
+  font-weight: 550;
+}
+@media (hover: hover) {
+  .private-room-switch-option:hover:where(:not(:disabled)):where([aria-pressed="false"]) { color: var(--text); }
+}
+
+/* One more plateless line of the pending stack (see .conversation-composer-dock):
+   the composer's column, its mark and its text edge. */
+.chat-audience-line {
+  display: flex;
+  align-items: center;
+  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
+  min-width: 0;
+  min-height: var(--composer-stack-row);
+  margin-inline: auto;
+  padding-inline: calc(var(--composer-stack-mark) - var(--icon-sm) / 2) var(--composer-stack-end);
+  color: var(--muted);
+  font-size: var(--font-composer-stack);
+}
+.chat-audience-copy { display: flex; align-items: baseline; gap: var(--space-1); flex: 1 1 0; min-width: 0; }
+.chat-audience-text { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-audience-action { flex: none; }
+/* A phone has no room for all of it on one line: who reads the chat comes first,
+   what the agent remembers under it, a long list of names may take two lines, and
+   the action is its lock (the session menu names it in full). */
+@media (max-width: 480px) {
+  .chat-audience-line { padding-block: var(--space-1); }
+  .chat-audience-action-label { display: none; }
+  .chat-audience-copy { flex-direction: column; align-items: stretch; gap: 0; }
+  .chat-audience-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+}

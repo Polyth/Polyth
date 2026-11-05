@@ -31,7 +31,11 @@ function fixture(t: test.TestContext) {
     security.control.run("INSERT INTO space_memberships(space_id,principal_id,role,created_at_ms) VALUES('spc_home','usr_viewer','viewer',1)");
   });
   const binding = bindCanonicalSecurity(security);
-  const registry = createProjectService(root);
+  // Project folders sit beside the data folder, as on a real server: a folder
+  // inside it can't be registered.
+  const dataDir = join(root, "data");
+  mkdirSync(dataDir);
+  const registry = createProjectService(dataDir);
   const ctx = (userId: string, role: SpaceContext["role"]): SpaceContext => ({
     spaceId: "spc_home",
     spaceSlug: "home",

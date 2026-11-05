@@ -20,18 +20,38 @@ export default function registerPackage(host: ServerPackageHost) {
             throw fail("not-found", "project not found");
         const refs = await sourceRefs(host.spaceStorage(request.space).path("session-import/ref-key"));
         const context: HarnessContext = { spaceId: request.space.spaceId, space: request.space, projectId: project.id, cwd: project.path, remote: Boolean(project.remote) };
+        // Native transcripts live under the host's one OS account, whoever's
+        // chat they were. Only the person who owns the machine may browse them,
+        // and never a transcript behind a Polyth chat they can't open: importing
+        // it would hand them someone's private chat (Spaces §14.5).
+        const space = request.space as typeof request.space & { instanceOwner?: boolean };
+        const person = host.personSpaceContext?.(space.userId, space.spaceId);
+        const mayBrowseNative = !person || space.instanceOwner === true;
+        const unopenableTranscript = async (): Promise<(nativeRef: string) => boolean> => {
+            // One person, or server work: nothing here is anyone else's.
+            if (!person)
+                return () => false;
+            const reader = new Set((await scoped.sessions.list(project.id)).map((session) => session.id));
+            const everyone = await host.forSpace(host.systemSpaceContext(space.spaceId)).sessions.list(project.id);
+            const hidden = everyone.filter((session) => !reader.has(session.id)).map((session) => session.backendSessionId).filter((id): id is string => !!id);
+            return (nativeRef) => hidden.some((id) => nativeRef.includes(id));
+        };
         if (request.path === "/api/session-import/sources" && request.method === "GET") {
             // List every registered harness, not only those already exposing a
             // source. The picker shows a harness accordion (and its supported
             // state) so a backend without a native transcript reader is visible
             // instead of silently missing.
             const providers = registry.providers();
+            const hiddenTranscript = mayBrowseNative ? await unopenableTranscript() : () => true;
             const sources = await Promise.all(providers.map(async (provider) => {
                 if (!provider.source) {
                     return { id: provider.descriptor.id, name: provider.descriptor.name, items: [], total: 0, imported: 0, unsupported: true };
                 }
+                if (!mayBrowseNative) {
+                    return { id: provider.descriptor.id, name: provider.descriptor.name, items: [], total: 0, imported: 0, ownerOnly: true };
+                }
                 try {
-                    const listed = (await provider.source.list(context)).slice(0, 100);
+                    const listed = (await provider.source.list(context)).filter((item) => !hiddenTranscript(item.ref)).slice(0, 100);
                     const items: Array<{ ref: string; title: string; updatedAt?: number }> = [];
                     let imported = 0;
                     for (const item of listed) {
@@ -54,7 +74,11 @@ export default function registerPackage(host: ServerPackageHost) {
             return true;
         }
         if (request.path === "/api/session-import/snapshot" && request.method === "POST") {
+            if (!mayBrowseNative)
+                throw fail("forbidden", "Only the owner of this server can import native chats");
             const ref = refs.decode(input.ref, context.spaceId, project.id, true);
+            if ((await unopenableTranscript())(ref.nativeRef))
+                throw fail("not-found", "Source is unavailable; select it again to start a new Snapshot");
             const provider = registry.providers().find((p) => p.descriptor.id === ref.providerId);
             // A caller may supply its own request id; absent one, the native
             // source identity is the request identity, so repeat imports resolve

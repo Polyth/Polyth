@@ -1,3 +1,4 @@
+import { rootProjects } from "@polyth/contracts";
 import {
   useCallback,
   useEffect,
@@ -441,7 +442,7 @@ export function UsageDashboard({ active = true, projectId: shellProjectId, sessi
             label={tr("usage.projectLabel")}
             ariaLabel={tr("usage.projectLabel")}
             value={projectId ?? ""}
-            options={projects.map((project) => ({ value: project.id, label: project.name, detail: project.path }))}
+            options={rootProjects(projects).map((project) => ({ value: project.id, label: project.name, detail: project.path }))}
             onChange={(value) => setProjectId(value)}
             mobileSheet
           />
