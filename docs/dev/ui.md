@@ -1104,11 +1104,18 @@ own a rail launcher: a registered capability with `rail !== false`
 Background helpers, importers and settings-only integrations get no Show/Hide.
 An earlier override on a package that is no longer listed appears as a
 removable row. Below the step header, everything from General to the
-Cancel/Continue row is one scroll region (`.project-setup-scroll`); the
+Continue row is one scroll region (`.project-setup-scroll`); the
 expanded Workspace list never scrolls on its own, so a short (half-screen)
 window stays usable. Continue opens step 2, `ProjectFolderDialog` with
 `onBack`. Back keeps the chosen directions. Settings reuse the same picker
 without `onBack`.
+
+Both steps are dismissed from the same place: one X in the dialog's top-end
+corner. Step 1 has no bottom Cancel — its footer carries only Continue, so the
+way out does not move between steps and the footer never competes with the
+primary action. The X is never the opening focus (`initialFocus` is the first
+`.project-direction-card`), so Enter on an open step 1 does not dismiss it;
+Escape still closes every step.
 
 When the account uses one interface for every project (Settings → Projects →
 Interface across projects, `projectInterfaceScope.ts`), directions shape

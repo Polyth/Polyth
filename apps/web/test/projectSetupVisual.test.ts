@@ -30,8 +30,13 @@ test("new-project step 1 scrolls from General to the actions as one region", asy
     readFile(new URL("../src/components/ProjectSetupFlowDialog.tsx", import.meta.url), "utf8"),
   ]);
 
-  // Editor and Cancel/Continue live inside the same scroll container.
+  // Editor and the primary action live inside the same scroll container.
   assert.match(setupTsx, /<div className="project-setup-scroll">\s*(?:\{[^}]*\}\s*)?<ProjectCompositionEditor[^>]*\/>\s*<div className="project-setup-actions">/);
+  // Both steps close from the top-end X. Step 1 keeps only Continue in its
+  // footer, so dismissing it never means going Back for a bottom Cancel.
+  assert.match(setupTsx, /<div className="project-setup-intro">[\s\S]*?<IconButton icon=\{CloseIcon\} label=\{tr\("common\.close"\)\} onClick=\{cancel\} \/>\s*<\/div>/);
+  assert.match(setupTsx, /<div className="project-setup-actions">\s*<Button variant="primary"[^>]*>[\s\S]*?<\/div>/);
+  assert.doesNotMatch(setupTsx, /<div className="project-setup-actions">\s*<Button[^>]*onClick=\{cancel\}/);
   assert.match(setupCss, /\.project-setup-scroll \{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s);
   // The expanded Workspace list must not become a nested scroll box here:
   // in a half-height window it collapsed to 0px.

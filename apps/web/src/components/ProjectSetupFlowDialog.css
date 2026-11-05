@@ -37,13 +37,30 @@
 }
 
 .project-setup-intro {
-  display: grid;
-  gap: var(--space-1);
+  display: flex;
+  gap: var(--space-2);
   flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
   min-width: 0;
   margin: 0;
   padding: var(--space-5) var(--space-5) var(--space-4);
   border-bottom: 1px solid var(--hair);
+}
+
+/* The one close affordance of step 1 sits where step 2's X sits: top end of
+   the dialog head, aligned with the step label rather than the heading. */
+.project-setup-intro-copy {
+  display: grid;
+  flex: 1 1 auto;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.project-setup-intro > .ui-icon-btn {
+  flex: none;
+  margin-block-start: calc(var(--space-1) * -1);
+  margin-inline-end: calc(var(--space-2) * -1);
 }
 
 .project-setup-intro h2 {
@@ -224,6 +241,11 @@ body[data-desktop-low-resource="true"] :is(
       var(--space-3)
       max(var(--space-3), var(--safe-left));
     border-bottom-color: color-mix(in srgb, var(--material-glass-border) 72%, transparent);
+  }
+
+  .project-setup-intro > .ui-icon-btn {
+    margin-block-start: 0;
+    margin-inline-end: calc(var(--space-1) * -1);
   }
 
   .project-setup-intro h2 {

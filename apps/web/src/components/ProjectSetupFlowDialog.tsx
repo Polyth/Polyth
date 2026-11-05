@@ -4,7 +4,7 @@ import { setNextProjectComposition } from "@polyth/session/web-api";
 import ProjectFolderDialog from "./ProjectFolderDialog.tsx";
 import ProjectCompositionEditor, { emptyProjectComposition } from "./ProjectCompositionEditor.tsx";
 import Dialog from "./a11y/Dialog.tsx";
-import { Button, ChevronRightIcon, Spinner } from "./ui/index.ts";
+import { Button, ChevronRightIcon, CloseIcon, IconButton, Spinner } from "./ui/index.ts";
 import { getState } from "../store.ts";
 import { updateProjectAppearance } from "../init.ts";
 import { tr } from "../i18n/index.ts";
@@ -140,18 +140,26 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
   }
 
   return (
-    <Dialog title={tr("projectcomposition.setupTitle")} onClose={cancel} size="lg" className="project-setup-flow-dialog">
+    // The top-end X is the only exit, never the opening focus: the first
+    // direction keeps the focus an unchanged step 1 gave it, so Enter does
+    // not dismiss the dialog on open.
+    <Dialog title={tr("projectcomposition.setupTitle")} onClose={cancel} size="lg" className="project-setup-flow-dialog" initialFocus=".project-direction-card">
+      {/* Both steps close from the same place: one X in the top-end corner.
+          Step 1 keeps only Continue in its footer, so the way out never moves
+          and the bottom bar never competes with the primary action. */}
       <div className="project-setup-intro">
-        <span className="project-setup-step">{tr("projectcomposition.setupStep")}</span>
-        <h2>{tr("projectcomposition.whatAreYouWorkingOn")}</h2>
-        <p>{tr("projectcomposition.setupHint")}</p>
+        <div className="project-setup-intro-copy">
+          <span className="project-setup-step">{tr("projectcomposition.setupStep")}</span>
+          <h2>{tr("projectcomposition.whatAreYouWorkingOn")}</h2>
+          <p>{tr("projectcomposition.setupHint")}</p>
+        </div>
+        <IconButton icon={CloseIcon} label={tr("common.close")} onClick={cancel} />
       </div>
       {/* One scroll region from the directions down to the actions: a short
           window must not trap the expanded Workspace list in its own box. */}
       <div className="project-setup-scroll">
         <ProjectCompositionEditor value={composition} onChange={setComposition} purposeHeading={false} />
         <div className="project-setup-actions">
-          <Button variant="ghost" onClick={cancel}>{tr("common.cancel")}</Button>
           <Button variant="primary" iconEnd={ChevronRightIcon} onClick={continueToPicker}>{tr("common.continue")}</Button>
         </div>
       </div>
