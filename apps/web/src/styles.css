@@ -5584,37 +5584,62 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .folder-dialog-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
 .folder-dialog-heading { flex: 1; min-width: 0; }
-.folder-dialog-head-row > .folder-back { margin-inline-start: -6px; }
-/* In a stepped flow the close control centres on the first title line. */
-.folder-dialog-body-stepped .folder-dialog-head-row > .ui-icon-btn { margin-block-start: -6px; }
 .folder-dialog-title { font-size: var(--font-window-title); font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; }
 .folder-dialog-subtitle { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); margin-top: 3px; }
-/* Stepped picker (project setup step 2): the same eyebrow → title → hint
-   stack step 1 uses, on the same content column. */
+/* Stepped picker (project setup step 2): the same head stack step 1 renders —
+   flow label with the one close control on an icon-height line, then the
+   title and hint — so the title column never moves between steps. */
 .folder-dialog-step {
+  min-width: 0;
   color: var(--accent);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
   font-weight: 650;
   letter-spacing: .01em;
 }
-.folder-dialog-head-stepped { gap: 2px; }
 .folder-dialog-step-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: space-between;
+  gap: var(--space-3);
   min-width: 0;
-  /* The row is the Back control's height; the label sits on its centre line. */
   min-height: var(--control-h-sm);
 }
-.folder-dialog-step-row > .folder-back { margin-inline-start: calc(var(--space-2) * -1); }
-.folder-dialog-head-stepped .folder-dialog-head-row { margin-block-start: 2px; }
-@media (min-width: 701px) {
-  .folder-dialog-body-stepped :is(.folder-dialog-head, .folder-toolbar, .folder-foot) { padding-inline: var(--space-5); }
-  .folder-dialog-body-stepped .folder-dialog-head { padding-block-start: var(--space-5); }
-  .folder-dialog-body-stepped :is(.folder-list, .folder-error) { margin-inline: var(--space-5); }
+.folder-dialog-head-stepped .folder-dialog-title {
+  margin: 6px 0 0;
+  font-size: var(--font-heading);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  font-weight: 700;
 }
-.folder-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 18px 10px; }
+.folder-dialog-head-stepped .folder-dialog-subtitle {
+  max-width: 62ch;
+  margin: 4px 0 0;
+}
+@media (max-width: 700px) {
+  .folder-dialog-head-stepped {
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid color-mix(in srgb, var(--material-glass-border) 72%, transparent);
+  }
+  /* The same head frame as desktop: step 2 holds step 1's height so the list
+     starts at the same place whichever way the person moves through the flow. */
+  .project-setup-head,
+  .folder-dialog-head-stepped { min-height: 140px; }
+}
+@media (min-width: 701px) {
+  .folder-dialog-head-stepped { padding: var(--space-5) var(--space-5) var(--space-4); border-bottom: 1px solid var(--hair); }
+  .folder-dialog-body-stepped :is(.folder-dialog-head, .folder-toolbar, .folder-foot) { padding-inline: var(--space-5); }
+  /* One head frame: step 1's two-line hint sets the height, and step 2 holds
+     the same frame so the body never moves when the flow advances. */
+  .project-setup-head,
+  .folder-dialog-head-stepped { min-height: 140px; }
+  .folder-dialog-body-stepped :is(.folder-list, .folder-error) { margin-inline: var(--space-5); }
+  .folder-dialog-body-stepped .folder-list { height: auto; flex: 1 1 auto; min-height: 0; }
+  /* One dialog box for the whole flow: advancing a step must not resize it. */
+  .project-setup-flow-step,
+  .folder-dialog-stepped { height: min(608px, calc(100dvh - 96px)); }
+}
+.folder-toolbar { display: flex; flex: none; align-items: center; gap: 8px; padding: 6px 18px 10px; }
 .folder-toolbar .ui-icon-btn { flex-shrink: 0; }
 .folder-location { gap: 4px; padding-bottom: 4px; }
 .folder-location > .folder-path { margin-inline-start: 4px; }
@@ -5651,7 +5676,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .folder-crumb:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .folder-crumbs-edit { flex: 1 1 auto; align-self: stretch; min-width: 20px; padding: 0; border: 0; background: none; cursor: text; }
-.folder-location .folder-options { margin-inline-start: 2px; position: relative; }
+.folder-location .folder-options { margin-inline-start: 4px; position: relative; }
 /* A non-default view (hidden folders shown) marks the ⋯ trigger. */
 .folder-options[data-active]::before {
   position: absolute; top: 5px; inset-inline-end: 5px; width: 6px; height: 6px;
@@ -5682,11 +5707,24 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-error { margin: 0 18px; }
 /* One bottom bar: ways to add on the start side, primary on the end side. */
 .folder-foot {
-  display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: var(--space-2) var(--space-3);
+  display: flex; flex: none; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: var(--space-2) var(--space-3);
   margin-top: 2px; padding: 12px 18px 16px;
   border-top: 1px solid var(--hair);
 }
 .folder-foot .ghost-link { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+/* Secondary row of the bottom bar: the flow's Back, then the ways to add. */
+.folder-foot-secondary {
+  display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center;
+  gap: var(--space-2) var(--space-3); min-width: 0;
+}
+.folder-foot .folder-back { flex: none; }
+/* An armed source owns the remaining height and scrolls its own fields. */
+.folder-dialog-body[data-source-armed] .folder-foot {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .folder-open-btn { flex: none; max-width: min(46%, 300px); margin-inline-start: auto; }
 .folder-open-btn .ui-btn-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -13255,8 +13293,30 @@ width: 100%; min-height: var(--tap);
   .folder-newname { width: 100%; }
   .folder-newname input { min-width: 0; flex: 1; }
   .folder-foot :is(button, .ghost-link) { min-height: var(--tap); }
-  /* Phones stack the ways to add over a full-width primary action. */
-  .folder-foot > .folder-source-row { flex-basis: 100%; }
+  /* Phones stack [Back + ways to add] over a full-width primary action. */
+  .folder-foot-secondary { flex: 1 1 100%; }
+  /* Inside the project flow the phone bar is one row — Back, the ways to add
+     and the primary action — so step 2 keeps step 1's footer height. */
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-foot { flex-wrap: nowrap; }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-foot-secondary {
+    flex: 0 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+  }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-back {
+    width: var(--tap);
+    min-width: var(--tap);
+    padding: 0;
+    justify-content: center;
+  }
+  .folder-dialog-body-stepped .folder-back-label { display: none; }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-new-folder { flex: none; }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-open-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    margin-inline-start: 0;
+  }
   .folder-open-btn { flex: 1 1 100%; max-width: none; margin-left: auto; }
   .folder-source-row :is(button, .ghost-link) { min-height: var(--tap); }
   /* Ways to add are one swipeable row of soft pills above the primary
@@ -13270,7 +13330,9 @@ width: 100%; min-height: var(--tap);
   .folder-dialog-body:not([data-source-armed]) .folder-source-row::-webkit-scrollbar { display: none; }
   .folder-source-row > .folder-source-chip {
     flex: none;
-    border-radius: var(--radius-round);
+    /* The footer's other buttons use the control corner; a lone pill here
+       made New folder look like a different control family. */
+    border-radius: var(--radius-control);
     background: var(--surface-overlay-hover);
   }
   .folder-source-panel { padding: var(--space-3) 0 0; }

@@ -22,6 +22,9 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
   // shape: the project starts as General and the flow is the folder picker.
   const [sharedInterface] = useState(isSharedProjectInterface);
   const [stage, setStage] = useState<"compose" | "picker" | "finalizing" | "error">(() => sharedInterface ? "picker" : "compose");
+  /** Coming back from the picker returns focus to Continue, where the person
+   *  left the step — not to the first direction card. */
+  const [returning, setReturning] = useState(false);
   const [composition, setComposition] = useState<ProjectComposition>(() => emptyProjectComposition());
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState("");
@@ -41,6 +44,7 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
   const continueToPicker = () => {
     setNextProjectComposition(composition);
     createdRef.current = false;
+    setReturning(false);
     setStage("picker");
   };
 
@@ -93,6 +97,7 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
    *  pending composition. */
   const backToCompose = () => {
     setNextProjectComposition(undefined);
+    setReturning(true);
     setStage("compose");
   };
 
@@ -143,28 +148,28 @@ export default function ProjectSetupFlowDialog({ onClose }: { onClose: () => voi
   }
 
   return (
-    // The top-end X is the only exit, never the opening focus: the first
-    // direction keeps the focus an unchanged step 1 gave it, so Enter does
-    // not dismiss the dialog on open.
-    <Dialog title={tr("projectcomposition.setupTitle")} onClose={cancel} size="lg" className="project-setup-flow-dialog" initialFocus=".project-direction-card">
+    // The top-end X is the only control in the head, never the opening focus:
+    // the first direction keeps the focus an unchanged step 1 gave it, so
+    // Enter does not dismiss the dialog on open.
+    <Dialog title={tr("projectcomposition.setupTitle")} onClose={cancel} size="lg" className="project-setup-flow-dialog project-setup-flow-step" initialFocus={returning ? ".project-setup-actions .ui-btn" : ".project-direction-card"}>
       {/* Both steps close from the same place: one X in the top-end corner.
           Step 1 keeps only Continue in its footer, so the way out never moves
           and the bottom bar never competes with the primary action. */}
-      <div className="project-setup-intro">
-        <span className="project-setup-step">{tr("projectcomposition.setupStep")}</span>
-        <div className="project-setup-heading">
-          <h2>{tr("projectcomposition.whatAreYouWorkingOn")}</h2>
+      <div className="project-setup-head">
+        <div className="project-setup-head-top">
+          <span className="project-setup-step">{tr("projectcomposition.setupStep")}</span>
           <IconButton icon={CloseIcon} label={tr("common.close")} onClick={cancel} />
         </div>
+        <h2 className="project-setup-title">{tr("projectcomposition.whatAreYouWorkingOn")}</h2>
         <p className="project-setup-hint">{tr("projectcomposition.setupHint")}</p>
       </div>
-      {/* One scroll region from the directions down to the actions: a short
-          window must not trap the expanded Workspace list in its own box. */}
+      {/* The directions scroll; the primary action is pinned below, exactly
+          where step 2 keeps its own. */}
       <div className="project-setup-scroll">
         <ProjectCompositionEditor value={composition} onChange={setComposition} purposeHeading={false} />
-        <div className="project-setup-actions">
-          <Button size="sm" variant="primary" iconEnd={ChevronRightIcon} onClick={continueToPicker}>{tr("common.continue")}</Button>
-        </div>
+      </div>
+      <div className="project-setup-actions">
+        <Button size="sm" variant="primary" iconEnd={ChevronRightIcon} onClick={continueToPicker}>{tr("common.continue")}</Button>
       </div>
     </Dialog>
   );

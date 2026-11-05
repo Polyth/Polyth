@@ -86,7 +86,8 @@
   align-items: center;
 }
 
-.project-direction-icon {
+.project-direction-icon,
+.project-composition-disclosure-icon {
   position: relative;
   z-index: 1;
   display: grid;
@@ -163,12 +164,15 @@
 /* Tool visibility accordion: the whole header row is the disclosure. */
 .project-composition-disclosure {
   appearance: none;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
   width: 100%;
   min-width: 0;
-  padding: var(--space-3) var(--space-4);
+  /* The same inset as a direction card: the icon tile and the text land on
+     the same two columns as every card above. */
+  padding: var(--space-3);
   border: 0;
   background: none;
   color: inherit;
@@ -184,6 +188,15 @@
 .project-composition-disclosure:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
+}
+
+/* Everything the disclosure opens keeps the card's inner inset; the title row
+   is the only full-bleed part (its hover paints the whole card). */
+.project-composition-review > :not(.project-composition-disclosure) {
+  margin-inline: var(--space-3);
+}
+.project-composition-review > .project-composition-error {
+  margin-block-end: var(--space-3);
 }
 
 .project-composition-disclosure-copy {
@@ -367,7 +380,8 @@
     gap: var(--space-3);
   }
 
-  .project-direction-icon {
+  .project-direction-icon,
+  .project-composition-disclosure-icon {
     width: var(--control-h-sm);
     height: var(--control-h-sm);
   }
@@ -397,9 +411,10 @@
     box-shadow: none !important;
   }
 
-  .project-composition-disclosure { padding-inline: 0; min-height: var(--tap); }
+  /* +1px for the card border step 1 keeps and this section replaces. */
+  .project-composition-disclosure { padding-inline: calc(var(--space-3) + 1px); min-height: var(--tap); }
 
-  .project-composition-review > :not(.project-composition-disclosure) { margin-inline: 0; }
+  .project-composition-review > :not(.project-composition-disclosure) { margin-inline: var(--space-3); }
 
   .project-composition-recommended {
     display: grid;

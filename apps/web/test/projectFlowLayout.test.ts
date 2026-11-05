@@ -86,14 +86,14 @@ async function fixture(): Promise<string> {
 interface Box { l: number; r: number; t: number; b: number; h: number; lh: number }
 
 const STEP1_SELECTORS = [
-  ".project-setup-flow-dialog", ".project-setup-step", ".project-setup-intro h2", ".project-setup-intro p",
-  ".project-setup-intro .ui-icon-btn", ".project-direction-card",
-  ".project-setup-actions", ".project-setup-actions .ui-btn",
+  ".project-setup-flow-dialog", ".project-setup-head", ".project-setup-step",
+  ".project-setup-head-top .ui-icon-btn", ".project-setup-title", ".project-setup-hint",
+  ".project-direction-card", ".project-setup-actions", ".project-setup-actions .ui-btn",
 ];
 const STEP2_SELECTORS = [
-  ".folder-dialog", ".folder-dialog-step", ".folder-back", ".folder-dialog-title", ".folder-dialog-subtitle",
-  ".folder-dialog-head-row > .ui-icon-btn:last-child", ".folder-list", ".folder-foot",
-  ".folder-open-btn",
+  ".folder-dialog", ".folder-dialog-head", ".folder-dialog-step",
+  ".folder-dialog-step-row .ui-icon-btn", ".folder-dialog-title", ".folder-dialog-subtitle",
+  ".folder-list", ".folder-foot", ".folder-back", ".folder-new-folder", ".folder-open-btn",
 ];
 
 /** Boxes for the requested selectors, plus every button label on screen. */
@@ -119,12 +119,16 @@ function readStage(selectors: string[]) {
   };
 }
 
-async function measure(phone: boolean) {
+async function measure(options: { phone?: boolean; height?: number; rtl?: boolean } = {}) {
   assert.ok(browser, "Chromium is available");
+  const { phone = false, height = 760, rtl = false } = options;
   const context = await browser.newContext(phone
-    ? { viewport: { width: 390, height: 760 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
-    : { viewport: { width: 1100, height: 760 }, deviceScaleFactor: 2 });
+    ? { viewport: { width: 390, height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
+    : { viewport: { width: 1100, height }, deviceScaleFactor: 2 });
   try {
+    if (rtl) await context.addInitScript(() => {
+      document.addEventListener("DOMContentLoaded", () => { document.documentElement.dir = "rtl"; });
+    });
     await context.route(`${ORIGIN}/**`, (route) => route.fulfill({ contentType: "text/html", body: html }));
     const page = await context.newPage();
     await page.goto(`${ORIGIN}/`);
@@ -155,61 +159,116 @@ const close = (a: number, b: number, message: string) =>
   assert.ok(Math.abs(a - b) <= 1, `${message} (${a.toFixed(1)} vs ${b.toFixed(1)})`);
 
 for (const phone of [false, true]) {
-  test(`${phone ? "phone" : "desktop"}: both steps share one content column, one X and one footer`, { skip: !CHROME }, async () => {
-    const { step1, step2, step1Buttons, step2Buttons, overflow } = await measure(phone);
-    const step1Panel = step1[".project-setup-flow-dialog"]!;
-    const step2Panel = step2[".folder-dialog"]!;
-    const step1X = step1[".project-setup-intro .ui-icon-btn"]!;
-    const step1Title = step1[".project-setup-intro h2"]!;
-    const step1Footer = step1[".project-setup-actions"]!;
-    const step1Primary = step1[".project-setup-actions .ui-btn"]!;
-    const step2X = step2[".folder-dialog-head-row > .ui-icon-btn:last-child"]!;
-    const step2Title = step2[".folder-dialog-title"]!;
-    const step2Footer = step2[".folder-foot"]!;
-    const step2Primary = step2[".folder-open-btn"]!;
+  test(`${phone ? "phone" : "desktop"}: both steps share one box, one head grid and one footer`, { skip: !CHROME }, async () => {
+    const { step1, step2, step1Buttons, step2Buttons, overflow } = await measure({ phone });
+    const panel1 = step1[".project-setup-flow-dialog"]!;
+    const panel2 = step2[".folder-dialog"]!;
+    const x1 = step1[".project-setup-head-top .ui-icon-btn"]!;
+    const x2 = step2[".folder-dialog-step-row .ui-icon-btn"]!;
+    const eyebrow1 = step1[".project-setup-step"]!;
+    const eyebrow2 = step2[".folder-dialog-step"]!;
+    const title1 = step1[".project-setup-title"]!;
+    const title2 = step2[".folder-dialog-title"]!;
+    const hint2 = step2[".folder-dialog-subtitle"]!;
+    const foot1 = step1[".project-setup-actions"]!;
+    const foot2 = step2[".folder-foot"]!;
+    const primary1 = step1[".project-setup-actions .ui-btn"]!;
+    const primary2 = step2[".folder-open-btn"]!;
 
     // Step 1 promises one exit and no bottom Cancel; step 2 adds only Back.
     assert.ok(!step1Buttons.some((label) => /^cancel$/i.test(label)), "step 1 has no Cancel button");
-    assert.equal(step1X ? 1 : 0, 1, "step 1 has exactly one close control");
     assert.ok(step2Buttons.some((label) => /^back$/i.test(label)), "step 2 offers Back");
 
-    // The text column, the cards/list and both primary actions sit on the same
-    // left and right edge in both steps.
-    close(step1Title.l, step2Title.l, "titles share the content column left edge");
-    close(step1[".project-direction-card"]!.l, step2[".folder-list"]!.l, "content starts on the same left edge");
-    close(step1[".project-direction-card"]!.r, step2[".folder-list"]!.r, "content ends on the same right edge");
-    close(step1Primary.r, step2Primary.r, "primary actions share the same end edge");
-
-    // One close affordance, in the same place, whatever the step. Vertical
-    // positions are measured from each panel's own top-left: the panels differ
-    // in height and therefore in where the backdrop centres them.
-    close(step1X.r, step2X.r, "the X keeps one right edge");
-    close(step1X.l, step2X.l, "the X keeps one left edge");
-    close(step1Title.t - step1Panel.t, step2Title.t - step2Panel.t, "the title keeps one offset from the panel top");
-    // Each X centres on its own title line, so a wrapped phone title does not
-    // drag the control into the middle of the block.
-    const centresOn = (x: Box, title: Box, at: string) =>
-      assert.ok(Math.abs(x.t + x.h / 2 - (title.t + title.lh / 2)) <= 2, `${at}: the X centres on the title line`);
-    centresOn(step1X, step1Title, "step 1");
-    centresOn(step2X, step2Title, "step 2");
-
-    // Footers are the same bar. On a phone the picker stacks its ways-to-add
-    // row above the primary action, so only the primary itself is comparable.
-    if (!phone) close(step1Footer.h, step2Footer.h, "both footers measure the same");
-    close(step1Primary.h, step2Primary.h, "both primary actions measure the same");
-    if (phone) {
-      assert.ok(step1Primary.h >= 44, "the phone primary action keeps a full touch target");
-      close(step1Primary.r - step1Primary.l, step2Primary.r - step2Primary.l, "the phone primary action spans the same width");
+    // The flow is one dialog box: the same panel, at the same place, on both
+    // steps, so advancing never resizes or re-centres the window.
+    close(step1[".project-setup-head"]!.b - step1[".project-setup-head"]!.t, step2[".folder-dialog-head"]!.b - step2[".folder-dialog-head"]!.t, "both head frames measure the same");
+    if (!phone) {
+      close(panel1.r - panel1.l, panel2.r - panel2.l, "both panels have one width");
+      close(panel1.h, panel2.h, "both panels have one height");
+      close(panel1.t, panel2.t, "both panels sit at one position");
     }
 
-    // Step 2 leads with Back on the flow label's line, never beside the title,
-    // so the title and the X never move between steps.
+    // One head: flow label, X, title and hint keep exact positions.
+    close(eyebrow1.l, eyebrow2.l, "flow labels share one left edge");
+    close(eyebrow1.t - panel1.t, eyebrow2.t - panel2.t, "flow labels sit at one height");
+    close(x1.r, x2.r, "the X keeps one right edge");
+    close(x1.l, x2.l, "the X keeps one left edge");
+    close(x1.t - panel1.t, x2.t - panel2.t, "the X keeps one height");
+    close(title1.l, title2.l, "titles share one left edge");
+    close(title1.t - panel1.t, title2.t - panel2.t, "titles sit at one height");
+    close(title1.lh, title2.lh, "titles share the same measure");
+    assert.ok(hint2.r - hint2.l <= 480, `the step-2 hint keeps a reading measure (${Math.round(hint2.r - hint2.l)}px)`);
+
+    // The content column and the primary action share edges across steps.
+    close(step1[".project-direction-card"]!.l, step2[".folder-list"]!.l, "content starts on the same left edge");
+    close(step1[".project-direction-card"]!.r, step2[".folder-list"]!.r, "content ends on the same right edge");
+    close(primary1.r, primary2.r, "primary actions share the same end edge");
+
+    // Both footers are pinned bars of one height, below the scrolling body.
     const back = step2[".folder-back"]!;
-    const eyebrow2 = step2[".folder-dialog-step"]!;
     assert.ok(back, "step 2 shows Back");
-    assert.ok(back.b <= step2Title.t + 1, `Back sits on the label line, above the title (${back.b.toFixed(1)} vs ${step2Title.t.toFixed(1)})`);
-    close((back.t + back.b) / 2, (eyebrow2.t + eyebrow2.b) / 2, "Back and the flow label share a centre line");
+    assert.ok(back.t >= step2[".folder-list"]!.b - 1, "Back sits below the scrolling list");
+    close(back.l, step2[".folder-list"]!.l, "Back starts at the content column");
+    close(foot1.h, foot2.h, "both footers measure the same");
+    assert.ok(back.t >= foot2.t - 0.5 && back.b <= foot2.b + 0.5, "Back lives inside the footer bar");
+    close(primary1.h, primary2.h, "both primary actions measure the same");
+    if (phone) {
+      assert.ok(primary1.h >= 44, "the phone primary action keeps a full touch target");
+      assert.ok(x1.h <= 32 && x2.h <= 32, "the head stays compact on a phone");
+    }
 
     assert.equal(overflow, false, "nothing overflows the viewport");
   });
 }
+
+test("short desktop window: the pinned footers stay inside both panels", { skip: !CHROME }, async () => {
+  const { step1, step2 } = await measure({ height: 520 });
+  for (const [name, boxes] of [["step 1", step1], ["step 2", step2]] as const) {
+    const panel = name === "step 1" ? boxes[".project-setup-flow-dialog"]! : boxes[".folder-dialog"]!;
+    const foot = name === "step 1" ? boxes[".project-setup-actions"]! : boxes[".folder-foot"]!;
+    assert.ok(foot.b <= panel.b + 0.5, `${name}: the footer stays inside the panel (${foot.b.toFixed(1)} <= ${panel.b.toFixed(1)})`);
+    assert.ok(foot.h >= 40, `${name}: the footer keeps its bar`);
+  }
+  close(
+    (step1[".project-setup-flow-dialog"]!.b - step1[".project-setup-flow-dialog"]!.t),
+    (step2[".folder-dialog"]!.b - step2[".folder-dialog"]!.t),
+    "both panels still share one height in a short window",
+  );
+});
+
+test("Back from the picker returns focus to Continue", { skip: !CHROME }, async () => {
+  assert.ok(browser, "Chromium is available");
+  const context = await browser.newContext({ viewport: { width: 1100, height: 760 } });
+  try {
+    await context.route(`${ORIGIN}/**`, (route) => route.fulfill({ contentType: "text/html", body: html }));
+    const page = await context.newPage();
+    await page.goto(`${ORIGIN}/`);
+    await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
+    await page.waitForSelector(".project-setup-flow-dialog");
+    await page.getByRole("button", { name: /continue/i }).click();
+    await page.waitForSelector(".folder-dialog .folder-list");
+    await page.locator(".folder-back").click();
+    await page.waitForSelector(".project-setup-flow-dialog");
+    const focused = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      return { tag: active?.tagName ?? null, text: active?.textContent?.trim() ?? null, inFoot: !!active?.closest(".project-setup-actions") };
+    });
+    assert.equal(focused.inFoot, true, `focus returns to the step-1 footer (${focused.tag} "${focused.text}")`);
+    assert.match(focused.text ?? "", /continue/i);
+  } finally {
+    await context.close();
+  }
+});
+
+test("RTL: the head mirrors without moving the content column", { skip: !CHROME }, async () => {
+  const { step1, step2, overflow } = await measure({ rtl: true });
+  const x1 = step1[".project-setup-head-top .ui-icon-btn"]!;
+  const x2 = step2[".folder-dialog-step-row .ui-icon-btn"]!;
+  const eyebrow1 = step1[".project-setup-step"]!;
+  const eyebrow2 = step2[".folder-dialog-step"]!;
+  // In RTL the end column is the left edge; the X keeps it on both steps.
+  close(x1.l, x2.l, "the X keeps one start edge in RTL");
+  close(eyebrow1.r, eyebrow2.r, "flow labels keep one edge in RTL");
+  close(step1[".project-direction-card"]!.l, step2[".folder-list"]!.l, "content keeps its column in RTL");
+  assert.equal(overflow, false, "RTL does not overflow");
+});

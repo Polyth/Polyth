@@ -1103,31 +1103,44 @@ own a rail launcher: a registered capability with `rail !== false`
 (`railLauncherPackageIds`). It ignores the active project's relevance.
 Background helpers, importers and settings-only integrations get no Show/Hide.
 An earlier override on a package that is no longer listed appears as a
-removable row. Below the step header, everything from General to the
-Continue row is one scroll region (`.project-setup-scroll`); the
-expanded Workspace list never scrolls on its own, so a short (half-screen)
-window stays usable. Continue opens step 2, `ProjectFolderDialog` with
-`onBack`. Back keeps the chosen directions. Settings reuse the same picker
-without `onBack`.
+removable row. Below the step header, the directions scroll on their own
+(`.project-setup-scroll`) with the Continue bar pinned under them; the
+expanded Workspace list never becomes its own scroll box, so a short
+(half-screen) window stays usable. Continue opens step 2,
+`ProjectFolderDialog` with `onBack`. Back keeps the chosen directions.
+Settings reuse the same picker without `onBack`.
 
-Both steps render one head grid and one footer bar, so nothing jumps when the
-flow advances (`apps/web/test/projectFlowLayout.test.ts` measures it):
+Both steps are one dialog box and one head grid
+(`apps/web/test/projectFlowLayout.test.ts` measures it in a browser):
 
-- **Head.** A flow eyebrow (`.project-setup-step` / `.folder-dialog-step`,
-  `projectcomposition.setupStep` and `setupStep2`), then the title line with
-  the one close control at the end column, then the hint. Both label rows are
-  one icon-control line tall, so the title and the X keep their exact offset
-  from the dialog's top edge on every step, and both titles, contents and
-  primary actions share one content column (24px gutters on desktop, 12px on
-  phones).
-- **Back.** Step 2 leads its eyebrow row with Back, never beside the title, so
-  the title and the X never shift. Back keeps the chosen directions.
-- **Footer.** Step 1 has no bottom Cancel: its footer carries only the compact
-  Continue (same height as the picker's primary action) and Back is the only
-  way to the previous step. Escape closes every step.
+- **One box.** On desktop both panels are `min(608px, calc(100dvh - 96px))`
+  tall, so advancing never resizes or re-centres the window. Phones keep the
+  full-screen sheet. Both heads also hold one frame (`min-height: 140px`:
+  step 1's two-line hint sets it, step 2 reserves it), so the body starts at
+  the same y either way.
+- **Head.** An icon-height line holds the flow label and the single X at the
+  end column, then the title (`18px/700`, the same on both steps), then the
+  hint (12px muted, `max-width: 62ch`). The label, the X, the title and the
+  hint keep the same position and the same content column on both steps, so
+  nothing moves when Continue is pressed.
+- **Back.** Step 2 leads its footer with Back, not its head; the head has
+  exactly one control. X leaves the flow from either step, Back returns to
+  the directions without losing the chosen ones.
+- **One content column.** 24px gutters on desktop, 12px on phones, shared by
+  the head, the cards/list, the toolbar and the footer. The Workspace
+  accordion carries a package icon so its text starts on the direction
+  cards' text column.
+- **Footer.** Pinned outside the scroll region on both steps, one height and
+  one primary action: step 1's compact Continue matches the picker's Open.
+  On phones the flow's picker footer is one row too — Back (icon-only, named
+  for assistive tech), New folder, then the flexible Open — so the bar keeps
+  step 1's height. Only the directions scroll; the expanded Workspace list
+  still never becomes its own scroll box.
 - **Focus.** The X is never the opening focus (`initialFocus` is the first
   `.project-direction-card`), so Enter on an open step 1 does not dismiss it.
-  On step 2 the folder list keeps that role.
+  Coming Back from the picker returns focus to Continue. On step 2 the folder
+  list keeps that role. Escape closes every step, except that it first
+  disarms an open alternative source (SSH, clone) instead of ending the flow.
 
 When the account uses one interface for every project (Settings → Projects →
 Interface across projects, `projectInterfaceScope.ts`), directions shape
@@ -1136,6 +1149,11 @@ nothing, so the flow opens `ProjectFolderDialog` directly: no step labels, no
 never reseeded (`seedInitialProjectWorkspace` is skipped).
 
 `ProjectFolderDialog` keeps its contract in its header comment. The main rules:
+
+- **Escape inside an alternative source.** A source panel that closes itself
+  on Escape marks its root `data-owns-escape` (the Git clone panel does); the
+  picker then leaves the key to it. Any other armed source is disarmed by the
+  picker first, so Escape never throws away the whole flow by accident.
 
 - **No keyboard on open.** Initial focus is the `.folder-list` listbox,
   never a text field. Typing a path is opt-in: click the empty end of the

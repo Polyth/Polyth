@@ -456,7 +456,7 @@ export default function ProjectFolderDialog({
       title={title}
       onClose={requestClose}
       size="lg"
-      className="folder-dialog"
+      className={`folder-dialog${stepLabel ? " folder-dialog-stepped" : ""}`}
       initialFocus=".folder-list"
       resolveRestoreFocus={resolveRestoreFocus}
     >
@@ -464,30 +464,43 @@ export default function ProjectFolderDialog({
         className={`folder-dialog-body${stepLabel ? " folder-dialog-body-stepped" : ""}`}
         data-source-armed={armedSource?.id}
         onKeyDown={onDialogKeyDown}
+        onKeyDownCapture={(e) => {
+          // An armed alternative source is a step inside this dialog: its
+          // Escape closes the source, never the whole flow. Menus and the
+          // typed-path field own their own Escape first.
+          if (!armedSource || e.key !== "Escape" || e.defaultPrevented) return;
+          const target = e.target instanceof Element ? e.target : null;
+          // A source panel that owns its Escape (data-owns-escape), a menu and
+          // the typed-path field all close themselves first.
+          if (target?.closest('[data-owns-escape], [role="menu"], .folder-path')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setArmedSource(null);
+        }}
       >
         <div className={`folder-dialog-head${stepLabel ? " folder-dialog-head-stepped" : ""}`}>
-          {/* A stepped flow keeps one stable column: the flow label on the
-              first line (with Back leading it on every step after the first),
-              then the title with the one close affordance. Back never moves
-              the title or the X between steps. */}
-          {stepLabel && (
-            <div className="folder-dialog-step-row">
-              {onBack && (
-                <IconButton icon={BackIcon} className="folder-back" label={tr("common.back")} disabled={busy} onClick={onBack} />
-              )}
-              <span className="folder-dialog-step">{stepLabel}</span>
+          {/* A stepped flow renders the same head stack as step 1: the flow
+              label with the single close control on an icon-height line, then
+              the title and its hint. Back is a footer action, so the title
+              column and the X never move between steps. */}
+          {stepLabel ? (
+            <>
+              <div className="folder-dialog-step-row">
+                <span className="folder-dialog-step">{stepLabel}</span>
+                <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
+              </div>
+              <h2 className="folder-dialog-title">{title}</h2>
+              <div className="folder-dialog-subtitle">{subtitle}</div>
+            </>
+          ) : (
+            <div className="folder-dialog-head-row">
+              <div className="folder-dialog-heading">
+                <div className="folder-dialog-title">{title}</div>
+                <div className="folder-dialog-subtitle">{subtitle}</div>
+              </div>
+              <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
             </div>
           )}
-          <div className="folder-dialog-head-row">
-            {!stepLabel && onBack && (
-              <IconButton icon={BackIcon} variant="quiet" className="folder-back" label={tr("common.back")} disabled={busy} onClick={onBack} />
-            )}
-            <div className="folder-dialog-heading">
-              <div className="folder-dialog-title">{title}</div>
-              <div className="folder-dialog-subtitle">{subtitle}</div>
-            </div>
-            <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
-          </div>
         </div>
 
         {/* A `solo` alternative source (e.g. SSH) drives its own browser, so
@@ -629,66 +642,83 @@ export default function ProjectFolderDialog({
             action on the end side. A source reveals its fields inline below
             the chips and owns the primary action while open. */}
         <div className="folder-foot">
-          <div className="folder-source-row">
-            {creating ? (
-              <span className="folder-newname">
-                <TextInput
-                  autoFocus
-                  uiSize="sm"
-                  value={newName}
-                  placeholder={tr("projectfolderdialog.newFolderName2")}
-                  aria-label={tr("projectfolderdialog.newFolderName")}
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  disabled={busy}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (isImeComposing(e)) return;
-                    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void createFolder();
-                  }}
-                  // Escape cancels only this sub-operation, not the dialog
-                  // (claimed while capturing, as for the path field).
-                  onKeyDownCapture={(e) => {
-                    if (isImeComposing(e)) return;
-                    if (e.key !== "Escape") return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCreating(false);
-                  }}
-                />
-                <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>
-                  {tr("common.create")}
-                </Button>
-              </span>
-            ) : (
+          {/* Secondary actions on the start side: the way back to the previous
+              flow step, then the ways to add a folder or another source. */}
+          <div className="folder-foot-secondary">
+            {onBack && (
               <Button
                 size="sm"
-                className="ghost-link folder-source-chip folder-new-folder"
-                iconStart={AddIcon}
+                variant="ghost"
+                className="folder-back"
+                iconStart={BackIcon}
+                aria-label={tr("common.back")}
                 disabled={busy}
-                onClick={() => { setArmedSource(null); setCreating(true); }}
+                onClick={onBack}
               >
-                {tr("projectfolderdialog.newFolder")}
+                <span className="folder-back-label">{tr("common.back")}</span>
               </Button>
             )}
-            {!onChoose && <SlotHost
-              slot="project.create.options"
-              context={{
-                busy,
-                browsedPath: selected ?? path,
-                armedId: armedSource?.id ?? null,
-                arm: (id: string, opts?: { soloBrowser?: boolean }) => {
-                  setCreating(false);
-                  setError("");
-                  setArmedSource({ id, solo: opts?.soloBrowser === true });
-                },
-                // Guarded: a source releasing on unmount/collapse must not
-                // clear a *different* source that armed itself in between.
-                disarm: (id: string) => setArmedSource((cur) => (cur && cur.id === id ? null : cur)),
-                onProjectOpened: completeExternally,
-                onConfigure,
-              }}
-            />}
+            <div className="folder-source-row">
+              {creating ? (
+                <span className="folder-newname">
+                  <TextInput
+                    autoFocus
+                    uiSize="sm"
+                    value={newName}
+                    placeholder={tr("projectfolderdialog.newFolderName2")}
+                    aria-label={tr("projectfolderdialog.newFolderName")}
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    disabled={busy}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (isImeComposing(e)) return;
+                      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void createFolder();
+                    }}
+                    // Escape cancels only this sub-operation, not the dialog
+                    // (claimed while capturing, as for the path field).
+                    onKeyDownCapture={(e) => {
+                      if (isImeComposing(e)) return;
+                      if (e.key !== "Escape") return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCreating(false);
+                    }}
+                  />
+                  <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>
+                    {tr("common.create")}
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  className="ghost-link folder-source-chip folder-new-folder"
+                  iconStart={AddIcon}
+                  disabled={busy}
+                  onClick={() => { setArmedSource(null); setCreating(true); }}
+                >
+                  {tr("projectfolderdialog.newFolder")}
+                </Button>
+              )}
+              {!onChoose && <SlotHost
+                slot="project.create.options"
+                context={{
+                  busy,
+                  browsedPath: selected ?? path,
+                  armedId: armedSource?.id ?? null,
+                  arm: (id: string, opts?: { soloBrowser?: boolean }) => {
+                    setCreating(false);
+                    setError("");
+                    setArmedSource({ id, solo: opts?.soloBrowser === true });
+                  },
+                  // Guarded: a source releasing on unmount/collapse must not
+                  // clear a *different* source that armed itself in between.
+                  disarm: (id: string) => setArmedSource((cur) => (cur && cur.id === id ? null : cur)),
+                  onProjectOpened: completeExternally,
+                  onConfigure,
+                }}
+              />}
+            </div>
           </div>
 
           {/* The local primary action steps aside while an alternative source

@@ -36,48 +36,39 @@
   z-index: 1;
 }
 
-/* Step head: flow eyebrow, then the title row (title + the one close
-   affordance), then the hint across the content column. Both steps render
-   this exact stack, so the title, the X and the text column never move when
-   the flow advances. */
-.project-setup-intro {
+/* Step head: the flow label and the one close control share an icon-height
+   line, then the title and hint. Step 2 renders the same stack, so the title
+   column and the X never move when the flow advances. */
+.project-setup-head {
   display: grid;
   flex: none;
-  gap: var(--space-1);
   min-width: 0;
   margin: 0;
   padding: var(--space-5) var(--space-5) var(--space-4);
   border-bottom: 1px solid var(--hair);
 }
 
-.project-setup-heading {
+.project-setup-head-top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-width: 0;
+  min-height: var(--control-h-sm);
 }
 
-.project-setup-heading > .ui-icon-btn {
-  flex: none;
-  /* Optically centred on the first title line instead of hanging above it. */
-  margin-block-start: -6px;
-}
-
-.project-setup-intro h2 {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
+.project-setup-title {
+  margin: 6px 0 0;
   color: var(--text);
   font-size: var(--font-heading);
-  line-height: 1.2;
-  letter-spacing: -0.025em;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
-.project-setup-intro p {
+.project-setup-hint {
   max-width: 62ch;
-  margin: 0;
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
@@ -85,13 +76,7 @@
 }
 
 .project-setup-step {
-  display: flex;
-  align-items: center;
-  /* One icon-control line, like step 2's Back row: the title and the X keep
-     their exact position when the flow advances. */
-  min-height: var(--control-h-sm);
-  width: max-content;
-  max-width: 100%;
+  min-width: 0;
   color: var(--accent);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
@@ -113,7 +98,9 @@
 
 .project-setup-scroll > .project-composition-editor {
   flex: none;
-  padding: var(--space-4) var(--space-5) var(--space-5);
+  /* 16px foot clearance, not 24: the scroll box is exactly the head-to-foot
+     span of the fixed dialog, and one extra 8px row would flash a scrollbar. */
+  padding: var(--space-4) var(--space-5) var(--space-4);
 }
 
 .project-setup-scroll > .project-setup-actions { margin-top: auto; }
@@ -241,8 +228,7 @@ body[data-desktop-low-resource="true"] :is(
         transparent 78%);
   }
 
-  .project-setup-intro {
-    gap: var(--space-1);
+  .project-setup-head {
     padding:
       max(var(--space-3), var(--safe-top))
       max(var(--space-3), var(--safe-right))
@@ -251,16 +237,7 @@ body[data-desktop-low-resource="true"] :is(
     border-bottom-color: color-mix(in srgb, var(--material-glass-border) 72%, transparent);
   }
 
-  .project-setup-heading > .ui-icon-btn {
-    margin-block-start: -4px;
-  }
-
-  .project-setup-intro h2 {
-    max-width: 18ch;
-    font-size: var(--font-heading);
-  }
-
-  .project-setup-intro p {
+  .project-setup-hint {
     max-width: 46ch;
   }
 
