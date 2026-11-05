@@ -356,6 +356,9 @@ function DesktopSettingsPage() {
     message: tr("desktop.settings.readyToCheck"),
   });
   const [error, setError] = useState("");
+  // On another server's page this computer's own choices stay out of reach
+  // (apps/desktop/src/windowSurface.ts): they are in the tray menu instead.
+  const remote = api.surface === "remote";
 
   useEffect(() => {
     void Promise.all([api.getSettings(), api.getInfo()]).then(([next, desktopInfo]) => {
@@ -410,6 +413,18 @@ function DesktopSettingsPage() {
         </div>
         <span className="tag">{info?.platform ?? tr("desktop.settings.platformFallback")} {info?.arch ?? ""}</span>
       </div>
+      {api.servers && (
+        <Row
+          label={tr("desktop.settings.server")}
+          hint={remote ? tr("desktop.settings.serverRemoteHint") : tr("desktop.settings.serverLocalHint")}
+          itemId="desktop.server"
+        >
+          <div className="desktop-update-action">
+            <span className="tag" dir="auto">{info?.server?.kind === "local" || !info?.server ? tr("desktop.servers.thisComputer") : info.server.label}</span>
+            <Button size="sm" onClick={() => void api.servers?.list()}>{tr("desktop.settings.serverManage")}</Button>
+          </div>
+        </Row>
+      )}
       <Row
         label={tr("desktop.settings.closeToTray")}
         hint={tr("desktop.settings.closeToTrayHint")}
@@ -475,14 +490,23 @@ function DesktopSettingsPage() {
           />
         </Row>
       )}
-      <Row
-        label={tr("desktop.settings.automaticUpdates")}
-        hint={tr("desktop.settings.automaticUpdatesHint")}
-        itemId="desktop.automaticUpdates"
-      >
-        <Toggle on={settings.automaticUpdates} onChange={(value) => save("automaticUpdates", value)} label={tr("desktop.settings.automaticUpdates")} />
-      </Row>
-      {info?.macLegacyUpdates ? (
+      {remote ? (
+        <ReadonlyRow
+          label={tr("desktop.settings.automaticUpdates")}
+          hint={tr("desktop.settings.remoteTrayHint")}
+          value={settings.automaticUpdates ? tr("desktop.settings.valueOn") : tr("desktop.settings.valueOff")}
+          itemId="desktop.automaticUpdates"
+        />
+      ) : (
+        <Row
+          label={tr("desktop.settings.automaticUpdates")}
+          hint={tr("desktop.settings.automaticUpdatesHint")}
+          itemId="desktop.automaticUpdates"
+        >
+          <Toggle on={settings.automaticUpdates} onChange={(value) => save("automaticUpdates", value)} label={tr("desktop.settings.automaticUpdates")} />
+        </Row>
+      )}
+      {remote ? null : info?.macLegacyUpdates ? (
         <ReadonlyRow
           label={tr("desktop.settings.updateChannel")}
           hint={tr("desktop.settings.updateChannelLegacyHint")}
@@ -543,18 +567,22 @@ function DesktopSettingsPage() {
           </Button>
         </div>
       </Row>
-      <Row label={tr("desktop.settings.polythData")} hint={info?.dataDir ?? tr("desktop.settings.loadingPaths")} itemId="desktop.data">
-        <Button size="sm" onClick={() => void api.openDataFolder()}>{tr("desktop.settings.openFolder")}</Button>
-      </Row>
-      <Row label={tr("desktop.settings.desktopLog")} hint={info?.logPath ?? tr("desktop.settings.loadingLogPath")}>
-        <Button
-          size="sm"
-          disabled={!info}
-          onClick={() => { if (info) void api.revealPath(info.logPath); }}
-        >
-          {tr("desktop.settings.revealLog")}
-        </Button>
-      </Row>
+      {!remote && (
+        <>
+          <Row label={tr("desktop.settings.polythData")} hint={info?.dataDir ?? tr("desktop.settings.loadingPaths")} itemId="desktop.data">
+            <Button size="sm" onClick={() => void api.openDataFolder()}>{tr("desktop.settings.openFolder")}</Button>
+          </Row>
+          <Row label={tr("desktop.settings.desktopLog")} hint={info?.logPath ?? tr("desktop.settings.loadingLogPath")}>
+            <Button
+              size="sm"
+              disabled={!info}
+              onClick={() => { if (info) void api.revealPath(info.logPath); }}
+            >
+              {tr("desktop.settings.revealLog")}
+            </Button>
+          </Row>
+        </>
+      )}
       <Row label={tr("desktop.settings.versions")}>
         <span className="mono">Polyth {info?.appVersion ?? "…"} · OpenCode {info?.opencodeVersion ?? "…"}</span>
       </Row>
@@ -631,6 +659,7 @@ export function installDesktopIntegration(): () => void {
       icon: "▣",
       pageId: "desktop",
       settingsItems: [
+        ...(api.servers ? [{ id: "desktop.server", pageId: "desktop", label: tr("desktop.settings.server"), keywords: ["servers", "client", "connect", "remote", "polyth link", "switch"], focusTarget: "desktop.server" }] : []),
         { id: "desktop.closeToTray", pageId: "desktop", label: tr("desktop.settings.closeToTray"), keywords: ["background", "system tray"], focusTarget: "desktop.closeToTray" },
         { id: "desktop.controlsPosition", pageId: "desktop", label: tr("desktop.settings.windowButtonPosition"), keywords: ["titlebar", "left", "right"], focusTarget: "desktop.controlsPosition" },
         { id: "desktop.controlsTheme", pageId: "desktop", label: tr("desktop.settings.windowButtonTheme"), keywords: ["titlebar", "light", "dark", "auto"], focusTarget: "desktop.controlsTheme" },

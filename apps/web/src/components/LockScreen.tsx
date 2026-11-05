@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { reloadBehindVeil } from "../launchVeil.ts";
 import { currentBrowserLogin, loginAccount, recoverAccount, type AccountLoginResult } from "../accounts.ts";
 import { fetchAuthStatus } from "../authClient.ts";
-import { desktopBridge } from "../desktopBridge.ts";
+import { localDesktopBridge } from "../desktopBridge.ts";
+import { DesktopServerExit } from "./DesktopServerSwitcher.tsx";
 import { browserSupportsPasskeys, signInWithPasskey } from "../passkeys.ts";
 import {
   beginProviderFlow,
@@ -30,7 +31,7 @@ const providerLabel = (provider: LoginProvider): string => {
  *  installation. Polyth Desktop re-opens its own session; a browser is told
  *  where Polyth opens and how to add a password. */
 function LocalOwnerLock() {
-  const renew = desktopBridge()?.renewOwnerSession;
+  const renew = localDesktopBridge()?.renewOwnerSession;
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const reopen = async (): Promise<void> => {
@@ -62,6 +63,7 @@ function LocalOwnerLock() {
             </Button>
           </div>
         )}
+        <DesktopServerExit />
       </div>
     </div>
   );
@@ -327,6 +329,7 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
         <Button variant="ghost" size="sm" className="lock-recovery" type="button" disabled={busy} onClick={switchMode}>
           {mode === "password" ? tr("lockscreen.useRecoveryCode") : tr("lockscreen.usePassword")}
         </Button>
+        <DesktopServerExit />
       </form>
     </div>
   );

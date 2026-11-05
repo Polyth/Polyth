@@ -94,14 +94,15 @@ test("Link page pairs with Full access by default and edits permissions on deman
   // The host card carries the server facts that used to live in Access.
   const facts = host.querySelector(".pkg-tunnel-hero")?.textContent ?? "";
   assert.match(facts, /127\.0\.0\.1:4400/);
-  assert.match(facts, /Required on every browser and phone/);
+  assert.match(facts, /Required on every browser and device/);
 
-  await act(async () => { button("Pair phone")!.click(); });
+  await act(async () => { button("Pair device")!.click(); });
   await flush();
   const pairingPost = requests.find((entry) => entry.path === "/api/tunnel/pairing" && entry.method === "POST");
   assert.deepEqual(pairingPost?.body, {}, "no profile → server default Full access");
   assert.equal(document.querySelector(".pkg-tunnel-qr svg") !== null, true);
   assert.doesNotMatch(document.body.textContent ?? "", /SECRET-PAYLOAD/);
+  assert.equal(button("Copy pairing link") !== undefined, true, "a computer takes the same invitation as a link");
   await act(async () => { button("Cancel")!.click(); });
   await flush();
 
@@ -142,7 +143,7 @@ test("the owner names this server for phones on the Link page", async () => {
   let field = host.querySelector("input[name='server-name']") as HTMLInputElement;
   assert.equal(field.placeholder, "studio", "until it is named, phones see the host name");
   assert.equal(field.value, "");
-  assert.equal(host.querySelector(`label[for="${field.id}"]`)?.textContent, "Name on phones");
+  assert.equal(host.querySelector(`label[for="${field.id}"]`)?.textContent, "Name on other devices");
 
   await type(field, "Home studio");
   assert.equal(requests.some((entry) => entry.method === "PUT"), false, "typing alone saves nothing");
@@ -163,6 +164,6 @@ test("the owner names this server for phones on the Link page", async () => {
   await flush();
   field = host.querySelector("input[name='server-name']") as HTMLInputElement;
   assert.equal(field === null, true, "only the owner can change it");
-  assert.match(host.querySelector(".pkg-tunnel-hero")?.textContent ?? "", /Name on phonesHome studio/);
+  assert.match(host.querySelector(".pkg-tunnel-hero")?.textContent ?? "", /Name on other devicesHome studio/);
   await act(async () => { member.unmount(); });
 });

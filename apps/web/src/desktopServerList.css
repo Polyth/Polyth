@@ -1,0 +1,102 @@
+/* The desktop app's server list (components/DesktopServerList.tsx). It stands on
+   the first-run card: same well, same row rhythm, same type. */
+.desktop-server-exit { align-self: center; margin-top: var(--space-2); }
+.desktop-servers-list { margin: var(--space-4) 0 0; padding: 0; list-style: none; }
+.desktop-servers-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.desktop-servers-row + .desktop-servers-row { box-shadow: inset 0 1px 0 var(--hair); }
+.desktop-servers-open {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: max(56px, var(--hit-min));
+  padding: var(--space-3);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: inherit;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+.desktop-servers-row:not(:has(.desktop-servers-more)) .desktop-servers-open { grid-column: 1 / -1; }
+.desktop-servers-open:disabled { cursor: default; }
+@media (hover: hover) {
+  /* The whole row, so the wash reaches past the "more" button at its end. */
+  .desktop-servers-row:not(:has(> .desktop-servers-open:disabled)):hover { background: var(--surface-overlay-hover); }
+  /* Themes paint plain buttons on hover; here the row carries the wash. */
+  button.desktop-servers-open:hover:where(:not(:disabled)) { background: transparent; }
+}
+.desktop-servers-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.desktop-servers-open[aria-current] .setup-usage-icon { color: var(--accent-text); background: var(--accent-wash); }
+.desktop-servers-open:disabled:not([aria-current]) .setup-usage-title { color: var(--muted); }
+.desktop-servers-trail { display: grid; place-items: center; width: 20px; color: var(--faint); }
+.desktop-servers-open[aria-current] .desktop-servers-trail { color: var(--accent-text); }
+.desktop-servers-more { margin-inline-end: var(--space-2); }
+.setup-usage-detail[data-tone="danger"] { color: var(--red); }
+
+.desktop-servers-rename form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.desktop-servers-rename { grid-template-columns: minmax(0, 1fr); }
+
+.desktop-servers-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.desktop-servers-confirm > div { display: flex; gap: var(--space-2); }
+
+.desktop-servers-add { display: grid; gap: var(--space-2); margin-top: var(--space-5); }
+.desktop-servers-add > label { color: var(--text); font-size: var(--font-label); font-weight: 500; }
+.desktop-servers-add > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
+.desktop-servers-add > p { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+/* First-run fields stay visible on the glass card when borders are hidden. */
+.desktop-servers-add input,
+.desktop-servers-rename input { background: var(--lock-well); box-shadow: var(--borderless-edge, none); }
+
+.desktop-servers-keep {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  box-shadow: inset 0 1px 0 var(--hair);
+  cursor: pointer;
+}
+
+.desktop-servers-words {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  list-style: none;
+  background: var(--lock-well);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+}
+.desktop-servers-words li {
+  color: var(--text);
+  font-size: var(--font-body);
+  font-weight: 550;
+  line-height: 1.5;
+  text-align: center;
+}

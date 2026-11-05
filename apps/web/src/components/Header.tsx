@@ -20,8 +20,11 @@ import {
   useWorkspaceMode,
 } from "../widgets/workspaceMode.ts";
 import {
-  CompassIcon, EditIcon, IconButton, InfoIcon, LinkIcon, Menu, MenuIcon, SessionIcon, SettingsIcon,
+  CompassIcon, EditIcon, IconButton, InfoIcon, LinkIcon, Menu, MenuIcon, ServerIcon, SessionIcon, SettingsIcon,
 } from "./ui/index.ts";
+import { onRemoteDesktopSurface } from "../desktopBridge.ts";
+import { canSwitchDesktopServer, switchDesktopServer } from "../nativeConnections.ts";
+import DesktopServerSwitcher from "./DesktopServerSwitcher.tsx";
 import { OWN_ACCOUNT_TARGET } from "./settings/usersModel.ts";
 import { openShellIntro } from "../shellIntro.ts";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
@@ -450,6 +453,9 @@ export function UserMenu({ account, editing, className = "" }: {
           "separator",
           { id: "account", label: tr("header.yourAccount"), icon: SessionIcon, onSelect: () => openSettingsPage("users", { itemId: OWN_ACCOUNT_TARGET }) },
           { id: "polyth-link", label: tr("header.polythLink"), icon: LinkIcon, onSelect: () => openSettingsPage("tunnel") },
+          ...(canSwitchDesktopServer()
+            ? [{ id: "switch-server", label: tr("sidebar.switchServer"), icon: ServerIcon, onSelect: () => switchDesktopServer() }]
+            : []),
           { id: "about", label: tr("header.aboutPolyth"), icon: InfoIcon, onSelect: () => openSettingsPage("about") },
           { id: "interface-tour", label: tr("shellintro.menuEntry"), icon: CompassIcon, onSelect: () => openShellIntro() },
           "separator",
@@ -509,7 +515,8 @@ export default function Header() {
   useEffect(() => { if (bareLayout) void loadSpaces(); }, [bareLayout]);
   const multiSpace = spaces.status === "ready" && spaces.spaces.length > 1;
   const showTitle = session !== null && shell.title;
-  const bareBar = shell.layout === "bare" && (showTitle || multiSpace);
+  // Another computer's Polyth always says so, even with nothing else in the bar.
+  const bareBar = shell.layout === "bare" && (showTitle || multiSpace || onRemoteDesktopSurface());
   const island = shell.layout === "columns" && shell.barStyle === "island";
   useShellBarFrame(occupancy.headerRef, fullHeight && (shell.layout !== "bare" || bareBar));
   const sessionStatusContribution = session ? (
@@ -534,11 +541,13 @@ export default function Header() {
           brand and view switch would only crowd the title there. */}
       {shell.layout === "bare" && (
         <div ref={occupancy.leadingRef} className="header-left-cluster">
+          <DesktopServerSwitcher />
           <SpaceSwitcher />
         </div>
       )}
       {shell.layout !== "bare" && !(compact && chatSurface) && <div ref={occupancy.leadingRef} className="header-left-cluster">
         {shell.layout === "classic" && <ShellBrand />}
+        <DesktopServerSwitcher />
         {/* Quiet by design: it renders only when more than one Space
             exists, and reads as a caption beside the brand. */}
         <SpaceSwitcher />

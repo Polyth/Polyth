@@ -38,7 +38,9 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpStream, UnixListener};
+use tokio::net::TcpStream;
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::sync::{broadcast, watch, Mutex, Notify};
 use tokio::time::Duration;
 use zeroize::Zeroize;
@@ -159,6 +161,7 @@ struct RpcRequest {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(not(unix), allow(dead_code))]
 struct RpcResponse {
     id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +178,7 @@ struct ClientState {
     sessions: HashMap<String, LiveSession>,
     revoked_hosts: HashSet<String>,
     next_generation: u64,
+    #[cfg_attr(not(unix), allow(dead_code))]
     events: broadcast::Sender<Value>,
 }
 
@@ -183,6 +187,7 @@ async fn main() {
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_else(|| "serve".into());
     match cmd.as_str() {
+        #[cfg(unix)]
         "serve" => {
             let data_dir = args.next().unwrap_or_else(|| ".".into());
             let socket = args
@@ -195,6 +200,13 @@ async fn main() {
                 eprintln!("polyth-link-client: {error}");
                 std::process::exit(1);
             }
+        }
+        // The desktop app's transport on every platform: one owner, no socket
+        // on disk, and the owner's death closes stdin, which ends this process.
+        "stdio" => {
+            let data_dir = args.next().unwrap_or_else(|| ".".into());
+            let web_dist = std::env::var("POLYTH_WEB_DIST").ok().map(PathBuf::from);
+            run_stdio(PathBuf::from(data_dir), web_dist).await;
         }
         other => {
             eprintln!("unknown command {other}");
@@ -217,6 +229,7 @@ fn new_state(data_dir: PathBuf, web_dist: Option<PathBuf>) -> ClientState {
     }
 }
 
+#[cfg(unix)]
 async fn serve(
     data_dir: PathBuf,
     socket: PathBuf,
@@ -266,6 +279,7 @@ async fn serve(
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 async fn handle_line(state: Arc<Mutex<ClientState>>, line: &str) -> String {
     let request: RpcRequest = match serde_json::from_str(line) {
         Ok(request) => request,
@@ -649,6 +663,7 @@ async fn confirm_pairing(
                     web_dist,
                     data_dir.clone(),
                     connection_id.clone(),
+                    preferred_port(&params),
                 )
                     .await
                     .map_err(|_| LinkError::ProxyBootstrapInvalid.code())?;
@@ -854,7 +869,13 @@ async fn connect_existing(
     )
     .await
     .map_err(|error| error.code())?;
-    let response = read_control(&mut recv).await.map_err(|error| error.code())?;
+    let response = read_control(&mut recv).await.map_err(|error| {
+        if closed_as_revoked(&connection) {
+            LinkError::DeviceRevoked.code()
+        } else {
+            error.code()
+        }
+    })?;
     if mode == ExistingConnectionMode::RecoverPrepared && authoritative_orphan(&response) {
         connection.close(0u32.into(), b"orphaned-pairing");
         endpoint.close().await;
@@ -873,8 +894,14 @@ async fn connect_existing(
     };
     let (link, link_rx) = watch::channel(Some(connection.clone()));
     let probe = Arc::new(Notify::new());
-    let proxy = start_proxy(link_rx, web_dist, data_dir.clone(), id.to_string())
-        .await
+    let proxy = start_proxy(
+        link_rx,
+        web_dist,
+        data_dir.clone(),
+        id.to_string(),
+        preferred_port(&params),
+    )
+    .await
         .map_err(|_| LinkError::ProxyBootstrapInvalid.code())?;
     let origin = proxy.origin.clone();
     let bootstrap = proxy.bootstrap.clone();
@@ -994,13 +1021,26 @@ async fn close_session(session: LiveSession, reason: &'static [u8]) {
     session.endpoint.close().await;
 }
 
+/// The loopback port a caller would like the proxy to keep. The port is part of
+/// the page's origin, so a desktop window keeps its origin storage from one
+/// launch to the next; a taken port falls back to a free one.
+fn preferred_port(params: &Value) -> Option<u16> {
+    params
+        .get("preferredPort")
+        .and_then(Value::as_u64)
+        .and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port != 0)
+}
+
 async fn start_proxy(
     link: watch::Receiver<Option<Connection>>,
     web_dist: Option<PathBuf>,
     data_dir: PathBuf,
     connection_scope: String,
+    preferred_port: Option<u16>,
 ) -> Result<ProxyHandle, LinkError> {
-    let (listener, owned) = polyth_link_core::local_proxy::bind_owned_loopback().await?;
+    let (listener, owned) =
+        polyth_link_core::local_proxy::bind_owned_loopback_on(preferred_port).await?;
     let port = owned.port;
     let closer = owned.clone();
     let boot = Arc::new(Mutex::new(ProxyBootstrap::new(port)));
@@ -1650,6 +1690,26 @@ fn reconnect_backoff(attempt: usize) -> Duration {
     Duration::from_millis(RECONNECT_BACKOFF_MS[index])
 }
 
+/// A host closes the connection right after telling a revoked device so, and
+/// the close can outrun the message. Its reason says the same thing.
+fn closed_as_revoked(connection: &Connection) -> bool {
+    matches!(
+        connection.close_reason(),
+        Some(iroh::endpoint::ConnectionError::ApplicationClosed(closed))
+            if closed.reason.as_ref() == b"revoked"
+    )
+}
+
+/// Why a reconnect handshake broke off: a revocation is final, anything else is
+/// worth another attempt.
+fn broken_handshake(connection: &Connection) -> ReconnectFailure {
+    if closed_as_revoked(connection) {
+        classify_reconnect_rejection(LinkError::DeviceRevoked.code())
+    } else {
+        ReconnectFailure::Transient
+    }
+}
+
 /// Re-open a trusted connection on the session's existing endpoint. The
 /// endpoint already holds the device key, so no identity secret is needed.
 async fn reconnect_link(
@@ -1671,11 +1731,11 @@ async fn reconnect_link(
         let (mut send, mut recv) = connection
             .open_bi()
             .await
-            .map_err(|_| ReconnectFailure::Transient)?;
+            .map_err(|_| broken_handshake(&connection))?;
         let _ = send.set_priority(PRI_CONTROL);
         open_control(&mut send)
             .await
-            .map_err(|_| ReconnectFailure::Transient)?;
+            .map_err(|_| broken_handshake(&connection))?;
         write_control(
             &mut send,
             &ControlMessage::ConnectionHello {
@@ -1684,10 +1744,10 @@ async fn reconnect_link(
             },
         )
         .await
-        .map_err(|_| ReconnectFailure::Transient)?;
+        .map_err(|_| broken_handshake(&connection))?;
         let response = read_control(&mut recv)
             .await
-            .map_err(|_| ReconnectFailure::Transient)?;
+            .map_err(|_| broken_handshake(&connection))?;
         validate_connection_response(response).map_err(classify_reconnect_rejection)?;
         Ok((send, recv))
     };
@@ -1977,6 +2037,41 @@ async fn proxy_ws(
     proxy_tungstenite_to_link(ws, send, recv, deflate).await
 }
 
+/// Maps `/packages/<id>/<file>` to `<packages_dir>/<id>/dist/web/<file>` when a
+/// separate package root is configured; everything else belongs to the shell.
+/// A package path never falls back to the shell's `index.html`: a missing module
+/// must fail as missing, and only the package's own `dist/web` tree is readable.
+fn static_file(
+    web_dist: &Path,
+    packages_dir: Option<&Path>,
+    path: &str,
+) -> Result<PathBuf, LinkError> {
+    let packaged = packages_dir.and_then(|root| {
+        let (id, rest) = path.strip_prefix("/packages/")?.split_once('/')?;
+        Some((root, id, rest))
+    });
+    let Some((root, id, rest)) = packaged else {
+        return resolve_static_path(web_dist, path);
+    };
+    let safe_id = !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    if !safe_id || rest.is_empty() {
+        return Err(LinkError::RequestPathDenied);
+    }
+    let bundle = root.join(id).join("dist").join("web");
+    let file = resolve_static_path(&bundle, &format!("/{rest}"))?;
+    let index = bundle
+        .canonicalize()
+        .map_err(|_| LinkError::RequestPathDenied)?
+        .join("index.html");
+    if file == index && !rest.ends_with("index.html") {
+        return Err(LinkError::RequestPathDenied);
+    }
+    Ok(file)
+}
+
 async fn serve_static(
     stream: &mut TcpStream,
     web_dist: Option<&Path>,
@@ -1985,7 +2080,10 @@ async fn serve_static(
     let Some(root) = web_dist else {
         return write_http(stream, 404, "not found").await;
     };
-    let file = match resolve_static_path(root, path) {
+    // A desktop build keeps package bundles apart from the shell, in the layout
+    // the server reads; a phone copies them next to the shell instead.
+    let packages_dir = std::env::var_os("POLYTH_WEB_PACKAGES_DIR").map(PathBuf::from);
+    let file = match static_file(root, packages_dir.as_deref(), path) {
         Ok(file) => file,
         Err(_) => return write_http(stream, 404, "not found").await,
     };
@@ -1993,15 +2091,21 @@ async fn serve_static(
         .await
         .map_err(|_| LinkError::RequestPathDenied)?;
     let content_type = match file.extension().and_then(|extension| extension.to_str()) {
-        Some("js") => "text/javascript",
+        Some("js" | "mjs") => "text/javascript",
         Some("css") => "text/css",
         Some("html") => "text/html; charset=utf-8",
-        Some("json") => "application/json",
+        Some("json" | "map") => "application/json",
         Some("svg") => "image/svg+xml",
         Some("woff2") => "font/woff2",
         Some("png") => "image/png",
         Some("webp") => "image/webp",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
         Some("ico") => "image/x-icon",
+        Some("wasm") => "application/wasm",
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     };
     let headers = format!(
@@ -2295,6 +2399,65 @@ fn leak_code(code: String) -> &'static str {
 }
 
 #[cfg(test)]
+mod static_file_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn roots() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempdir().unwrap();
+        let shell = dir.path().join("web");
+        let packages = dir.path().join("packages");
+        std::fs::create_dir_all(&shell).unwrap();
+        std::fs::write(shell.join("index.html"), "shell").unwrap();
+        std::fs::write(shell.join("main.js"), "main").unwrap();
+        let bundle = packages.join("files").join("dist").join("web");
+        std::fs::create_dir_all(bundle.join("chunks")).unwrap();
+        std::fs::write(bundle.join("entry.js"), "entry").unwrap();
+        std::fs::write(bundle.join("chunks").join("a.js"), "chunk").unwrap();
+        std::fs::write(packages.join("files").join("secret.txt"), "secret").unwrap();
+        (dir, shell, packages)
+    }
+
+    fn name(path: PathBuf) -> String {
+        path.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn package_paths_read_only_the_package_bundle() {
+        let (_dir, shell, packages) = roots();
+        let read = |path: &str| static_file(&shell, Some(&packages), path);
+        assert_eq!(name(read("/packages/files/entry.js").unwrap()), "entry.js");
+        assert_eq!(name(read("/packages/files/chunks/a.js").unwrap()), "a.js");
+        assert_eq!(name(read("/main.js").unwrap()), "main.js");
+        // A missing module fails as missing instead of answering with a page.
+        assert!(read("/packages/files/missing.js").is_err());
+        assert!(read("/packages/unknown/entry.js").is_err());
+        // Nothing above the bundle, and no odd package ids.
+        assert!(read("/packages/files/../secret.txt").is_err());
+        assert!(read("/packages/files/..%2fsecret.txt").is_err());
+        assert!(read("/packages/..%2ffiles/entry.js").is_err());
+        assert!(read("/packages/Files/entry.js").is_err());
+    }
+
+    #[test]
+    fn without_a_package_root_the_shell_keeps_its_fallback() {
+        let (_dir, shell, _packages) = roots();
+        // The phone layout: packages sit next to the shell, and unknown paths
+        // are the app's routes.
+        assert_eq!(name(static_file(&shell, None, "/p/project").unwrap()), "index.html");
+    }
+
+    #[test]
+    fn preferred_port_ignores_nonsense() {
+        assert_eq!(preferred_port(&json!({ "preferredPort": 41234 })), Some(41234));
+        assert_eq!(preferred_port(&json!({ "preferredPort": 0 })), None);
+        assert_eq!(preferred_port(&json!({ "preferredPort": 70000 })), None);
+        assert_eq!(preferred_port(&json!({ "preferredPort": "41234" })), None);
+        assert_eq!(preferred_port(&json!({})), None);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
@@ -2559,6 +2722,9 @@ mod tests {
         /// deadline: a relay path queueing the Pong behind a photo download.
         Busy,
         Revoked,
+        /// Closes as revoked without waiting for its message to arrive, the way
+        /// a real host answers a revoked device.
+        RevokedAbruptly,
     }
 
     /// A minimal trusted host: accepts each connection's hello with the
@@ -2588,6 +2754,10 @@ mod tests {
                         panic!("expected a trusted hello");
                     };
                     assert_eq!(device_endpoint, connection.remote_id().to_string());
+                    if answer == FakeHostAnswer::RevokedAbruptly {
+                        connection.close(0u32.into(), b"revoked");
+                        return;
+                    }
                     if answer == FakeHostAnswer::Revoked {
                         let _ = write_control(
                             &mut send,
@@ -2631,7 +2801,9 @@ mod tests {
                                     }
                                     let _ = write_control(&mut send, &ControlMessage::Pong { nonce }).await;
                                 }
-                                FakeHostAnswer::Mute | FakeHostAnswer::Revoked => {}
+                                FakeHostAnswer::Mute
+                                | FakeHostAnswer::Revoked
+                                | FakeHostAnswer::RevokedAbruptly => {}
                             }
                         }
                     });
@@ -2687,7 +2859,7 @@ mod tests {
         let state = Arc::new(Mutex::new(new_state(dir.path().to_path_buf(), None)));
         let (link, link_rx) = watch::channel(Some(connection.clone()));
         let probe = Arc::new(Notify::new());
-        let proxy = start_proxy(link_rx, None, dir.path().to_path_buf(), host_id.clone())
+        let proxy = start_proxy(link_rx, None, dir.path().to_path_buf(), host_id.clone(), None)
             .await
             .unwrap();
         let port = proxy.listener.port;
@@ -2915,6 +3087,30 @@ mod tests {
         assert!(fixture.state.lock().await.sessions.is_empty());
         assert!(proxied_get(fixture.port, &fixture.cookie).await.is_err()
             || proxied_get(fixture.port, &fixture.cookie).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_revocation_that_outruns_its_message_still_ends_the_session() {
+        let (fixture, mut connections) =
+            link_fixture(vec![FakeHostAnswer::Accept, FakeHostAnswer::RevokedAbruptly]).await;
+        let first = connections.recv().await.unwrap();
+        first.close(0u32.into(), b"gone");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let status = dispatch(
+                fixture.state.clone(),
+                "status",
+                json!({ "connectionId": fixture.host_id }),
+            )
+            .await
+            .unwrap();
+            if status["state"] == "revoked" {
+                break;
+            }
+            assert!(Instant::now() < deadline, "kept reconnecting: {status}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(fixture.state.lock().await.sessions.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

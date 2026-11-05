@@ -1,125 +1,136 @@
 import { spawn } from "node:child_process";
-import { createConnection, type Socket } from "node:net";
-import { mkdir, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir } from "node:fs/promises";
+import type { Readable, Writable } from "node:stream";
 
-const CONNECT_RETRY_MS = 50;
-const CONNECT_TIMEOUT_MS = 5_000;
-const RPC_TIMEOUT_MS = 30_000;
+/** How long one request may take. A pairing waits for a person on the other computer. */
+const RPC_TIMEOUT_MS: Readonly<Record<string, number>> = {
+  "pairing.confirm": 130_000,
+  connect: 25_000,
+  "connection.recover": 25_000,
+};
+const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+/** Closing stdin ends the client; it closes its sessions within two seconds. */
+const EXIT_GRACE_MS = 3_000;
+/** No answer comes near this; a line that does is a broken client, not data. */
+const MAX_LINE_CHARS = 4 * 1024 * 1024;
 
-const err = (code: string, message: string): Error => Object.assign(new Error(message), { code });
+const failure = (code: string): Error => Object.assign(new Error(code), { code });
 
-interface RpcResponse {
-  id: number;
-  result?: unknown;
-  error?: { code?: string; message?: string };
+interface OwnedProcess {
+  stdin: Writable;
+  stdout: Readable;
+  stderr: Readable;
+  readonly exitCode: number | null;
+  kill(signal?: NodeJS.Signals): boolean;
+  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  once(event: "error", listener: (error: Error) => void): unknown;
 }
 
-export interface PolythLinkPairingPreview {
-  hostLabel: string;
-  hostFingerprint: string;
-  expiresAt: string;
+export interface PolythLinkClientOptions {
+  binary: string;
+  dataDir: string;
+  /** The shell the local proxy serves. */
+  webDist: string;
+  /** Package bundles, laid out as `<id>/dist/web` (a desktop build keeps them apart from the shell). */
+  packagesDir: string;
+  env?: NodeJS.ProcessEnv;
+  log?(message: string, error?: unknown): void;
+  /** Tests supply a fake process. */
+  start?(binary: string, args: string[], env: NodeJS.ProcessEnv): OwnedProcess;
 }
 
-export interface PolythLinkPairingAttempt {
-  attemptId: string;
-  safetyPhrase?: string[];
-  state: string;
-}
-
-export interface PolythLinkConnection {
-  connectionId: string;
-  origin: string;
-  bootstrapUrl: string;
-}
-
-export interface PolythLinkClientManager {
+export interface PolythLinkClient {
   invoke<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
-  parsePairingTicket(ticket: string): Promise<PolythLinkPairingPreview>;
-  beginPairing(ticket: string, label: string): Promise<PolythLinkPairingAttempt>;
-  confirmPairing(attemptId: string): Promise<PolythLinkConnection>;
-  cancelPairing(attemptId: string): Promise<void>;
-  connections(): Promise<unknown[]>;
-  connect(connectionId: string): Promise<PolythLinkConnection>;
-  recover(connectionId: string): Promise<unknown>;
-  status(connectionId: string): Promise<unknown>;
-  disconnect(connectionId: string): Promise<void>;
-  forget(connectionId: string): Promise<void>;
-  onEvent(cb: (event: unknown) => void): { dispose(): void };
+  /** Runs when the process ends without `close()`. */
+  onExit(listener: () => void): () => void;
   close(): Promise<void>;
 }
 
-export async function startPolythLinkClientManager(input: {
-  binary: string;
-  dataDir: string;
-  socketPath: string;
-  webDist?: string;
-  log?(message: string, error?: unknown): void;
-}): Promise<PolythLinkClientManager> {
-  if (process.platform === "win32") throw err("unsupported", "Desktop Polyth Link client IPC requires Unix sockets");
-  await mkdir(dirname(input.socketPath), { recursive: true });
-  await rm(input.socketPath, { force: true }).catch(() => {});
+/** The variables the client needs to run, resolve names and reach a proxy. It
+ *  holds no provider credentials and has no use for the app's other settings. */
+export function linkClientEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const kept: NodeJS.ProcessEnv = {};
+  const allowed = /^(?:PATH|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|TMP|TEMP|TMPDIR|SYSTEMROOT|WINDIR|COMSPEC|LANG|LC_[A-Z]+|TZ|SSL_CERT_FILE|SSL_CERT_DIR|(?:HTTPS?|ALL|NO)_PROXY|RUST_LOG)$/i;
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && allowed.test(name)) kept[name] = value;
+  }
+  return kept;
+}
 
-  const child = spawn(input.binary, ["serve", input.dataDir, input.socketPath], {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      ...(input.webDist ? { POLYTH_WEB_DIST: input.webDist } : {}),
-    },
-  });
-  child.stdout.on("data", (chunk) => input.log?.(`polyth-link-client: ${String(chunk).trimEnd()}`));
-  child.stderr.on("data", (chunk) => input.log?.(`polyth-link-client: ${String(chunk).trimEnd()}`));
-
-  let socket: Socket | null = null;
-  let closed = false;
-  let nextId = 0;
-  let buffer = "";
+/**
+ * The one `polyth-link-client` process this app owns, started on first use and
+ * spoken to over JSON lines on stdin/stdout, the same on Windows, macOS and
+ * Linux. No socket exists on disk, and when this process dies by any means its
+ * stdin closes, which ends the client. A client that exits on its own is started
+ * again by the next request; the sessions it held are gone, so callers reconnect.
+ */
+export function createPolythLinkClient(options: PolythLinkClientOptions): PolythLinkClient {
+  const start = options.start ?? ((binary, args, env) =>
+    spawn(binary, args, { stdio: ["pipe", "pipe", "pipe"], env, windowsHide: true }));
+  const exitListeners = new Set<() => void>();
   const pending = new Map<number, {
     resolve(value: unknown): void;
     reject(error: Error): void;
     timer: ReturnType<typeof setTimeout>;
   }>();
-  const eventListeners = new Set<(event: unknown) => void>();
+  let child: OwnedProcess | null = null;
+  let starting: Promise<OwnedProcess> | null = null;
+  let closed = false;
+  let nextId = 0;
 
-  const rejectPending = (error: Error): void => {
+  const rejectPending = (code: string): void => {
     for (const request of pending.values()) {
       clearTimeout(request.timer);
-      request.reject(error);
+      request.reject(failure(code));
     }
     pending.clear();
   };
 
   const handleLine = (line: string): void => {
     if (!line.trim()) return;
-    let message: Record<string, unknown>;
+    let message: { id?: unknown; result?: unknown; error?: { code?: unknown } };
     try {
-      message = JSON.parse(line) as Record<string, unknown>;
+      message = JSON.parse(line) as typeof message;
     } catch {
-      input.log?.("Ignoring invalid polyth-link-client JSON line");
+      options.log?.("Ignoring a line from polyth-link-client that is not JSON");
       return;
     }
-    if (message.method === "event") {
-      for (const cb of [...eventListeners]) cb(message.params);
-      return;
-    }
-    const id = Number(message.id);
-    if (!Number.isSafeInteger(id)) return;
-    const request = pending.get(id);
+    const request = typeof message.id === "number" ? pending.get(message.id) : undefined;
     if (!request) return;
-    pending.delete(id);
+    pending.delete(message.id as number);
     clearTimeout(request.timer);
-    const response = message as unknown as RpcResponse;
-    if (response.error) {
-      request.reject(err(String(response.error.code ?? "link-client-error"), response.error.message ?? String(response.error.code ?? "Polyth Link client error")));
-    } else {
-      request.resolve(response.result);
-    }
+    if (message.error) request.reject(failure(String(message.error.code ?? "link-client-error")));
+    else request.resolve(message.result);
   };
 
-  const bindSocket = (next: Socket): void => {
-    socket = next;
-    next.setEncoding("utf8");
-    next.on("data", (chunk) => {
+  const launch = async (): Promise<OwnedProcess> => {
+    await mkdir(options.dataDir, { recursive: true, mode: 0o700 });
+    const env: NodeJS.ProcessEnv = {
+      ...linkClientEnv(options.env ?? process.env),
+      POLYTH_WEB_DIST: options.webDist,
+      POLYTH_WEB_PACKAGES_DIR: options.packagesDir,
+    };
+    const process_ = start(options.binary, ["stdio", options.dataDir], env);
+    const ended = (reason: string): void => {
+      if (child !== process_) return;
+      child = null;
+      rejectPending(closed ? "link-client-closed" : "link-client-exited");
+      if (closed) return;
+      options.log?.(`polyth-link-client ended (${reason})`);
+      for (const listener of [...exitListeners]) listener();
+    };
+    child = process_;
+    process_.once("error", (error) => {
+      options.log?.("polyth-link-client failed to run", error);
+      ended("spawn error");
+    });
+    process_.once("exit", (code, signal) => ended(String(code ?? signal ?? "unknown")));
+    // A broken pipe surfaces as an exit; it must not become an uncaught error.
+    process_.stdin.on("error", (error) => options.log?.("polyth-link-client stdin", error));
+    process_.stderr.on("data", (chunk) => options.log?.(`polyth-link-client: ${String(chunk).trimEnd()}`));
+    let buffer = "";
+    process_.stdout.setEncoding("utf8");
+    process_.stdout.on("data", (chunk: string) => {
       buffer += chunk;
       for (;;) {
         const newline = buffer.indexOf("\n");
@@ -128,141 +139,61 @@ export async function startPolythLinkClientManager(input: {
         buffer = buffer.slice(newline + 1);
         handleLine(line);
       }
-    });
-    next.on("close", () => {
-      if (socket === next) socket = null;
-      rejectPending(err("link-client-disconnected", "Polyth Link client IPC disconnected"));
-    });
-    next.on("error", (error) => input.log?.("Polyth Link client IPC error", error));
-  };
-
-  const waitForSocket = async (): Promise<void> => {
-    const deadline = Date.now() + CONNECT_TIMEOUT_MS;
-    let lastError: unknown;
-    while (!closed && Date.now() < deadline) {
-      const candidate = createConnection(input.socketPath);
-      try {
-        await new Promise<void>((resolve, reject) => {
-          candidate.once("connect", resolve);
-          candidate.once("error", reject);
-        });
-        bindSocket(candidate);
-        return;
-      } catch (error) {
-        lastError = error;
-        candidate.destroy();
-        if (child.exitCode !== null) break;
-        await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_MS));
+      if (buffer.length > MAX_LINE_CHARS) {
+        options.log?.("polyth-link-client sent an oversized line; stopping it");
+        buffer = "";
+        process_.kill();
       }
-    }
-    throw err("link-client-start-failed", `Could not connect to Polyth Link client IPC${lastError ? `: ${String(lastError)}` : ""}`);
-  };
-
-  child.once("exit", (code, signal) => {
-    if (closed) return;
-    const error = err("link-client-exited", `Polyth Link client exited (${code ?? signal ?? "unknown"})`);
-    rejectPending(error);
-    socket?.destroy();
-    socket = null;
-  });
-
-  try {
-    await waitForSocket();
-  } catch (error) {
-    closed = true;
-    child.kill("SIGTERM");
-    throw error;
-  }
-
-  const invoke = async <T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
-    if (closed || !socket || socket.destroyed) throw err("link-client-disconnected", "Polyth Link client is not connected");
-    const id = ++nextId;
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(err("link-client-timeout", `Polyth Link client RPC timed out: ${method}`));
-      }, RPC_TIMEOUT_MS);
-      timer.unref?.();
-      pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-      socket!.write(`${JSON.stringify({ id, method, params })}\n`, (error) => {
-        if (!error) return;
-        const request = pending.get(id);
-        if (!request) return;
-        pending.delete(id);
-        clearTimeout(request.timer);
-        request.reject(error);
-      });
     });
+    return process_;
   };
 
-  const connectionFrom = (result: Record<string, unknown>, fallbackId = ""): PolythLinkConnection => {
-    const origin = String(result.origin ?? "");
-    const bootstrapUrl = String(result.bootstrapUrl ?? result.bootstrap ?? "");
-    const connectionId = String(result.connectionId ?? fallbackId);
-    if (!origin || !bootstrapUrl || !connectionId) {
-      throw err("link-client-invalid-response", "Polyth Link connection response is incomplete");
-    }
-    return { connectionId, origin, bootstrapUrl };
+  const running = async (): Promise<OwnedProcess> => {
+    if (closed) throw failure("link-client-closed");
+    if (child) return child;
+    starting ??= launch().finally(() => { starting = null; });
+    return starting;
   };
 
   return {
-    invoke,
-    parsePairingTicket(ticket) {
-      return invoke<PolythLinkPairingPreview>("pairing.parse", { ticket });
+    async invoke<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+      const target = await running();
+      const id = ++nextId;
+      return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(failure("link-client-timeout"));
+        }, RPC_TIMEOUT_MS[method] ?? DEFAULT_RPC_TIMEOUT_MS);
+        timer.unref?.();
+        pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+        target.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+      });
     },
-    beginPairing(ticket, label) {
-      return invoke<PolythLinkPairingAttempt>("pairing.begin", { ticket, label });
-    },
-    async confirmPairing(attemptId) {
-      return connectionFrom(await invoke<Record<string, unknown>>("pairing.confirm", { attemptId }));
-    },
-    async cancelPairing(attemptId) {
-      await invoke("pairing.cancel", { attemptId });
-    },
-    async connections() {
-      const result = await invoke<unknown>("connections.list");
-      return Array.isArray(result) ? result : [];
-    },
-    async connect(connectionId) {
-      return connectionFrom(await invoke<Record<string, unknown>>("connect", { connectionId }), connectionId);
-    },
-    recover(connectionId) {
-      return invoke("connection.recover", { connectionId });
-    },
-    status(connectionId) {
-      return invoke("status", { connectionId });
-    },
-    async disconnect(connectionId) {
-      await invoke("disconnect", { connectionId });
-    },
-    async forget(connectionId) {
-      await invoke("forget", { connectionId });
-    },
-    onEvent(cb) {
-      eventListeners.add(cb);
-      return { dispose: () => { eventListeners.delete(cb); } };
+    onExit(listener) {
+      exitListeners.add(listener);
+      return () => { exitListeners.delete(listener); };
     },
     async close() {
       if (closed) return;
       closed = true;
-      rejectPending(err("link-client-closed", "Polyth Link client closed"));
-      socket?.end();
-      socket?.destroy();
-      socket = null;
-      child.kill("SIGTERM");
+      await starting?.catch(() => undefined);
+      const target = child;
+      if (!target || target.exitCode !== null) {
+        rejectPending("link-client-closed");
+        return;
+      }
       await new Promise<void>((resolve) => {
-        if (child.exitCode !== null) return resolve();
         const timer = setTimeout(() => {
-          child.kill("SIGKILL");
+          target.kill("SIGKILL");
           resolve();
-        }, 2_000);
+        }, EXIT_GRACE_MS);
         timer.unref?.();
-        child.once("exit", () => {
+        target.once("exit", () => {
           clearTimeout(timer);
           resolve();
         });
+        target.stdin.end();
       });
-      await rm(input.socketPath, { force: true }).catch(() => {});
     },
   };
 }

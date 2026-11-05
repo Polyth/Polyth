@@ -50,7 +50,13 @@ const linkClientName = process.platform === "win32" ? "polyth-link-client.exe" :
 await mkdir(linkDir, { recursive: true });
 
 if (process.platform === "win32") {
-  console.warn("Polyth Link host/client are not packaged on Windows until the native client IPC has a named-pipe transport.");
+  // The client talks over stdio on every platform. The host still needs a Unix
+  // socket for the server's ingress, so a Windows app connects to other servers
+  // but cannot yet be reached through Link itself.
+  console.warn("The Polyth Link host is not packaged on Windows: it needs the server's Unix-socket ingress.");
+  const cargo = spawnSync("cargo", ["build", "--release", "-p", "polyth-link-client"], { cwd: repoRoot, stdio: "inherit" });
+  if (cargo.status !== 0) throw new Error("failed to build polyth-link-client");
+  await copyFile(join(repoRoot, "target", "release", linkClientName), join(linkDir, linkClientName));
 } else if (process.platform === "darwin" && process.env.POLYTH_MAC_MULTI_ARCH === "1") {
   for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
     const added = spawnSync("rustup", ["target", "add", target], { cwd: repoRoot, stdio: "inherit" });
@@ -82,11 +88,9 @@ if (process.platform === "win32") {
   await copyFile(join(repoRoot, "target", "release", linkClientName), join(linkDir, linkClientName));
 }
 
-if (process.platform !== "win32") {
-  for (const name of [linkHostName, linkClientName]) {
-    if (!existsSync(join(linkDir, name))) {
-      throw new Error(`Polyth Link binary missing from package resources: ${join(linkDir, name)}`);
-    }
+for (const name of process.platform === "win32" ? [linkClientName] : [linkHostName, linkClientName]) {
+  if (!existsSync(join(linkDir, name))) {
+    throw new Error(`Polyth Link binary missing from package resources: ${join(linkDir, name)}`);
   }
 }
 

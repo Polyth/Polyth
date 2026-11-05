@@ -364,6 +364,20 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - uses: dtolnay/rust-toolchain@f00cc37de62c899691b45db1cc585604520c95a7 # 1.91.0
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # The Link client's TLS library needs clang on Windows ARM.
+      - name: Provide clang for the Link client
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+            choco install llvm -y --no-progress
+            "C:\Program Files\LLVM\bin" | Out-File -Append -FilePath $env:GITHUB_PATH
+          }
+
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 

@@ -39,7 +39,8 @@ import { shouldRefreshRuntimeFeatures } from "./runtimeFeaturesSync.ts";
 import { flushClientPersistence, type PersistenceScope } from "./clientPersistence.ts";
 import { hydrateLocalMutationIntent, loadLocalMutationIntent, reconcileLocalMutationIntent, submitDirectPrompt } from "./mutationIntent.ts";
 import { createSessionWithRecovery } from "./sessionCreateRecovery.ts";
-import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
+import { isNativeMobile, isPolythLinkLoopbackOrigin } from "@polyth/mobile/runtime";
+import { isLinkClientPage, returnToConnectionHub } from "./nativeConnections.ts";
 import { loadScopedDraftRecord, scopedDraftCacheKey, updateScopedDraftRecord, type ScopedDraftRecord } from "./draftRecord.ts";
 import { clientPersistenceScope, persistenceScopeIsCurrent } from "./reliabilityContext.ts";
 import {
@@ -596,7 +597,7 @@ function publishSyncStatus(status: SyncStatus): void {
 }
 
 function verifyNativeLoopbackProxy(): Promise<void> {
-  if (!isNativeMobile() || !isPolythLinkLoopbackOrigin(location.origin)
+  if (!isLinkClientPage() || !isPolythLinkLoopbackOrigin(location.origin)
     || returningToConnectionHub) return Promise.resolve();
   if (nativeProxyProbe) return nativeProxyProbe;
   nativeProxyProbe = (async () => {
@@ -628,10 +629,7 @@ function verifyNativeLoopbackProxy(): Promise<void> {
         && (typeof document === "undefined" || document.visibilityState !== "hidden")) {
         returningToConnectionHub = true;
         await flushClientPersistence().catch(() => undefined);
-        await returnToMobileConnectionHub(
-          `${location.pathname}${location.search}${location.hash}`,
-          { resume: true },
-        );
+        await returnToConnectionHub(`${location.pathname}${location.search}${location.hash}`);
       }
     } finally {
       clearTimeout(timeout);

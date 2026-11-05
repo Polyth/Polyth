@@ -1279,7 +1279,9 @@ what cannot be defaulted:
   the button saying what happens next. The first two need no password: Start
   calls `completeLocalSetup()` on the desktop bridge (the main process takes
   the name from the OS account) and restarts into the workspace; "from my
-  phone too" then opens Polyth Link (`/?settings=tunnel`). The progress dots
+  phone too" then opens Polyth Link (`/?settings=tunnel`). A quiet link under
+  the foot, "Connect to Polyth on another computer", opens the app's
+  [server list](desktop.md#connecting-to-another-polyth). The progress dots
   stay hidden (height kept) for this one-step start. "With other people" shows
   three dots and continues to the account (name, and a password with a reveal
   toggle instead of a confirmation field) → recovery codes → automatic restart;
@@ -1292,7 +1294,9 @@ what cannot be defaulted:
   in `/api/auth/status`) a locked Desktop window asks its main process for a
   new session once per minute (`claimOwnerSessionRenewal`) and reloads; the
   lock screen shows no sign-in form but "Welcome back" + Continue in Desktop,
-  or, in a browser, where Polyth opens and where to set a password. Settings →
+  or, in a browser, where Polyth opens and where to set a password. The desktop
+  window on another server takes the browser's path on these screens and adds
+  "Choose another server" (`DesktopServerExit`), since they show no shell. Settings →
   Users → your account offers "Set a password…" (`SecureAccountDialog`:
   password → recovery codes → Protect account); "Add user" opens the same
   dialog first, then the add-user form.
@@ -4237,7 +4241,9 @@ name on the content edge, at a project name's size and a firmer weight; in
 the native app it opens the native server menu (the separate Switch server
 tool is gone), with several Spaces it is the Space switcher whose last entry
 is the server menu, and with nothing to choose it is plain text (the page
-never learns a paired server's name). The tools are search, select, Settings
+never learns a paired server's name; the desktop app's page does, from the main
+process, and shows it in a chip beside the Space switcher only when the server is
+elsewhere). The tools are search, select, Settings
 and close. Add project is a quiet last row of the list (a dashed tile in the
 mark column, the label on the name edge), hidden while searching or
 selecting. The search field is not on screen until the search tool is

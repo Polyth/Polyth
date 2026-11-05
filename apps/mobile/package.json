@@ -8,6 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./connection": "./src/ConnectionScreen.tsx",
+    "./connection-controller": "./src/connectionController.ts",
+    "./connection-ui": "./src/connectionUi.ts",
+    "./link": "./src/polythLink.ts",
     "./launch": "./src/launch.ts",
     "./native": "./src/nativeBridge.ts",
     "./runtime": "./src/runtime.ts"

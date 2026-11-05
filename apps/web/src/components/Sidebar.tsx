@@ -57,6 +57,7 @@ import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "./ConversationCreateDialog.tsx";
 import SpaceSwitcher from "./SpaceSwitcher.tsx";
+import DesktopServerSwitcher from "./DesktopServerSwitcher.tsx";
 import { tr } from "../i18n/index.ts";
 import { confirmAlert } from "../alerts.ts";
 import { errorFeedback, tapFeedback } from "../haptics.ts";
@@ -1247,6 +1248,7 @@ export default function Sidebar() {
               <div className="sidebar-drawer-tools" role="toolbar" aria-label={tr("sidebar.listOptions")}>
                 {/* Phone entry point: the header collapses on phones, so the
                     drawer carries the Space switcher instead. */}
+                <DesktopServerSwitcher />
                 <SpaceSwitcher />
                 <IconButton
                   icon={SearchIcon}

@@ -53,6 +53,22 @@ export interface DesktopUpdateState {
   progressWindow?: boolean;
 }
 
+/** What the window is showing; decides what it may ask of the main process. */
+export type DesktopWindowSurface = "local" | "hub" | "remote";
+
+/** What the main process says about a page as it loads. */
+export interface DesktopWindowPlacement {
+  surface: DesktopWindowSurface | null;
+  /** A local Link proxy serves this page, so it can lose that proxy. */
+  linkProxy: boolean;
+}
+
+/** The server on screen. `label` is what the person calls it. */
+export interface DesktopServerInfo {
+  kind: "local" | "link" | "address";
+  label: string;
+}
+
 export interface DesktopInfo {
   appVersion: string;
   opencodeVersion: string;
@@ -68,6 +84,7 @@ export interface DesktopInfo {
   softwareRendering: boolean;
   /** The macOS 12 build on macOS 12: updates come from stable releases only. */
   macLegacyUpdates: boolean;
+  server: DesktopServerInfo;
 }
 
 /** The blocker as main holds it. `working` is the renderer's last report. */
@@ -112,7 +129,49 @@ export type DesktopLocalSetupResult =
   | { ok: true }
   | { ok: false; error: "setup-completed" | "recovery-required" | "unavailable" };
 
+export interface DesktopServerAnchor {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The server list's view of this computer and the servers saved by address. */
+export interface DesktopServersView {
+  active: { kind: "local" } | { kind: "link"; id: string } | { kind: "address"; url: string };
+  runLocalServer: boolean;
+  /** This computer's server: running, waiting for first-run setup, or stopped. */
+  local: "running" | "setup" | "stopped";
+  /** The Link client is part of this build. */
+  linkAvailable: boolean;
+  addresses: { url: string; lastUsedAt: number }[];
+}
+
+/** A failure travels as a value: IPC keeps only an error's message, and the
+ *  list decides by code. */
+export type DesktopServersResult<T> = { ok: true; result: T } | { ok: false; code: string };
+
+export type DesktopOpenServer = { kind: "local"; path?: string } | { kind: "address"; url: string };
+
+export interface PolythDesktopServersApi {
+  /** The native server menu at `anchor`. The app draws it, so the page never reads the list. */
+  menu(anchor?: DesktopServerAnchor): Promise<void>;
+  /** Shows the server list, optionally leading with adding a server. */
+  list(options?: { add?: boolean }): Promise<void>;
+  /** The open server's page lost its local proxy: reconnect it at `path`. */
+  resume(path?: string): Promise<void>;
+  state(): Promise<DesktopServersView>;
+  open(target: DesktopOpenServer): Promise<DesktopServersResult<void>>;
+  link(method: string, params?: Record<string, unknown>): Promise<DesktopServersResult<unknown>>;
+  forgetAddress(url: string): Promise<DesktopServersView>;
+  setRunLocalServer(run: boolean): Promise<DesktopServersView>;
+}
+
 export interface PolythDesktopApi {
+  /** Read once per page: the main process answers from the page's own origin. */
+  surface: DesktopWindowSurface | null;
+  linkProxy: boolean;
+  servers: PolythDesktopServersApi;
   getInfo(): Promise<DesktopInfo>;
   requestSetupClaim(request?: DesktopSetupClaimRequest): Promise<DesktopSetupClaim>;
   restartAfterSetup(): Promise<void>;

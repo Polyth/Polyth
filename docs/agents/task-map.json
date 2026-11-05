@@ -354,7 +354,9 @@
       ],
       "testHints": [
         "apps/desktop/test/configuration.test.ts",
-        "apps/desktop/test/serverPackages.test.ts"
+        "apps/desktop/test/serverPackages.test.ts",
+        "apps/desktop/test/windowSurface.test.ts",
+        "apps/web/test/desktopServerList.test.ts"
       ],
       "risk": "high"
     },

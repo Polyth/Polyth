@@ -310,7 +310,9 @@ proxy-terminated TLS, so create the owner account once over loopback (plain
 ### Desktop app
 
 Polyth Desktop (Electron) runs its own loopback server with bundled OpenCode and
-Chromium and handles first-run setup itself. Installers (AppImage, DMG, NSIS EXE) are
+Chromium and handles first-run setup itself. It can also show Polyth running on another
+computer, through Polyth Link or by address, with or without a server of its own.
+Installers (AppImage, DMG, NSIS EXE) are
 on [polyth.app/download](https://polyth.app/download/); release channels and the
 update feed are described in [Releases](docs/operations/releases.md). From source:
 

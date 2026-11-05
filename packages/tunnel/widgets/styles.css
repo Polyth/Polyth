@@ -387,3 +387,15 @@
     transition: none;
   }
 }
+
+/* A computer cannot scan its own screen: it takes the same invitation as a link. */
+.pkg-tunnel-computer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}

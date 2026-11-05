@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   DesktopCommand,
   DesktopInfo,
+  DesktopServersResult,
+  DesktopServersView,
+  DesktopWindowPlacement,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
   DesktopSettings,
@@ -11,6 +14,7 @@ import type {
   DesktopWindowAction,
   DesktopWindowState,
   PolythDesktopApi,
+  PolythDesktopServersApi,
 } from "./types.ts";
 
 const subscribe = <T>(channel: string, listener: (value: T) => void): (() => void) => {
@@ -19,7 +23,31 @@ const subscribe = <T>(channel: string, listener: (value: T) => void): (() => voi
   return () => ipcRenderer.removeListener(channel, handler);
 };
 
+const placement = (): DesktopWindowPlacement => {
+  try {
+    return ipcRenderer.sendSync("desktop:surface") as DesktopWindowPlacement;
+  } catch {
+    return { surface: null, linkProxy: false };
+  }
+};
+
+const servers: PolythDesktopServersApi = {
+  menu: (anchor) => ipcRenderer.invoke("desktop:servers:menu", anchor) as Promise<void>,
+  list: (options) => ipcRenderer.invoke("desktop:servers:list", { add: options?.add === true }) as Promise<void>,
+  resume: (path) => ipcRenderer.invoke("desktop:servers:resume", path) as Promise<void>,
+  state: () => ipcRenderer.invoke("desktop:servers:state") as Promise<DesktopServersView>,
+  open: (target) => ipcRenderer.invoke("desktop:servers:open", target) as Promise<DesktopServersResult<void>>,
+  link: (method, params) => ipcRenderer.invoke("desktop:link", method, params) as Promise<DesktopServersResult<unknown>>,
+  forgetAddress: (url) => ipcRenderer.invoke("desktop:servers:forget-address", url) as Promise<DesktopServersView>,
+  setRunLocalServer: (run) => ipcRenderer.invoke("desktop:servers:run-local", run === true) as Promise<DesktopServersView>,
+};
+
+const place = placement();
+
 const api: PolythDesktopApi = {
+  surface: place.surface,
+  linkProxy: place.linkProxy,
+  servers: Object.freeze(servers),
   getInfo: () => ipcRenderer.invoke("desktop:info") as Promise<DesktopInfo>,
   requestSetupClaim: (request) =>
     ipcRenderer.invoke("desktop:setup:claim", { fresh: request?.fresh === true }) as Promise<DesktopSetupClaim>,

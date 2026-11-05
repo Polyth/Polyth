@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { authBootstrapPhase, claimLinkSessionBounce, claimOwnerSessionRenewal } from "./authBootstrap.ts";
-import { desktopBridge } from "./desktopBridge.ts";
+import { desktopBridge, localDesktopBridge } from "./desktopBridge.ts";
 import { fetchAuthStatus } from "./authClient.ts";
 import { Button } from "./components/ui/index.ts";
 import { POLYTH_MARK_SRC } from "./brandAsset.ts";
@@ -16,7 +16,7 @@ import { exposeSurfaces } from "./surfaces.ts";
 import { exposeCapabilities } from "./capabilities.ts";
 import { installShell } from "./shell.ts";
 import { installCommandSlotBridge } from "./commandBridge.ts";
-import { installNativeConnectionCommands } from "./nativeConnections.ts";
+import { installNativeConnectionCommands, isLinkClientPage, returnToConnectionHub } from "./nativeConnections.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
 import { setNativeKeyboardInset, setNativeKeyboardMotion, startMobileViewport } from "./mobileViewport.ts";
@@ -49,12 +49,13 @@ import { bootPackages } from "./packages/registry.ts";
 import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
+import { DesktopServerExit } from "./components/DesktopServerSwitcher.tsx";
 import SetupScreen from "./components/SetupScreen.tsx";
 import { dismissTopEscapeLayer } from "./useEscape.ts";
 import { stepSettingsBack } from "./settingsPresentation.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
 import { installNativeMobileIntegration } from "@polyth/mobile/native";
-import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
+import { isNativeMobile, isPolythLinkLoopbackOrigin } from "@polyth/mobile/runtime";
 import { handleNativeBack } from "./nativeMobile.ts";
 import { applyBackgroundToDom } from "./backgrounds.ts";
 import { restoreCustomWallpaper } from "./customWallpaperMemory.ts";
@@ -192,7 +193,7 @@ function Root() {
         if (nextPhase === "locked" && status.accessMode === "local") {
           // A password-less owner's Desktop window gets its session from the
           // main process, never from a sign-in form.
-          const renew = desktopBridge()?.renewOwnerSession;
+          const renew = localDesktopBridge()?.renewOwnerSession;
           if (renew && claimOwnerSessionRenewal(status, sessionStorage) && await renew().catch(() => false)) {
             if (!cancelled && !invalidated) location.reload();
             return;
@@ -217,12 +218,9 @@ function Root() {
       })
       .catch(async (error: unknown) => {
         if (cancelled || invalidated) return;
-        if (isNativeMobile() && isPolythLinkLoopbackOrigin(location.origin)
+        if (isLinkClientPage() && isPolythLinkLoopbackOrigin(location.origin)
           && claimLinkSessionBounce(error, sessionStorage)) {
-          await returnToMobileConnectionHub(
-            `${location.pathname}${location.search}${location.hash}`,
-            { resume: true },
-          );
+          await returnToConnectionHub(`${location.pathname}${location.search}${location.hash}`);
           return;
         }
         setPhase("unavailable");
@@ -254,6 +252,7 @@ function Root() {
         <h1>{tr("lockscreen.polythIsLocked")}</h1>
         <p className="lock-hint" role="status">{tr("lockscreen.couldnTReachTheServer")}</p>
         <Button onClick={reloadBehindVeil}>{tr("common.retry")}</Button>
+        <DesktopServerExit />
       </div>
     </div>
   );
