@@ -9076,6 +9076,9 @@ html[dir="rtl"] .menu-popup button {
 html[dir="rtl"] .settings-nav-item {
   text-align: right;
 }
+html[dir="rtl"] .settings-nav-chevron {
+  transform: scaleX(-1);
+}
 html[dir="rtl"] .sidebar-search > svg,
 html[dir="rtl"] .side-search svg {
   left: auto;
@@ -9215,7 +9218,7 @@ html[dir="rtl"] input[type="number"] {
 .settings-nav-list { padding: 0 8px 10px; }
 .settings-nav-group { padding: 12px 10px 4px; font-size: var(--font-meta); }
 .settings-nav-item { min-height: var(--control-h-sm); display: flex; align-items: center; padding: 0 var(--space-2); border-radius: var(--radius-control); font-size: var(--font-body); }
-.settings-nav-item.active { color: var(--accent); background: var(--accent-wash); font-weight: 650; }
+.settings-nav-item.active { color: var(--text); background: var(--accent-wash); font-weight: 650; }
 .settings-nav-icon {
   display: inline-grid;
   place-items: center;
@@ -9756,9 +9759,8 @@ html[dir="rtl"] input[type="number"] {
   .settings-nav > .nav-foot { display: none; }
   .settings-nav-search { flex: none; margin: 12px 12px 8px; }
   .settings-nav-list {
-    flex: 1; min-height: 0; padding: 0 10px 14px;
+    padding: 0 10px 14px;
     flex-direction: column; align-items: stretch; gap: 2px;
-    overflow-x: hidden; overflow-y: auto;
   }
   .settings-nav-group { display: block; }
   .settings-nav-item { flex: none; width: 100%; min-height: 42px; padding-inline: 12px; white-space: normal; }
@@ -12925,7 +12927,8 @@ html[data-modal-surface="open"] body {
   overscroll-behavior: none;
 }
 
-.settings-mobile-nav-head { display: none; }
+.settings-nav-scroll,
+.settings-mobile-nav-head { display: contents; }
 .dialog-panel,
 .settings-pane,
 .settings-pane-body,
@@ -13025,23 +13028,6 @@ min-height: var(--tap);
     border: 0;
     border-radius: 0;
   }
-  .settings-mobile-nav-head {
-    min-height: calc(var(--tap) + var(--safe-top));
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex: none;
-    padding: var(--safe-top) var(--space-2) 0;
-    border-bottom: 0;
-    background: transparent;
-  }
-  .settings-mobile-nav-head strong {
-    min-width: 0;
-    flex: 1;
-    padding-bottom: 0;
-    font-size: max(var(--font-meta), 14px);
-  }
-  .settings-mobile-nav-head .close-btn,
   .settings-mobile-page .close-btn,
   .settings-mobile-back {
     min-width: var(--tap);
@@ -19664,30 +19650,30 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     border: 0;
     background: transparent;
   }
+  /* The status bar stays clear: rows scroll under this edge, not under the
+     clock. On the layer itself, so the list keeps its place under a page. */
+  .settings-shell > .settings-nav { padding-block-start: var(--safe-top); }
+  /* The list is one scroller from the status bar down: the search row sits at
+     its top and leaves with the first rows. The results below keep their own
+     scroll, so a query fits the screen and the field stays in reach. */
+  .settings-nav-scroll {
+    min-height: 0;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .settings-mobile-nav-head {
-    min-height: calc(var(--control-h-lg) + var(--space-4) * var(--density-scale));
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-2);
     flex: none;
-    margin: calc(var(--safe-top) + var(--space-1)) calc(var(--space-4) * var(--density-scale)) calc(var(--space-3) * var(--density-scale));
-    padding: 0 calc(var(--space-2) * var(--density-scale)) 0 calc(var(--space-4) * var(--density-scale));
-    border: 1px solid var(--material-glass-border);
-    border-radius: var(--radius-sheet);
-    background: var(--material-glass-strong);
-    box-shadow: var(--shadow-sm);
+    margin: var(--space-1) calc(var(--space-4) * var(--density-scale)) calc(var(--space-3) * var(--density-scale));
   }
-  .settings-mobile-nav-head strong {
-    min-width: 0;
-    flex: 1;
-    padding: 0;
-    color: var(--text);
-    font-size: var(--font-heading);
-    font-weight: 650;
-    line-height: 1.25;
-    letter-spacing: -.015em;
-  }
-  .settings-mobile-nav-head .ui-icon-btn {
+  .settings-mobile-nav-head > .ui-icon-btn {
     width: var(--tap);
     min-width: var(--tap);
     height: var(--tap);
@@ -19698,8 +19684,9 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     display: flex;
     align-items: center;
     gap: calc(var(--space-2) * var(--density-scale));
-    flex: none;
-    margin: 0 calc(var(--space-4) * var(--density-scale)) calc(var(--space-3) * var(--density-scale));
+    min-width: 0;
+    flex: 1;
+    margin: 0;
     padding: 0 calc(var(--space-3) * var(--density-scale));
     border: 1px solid var(--material-glass-border);
     border-radius: var(--radius-surface);
@@ -19745,14 +19732,11 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     opacity: 1;
   }
   .settings-nav-list {
-    flex: 1;
-    min-height: 0;
     display: flex;
+    flex: none;
     flex-direction: column;
     gap: calc(var(--space-5) * var(--density-scale));
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    overflow: visible;
     padding: calc(var(--space-4) * var(--density-scale)) calc(var(--space-4) * var(--density-scale)) max(calc(var(--space-6) * var(--density-scale)), var(--safe-bottom));
   }
   .settings-nav-section {
@@ -19840,7 +19824,7 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
   .settings-results {
     flex: 1;
     min-height: 0;
-    margin: 0 var(--space-4) max(var(--space-6), var(--safe-bottom));
+    margin: 0 calc(var(--space-4) * var(--density-scale)) max(var(--space-6), var(--safe-bottom));
     padding: var(--space-1);
     overflow-y: auto;
     border: 1px solid var(--material-glass-border);
@@ -19860,7 +19844,6 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
   .settings-result.cursor { background: var(--surface-overlay-hover); }
 
    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
-     .settings-mobile-nav-head,
      .settings-nav-search-shell,
      .settings-nav-group-list,
      .settings-results
@@ -19872,13 +19855,11 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   }
   body[data-glass="off"] :is(
-    .settings-mobile-nav-head,
     .settings-nav-search-shell,
     .settings-nav-group-list,
     .settings-results
   ),
   body[data-desktop-low-resource="true"]:not([data-glass="off"]) :is(
-    .settings-mobile-nav-head,
     .settings-nav-search-shell,
     .settings-nav-group-list,
     .settings-results
@@ -20274,8 +20255,9 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
 .ui-checkbox:hover:not(.ui-checkbox--disabled) .ui-checkbox-box { border-color: color-mix(in srgb, var(--text) 62%, transparent); }
 
 /* ---- Settings shell (canonical; wins over the earlier tuning blocks) ----
-   Nav item states: hover = neutral overlay; selected = accent wash + accent
-   text + inline-start bar. Weight never changes, so labels never reflow. */
+   Nav item states: hover = neutral overlay; selected = accent wash + inline-
+   start bar. The label stays body ink: an accent on its own wash reached only
+   2.2-4.2:1 across the palettes. Weight never changes, so labels never reflow. */
 .settings-nav-item { font-weight: 500; }
 .settings-nav-item.active { font-weight: 500; }
 @media (min-width: 701px) {
@@ -20287,9 +20269,9 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
   @media (hover: hover) {
     .settings-nav-item:hover:where(:not(:disabled)) { color: var(--text); background: var(--surface-overlay-hover); }
   }
-  .settings-nav-item.active { color: var(--accent); background: var(--accent-wash); }
+  .settings-nav-item.active { color: var(--text); background: var(--accent-wash); }
   @media (hover: hover) {
-    .settings-nav-item.active:hover:where(:not(:disabled)) { color: var(--accent); background: var(--accent-wash); }
+    .settings-nav-item.active:hover:where(:not(:disabled)) { color: var(--text); background: var(--accent-wash); }
   }
   .settings-nav-item.active::before {
     content: ""; position: absolute; inset-block: 7px; inset-inline-start: 0;
@@ -20336,7 +20318,9 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
 
 /* Grouped search results: page header row, then its matching rows. */
 .settings-results { gap: 0; }
-.settings-result { text-align: start; }
+/* `flex: none`: the column scrolls; it must not squeeze a row until its text
+   runs over the next one. */
+.settings-result { flex: none; text-align: start; }
 .settings-result-pagehead {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
   column-gap: var(--space-2); margin-top: var(--space-2);
@@ -20395,8 +20379,10 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
 }
 .settings-head-help-slot:empty { visibility: hidden; }
 h1.settings-mobile-title { margin: 0; line-height: 1.3; }
-h1.settings-mobile-title:focus { outline: none; }
-.settings-pane-title:focus { outline: none; }
+/* These headings take focus only as a landing point for assistive tech. The
+   global :focus-visible wash would frame the title whenever Settings opens. */
+h1.settings-mobile-title:focus { outline: none; box-shadow: none; }
+.settings-pane-title:focus { outline: none; box-shadow: none; }
 
 /* Content pane stays (near-)opaque under glass so the blurred workspace never
    ghosts through rows and hints; glass remains on the nav and scrim. */

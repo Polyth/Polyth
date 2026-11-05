@@ -83,9 +83,9 @@ const settingRows = Array.from({ length: 22 }, (_, i) =>
 // A page id is a class on the shell, so a page-scoped rule can re-size the
 // layer for that page alone; Usage once kept a 4vh/2vw box on phones.
 const settings = (stage: "page" | "nav", pageId = "general") => `<div class="scrim settings-scrim"><div class="modal settings-shell settings-page-${pageId} settings-mobile-${stage}">
-  <div class="modal-nav settings-nav"><div class="settings-mobile-nav-head"><strong>Settings</strong><button class="ui-icon-btn" aria-label="Close">×</button></div>
-    <div class="settings-nav-search-shell"><input class="ui-input ui-input--sm settings-nav-search" type="search" placeholder="Search settings"></div>
-    <nav class="settings-nav-list">${Array.from({ length: 24 }, (_, i) => `<button class="settings-nav-item"><span class="settings-nav-label">Page ${i}</span></button>`).join("")}</nav></div>
+  <div class="modal-nav settings-nav"><div class="settings-nav-scroll"><div class="settings-mobile-nav-head"><h1 class="sr-only">Settings</h1>
+    <div class="settings-nav-search-shell"><input class="ui-input ui-input--sm settings-nav-search" type="search" placeholder="Search settings"></div><button class="ui-icon-btn" aria-label="Close">×</button></div>
+    <nav class="settings-nav-list">${Array.from({ length: 24 }, (_, i) => `<button class="settings-nav-item"><span class="settings-nav-label">Page ${i}</span></button>`).join("")}</nav></div></div>
   <div class="modal-main settings-pane"><div class="modal-head settings-pane-head"><div class="settings-pane-head-bar"><button class="settings-mobile-back">Back</button><h1 class="settings-mobile-title">General</h1><div class="settings-pane-head-actions"><button class="ui-icon-btn" aria-label="Close">×</button></div></div></div>
     <div class="modal-body settings-pane-body">${settingRows}</div></div></div></div>`;
 
@@ -99,7 +99,7 @@ interface Family { html: string; layer: string; head: string; scroller: string }
 const FAMILIES: Record<string, Family> = {
   "settings page": { html: shell({ inApp: settings("page") }), layer: ".settings-shell", head: ".settings-pane-head", scroller: ".settings-pane-body" },
   "usage settings page": { html: shell({ inApp: settings("page", "usage") }), layer: ".settings-shell", head: ".settings-pane-head", scroller: ".settings-pane-body" },
-  "settings navigation": { html: shell({ inApp: settings("nav") }), layer: ".settings-shell", head: ".settings-mobile-nav-head", scroller: ".settings-nav-list" },
+  "settings navigation": { html: shell({ inApp: settings("nav") }), layer: ".settings-shell", head: ".settings-mobile-nav-head", scroller: ".settings-nav-scroll" },
   "phone navigator": {
     html: shell({ inShell: `<div class="mobile-nav-backdrop"></div><nav class="mobile-navigator" role="dialog"><div class="mobile-nav-toolbar"><div class="mobile-nav-search"><input type="search" placeholder="Search"></div></div><div class="mobile-nav-scroll">${rows(22)}</div></nav>` }),
     layer: ".mobile-navigator", head: ".mobile-nav-toolbar", scroller: ".mobile-nav-scroll",
@@ -191,11 +191,20 @@ for (const variant of VARIANTS) for (const [name, family] of Object.entries(FAMI
           };
           const layerEl = document.querySelector(layer)!;
           const scrollerEl = document.querySelector<HTMLElement>(scroller)!;
+          // Read at rest: a phone Settings list carries its head in the scroller.
+          const headBox = box(document.querySelector(head))!;
           scrollerEl.scrollTop = scrollerEl.scrollHeight;
           const inputs = [...layerEl.querySelectorAll("input")].filter((input) => input.getClientRects().length > 0);
+          // A field the scroller carried away above its view scrolls back to it
+          // (the Settings search). Only this scroller moves, never the page.
+          const lastInput = inputs[inputs.length - 1];
+          if (lastInput && scrollerEl.contains(lastInput)) {
+            const above = scrollerEl.getBoundingClientRect().top - lastInput.getBoundingClientRect().top;
+            if (above > 0) scrollerEl.scrollTop -= above;
+          }
           const hitAt = (y: number) => !!document.elementFromPoint(probeX, Math.max(1, Math.min(window.innerHeight - 1, y)))?.closest(layer);
           return {
-            layer: box(layerEl)!, root: box(document.getElementById("root"))!, head: box(document.querySelector(head))!,
+            layer: box(layerEl)!, root: box(document.getElementById("root"))!, head: headBox,
             scroller: box(scrollerEl)!, lastInput: box(inputs[inputs.length - 1] ?? null),
             hitTop: hitAt(Math.max(1, (box(layerEl)!.top) + 4)),
             hitBottom: hitAt(Math.min(window.innerHeight, box(layerEl)!.bottom) - 4),

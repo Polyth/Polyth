@@ -3527,6 +3527,13 @@ host.capabilities.register({
 
 The host Settings search field shows no keyboard shortcut hint in phone mode
 (viewport at most 700px); desktop keeps its shortcut hint in the placeholder.
+On a phone the list stage has no title bar: the search field and Close share
+one row at the top of a single scroller (`.settings-nav-scroll`) and leave with
+the first rows, so nothing stays pinned over the pages. The scroller starts
+below the status bar, so rows never run under the clock. The title remains for
+assistive technology (`sr-only`, the stage's focus target). A query's results
+fit the screen and scroll on their own, so the field stays in reach. A page
+keeps its fixed Back, title and Close bar. Desktop keeps its two-pane window.
 
 - `registerPage` contributes a page into the Settings modal
   (`settings.pages` slot under the hood). `group` is one of

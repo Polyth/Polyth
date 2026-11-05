@@ -215,6 +215,28 @@ test("the phone Settings page paints an opaque material, so the list never reads
   assert.match(css, /body\[data-shell-look="obsidian"\]:not\(#\\#\) \{[^}]*--look-overlay-solid: var\(--panel\);/);
 });
 
+test("phone Settings is a phone layer in every look: full-screen material, the look's cards, no window chrome", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const look = 'body\\[data-shell-look\\]:not\\(\\[data-shell-look="standard"\\]\\):not\\(#\\\\#\\)';
+  const start = css.search(new RegExp(`@media \\(max-width: 700px\\) \\{\\s*${look} \\.scrim\\.settings-scrim > \\.settings-shell > \\.settings-pane`));
+  assert.ok(start >= 0);
+  const block = css.slice(start, css.indexOf("\n}\n", start));
+  // A floating window's corners, edge and scrim would frame the screen, with
+  // the wallpaper showing in the corners.
+  assert.match(block, /\.scrim\.settings-scrim > \.settings-shell \{[^}]*border: 0 !important;[^}]*border-radius: 0 !important;[^}]*background: var\(--look-phone-layer\) !important;/);
+  assert.match(block, /\.scrim\.settings-scrim \{[^}]*background: transparent !important;/);
+  // The two-pane nav column's seam and tint stop at the wide window.
+  assert.match(block, /\.settings-shell > \.settings-nav \{[^}]*border: 0 !important;[^}]*background: transparent !important;/);
+  // Cards speak the look's panel card, so corners and rules match its field.
+  assert.match(block, /:is\(\.settings-nav-group-list, \.settings-results\) \{[^}]*border-radius: var\(--look-widget-radius\) !important;[^}]*background: var\(--look-widget\) !important;/);
+  // A current row stays visible where the navigator's plate is the card's own material.
+  assert.match(block, /\.settings-nav-group-list > \.settings-nav-item\.active \{[^}]*background: var\(--look-list-select\) !important;/);
+  assert.match(css, /body\[data-shell-look="monolith"\]:not\(#\\#\) \{[^}]*--look-list-select: var\(--look-select\);/);
+  assert.match(css, /body\[data-shell-look="monolith-reverse"\]:not\(#\\#\) \{[^}]*--look-list-select: var\(--look-plane-solid\);/);
+  // 11px mono made iOS zoom the page on focus and read as a data readout.
+  assert.doesNotMatch(css, /:is\([^)]*\.settings-nav-search[^)]*\) \{\s*font-family: var\(--mono\)/);
+});
+
 test("every look owns the chrome a platform style paints, each piece in its role", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   const shared = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#)';

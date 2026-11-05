@@ -296,10 +296,13 @@ test("mobile Settings follows glass, rounding, density, and text preferences", {
       <div class="scrim settings-scrim">
         <section class="modal settings-shell settings-mobile-nav">
           <nav class="modal-nav settings-nav">
-            <div class="settings-mobile-nav-head"><strong>Settings</strong></div>
-            <div class="settings-nav-search-shell">
-              <input class="ui-input ui-input--sm settings-nav-search" placeholder="Search settings" />
-              <kbd class="settings-nav-search-shortcut">⌘K</kbd>
+            <div class="settings-nav-scroll">
+            <div class="settings-mobile-nav-head">
+              <h1 class="sr-only">Settings</h1>
+              <div class="settings-nav-search-shell">
+                <input class="ui-input ui-input--sm settings-nav-search" placeholder="Search settings" />
+              </div>
+              <button class="ui-icon-btn" aria-label="Close">×</button>
             </div>
             <nav class="settings-nav-list">
               <section class="settings-nav-section">
@@ -313,6 +316,7 @@ test("mobile Settings follows glass, rounding, density, and text preferences", {
                 </div>
               </section>
             </nav>
+            </div>
           </nav>
         </section>
       </div>
@@ -328,7 +332,9 @@ test("mobile Settings follows glass, rounding, density, and text preferences", {
       cardBackground: style(".settings-nav-group-list").backgroundImage,
       cardFilter: style(".settings-nav-group-list").backdropFilter,
       cardColor: style(".settings-nav-group-list").backgroundColor,
-      headRadius: style(".settings-mobile-nav-head").borderRadius,
+      headFill: style(".settings-mobile-nav-head").backgroundImage,
+      headColor: style(".settings-mobile-nav-head").backgroundColor,
+      headBorder: style(".settings-mobile-nav-head").borderTopWidth,
       searchRadius: style(".settings-nav-search-shell").borderRadius,
       rowFont: style(".settings-nav-item").fontSize,
       rowGap: style(".settings-nav-item").gap,
@@ -350,6 +356,10 @@ test("mobile Settings follows glass, rounding, density, and text preferences", {
   assert.match(clear.shellBackground, /radial-gradient/);
   assert.match(clear.shellFilter, /blur/);
   assert.match(clear.cardBackground, /radial-gradient/);
+  // The search field is the head: the row around it draws no second card.
+  assert.equal(clear.headFill, "none");
+  assert.equal(clear.headColor, "rgba(0, 0, 0, 0)");
+  assert.equal(clear.headBorder, "0px");
 
   await setState({ glass: "matte", density: "comfortable", radius: "1", font: 15 });
   const matte = await readState();
@@ -361,12 +371,10 @@ test("mobile Settings follows glass, rounding, density, and text preferences", {
   assert.equal(off.cardBackground, "none");
   assert.equal(off.cardFilter, "none");
   assert.notEqual(off.cardColor, "rgba(0, 0, 0, 0)");
-  assert.equal(off.headRadius, "0px");
   assert.equal(off.rowFont, "10px");
 
   await setState({ glass: "clear", density: "compact", radius: "2", font: 24 });
   const compact = await readState();
-  assert.equal(compact.headRadius, "32px");
   assert.equal(compact.searchRadius, "24px");
   assert.equal(compact.rowFont, "24px");
   assert.ok(Number.parseFloat(compact.rowGap) < Number.parseFloat(clear.rowGap || "0"));
@@ -375,6 +383,69 @@ test("mobile Settings follows glass, rounding, density, and text preferences", {
   const lowResource = await readState();
   assert.equal(lowResource.cardBackground, "none");
   assert.equal(lowResource.cardFilter, "none");
+});
+
+test("mobile Settings search leaves with the list, and its results scroll under it without squeezing a row", { skip: !CHROME }, async (t) => {
+  assert.ok(page);
+  t.after(async () => { await page!.setViewportSize({ width: 390, height: 720 }); });
+  const css = await read("../src/styles.css");
+  await page.setViewportSize({ width: 390, height: 720 });
+  const stage = (body: string) => `
+    <style>${css}</style>
+    <body data-glass="off" data-density="comfortable">
+      <div class="scrim settings-scrim">
+        <section class="modal settings-shell settings-mobile-nav">
+          <nav class="modal-nav settings-nav">
+            <div class="settings-nav-scroll">
+              <div class="settings-mobile-nav-head">
+                <h1 class="sr-only">Settings</h1>
+                <div class="settings-nav-search-shell ui-field-well"><input class="ui-input ui-input--sm settings-nav-search" /></div>
+                <button class="ui-icon-btn" aria-label="Close">×</button>
+              </div>
+              ${body}
+            </div>
+          </nav>
+        </section>
+      </div>
+    </body>`;
+  await page.setContent(stage(`<nav class="settings-nav-list"><section class="settings-nav-section"><div class="settings-nav-group-list">
+    ${Array.from({ length: 30 }, (_, i) => `<button class="settings-nav-item"><span class="settings-nav-label">Page ${i}</span></button>`).join("")}
+  </div></section></nav>`));
+  const list = await page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".settings-nav-scroll")!;
+    const head = document.querySelector<HTMLElement>(".settings-mobile-nav-head")!;
+    const field = document.querySelector<HTMLElement>(".settings-nav-search-shell")!.getBoundingClientRect();
+    const close = document.querySelector<HTMLElement>(".settings-mobile-nav-head > .ui-icon-btn")!.getBoundingClientRect();
+    const listScrolls = getComputedStyle(document.querySelector(".settings-nav-list")!).overflowY;
+    const top = head.getBoundingClientRect().top;
+    scroller.scrollTop = 200;
+    return {
+      top, moved: head.getBoundingClientRect().top, listScrolls,
+      sameRow: Math.abs((field.top + field.bottom) / 2 - (close.top + close.bottom) / 2) <= 1 && field.right <= close.left,
+      title: document.querySelector<HTMLElement>(".settings-mobile-nav-head h1")!.getBoundingClientRect().width,
+    };
+  });
+  assert.equal(list.moved, list.top - 200, "the search row scrolls away with the first rows");
+  assert.equal(list.listScrolls, "visible", "the list has no scroller of its own under the search row");
+  assert.ok(list.sameRow, "search and close share one row");
+  assert.ok(list.title <= 1, "the title is for assistive technology only");
+
+  await page.setContent(stage(`<div class="settings-results" role="listbox">
+    ${Array.from({ length: 30 }, (_, i) => `<button class="settings-result settings-result-item"><span class="settings-result-label">Row ${i}</span><span class="settings-result-hint">${"A longer description that wraps onto a further line. ".repeat(3)}</span></button>`).join("")}
+  </div>`));
+  const results = await page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".settings-nav-scroll")!;
+    const box = document.querySelector<HTMLElement>(".settings-results")!;
+    const rows = [...box.querySelectorAll<HTMLElement>(".settings-result")];
+    return {
+      outerOverflow: scroller.scrollHeight - scroller.clientHeight,
+      innerOverflow: box.scrollHeight - box.clientHeight,
+      squeezed: rows.filter((row) => row.scrollHeight > row.clientHeight + 1).length,
+    };
+  });
+  assert.ok(results.outerOverflow <= 1, "a query fits the screen: the field stays in reach");
+  assert.ok(results.innerOverflow > 0, "the results scroll on their own");
+  assert.equal(results.squeezed, 0, "no result row is squeezed until its text runs over the next");
 });
 
 test("390px folder dialog Open control stays reachable without a type picker", { skip: !CHROME }, async () => {

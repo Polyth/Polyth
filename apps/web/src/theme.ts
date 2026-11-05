@@ -222,7 +222,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
     tokens: {
       bg: "#fdf6e3", panel: "#f3ecd9", elevated: "#fffdf5", raised: "#f5eeda", sunken: "#e9e2cd", inputBg: "#fffdf5",
       border: "#d5cdb4", borderSoft: "#e2dbc4",
-      text: "#3b4a51", textDim: "#586e75", muted: "#4b575c", faint: "#56656b",
+      text: "#3b4a51", textDim: "#4f646b", muted: "#4b575c", faint: "#56656b",
       accent: "#2aa198", accentInk: "#002b36", accentHi: "#35b3aa",
       green: "#586b00", amber: "#765900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
     },
