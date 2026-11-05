@@ -3102,7 +3102,7 @@ dependencies = [
 name = "polyth-link-client"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "hex",
  "httparse",
  "iroh",
@@ -3120,7 +3120,7 @@ dependencies = [
 name = "polyth-link-core"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "ciborium",
  "futures-util",
  "hex",
@@ -3148,7 +3148,7 @@ dependencies = [
 name = "polyth-link-host"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "hex",
  "httparse",
  "iroh",
