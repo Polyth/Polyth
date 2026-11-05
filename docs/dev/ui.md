@@ -1580,6 +1580,12 @@ menu after an action succeeds. Use
 the shared menu-item styling and semantics so keyboard navigation includes the
 contributed action; unregister it when the package is disabled.
 
+`sidebar.project.actions` renders in the footer of a project's action menu
+(the desktop card menu and the project rail menu). Contributions receive
+`projectId` and `closeMenu()`; close the menu as soon as an action takes over
+the interaction. A footer contribution is unmounted with its menu, so content
+that must outlive the dropdown (a dialog, a panel) belongs in `app.layers`.
+
 **Navigator multi-select.** A select toggle (`SelectIcon`, `aria-pressed`)
 sits immediately left of the session search field in the desktop service
 bar, right after the search tool in the phone navigator header, and beside
@@ -3271,6 +3277,12 @@ host.surfaces.register({
   one of its pages is open) is not an outside click for a dynamic window;
   otherwise pointerdown dismisses the window and the click reopens it. A new
   launcher surface must carry the attribute.
+- **A floating window never resizes from its content edge:** its width handle
+  is the inline-start edge (the side facing Chat), with the top/bottom edges
+  and the start corners; the inline-end edge carries the scrollbar and is not
+  a resize edge. A hit area there intercepted wheel and touch scrolling and
+  grew an empty strip beside the window. Pointer and keyboard resizing both
+  use the same start-edge handle (`ContextRail` `RESIZE_EDGES`).
 - **Keep the pinned window** (Settings → Behavior → *Package windows*,
   `UiSettings.sharedPinnedWindow`, on by default; a record saved before
   `sharedPinnedWindowVersion` 2 was written while it was opt-in, so its

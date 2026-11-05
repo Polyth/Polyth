@@ -846,6 +846,13 @@ export default function Sidebar() {
     setProjectMenuOpenId(id);
     setProjectMenuSource(source);
   };
+  // Package rows live in the menu footer, so selecting one does not go through
+  // Menu's own select() and must dismiss the menu explicitly.
+  const closeProjectMenu = () => {
+    setProjectMenuOpenId(null);
+    setProjectMenuSource(null);
+    requestAnimationFrame(() => projectMenuReturnRef.current?.focus());
+  };
   const onProjectContextMenu = (event: ReactMouseEvent<HTMLElement>, id: string, source: "card" | "rail") => {
     event.preventDefault();
     event.stopPropagation();
@@ -985,7 +992,7 @@ export default function Sidebar() {
             }}
             returnFocusRef={projectMenuReturnRef}
             entries={projectMenuEntries(p)}
-            footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />}
+            footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id, closeMenu: closeProjectMenu }} />}
           >
             {(trigger) => (
               <button
@@ -1107,7 +1114,7 @@ export default function Sidebar() {
                     }}
                     returnFocusRef={projectMenuReturnRef}
                     entries={projectMenuEntries(candidate)}
-                    footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: candidate.id }} />}
+                    footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: candidate.id, closeMenu: closeProjectMenu }} />}
                   >
                     {(trigger) => (
                       <Tooltip

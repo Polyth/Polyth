@@ -1,5 +1,5 @@
 import "./styles.css";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SessionProjection } from "@polyth/contracts";
 import ProviderLogo from "@polyth/models/provider-logo";
 import { createApiTransport, defineWebPackage } from "@polyth/web-sdk";
@@ -30,13 +30,60 @@ type Source = {
 
 const listId = (id: string) => `pkg-session-import-list-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
+// The picker lives in the shell's floating layer, so closing the project menu
+// that opened it never unmounts the dialog (a footer contribution is unmounted
+// with its menu). The menu only publishes the request.
+let openProjectId: string | null = null;
+const listeners = new Set<() => void>();
+const emit = () => { for (const listener of listeners) listener(); };
+
+function openImportDialog(projectId: string): void {
+  openProjectId = projectId;
+  emit();
+}
+
+function closeImportDialog(): void {
+  openProjectId = null;
+  emit();
+}
+
+function subscribeImportDialog(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** The project-menu row. It only opens the picker; the dialog itself is mounted
+ * once in `app.layers`, so the menu can close immediately. */
+export function ImportMenuEntry({ projectId, closeMenu }: { projectId: string; closeMenu?: () => void }) {
+  return (
+    <div className="pkg-session-import">
+      <button
+        type="button"
+        role="menuitem"
+        className="ui-menu-item pkg-session-import-trigger"
+        onClick={() => {
+          closeMenu?.();
+          openImportDialog(projectId);
+        }}
+      >
+        <Icon icon={DownloadIcon} size="sm" aria-hidden="true" />
+        <span className="ui-menu-item-label">{tr("importsessionsdialog.importSessions")}</span>
+      </button>
+    </div>
+  );
+}
+
+export function ImportDialogLayer() {
+  const projectId = useSyncExternalStore(subscribeImportDialog, () => openProjectId, () => null);
+  return projectId === null ? null : <ImportDialog key={projectId} projectId={projectId} onClose={closeImportDialog} />;
+}
+
 /** The one session-import surface. It lists every registered harness, so a new
  * backend appears without touching this package, and groups the native
  * conversations as collapsed accordions. The top filter matches any part of a
  * title and force-opens every group that still has a match. */
-function ImportMenuEntry({ projectId }: { projectId: string }) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+function ImportDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
   const [sources, setSources] = useState<Source[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -49,28 +96,17 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
   const searchPending = query !== deferredQuery;
   const searching = deferredQuery.trim() !== "";
 
-  const browse = async () => {
-    setOpen(true);
-    setLoading(true);
-    setError("");
-    setSelected(new Set());
-    setExpanded(new Set());
-    setQuery("");
-    setProgress(null);
-    setFailureCount(0);
-    try {
-      setSources(await api.get<Source[]>(
-        `/api/session-import/sources?projectId=${encodeURIComponent(projectId)}`,
-      ));
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    let live = true;
+    api.get<Source[]>(`/api/session-import/sources?projectId=${encodeURIComponent(projectId)}`)
+      .then((next) => { if (live) setSources(next); })
+      .catch((cause: unknown) => { if (live) setError((cause as Error).message); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [projectId]);
 
   const close = () => {
-    if (!busy) setOpen(false);
+    if (!busy) onClose();
   };
 
   const toggle = (ref: string) => {
@@ -151,7 +187,7 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
     setSelected(new Set());
     if (failed === 0) {
       if (imported === 1 && last) await openSession(last.id);
-      setOpen(false);
+      onClose();
     }
   };
 
@@ -159,46 +195,35 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
   const showFilter = !loading && sources.length > 0;
 
   return (
-    <div className="pkg-session-import">
-      <button
-        type="button"
-        role="menuitem"
-        className="ui-menu-item pkg-session-import-trigger"
-        onClick={() => void browse()}
-      >
-        <Icon icon={DownloadIcon} size="sm" aria-hidden="true" />
-        <span className="ui-menu-item-label">{tr("importsessionsdialog.importSessions")}</span>
-      </button>
-      {open && (
-        <Dialog
-          title={tr("importsessionsdialog.importSessions")}
-          className="import-sessions-dialog pkg-session-import-dialog"
-          size="lg"
-          onClose={close}
-          footer={(
-            <>
-              <span className="muted pkg-session-import-hint">
-                {tr("importsessionsdialog.historyLoadsTheFirstTimeAnImported")}
-              </span>
-              <span className="header-spacer" />
-              <Button size="sm" disabled={busy} onClick={close}>{tr("common.cancel")}</Button>
-              <Button
-                size="sm"
-                variant="primary"
-                busy={busy}
-                disabled={loading || importCount === 0}
-                onClick={() => void importSelected()}
-              >
-                {busy
-                  ? tr("importsessionsdialog.importing")
-                  : importCount > 0
-                    ? `${tr("importsessionsdialog.importSessions")} · ${importCount}`
-                    : tr("importsessionsdialog.importSessions")}
-              </Button>
-            </>
-          )}
-        >
-          <div className="pkg-session-import-body">
+    <Dialog
+      title={tr("importsessionsdialog.importSessions")}
+      className="import-sessions-dialog pkg-session-import-dialog"
+      size="lg"
+      onClose={close}
+      footer={(
+        <>
+          <span className="muted pkg-session-import-hint">
+            {tr("importsessionsdialog.historyLoadsTheFirstTimeAnImported")}
+          </span>
+          <span className="header-spacer" />
+          <Button size="sm" disabled={busy} onClick={close}>{tr("common.cancel")}</Button>
+          <Button
+            size="sm"
+            variant="primary"
+            busy={busy}
+            disabled={loading || importCount === 0}
+            onClick={() => void importSelected()}
+          >
+            {busy
+              ? tr("importsessionsdialog.importing")
+              : importCount > 0
+                ? `${tr("importsessionsdialog.importSessions")} · ${importCount}`
+                : tr("importsessionsdialog.importSessions")}
+          </Button>
+        </>
+      )}
+    >
+      <div className="pkg-session-import-body">
             <p className="muted pkg-session-import-intro">{tr("sessionimport.intro")}</p>
 
             {progress && (
@@ -355,14 +380,27 @@ function ImportMenuEntry({ projectId }: { projectId: string }) {
               </div>
             )}
           </div>
-        </Dialog>
-      )}
-    </div>
+    </Dialog>
   );
 }
 
-export default defineWebPackage((host) => () => host.slots.register({
-  id: "session-import.open",
-  slot: "sidebar.project.actions",
-  render: (props) => <ImportMenuEntry projectId={String(props.projectId)} />,
-}));
+export default defineWebPackage((host) => () => {
+  const off = [
+    host.slots.register({
+      id: "session-import.open",
+      slot: "sidebar.project.actions",
+      render: (props) => (
+        <ImportMenuEntry
+          projectId={String(props.projectId)}
+          closeMenu={typeof props.closeMenu === "function" ? props.closeMenu as () => void : undefined}
+        />
+      ),
+    }),
+    host.slots.register({
+      id: "session-import.dialog",
+      slot: "app.layers",
+      render: () => <ImportDialogLayer />,
+    }),
+  ];
+  return () => { for (const dispose of off.toReversed()) dispose(); };
+});
