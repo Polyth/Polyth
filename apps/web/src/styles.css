@@ -14987,22 +14987,17 @@ width: 100%;
 .package-window-resize--n, .package-window-resize--s { inset-inline: var(--space-3); height: var(--package-window-resize-hit); }
 .package-window-resize--n { inset-block-start: 0; cursor: ns-resize; }
 .package-window-resize--s { inset-block-end: 0; cursor: ns-resize; }
-.package-window-resize--e, .package-window-resize--w { inset-block: var(--space-3); width: var(--package-window-resize-hit); }
-.package-window-resize--e { inset-inline-end: 0; cursor: ew-resize; }
-.package-window-resize--w { inset-inline-start: 0; cursor: ew-resize; }
-.package-window-resize--ne, .package-window-resize--nw,
-.package-window-resize--se, .package-window-resize--sw { width: var(--space-3); height: var(--space-3); }
-/* Corners are logical like the edges ("e" = inline end), so an RTL locale or a
-   mirrored shell (shellDirection.ts) puts them on the matching side. */
-.package-window-resize--ne { inset-block: 0 auto; inset-inline: auto 0; cursor: nesw-resize; }
+/* No inline-end (content/scrollbar) edge: a resize hit area there intercepted
+   wheel and touch scrolling and left an empty strip beside the window. The
+   window resizes from its inline start, top/bottom edges and start corners. */
+.package-window-resize--w { inset-block: var(--space-3); width: var(--package-window-resize-hit); inset-inline-start: 0; cursor: ew-resize; }
+.package-window-resize--nw, .package-window-resize--sw { width: var(--space-3); height: var(--space-3); }
+/* Corners are logical like the edges ("w" = inline start), so an RTL locale or
+   a mirrored shell (shellDirection.ts) puts them on the matching side. */
 .package-window-resize--nw { inset-block: 0 auto; inset-inline: 0 auto; cursor: nwse-resize; }
-.package-window-resize--se { inset-block: auto 0; inset-inline: auto 0; cursor: nwse-resize; }
-.rail-dynamic > .package-window-resize--e,
-.rail-dynamic > .package-window-resize--ne,
-.rail-dynamic > .package-window-resize--se { inset-inline-end: var(--package-window-seam-padding); }
 .package-window-resize--sw { inset-block: auto 0; inset-inline: 0 auto; cursor: nesw-resize; }
-.package-window-resize:is(.package-window-resize--ne, .package-window-resize--sw):dir(rtl) { cursor: nwse-resize; }
-.package-window-resize:is(.package-window-resize--nw, .package-window-resize--se):dir(rtl) { cursor: nesw-resize; }
+.package-window-resize--sw:dir(rtl) { cursor: nwse-resize; }
+.package-window-resize--nw:dir(rtl) { cursor: nesw-resize; }
 .package-window-resize:focus-visible { outline: var(--focus-ring); outline-offset: calc(-1 * var(--package-window-resize-hit)); }
 html[data-package-window-resizing="true"] { user-select: none; cursor: grabbing; }
 html[data-package-window-resizing="true"] :is(.rail-workspace, .app-shell:has(.rail-dock-bottom)) { transition: none; }

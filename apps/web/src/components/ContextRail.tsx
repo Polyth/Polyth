@@ -97,7 +97,12 @@ const RESIZE_STEP_LARGE = 64;
 const BOTTOM_DOCK_MIN = 160;
 const BOTTOM_DOCK_CHAT_FLOOR = 240;
 type ResizeEdge = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
-const RESIZE_EDGES: ResizeEdge[] = ["n", "ne", "e", "se", "s", "sw", "w", "nw"];
+/** Draggable edges of a floating package window. The inline end is omitted:
+ *  that edge carries the window's scrollbar, so a resize hit area there
+ *  swallowed wheel/touch scrolling and grew an empty strip beside it. A
+ *  floating window resizes from the inline start (and its corners) and from
+ *  the top/bottom edges, never from the content's trailing edge. */
+const RESIZE_EDGES: ResizeEdge[] = ["n", "nw", "w", "sw", "s"];
 
 // Small count badge on strip buttons.
 function Badge({ n }: { n: number }) {
@@ -1085,11 +1090,12 @@ export default function ContextRail() {
     window.addEventListener("pointercancel", up, { once: true });
   };
 
-  const onDynamicResizeKey = (edge: "e" | "s", e: ReactKeyboardEvent) => {
+  const onDynamicResizeKey = (edge: ResizeEdge, e: ReactKeyboardEvent) => {
     if (!dynamic || open === null) return;
     const step = e.shiftKey ? RESIZE_STEP_LARGE : RESIZE_STEP;
-    if (edge === "e") {
-      const grow = paneRtl() ? "ArrowLeft" : "ArrowRight";
+    if (edge === "w" || edge === "e") {
+      // Growing away from the inline start moves left in LTR and right in RTL.
+      const grow = (edge === "w") !== paneRtl() ? "ArrowLeft" : "ArrowRight";
       const next = e.key === "Home" ? dynamicMinWidth
         : e.key === "End" ? dynamicMaxWidth
           : e.key === "ArrowLeft" || e.key === "ArrowRight" ? dynamicWidth + (e.key === grow ? step : -step) : null;
@@ -1100,6 +1106,7 @@ export default function ContextRail() {
       commitWidth(width);
       return;
     }
+    if (edge !== "s") return;
     const next = e.key === "Home" ? dynamicMinHeight
       : e.key === "End" ? dynamicMaxHeight
         : e.key === "ArrowUp" ? dynamicHeight - step
@@ -1359,15 +1366,15 @@ export default function ContextRail() {
             <div
               key={edge}
               className={`package-window-resize package-window-resize--${edge}`}
-              aria-hidden={edge !== "e" && edge !== "s"}
-              {...(edge === "e" || edge === "s" ? {
+              aria-hidden={edge === "w" || edge === "s" ? undefined : true}
+              {...(edge === "w" || edge === "s" ? {
                 tabIndex: 0,
                 role: "separator",
-                "aria-orientation": edge === "e" ? "vertical" as const : "horizontal" as const,
+                "aria-orientation": edge === "w" ? "vertical" as const : "horizontal" as const,
                 "aria-label": tr("contextrail.resizeValue", { value: paneSurface?.title ?? tr("contextrail.panel") }),
-                "aria-valuemin": edge === "e" ? dynamicMinWidth : dynamicMinHeight,
-                "aria-valuemax": edge === "e" ? dynamicMaxWidth : dynamicMaxHeight,
-                "aria-valuenow": edge === "e" ? dynamicWidth : dynamicHeight,
+                "aria-valuemin": edge === "w" ? dynamicMinWidth : dynamicMinHeight,
+                "aria-valuemax": edge === "w" ? dynamicMaxWidth : dynamicMaxHeight,
+                "aria-valuenow": edge === "w" ? dynamicWidth : dynamicHeight,
                 onKeyDown: (event: ReactKeyboardEvent) => onDynamicResizeKey(edge, event),
               } : {})}
               onPointerDown={(event) => onDynamicResizeDown(edge, event)}

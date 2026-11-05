@@ -1118,18 +1118,26 @@ test("package window resizes and preserves dynamic, pinned, and fullscreen behav
     };
 
     // Measure the window at rest: it slides in, and a mid-entrance box puts
-    // the east handle under the right rail.
+    // the inline-start handle under the right rail.
     await waitForAnimations(page, '[data-package-window-owner="workflow"]');
     const initial = await window.boundingBox();
     assert.ok(initial);
-    const east = window.locator(".package-window-resize--e");
-    const eastBox = await east.boundingBox();
-    assert.ok(eastBox);
-    const minWidth = Number(await east.getAttribute("aria-valuemin"));
-    const delta = initial.width > minWidth + 24 ? -24 : 24;
-    await drag(".package-window-resize--e", eastBox.x + eastBox.width / 2 + delta, initial.y + initial.height / 2);
-    const resized = await window.boundingBox();
-    assert.ok(resized && Math.abs(resized.x + resized.width - (initial.x + initial.width + delta)) <= 3);
+    assert.equal(
+      await window.locator(".package-window-resize--e").count(),
+      0,
+      "the content/scrollbar edge must not offer manual resizing",
+    );
+    const west = window.locator(".package-window-resize--w");
+    assert.equal(await west.getAttribute("aria-hidden"), null);
+    const westBox = await west.boundingBox();
+    assert.ok(westBox);
+    await drag(".package-window-resize--w", westBox.x + westBox.width / 2 - 24, initial.y + initial.height / 2);
+    const widened = await window.boundingBox();
+    assert.ok(widened && widened.width >= initial.width + 20);
+    assert.ok(
+      widened && Math.abs(widened.x + widened.width - (initial.x + initial.width)) <= 3,
+      "growing from the inline start keeps the window anchored to its launcher seam",
+    );
 
     await drag(".package-window-resize--w", 0, initial.y + initial.height / 2);
     const widest = await window.boundingBox();
@@ -1150,7 +1158,7 @@ test("package window resizes and preserves dynamic, pinned, and fullscreen behav
     const shortest = await window.boundingBox();
     assert.ok(shortest && shortest.height <= tallest.height && shortest.height >= 240);
 
-    const keyboardResize = window.locator('.package-window-resize--e[role="separator"]');
+    const keyboardResize = window.locator('.package-window-resize--w[role="separator"]');
     await keyboardResize.focus();
     await page.keyboard.press("End");
     await waitForAnimations(page, '[data-package-window-owner="workflow"]');
