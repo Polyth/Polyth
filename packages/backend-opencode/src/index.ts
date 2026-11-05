@@ -277,9 +277,11 @@ interface SessionMaps {
 
 /** A title utility turn runs on OpenCode's hidden, tool-less `title` agent: the
  * default `build` agent sends ~15k tokens of tools and project instructions,
- * which weak (free) models then title instead of the request. */
+ * which weak (free) models then title instead of the request. A `minimal`
+ * utility turn only needs some reply at the lowest token cost, which is the
+ * same agent. */
 export const turnAgent = (req: Pick<CanonicalTurnRequest, "agent" | "utility">): string | undefined =>
-  req.agent ?? (req.utility?.purpose === "custom-title" ? "title" : undefined);
+  req.agent ?? (req.utility?.purpose === "custom-title" || req.utility?.purpose === "minimal" ? "title" : undefined);
 
 const mapsFrom = (sessionIdMap?: Map<string, string>): SessionMaps => {
   const forward = sessionIdMap ?? new Map<string, string>();

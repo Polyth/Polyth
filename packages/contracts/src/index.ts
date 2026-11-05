@@ -4631,6 +4631,13 @@ export interface HarnessProvider {
    * and never falls back to another login. Absent means the provider's
    * default account. Must not start a process. */
   limitsAccount?(): HarnessLimitsAccount | undefined;
+  /** One stateless completion on this harness's own login, answered by its
+   * CLI's print mode: no runtime, native session or project, so background work
+   * that has none can reach a harness whose runtime exists only for a canonical
+   * session. It runs a real model turn in `request.cwd`, and only on this
+   * server's own login. `request.model` is required. Absent: use a project
+   * runtime's `completeSmallModel`. */
+  completeUtility?(request: SmallModelCompletionRequest): Promise<SmallModelCompletionResult>;
 }
 export interface HarnessRegistry {
   register(provider: HarnessProvider): Disposable;

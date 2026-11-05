@@ -160,9 +160,10 @@ test("OpenCode refuses a prompt receipt when the runtime generation changes duri
   assert.deepEqual(receipts, []);
 });
 
-test("only a title utility turn selects OpenCode's tool-less title agent", async () => {
+test("only a title or a minimal utility turn selects OpenCode's tool-less title agent", async () => {
   const { turnAgent } = await import("../src/index.ts");
   assert.equal(turnAgent({ utility: { purpose: "custom-title" } }), "title");
+  assert.equal(turnAgent({ utility: { purpose: "minimal" } }), "title");
   assert.equal(turnAgent({ utility: { purpose: "commit-message" } }), undefined);
   assert.equal(turnAgent({}), undefined);
   assert.equal(turnAgent({ agent: "plan", utility: { purpose: "custom-title" } }), "plan");

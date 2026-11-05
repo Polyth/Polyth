@@ -402,6 +402,10 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
                 throw error;
             }
         },
+        async completeUtility(request: SmallModelCompletionRequest) {
+            const { command, env } = await resolveBinary();
+            return createClaudeSmallModelRunner({ command, cwd: request.cwd, env }).complete(request);
+        },
         async releaseExecution(context, binding, operationId) {
             if (!context.space)
                 return { kind: "rejected", code: "unsupported", message: "Local Space context required" };

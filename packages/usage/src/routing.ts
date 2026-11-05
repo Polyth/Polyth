@@ -12,7 +12,7 @@ import type {
 } from "@polyth/plugins";
 import type { UsageObservation } from "./analytics/contracts.ts";
 import type { UsageLimitSnapshot } from "./limits.ts";
-import { currentLimitSources, sourceFamily, windowAppliesToModel, type LimitSourceRef } from "./limitSources.ts";
+import { currentLimitSources, sourceFamily, windowMetersModel, type LimitSourceRef } from "./limitSources.ts";
 import { canonicalHarnessId, canonicalProviderId, isPlaceholderProviderId } from "./providerIdentity.ts";
 
 export const DEFAULT_ROUTING_LIMIT = 12;
@@ -54,20 +54,6 @@ export function parseFavoriteKey(key: string): { harnessId: string; providerID: 
   if (slash <= 0 || slash === rest.length - 1) return undefined;
   return { harnessId: canonicalHarnessId(harnessId), providerID: rest.slice(0, slash), modelID: rest.slice(slash + 1) };
 }
-
-/** The Limits widget's own rules (`limitSources.ts`) decide which sources and
- *  windows meter a pair, so the shortlist and the widget never disagree. One
- *  refinement: Antigravity meters Google and third-party models in separate
- *  `google-*` / `third-party-*` windows. The widget shows both; a routing
- *  decision must not call a Gemini model blocked by the third-party window. */
-const windowApplies = (source: LimitSourceRef, windowId: string, modelID: string): boolean => {
-  if (!windowAppliesToModel(windowId, modelID)) return false;
-  if (sourceFamily(source) !== "antigravity") return true;
-  const google = /gemini|gemma|google/i.test(modelID);
-  if (/^google[-_]/i.test(windowId)) return google;
-  if (/^third[-_]party[-_]/i.test(windowId)) return !google;
-  return true;
-};
 
 /** Metered windows only: balances and zero-limit placeholders carry no headroom. */
 const meteredWindows = (snapshot: UsageLimitSnapshot) =>
@@ -263,7 +249,7 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
     for (const snapshot of snapshots) {
       if (!sources.has(snapshot.providerId)) continue;
       for (const window of meteredWindows(snapshot)) {
-        if (!windowApplies(snapshot, window.id, tally.quotaModel)) continue;
+        if (!windowMetersModel(snapshot, window.id, tally.quotaModel)) continue;
         // A window whose reset already passed no longer constrains anything.
         if (window.resetsAt !== undefined && window.resetsAt <= input.now) continue;
         const used = Math.min(1, window.used / window.limit);

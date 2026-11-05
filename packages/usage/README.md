@@ -157,6 +157,8 @@ A harness can run several native logins, for example a second Claude Code accoun
 - an Antigravity account's `agy` runs with `HOME` set to the account directory, so it reads only `<configDir>/.gemini/antigravity-cli/antigravity-oauth-token`, never the default `~/.gemini` login, `GEMINI_CLI_HOME`/`ANTIGRAVITY_CLI_HOME`, the OpenCode plugin's `antigravity-accounts.json` or the OpenCode auth file. The delegation shortlist's `google-*` / `third-party-*` split applies to account sources by family;
 - only families with an account reader are discovered. Today those are `claude`, `codex` and `antigravity`; other families are ignored until Usage can read one account's credentials for them.
 
+The source rules are also a public subpath, `@polyth/usage/limit-sources` (`canonicalSource`, `canonicalModelSource`, `sourceFamily`, `windowMetersModel`), so a package that acts on these windows answers the same question the same way. [Limit windows](../limit-windows/README.md) does, and reads the snapshots through the `usage-limits` service.
+
 The Limits page, settings and widget name an account source `<source> · <account>` (`Claude · Work`) and keep it next to its family's default source.
 
 ## Delegation shortlist

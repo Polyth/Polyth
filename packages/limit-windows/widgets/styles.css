@@ -1,0 +1,230 @@
+/* Settings → Limit windows. Type and hairlines carry the page; the only drawn
+   object is the forecast strip. Everything is scoped under this package's root. */
+.limit-windows-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  min-width: 0;
+}
+
+.limit-windows-note {
+  margin: 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--muted);
+}
+
+.limit-windows-meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.limit-windows-meter + .limit-windows-meter {
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--hair);
+}
+
+.limit-windows-meter-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  min-width: 0;
+}
+
+.limit-windows-meter-name {
+  font-size: var(--font-label);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.limit-windows-meter-state {
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--muted);
+}
+
+.limit-windows-next {
+  margin: 0;
+  max-width: 65ch;
+  font-size: var(--font-label);
+  color: var(--text-dim);
+}
+
+.limit-windows-next[data-attention="true"] {
+  color: var(--amber-on-wash);
+}
+
+/* ---- forecast strip ------------------------------------------------------ */
+.limit-windows-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block-start: var(--space-1);
+  min-width: 0;
+}
+
+.limit-windows-strip-track {
+  position: relative;
+  height: 10px;
+  overflow: hidden;
+  background: var(--surface-overlay);
+  border-radius: var(--radius-round);
+}
+
+.limit-windows-strip-window {
+  position: absolute;
+  inset-block: 0;
+}
+
+.limit-windows-strip-window[data-kind="running"] {
+  background: var(--accent);
+}
+
+.limit-windows-strip-window[data-kind="planned"] {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.limit-windows-strip-hour {
+  position: absolute;
+  inset-block: 0;
+  width: 2px;
+  margin-inline-start: -1px;
+  background: var(--text);
+}
+
+.limit-windows-strip-labels {
+  position: relative;
+  min-height: 1.4em;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.limit-windows-strip-label {
+  position: absolute;
+  white-space: nowrap;
+}
+
+/* ---- start now and history ----------------------------------------------- */
+.limit-windows-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.limit-windows-failure {
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--red);
+}
+
+.limit-windows-history > summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--muted);
+}
+
+.limit-windows-history > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+.limit-windows-history ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  color: var(--text-dim);
+}
+
+.limit-windows-history li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  min-width: 0;
+}
+
+.limit-windows-history-at {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.limit-windows-history-outcome {
+  overflow-wrap: anywhere;
+}
+
+.limit-windows-history li[data-outcome="failed"] .limit-windows-history-outcome {
+  color: var(--red);
+}
+
+.limit-windows-history li[data-outcome="no-effect"] .limit-windows-history-outcome {
+  color: var(--amber-on-wash);
+}
+
+/* ---- plan controls ------------------------------------------------------- */
+.limit-windows-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1) var(--space-2);
+}
+
+.limit-windows-time {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.limit-windows-time input,
+.limit-windows-range input {
+  width: 7em;
+  font-variant-numeric: tabular-nums;
+}
+
+.limit-windows-days {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.limit-windows-range {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.limit-windows-range label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-label);
+  color: var(--text-dim);
+}
+
+.limit-windows-meter-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.limit-windows-meter-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-label);
+  color: var(--text);
+}

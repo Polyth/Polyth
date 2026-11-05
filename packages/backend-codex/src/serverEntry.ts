@@ -185,6 +185,10 @@ export function createCodexProvider(host: ServerPackageHost, account?: ResolvedH
             runtime.completeSmallModel = (request: SmallModelCompletionRequest) => smallModel.complete(request);
             return runtime;
         },
+        async completeUtility(request: SmallModelCompletionRequest) {
+            const command = await resolveCodexBinary();
+            return createCodexSmallModelRunner({ command, cwd: request.cwd, env: await codexEnv(command, account) }).complete(request);
+        },
         async releaseExecution(context, binding, operationId) {
             if (!context.space)
                 return { kind: "rejected", code: "unsupported", message: "Local Space context required" };
