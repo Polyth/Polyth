@@ -43,7 +43,7 @@ const BEA = { userId: "usr_bea", name: "Bea" };
 const CY = { userId: "usr_cy", name: "Cy" };
 const start = Date.UTC(2026, 9, 13, 9, 0);
 
-async function mount(sessionId: string, messages: Array<[number, typeof ANN, string]>) {
+async function mount(sessionId: string, messages: Array<[number, typeof ANN, string, Partial<{ attachments: unknown }>?]>) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
@@ -51,9 +51,9 @@ async function mount(sessionId: string, messages: Array<[number, typeof ANN, str
     activateProject("family");
     setSessions("family", [{ id: sessionId, projectId: "family", title: "Talk", status: "idle", purpose: "conversation", createdAt: 1, updatedAt: 1 }]);
     activateSession(sessionId);
-    messages.forEach(([minute, author, text], index) => applyEvent({
+    messages.forEach(([minute, author, text, extra], index) => applyEvent({
       id: `${sessionId}-${index + 1}`, sessionId, seq: index + 1, time: start + minute * 60_000,
-      type: "person/message", data: { text, author, mentions: [] } as JsonObject, v: 1,
+      type: "person/message", data: { text, author, mentions: [], ...(extra ?? {}) } as JsonObject, v: 1,
     } satisfies SessionEvent));
     root.render(createElement(Timeline, { model: reduceSessionModel(sessionId, getState().events[sessionId] ?? []) }));
   });
@@ -123,6 +123,22 @@ test("a second other voice names each run and marks its last bubble", async () =
     assert.notEqual(toneOf(3, ".person-message-author"), bea, "two people never share a colour");
     assert.equal(toneOf(3, ".person-message-mark"), toneOf(3, ".person-message-author"));
     assert.equal(view.host.querySelector(".msg.person-message.is-own [data-person-tone]"), null);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("a person message shows the attachments it carried", async () => {
+  const view = await mount("files", [[0, BEA, "see this", { attachments: [
+    { id: "att-shot", name: "screen.png", mime: "image/png", size: 1024, kind: "url", url: "https://example.com/screen.png" },
+  ] }], [1, ANN, "thanks"]]);
+  try {
+    const row = view.host.querySelector<HTMLElement>(".msg.person-message[data-message-seq='1']");
+    assert.ok(row);
+    assert.equal(row.querySelectorAll(".person-message-stack .attachment-pill").length, 1);
+    assert.match(row.querySelector(".att-name")?.textContent ?? "", /screen\.png/);
+    // The next message is its own bubble without pills.
+    assert.equal(view.host.querySelector(".msg.person-message[data-message-seq='2'] .attachment-pill"), null);
   } finally {
     await view.unmount();
   }

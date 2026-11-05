@@ -302,7 +302,14 @@ export function contextPressureText(input: {
 }
 
 export { effectiveHistory, isContextFreeNativeCommand, recoveredUserText } from "./history.ts";
-export { PACKAGE_CONTEXT_OPEN, PENDING_PACKAGE_CONTEXT_MAX_CHARS, pendingPackageContext } from "./packageContext.ts";
+export {
+  PACKAGE_CONTEXT_OPEN,
+  PENDING_PACKAGE_CONTEXT_MAX_CHARS,
+  pendingPackageContext,
+  pendingPackageContextItems,
+  pendingPersonMessageAttachments,
+  type PendingPackageContextItem,
+} from "./packageContext.ts";
 export { latestCompletedExchange, type CompletedExchange } from "./nextAction.ts";
 
 export {

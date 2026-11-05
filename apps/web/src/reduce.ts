@@ -184,6 +184,8 @@ export interface PersonMessageMsg {
   id: string;
   eventSeq: number;
   text: string;
+  /** Attachments the author sent with the message, as prepared server-side. */
+  attachments?: AttachmentRef[];
   author?: SessionPerson;
   mentions: SessionPerson[];
   carryToAgent?: boolean;
@@ -1013,6 +1015,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         time: ev.time,
       };
       if (author) msg.author = author;
+      // Attachment pills on a person's message: keep only well-formed refs.
+      const attachmentsValue = (d as { attachments?: unknown }).attachments;
+      if (Array.isArray(attachmentsValue)) {
+        const refs = attachmentsValue.filter((attachment): attachment is AttachmentRef =>
+          typeof attachment === "object" && attachment !== null
+          && typeof (attachment as { name?: unknown }).name === "string"
+          && typeof (attachment as { mime?: unknown }).mime === "string");
+        if (refs.length > 0) msg.attachments = refs;
+      }
       if (d.carryToAgent === true) msg.carryToAgent = true;
       const replyToSeq = num(d, "replyToSeq");
       if (replyToSeq !== undefined) msg.replyToSeq = replyToSeq;

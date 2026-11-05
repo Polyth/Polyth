@@ -208,6 +208,49 @@ test("posting appends a canonical event, never starts a turn, and ignores a call
   );
 });
 
+test("attachments travel with a person message and may stand alone", async (t) => {
+  const h = await harness(t);
+  const attachment = {
+    id: "att-screenshot", name: "screen.png", mime: "image/png", size: 1024,
+    kind: "url", url: "https://example.com/screen.png",
+  };
+  const result = await h.sessions.postPersonMessage!(
+    SESSION_ID,
+    { text: "  look  ", attachments: [attachment] },
+    { author: author("usr_ann", "Ann") },
+  );
+  const events = await h.events();
+  const posted = events.find((event) => event.type === "person/message" && event.seq === result.seq)!;
+  const data = posted.data as { text: string; attachments?: Array<{ name: string; url?: string }> };
+  assert.equal(data.text, "look");
+  assert.equal(data.attachments?.length, 1);
+  assert.equal(data.attachments?.[0]?.name, "screen.png");
+  assert.equal(data.attachments?.[0]?.url, "https://example.com/screen.png");
+
+  // An attachment is a complete message: empty text is accepted with it.
+  const alone = await h.sessions.postPersonMessage!(
+    SESSION_ID,
+    { text: "   ", attachments: [attachment] },
+    { author: author("usr_ann", "Ann") },
+  );
+  assert.ok(alone.seq > result.seq);
+  const aloneEvent = (await h.events()).find((event) => event.type === "person/message" && event.seq === alone.seq)!;
+  assert.equal((aloneEvent.data as { text: string }).text, "");
+  assert.equal((aloneEvent.data as { attachments?: unknown[] }).attachments?.length, 1);
+
+  // A malformed ref is refused before anything is appended.
+  const before = (await h.events()).filter((event) => event.type === "person/message").length;
+  await assert.rejects(
+    h.sessions.postPersonMessage!(
+      SESSION_ID,
+      { text: "bad", attachments: [{ id: "x", name: "x", mime: "nope", size: 1, kind: "url", url: "javascript:1" }] } as never,
+      { author: author("usr_ann", "Ann") },
+    ),
+    { code: "invalid-input" },
+  );
+  assert.equal((await h.events()).filter((event) => event.type === "person/message").length, before);
+});
+
 test("posting works while the session is working and while archived it is refused", async (t) => {
   const h = await harness(t);
   await h.store.patchProjection!(SESSION_ID, (current) => ({ ...current, status: "working" }));

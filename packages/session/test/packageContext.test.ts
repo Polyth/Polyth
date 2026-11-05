@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { SessionEvent } from "@polyth/contracts";
-import { deriveMessages, pendingPackageContext } from "../src/index.ts";
+import { deriveMessages, pendingPackageContext, pendingPersonMessageAttachments } from "../src/index.ts";
 
 let seq = 0;
 const ev = (type: string, data: Record<string, unknown>, ignorable = false): SessionEvent => {
@@ -131,4 +131,60 @@ test("derived history keeps delivered context once, inside the prompt that carri
   const text = JSON.stringify(deriveMessages(events));
   assert.equal(text.match(/All good/g)?.length, 1);
   assert.match(text, /polyth-package-context/);
+});
+
+const shot = {
+  id: "att-shot", name: "screen.png", mime: "image/png", size: 2048,
+  kind: "url", url: "https://example.com/screen.png",
+};
+
+test("a carried person message's attachments are delivered with the same prompt", () => {
+  seq = 0;
+  const before = [
+    ev("user/message", { text: "start" }),
+    personMessage("look at this", { carryToAgent: true, attachments: [shot] }),
+  ];
+  assert.deepEqual(pendingPersonMessageAttachments(before).map((attachment) => attachment.id), ["att-shot"]);
+  const pending = pendingPackageContext(before) ?? "";
+  assert.match(pending, /look at this/);
+  // Once the prompt carrying them exists, nothing stays pending.
+  const delivered = [...before, ev("user/message", { text: "continue", recoveryContext: pending })];
+  assert.deepEqual(pendingPersonMessageAttachments(delivered), []);
+});
+
+test("an attachment-only carried message still delivers its attachment", () => {
+  seq = 0;
+  const events = [
+    ev("user/message", { text: "start" }),
+    personMessage("", { carryToAgent: true, attachments: [shot] }),
+  ];
+  const pending = pendingPackageContext(events) ?? "";
+  assert.match(pending, /Message from Bea/);
+  assert.match(pending, /\(attachment only\)/);
+  assert.deepEqual(pendingPersonMessageAttachments(events).map((attachment) => attachment.id), ["att-shot"]);
+});
+
+test("attachments of uncarried person messages never ride a prompt", () => {
+  seq = 0;
+  const events = [
+    ev("user/message", { text: "start" }),
+    personMessage("just us", { attachments: [shot] }),
+  ];
+  assert.deepEqual(pendingPersonMessageAttachments(events), []);
+});
+
+test("a carried message dropped by the context bound takes its attachments with it", () => {
+  seq = 0;
+  const events = [
+    ev("user/message", { text: "start" }),
+    personMessage("old", { carryToAgent: true, attachments: [shot] }),
+    personMessage("new", { carryToAgent: true, attachments: [{ ...shot, id: "att-new", name: "new.png" }] }),
+  ];
+  // The bound keeps only the newest item, so only its attachment is delivered.
+  const bounded = pendingPackageContext(events, 227) ?? "";
+  assert.doesNotMatch(bounded, /## Message from Bea\nold/);
+  assert.deepEqual(
+    pendingPersonMessageAttachments(events, 227).map((attachment) => attachment.id),
+    ["att-new"],
+  );
 });

@@ -643,12 +643,16 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   `collaborate`, a "Share with the agent" switch (off by default). The send
   action becomes a pill naming the recipient ("Send to {first name}",
   "Send to N people"); it posts a `person/message` and never queues behind or
-  steers the agent.
+  steers the agent. Pending attachment cards travel with that message exactly
+  as they do with a prompt (an attachment alone is a message), and the pills
+  leave the composer only for the refs that were sent.
 - **People-only composers** (a conversation; a reader with only `view`): no
   model row, Add menu, shell, stop/queue or agent toggle. The rail passes
   `context.agentless = true`, and the host leaves out widgets that declare
   `agentOnly` (goal, approvals, workflows, recap, voice with the agent,
-  conversation tools); dictation stays. Viewers get one quiet line, "You can
+  conversation tools); dictation stays. There is no Add menu, so files still
+  arrive by paste or drop, but they travel with the person message like any
+  other pill. Viewers get one quiet line, "You can
   view this chat · Ask {owner} if you need the agent". The placeholder says
   the agent will not see the message (a short "Message people…" on phones).
 - **Timeline**: a person message is a chat bubble in the Messages manner
@@ -671,8 +675,11 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   ink on one's own bubble); the reader's own mention is the one solid
   accent. A carried
   message says "The agent gets this with the next message", then "Shared
-  with the agent" once a prompt has delivered it. It is not a prompt: no
-  prompt recall, title, queue or activity grouping.
+  with the agent" once a prompt has delivered it; its attachment cards ride
+  that same prompt. It is not a prompt: no
+  prompt recall, title, queue or activity grouping. Attachment cards stack
+  under the bubble in the same read-only form a prompt uses, wrapped inside
+  the bubble's column so they never widen the row.
   `conversation/session-started` is a centered link row with the agent glyph
   that opens the new chat.
 - **Navigator**: an `@` mark while `attention.mentions` is set; conversations

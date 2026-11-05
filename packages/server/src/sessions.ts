@@ -100,6 +100,7 @@ import {
   normalizeCompactionSummary,
   selectConfirmedEpochRecoveryEvents,
   pendingPackageContext,
+  pendingPersonMessageAttachments,
   planRuntimeEpochRecovery,
   recoveredUserText,
   unrestoredCompactionSeq,
@@ -120,7 +121,7 @@ import {
   restartRecoveredOperationIds as restartRecoveredOperationIdsOf,
 } from "./operationAdmission.ts";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
-import { sanitizeAttachments } from "./attachments.ts";
+import { MAX_TURN_ATTACHMENTS, mergeAttachmentInputs, sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createSpawnTelemetry, type SpawnTelemetry } from "./spawnTelemetry.ts";
 import {
@@ -7240,7 +7241,18 @@ export function createSessionService(deps: {
     proj: SessionProjection, raw: unknown, sessionId: string,
   ): Promise<AttachmentRef[] | undefined> => {
     const maxBytes = deps.attachments?.maxBytes ?? 20 * 1024 * 1024;
-    const refs = sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId, sessionId });
+    return prepareShapedAttachments(
+      proj,
+      sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId, sessionId }),
+      sessionId,
+    );
+  };
+
+  /** The IO half of preparation for refs that are already shape-checked
+   *  (the prompt's own plus carried person-message refs). */
+  const prepareShapedAttachments = async (
+    proj: SessionProjection, refs: AttachmentRef[], sessionId: string,
+  ): Promise<AttachmentRef[] | undefined> => {
     if (refs.length === 0) return undefined;
     const committedIds: string[] = [];
     for (const ref of refs) {
@@ -7764,6 +7776,33 @@ export function createSessionService(deps: {
       }
       selectedModel = selection.descriptor;
     }
+    // The pending-context window is read before attachments are decided: a
+    // carried person message keeps its attachments owed to this exact prompt.
+    const recoveryEvents = await store.events(sessionId);
+    // A native command runs only as the runtime's exact input: recovery,
+    // instructions or memory around it turn it into an ordinary prompt. None
+    // rides with it; each stays pending for the next ordinary turn, whose
+    // user/message records what it restored.
+    const contextFree = nativeDescriptor !== undefined;
+    const carriedAttachments = contextFree ? [] : pendingPersonMessageAttachments(recoveryEvents);
+    if (carriedAttachments.length > 0) {
+      const merged = mergeAttachmentInputs(input.attachments, carriedAttachments);
+      if (Array.isArray(merged) && merged.length > MAX_TURN_ATTACHMENTS) {
+        throw Object.assign(
+          new Error(`the next message would carry ${merged.length} attachments (max ${MAX_TURN_ATTACHMENTS})`),
+          { code: "invalid-input" },
+        );
+      }
+      const shaped = sanitizeAttachments(merged, {
+        maxBytes: deps.attachments?.maxBytes ?? 20 * 1024 * 1024,
+        projectId: proj.projectId,
+        sessionId,
+      });
+      const prepared = await prepareShapedAttachments(proj, shaped, sessionId);
+      input = { ...input };
+      if (prepared) input.attachments = prepared;
+      else delete input.attachments;
+    }
     // One delivery decision per attachment, shared with the send-time check.
     // A `text-projection` plan is emulated HERE so the adapter only ever sees
     // refs its harness can actually deliver.
@@ -7859,12 +7898,6 @@ export function createSessionService(deps: {
         behaviorLogged.set(sessionId, cur.revision);
       }
     }
-    const recoveryEvents = await store.events(sessionId);
-    // A native command runs only as the runtime's exact input: recovery,
-    // instructions or memory around it turn it into an ordinary prompt. None
-    // rides with it; each stays pending for the next ordinary turn, whose
-    // user/message records what it restored.
-    const contextFree = nativeDescriptor !== undefined;
     const firstTurnOfRuntimeLeg = proj.runtimeLeg
       ? proj.runtimeLeg.bootstrap !== "native-resume"
       : !contextTurnStarted(recoveryEvents);
@@ -13440,7 +13473,12 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("a person message needs an author"), { code: "invalid-input" });
       }
       const text = typeof input?.text === "string" ? input.text.trim() : "";
-      if (!text) throw Object.assign(new Error("message text is required"), { code: "invalid-input" });
+      // An attachment-only message is still a message; text alone is not
+      // required once something travels with it.
+      const carriesAttachments = Array.isArray(input?.attachments) && input.attachments.length > 0;
+      if (!text && !carriesAttachments) {
+        throw Object.assign(new Error("message text or an attachment is required"), { code: "invalid-input" });
+      }
       if (text.length > PERSON_MESSAGE_MAX_CHARS) {
         throw Object.assign(new Error(`message text must be at most ${PERSON_MESSAGE_MAX_CHARS} characters`), { code: "invalid-input" });
       }
@@ -13526,8 +13564,10 @@ export function createSessionService(deps: {
           const name = nameById.get(userId);
           mentions.push({ userId, ...(name ? { name } : {}) });
         }
+        const attachments = await prepareAttachments(proj, input.attachments, sessionId);
         const data: JsonObject = {
           text,
+          ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
           author: { ...author },
           mentions: mentions.map((mention) => ({ ...mention })),
           ...(carryToAgent ? { carryToAgent: true } : {}),
@@ -13573,7 +13613,8 @@ export function createSessionService(deps: {
             sessionId,
             seq: message.seq,
             author: { ...author },
-            text,
+            // An attachment-only message still says what arrived.
+            text: text || (attachments ?? []).map((attachment) => attachment.name).join(", "),
             mentions,
             audience: messageAudience,
           });
@@ -13738,17 +13779,37 @@ export function createSessionService(deps: {
       const events = await store.events(conversationId);
       const bySeq = new Map(events.map((event) => [event.seq, event] as const));
       const messages: Array<{ author: SessionPerson; time: number; text: string }> = [];
+      const selectedAttachments: AttachmentRef[] = [];
       for (const seq of [...wanted].sort((left, right) => left - right)) {
         const event = bySeq.get(seq);
         if (event?.type !== PERSON_MESSAGE_EVENT) {
           throw Object.assign(new Error("selected messages must be conversation messages"), { code: "invalid-input" });
         }
-        const data = event.data as { text?: unknown; author?: unknown };
+        const data = event.data as { text?: unknown; author?: unknown; attachments?: unknown };
         const messageAuthor = normalizeSessionPerson(data.author as SessionPerson | undefined);
         if (!messageAuthor?.userId || typeof data.text !== "string") {
           throw Object.assign(new Error("selected messages must be conversation messages"), { code: "invalid-input" });
         }
         messages.push({ author: messageAuthor, time: event.time, text: data.text });
+        // The new agent chat carries the selected messages' attachments as
+        // prompt attachments, so handing a conversation over delivers what
+        // people sent with it, not only the words.
+        if (Array.isArray(data.attachments)) {
+          for (const raw of data.attachments) {
+            if (typeof raw !== "object" || raw === null) continue;
+            const attachment = raw as Partial<AttachmentRef>;
+            if (typeof attachment.id !== "string" || typeof attachment.name !== "string"
+              || typeof attachment.mime !== "string" || !Number.isSafeInteger(attachment.size)) continue;
+            selectedAttachments.push(attachment as AttachmentRef);
+          }
+        }
+      }
+      const selectedAttachmentInput = mergeAttachmentInputs([], selectedAttachments);
+      if (Array.isArray(selectedAttachmentInput) && selectedAttachmentInput.length > MAX_TURN_ATTACHMENTS) {
+        throw Object.assign(
+          new Error(`the selected messages carry ${selectedAttachmentInput.length} attachments (max ${MAX_TURN_ATTACHMENTS})`),
+          { code: "invalid-input" },
+        );
       }
       const participants: Array<{ userId: string; access: "view" | "collaborate" | "manage" }> = [];
       const seenParticipants = new Set<string>([author.userId]);
@@ -13786,7 +13847,12 @@ export function createSessionService(deps: {
       const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
       const contextPrompt = conversationContextBlock(conversation.title, messages)
         + (prompt ? `\n\n${prompt}` : "");
-      await service.send(created.id, { text: contextPrompt }, { author });
+      await service.send(created.id, {
+        text: contextPrompt,
+        ...(Array.isArray(selectedAttachmentInput) && selectedAttachmentInput.length > 0
+          ? { attachments: selectedAttachmentInput as AttachmentRef[] }
+          : {}),
+      }, { author });
       const data: JsonObject = {
         sessionId: created.id,
         title: (await store.projection(created.id))?.title ?? title,

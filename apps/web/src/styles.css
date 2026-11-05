@@ -20914,6 +20914,18 @@ body.desktop-app .lock-screen {
   padding-inline: var(--person-tail-w);
 }
 .person-message.is-own .person-message-line { flex-direction: row-reverse; }
+/* Bubble and its attachment cards stack as one column, so the cards wrap
+   under the words instead of widening the line. */
+.person-message-stack {
+  display: flex;
+  min-inline-size: 0;
+  max-inline-size: min(76%, 560px);
+  flex-direction: column;
+  align-items: flex-start;
+}
+.person-message.is-own .person-message-stack { align-items: flex-end; }
+.person-message-stack .person-message-text { max-inline-size: 100%; }
+.person-message-stack .attachment-pills { max-inline-size: 100%; }
 .person-message-text {
   position: relative;
   min-inline-size: 0;

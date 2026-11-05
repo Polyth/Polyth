@@ -38,6 +38,7 @@ const { createRoot } = await import("react-dom/client");
 const { default: Composer } = await import("../src/components/Composer.tsx");
 const { api } = await import("@polyth/session/web-api");
 const { activateProject, activateSession, seedSessionCache, setModels } = await import("../src/store.ts");
+const { pendingAttachments, seedAttachments } = await import("../src/attachments.ts");
 
 test("picking a person sends a person message and never an agent turn", async () => {
   const projectId = "people-project";
@@ -82,6 +83,11 @@ test("picking a person sends a person message and never an agent turn", async ()
     sharing: { access: "collaborate", shared: true } as never,
   });
   activateSession(sessionId);
+  // A screenshot picked before the mention must leave with the message.
+  seedAttachments(sessionId, [{
+    id: "att-screenshot", name: "screen.png", mime: "image/png", size: 2048,
+    kind: "url", url: "https://example.com/screen.png",
+  }]);
 
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -113,6 +119,11 @@ test("picking a person sends a person message and never an agent turn", async ()
     const personPosts = requests.filter((request) => request.url.includes("/person-messages"));
     assert.equal(personPosts.length, 1, "exactly one person-messages POST");
     assert.match(personPosts[0]!.body ?? "", /u-alice/);
+    const posted = JSON.parse(personPosts[0]!.body ?? "{}") as { attachments?: Array<{ name: string }> };
+    assert.equal(posted.attachments?.length, 1, "the screenshot travels with the message");
+    assert.equal(posted.attachments?.[0]?.name, "screen.png");
+    assert.equal(pendingAttachments(sessionId).length, 0, "sent pills leave the composer");
+    assert.equal(host.querySelectorAll(".attachment-pill").length, 0);
     assert.deepEqual(agentSends, [], "no agent message was sent");
   } finally {
     await act(async () => { root.unmount(); });

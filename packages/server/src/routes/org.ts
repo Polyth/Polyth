@@ -114,6 +114,7 @@ export function orgRoutes(deps: {
       const b = await body();
       const input: PersonMessageInput = {
         text: String(b.text ?? ""),
+        ...(Array.isArray(b.attachments) ? { attachments: b.attachments } : {}),
         ...(Array.isArray(b.mentions) ? { mentions: b.mentions.map(String) } : {}),
         ...(b.carryToAgent === true ? { carryToAgent: true } : {}),
         ...(typeof b.replyToSeq === "number" ? { replyToSeq: b.replyToSeq } : {}),

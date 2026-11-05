@@ -1010,22 +1010,27 @@ function PersonMessageView({ m, entering = false }: { m: PersonMessageMsg; enter
         <span className="person-mark person-message-mark" data-person-tone={tone ?? undefined} aria-hidden="true">{personInitials(authorName)}</span>
       )}
       <div className="person-message-line">
-        <div className={`person-message-text${emoji ? " is-emoji" : ""}`} {...(emoji ? { "data-emoji": emoji } : {})}>
-          {/* In a group the run's first bubble opens with its author's name,
-              in their colour, so each voice reads at a glance. */}
-          {identity && !m.continuation && (
-            <span className="person-message-author" data-person-tone={tone ?? undefined} aria-hidden="true"><bdi>{authorName}</bdi></span>
+        <div className="person-message-stack">
+          <div className={`person-message-text${emoji ? " is-emoji" : ""}`} {...(emoji ? { "data-emoji": emoji } : {})}>
+            {/* In a group the run's first bubble opens with its author's name,
+                in their colour, so each voice reads at a glance. */}
+            {identity && !m.continuation && (
+              <span className="person-message-author" data-person-tone={tone ?? undefined} aria-hidden="true"><bdi>{authorName}</bdi></span>
+            )}
+            {parts.map((part, index) => part.mention
+              ? (
+                <span
+                  key={index}
+                  className={`person-mention${part.own ? " is-self" : ""}`}
+                  data-person-tone={part.own ? undefined : personToneOf(tones, part.mention.userId) ?? undefined}
+                  title={part.mention.name}
+                >{part.text}</span>
+              )
+              : <Fragment key={index}>{part.text}</Fragment>)}
+          </div>
+          {m.attachments && m.attachments.length > 0 && (
+            <AttachmentPills attachments={m.attachments} />
           )}
-          {parts.map((part, index) => part.mention
-            ? (
-              <span
-                key={index}
-                className={`person-mention${part.own ? " is-self" : ""}`}
-                data-person-tone={part.own ? undefined : personToneOf(tones, part.mention.userId) ?? undefined}
-                title={part.mention.name}
-              >{part.text}</span>
-            )
-            : <Fragment key={index}>{part.text}</Fragment>)}
         </div>
         <time className="person-message-time" dateTime={time.toISOString()}>{timeLabel}</time>
       </div>

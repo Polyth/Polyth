@@ -1521,7 +1521,13 @@ export const PERSON_MESSAGE_MAX_MENTIONS = 32;
  *  it as reference data (see `pendingPackageContext`). Old clients ignore the
  *  unknown type. */
 export interface PersonMessageData {
+  /** The words; empty is allowed when the message carries an attachment. */
   text: string;
+  /** Server-prepared attachment refs (files, images, links, browser context).
+   *  Same shape and existence rules as a prompt attachment, but they are only
+   *  for the people reading the message and never reach a model unless the
+   *  message is handed over by an explicit later path. */
+  attachments?: AttachmentRef[];
   /** Server-stamped from the authenticated person, never from input. */
   author: SessionPerson;
   /** Mentioned people, filtered server-side to people who can open the
@@ -1535,7 +1541,11 @@ export interface PersonMessageData {
 
 /** What a client may supply for a `person/message`. */
 export interface PersonMessageInput {
+  /** Required unless `attachments` is non-empty. */
   text: string;
+  /** Prepared like prompt attachments (shape-checked, existence-checked,
+   *  bounded); people-only, never model-visible. */
+  attachments?: AttachmentRef[];
   /** User ids. Unknown people and people who cannot open the session are
    *  dropped without revealing whether they exist. */
   mentions?: string[];

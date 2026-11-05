@@ -1810,10 +1810,13 @@ function ComposerBody({
     const target = sessionIdRef.current;
     inputRef.current?.finishComposition();
     const raw = (override ?? inputRef.current?.getText() ?? text).trim();
-    if (!target || raw === "" || peopleSendingRef.current) return;
+    // A person message carries its pills exactly as a prompt does; an
+    // attachment alone is a complete message.
+    const attachmentsAtSend = target ? pendingAttachments(target) : [];
+    if (!target || (raw === "" && attachmentsAtSend.length === 0) || peopleSendingRef.current) return;
     const mentions = personMentionsRef.current.map((mention) => ({ userId: mention.userId, name: mention.name }));
     const carry = carryToAgentRef.current && !peopleOnly;
-    const operationKey = [target, raw, mentions.map((mention) => mention.userId).join(","), carry ? "carry" : ""].join("\u0000");
+    const operationKey = [target, raw, attachmentsAtSend.map((attachment) => attachment.id).join(","), mentions.map((mention) => mention.userId).join(","), carry ? "carry" : ""].join("\u0000");
     const clientOperationId = personMessageOperationId(operationKey);
     peopleSendingRef.current = true;
     setPeopleSending(true);
@@ -1821,18 +1824,28 @@ function ComposerBody({
     const textAtSend = raw;
     void postPersonMessage(target, {
       text: raw,
+      ...(attachmentsAtSend.length > 0 ? { attachments: attachmentsAtSend } : {}),
       ...(mentions.length > 0 ? { mentions: mentions.map((mention) => mention.userId) } : {}),
       ...(carry ? { carryToAgent: true } : {}),
       clientOperationId,
     }).then(() => {
       forgetPersonMessageOperation(operationKey);
       if (getState().activeSessionId !== target || scopedDraftCacheKey(target) !== scopeKeyAtSend) return;
-      if ((inputRef.current?.getText() ?? "") !== textAtSend) return;
+      // The editor may still hold composition whitespace around the sent
+      // words; compare the committed text, not its raw spelling.
+      if ((inputRef.current?.getText() ?? "").trim() !== textAtSend) return;
       setText("");
       inputRef.current?.replaceText("");
       setPersonMentions([]);
       setAgentMentionOverride(false);
       setCarryToAgent(false);
+      // Only the pills that travelled go away; a new attachment added while
+      // the request was in flight belongs to the next message.
+      const currentAttachments = pendingAttachments(target);
+      if (currentAttachments.length === attachmentsAtSend.length
+        && currentAttachments.every((attachment, index) => attachment.id === attachmentsAtSend[index]?.id)) {
+        clearAttachments(target);
+      }
       saveDraft(target, "");
       cancelDraftSync(target);
     }).catch((error) => {
@@ -3973,7 +3986,7 @@ function ComposerBody({
     || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
   const hasDraft = liveText.trim() !== "" || attachments.length > 0;
-  const peopleSendDisabled = peopleSending || liveText.trim() === "";
+  const peopleSendDisabled = peopleSending || (liveText.trim() === "" && attachments.length === 0);
   const runningHasSend = !sendDisabled;
   const runningPrimaryLabel = queueEdit
     ? tr("composer.saveQueuedMessageInIts")

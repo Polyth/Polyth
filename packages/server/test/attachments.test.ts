@@ -13,7 +13,7 @@ import type {
 } from "@polyth/contracts";
 import type { PermissionService } from "@polyth/permissions";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
-import { sanitizeAttachments } from "../src/attachments.ts";
+import { attachmentDeliveryKey, mergeAttachmentInputs, sanitizeAttachments } from "../src/attachments.ts";
 
 const OPTS = { maxBytes: 1024 * 1024, projectId: "p1" };
 
@@ -444,4 +444,18 @@ test("remote/SSH linked worktree routes inbox materialization and text projectio
   assert.deepEqual(fake.started[0]!.attachments ?? [], []);
   assert.equal(statSync(join(worktree, rel)).size, body.length);
   await store.close();
+});
+
+test("carried refs merge after the prompt's own and drop an exact repeat", () => {
+  const own = { id: "own", name: "own.png", mime: "image/png", size: 1, kind: "image", path: "a/own.png" };
+  const carriedFile = { id: "carried", name: "shot.png", mime: "image/png", size: 2, kind: "image", path: "a/own.png" };
+  const carriedUrl = { id: "link", name: "docs", mime: "text/uri-list", size: 0, kind: "url", url: "https://example.com/docs" };
+  const merged = mergeAttachmentInputs([own], [carriedFile, carriedUrl]) as Array<{ id: string }>;
+  assert.deepEqual(merged.map((ref) => ref.id), ["own", "link"], "the same file range is delivered once");
+  // Same identity, different id, still one ref; a distinct file stays.
+  assert.equal(attachmentDeliveryKey(carriedFile), attachmentDeliveryKey(own));
+  assert.notEqual(attachmentDeliveryKey(carriedUrl), attachmentDeliveryKey(own));
+  assert.deepEqual(mergeAttachmentInputs(undefined, [carriedUrl]), [carriedUrl]);
+  // Non-array input is left for the shape check to report.
+  assert.deepEqual(mergeAttachmentInputs({ bad: true }, [carriedUrl]), { bad: true });
 });
