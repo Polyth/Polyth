@@ -49,7 +49,7 @@ test("plugin UI assets are integrity-addressed even when the process flag is dis
   try {
     const response = await fetch(`${base}${plugin.ui!.url}`);
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "application/javascript");
+    assert.equal(response.headers.get("content-type"), "application/javascript; charset=utf-8");
     assert.match(response.headers.get("cache-control") ?? "", /immutable/);
     assert.match(await response.text(), /export const modules/);
 

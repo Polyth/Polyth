@@ -243,6 +243,10 @@ Plugin bridge reconciliation carries a package generation fence so stale async l
 
 Declarative tool renderers have zero sandbox-runtime activation cost.
 
+A managed `entries.ui` is bundled once, at install or update, into `.polyth/ui/ui-<sha256>.mjs` (`buildUiBundle`): esbuild with React external, `minify`, `charset: "utf8"` and `legalComments: "eof"`, so third-party license notices are kept once at the end of the file. Function and class names are not preserved (no `keepNames`). The host reads only the `modules`, `icon` and `surfaces` export keys, which survive minification, so package code must not branch on `Function.name` or `constructor.name`. The same tree always yields the same bytes and integrity. That file is the only output, and the install's tree integrity covers it.
+
+`GET /api/plugins/:id/ui/<sha256>.mjs` (`pluginAssetRoutes`) sends `application/javascript; charset=utf-8`, `immutable` and `vary: accept-encoding`. The route hashes the file against the name in the URL, then keeps the verified bytes gzip-compressed in memory, at most 32 bundles per route instance. A client whose `Accept-Encoding` admits gzip with a non-zero weight gets that copy with `content-encoding: gzip`. Nothing is re-read or re-hashed while the file's stat identity (device, inode, size, mtime, ctime) is unchanged. A changed file is verified again, and a mismatched or removed one is answered 404 as before. A client without gzip, or a bundle gzip cannot shrink, gets the plain bytes, read and verified on that request. The compressed copy is never written into the install tree, so existing installs keep their tree integrity and get compression without a reinstall. Bundles built before minification keep their bytes until the package is updated or reinstalled.
+
 ## Updates and rollback
 
 Managed updates use the existing staged-version model:

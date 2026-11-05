@@ -49,9 +49,19 @@ export async function buildUiBundle(opts: {
     format: "esm",
     jsx: "automatic",
     external: EXTERNAL_REACT,
+    // The host only reads the `modules`/`icon`/`surfaces` export keys, which
+    // minification keeps; local function and class names are not preserved
+    // (no keepNames), so package code must not branch on `Function.name`.
+    minify: true,
+    // Module scripts are always decoded as UTF-8, so non-ASCII text needs no
+    // `\uXXXX` escaping, which only inflated the bundle.
+    charset: "utf8",
+    // Third-party license notices stay, collected once at the end of the file.
+    legalComments: "eof",
     write: false,
-    // Source-path comments are relative to this; the random staging dir must
-    // not leak into the bytes, or a rebuild of the same version never matches.
+    // Any source path esbuild writes is relative to this; the random staging
+    // dir must not leak into the bytes, or a rebuild of the same version never
+    // matches.
     absWorkingDir: installDir,
     outfile: join(opts.outDir, "ui.mjs"),
     logLevel: "silent",
