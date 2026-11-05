@@ -57,10 +57,11 @@ export function sessionRetentionRoutes(spaces: SpaceServicesFor): RouteHandler {
         }
         succeeded.push(session.id);
       } catch (error) {
-        failed.push({
-          id: session.id,
-          code: (error as { code?: string }).code ?? "internal",
-        });
+        const code = (error as { code?: string }).code ?? "internal";
+        // Deleting a parent takes its tree with it, so a child later in the
+        // list is already gone. That is the outcome this request asked for.
+        if (code === "not-found") succeeded.push(session.id);
+        else failed.push({ id: session.id, code });
       }
     }
     json(200, { eligibleCount: eligible.length, succeeded, failed });

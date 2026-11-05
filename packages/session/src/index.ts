@@ -90,7 +90,7 @@ const PROMPT_HISTORY_CHUNK = 32;
 export { redactContinuity } from "./continuity.ts";
 export type { ContinuityWorkspace } from "./continuity.ts";
 export type { SessionPersonState } from "@polyth/contracts";
-export { archivedSessionRetentionSummary, isPristineSessionLog, sessionRetentionSummary } from "./retention.ts";
+export { archivedSessionRetentionSummary, isPristineSessionLog, normalizedRetentionDays, sessionRetentionSummary } from "./retention.ts";
 export type { SessionRetentionSummary } from "./retention.ts";
 
 /** Unresolved-request counters derived from durable events (never cached). */

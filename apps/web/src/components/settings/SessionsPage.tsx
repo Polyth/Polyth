@@ -131,6 +131,7 @@ export default function SessionsPage() {
   const retentionDays = defaults.retentionDays ?? 30;
   const retentionAction: RetentionAction = defaults.retentionAction ?? "archive";
   const archiveRetentionDays = defaults.archiveRetentionDays ?? 30;
+  const autoCleanup = settings.autoCleanupExpiredSessions;
   const defaultAgent = defaults.defaultAgent
     && mainAgents.some((agent) => agent.name === defaults.defaultAgent)
     ? defaults.defaultAgent
@@ -168,6 +169,9 @@ export default function SessionsPage() {
   const [archivesEligible, setArchivesEligible] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  // NumberField keeps its typed text; a remount restores the period after a
+  // declined confirmation.
+  const [retentionFieldKey, setRetentionFieldKey] = useState(0);
   const [visibleSessionCountInput, setVisibleSessionCountInput] = useState(
     String(settings.defaultVisibleSessionCount),
   );
@@ -246,6 +250,45 @@ export default function SessionsPage() {
       .catch(() => { if (live) setArchivesEligible(0); });
     return () => { live = false; };
   }, [archiveRetentionDays]);
+
+  // The server cleans up on its own schedule, so the count moves without this page.
+  useEffect(() => {
+    if (!autoCleanup) return;
+    const timer = setInterval(() => {
+      void api.sessionRetention(retentionDays)
+        .then((summary) => setEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0))
+        .catch(() => {});
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [autoCleanup, retentionDays]);
+
+  // Each of these starts permanent deletion that nobody confirms later, so the
+  // person confirms it here. Archiving can be undone and needs no question.
+  const confirmAutoDelete = () => confirmAlert(
+    tr("settings.sessionspage.confirmAutoCleanupDelete", { count: eligible ?? 0 }),
+    { title: tr("settings.sessionspage.autoCleanup"), confirmLabel: tr("settings.sessionspage.autoCleanupDeleteConfirm"), destructive: true },
+  );
+
+  const changeAutoCleanup = async (on: boolean) => {
+    if (on && retentionAction === "delete" && !await confirmAutoDelete()) return;
+    updateSettings({ autoCleanupExpiredSessions: on });
+  };
+
+  const changeRetentionAction = async (action: RetentionAction) => {
+    if (action === "delete" && autoCleanup && !await confirmAutoDelete()) return;
+    setSessionDefaults({ retentionAction: action });
+  };
+
+  const changeRetentionDays = async (days: number) => {
+    if (days < retentionDays && autoCleanup && retentionAction === "delete" && !await confirmAlert(
+      tr("settings.sessionspage.confirmAutoCleanupShorterPeriod", { days }),
+      { title: tr("settings.sessionspage.autoCleanup"), confirmLabel: tr("settings.sessionspage.autoCleanupDeleteConfirm"), destructive: true },
+    )) {
+      setRetentionFieldKey((key) => key + 1);
+      return;
+    }
+    setSessionDefaults({ retentionDays: days });
+  };
 
   const cleanup = async () => {
     if (retentionAction === "delete" && !await confirmAlert(
@@ -439,12 +482,13 @@ export default function SessionsPage() {
       >
         <Row label={tr("settings.sessionspage.retentionPeriod")} hint={tr("settings.sessionspage.idleCompletedSessionsOlderThanThisBecome")}>
           <NumberField
+            key={retentionFieldKey}
             value={retentionDays}
             min={1}
             max={3650}
             unit={tr("settings.sessionspage.days")}
             label={tr("settings.sessionspage.retentionPeriod")}
-            onCommit={(days) => setSessionDefaults({ retentionDays: days })}
+            onCommit={(days) => void changeRetentionDays(days)}
             />
         </Row>
         <Row
@@ -459,7 +503,22 @@ export default function SessionsPage() {
               ["archive", tr("common.archive")],
               ["delete", tr("common.delete")],
             ]}
-            onChange={(value) => setSessionDefaults({ retentionAction: value as RetentionAction })}
+            onChange={(value) => void changeRetentionAction(value as RetentionAction)}
+          />
+        </Row>
+        <Row
+          label={tr("settings.sessionspage.autoCleanup")}
+          hint={tr(!autoCleanup
+            ? "settings.sessionspage.autoCleanupOffHint"
+            : retentionAction === "delete"
+              ? "settings.sessionspage.autoCleanupDeleteHint"
+              : "settings.sessionspage.autoCleanupArchiveHint")}
+          itemId="sessions.autoCleanupExpiredSessions"
+        >
+          <Toggle
+            on={autoCleanup}
+            onChange={(on) => void changeAutoCleanup(on)}
+            label={tr("settings.sessionspage.autoCleanup")}
           />
         </Row>
         <Row label={tr("settings.sessionspage.cleanUpExpiredSessions")} hint={expiredHint}>

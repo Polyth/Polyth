@@ -105,6 +105,9 @@ export interface PolythSettings {
   /** Delete a newly-created session after a confirmed first-turn startup
    * failure when the canonical log contains no assistant output. */
   autoDeleteFailedStartupSessions: boolean;
+  /** "Clean up automatically": the server applies the Cleanup settings to
+   * expired sessions on its own schedule. Off until the person turns it on. */
+  autoCleanupExpiredSessions: boolean;
   /** "Chat memory": when this person's chats are compacted, unless a chat says otherwise. */
   compactionDefault: CompactionPreference;
   showArchived: boolean; // show archived sessions in the sidebar
@@ -144,6 +147,7 @@ export const DEFAULT_SETTINGS: PolythSettings = {
   defaultModel: "",
   autoTitleSessions: true,
   autoDeleteFailedStartupSessions: true,
+  autoCleanupExpiredSessions: false,
   compactionDefault: COMPACTION_AUTO,
   showArchived: false,
   defaultVisibleSessionCount: DEFAULT_VISIBLE_SESSION_COUNT,
@@ -229,6 +233,7 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     defaultModel: pickString(r.defaultModel, d.defaultModel),
     autoTitleSessions: pickBool(r.autoTitleSessions, d.autoTitleSessions),
     autoDeleteFailedStartupSessions: pickBool(r.autoDeleteFailedStartupSessions, d.autoDeleteFailedStartupSessions),
+    autoCleanupExpiredSessions: pickBool(r.autoCleanupExpiredSessions, d.autoCleanupExpiredSessions),
     compactionDefault: parseCompactionPreference(r.compactionDefault) ?? d.compactionDefault,
     showArchived: pickBool(r.showArchived, d.showArchived),
     defaultVisibleSessionCount: pickNumber(

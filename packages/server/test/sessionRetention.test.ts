@@ -71,3 +71,37 @@ test("session retention can delete sessions and purge old or all archives", asyn
   await request("POST", "/api/session-retention", { target: "archives", all: true });
   assert.deepEqual(deleted, ["old", "old-archive", "old-archive", "recent-archive"]);
 });
+
+test("a child its parent's cascade already removed counts as cleaned up", async () => {
+  const rows: SessionProjection[] = [
+    { id: "parent", projectId: "p", title: "parent", status: "idle", createdAt: 1, updatedAt: now - 40 * DAY },
+    { id: "child", projectId: "p", parentId: "parent", title: "child", status: "idle", createdAt: 1, updatedAt: now - 40 * DAY },
+    { id: "broken", projectId: "p", title: "broken", status: "idle", createdAt: 1, updatedAt: now - 40 * DAY },
+  ];
+  const gone = new Set<string>();
+  const cascading = {
+    list: async () => rows,
+    archive: async () => {},
+    delete: async (id: string) => {
+      if (id === "broken") throw Object.assign(new Error("busy"), { code: "conflict" });
+      if (gone.has(id)) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      gone.add(id);
+      if (id === "parent") gone.add("child");
+    },
+  } as SessionService;
+  const route = sessionRetentionRoutes(() => ({ sessions: cascading } as unknown as SpaceServices));
+  let response: unknown;
+  await route({
+    space: fakeSpaceContext(),
+    path: "/api/session-retention",
+    method: "POST",
+    url: new URL("http://localhost/api/session-retention"),
+    body: async () => ({ days: 30, action: "delete" }),
+    json: (_status: number, body: unknown) => { response = body; },
+  } as never);
+  assert.deepEqual(response, {
+    eligibleCount: 3,
+    succeeded: ["parent", "child"],
+    failed: [{ id: "broken", code: "conflict" }],
+  });
+});

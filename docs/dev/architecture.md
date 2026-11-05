@@ -329,6 +329,26 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   (`turn/failed`, `turn/stopped` reason `error`, e.g. `rate-limited`) is never
   auto-deleted. Forensics for a vanished session: `deletion_tombstones` and
   `runtime_operations` rows with `mutation_kind` `session-delete`.
+- `expiredSessionCleanup.ts` — "Clean up automatically" (Settings → Sessions →
+  Cleanup). Off until a person turns on the synced
+  `product.autoCleanupExpiredSessions`; it then applies that person's
+  `sessionDefaults.retentionDays`/`retentionAction`. Passes run 10 minutes after
+  boot, hourly, and 30 seconds after a changed choice, one session at a time and
+  paced. With nobody opted in, a pass ends before listing anything. Whose choice
+  applies is resolved per session as in `failedStartupCleanup.ts`; a session with
+  no recorded account needs every Space member, on the longest period and the
+  gentlest action. "Expired" means `sessionRetentionSummary`
+  (`packages/session/src/retention.ts`), shared with the Cleanup button so the
+  count on screen is what either acts on: a delegation tree expires whole, because
+  Space-scoped archive/delete cascade; anything running, waiting, pinned, holding
+  a draft, paused, due to auto-resume or hosting a workflow holds its tree; and a
+  tree rooted in a package-owned session (`purpose`) is never a candidate. The
+  sweep also keeps trees with queued delivery or touched since the list, and
+  another member's pin or draft. A `delete` choice archives instead when the tree
+  owns a checkout or is in an uncertain state (`unknown`, `epoch-pending`), so
+  unattended deletion can never take unmerged work or a possibly live turn. The
+  web page asks for confirmation before anything that starts or widens unattended
+  deletion.
 - `http.ts` — core REST (health, projects, sessions, models/agents) + `RouteHandler`
   chain + static bundle. Feature packages never edit this file. F16: one auth gate
   runs before all routing — every `/api` path 401s without a session cookie except

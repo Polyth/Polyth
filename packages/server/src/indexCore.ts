@@ -136,7 +136,8 @@ import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
 import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
-import { createFailedStartupCleanupPolicy } from "./failedStartupCleanup.ts";
+import { createFailedStartupCleanupPolicy, type SessionAccountDeps } from "./failedStartupCleanup.ts";
+import { createExpiredSessionPolicy, sessionsKeptByPeople, startExpiredSessionCleanup } from "./expiredSessionCleanup.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig, PERSONAL_MCP_PACKAGE } from "./mcp.ts";
 import { createCapabilityProvisioningController, reconcilePinnedHarness } from "./capabilityProvisioning.ts";
 import { guardedPermissions, spaceHasGuardedMember } from "./accountGuardrails.ts";
@@ -2565,7 +2566,7 @@ export async function boot(opts: BootOptions = {}) {
     ?? smallModel();
   // "Delete failed startup sessions" is a synced client setting; every
   // server-side automatic removal honours the owning account's choice.
-  const failedStartupCleanupAllowed = createFailedStartupCleanupPolicy({
+  const sessionAccounts: SessionAccountDeps = {
     spaceOf: (projection) => projection.spaceId ?? projects.spaceOfProject(projection.projectId),
     accountForSession: async (sessionId, spaceId) =>
       (await notifications.recipientForSession(sessionId, { spaceId }))?.userId,
@@ -2574,7 +2575,8 @@ export async function boot(opts: BootOptions = {}) {
       .filter((userId) => Boolean(spaceGateway.store.roleOf(userId, spaceId))),
     settingsFor: (userId) => clientSettings.get(userId).settings,
     projection: (sessionId) => store.projection(sessionId),
-  });
+  };
+  const failedStartupCleanupAllowed = createFailedStartupCleanupPolicy(sessionAccounts);
 
   const turnCompletedListeners = new Set<
     (event: { sessionId: string; assistantText: string; userId?: string }) => void | Promise<void>
@@ -3202,10 +3204,22 @@ export async function boot(opts: BootOptions = {}) {
       },
     });
   };
+  // "Clean up automatically" in Settings → Sessions. Nothing here runs before
+  // its first timer, well after boot recovery.
+  const expiredSessionCleanup = startExpiredSessionCleanup({
+    spaceIds: () => spaceGateway.store.allSpaces().map((space) => space.id),
+    sessionsFor: (spaceId) => spaceServices(spaceGateway.resolveInternal(spaceId)).sessions,
+    policy: createExpiredSessionPolicy(sessionAccounts),
+    keep: (spaceId, sessionIds) => sessionsKeptByPeople(sessionIds, sessionAccounts.members(spaceId), store.personStates),
+    stopped: isShuttingDown,
+  });
   const settingsRoute = settingsRoutes({
     behavior, mcp,
     clientSettings,
-    broadcastClientSettings: (userId, state) => broadcast.clientSettingsChanged?.(userId, state),
+    broadcastClientSettings: (userId, state) => {
+      broadcast.clientSettingsChanged?.(userId, state);
+      expiredSessionCleanup.settingsChanged(userId, state.settings);
+    },
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
       const current = (await runtimeCatalog.agents()).find((agent) =>
@@ -3567,6 +3581,7 @@ export async function boot(opts: BootOptions = {}) {
       await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
       await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
       await pristineSweepFlight;
+      await expiredSessionCleanup.stop();
       await sessionWatches.close();
       await sessions.flushPendingStreams().catch((error) => console.error("[polyth] stream flush failed", error));
       sessions.dispose();
