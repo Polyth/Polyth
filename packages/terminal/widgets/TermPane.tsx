@@ -330,6 +330,9 @@ export default function TermPane(props: TermPaneProps) {
   const [useRegex, setUseRegex] = useState(false);
   const [current, setCurrent] = useState(0);
   const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(null);
+  // The same Ctrl+click can reach both mousedown and contextmenu (macOS treats
+  // it as a secondary click); only the first of them opens the URL.
+  const openedLinkRef = useRef<{ url: string; at: number }>({ url: "", at: 0 });
 
   // ---- touch terminal state ----
   const prefs = useTouchPrefs();
@@ -1119,6 +1122,20 @@ export default function TermPane(props: TermPaneProps) {
     bar.style.transform = `translate(${Math.round(x)}px, ${Math.round(top)}px)`;
   });
 
+  /** Open the terminal link under `target`; true when one was opened. */
+  const openLinkAt = (target: EventTarget | null): boolean => {
+    const linkEl = (target as HTMLElement | null)?.closest?.("[data-url],[data-osc-link]") as HTMLElement | null;
+    if (!linkEl) return false;
+    const osc = linkEl.dataset.oscLink;
+    const url = osc ? emu.linkUrl(Number(osc)) : linkEl.dataset.url;
+    if (!url || !/^(https?|file|ftp|mailto):/i.test(url)) return false;
+    const now = Date.now();
+    if (openedLinkRef.current.url === url && now - openedLinkRef.current.at < 700) return true;
+    openedLinkRef.current = { url, at: now };
+    window.open(url, "_blank", "noopener,noreferrer");
+    return true;
+  };
+
   const onMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (selectionUiTarget(e.target)) return;
     // Touch generates compatibility mouse events. Touch selection is the long
@@ -1131,17 +1148,10 @@ export default function TermPane(props: TermPaneProps) {
     if (contextMenu) setContextMenu(null);
     setTouchSelection(null);
     bodyRef.current?.focus({ preventScroll: true });
-    // links: ctrl/cmd+click opens
-    const target = e.target as HTMLElement;
-    const linkEl = target.closest?.("[data-url],[data-osc-link]") as HTMLElement | null;
-    if (e.button === 0 && linkEl && (e.ctrlKey || e.metaKey)) {
-      const osc = linkEl.dataset.oscLink;
-      const url = osc ? emu.linkUrl(Number(osc)) : linkEl.dataset.url;
-      if (url && /^(https?|file|ftp|mailto):/i.test(url)) {
-        e.preventDefault();
-        window.open(url, "_blank", "noopener,noreferrer");
-        return;
-      }
+    // links: ctrl/cmd+click opens, whichever button the platform reports for it
+    if ((e.button === 0 || (e.ctrlKey && e.button === 2)) && (e.ctrlKey || e.metaKey) && openLinkAt(e.target)) {
+      e.preventDefault();
+      return;
     }
     if (reportMouse(e, "down")) {
       dragButtonRef.current = e.button;
@@ -1414,6 +1424,13 @@ export default function TermPane(props: TermPaneProps) {
     // platform's long-press callout would only compete with it.
     if (touchInputRef.current || selectionUiTarget(e.target)) {
       e.preventDefault();
+      return;
+    }
+    // On macOS Ctrl+click arrives here as a secondary click; open the link
+    // instead of the terminal's menu.
+    if (e.ctrlKey && openLinkAt(e.target)) {
+      e.preventDefault();
+      setContextMenu(null);
       return;
     }
     const tracking = emu.modes().mouseTracking !== 0;

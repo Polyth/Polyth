@@ -75,6 +75,17 @@ with full IME, autocorrect and dictation; Enter or Send writes the line plus
 `\r`. Closing it hands the keyboard to the terminal input before the row's
 field unmounts, so the keyboard is never left without an input.
 
+## Links
+
+Printed URLs and OSC 8 hyperlinks render as dotted-underlined link cells.
+Ctrl+click (Cmd+click on macOS) opens one in a new tab; a plain click stays a
+selection or a mouse-tracking click. A platform that treats Ctrl+click as a
+secondary click (macOS) may report it as button 2 and raise `contextmenu`
+instead of a plain mousedown, so both paths resolve the same link and only the
+first opens it — the terminal menu does not appear. Right-click keeps the
+terminal menu, and `http(s)`, `file`, `ftp` and `mailto` are the schemes that
+open.
+
 ## Touch selection
 
 Touch selects through the terminal's own cell selection, as Termux does, not
