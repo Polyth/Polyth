@@ -75,7 +75,7 @@ interface Harness {
   sessionId: string;
 }
 
-async function harness(): Promise<Harness> {
+async function harness(extra: Partial<Parameters<typeof createSessionService>[0]> = {}): Promise<Harness> {
   const dataDir = tmp();
   const store = createStore(join(dataDir, "sessions.db"));
   const registry = createProjectService(dataDir);
@@ -90,6 +90,7 @@ async function harness(): Promise<Harness> {
     broadcast: { event: () => {}, projection: () => {} },
     queue: store,
     org: store,
+    ...extra,
   });
   const annId = gateway.store.users()[0]!.id;
   const beaId = gateway.store.createUser("Bea").id;
@@ -328,4 +329,24 @@ test("a live projection reaches each person's socket with their own draft and pi
     ws.close();
     server.close();
   }
+});
+
+test("the first person who types into a chat is offered as its owner; delegated and scheduled writers are not", async () => {
+  const wrote: Array<{ sessionId: string; spaceId: string; userId: string }> = [];
+  const h = await harness({ personWrote: async (input) => { wrote.push(input); } });
+  const spaceId = (await h.store.projection(h.sessionId))!.spaceId!;
+  const bea = h.gateway.services(h.bea).sessions;
+  await bea.send(h.sessionId, { text: "from Bea" });
+  assert.deepEqual(wrote, [{ sessionId: h.sessionId, spaceId, userId: h.beaId }]);
+
+  // A delegated child acts for its parent's person but never claims an owner.
+  const child = await h.gateway.services(h.ann).sessions.create({ projectId: h.projectId, title: "Child", parentId: h.sessionId });
+  wrote.length = 0;
+  await h.gateway.services(h.ann).sessions.send(child.id, { text: "child task" });
+  assert.deepEqual(wrote, []);
+
+  // A failing registration never blocks the message.
+  const failing = await harness({ personWrote: async () => { throw new Error("store down"); } });
+  await failing.gateway.services(failing.bea).sessions.send(failing.sessionId, { text: "still sent" });
+  assert.deepEqual(authors(await failing.store.events(failing.sessionId)), [{ userId: failing.beaId, name: "Bea" }]);
 });

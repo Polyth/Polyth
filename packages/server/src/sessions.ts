@@ -810,6 +810,11 @@ export function createSessionService(deps: {
   contextPressureEnabled?: () => Promise<boolean>;
   /** A person's default "Chat memory" choice. Omitted means `auto`. */
   compactionDefault?: (userId: string | undefined) => CompactionPreference | undefined;
+  /** A person typed a message into a top-level chat. The composition root
+   *  records them as the chat's owning account (notification recipient) when
+   *  none was recorded at creation, which package, tool and isolation create
+   *  paths never did. It never replaces a recorded owner. */
+  personWrote?: (input: { sessionId: string; spaceId: string; userId: string }) => Promise<unknown>;
   /** Package-owned context for a `purpose` session. It is persisted on every
    * user/message with the rest of the turn context before runtime delivery,
    * so the model sees it on each turn while chat rows show only the prompt. */
@@ -8132,6 +8137,15 @@ export function createSessionService(deps: {
     if (turnAuthor && !isDeepStrictEqual(proj.actor, turnAuthor)) {
       await applyProjection(sessionId, (current) =>
         isDeepStrictEqual(current.actor, turnAuthor) ? current : { ...current, actor: turnAuthor });
+    }
+    // Only a person who typed it (no delegation, schedule or judge) can own
+    // the chat; a delegated child inherits its parent's owner instead.
+    if (messageAdmittedHere && turnAuthor && !turnAuthor.via && !proj.parentId && proj.spaceId && deps.personWrote) {
+      try {
+        await deps.personWrote({ sessionId, spaceId: proj.spaceId, userId: turnAuthor.userId });
+      } catch (error) {
+        console.warn(`[polyth] owner registration failed for ${sessionId}`, error);
+      }
     }
     if (messageAdmittedHere && !hiddenUserMessage) {
       await consumeAdmittedDraft(sessionId, turnAuthor, [input.text, text, raw]);

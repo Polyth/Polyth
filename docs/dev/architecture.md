@@ -652,7 +652,32 @@ for the small-model fallback. Settings → Sessions → Compaction model
 (`sessionDefaults.compactionModel`: `session` default, `small`; read per
 owning account by `compactionModelPreference`) can put the small model first
 for every Polyth-owned compaction, with the session's model as its fallback;
-a harness's native compaction always uses its own model. A rate-limit resume's "Compact before
+a harness's native compaction always uses its own model. The owning account
+(`sessionAccountId`, also used for Recap's after-turn small model) is resolved by
+`resolveSessionAccount` (`packages/server/src/sessionAccount.ts`), in this order:
+the chat's notification recipient, else `SessionProjection.actor` while it still
+holds a role in the chat's Space, else the Space's only member. A shared Space
+without either record has no owner, and the server defaults apply. The
+recipient is written by `POST /api/sessions`, forks and agent-session routes.
+Package, control-tool and isolation create paths never wrote one (1,521 of
+2,224 top-level chats on one server lacked it, 2026-11-05), so the session
+service's `personWrote` hook records the first person who types into a
+top-level chat (not a delegation, schedule or judge writer, not a child),
+idempotently and never over a recorded owner. Push notifications go only to a
+recipient, so such a chat starts notifying its owner from that message on.
+Deletion policies (`accountsDecidingFor`) do not use this fallback: with no
+recipient, every Space member's choice still counts and keeping wins.
+A blank summary counts as that model's
+failure (the CLI runners already reject blank output; `oneShot` and
+OpenCode's direct completion can return `""`). A blank or unusable answer and a
+transient upstream fault (overloaded, 5xx, connection reset) get one retry on
+the same route after 2 s (`SUMMARY_TRIES`); a limit, quota, auth, model,
+timeout, abort or unknown outcome is never retried. When every model fails, `session/compaction-failed` names each one
+tried, in order, with its own reason ("opus on Claude Code: You've hit your
+5-hour limit · resets 2:50pm (Europe/Kyiv)"). A print-mode CLI that exits
+non-zero with an empty stderr reports its last stdout lines
+(`packages/harness-runtime/src/smallModelCli.ts`), since that is where Claude
+Code prints its limit refusal. A rate-limit resume's "Compact before
 proceeding" asks the small model first (`smallModelFirst`), and falls back to
 this Polyth compaction when the runtime's native one fails. A same-harness fresh leg
 (the rewind replacement path: release proof, fresh native session, epoch

@@ -383,3 +383,98 @@ test("a session runtime without direct completion summarizes on a project runtim
   assert.equal(text, "S");
   assert.deepEqual(runs, [{ runtime: project, requireDirect: false }]);
 });
+
+test("a failed compaction summary names every model it tried, with its own reason", async () => {
+  // The chat d34b0ef0 case: the chosen small model answered blank, then the
+  // session's Claude model refused over its 5-hour limit.
+  const session = { completeSmallModel: async () => ({}) } as unknown as AgentRuntime;
+  const utility = {} as AgentRuntime;
+  const runs: string[] = [];
+  const failure = await summarizeSessionFirst({
+    sessionRuntime: session,
+    sessionRoute: { model: { providerID: "anthropic", modelID: "opus" }, harnessId: "claude" },
+    fallbackRoute: { model: { providerID: "opencode-go", modelID: "muse-spark" }, harnessId: "pi" },
+    smallModelFirst: true,
+    projectRuntime: async () => utility,
+    describe: (route) => `${route.model?.modelID} on ${route.harnessId === "claude" ? "Claude Code" : "Pi"}`,
+    retryDelayMs: 0,
+    run: async (runtime) => {
+      runs.push(runtime === utility ? "small" : "own");
+      if (runtime === utility) return "  \n";
+      throw Object.assign(new Error("You've hit your 5-hour limit · resets 2:50pm (Europe/Kyiv)"), { code: "unavailable" });
+    },
+  }).then(() => undefined, (error: unknown) => error as Error & { code?: string });
+  assert.ok(failure);
+  assert.equal(
+    failure.message,
+    "muse-spark on Pi: returned an empty summary (tried 2 times); opus on Claude Code: You've hit your 5-hour limit · resets 2:50pm (Europe/Kyiv)",
+  );
+  assert.equal(failure.code, "invalid-response");
+  // The blank answer is retried once; the limit refusal is not.
+  assert.deepEqual(runs, ["small", "small", "own"]);
+});
+
+test("a compaction summary failure without a describer names the model and harness id", async () => {
+  await assert.rejects(() => summarizeSessionFirst({
+    sessionRoute: { model: { providerID: "a", modelID: "big" }, harnessId: "codex" },
+    fallbackRoute: { model: { providerID: "a", modelID: "big" }, harnessId: "codex" },
+    projectRuntime: async () => ({}) as AgentRuntime,
+    run: async () => { throw Object.assign(new Error("quota"), { code: "rate-limited" }); },
+  }), (error: Error & { code?: string }) => {
+    assert.equal(error.message, "big on codex: quota");
+    assert.equal(error.code, "rate-limited");
+    return true;
+  });
+});
+
+test("a compaction summary retries a blank or transient answer once on the same route", async () => {
+  const route = { model: { providerID: "a", modelID: "big" }, harnessId: "codex" };
+  let acquired = 0;
+  const answers: Array<() => string> = [() => "", () => "SUMMARY"];
+  const text = await summarizeSessionFirst({
+    sessionRoute: route,
+    fallbackRoute: route,
+    retryDelayMs: 0,
+    projectRuntime: async () => { acquired += 1; return {} as AgentRuntime; },
+    run: async () => answers.shift()!(),
+  });
+  assert.equal(text, "SUMMARY");
+  assert.equal(acquired, 1);
+
+  const calls: string[] = [];
+  const overloaded = await summarizeSessionFirst({
+    sessionRoute: route,
+    fallbackRoute: route,
+    retryDelayMs: 0,
+    projectRuntime: async () => ({}) as AgentRuntime,
+    run: async () => {
+      calls.push("run");
+      if (calls.length === 1) throw Object.assign(new Error("API Error: 529 Overloaded"), { code: "unavailable" });
+      return "AGAIN";
+    },
+  });
+  assert.equal(overloaded, "AGAIN");
+  assert.equal(calls.length, 2);
+});
+
+test("a compaction summary never retries a limit, timeout or unknown failure", async () => {
+  const route = { model: { providerID: "a", modelID: "big" }, harnessId: "codex" };
+  for (const error of [
+    Object.assign(new Error("You've hit your 5-hour limit · resets 2:50pm (Europe/Kyiv)"), { code: "unavailable" }),
+    Object.assign(new Error("API Error: 429 rate limit"), { code: "unavailable" }),
+    Object.assign(new Error("claude utility completion timed out after 180000ms"), { code: "unavailable" }),
+    Object.assign(new Error("slow"), { code: "timeout" }),
+    Object.assign(new Error("lost"), { code: "outcome-unknown" }),
+    Object.assign(new Error("no such model"), { code: "invalid-model" }),
+  ]) {
+    let calls = 0;
+    await assert.rejects(() => summarizeSessionFirst({
+      sessionRoute: route,
+      fallbackRoute: route,
+      retryDelayMs: 0,
+      projectRuntime: async () => ({}) as AgentRuntime,
+      run: async () => { calls += 1; throw error; },
+    }), (failure: Error) => !failure.message.includes("tried 2 times"));
+    assert.equal(calls, 1, error.message);
+  }
+});

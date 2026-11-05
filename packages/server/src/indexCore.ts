@@ -129,6 +129,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
+import { resolveSessionAccount } from "./sessionAccount.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
@@ -2649,15 +2650,25 @@ export async function boot(opts: BootOptions = {}) {
       return undefined;
     }
   };
-  // The account a session belongs to: the recipient registered when it was
-  // created in its Space. Absent for legacy or Space-less sessions.
+  // The account a session belongs to: the recipient registered for it in its
+  // Space. Many chats have none (package, tool and isolation create paths
+  // never recorded one), so this falls back to the person it acts for and then
+  // to the Space's only member; both must still hold a role in that Space.
+  // Absent for Space-less sessions. Settings reads only: deletion policies
+  // keep their own every-member rule.
   const sessionAccountId = async (
-    projection: Pick<SessionProjection, "id" | "spaceId"> | null | undefined,
+    projection: Pick<SessionProjection, "id" | "spaceId" | "actor"> | null | undefined,
     purpose: string,
   ): Promise<string | undefined> => {
-    if (!projection?.spaceId) return undefined;
+    const spaceId = projection?.spaceId;
+    if (!projection || !spaceId) return undefined;
     try {
-      return (await notifications.recipientForSession(projection.id, { spaceId: projection.spaceId }))?.userId;
+      return resolveSessionAccount({
+        recipient: (await notifications.recipientForSession(projection.id, { spaceId }))?.userId,
+        actor: projection.actor?.userId,
+        members: () => sessionAccounts.members(spaceId),
+        isMember: (userId) => notificationAccess({ userId, spaceId }),
+      });
     } catch (error) {
       console.warn(`[polyth] ${purpose} account lookup failed`, error);
       return undefined;
@@ -2862,6 +2873,13 @@ export async function boot(opts: BootOptions = {}) {
         sessionRoute: { ...(model ? { model } : {}), ...(projection.resolvedHarnessId ? { harnessId: projection.resolvedHarnessId } : {}) },
         fallbackRoute: smallModelExecutionRoute(resolveSmallModel(userId), projection),
         projectRuntime: (harnessId) => runtimes.forProject(projection.projectId, project?.path, harnessId),
+        // A failure names the model and harness the person picked, e.g. "opus on Claude Code".
+        describe: (route) => {
+          const harnessName = route.harnessId
+            ? harnesses.providers().find((provider) => provider.descriptor.id === route.harnessId)?.descriptor.name ?? route.harnessId
+            : undefined;
+          return `${route.model?.modelID ?? "the default model"}${harnessName ? ` on ${harnessName}` : ""}`;
+        },
         run: async (rt, routeModel, requireDirect) => {
           const budget = await smallModels.inputBudget(rt, routeModel, maxOutputTokens);
           const { text } = await smallModels.complete(rt, {
@@ -3010,6 +3028,9 @@ export async function boot(opts: BootOptions = {}) {
     compactionDefault: (userId) => userId
       ? parseCompactionPreference((clientSettings.get(userId).settings as { product?: { compactionDefault?: unknown } } | null | undefined)?.product?.compactionDefault)
       : undefined,
+    // Idempotent and never replaces a recorded owner; an account without a
+    // role in the Space is refused by the store.
+    personWrote: ({ sessionId, spaceId, userId }) => notifications.registerSessionRecipient(sessionId, { userId, spaceId }),
     // The hint points at agent.spawn, so it follows the subagent-routing policy.
     contextPressureEnabled: async () => {
       try {

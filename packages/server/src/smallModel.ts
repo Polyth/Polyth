@@ -95,9 +95,14 @@ const sameRoute = (a: SmallModelRoute, b: SmallModelRoute): boolean =>
  *  (Antigravity) cannot lend a project-scoped runtime at all. Only its direct
  *  completion is used, so the live native leg never gets an extra turn. Then
  *  the session route on a project runtime (when not already tried) and the
- *  configured small model. The first failure is reported: the session's own
- *  model explains it best. `smallModelFirst` asks the configured small model
- *  before all of them, for a session whose own model is out of quota. */
+ *  configured small model. `smallModelFirst` asks the configured small model
+ *  before all of them, for a session whose own model is out of quota.
+ *  A blank answer counts as a failure of its model. A blank or unusable
+ *  answer and a transient upstream fault get one retry on the same route
+ *  after 2 s; a limit, quota, auth, model, timeout or abort does not. When every route fails,
+ *  the error names each model tried, in order, with its own reason, e.g.
+ *  "opus on Claude Code: You've hit your 5-hour limit · resets 2:50pm"; its
+ *  code is the first failure's. */
 export async function summarizeSessionFirst(input: {
   sessionRuntime?: AgentRuntime;
   sessionRoute: SmallModelRoute;
@@ -105,40 +110,107 @@ export async function summarizeSessionFirst(input: {
   smallModelFirst?: boolean;
   projectRuntime(harnessId?: string): Promise<AgentRuntime>;
   run(runtime: AgentRuntime, model: ModelRef | undefined, requireDirect: boolean): Promise<string>;
+  /** How a failure names its route; defaults to "<modelID> on <harnessId>". */
+  describe?(route: SmallModelRoute): string;
+  /** Pause before a retry; a test seam. */
+  retryDelayMs?: number;
 }): Promise<string> {
-  let failure: unknown;
+  const failures: Array<{ route: SmallModelRoute; error: unknown }> = [];
+  const retryDelayMs = input.retryDelayMs ?? SUMMARY_RETRY_DELAY_MS;
+  const attempt = async (
+    route: SmallModelRoute,
+    runtime: () => Promise<AgentRuntime>,
+    requireDirect: boolean,
+  ): Promise<string | undefined> => {
+    let rt: AgentRuntime;
+    try {
+      rt = await runtime();
+    } catch (error) {
+      failures.push({ route, error });
+      return undefined;
+    }
+    let error: unknown;
+    for (let tries = 1; tries <= SUMMARY_TRIES; tries += 1) {
+      if (tries > 1 && retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      try {
+        const text = await input.run(rt, route.model, requireDirect);
+        if (text.trim()) return text;
+        error = Object.assign(new Error("returned an empty summary"), { code: "invalid-response" });
+      } catch (caught) {
+        error = caught;
+      }
+      if (!retryableSummaryFailure(error)) break;
+      if (tries === SUMMARY_TRIES) {
+        error = Object.assign(new Error(`${errorText(error)} (tried ${SUMMARY_TRIES} times)`), {
+          code: (error as { code?: unknown } | null)?.code ?? "unavailable",
+          cause: error,
+        });
+      }
+    }
+    failures.push({ route, error });
+    return undefined;
+  };
   const triedSmall = input.smallModelFirst === true && !sameRoute(input.fallbackRoute, input.sessionRoute);
   if (triedSmall) {
-    try {
-      const text = await input.run(await input.projectRuntime(input.fallbackRoute.harnessId), input.fallbackRoute.model, false);
-      if (text.trim()) return text;
-    } catch (error) {
-      failure = error;
-    }
+    const text = await attempt(input.fallbackRoute, () => input.projectRuntime(input.fallbackRoute.harnessId), false);
+    if (text) return text;
   }
-  const triedSession = Boolean(input.sessionRuntime?.completeSmallModel);
-  if (input.sessionRuntime && triedSession) {
-    try {
-      const text = await input.run(input.sessionRuntime, input.sessionRoute.model, true);
-      if (text.trim()) return text;
-    } catch (error) {
-      failure ??= error;
-    }
+  const sessionRuntime = input.sessionRuntime;
+  const triedSession = Boolean(sessionRuntime?.completeSmallModel);
+  if (sessionRuntime && triedSession) {
+    const text = await attempt(input.sessionRoute, async () => sessionRuntime, true);
+    if (text) return text;
   }
   const routes = [input.sessionRoute, input.fallbackRoute]
     .filter((route, index, all) => all.findIndex((other) => sameRoute(other, route)) === index)
     .filter((route) => !(triedSession && sameRoute(route, input.sessionRoute)))
     .filter((route) => !(triedSmall && sameRoute(route, input.fallbackRoute)));
   for (const route of routes) {
-    try {
-      const text = await input.run(await input.projectRuntime(route.harnessId), route.model, false);
-      if (text.trim()) return text;
-    } catch (error) {
-      failure ??= error;
-    }
+    const text = await attempt(route, () => input.projectRuntime(route.harnessId), false);
+    if (text) return text;
   }
-  throw failure ?? Object.assign(new Error("the model returned an empty summary"), { code: "unavailable" });
+  throw summaryFailure(failures, input.describe ?? describeRoute);
 }
+
+/** Each route gets one retry for a failure that a second identical request
+ *  can plausibly fix. */
+const SUMMARY_TRIES = 2;
+const SUMMARY_RETRY_DELAY_MS = 2_000;
+const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error);
+/** A usage limit or quota does not lift within seconds; retrying only spends a
+ *  refused request (or, after a reset, a second paid one). */
+const LIMIT_FAILURE = /hit your .*limit|usage limit|rate.?limit|quota|too many requests|\b429\b/i;
+const TRANSIENT_FAILURE = /overloaded|\b(?:500|502|503|504|529)\b|ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|fetch failed|network error/i;
+/** Retry a blank or unusable answer and a transient upstream fault. Never a
+ *  limit, quota, auth, model, timeout (it already waited 3 minutes), abort or
+ *  unknown outcome. */
+const retryableSummaryFailure = (error: unknown): boolean => {
+  const code = (error as { code?: unknown } | null)?.code;
+  const message = errorText(error);
+  if (LIMIT_FAILURE.test(message)) return false;
+  if (code === "invalid-response" || code === "overloaded") return true;
+  if (typeof code === "string" && code !== "unavailable" && code !== "upstream") return false;
+  return TRANSIENT_FAILURE.test(message);
+};
+
+const describeRoute = (route: SmallModelRoute): string =>
+  `${route.model?.modelID ?? "the default model"}${route.harnessId ? ` on ${route.harnessId}` : ""}`;
+
+const summaryFailure = (
+  failures: ReadonlyArray<{ route: SmallModelRoute; error: unknown }>,
+  describe: (route: SmallModelRoute) => string,
+): Error => {
+  if (!failures.length) return Object.assign(new Error("no model could write the summary"), { code: "unavailable" });
+  const message = failures.map(({ route, error }) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `${describe(route)}: ${reason.trim() || "failed"}`;
+  }).join("; ");
+  const code = (failures[0]!.error as { code?: unknown } | null)?.code;
+  return Object.assign(new Error(message), {
+    code: typeof code === "string" ? code : "unavailable",
+    cause: failures[0]!.error,
+  });
+};
 
 const promptForFallback = (options: SmallModelCompleteOptions): string =>
   options.systemPrompt ? `${options.systemPrompt}\n\n${options.prompt}` : options.prompt;

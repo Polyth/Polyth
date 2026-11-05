@@ -57,6 +57,15 @@ const windowsShim = (command: string): boolean =>
 const withoutFences = (text: string): string =>
   text.replace(/^```[a-zA-Z0-9_-]*\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
 
+/** A failed print-mode run's own explanation: its last non-empty stdout
+ *  lines, bounded, since an error event persists it. */
+const FAILURE_REASON_MAX_CHARS = 500;
+const failureReason = (stdout: string): string => {
+  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(-3);
+  const text = lines.join(" ");
+  return text.length > FAILURE_REASON_MAX_CHARS ? `${text.slice(0, FAILURE_REASON_MAX_CHARS - 1)}…` : text;
+};
+
 /** Distinct from a provider error: this adapter cannot serve the request and
  * the caller should use the session-backed compatibility path instead. */
 const unsupported = (message: string): Error =>
@@ -120,8 +129,13 @@ export function createSmallModelCliRunner(options: SmallModelCliOptions): SmallM
             try { child?.kill("SIGKILL"); } catch { /* already gone */ }
           }, 2_000).unref?.();
         };
-        const failure = (fallback: string): Error =>
-          Object.assign(new Error(stderr.trim() || fallback), { code: "unavailable" });
+        const failure = (fallback: string): Error => {
+          // Claude Code prints a refusal such as "You've hit your 5-hour
+          // limit · resets 2:50pm (Europe/Kyiv)" on stdout with an empty
+          // stderr and exit code 1: that line is the reason, not the exit code.
+          // The code stays `unavailable`; callers map it to 503 or a soft skip.
+          return Object.assign(new Error(stderr.trim() || failureReason(stdout) || fallback), { code: "unavailable" });
+        };
         // A prompt that cannot fit in argv (Windows or MAX_ARG_STRLEN) is not a
         // provider failure: fall back to the session compatibility path.
         const launchFailure = (error: unknown): Error =>
