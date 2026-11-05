@@ -152,6 +152,42 @@ responses still loading when a page closes — let the warm-up load finish
 (≥ 12 s through the proxy). The Resource Timing buffer holds 250 entries, so a
 boot list read from it silently misses late requests.
 
+## Phone: opening a chat that has photos
+
+Workload (2026-11-05): agent-beta, the real `polyth-link-host` and
+`polyth-link-client` forced onto the public n0 relay (the transport both paired
+iPhones last reported), headless Chromium at the loopback origin with a phone
+context, a chat with six 2 MB noise PNGs left 300 ms after opening it for a chat
+with text only. The relay leg ran between processes on one host, so a phone's
+last mile comes on top. WebKit itself was not measured.
+
+The relay passes the first 2–3 MB fast, then about 10 Mbit/s: 2 MB took 126 ms,
+16 MB took 13.9 s. An idle 40 KB read takes about 30 ms.
+
+| Over the relay | Before | After |
+| --- | --- | --- |
+| Tap until the tapped chat shows | 4.3–5.3 s, previous chat on screen, no loader (n=4) | 0.5–0.8 s (n=3) |
+| Same tap between chats with no photos | 0.38 s (n=1) | 0.36–0.40 s (n=5) |
+| All six photos of a chat shown | 9.4–9.7 s (n=2) | 5.4–5.6 s (n=2) |
+| App returns to the foreground 1 s into a download | 0 of 6 photos, all cut 5 s after the probe (n=2, one with flipped priorities alone) | 12 of 12 over 18.9 s (24 MB, n=1) |
+
+Raw QUIC probe on the same relay, five 2 MB bodies at once, one API read at a
+time alongside, n=5 rounds per setting over two runs:
+
+| Priorities | API read | Control Pong |
+| --- | --- | --- |
+| Files above API (the old inverted values) | 6.5 s, or none finished before the photos | 6.5–9.2 s |
+| Files below API | 2.1–5.7 s | 2.2–5.7 s |
+| Files below API, one body at a time (1 run) | median 0.85 s, max 1.25 s | not measured |
+
+Priorities cannot reach what is already queued on the relay, which is why the
+number of concurrent bodies matters as much as their rank, and why a Pong can be
+more than 5 s late on a healthy link.
+
+Invariants: tiles load through the queue; the higher `PRI_*` value is sent first
+and file bodies rank lowest; stream data arriving keeps a liveness probe alive,
+for at most `LIVENESS_BUSY_LIMIT`.
+
 ## Session spawn timing
 
 `SessionService.create` starts a bounded, in-memory sample after validating the

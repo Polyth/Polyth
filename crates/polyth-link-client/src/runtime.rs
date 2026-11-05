@@ -79,6 +79,11 @@ const RECONNECT_BACKOFF_MS: [u64; 6] = [0, 250, 1_000, 2_000, 5_000, 10_000];
 /// its idle timeout, measured in awake time, so without a probe every request
 /// and the page's WebSocket hang on it for tens of seconds.
 const LIVENESS_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long stream data still arriving may stand in for a late Pong. A relay
+/// path queues the Pong behind everything already on its way to this device,
+/// which reaches seconds during a photo download; the bound keeps a wedged
+/// control stream from passing as healthy forever.
+const LIVENESS_BUSY_LIMIT: Duration = Duration::from_secs(30);
 
 struct ProxyHandle {
     origin: String,
@@ -1326,6 +1331,26 @@ async fn handle_client_context(
     if !client_storage_key_valid(key) {
         return write_http(stream, 400, "invalid storage key").await;
     }
+    // A PUT's body arrives from the socket, and a suspended page may never send
+    // it. Read it before taking the store's lock, within a deadline: waiting
+    // there would hold every other local read, and with it every session open.
+    let put_body = if method == "PUT" {
+        let read = tokio::time::timeout(
+            Duration::from_millis(Limits::v1().header_read_timeout_ms),
+            read_client_storage_body(stream, &parsed),
+        )
+        .await
+        .unwrap_or(Err(LinkError::RequestHeaderInvalid));
+        match read {
+            Ok(value) => Some(value),
+            Err(error) => {
+                let status = if error == LinkError::RequestTooLarge { 413 } else { 400 };
+                return write_http(stream, status, "invalid storage value").await;
+            }
+        }
+    } else {
+        None
+    };
     let _guard = storage_lock.lock().await;
     let root = client_storage_root(data_dir, connection_scope);
     if ensure_client_storage_root(&root).is_err() {
@@ -1355,20 +1380,11 @@ async fn handle_client_context(
             }
             Err(_) => write_http(stream, 400, "storage unavailable").await,
         },
-        "PUT" => {
-            let value = match read_client_storage_body(stream, &parsed).await {
-                Ok(value) => value,
-                Err(error) => {
-                    let status = if error == LinkError::RequestTooLarge { 413 } else { 400 };
-                    return write_http(stream, status, "invalid storage value").await;
-                }
-            };
-            match write_client_storage_record(&root, key, &value) {
-                Ok(()) => write_empty(stream, 204).await,
-                Err(LinkError::RequestTooLarge) => write_http(stream, 413, "storage quota exceeded").await,
-                Err(_) => write_http(stream, 400, "storage unavailable").await,
-            }
-        }
+        "PUT" => match write_client_storage_record(&root, key, put_body.as_deref().unwrap_or_default()) {
+            Ok(()) => write_empty(stream, 204).await,
+            Err(LinkError::RequestTooLarge) => write_http(stream, 413, "storage quota exceeded").await,
+            Err(_) => write_http(stream, 400, "storage unavailable").await,
+        },
         _ => write_http(stream, 404, "not found").await,
     }
 }
@@ -1530,12 +1546,27 @@ enum ControlEnd {
     Lost,
 }
 
-async fn serve_control(send: &mut SendStream, recv: &mut RecvStream, probe: &Notify) -> ControlEnd {
+/// A liveness Ping waiting for its Pong.
+#[derive(Clone, Copy)]
+struct PendingProbe {
+    nonce: [u8; 16],
+    deadline: tokio::time::Instant,
+    give_up_at: tokio::time::Instant,
+    /// STREAM frames received when the deadline was last set.
+    stream_frames: u64,
+}
+
+async fn serve_control(
+    send: &mut SendStream,
+    recv: &mut RecvStream,
+    probe: &Notify,
+    connection: &Connection,
+) -> ControlEnd {
     // `ControlReader` keeps a partial frame across the select below.
     let mut reader = ControlReader::new(recv);
-    let mut pending: Option<([u8; 16], tokio::time::Instant)> = None;
+    let mut pending: Option<PendingProbe> = None;
     loop {
-        let deadline = pending.map(|(_, deadline)| deadline);
+        let deadline = pending.map(|pending| pending.deadline);
         let message = tokio::select! {
             message = reader.read() => message,
             _ = probe.notified(), if pending.is_none() => {
@@ -1544,15 +1575,35 @@ async fn serve_control(send: &mut SendStream, recv: &mut RecvStream, probe: &Not
                 if write_control(send, &ControlMessage::Ping { nonce }).await.is_err() {
                     return ControlEnd::Lost;
                 }
-                pending = Some((nonce, tokio::time::Instant::now() + LIVENESS_TIMEOUT));
+                let now = tokio::time::Instant::now();
+                pending = Some(PendingProbe {
+                    nonce,
+                    deadline: now + LIVENESS_TIMEOUT,
+                    give_up_at: now + LIVENESS_BUSY_LIMIT,
+                    stream_frames: connection.stats().frame_rx.stream,
+                });
                 continue;
             }
             _ = tokio::time::sleep_until(deadline.unwrap_or_else(tokio::time::Instant::now)),
-                if deadline.is_some() => return ControlEnd::Lost,
+                if deadline.is_some() => {
+                // Data still arriving proves the link is alive, and replacing it
+                // would cut off those very transfers. Only ACKs prove nothing: a
+                // host whose application has stopped still acknowledges packets.
+                let now = tokio::time::Instant::now();
+                let frames = connection.stats().frame_rx.stream;
+                match pending.as_mut() {
+                    Some(waiting) if frames > waiting.stream_frames && now < waiting.give_up_at => {
+                        waiting.stream_frames = frames;
+                        waiting.deadline = now + LIVENESS_TIMEOUT;
+                        continue;
+                    }
+                    _ => return ControlEnd::Lost,
+                }
+            }
         };
         match message {
             Ok(ControlMessage::Pong { nonce }) => {
-                if pending.is_some_and(|(expected, _)| expected == nonce) {
+                if pending.is_some_and(|waiting| waiting.nonce == nonce) {
                     pending = None;
                 }
             }
@@ -1700,7 +1751,7 @@ fn spawn_control_loop(
 ) {
     tokio::spawn(async move {
         loop {
-            if serve_control(&mut send, &mut recv, &probe).await == ControlEnd::Revoked {
+            if serve_control(&mut send, &mut recv, &probe, &connection).await == ControlEnd::Revoked {
                 proxy_listener.close();
                 connection.close(0u32.into(), b"revoked");
                 finish_session(state, &connection_id, generation, true).await;
@@ -2504,6 +2555,9 @@ mod tests {
         /// Accepts, then never answers on the control stream: a connection
         /// whose path died while the phone was suspended.
         Mute,
+        /// Accepts and keeps sending data, but answers a Ping past the liveness
+        /// deadline: a relay path queueing the Pong behind a photo download.
+        Busy,
         Revoked,
     }
 
@@ -2562,10 +2616,22 @@ mod tests {
                         let mut send = send;
                         let mut recv = recv;
                         while let Ok(message) = read_control(&mut recv).await {
-                            if let (ControlMessage::Ping { nonce }, FakeHostAnswer::Accept) =
-                                (message, answer)
-                            {
-                                let _ = write_control(&mut send, &ControlMessage::Pong { nonce }).await;
+                            let ControlMessage::Ping { nonce } = message else { continue };
+                            match answer {
+                                FakeHostAnswer::Accept => {
+                                    let _ = write_control(&mut send, &ControlMessage::Pong { nonce }).await;
+                                }
+                                FakeHostAnswer::Busy => {
+                                    let late = LIVENESS_TIMEOUT + Duration::from_secs(2);
+                                    let until = tokio::time::Instant::now() + late;
+                                    while tokio::time::Instant::now() < until {
+                                        tokio::time::sleep(Duration::from_millis(500)).await;
+                                        let traffic = ControlMessage::Ping { nonce: [7u8; 16] };
+                                        let _ = write_control(&mut send, &traffic).await;
+                                    }
+                                    let _ = write_control(&mut send, &ControlMessage::Pong { nonce }).await;
+                                }
+                                FakeHostAnswer::Mute | FakeHostAnswer::Revoked => {}
                             }
                         }
                     });
@@ -2762,6 +2828,53 @@ mod tests {
         assert!(again.is_err(), "a healthy link was replaced");
         let response = proxied_get(fixture.port, &fixture.cookie).await.unwrap();
         assert!(response.ends_with("conn-1"), "{response}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_busy_link_outlives_a_late_pong() {
+        let (fixture, mut connections) = link_fixture(vec![FakeHostAnswer::Busy]).await;
+        connections.recv().await.unwrap();
+        dispatch(
+            fixture.state.clone(),
+            "status",
+            json!({ "connectionId": fixture.host_id }),
+        )
+        .await
+        .unwrap();
+        let again =
+            tokio::time::timeout(LIVENESS_TIMEOUT + Duration::from_secs(4), connections.recv()).await;
+        assert!(again.is_err(), "a link still delivering data was replaced");
+        let response = proxied_get(fixture.port, &fixture.cookie).await.unwrap();
+        assert!(response.ends_with("conn-1"), "{response}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_store_write_waiting_for_its_body_does_not_hold_reads() {
+        let (fixture, mut connections) = link_fixture(vec![FakeHostAnswer::Accept]).await;
+        connections.recv().await.unwrap();
+        let (port, cookie) = (fixture.port, fixture.cookie.clone());
+        let head = |method: &str, extra: &str| {
+            format!(
+                "{method} {CLIENT_CONTEXT_STORAGE_PREFIX}draft.v1 HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\n{extra}\r\n"
+            )
+        };
+        // The body of this PUT never arrives.
+        let mut stuck = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        stuck
+            .write_all(head("PUT", "Content-Length: 100\r\n").as_bytes())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let mut reader = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        reader.write_all(head("GET", "").as_bytes()).await.unwrap();
+        let mut response = String::new();
+        tokio::time::timeout(Duration::from_secs(2), reader.read_to_string(&mut response))
+            .await
+            .expect("a read waited behind a store write that had no body yet")
+            .unwrap();
+        assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        drop(stuck);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

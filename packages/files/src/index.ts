@@ -67,6 +67,8 @@ export interface FileRawResult {
   data: Uint8Array;
   mime: string;
   size: number;
+  /** On-disk revision at read time; the raw endpoint's validator. */
+  revision?: string;
 }
 
 // Only types the raw endpoint may serve inline. HTML/SVG/JS are deliberately
@@ -364,7 +366,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       if (!st.isFile()) throw new Error(`Not a file: ${rel}`);
       if (st.size > MAX_RAW) throw new Error(`File too large to serve raw: ${rel}`);
       const data = await readFile(abs);
-      return { data, mime: rawMimeOf(rel), size: st.size };
+      return { data, mime: rawMimeOf(rel), size: st.size, revision: revisionOf(st) };
     },
 
     async write(root, rel, content, opts = {}) {

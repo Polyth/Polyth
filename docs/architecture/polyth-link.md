@@ -50,7 +50,13 @@ or unauthenticated share link.
    did not negotiate it is a protocol error. Older peers neither send nor read
    the field, so a mixed pair keeps plain frames. The host's own leg to the
    server stays uncompressed (a local unix socket).
-7. **Mobile proxy.** The Android/iOS native adapter runs the shared Rust Link
+7. **Stream priorities.** The transport sends the pending stream with the
+   highest priority value first (`PRI_*`, `polyth-link-core/src/protocol.rs`):
+   control above API and WebSocket, file bodies (`/files`, `/attachment` paths)
+   below everything, so a download cannot hold back API answers. A priority only
+   orders what has not left the host yet; data already queued on a relay still
+   goes first (numbers: [Phone: opening a chat that has photos](../agents/performance.md#phone-opening-a-chat-that-has-photos)).
+8. **Mobile proxy.** The Android/iOS native adapter runs the shared Rust Link
    client and loads the bundled web app through a one-time `bootstrapUrl` on
    a Rust-owned `127.0.0.1` listener. The browser receives only non-secret
    connection metadata and the loopback bootstrap URL. The app enters it
@@ -81,11 +87,11 @@ or unauthenticated share link.
     the proxy the app opened: the native side draws the server list itself and
     returns only the kind of choice, so connection metadata still never reaches
     loopback JavaScript (`docs/mobile/polyth-link.md`).
-8. **Local numeric pairing.** Nearby discovery supplies only a pinned bootstrap
+9. **Local numeric pairing.** Nearby discovery supplies only a pinned bootstrap
    hint. The six-digit code is authenticated with OPAQUE using the fixed
    `argon2id-v1-m65536-t3-p1` profile, a 120-second lifetime, and bounded
    per-device, endpoint, and host attempts; it never becomes persistent trust.
-9. **Interrupted pairing recovery.** A durable `prepared` record is never an
+10. **Interrupted pairing recovery.** A durable `prepared` record is never an
    active connection. Only the explicit native recovery operation may probe the
    pinned host. It promotes an accepted device, or removes the matching native
    identity and metadata only after an exact authoritative orphan rejection.
@@ -129,7 +135,11 @@ or unauthenticated share link.
   without the matching `Pong` within 5 s the link is treated as lost and
   replaced. After a suspension the old connection still looks open (QUIC
   measures its idle timeout in awake time), so without this probe requests and
-  the page's WebSocket hung on it for tens of seconds.
+  the page's WebSocket hung on it for tens of seconds. Stream data arriving
+  meanwhile re-arms the wait, for at most 30 s: a relay path queues the `Pong`
+  behind everything already on its way to the phone, and replacing a link that
+  is delivering would cut those very transfers. ACKs do not count, because a
+  host whose application has stopped still sends them.
   `status` and `connect` first prove the origin is served: a loopback probe
   must be *accepted by this proxy's accept loop* (a reclaimed iOS listener
   can fail silently, and a bare TCP connect could reach another local

@@ -395,13 +395,22 @@ export function workspaceRoutes(deps: {
         || raw.mime === "application/xml"
         || raw.mime === "application/octet-stream");
       const data = Buffer.from(raw.data);
+      const etag = raw.revision ? `"${raw.revision}"` : undefined;
       const headers = {
         "content-type": raw.mime,
         "accept-ranges": "bytes",
         "x-content-type-options": "nosniff",
         "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(query("path")?.split(/[\\/]/).pop() ?? "file")}`,
         "cache-control": "no-cache",
+        ...(etag ? { etag } : {}),
       };
+      // Opening a chat again asks for all its photos again. One round trip
+      // answers that instead of megabytes through a phone's relay path.
+      if (etag && req.headers["if-none-match"] === etag && !req.headers.range) {
+        res.writeHead(304, headers);
+        res.end();
+        return true;
+      }
       // Media players (Safari always) fetch byte ranges to seek and refuse a
       // video served without them. The file is already in memory (bounded by
       // MAX_RAW_BYTES), so a single range is a slice of it.

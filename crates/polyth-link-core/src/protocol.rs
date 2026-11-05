@@ -9,11 +9,15 @@ pub const STREAM_HTTP: u8 = 2;
 pub const STREAM_WEBSOCKET: u8 = 3;
 pub const DISABLE_0RTT: bool = true;
 
-pub const PRI_CONTROL: i32 = -100;
-pub const PRI_REVOKE: i32 = -90;
-pub const PRI_SESSION: i32 = -40;
+// QUIC send priorities: the transport sends the pending stream with the HIGHEST
+// value first and a lower one only once nothing above it is ready. File bodies
+// therefore rank below everything, so a photo download cannot hold back API
+// answers or the liveness Pong on a slow relay path.
+pub const PRI_CONTROL: i32 = 100;
+pub const PRI_REVOKE: i32 = 90;
+pub const PRI_SESSION: i32 = 40;
 pub const PRI_API: i32 = 0;
-pub const PRI_FILE: i32 = 80;
+pub const PRI_FILE: i32 = -80;
 
 pub fn is_idempotent_method(method: &str) -> bool {
     matches!(
@@ -361,6 +365,15 @@ pub fn validate_websocket_open(open: &WebSocketOpenV1) -> Result<(), LinkError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn urgent_streams_outrank_file_bodies() {
+        // The transport sends the highest value first.
+        assert!(PRI_CONTROL > PRI_REVOKE);
+        assert!(PRI_REVOKE > PRI_SESSION);
+        assert!(PRI_SESSION > PRI_API);
+        assert!(PRI_API > PRI_FILE);
+    }
 
     #[test]
     fn http_head_round_trip() {

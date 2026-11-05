@@ -1731,10 +1731,16 @@ export async function openSession(
   // the loading state so an incomplete WS fragment can never masquerade as the
   // full log.
   if (useCachedView) {
-    if (cachedSession.projectId !== before.activeProjectId) {
-      store.setOpeningSession(sessionId);
-      store.activateProject(cachedSession.projectId);
-    }
+    // The composer needs its draft before it mounts. On the phone that read is
+    // an HTTP request to the app's own loopback, and it waits for a socket like
+    // any other, so it can take seconds on a busy page. The claim makes a slow
+    // read show the loading layer: the previous chat must not stay on screen as
+    // if the tap had done nothing. A fast read never reaches the layer's delay,
+    // and a chat already on screen (a new one, opened as it is created) has
+    // nothing to replace.
+    const projectChanges = cachedSession.projectId !== before.activeProjectId;
+    if (projectChanges || before.activeSessionId !== cachedSessionId) store.setOpeningSession(sessionId);
+    if (projectChanges) store.activateProject(cachedSession.projectId);
     const hydrationClaim = store.getState();
     await hydrateComposerDraft(cachedSessionId);
     if (generation !== openSessionGeneration) return;
@@ -1742,7 +1748,10 @@ export async function openSession(
     if (afterHydration.activeProjectId !== hydrationClaim.activeProjectId
       || afterHydration.activeSessionId !== hydrationClaim.activeSessionId
       || afterHydration.newSessionIntent !== hydrationClaim.newSessionIntent
-      || afterHydration.activePage !== hydrationClaim.activePage) return;
+      || afterHydration.activePage !== hydrationClaim.activePage) {
+      if (afterHydration.openingSessionId === sessionId) store.setOpeningSession(null);
+      return;
+    }
     void reconcileClientMutation(cachedSessionId, true);
     store.activateSession(cachedSessionId);
     activateRuntime(cachedSessionId);

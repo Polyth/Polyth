@@ -115,22 +115,31 @@ test("tree entries carry mtime and /api/files/raw honours an explicit download",
 
     const projects = { get: async (id: string) => id === "p1" ? { id, path: root, name: "repo" } : undefined } as unknown as ProjectService;
     const route = workspaceRoutes({ projects, sessions: {} as SessionService, files: createFileService() });
-    const fetchRaw = async (query: string) => {
+    const fetchRaw = async (query: string, requestHeaders: Record<string, string> = {}) => {
       let headers: Record<string, string> = {};
       let body: Buffer | undefined;
+      let status = 0;
       await route({
         path: "/api/files/raw",
         method: "GET",
         url: new URL(`https://polyth.test/api/files/raw?projectId=p1&path=notes.txt${query}`),
-        req: { headers: {} },
+        req: { headers: requestHeaders },
         res: {
-          writeHead: (_status: number, next: Record<string, string>) => { headers = next; },
+          writeHead: (code: number, next: Record<string, string>) => { status = code; headers = next; },
           end: (data?: Buffer) => { body = data; },
         },
       } as unknown as RouteRequest);
-      return { disposition: headers["content-disposition"], body: body?.toString("utf8") };
+      return { status, etag: headers.etag, disposition: headers["content-disposition"], body: body?.toString("utf8") };
     };
-    assert.match((await fetchRaw("")).disposition ?? "", /^inline;/);
+    const first = await fetchRaw("");
+    assert.match(first.disposition ?? "", /^inline;/);
+    assert.match(first.etag ?? "", /^".+"$/, "a read carries a validator");
+    const revisited = await fetchRaw("", { "if-none-match": first.etag! });
+    assert.equal(revisited.status, 304, "an unchanged file is not sent again");
+    assert.equal(revisited.body, undefined);
+    assert.equal(revisited.etag, first.etag);
+    assert.equal((await fetchRaw("", { "if-none-match": "\"other\"" })).status, 200, "a changed file is sent");
+    assert.equal((await fetchRaw("", { "if-none-match": first.etag!, range: "bytes=0-1" })).status, 206, "a range read stays a range read");
     const download = await fetchRaw("&download=1");
     assert.match(download.disposition ?? "", /^attachment; filename\*=UTF-8''notes\.txt$/);
     assert.equal(download.body, "hello");

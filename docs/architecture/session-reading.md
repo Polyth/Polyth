@@ -232,6 +232,23 @@ most four concurrent requests. Active history still requires a
 semantic checkpoint before it can be truncated safely; shared segments alone
 do not establish a lifetime memory bound.
 
+### Opening a chat and its attachment tiles
+
+On a phone the browser reaches one HTTP/1.1 origin, the app's Link loopback,
+through six sockets, and everything shares them: API reads, the local draft
+store and images. Two rules keep a tap on a chat independent of what is
+downloading:
+
+- The composer needs its draft before it mounts, so `openSession` awaits a
+  local read even when the history is cached. It takes the opening claim first,
+  so a read that has to wait for a socket shows the loading layer. The previous
+  chat never stays on screen as if the tap had done nothing.
+- Attachment tiles are full-size files. They start near the screen, load through
+  one queue of `MAX_THUMB_LOADS` (`apps/web/src/attachmentThumbQueue.ts`), stop
+  downloading when they leave the page, and try again after a dropped transfer,
+  because an `<img>` never retries on its own. `/api/files/raw` answers a repeated
+  read with 304 from its `ETag`.
+
 ## Migration and compatibility
 
 Session schema v16 adds derived navigator/unread indexes and Space-scoped
