@@ -46,6 +46,7 @@ argv, into logs or into output.
 | Control socket, `server-trusted` / `multi-tenant-sandboxed` | `internal-service` | **Only** `GET /api/health` and `GET /api/agent`. Every agent runs as the server's OS user and could open the socket, so it no longer speaks for an owner there (`httpCore.ts`, `CONTROL_SOCKET_RESTRICTED_ALLOW`) |
 | `polyth login <url>` (device code) | `access-token` (`tokenKind: device`) | The chosen profile's grants |
 | Automation token (Settings → Command line) | `access-token` (`tokenKind: automation`) | The chosen profile's grants, optionally pinned to one Space |
+| App token (Settings → Apps) | `access-token` (`tokenKind: app`) | Only the [Client API](client-api.md), not the routes this CLI uses |
 | No-token mode (owner opt-in) | `local-user` (`sessionId: trusted-cli`) as the owner who enabled it | Full owner authority, including approving agent requests |
 
 **Access tokens** (`packages/identity/src/accessTokens.ts`, control-plane
@@ -59,10 +60,15 @@ everywhere, suspension) or on revocation. Token principals are grant-bound like
 paired devices: they reach only the default-deny `CORE_REMOTE_ACCESS` /
 package `remoteAccess` route tables, capped by account guardrails.
 `core.requests.respond`, credentials, identity/pairing management, package
-installs and server control are never grantable — **a token can never answer an
-agent's permission request.** Bearer tokens are accepted only over TLS (direct
+installs and server control are never grantable — **a terminal or automation
+token can never answer an agent's permission request.** Only an app's token may
+hold that grant, when the instance owner gives it to that one app ([Client
+API](client-api.md#approving-agent-actions)). Bearer tokens are accepted only over TLS (direct
 or via a trusted proxy) or loopback, never as a fallback to cookies, and never
 for WebSockets (the CLI long-polls instead).
+
+The `?settings=…&code=…` sign-in link is read at boot (`rememberBootSettingsLink`
+in `apps/web/src/router.ts`), before the first URL canonicalization drops it.
 
 **Device sign-in**: `POST /api/auth/cli/device` → `{deviceCode, userCode,
 verificationPath: "/?settings=command-line"}`; the person confirms the code on

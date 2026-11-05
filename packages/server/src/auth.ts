@@ -228,6 +228,8 @@ export interface AuthService {
   requireCapability(principal: AuthPrincipal, capability: string): void;
   /** Server-owned user identity carried by a resolved principal. */
   userIdForPrincipal(principal: AuthPrincipal): string | undefined;
+  /** Durable record of a consequential act by an app's token. */
+  auditToken?(principal: AuthPrincipal, action: string, resource: string): void;
   /** Accounts with usable credentials on this server. */
   accountIds(): string[];
   hasCredential(userId: string): boolean;
@@ -367,6 +369,7 @@ function boundCanonicalAuthService(): AuthService | null {
     gate: (request, ingress) => gateway.gate(request, ingress),
     requireCapability: (principal, capability) => requirePrincipalCapability(principal, capability),
     userIdForPrincipal: (principal) => gateway.userIdForPrincipal(principal),
+    auditToken: (principal, action, resource) => gateway.auditToken(principal, action, resource),
     accountIds: () => security.control.all<{ id: string }>(
       "SELECT u.id FROM users u JOIN principals p ON p.id=u.id WHERE p.kind='user' AND p.status='active' ORDER BY u.id",
     ).map((row) => row.id),

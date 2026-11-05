@@ -60,6 +60,8 @@ import { createProxyTrust, type ProxyTrust } from "./trustedProxy.ts";
 import { logHttp500 } from "./httpLog.ts";
 import { httpErrorDiagnostics } from "./errorDiagnostics.ts";
 import { streamHistoryResponse } from "./historyResponse.ts";
+import { createClientApiStreams, handleClientApi, type ClientApiStreams } from "./routes/clientApi.ts";
+import { CLIENT_API_PREFIX } from "@polyth/contracts/client-api";
 import { withProjectIconRef } from "./projectIconRefs.ts";
 import { createSessionOnce, sessionCreateOperationStatus, sessionIdForCreateOperation } from "./sessionCreateIdempotency.ts";
 import { clampWaitMs, type SessionEventWaiters } from "./sessionEventWaiters.ts";
@@ -392,6 +394,8 @@ export interface HttpAuth {
   gate(req: AuthRequestLike, ingress: RequestIngress): GateDenial | null;
   /** Account carried by a resolved principal (see `AuthService`). */
   userIdForPrincipal?(principal: AuthPrincipal): string | undefined;
+  /** Durable record of a consequential act by an app's token. */
+  auditToken?(principal: AuthPrincipal, action: string, resource: string): void;
 }
 
 export interface HttpDeps {
@@ -609,6 +613,7 @@ export function createTunnelIngress(opts: {
 }
 
 export function createHttpHandler(deps: HttpDeps): HttpHandler {
+  const clientApiStreams = createClientApiStreams();
   return async (req, res, ingress) => {
     if (deps.admission && !deps.admission.enter()) {
       if (!res.headersSent && !res.writableEnded) {
@@ -617,7 +622,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
       return;
     }
     try {
-      await dispatchHttp(deps, req, res, ingress);
+      await dispatchHttp(deps, clientApiStreams, req, res, ingress);
     } finally {
       deps.admission?.leave();
     }
@@ -626,6 +631,7 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
 
 async function dispatchHttp(
   deps: HttpDeps,
+  clientApiStreams: ClientApiStreams,
   req: IncomingMessage,
   res: ServerResponse,
   ingress: RequestIngress,
@@ -740,6 +746,16 @@ async function dispatchHttp(
       // API/control path; the SPA shell and static assets stay reachable.
       const guardedApi = principalAccountGrants(principal) !== undefined
         && (path.startsWith("/api/") || path.startsWith("/internal/") || path === "/metrics" || path.startsWith("/debug"));
+      // The Client API speaks only bearer tokens, so it has no cookie for a
+      // foreign page to ride. An app's token in turn reaches only this API:
+      // not the UI routes, whose "always allow" and delegation it may not use.
+      const clientApi = path === CLIENT_API_PREFIX || path.startsWith(`${CLIENT_API_PREFIX}/`);
+      if (clientApi && principal.kind !== "access-token") {
+        throw new AuthorizationError("forbidden", "not allowed");
+      }
+      if (!clientApi && principal.kind === "access-token" && principal.tokenKind === "app") {
+        throw new AuthorizationError("forbidden", "not allowed");
+      }
       if (isGrantBoundPrincipal(principal) || guardedApi) {
         if (!canonicalizeRemotePath(rawPath) || path !== rawPath) {
           throw Object.assign(new Error("The requested path is invalid."), { code: "invalid-path" });
@@ -765,6 +781,39 @@ async function dispatchHttp(
       const recordNotificationRecipient = async (work: (() => Promise<void>) | undefined): Promise<void> => {
         try { await work?.(); } catch { console.warn("[polyth] notification recipient registration failed"); }
       };
+
+      if (clientApi) {
+        const currentServices = (spaceId: string): SpaceServices => {
+          if (deps.auth?.gate(reqLike, ingress)) throw new AuthorizationError("forbidden", "not allowed");
+          const current = deps.auth?.resolve(reqLike, ingress) ?? resolution;
+          assertPairedHttpAllowed(current.principal, method, path, [{ owner: "core", policy: CORE_REMOTE_ACCESS }]);
+          return deps.spaces.services(deps.spaces.resolve(current.principal, { explicit: spaceId, remembered: null }));
+        };
+        return await handleClientApi({
+          req, res, url, path, method,
+          principal,
+          services: space,
+          currentServices,
+          body: loadBody,
+          json: (code, body) => json(res, code, body),
+          models: async () => {
+            const catalog = await accountCatalog();
+            const guarded = guardrailsForUser(space().ctx.userId);
+            if (guarded) return guardedCatalog(catalog, guarded);
+            return deps.visibility ? deps.visibility.filter(catalog, { userId: space().ctx.userId }) : catalog;
+          },
+          version: deps.version,
+          streams: clientApiStreams,
+          ...(deps.eventWaiters ? { waiters: deps.eventWaiters } : {}),
+          ...(deps.auth?.auditToken ? { audit: (action, resource) => deps.auth!.auditToken!(principal, action, resource) } : {}),
+          parseHarness: harnessSelectionInput,
+          parseOperationId: clientOperationId,
+          scopeOperationId: accountScopedClientOperationId,
+          recordCreated: (ref) => recordNotificationRecipient(deps.notificationRecipients
+            ? () => deps.notificationRecipients!.created(ref.id, space().ctx)
+            : undefined),
+        });
+      }
 
       if (path === "/api/cli/whoami" && method === "GET") {
         // What the `polyth` CLI is speaking as. No secrets: token ids and

@@ -22,6 +22,7 @@ const TYPECHECK_PROJECTS = [
   "packages/web-search",
   "packages/custom-titles",
   "packages/cli",
+  "packages/client",
   // Workspace widgets are TypeScript props contracts at runtime: a missing
   // required JSX prop reaches the browser as an undefined value and crashes the
   // surface instead of failing a build.

@@ -6,7 +6,7 @@ import { sessionIdsToRefresh } from "./sessionStatus.ts";
 import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
-import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
+import { formatAppUrl, parseAppUrl, rememberBootSettingsLink, takeBootSettingsPage } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./projectRegistry.ts";
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
@@ -838,6 +838,7 @@ export function firstScreenRestored(): Promise<void> {
 }
 
 export function init(): Promise<void> {
+  rememberBootSettingsLink(location.search);
   bootReadsAt ??= typeof performance !== "undefined" ? performance.now() : Date.now();
   // A capability dragged out of a window (a Custom actions tile) turns the
   // icon rails into drop targets; the host owns that bridge, not the package.
@@ -1408,11 +1409,12 @@ function startSync(): void {
     window.dispatchEvent(new Event(CONNECTION_RESTORED_EVENT));
   });
   void initPluginBridge(sync).then(() => {
-    const page = settingsPageFromSearch(location.search);
+    const page = takeBootSettingsPage();
     if (!page) return;
     store.openSettingsPage(page);
     const url = new URL(location.href);
     url.searchParams.delete("settings");
+    url.searchParams.delete("code");
     const search = url.searchParams.toString();
     history.replaceState(history.state, "", `${url.pathname}${search ? `?${search}` : ""}${url.hash}`);
   }).catch((error) => {

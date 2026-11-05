@@ -1,0 +1,312 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Polyth Client API",
+    "version": "1.0.0",
+    "description": "The stable API for third-party Polyth clients. Guide: docs/dev/client-api.md. Within v1 changes are additive: ignore fields and event types you do not know."
+  },
+  "security": [{ "bearer": [] }],
+  "paths": {
+    "/api/auth/cli/device": {
+      "post": {
+        "summary": "Ask a person for access",
+        "description": "Refused when the request carries Origin or Sec-Fetch-Site. No token needed.",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SignInStart" } } } },
+        "responses": {
+          "200": { "description": "A code for the person to confirm", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SignInCode" } } } },
+          "403": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/cli/device/token": {
+      "post": {
+        "summary": "Collect the token once confirmed",
+        "description": "Poll no faster than `interval`. The token is returned exactly once.",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["deviceCode"], "properties": { "deviceCode": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "`status` is `pending` or `issued`", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SignInResult" } } } },
+          "403": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/cli/logout": {
+      "post": {
+        "summary": "Withdraw the presented token",
+        "responses": { "200": { "description": "`ok` tells whether a token was withdrawn" } }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "summary": "Who this token speaks as",
+        "responses": { "200": { "description": "The account", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Account" } } } }, "401": { "$ref": "#/components/responses/Error" }, "403": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "summary": "List projects",
+        "responses": { "200": { "description": "Projects", "content": { "application/json": { "schema": { "type": "object", "properties": { "projects": { "type": "array", "items": { "$ref": "#/components/schemas/Project" } } } } } } }, "403": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "summary": "List the models this account may use",
+        "responses": { "200": { "description": "Models", "content": { "application/json": { "schema": { "type": "object", "properties": { "models": { "type": "array", "items": { "$ref": "#/components/schemas/Model" } } } } } } }, "403": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions": {
+      "get": {
+        "summary": "List chats, most recent first",
+        "parameters": [
+          { "name": "projectId", "in": "query", "schema": { "type": "string" } },
+          { "name": "archived", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "`nextCursor` of the previous page" }
+        ],
+        "responses": { "200": { "description": "One page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionPage" } } } }, "403": { "$ref": "#/components/responses/Error" } }
+      },
+      "post": {
+        "summary": "Start a chat",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateSession" } } } },
+        "responses": { "200": { "description": "The chat", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Session" } } } }, "400": { "$ref": "#/components/responses/Error" }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+      "get": {
+        "summary": "Read a chat",
+        "responses": { "200": { "description": "The chat", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Session" } } } }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}/events": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+      "get": {
+        "summary": "Read a chat's events: one page, a long poll, or a live stream",
+        "description": "With `Accept: text/event-stream` this is a live stream that first replays from `afterSeq` or `Last-Event-ID`. Each frame is `id: <seq>` and `data: <Event>`; the server pings with comments and says `event: end` with a `reason` (`unauthorized`, `not-found`, `shutdown`, `error`) before it closes. Otherwise it answers one JSON page; `waitMs` holds the read until there is something new.",
+        "parameters": [
+          { "name": "afterSeq", "in": "query", "schema": { "type": "integer", "minimum": 0, "default": 0 } },
+          { "name": "waitMs", "in": "query", "schema": { "type": "integer", "minimum": 0, "maximum": 30000 } },
+          { "name": "Last-Event-ID", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page or a stream",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EventPage" } },
+              "text/event-stream": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "429": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/messages": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+      "post": {
+        "summary": "Send a message",
+        "description": "When a connection fails, the message may or may not have arrived. Retry only with the same `clientOperationId`, which can never deliver it twice.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendMessage" } } } },
+        "responses": { "200": { "description": "Admitted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendResult" } } } }, "400": { "$ref": "#/components/responses/Error" }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}/abort": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+      "post": {
+        "summary": "Stop the running turn",
+        "responses": { "200": { "$ref": "#/components/responses/Ok" }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}/requests": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }],
+      "get": {
+        "summary": "What the agent is waiting on",
+        "description": "Permission requests and questions. Credential requests are answered only in Polyth's protected UI and do not appear here.",
+        "responses": { "200": { "description": "Open requests", "content": { "application/json": { "schema": { "type": "object", "properties": { "requests": { "type": "array", "items": { "$ref": "#/components/schemas/PendingRequest" } } } } } } }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}/permissions/{requestId}/approve": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": {
+        "summary": "Allow one action, once",
+        "description": "Needs `core.requests.respond`, which only the instance owner can give to an app. A standing \"always allow\" stays in Polyth's UI.",
+        "responses": { "200": { "$ref": "#/components/responses/Ok" }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}/permissions/{requestId}/reject": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": {
+        "summary": "Refuse one action",
+        "responses": { "200": { "$ref": "#/components/responses/Ok" }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}/questions/{requestId}/answer": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": {
+        "summary": "Answer the agent's question",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["answers"], "properties": { "answers": { "type": "object" } } } } } },
+        "responses": { "200": { "$ref": "#/components/responses/Ok" }, "400": { "$ref": "#/components/responses/Error" }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/sessions/{id}/questions/{requestId}/reject": {
+      "parameters": [{ "$ref": "#/components/parameters/SessionId" }, { "$ref": "#/components/parameters/RequestId" }],
+      "post": {
+        "summary": "Decline the agent's question",
+        "responses": { "200": { "$ref": "#/components/responses/Ok" }, "403": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": { "type": "http", "scheme": "bearer", "description": "An app token (`pth_…`). Accepted only over TLS or on loopback." }
+    },
+    "parameters": {
+      "SessionId": { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+      "RequestId": { "name": "requestId", "in": "path", "required": true, "schema": { "type": "string" } }
+    },
+    "responses": {
+      "Ok": { "description": "Done", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } } } } } },
+      "Error": { "description": "Refused", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string" },
+          "code": { "type": "string", "description": "`outcome-unknown` means the action may have happened: never repeat it without the same `clientOperationId`." },
+          "message": { "type": "string" }
+        }
+      },
+      "SignInStart": {
+        "type": "object",
+        "required": ["kind", "label"],
+        "properties": {
+          "kind": { "const": "app" },
+          "label": { "type": "string", "maxLength": 80, "description": "The name the person reads before deciding." },
+          "profile": { "enum": ["read", "control", "approve"], "default": "control", "description": "`approve` falls back to `control` unless the instance owner says yes." }
+        }
+      },
+      "SignInCode": {
+        "type": "object",
+        "properties": {
+          "deviceCode": { "type": "string" },
+          "userCode": { "type": "string" },
+          "expiresIn": { "type": "integer" },
+          "interval": { "type": "integer" },
+          "verificationPath": { "type": "string" }
+        }
+      },
+      "SignInResult": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "enum": ["pending", "issued"] },
+          "interval": { "type": "integer" },
+          "token": { "type": "string" }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "spaceId": { "type": "string" },
+          "app": { "type": "string" },
+          "grants": { "type": "array", "items": { "type": "string" } },
+          "version": { "type": "string" }
+        }
+      },
+      "Project": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "path": { "type": "string" } }
+      },
+      "Model": {
+        "type": "object",
+        "properties": { "providerId": { "type": "string" }, "modelId": { "type": "string" }, "name": { "type": "string" }, "harnessId": { "type": "string" } }
+      },
+      "ModelRef": {
+        "type": "object",
+        "required": ["providerId", "modelId"],
+        "properties": { "providerId": { "type": "string" }, "modelId": { "type": "string" } }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "projectId": { "type": "string" },
+          "parentId": { "type": "string" },
+          "title": { "type": "string" },
+          "status": { "type": "string" },
+          "createdAt": { "type": "integer" },
+          "updatedAt": { "type": "integer" },
+          "pending": { "type": "object", "properties": { "permissions": { "type": "integer" }, "questions": { "type": "integer" } } }
+        }
+      },
+      "SessionPage": {
+        "type": "object",
+        "properties": { "sessions": { "type": "array", "items": { "$ref": "#/components/schemas/Session" } }, "nextCursor": { "type": "string" } }
+      },
+      "CreateSession": {
+        "type": "object",
+        "required": ["projectId"],
+        "properties": {
+          "projectId": { "type": "string" },
+          "title": { "type": "string", "maxLength": 120 },
+          "model": { "$ref": "#/components/schemas/ModelRef" },
+          "harnessId": { "type": "string" },
+          "clientOperationId": { "type": "string", "format": "uuid", "description": "Reuse after a lost response: it can never create a second chat." }
+        }
+      },
+      "SendMessage": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1 },
+          "delivery": { "enum": ["normal", "queue", "steer", "interrupt"] },
+          "model": { "$ref": "#/components/schemas/ModelRef" },
+          "clientOperationId": { "type": "string", "format": "uuid" }
+        }
+      },
+      "SendResult": {
+        "type": "object",
+        "properties": { "turnId": { "type": "string" }, "queueId": { "type": "string" }, "queued": { "type": "boolean" } }
+      },
+      "PendingRequest": {
+        "type": "object",
+        "required": ["kind", "requestId"],
+        "properties": {
+          "kind": { "enum": ["permission", "question"] },
+          "requestId": { "type": "string" },
+          "permission": { "type": "string" },
+          "patterns": { "type": "array", "items": { "type": "string" } },
+          "tool": { "type": "string" },
+          "questions": { "type": "array", "items": { "type": "object" } }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": ["seq", "time", "type"],
+        "description": "Assistant text arrives as `message.delta` while it is written, then once whole as `message.assistant`. Ignore types you do not know.",
+        "properties": {
+          "seq": { "type": "integer" },
+          "time": { "type": "integer" },
+          "type": {
+            "type": "string",
+            "examples": ["message.user", "message.delta", "message.assistant", "tool.called", "tool.started", "tool.finished", "tool.failed", "permission.requested", "permission.resolved", "permission.expired", "question.asked", "question.answered", "question.expired", "turn.started", "turn.finished"]
+          }
+        },
+        "additionalProperties": true
+      },
+      "EventPage": {
+        "type": "object",
+        "properties": {
+          "events": { "type": "array", "items": { "$ref": "#/components/schemas/Event" } },
+          "cursor": { "type": "integer", "description": "Pass as `afterSeq` next." },
+          "complete": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

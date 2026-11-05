@@ -1,7 +1,7 @@
 // Session URL parse/format: /p/:projectId/s/:sessionId plus ?session= for agents.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "../src/router.ts";
+import { formatAppUrl, parseAppUrl, rememberBootSettingsLink, settingsPageFromSearch, takeBootSettingsCode, takeBootSettingsPage } from "../src/router.ts";
 
 test("parseAppUrl reads project and session from the path", () => {
   assert.deepEqual(parseAppUrl("/p/prj_1/s/ses_2"), { projectId: "prj_1", sessionId: "ses_2" });
@@ -45,4 +45,20 @@ test("formatAppUrl builds canonical urls", () => {
   assert.equal(formatAppUrl("prj_1", null), "/p/prj_1");
   assert.equal(formatAppUrl(null, null), "/");
   assert.equal(formatAppUrl(null, "ses_2"), "/?session=ses_2");
+});
+
+test("a boot settings link survives URL canonicalization, and each part is read once", () => {
+  rememberBootSettingsLink("?settings=apps&code=BCDF-GHJK");
+  assert.equal(takeBootSettingsPage(), "apps");
+  assert.equal(takeBootSettingsPage(), null);
+  assert.equal(takeBootSettingsCode(), "BCDF-GHJK");
+  assert.equal(takeBootSettingsCode(), null);
+
+  rememberBootSettingsLink("?settings=not a page&code=BCDF-GHJK");
+  assert.equal(takeBootSettingsPage(), null);
+  assert.equal(takeBootSettingsCode(), null);
+
+  rememberBootSettingsLink("?settings=command-line");
+  assert.equal(takeBootSettingsCode(), null);
+  assert.equal(takeBootSettingsPage(), "command-line");
 });

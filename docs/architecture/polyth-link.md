@@ -222,8 +222,8 @@ Without full access, remote access is default-deny. Core HTTP that is
 remote-safe is listed in `CORE_REMOTE_ACCESS`. Packages without `remoteAccess`
 are local-only. Privileged capabilities (full access, pairing, grants, identity
 rotate, password, package install, secure-safe export, shutdown) are never
-grantable to guarded accounts or CLI tokens; the owner may grant them to a
-paired device. From the `/api/auth/*` tree, Link ingress answers
+grantable to guarded accounts or to CLI and app tokens; the owner may grant them
+to a paired device. From the `/api/auth/*` tree, Link ingress answers
 `GET /api/auth/status`, and for a full-access device (an unguarded account)
 also `GET /api/auth/accounts`, `GET /api/auth/me` and `GET /api/auth/cli` for
 the device's own account (`handlePairedRead` in `@polyth/identity`, gated in

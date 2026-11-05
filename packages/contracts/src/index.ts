@@ -66,14 +66,18 @@ export type AuthPrincipal =
       readonly accountGrants?: readonly string[];
     }
   | {
-      /** A person's command-line bearer token (device sign-in or automation).
-       *  Default-deny like a paired device: only `grants` are reachable. */
+      /** A person's bearer token: a terminal sign-in, an automation or a
+       *  third-party app. Default-deny like a paired device: only `grants` are
+       *  reachable, and an `app` token reaches only the Client API. */
       readonly kind: "access-token";
       readonly tokenId: string;
-      readonly tokenKind: "device" | "automation";
+      readonly tokenKind: "device" | "automation" | "app";
       readonly grants: readonly string[];
       /** Present when the token is pinned to one Space. */
       readonly spaceId?: string;
+      /** The name its owner approved, for an `app` token. Labels what the app
+       *  sends; never an identity or an authority. */
+      readonly appName?: string;
       /** Present only for a guarded account: intersected with `grants`. */
       readonly accountGrants?: readonly string[];
     }
@@ -1475,21 +1479,26 @@ export interface SessionPerson {
   /** How the person reached the session without typing the message: a
    *  delegated child acts for whoever ran its parent's turn, a scheduled run
    *  for the schedule's owner, a judge's fixed message for the person who
-   *  gave that judge the action. */
-  via?: "delegation" | "schedule" | "judge";
+   *  gave that judge the action, a third-party app for the person who
+   *  connected it. */
+  via?: "delegation" | "schedule" | "judge" | "app";
+  /** The approved name of the app, when `via` is `app`. Presentation only. */
+  viaName?: string;
 }
 
 /** A well-formed `SessionPerson` from stored or wire data, else undefined.
  *  Unknown fields are dropped; a name is bounded for presentation. */
 export function normalizeSessionPerson(value: unknown): SessionPerson | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const row = value as { userId?: unknown; name?: unknown; via?: unknown };
+  const row = value as { userId?: unknown; name?: unknown; via?: unknown; viaName?: unknown };
   if (typeof row.userId !== "string" || !row.userId || row.userId.length > 200) return undefined;
   const name = typeof row.name === "string" ? row.name.trim().slice(0, 120) : "";
+  const viaName = row.via === "app" && typeof row.viaName === "string" ? row.viaName.trim().slice(0, 120) : "";
   return {
     userId: row.userId,
     ...(name ? { name } : {}),
-    ...(row.via === "delegation" || row.via === "schedule" || row.via === "judge" ? { via: row.via } : {}),
+    ...(row.via === "delegation" || row.via === "schedule" || row.via === "judge" || row.via === "app" ? { via: row.via } : {}),
+    ...(viaName ? { viaName } : {}),
   };
 }
 
@@ -7523,7 +7532,7 @@ export const GRANT_PROFILE_PRESETS: Record<GrantProfileId, readonly string[]> = 
 
 /** Capabilities a command-line token may ever hold. Human-only decisions
  *  (answering approvals, credentials, pairing/identity management, package
- *  installs, server control) are never grantable to a token. */
+ *  installs, server control) are never grantable to one. */
 export const CLI_TOKEN_GRANTABLE: readonly RemoteCapability[] = [
   REMOTE_CAPABILITY.coreHealthRead,
   REMOTE_CAPABILITY.coreProjectsRead,
@@ -7569,6 +7578,37 @@ export function normalizeCliTokenGrants(raw: unknown): string[] {
   const refused = grants.filter((grant) => !(CLI_TOKEN_GRANTABLE as readonly string[]).includes(grant));
   if (refused.length) {
     throw Object.assign(new Error(`not grantable to a command-line token: ${refused.join(", ")}`), { code: "invalid-input" });
+  }
+  return grants;
+}
+
+/** Answering an agent's permission request. An app token may hold it only when
+ *  the instance owner chose so for that one app; terminals and automations
+ *  never may. Every process on the owner's machine that can read such a token
+ *  can use it, an agent included, which is why it is never a default. */
+export const APP_APPROVAL_GRANT: RemoteCapability = REMOTE_CAPABILITY.coreRequestsRespond;
+
+/** Capabilities a third-party app's token may ever hold. */
+export const APP_TOKEN_GRANTABLE: readonly RemoteCapability[] = [...CLI_TOKEN_GRANTABLE, APP_APPROVAL_GRANT];
+
+export type AppAccessProfileId = CliAccessProfileId | "approve";
+
+/** Named grant sets for an app. `approve` is `control` plus the owner-only
+ *  approval grant, and falls back to `control` without the owner's yes. */
+export const APP_ACCESS_PROFILES: Record<AppAccessProfileId, readonly RemoteCapability[]> = {
+  ...CLI_ACCESS_PROFILES,
+  approve: [...CLI_ACCESS_PROFILES.control, APP_APPROVAL_GRANT],
+};
+
+/** Validate an explicit grant list for an app's token. */
+export function normalizeAppTokenGrants(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length > 64 || raw.some((value) => typeof value !== "string")) {
+    throw Object.assign(new Error("grants must be a list of capability names"), { code: "invalid-input" });
+  }
+  const grants = normalizeRemoteGrants(raw as string[]);
+  const refused = grants.filter((grant) => !(APP_TOKEN_GRANTABLE as readonly string[]).includes(grant));
+  if (refused.length) {
+    throw Object.assign(new Error(`not grantable to an app: ${refused.join(", ")}`), { code: "invalid-input" });
   }
   return grants;
 }

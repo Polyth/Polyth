@@ -353,9 +353,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           const body = await readBody(req);
           if (path === '/api/auth/cli/device') {
             send(200, {
-              ...identity.accessTokens.device.start({ label: body.label, profile: body.profile, address: req.socket.remoteAddress }),
-              // The web UI's Settings → Command line page confirms the code.
-              verificationPath: '/?settings=command-line',
+              ...identity.accessTokens.device.start({ kind: body.kind, label: body.label, profile: body.profile, address: req.socket.remoteAddress }),
+              // The web UI's Settings → Command line or Apps page confirms the code.
+              verificationPath: body.kind === 'app' ? '/?settings=apps' : '/?settings=command-line',
             });
           } else {
             send(200, identity.accessTokens.device.redeem(body.deviceCode));
@@ -496,7 +496,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
               send(200, { ...account, name: account.displayName, current: account.id === identity.accounts.current(token!).id });
             } else if (req.method === 'POST' && path === '/api/auth/cli/tokens') {
               send(200, identity.accessTokens.create(token!, {
-                label: body.label, profile: body.profile, grants: body.grants, spaceId: body.spaceId, expiresInDays: body.expiresInDays,
+                kind: body.kind, label: body.label, profile: body.profile, grants: body.grants, spaceId: body.spaceId, expiresInDays: body.expiresInDays,
               }));
             } else if (req.method === 'DELETE' && cliTokenPath.test(path)) {
               identity.accessTokens.revoke(token!, cliTokenPath.exec(path)![1]!, Number(body.expectedRevision)); send(200, { ok: true });
@@ -504,7 +504,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
               send(200, identity.accessTokens.device.lookup(token!, body.userCode));
             } else if (req.method === 'POST' && path === '/api/auth/cli/device/decide') {
               if (typeof body.approve !== 'boolean') throw controlError('invalid-input', 'approve must be boolean');
-              identity.accessTokens.device.decide(token!, body.userCode, body.approve); send(200, { ok: true });
+              identity.accessTokens.device.decide(token!, body.userCode, body.approve, { allowOwnerGrants: body.allowOwnerGrants }); send(200, { ok: true });
             } else if (req.method === 'POST' && path === '/api/auth/cli/trust') {
               send(200, identity.accessTokens.trust.set(token!, body.mode, Number(body.expectedRevision)));
             } else if (req.method === 'POST' && path === '/api/auth/passkeys/register/options') {

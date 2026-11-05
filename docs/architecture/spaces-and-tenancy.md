@@ -284,7 +284,7 @@ cookie can never choose the owner's password (`owner-confirmation-required`). Wh
 answers `owner-credential-required` (409): creating accounts, passkey
 registration, external sign-in links and sign-in provider configuration, and —
 through `sessions.require(token, true)` — every action that otherwise asks for
-a recent sign-in (CLI tokens, approving a CLI sign-in, no-token CLI trust,
+a recent sign-in (CLI and app tokens, approving their sign-in, no-token CLI trust,
 account guardrails/limits/permissions). A session's age never stands in for a
 credential. Boot refuses `POLYTH_PUBLIC_ORIGIN` (`controlPlanePreflight.ts`). A Docker or
 standalone server never offers `local`: it keeps the setup code and password.

@@ -32,6 +32,31 @@ export function settingsPageFromSearch(search = ""): string | null {
   return page;
 }
 
+let bootSettingsLink: { page: string; code: string | null } | null = null;
+
+/** Remember a settings deep link at boot. The first URL canonicalization drops
+ *  the query (`/?settings=apps&code=…` becomes `/p/<project>`) before packages
+ *  have loaded and before the page that reads the code has mounted. */
+export function rememberBootSettingsLink(search: string): void {
+  const page = settingsPageFromSearch(search);
+  if (!page) return;
+  bootSettingsLink = { page, code: new URLSearchParams(search).get("code") };
+}
+
+/** The settings page a boot link asked for. Read once. */
+export function takeBootSettingsPage(): string | null {
+  const page = bootSettingsLink?.page ?? null;
+  if (bootSettingsLink) bootSettingsLink = { page: "", code: bootSettingsLink.code };
+  return page || null;
+}
+
+/** The sign-in code a boot link carried. Read once, by the page confirming it. */
+export function takeBootSettingsCode(): string | null {
+  const code = bootSettingsLink?.code ?? null;
+  if (bootSettingsLink) bootSettingsLink = { ...bootSettingsLink, code: null };
+  return code;
+}
+
 /** Canonical URL for the current selection ("/" when nothing is active). */
 export function formatAppUrl(projectId: string | null, sessionId: string | null): string {
   if (!projectId) return sessionId ? `/?session=${encodeURIComponent(sessionId)}` : "/";

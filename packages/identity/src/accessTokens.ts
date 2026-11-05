@@ -2,10 +2,11 @@
 //
 // Three things live here, all owned by a person:
 //
-// - Access tokens: bearer credentials for the `polyth` CLI. A token is either
-//   a `device` token (minted by the device-authorization flow after the person
-//   approves a code in the signed-in web UI) or an `automation` token (created
-//   directly in the web UI for scripts). Only a SHA-256 of the token is stored.
+// - Access tokens: bearer credentials. A token is a `device` token (the `polyth`
+//   CLI, minted by the device-authorization flow after the person approves a
+//   code in the signed-in web UI), an `automation` token (created directly in
+//   the web UI for scripts) or an `app` token (a third-party client of the
+//   Client API, through either path). Only a SHA-256 of the token is stored.
 //   A token speaks for its owner, is capped by an explicit grant list (the same
 //   remote capabilities paired devices use), may be pinned to one Space, and
 //   dies with the account's auth epoch (password change, logout everywhere,
@@ -25,7 +26,7 @@ import { controlError, type ControlPlane } from '@polyth/control-plane';
 import type { SessionService } from './sessions.ts';
 import { opaqueId, tokenHash } from './validation.ts';
 
-export type AccessTokenKind = 'device' | 'automation';
+export type AccessTokenKind = 'device' | 'automation' | 'app';
 export type CliTrustMode = 'off' | 'loopback' | 'private-network';
 export const CLI_TRUST_MODES: readonly CliTrustMode[] = ['off', 'loopback', 'private-network'];
 
@@ -46,6 +47,7 @@ export interface ResolvedAccessToken {
   id: string;
   userId: string;
   kind: AccessTokenKind;
+  label: string;
   grants: string[];
   spaceId: string | null;
 }
@@ -61,9 +63,15 @@ export interface DeviceAuthorizationStart {
 
 export interface DeviceAuthorizationDetails {
   userCode: string;
+  /** What approving mints: `device` for a terminal, `app` for an app. */
+  kind: 'device' | 'app';
   label: string;
   profile: string;
   grants: string[];
+  /** The app asks for grants only the instance owner may hand out. */
+  asksOwnerGrants: boolean;
+  /** The person deciding is that owner. Otherwise it connects without them. */
+  canAllowOwnerGrants: boolean;
   clientAddress: string | null;
   createdAt: number;
   expiresAt: number;
@@ -87,6 +95,18 @@ export interface AccessTokenPolicy {
   normalizeGrants(raw: unknown): string[];
   /** Named grant profiles offered to people (e.g. read/control). */
   profiles: Readonly<Record<string, readonly string[]>>;
+  /** Third-party apps. Without this, app tokens cannot be issued or used. */
+  apps?: AppTokenPolicy;
+}
+
+export interface AppTokenPolicy {
+  /** Validate an explicit grant list; throws `invalid-input`. */
+  normalizeGrants(raw: unknown): string[];
+  profiles: Readonly<Record<string, readonly string[]>>;
+  /** Grants only the instance owner may hand to an app, one app at a time. */
+  ownerOnlyGrants: readonly string[];
+  /** The profile an app falls back to when the owner did not allow those. */
+  withoutOwnerGrants: Readonly<Record<string, string>>;
 }
 
 /** Token text: a recognizable prefix for secret scanners + 256 random bits. */
@@ -100,13 +120,16 @@ const MAX_PENDING_PER_ADDRESS = 5;
 const MAX_PENDING_TOTAL = 50;
 const MAX_TOKEN_DAYS = 3650;
 const LAST_USED_WRITE_MS = 60_000;
+const DEVICE_APP_TOKEN_DAYS = 365;
 
 export const validAccessToken = (value: unknown): value is string =>
   typeof value === 'string' && ACCESS_TOKEN_PATTERN.test(value);
 
 const label = (value: unknown, fallback: string): string => {
   const raw = typeof value === 'string' ? value : fallback;
-  const clean = raw.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 80);
+  // Also without direction controls: a name is shown to the person deciding
+  // whether to trust it, and must read as what it is.
+  const clean = raw.replace(/[\x00-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 80);
   if (!clean) throw controlError('invalid-input', 'A label is required');
   return clean;
 };
@@ -136,20 +159,43 @@ export function createAccessTokens(
     if (!policy) throw controlError('unavailable', 'Command-line access is unavailable');
     return policy;
   };
-  const parseGrants = (raw: string): string[] => {
+  const requireApps = (): AppTokenPolicy => {
+    const apps = requirePolicy().apps;
+    if (!apps) throw controlError('unavailable', 'App access is unavailable');
+    return apps;
+  };
+  const isOwner = (userId: string): boolean => !!control.get(
+    `SELECT 1 FROM instance_roles r JOIN principals p ON p.id=r.user_id
+      WHERE r.user_id=? AND r.role='owner' AND p.status='active' AND p.kind='user'`,
+    userId,
+  );
+  const holdsOwnerGrants = (grants: readonly string[]): boolean => {
+    const ownerOnly = requirePolicy().apps?.ownerOnlyGrants ?? [];
+    return grants.some((grant) => ownerOnly.includes(grant));
+  };
+  /** What a stored row grants now. A corrupt row grants nothing, and an owner
+   *  grant lasts only while the person holding the token is still an owner. */
+  const grantsOf = (row: Pick<TokenRow, 'kind' | 'user_id' | 'grants_json'>): string[] => {
     try {
-      const value = JSON.parse(raw) as unknown;
-      return requirePolicy().normalizeGrants(value);
+      const value = JSON.parse(row.grants_json) as unknown;
+      if (row.kind !== 'app') return requirePolicy().normalizeGrants(value);
+      const grants = requireApps().normalizeGrants(value);
+      return holdsOwnerGrants(grants) && !isOwner(row.user_id)
+        ? grants.filter((grant) => !requireApps().ownerOnlyGrants.includes(grant))
+        : grants;
     } catch {
-      return []; // A corrupt row grants nothing.
+      return [];
     }
   };
   const summary = (row: TokenRow): AccessTokenSummary => ({
-    id: row.id, kind: row.kind, label: row.label, grants: parseGrants(row.grants_json), spaceId: row.space_id,
+    id: row.id, kind: row.kind, label: row.label, grants: grantsOf(row), spaceId: row.space_id,
     createdAt: row.created_at_ms, lastUsedAt: row.last_used_at_ms, expiresAt: row.expires_at_ms, revision: row.revision,
   });
-  const grantsFor = (input: { profile?: unknown; grants?: unknown }): { profile: string; grants: string[] } => {
-    const { profiles, normalizeGrants } = requirePolicy();
+  const resolved = (row: TokenRow): ResolvedAccessToken => ({
+    id: row.id, userId: row.user_id, kind: row.kind, label: row.label, grants: grantsOf(row), spaceId: row.space_id,
+  });
+  const grantsFor = (input: { profile?: unknown; grants?: unknown }, kind: AccessTokenKind = 'device'): { profile: string; grants: string[] } => {
+    const { profiles, normalizeGrants } = kind === 'app' ? requireApps() : requirePolicy();
     if (input.grants !== undefined) {
       const grants = normalizeGrants(input.grants);
       if (!grants.length) throw controlError('invalid-input', 'Choose at least one permission');
@@ -162,11 +208,6 @@ export function createAccessTokens(
   };
   const activeUser = (userId: string): { auth_epoch: number } | undefined => control.get<{ auth_epoch: number }>(
     "SELECT p.auth_epoch FROM users u JOIN principals p ON p.id=u.id WHERE u.id=? AND p.kind='user' AND p.status='active'",
-    userId,
-  );
-  const isOwner = (userId: string): boolean => !!control.get(
-    `SELECT 1 FROM instance_roles r JOIN principals p ON p.id=r.user_id
-      WHERE r.user_id=? AND r.role='owner' AND p.status='active' AND p.kind='user'`,
     userId,
   );
   const assertMember = (userId: string, spaceId: string): void => {
@@ -225,7 +266,7 @@ export function createAccessTokens(
       if (row.last_used_at_ms === null || time - row.last_used_at_ms >= LAST_USED_WRITE_MS) {
         control.transaction(() => control.run('UPDATE access_tokens SET last_used_at_ms=? WHERE id=?', time, row.id));
       }
-      return { id: row.id, userId: row.user_id, kind: row.kind, grants: parseGrants(row.grants_json), spaceId: row.space_id };
+      return resolved(row);
     },
 
     /** Revalidate an already-authenticated channel by token id (no secret).
@@ -239,7 +280,7 @@ export function createAccessTokens(
             AND p.kind='user' AND p.status='active' AND t.auth_epoch=p.auth_epoch`,
         id, expectedUserId, time,
       );
-      return row ? { id: row.id, userId: row.user_id, kind: row.kind, grants: parseGrants(row.grants_json), spaceId: row.space_id } : null;
+      return row ? resolved(row) : null;
     },
 
     /** Tokens the signed-in person owns that can still be used. */
@@ -250,11 +291,16 @@ export function createAccessTokens(
      *  session (a full-access paired device). */
     byUser: { list: listFor },
 
-    /** Web UI: create an automation token. Requires a recent sign-in. */
+    /** Web UI: create an automation or app token. Requires a recent sign-in;
+     *  an app token that may answer agents also requires the instance owner. */
     create(sessionToken: string, input: {
-      label?: unknown; profile?: unknown; grants?: unknown; spaceId?: unknown; expiresInDays?: unknown;
+      kind?: unknown; label?: unknown; profile?: unknown; grants?: unknown; spaceId?: unknown; expiresInDays?: unknown;
     }): IssuedAccessToken {
-      const { grants } = grantsFor(input);
+      if (input.kind !== undefined && input.kind !== 'automation' && input.kind !== 'app') {
+        throw controlError('invalid-input', 'Token kind must be automation or app');
+      }
+      const kind = input.kind === 'app' ? 'app' : 'automation';
+      const { grants } = grantsFor(input, kind);
       const name = label(input.label, '');
       let expiresAt: number | null;
       if (input.expiresInDays === null) expiresAt = null;
@@ -269,7 +315,11 @@ export function createAccessTokens(
       return control.transaction(() => {
         const actor = sessions.require(sessionToken, true);
         if (spaceId) assertMember(actor.userId, spaceId);
-        return insertToken({ userId: actor.userId, kind: 'automation', label: name, grants, spaceId, expiresAt });
+        const ownerGrants = kind === 'app' && holdsOwnerGrants(grants);
+        if (ownerGrants && !isOwner(actor.userId)) throw controlError('forbidden', 'Instance owner access required');
+        const issued = insertToken({ userId: actor.userId, kind, label: name, grants, spaceId, expiresAt });
+        if (ownerGrants) control.audit(actor.userId, 'app.owner-grant-allowed', issued.summary.id);
+        return issued;
       });
     },
 
@@ -305,10 +355,15 @@ export function createAccessTokens(
     },
 
     device: {
-      /** Unauthenticated CLI call. Bounded so it cannot be used to flood. */
-      start(input: { label?: unknown; profile?: unknown; address?: string }): DeviceAuthorizationStart {
-        const { profile } = grantsFor({ profile: input.profile ?? 'control' });
-        const name = label(input.label, 'Polyth CLI');
+      /** Unauthenticated CLI or app call. Bounded so it cannot be used to flood. */
+      start(input: { kind?: unknown; label?: unknown; profile?: unknown; address?: string }): DeviceAuthorizationStart {
+        if (input.kind !== undefined && input.kind !== 'device' && input.kind !== 'app') {
+          throw controlError('invalid-input', 'Sign-in kind must be device or app');
+        }
+        const kind = input.kind === 'app' ? 'app' : 'device';
+        const { profile } = grantsFor({ profile: input.profile ?? 'control' }, kind);
+        // An app names itself, and the person reads that name before deciding.
+        const name = label(input.label, kind === 'app' ? '' : 'Polyth CLI');
         const address = typeof input.address === 'string' ? input.address.slice(0, 64) : null;
         return control.transaction(() => {
           const time = now();
@@ -327,9 +382,9 @@ export function createAccessTokens(
             userCode = newUserCode();
           }
           control.run(
-            `INSERT INTO device_authorizations(id,device_code_hash,user_code,label,profile,client_address,status,created_at_ms,expires_at_ms)
-             VALUES(?,?,?,?,?,?,'pending',?,?)`,
-            opaqueId('dev'), tokenHash('device', deviceCode), userCode, name, profile, address, time, time + DEVICE_TTL_MS,
+            `INSERT INTO device_authorizations(id,device_code_hash,user_code,kind,label,profile,client_address,status,created_at_ms,expires_at_ms)
+             VALUES(?,?,?,?,?,?,?,'pending',?,?)`,
+            opaqueId('dev'), tokenHash('device', deviceCode), userCode, kind, name, profile, address, time, time + DEVICE_TTL_MS,
           );
           return { deviceCode, userCode: formatUserCode(userCode), expiresIn: DEVICE_TTL_MS / 1000, interval: DEVICE_POLL_INTERVAL_S };
         });
@@ -337,31 +392,48 @@ export function createAccessTokens(
 
       /** Web UI: show what is asking for access before the person decides. */
       lookup(sessionToken: string, rawCode: unknown): DeviceAuthorizationDetails {
-        sessions.require(sessionToken);
+        const actor = sessions.require(sessionToken);
         const code = normalizeUserCode(rawCode);
         const row = code ? control.get<{
-          user_code: string; label: string; profile: string; client_address: string | null; created_at_ms: number; expires_at_ms: number;
+          user_code: string; kind: 'device' | 'app'; label: string; profile: string; client_address: string | null; created_at_ms: number; expires_at_ms: number;
         }>(
-          "SELECT user_code,label,profile,client_address,created_at_ms,expires_at_ms FROM device_authorizations WHERE user_code=? AND status='pending' AND expires_at_ms>?",
+          "SELECT user_code,kind,label,profile,client_address,created_at_ms,expires_at_ms FROM device_authorizations WHERE user_code=? AND status='pending' AND expires_at_ms>?",
           code, now(),
         ) : undefined;
         if (!row) throw controlError('not-found', 'This code is unknown or has expired');
-        const { grants } = grantsFor({ profile: row.profile });
+        const { grants } = grantsFor({ profile: row.profile }, row.kind);
         return {
-          userCode: formatUserCode(row.user_code), label: row.label, profile: row.profile, grants,
+          userCode: formatUserCode(row.user_code), kind: row.kind, label: row.label, profile: row.profile, grants,
+          asksOwnerGrants: row.kind === 'app' && holdsOwnerGrants(grants),
+          canAllowOwnerGrants: isOwner(actor.userId),
           clientAddress: row.client_address, createdAt: row.created_at_ms, expiresAt: row.expires_at_ms,
         };
       },
 
-      /** Web UI: approve or deny. Approval requires a recent sign-in. */
-      decide(sessionToken: string, rawCode: unknown, approve: boolean): void {
+      /** Web UI: approve or deny. Approval requires a recent sign-in. An app
+       *  that asks for owner-only grants receives them only when the instance
+       *  owner says yes here; approving alone connects it without them. */
+      decide(sessionToken: string, rawCode: unknown, approve: boolean, options: { allowOwnerGrants?: unknown } = {}): void {
+        if (options.allowOwnerGrants !== undefined && typeof options.allowOwnerGrants !== 'boolean') {
+          throw controlError('invalid-input', 'allowOwnerGrants must be boolean');
+        }
         const code = normalizeUserCode(rawCode);
         control.transaction(() => {
           const actor = sessions.require(sessionToken, approve);
-          const row = code ? control.get<{ id: string }>(
-            "SELECT id FROM device_authorizations WHERE user_code=? AND status='pending' AND expires_at_ms>?", code, now(),
+          const row = code ? control.get<{ id: string; kind: 'device' | 'app'; profile: string }>(
+            "SELECT id,kind,profile FROM device_authorizations WHERE user_code=? AND status='pending' AND expires_at_ms>?", code, now(),
           ) : undefined;
           if (!row) throw controlError('not-found', 'This code is unknown or has expired');
+          const asksOwnerGrants = row.kind === 'app' && holdsOwnerGrants(grantsFor({ profile: row.profile }, 'app').grants);
+          if (options.allowOwnerGrants === true) {
+            if (!approve || !asksOwnerGrants) throw controlError('invalid-input', 'This sign-in does not ask for that permission');
+            if (!isOwner(actor.userId)) throw controlError('forbidden', 'Instance owner access required');
+            control.audit(actor.userId, 'app.owner-grant-allowed', row.id);
+          } else if (approve && asksOwnerGrants) {
+            const fallback = requireApps().withoutOwnerGrants[row.profile];
+            if (!fallback) throw controlError('invalid-input', 'This sign-in cannot connect without that permission');
+            control.run('UPDATE device_authorizations SET profile=? WHERE id=?', fallback, row.id);
+          }
           control.run('UPDATE device_authorizations SET status=?,user_id=? WHERE id=?', approve ? 'approved' : 'denied', actor.userId, row.id);
           control.audit(actor.userId, approve ? 'cli.device-approved' : 'cli.device-denied', row.id);
         });
@@ -373,9 +445,9 @@ export function createAccessTokens(
         return control.transaction(() => {
           const time = now();
           const row = control.get<{
-            id: string; status: string; user_id: string | null; label: string; profile: string; expires_at_ms: number; last_poll_at_ms: number | null;
+            id: string; status: string; kind: 'device' | 'app'; user_id: string | null; label: string; profile: string; expires_at_ms: number; last_poll_at_ms: number | null;
           }>(
-            'SELECT id,status,user_id,label,profile,expires_at_ms,last_poll_at_ms FROM device_authorizations WHERE device_code_hash=?',
+            'SELECT id,status,kind,user_id,label,profile,expires_at_ms,last_poll_at_ms FROM device_authorizations WHERE device_code_hash=?',
             tokenHash('device', deviceCode),
           );
           if (!row || row.status === 'redeemed') throw controlError('expired', 'This sign-in is no longer valid');
@@ -391,8 +463,11 @@ export function createAccessTokens(
             control.run('UPDATE device_authorizations SET last_poll_at_ms=? WHERE id=?', time, row.id);
             return { status: 'pending', interval: DEVICE_POLL_INTERVAL_S };
           }
-          const { grants } = grantsFor({ profile: row.profile });
-          const issued = insertToken({ userId: row.user_id!, kind: 'device', label: row.label, grants, spaceId: null, expiresAt: null });
+          const { grants } = grantsFor({ profile: row.profile }, row.kind);
+          const issued = insertToken({
+            userId: row.user_id!, kind: row.kind, label: row.label, grants, spaceId: null,
+            expiresAt: row.kind === 'app' ? time + DEVICE_APP_TOKEN_DAYS * 24 * 60 * 60_000 : null,
+          });
           control.run("UPDATE device_authorizations SET status='redeemed',token_id=? WHERE id=?", issued.summary.id, row.id);
           return { status: 'issued', ...issued };
         });

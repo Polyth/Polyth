@@ -1119,7 +1119,9 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, sett
     // A judge's fixed message is always labeled: nobody typed it.
     const otherAuthor = m.author && m.author.userId !== activeBrowserAccountId() ? m.author : undefined;
     const otherName = otherAuthor ? otherAuthor.name ?? tr("timeline.anotherPerson") : undefined;
-    const byJudge = m.author?.via === "judge" ? tr("timeline.sentByJudge") : undefined;
+    const byJudge = m.author?.via === "judge" ? tr("timeline.sentByJudge")
+      : m.author?.via === "app" && m.author.viaName ? tr("timeline.sentByApp", { name: m.author.viaName })
+      : undefined;
     const personLabel = byJudge ? (otherName ? `${otherName} · ${byJudge}` : byJudge) : otherName;
     return (
       <div className={`msg user${entering ? " timeline-row-enter" : ""}${leaving ? " rewind-leaving" : ""}`} data-msg-id={m.id} data-message-seq={m.eventSeq} data-via={m.author?.via} role="article" aria-label={`${otherName ? userArticleNameFrom(otherName, m.time) : userArticleName(m.time)}${byJudge ? `. ${byJudge}` : ""}`}>

@@ -43,6 +43,7 @@ const FRAMEWORK_PACKAGES: Readonly<Record<string, string>> = {
   "pairing-qr": "device pairing codec for the mobile app",
   "push-relay": "push notification relay",
   cli: "polyth command line, shipped by the desktop app",
+  client: "public client of the Client API, named by its contract and Settings",
   "polyth-mcp": "agent tool MCP bridge",
 };
 

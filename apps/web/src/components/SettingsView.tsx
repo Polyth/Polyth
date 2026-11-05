@@ -28,6 +28,7 @@ import { ChatPage } from "./settings/ChatSettingsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import UsersPage from "./settings/UsersPage.tsx";
 import CommandLinePage from "./settings/CommandLinePage.tsx";
+import AppsPage from "./settings/AppsPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
 import { PackageGlyph } from "./settings/packageIcons.tsx";
 import PackageTourOverlay from "./PackageTourOverlay.tsx";
@@ -132,7 +133,7 @@ const NAV_LAYOUT: Readonly<Record<NavGroup, readonly string[]>> = {
   Code: ["projects", "files", "git", "ssh", "task-trackers", "monitoring"],
   Integrations: ["browser", "web-search", "secure-safe", "home-assistant"],
   Customize: ["shortcuts", "packages"],
-  System: ["users", "command-line", "tunnel", "about"],
+  System: ["users", "command-line", "apps", "tunnel", "about"],
 };
 
 const PAGE_PLACEMENT: ReadonlyMap<string, { group: NavGroup; order: number }> = new Map(
@@ -157,6 +158,7 @@ const BUILTIN: PageDef[] = ([
   { id: "packages", label: tr("settingsview.packages"), declared: "Customize", render: () => <PackagesPage /> },
   { id: "users", label: tr("settingsview.users"), declared: "System", render: (target) => <UsersPage {...(target ? { settingsTarget: target } : {})} /> },
   { id: "command-line", label: tr("settingsview.commandLine"), declared: "System", render: () => <CommandLinePage /> },
+  { id: "apps", label: tr("settingsview.apps"), declared: "System", render: () => <AppsPage /> },
   { id: "about", label: tr("settingsview.about"), declared: "System", render: () => <AboutPage /> },
 ] as (Omit<PageDef, "group" | "order"> & { declared: DeclaredGroup })[]).map(({ declared, ...page }) => ({
   ...page,
@@ -210,6 +212,7 @@ const SETTINGS_ICON_BY_PAGE: Readonly<Record<string, string>> = {
   packages: "package",
   users: "user",
   "command-line": "terminal",
+  apps: "plugin",
   tunnel: "qr",
   about: "info",
   desktop: "network",

@@ -1,0 +1,13 @@
+{
+  "name": "@polyth/client",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Client for the Polyth Client API: connect any app to a Polyth server.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0"
+  }
+}

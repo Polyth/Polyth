@@ -68,8 +68,9 @@ export function admittedAuthor(
   if (own) {
     // Trusted server code acting through the person's own context (a
     // schedule run as its owner) may say how; it never changes who.
-    const via = normalizeSessionPerson(requested)?.via;
-    return via && requested?.userId === own.userId ? { ...own, via } : own;
+    const asked = normalizeSessionPerson(requested);
+    if (!asked?.via || requested?.userId !== own.userId) return own;
+    return { ...own, via: asked.via, ...(asked.viaName ? { viaName: asked.viaName } : {}) };
   }
   const person = normalizeSessionPerson(requested);
   if (!person) return undefined;

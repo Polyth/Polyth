@@ -26,7 +26,9 @@ project-scoped permissions for system administrator agents.
 
 The [`polyth` CLI](cli.md) covers terminal access to a server or Polyth
 Desktop: targets, CLI tokens, the owner-only no-token mode and the
-automation contract (`events`, `on`, `wait`, exit codes).
+automation contract (`events`, `on`, `wait`, exit codes). The [Client
+API](client-api.md) is how any other program becomes a Polyth client: app
+sign-in, the owner's permission to approve agents, `/api/v1` and `@polyth/client`.
 
 Inside a request use the already validated `rc.space`, then `host.forSpace(rc.space)` for scoped core services. Validate ownership before any operation that uses a legacy/unscoped handle. Store tenant data via `host.spaceStorage(rc.space)`; shared `storageDir` is not a tenant store. Paired access is default-deny; new remote-safe routes need a reviewed `remoteAccess` declaration and negative authorization tests.
 

@@ -12,6 +12,7 @@ import { cliAccessMigration } from './cliAccessMigration.ts';
 import { accountPermissionsMigration } from './accountPermissionsMigration.ts';
 import { sharingMigration } from './sharingMigration.ts';
 import { localAccessMigration } from './localAccessMigration.ts';
+import { appAccessMigration } from './appAccessMigration.ts';
 export const migrations = [
   ...v1,
   securityMigration,
@@ -26,4 +27,5 @@ export const migrations = [
   accountPermissionsMigration,
   sharingMigration,
   localAccessMigration,
+  appAccessMigration,
 ];

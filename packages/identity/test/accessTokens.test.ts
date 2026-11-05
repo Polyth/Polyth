@@ -144,3 +144,143 @@ test('without a host policy command-line access is unavailable and tokens never 
   assert.throws(() => f.identity.accessTokens.create(owner.token, { label: 'x', profile: 'read' }), { code: 'unavailable' });
   assert.equal(f.identity.accessTokens.resolve(`pth_${'a'.repeat(64)}`), null);
 });
+
+const APP_GRANTABLE = [...GRANTABLE, 'core.requests.respond'];
+const APPROVAL = 'core.requests.respond';
+const appPolicy: AccessTokenPolicy = {
+  ...policy,
+  apps: {
+    normalizeGrants(raw) {
+      if (!Array.isArray(raw) || raw.some((g) => typeof g !== 'string' || !APP_GRANTABLE.includes(g))) {
+        throw Object.assign(new Error('bad grants'), { code: 'invalid-input' });
+      }
+      return [...new Set(raw as string[])].sort();
+    },
+    profiles: {
+      read: ['core.health.read', 'core.sessions.read'],
+      control: GRANTABLE,
+      approve: APP_GRANTABLE,
+    },
+    ownerOnlyGrants: [APPROVAL],
+    withoutOwnerGrants: { approve: 'control' },
+  },
+};
+
+async function appSetup(t: Parameters<typeof fixture>[0]) {
+  const f = fixture(t, { accessTokens: appPolicy });
+  const { owner } = await installed(f);
+  const member = await f.identity.accounts.createLocal(owner.token, { login: 'member', name: 'Member', password: 'member test passphrase' });
+  const memberSession = await f.identity.credentials.login({ login: 'member', password: 'member test passphrase' });
+  return { f, owner, member, memberSession, tokens: f.identity.accessTokens };
+}
+
+const redeemed = (tokens: ReturnType<typeof fixture>['identity']['accessTokens'], deviceCode: string) => {
+  const issued = tokens.device.redeem(deviceCode);
+  assert.equal(issued.status, 'issued');
+  return issued.status === 'issued' ? issued : assert.fail('not issued');
+};
+
+test('app sign-in: it must name itself, and approving alone never gives it the approval grant', async (t) => {
+  const { owner, tokens } = await appSetup(t);
+  assert.throws(() => tokens.device.start({ kind: 'app', profile: 'control' }), { code: 'invalid-input' });
+  assert.throws(() => tokens.device.start({ kind: 'automation', label: 'x' }), { code: 'invalid-input' });
+  assert.throws(() => tokens.device.start({ kind: 'app', label: '\u202e\u2066 ', profile: 'control' }), { code: 'invalid-input' });
+  const spoof = tokens.device.start({ kind: 'app', label: 'Bot\u202egnp.exe\u2069', profile: 'control' });
+  assert.equal(tokens.device.lookup(owner.token, spoof.userCode).label, 'Botgnp.exe');
+
+  const start = tokens.device.start({ kind: 'app', label: 'Phone bot', profile: 'approve', address: '10.0.0.9' });
+  const details = tokens.device.lookup(owner.token, start.userCode);
+  assert.equal(details.kind, 'app');
+  assert.equal(details.asksOwnerGrants, true);
+  assert.equal(details.canAllowOwnerGrants, true);
+  assert.ok(details.grants.includes(APPROVAL));
+
+  tokens.device.decide(owner.token, start.userCode, true);
+  const issued = redeemed(tokens, start.deviceCode);
+  assert.equal(issued.summary.kind, 'app');
+  assert.equal(issued.summary.label, 'Phone bot');
+  assert.deepEqual(issued.summary.grants, [...GRANTABLE].sort());
+  assert.ok(issued.summary.expiresAt !== null, 'an app token from a code expires');
+  assert.equal(tokens.resolve(issued.token)!.grants.includes(APPROVAL), false);
+});
+
+test('app sign-in: the owner can allow approvals for this one app, and it is audited', async (t) => {
+  const { f, owner, tokens } = await appSetup(t);
+  const start = tokens.device.start({ kind: 'app', label: 'Trusted', profile: 'approve' });
+  tokens.device.decide(owner.token, start.userCode, true, { allowOwnerGrants: true });
+  const issued = redeemed(tokens, start.deviceCode);
+  const resolved = tokens.resolve(issued.token)!;
+  assert.equal(resolved.kind, 'app');
+  assert.equal(resolved.label, 'Trusted');
+  assert.ok(resolved.grants.includes(APPROVAL));
+  assert.ok(f.control.get("SELECT 1 FROM audit_events WHERE action='app.owner-grant-allowed'"));
+});
+
+test('app sign-in: a member cannot allow approvals; the app connects without them', async (t) => {
+  const { memberSession, tokens } = await appSetup(t);
+  const start = tokens.device.start({ kind: 'app', label: 'Member app', profile: 'approve' });
+  assert.equal(tokens.device.lookup(memberSession.token, start.userCode).canAllowOwnerGrants, false);
+  assert.throws(() => tokens.device.decide(memberSession.token, start.userCode, true, { allowOwnerGrants: true }), { code: 'forbidden' });
+  // The refusal left the sign-in pending and unchanged.
+  assert.deepEqual(tokens.device.redeem(start.deviceCode), { status: 'pending', interval: 3 });
+  tokens.device.decide(memberSession.token, start.userCode, true);
+  const issued = redeemed(tokens, start.deviceCode);
+  assert.equal(issued.summary.grants.includes(APPROVAL), false);
+});
+
+test('app sign-in: the owner yes applies only to a request that asked, and only when approving', async (t) => {
+  const { owner, tokens } = await appSetup(t);
+  const plain = tokens.device.start({ kind: 'app', label: 'Plain', profile: 'control' });
+  assert.equal(tokens.device.lookup(owner.token, plain.userCode).asksOwnerGrants, false);
+  assert.throws(() => tokens.device.decide(owner.token, plain.userCode, true, { allowOwnerGrants: true }), { code: 'invalid-input' });
+
+  const terminal = tokens.device.start({ label: 'CLI', profile: 'control' });
+  assert.throws(() => tokens.device.decide(owner.token, terminal.userCode, true, { allowOwnerGrants: true }), { code: 'invalid-input' });
+
+  const asks = tokens.device.start({ kind: 'app', label: 'Asks', profile: 'approve' });
+  assert.throws(() => tokens.device.decide(owner.token, asks.userCode, false, { allowOwnerGrants: true }), { code: 'invalid-input' });
+  assert.throws(() => tokens.device.decide(owner.token, asks.userCode, true, { allowOwnerGrants: 'yes' }), { code: 'invalid-input' });
+  tokens.device.decide(owner.token, asks.userCode, false);
+  assert.throws(() => tokens.device.redeem(asks.deviceCode), { code: 'forbidden' });
+});
+
+test('app tokens from the UI: only the owner can create one that approves; a CLI token never can', async (t) => {
+  const { f, owner, memberSession, tokens } = await appSetup(t);
+  const made = tokens.create(owner.token, { kind: 'app', label: 'Mine', profile: 'approve', expiresInDays: 30 });
+  assert.equal(made.summary.kind, 'app');
+  assert.ok(tokens.resolve(made.token)!.grants.includes(APPROVAL));
+  assert.ok(f.control.get("SELECT 1 FROM audit_events WHERE action='app.owner-grant-allowed'"));
+
+  assert.throws(() => tokens.create(memberSession.token, { kind: 'app', label: 'No', profile: 'approve' }), { code: 'forbidden' });
+  assert.throws(() => tokens.create(memberSession.token, { kind: 'app', label: 'No', grants: [APPROVAL] }), { code: 'forbidden' });
+  const memberControl = tokens.create(memberSession.token, { kind: 'app', label: 'Fine', profile: 'control' });
+  assert.equal(memberControl.summary.grants.includes(APPROVAL), false);
+
+  assert.throws(() => tokens.create(owner.token, { label: 'cli', grants: [APPROVAL] }), { code: 'invalid-input' });
+  assert.throws(() => tokens.create(owner.token, { label: 'cli', profile: 'approve' }), { code: 'invalid-input' });
+  assert.throws(() => tokens.create(owner.token, { kind: 'device', label: 'cli', profile: 'read' }), { code: 'invalid-input' });
+});
+
+test('app tokens: the approval grant ends with the owner role, and revocation ends the token', async (t) => {
+  const { f, owner, member, tokens } = await appSetup(t);
+  const made = tokens.create(owner.token, { kind: 'app', label: 'Mine', profile: 'approve' });
+  const userId = owner.session.userId;
+  assert.ok(tokens.live(made.summary.id, userId)!.grants.includes(APPROVAL));
+
+  // An installation always keeps an owner, so hand the role over first.
+  f.control.transaction(() => f.control.run("INSERT INTO instance_roles(user_id,role) VALUES(?,'owner')", member.id));
+  f.control.transaction(() => f.control.run("DELETE FROM instance_roles WHERE user_id=? AND role='owner'", userId));
+  assert.equal(tokens.resolve(made.token)!.grants.includes(APPROVAL), false);
+  assert.equal(tokens.live(made.summary.id, userId)!.grants.includes(APPROVAL), false);
+  assert.ok(tokens.resolve(made.token)!.grants.includes('core.sessions.read'));
+
+  assert.equal(tokens.revokeSelf(made.token), true);
+  assert.equal(tokens.resolve(made.token), null);
+  assert.equal(tokens.live(made.summary.id, userId), null);
+});
+
+test('app tokens are unavailable without an app policy', async (t) => {
+  const { owner, tokens } = await setup(t);
+  assert.throws(() => tokens.device.start({ kind: 'app', label: 'x', profile: 'control' }), { code: 'unavailable' });
+  assert.throws(() => tokens.create(owner.token, { kind: 'app', label: 'x', profile: 'control' }), { code: 'unavailable' });
+});

@@ -17,6 +17,8 @@ export interface SessionEventWaiters {
   size(): number;
   /** Release every waiter (server shutdown). */
   close(): void;
+  /** After `close`, waits return at once: a streaming reader must stop. */
+  isClosed(): boolean;
 }
 
 /** Longest single wait a client may ask for; proxies commonly cut ~60 s. */
@@ -88,6 +90,9 @@ export function createSessionEventWaiters(): SessionEventWaiters {
       for (const set of bySession.values()) wake(set);
       wake(anyProjection);
       bySession.clear();
+    },
+    isClosed() {
+      return closed;
     },
   };
 }

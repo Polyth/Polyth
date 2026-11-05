@@ -37,6 +37,46 @@ test('v1 migration preserves sentinel, user IDs and original migration checksum 
   }
 });
 
+test('v14 widens access token kinds and keeps every existing token and pending sign-in', t => {
+  const dir = directory(t), root = join(dir, 'control-plane'), id = randomUUID();
+  mkdirSync(root);
+  writeFileSync(join(root, 'installation.json'), JSON.stringify({ version: 1, id }));
+  const raw = new DatabaseSync(join(root, 'control.sqlite'));
+  raw.exec('PRAGMA foreign_keys=ON; CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at_ms INTEGER NOT NULL) STRICT');
+  for (let i = 0; i < migrations.length - 1; i++) {
+    raw.exec('BEGIN IMMEDIATE');
+    raw.exec(migrations[i]!);
+    raw.prepare('INSERT INTO schema_migrations VALUES(?,?,0)').run(i + 1, digest(migrations[i]!));
+    if (i === 0) raw.prepare("INSERT INTO installation(singleton,id,state) VALUES(1,?,'uninitialized')").run(id);
+    raw.exec('COMMIT');
+  }
+  raw.exec(`
+    INSERT INTO principals(id,kind,status) VALUES('usr_a','user','active');
+    INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES('usr_a','A',0,0);
+    INSERT INTO access_tokens(id,user_id,kind,label,token_hash,grants_json,space_id,auth_epoch,created_at_ms,last_used_at_ms,expires_at_ms,revoked_at_ms,revision)
+      VALUES('tok_1','usr_a','device','laptop','hash1','["core.health.read"]',NULL,1,5,6,7,8,3);
+    INSERT INTO device_authorizations(id,device_code_hash,user_code,label,profile,status,created_at_ms,expires_at_ms)
+      VALUES('dev_1','code1','BCDFGHJK','cli','read','pending',5,9);
+  `);
+  assert.throws(() => raw.exec("INSERT INTO access_tokens(id,user_id,kind,label,token_hash,grants_json,auth_epoch,created_at_ms) VALUES('tok_x','usr_a','app','x','hashx','[]',1,5)"), /CHECK/);
+  raw.close();
+
+  const c = openControlPlane({ directory: dir });
+  try {
+    assert.deepEqual({ ...c.get<Record<string, unknown>>('SELECT * FROM access_tokens WHERE id=?', 'tok_1') }, {
+      id: 'tok_1', user_id: 'usr_a', kind: 'device', label: 'laptop', token_hash: 'hash1', grants_json: '["core.health.read"]',
+      space_id: null, auth_epoch: 1, created_at_ms: 5, last_used_at_ms: 6, expires_at_ms: 7, revoked_at_ms: 8, revision: 3,
+    });
+    assert.equal(c.get<{ kind: string }>('SELECT kind FROM device_authorizations WHERE id=?', 'dev_1')?.kind, 'device');
+    assert.ok(c.get("SELECT 1 FROM sqlite_master WHERE type='index' AND name='access_tokens_by_user'"));
+    assert.equal(c.get("SELECT 1 FROM sqlite_master WHERE name='access_tokens_v14'"), undefined);
+    c.transaction(() => c.run("INSERT INTO access_tokens(id,user_id,kind,label,token_hash,grants_json,auth_epoch,created_at_ms) VALUES('tok_2','usr_a','app','bot','hash2','[]',1,5)"));
+    assert.throws(() => c.transaction(() => c.run("INSERT INTO access_tokens(id,user_id,kind,label,token_hash,grants_json,auth_epoch,created_at_ms) VALUES('tok_3','usr_a','other','x','hash3','[]',1,5)")), /CHECK/);
+    assert.throws(() => c.transaction(() => c.run("UPDATE device_authorizations SET kind='automation' WHERE id='dev_1'")), /CHECK/);
+    assert.deepEqual(c.all('PRAGMA foreign_key_check'), []);
+  } finally { c.close(); }
+});
+
 for (const legacy of ['auth.json', 'tenancy.json', 'sessions', 'unknown-existing-data']) test(`existing ${legacy} is never overlaid by fresh authority`, t => {
   const dir = directory(t), file = join(dir, legacy);
   writeFileSync(file, 'existing data');

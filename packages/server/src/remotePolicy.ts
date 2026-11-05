@@ -127,7 +127,7 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
   routeScopes: [
     "agents", "auth", "cli", "core", "folders", "health", "labels", "models", "notifications", "native-push",
     "package-assets", "packages", "projects", "providers", "runtime", "search", "sessions", "settings",
-    "sharing", "spaces",
+    "sharing", "spaces", "v1",
   ],
   http: [
     { methods: ["GET"], path: "/api/health", capability: REMOTE_CAPABILITY.coreHealthRead, mutation: false },
@@ -213,6 +213,23 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/spaces/:id/activate", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["GET"], path: "/api/settings/client", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["PUT"], path: "/api/settings/client", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
+    // Client API v1: bearer tokens only (httpCore refuses any other principal).
+    // Rejecting a request and answering a question carry no more authority than
+    // stopping a turn and sending a message; approving is its own, owner-given grant.
+    { methods: ["GET"], path: "/api/v1/me", capability: REMOTE_CAPABILITY.coreHealthRead, mutation: false },
+    { methods: ["GET"], path: "/api/v1/projects", capability: REMOTE_CAPABILITY.coreProjectsRead, mutation: false },
+    { methods: ["GET"], path: "/api/v1/models", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    { methods: ["GET"], path: "/api/v1/sessions", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    { methods: ["POST"], path: "/api/v1/sessions", capability: REMOTE_CAPABILITY.coreSessionsCreate, mutation: true },
+    { methods: ["GET"], path: "/api/v1/sessions/:id", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    { methods: ["GET"], path: "/api/v1/sessions/:id/events", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    { methods: ["POST"], path: "/api/v1/sessions/:id/messages", capability: REMOTE_CAPABILITY.coreSessionsMessage, mutation: true },
+    { methods: ["POST"], path: "/api/v1/sessions/:id/abort", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
+    { methods: ["GET"], path: "/api/v1/sessions/:id/requests", capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
+    { methods: ["POST"], path: "/api/v1/sessions/:id/permissions/:requestId/approve", capability: REMOTE_CAPABILITY.coreRequestsRespond, mutation: true },
+    { methods: ["POST"], path: "/api/v1/sessions/:id/permissions/:requestId/reject", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
+    { methods: ["POST"], path: "/api/v1/sessions/:id/questions/:requestId/answer", capability: REMOTE_CAPABILITY.coreSessionsMessage, mutation: true },
+    { methods: ["POST"], path: "/api/v1/sessions/:id/questions/:requestId/reject", capability: REMOTE_CAPABILITY.coreSessionsMessage, mutation: true },
   ],
   websocket: [
     { path: "/ws", capability: REMOTE_CAPABILITY.coreSessionsRead },

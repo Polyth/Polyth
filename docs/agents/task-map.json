@@ -752,22 +752,29 @@
       "match": [
         "packages/polyth-mcp/**",
         "packages/cli/**",
+        "packages/client/**",
+        "packages/server/src/routes/clientApi.ts",
+        "packages/contracts/src/clientApi.ts",
+        "docs/api/**",
         ".opencode/skill/polyth-control/**"
       ],
       "entrypoints": [
         "packages/polyth-mcp",
         "packages/cli/src/main.ts",
+        "packages/server/src/routes/clientApi.ts",
         ".opencode/opencode.json"
       ],
       "references": [
         "docs/agents/security.md",
         "docs/agents/evidence.md",
-        "docs/dev/cli.md"
+        "docs/dev/cli.md",
+        "docs/dev/client-api.md"
       ],
       "testHints": [
         "packages/polyth-mcp/test/control.test.ts",
         "packages/cli/test/cli.test.ts",
-        "packages/server/test/cliAccess.test.ts"
+        "packages/server/test/cliAccess.test.ts",
+        "packages/server/test/clientApi.test.ts"
       ],
       "risk": "critical"
     }

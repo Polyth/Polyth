@@ -26,6 +26,9 @@ import {
   CLI_ACCESS_PROFILES,
   normalizeAccountGuardrails,
   normalizeCliTokenGrants,
+  normalizeAppTokenGrants,
+  APP_ACCESS_PROFILES,
+  APP_APPROVAL_GRANT,
   normalizeAccountLimits,
   normalizeAccountPermissions,
   type AccountLimits,
@@ -93,7 +96,16 @@ export function createCanonicalSecurity(options: CanonicalSecurityOptions): Cano
       ...(options.passwords ? { passwords: options.passwords } : {}),
       webauthn: { origin: options.origin, ...options.webauthn },
       normalizeGuardrails: normalizeAccountGuardrails,
-      accessTokens: { normalizeGrants: normalizeCliTokenGrants, profiles: CLI_ACCESS_PROFILES },
+      accessTokens: {
+        normalizeGrants: normalizeCliTokenGrants,
+        profiles: CLI_ACCESS_PROFILES,
+        apps: {
+          normalizeGrants: normalizeAppTokenGrants,
+          profiles: APP_ACCESS_PROFILES,
+          ownerOnlyGrants: [APP_APPROVAL_GRANT],
+          withoutOwnerGrants: { approve: "control" },
+        },
+      },
       normalizeLimits: (raw) => {
         const limits = normalizeAccountLimits(raw);
         return accountLimitsEmpty(limits) ? null : limits;

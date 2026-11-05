@@ -39,6 +39,8 @@ export interface CanonicalAuthGateway {
    *  live on every resolution so a change applies to the next request/frame. */
   guardrailsFor(userId: string): AccountGuardrails | null;
   cookieName(): string;
+  /** Durable record of a consequential act by an app's token. */
+  auditToken(principal: AuthPrincipal, action: string, resource: string): void;
 }
 
 /**
@@ -104,6 +106,7 @@ export function createCanonicalAuthGateway(options: {
       tokenKind: token.kind,
       grants: Object.freeze([...token.grants]),
       ...(token.spaceId ? { spaceId: token.spaceId } : {}),
+      ...(token.kind === "app" ? { appName: token.label } : {}),
       userId: token.userId,
     } as Extract<AuthPrincipal, { kind: "access-token" }>;
     return withTokenCeiling(principal, token.userId);
@@ -152,6 +155,12 @@ export function createCanonicalAuthGateway(options: {
   };
   const gateway: CanonicalAuthGateway = {
     cookieName: () => options.cookieName,
+    auditToken(principal, action, resource) {
+      if (principal.kind !== "access-token") return;
+      const userId = directUser(principal);
+      if (!userId) return;
+      options.control.transaction(() => options.control.audit(userId, action, `${principal.tokenId}:${resource}`));
+    },
     attachPairedDeviceResolver(resolver) { pairedResolver = resolver; },
     accountExists,
     guardrailsFor,

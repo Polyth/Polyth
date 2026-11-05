@@ -1,10 +1,12 @@
-// Typed client for command-line access: signed-in terminals, automation
-// tokens, the terminal sign-in confirmation and the no-token trust mode. The
+// Typed client for command-line and app access: signed-in terminals, automation
+// and app tokens, the sign-in confirmation and the no-token trust mode. The
 // server (packages/identity) owns every rule; this module only speaks HTTP.
 import { authJson } from "./authClient.ts";
 
-export type CliTokenKind = "device" | "automation";
+export type CliTokenKind = "device" | "automation" | "app";
 export type CliProfile = "read" | "control";
+/** The grant only the instance owner can hand to one app. */
+export const APPROVAL_GRANT = "core.requests.respond";
 export type CliTrustMode = "off" | "loopback" | "private-network";
 
 export interface CliTokenSummary {
@@ -37,9 +39,15 @@ export interface CliAccessState {
 
 export interface CliDeviceRequest {
   userCode: string;
+  /** `app` is a third-party client; absent on an older server's answer. */
+  kind?: "device" | "app";
   label: string;
   profile: string;
   grants: string[];
+  /** It asks for what only the instance owner may allow. */
+  asksOwnerGrants?: boolean;
+  /** The person deciding is that owner. */
+  canAllowOwnerGrants?: boolean;
   clientAddress: string | null;
   createdAt: number;
   expiresAt: number;
@@ -77,7 +85,7 @@ export async function loadCliAccess(): Promise<CliAccessState> {
 }
 
 export const createCliToken = (input: {
-  label: string; profile: CliProfile; spaceId: string | null; expiresInDays: number | null;
+  kind?: "app"; label: string; profile: CliProfile | "approve"; spaceId: string | null; expiresInDays: number | null;
 }): Promise<CreatedCliToken> => send<CreatedCliToken & Record<string, unknown>>("/api/auth/cli/tokens", input);
 
 export const revokeCliToken = async (token: Pick<CliTokenSummary, "id" | "revision">): Promise<void> => {
@@ -87,8 +95,8 @@ export const revokeCliToken = async (token: Pick<CliTokenSummary, "id" | "revisi
 export const lookupCliDevice = (userCode: string): Promise<CliDeviceRequest> =>
   send<CliDeviceRequest & Record<string, unknown>>("/api/auth/cli/device/lookup", { userCode });
 
-export const decideCliDevice = async (userCode: string, approve: boolean): Promise<void> => {
-  await send("/api/auth/cli/device/decide", { userCode, approve });
+export const decideCliDevice = async (userCode: string, approve: boolean, allowOwnerGrants = false): Promise<void> => {
+  await send("/api/auth/cli/device/decide", { userCode, approve, ...(allowOwnerGrants ? { allowOwnerGrants: true } : {}) });
 };
 
 export const setCliTrust = (mode: CliTrustMode, expectedRevision: number): Promise<CliTrust> =>
