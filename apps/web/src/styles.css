@@ -5633,7 +5633,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
      the same frame so the body never moves when the flow advances. */
   .project-setup-head,
   .folder-dialog-head-stepped { min-height: 140px; }
-  .folder-dialog-body-stepped :is(.folder-list, .folder-error) { margin-inline: var(--space-5); }
+  .folder-dialog-body-stepped :is(.folder-list, .folder-error, .folder-missing) { margin-inline: var(--space-5); }
   .folder-dialog-body-stepped .folder-list { height: auto; flex: 1 1 auto; min-height: 0; }
   /* One dialog box for the whole flow: advancing a step must not resize it. */
   .project-setup-flow-step,
@@ -5705,6 +5705,22 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-row-enter > .ui-icon { color: var(--faint); }
 .folder-empty { color: var(--muted); font-size: var(--font-meta); padding: 18px 12px; text-align: center; }
 .folder-error { margin: 0 18px; }
+/* A typed location that does not exist yet: a notice above the bar, not an
+   error, because the primary action is the way out of it. */
+.folder-missing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 18px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--accent-line) 75%, var(--hair));
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
 /* One bottom bar: ways to add on the start side, primary on the end side. */
 .folder-foot {
   display: flex; flex: none; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: var(--space-2) var(--space-3);
@@ -13278,7 +13294,8 @@ width: 100%; min-height: var(--tap);
     padding-block: 5px;
   }
   .folder-row-meta { display: none; }
-  .folder-error { margin-inline: 12px; }
+  .folder-error,
+  .folder-missing { margin-inline: 12px; }
   .folder-foot {
     flex: none;
     flex-wrap: wrap;
@@ -13317,6 +13334,11 @@ width: 100%; min-height: var(--tap);
     max-width: none;
     margin-inline-start: 0;
   }
+  /* The create offer names the folder it will make; give it the full bar
+     rather than an ellipsis. */
+  .folder-dialog-body-stepped[data-missing] .folder-foot { flex-wrap: wrap; }
+  .folder-dialog-body-stepped[data-missing] .folder-foot-secondary { flex: 1 1 100%; }
+  .folder-dialog-body-stepped[data-missing] .folder-open-btn { flex: 1 1 100%; }
   .folder-open-btn { flex: 1 1 100%; max-width: none; margin-left: auto; }
   .folder-source-row :is(button, .ghost-link) { min-height: var(--tap); }
   /* Ways to add are one swipeable row of soft pills above the primary

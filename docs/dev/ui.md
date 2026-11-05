@@ -1154,6 +1154,14 @@ never reseeded (`seedInitialProjectWorkspace` is skipped).
   on Escape marks its root `data-owns-escape` (the Git clone panel does); the
   picker then leaves the key to it. Any other armed source is disarmed by the
   picker first, so Escape never throws away the whole flow by accident.
+- **A typed path that does not exist.** Enter, or the primary action, on a
+  location that is not on disk reports it as a notice — "“{path}” doesn’t
+  exist yet." — rather than a red error, and the primary action becomes
+  **Create “{name}”**. Pressing it creates exactly that path (recursively) and
+  selects it, so the next press opens it. A missing location is never silently
+  replaced by the folder that happens to be on screen, including when Open is
+  pressed while the path field is still open. Escape abandons the typed
+  attempt and the offer with it.
 
 - **No keyboard on open.** Initial focus is the `.folder-list` listbox,
   never a text field. Typing a path is opt-in: click the empty end of the
