@@ -716,7 +716,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-pro
 
 /* 3a. Floating surfaces: toasts, menus, tooltips, dialogs, settings. */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner, .workspace-customize-panel) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.notify-card, .ui-popover, .dialog-panel, .modal.settings-shell, .perm-banner, .workspace-customize-panel) {
   background: color-mix(in srgb, var(--look-float) var(--look-float-a), transparent) !important;
   backdrop-filter: var(--look-float-blur) !important;
   border: 1px solid var(--look-float-edge) !important;
@@ -2322,7 +2322,7 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher
   box-shadow: var(--look-glass-shadow) !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.notify-card, .ui-popover, .dialog-panel, .modal.settings-shell, .perm-banner) {
   border: 1px solid transparent !important;
   background: linear-gradient(var(--look-fill-strong), var(--look-fill-strong)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;

@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { useAnchoredPosition, type AnchoredSide } from "./useAnchoredPosition.ts";
 import { usePackageWindowOwner } from "./PackageWindowContext.ts";
 
-const SHOW_DELAY_MS = 350;
+const SHOW_DELAY_MS = 700;
 
 export interface TooltipProps {
   content: ReactNode;

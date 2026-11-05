@@ -344,7 +344,7 @@ All from `apps/web/src/components/ui` (see `index.ts`):
   `:hover` touch leaves on the tapped tab: the global touch reset that
   flattens quiet buttons skips `[aria-selected="true"]`, as it skips
   `[aria-pressed="true"]`.
-- `Tooltip` — `content`, wraps its trigger; hover (fine pointers, 350ms
+- `Tooltip` — `content`, wraps its trigger; hover (fine pointers, 700ms
   delay) + focus; the trigger must own its accessible name. `disabled`
   drops a pending or shown bubble while the trigger's context already shows
   the same thing (the project rail's tooltip while the sessions peek is

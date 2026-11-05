@@ -208,14 +208,6 @@ html[data-theme-style="macos"] .menu-kbd {
   color: var(--text-dim); font: 400 var(--font-meta)/1 var(--ui-font-family);
 }
 
-/* Help tag: a small light plate on the surface stroke. */
-html[data-theme-style="macos"] .ui-tooltip {
-  padding: 4px 8px;
-  border-color: var(--macos-stroke-surface);
-  border-radius: calc(5px * var(--macos-round));
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
-  color: var(--text);
-}
 
 /* Alert and sheet: the content surface on the surface stroke under the alert
    shadow; title and commands share it, with no rules or bands between. */
