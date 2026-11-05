@@ -2427,12 +2427,54 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-float-navigation, .mobile-
   backdrop-filter: var(--look-glass-blur) !important;
 }
 
-/* A project's mark is a polished accent disc. */
-body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+/* A project's mark is a gem: its own colour seen through glass. Without a colour
+   it is clear rather than the accent, on every surface that shows a mark. The
+   default goes through the token because a `color` at this strength would beat
+   the appearance dialog's preview, which follows the colour being chosen. */
+body[data-shell-look="obsidian"]:not(#\#) .project-glyph {
+  --session-blue: var(--text-dim);
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-navigator, .context-selector-project .picker-trigger-icon) .project-glyph {
   border-radius: var(--look-pill-radius);
-  background: linear-gradient(135deg, var(--accent-hi), var(--accent));
-  color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 28%, transparent), 0 4px 12px -6px var(--accent);
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-navigator, .context-selector-project .picker-trigger-icon) .project-glyph:not(:has(> img)) {
+  background: radial-gradient(120% 120% at 30% 12%, color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 9%, transparent) 70%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, currentColor 32%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 6px 14px -9px currentColor;
+}
+
+/* Phone Settings: categories are plain lists on the glass, parted by their
+   headings rather than framed. Headings and rows share one column with the
+   search field's icon; only the current row carries a shape. */
+@media (max-width: 700px) {
+  body[data-shell-look="obsidian"]:not(#\#) :is(.settings-nav-group-list, .settings-results) {
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  /* Rows clip to no card now; the results list keeps its own scrolling. */
+  body[data-shell-look="obsidian"]:not(#\#) .settings-nav-group-list {
+    overflow: visible;
+  }
+
+  body[data-shell-look="obsidian"]:not(#\#) .settings-results {
+    margin-inline: calc(var(--space-4) * var(--density-scale));
+    padding: 0;
+  }
+
+  /* A setting found inside a page keeps its indent under that page's row. */
+  body[data-shell-look="obsidian"]:not(#\#) :is(.settings-nav-group, .settings-nav-item, .settings-result-pagehead) {
+    padding-inline: calc(var(--space-3) * var(--density-scale));
+  }
+
+  body[data-shell-look="obsidian"]:not(#\#) .settings-result {
+    border-radius: var(--look-select-radius);
+  }
 }
 
 /*

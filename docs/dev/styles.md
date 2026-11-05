@@ -712,7 +712,7 @@ at ≥ 6.6:1.
 | `air` | Each project is an island, its mark as far in from the island's side as from its top (names, chats and Add project keep those columns); the toolbar steps in with them (title on the marks' edge, close on their ⋮ column); current chat an accent pill; marks are accent discs | Islands with the glyph in an accent disc; the widget is an island |
 | `monolith` | The backdrop; current chat is a raised piece of the sheet; heavier project names | Raised sheet tiles and widget on the backdrop |
 | `monolith-reverse` | The lit plane; current chat and marks carved into it | Keys carved into the plane (a press sinks deeper); the widget a recessed window |
-| `obsidian` | Dark glass (the light canvas in pearl); accent pill; polished accent discs | Glass tiles with the gradient rim; only a pressed tile takes the accent rim and glow |
+| `obsidian` | Dark glass (the light canvas in pearl); accent pill; marks are glass in the project's own colour, clear without one, on the composer's project chip too | Glass tiles with the gradient rim; only a pressed tile takes the accent rim and glow |
 | `editorial` | A contents page: a rule under the toolbar and between chapters, serif entries, the open one in italic, small-capital dates | A two-column index in serif with warm glyphs and a rule under each entry; the widget a ruled section |
 
 **Contract:**
@@ -1336,7 +1336,10 @@ project setup, and Workspace omit the surrounding backdrop because the surface
 fills the viewport. The phone Settings layer is opaque in every Glass mode
 except the user's explicit Clear choice: it is the whole screen rather than a
 sheet over the workspace, so the workspace must not ghost through its rows,
-group cards or page padding (the pane already fills with `--bg`). Workspace
+group cards or page padding (the pane already fills with `--bg`). The Obsidian
+look has no group cards there: categories and search results are plain lists
+on the glass, parted by their headings, with headings and rows on one column.
+Workspace
 shares the Navigator's glass material and effect
 preferences without an additional scrim or backdrop filter on its sheet host.
 Partial-height windows retain an opaque scrim and surface fallback

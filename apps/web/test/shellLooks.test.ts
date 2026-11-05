@@ -360,6 +360,38 @@ test("the lines above the composer are text in every look", async () => {
   assert.doesNotMatch(css, /\.(?:agent-status-dock|subagent-island|pending-changes-bar)[^,{]*\{[^}]*padding-inline/);
 });
 
+test("Obsidian's phone Settings lists its categories without a frame", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const phone = css.match(/@media \(max-width: 700px\) \{\s*body\[data-shell-look="obsidian"\]:not\(#\\#\) :is\(\.settings-nav-group-list, \.settings-results\) \{[^}]*\}[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(phone, "the frame comes off at the phone breakpoint only");
+  assert.match(phone, /:is\(\.settings-nav-group-list, \.settings-results\) \{[^}]*border: 0;[^}]*background: none;[^}]*box-shadow: none;/);
+  // The list loses its clip, but long search results still have to scroll.
+  assert.match(phone, /\.settings-nav-group-list \{\s*overflow: visible;/);
+  assert.doesNotMatch(phone, /\.settings-results[^{]*\{[^}]*overflow/);
+  // Headings and rows keep one column, and a bare result row keeps a corner.
+  assert.match(phone, /:is\(\.settings-nav-group, \.settings-nav-item, \.settings-result-pagehead\) \{\s*padding-inline:/);
+  // A setting found inside a page keeps its own indent under that page's row.
+  assert.doesNotMatch(phone, /\.settings-result(?:-item)?[,)][^{]*\{[^}]*padding-inline/);
+  assert.match(phone, /\.settings-result \{\s*border-radius: var\(--look-select-radius\);/);
+  // No other look gives up its group cards.
+  for (const look of SHELL_LOOKS.filter((candidate) => candidate !== "obsidian")) {
+    assert.doesNotMatch(css, new RegExp(`body\\[data-shell-look="${look}"\\][^{]*\\.settings-nav-group-list`), look);
+  }
+});
+
+test("Obsidian's project marks are glass in the project's own colour, never the accent", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const look = 'body\\[data-shell-look="obsidian"\\]:not\\(#\\\\#\\)';
+  const tile = css.match(new RegExp(`${look} :is\\(\\.mobile-navigator, \\.context-selector-project \\.picker-trigger-icon\\) \\.project-glyph:not\\(:has\\(> img\\)\\) \\{[^}]*\\}`))?.[0] ?? "";
+  assert.ok(tile, "the phone navigator and the composer's project chip share one tile");
+  assert.match(tile, /background: radial-gradient\([^;]*currentColor[^;]*;/);
+  assert.doesNotMatch(tile, /--accent/);
+  // A colourless mark is neutral on every surface, but only through the default
+  // token: a `color` at this strength would beat the appearance dialog's preview.
+  assert.match(css, new RegExp(`${look} \\.project-glyph \\{\\s*--session-blue: var\\(--text-dim\\);\\s*\\}`));
+  assert.doesNotMatch(css, new RegExp(`${look} [^{]*\\.project-glyph[^{]*\\{[^}]*\\scolor:`));
+});
+
 test("Send and Stop share each look's corner, with no glow or ring", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   for (const look of ["paper", "editorial"]) {
