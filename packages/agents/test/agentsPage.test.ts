@@ -44,6 +44,8 @@ const {
   publishProjectList,
 } = await import("../../../apps/web/src/store.ts");
 const { default: AgentsPage } = await import("../widgets/AgentsPage.tsx");
+const { default: AgentFutureApproval } = await import("../widgets/AgentFutureApproval.tsx");
+const { agentsSnapshot } = await import("../widgets/agentsStore.ts");
 const { offerAgentSeed } = await import("../widgets/agentSeed.ts");
 const { resolveScheduleProjectId } = await import("../widgets/scheduleData.ts");
 const { switchCadenceMode } = await import("../widgets/PlannerScheduleFields.tsx");
@@ -76,8 +78,9 @@ function agentsPage(start: string | null = null) {
   const opened: Array<{ resource: string | null; projectId?: string }> = [];
   const sessions: string[] = [];
   let navigate: (resource: string | null) => void = () => {};
+  const slots: Array<{ slot: string; context?: Record<string, unknown> }> = [];
   const host = {
-    ui: { Slot: () => null },
+    ui: { Slot: (props: { slot: string; context?: Record<string, unknown> }) => { slots.push(props); return null; } },
     navigation: {
       openPage: (_id: string, resource?: string | null, options?: { projectId?: string }) => {
         opened.push({ resource: resource ?? null, ...(options?.projectId ? { projectId: options.projectId } : {}) });
@@ -93,7 +96,7 @@ function agentsPage(start: string | null = null) {
     navigate = setResource;
     return createElement(AgentsPage, { host, resource });
   }
-  return { element: createElement(Harness), opened, sessions, go: (resource: string | null) => navigate(resource) };
+  return { element: createElement(Harness), opened, sessions, slots, go: (resource: string | null) => navigate(resource) };
 }
 
 const response = (body: unknown, status = 200): Response =>
@@ -497,17 +500,18 @@ test("a request waiting in an agent's run is answered above its message box, and
     }],
   };
   const server = fakeServer([waiting]);
-  const view = await mounted(agentsPage("agent-inbox").element);
+  const page = agentsPage("agent-inbox");
+  const view = await mounted(page.element);
   await act(async () => { await delay(30); });
-  const card = view.container.querySelector(".agent-dock .agent-request")!;
-  assert.match(card.textContent ?? "", /Asks to run/);
-  assert.equal(card.querySelector("code")!.textContent, "bash · rm -rf .cache");
+  // The decision itself is the chat's card, which the host mounts in this slot.
+  const asked = page.slots.filter((entry) => entry.slot === "session.permission.requests");
+  assert.ok(asked.length > 0, "the conversation asks the host for the session's permission card");
+  assert.deepEqual(asked.at(-1)!.context, { sessionId: "ses-9", requestIds: ["req-1"] });
+  const wait = view.container.querySelector(".agent-dock .agent-permission-wait")!;
+  assert.match(wait.textContent ?? "", /waiting/);
   assert.match(view.container.querySelector(".agent-head-status")!.textContent ?? "", /Waiting for you/);
-  await act(async () => { buttonNamed(card, "Allow once")!.click(); await delay(30); });
-  const reply = server.writes.find((write) => write.url.includes("/permission"))!;
-  assert.match(reply.url, /ses-9/);
-  assert.match(reply.url + JSON.stringify(reply.body), /req-1/);
-  assert.match(JSON.stringify(reply.body), /once/);
+  await act(async () => { buttonNamed(wait, "Open session")!.click(); await delay(10); });
+  assert.deepEqual(page.sessions, ["ses-9"], "the way into the session stays beside the card");
   await view.unmount();
 
   const home = await mounted(agentsPage().element);
@@ -517,7 +521,135 @@ test("a request waiting in an agent's run is answered above its message box, and
   assert.match(inbox.textContent ?? "", /bash · rm -rf \.cache/);
   await act(async () => { buttonNamed(inbox, "Deny")!.click(); await delay(30); });
   assert.match(JSON.stringify(server.writes.at(-1)!.body), /reject/);
+  // The list still names it until the run's observer notices the answer.
+  assert.ok(!home.container.querySelector(".agents-home-request"), "answered, it leaves at the click");
   await home.unmount();
+});
+
+test("an inbox answer the server refuses comes back and says so", async () => {
+  resetRegistry();
+  seedProject("ag-refused", "Refused");
+  activateProject("ag-refused");
+  fakeServer([{
+    ...taskFor("ag-refused", "Clean the build cache."),
+    id: "agent-refused", title: "Cache cleaner", runs: 1,
+    history: [{
+      runId: "r1", startedAt: Date.now() - 60_000, status: "running" as const, sessionId: "ses-7",
+      waiting: [{ requestId: "req-7", kind: "permission" as const, title: "bash · rm -rf .cache", since: Date.now() - 30_000 }],
+    }],
+  }]);
+  const listed = globalThis.fetch;
+  globalThis.fetch = async (input, init) => String(input).includes("/permission")
+    ? response({ error: "permission request already resolved", code: "conflict" }, 409)
+    : listed(input, init);
+  const home = await mounted(agentsPage().element);
+  await act(async () => { await delay(30); });
+  const inbox = home.container.querySelector(".agents-home-request")!;
+  await act(async () => { buttonNamed(inbox, "Allow once")!.click(); await delay(30); });
+  assert.ok(home.container.querySelector(".agents-home-request"), "offered again");
+  assert.match(getState().uiError ?? "", /already resolved/i);
+  await home.unmount();
+});
+
+test("the checkbox on an agent's card raises the agent's own level, and only when it may", async () => {
+  resetRegistry();
+  seedProject("ag-next", "Next");
+  activateProject("ag-next");
+  const agent = (id: string, extra: Partial<ScheduleTaskDto> = {}) => ({
+    ...taskFor("ag-next", "Build."), id, title: id, runs: 1, ownerUserId: "usr-1",
+    target: { mode: "dedicated-session" as const },
+    history: [{ runId: "r1", startedAt: 1, status: "running" as const, sessionId: `ses-${id}` }],
+    ...extra,
+  });
+  const server = fakeServer([
+    agent("own"),
+    agent("nobody", { ownerUserId: undefined }),
+    agent("file", { source: "loop-file" as const }),
+    agent("routine", { permissions: "routine" as const }),
+    agent("refused"),
+  ] as ScheduleTaskDto[]);
+  const listed = globalThis.fetch;
+  globalThis.fetch = async (input, init) => init?.method === "PATCH" && String(input).endsWith("/refused")
+    ? response({ error: "forbidden", code: "forbidden" }, 403)
+    : listed(input, init);
+  const list = await mounted(agentsPage("own").element);
+  await act(async () => { await delay(30); });
+  await list.unmount();
+
+  const host = { sessions: { subscribe: () => () => {}, get: () => ({ purpose: "agent" }) } } as unknown as WebPackageHost;
+  const open = async (sessionId: string, level: "routine" | "all") => {
+    const effects: Array<{ confirmNote?: string; apply(level: "routine" | "all"): void }> = [];
+    const view = await mounted(createElement(AgentFutureApproval, {
+      host, sessionId, level,
+      addPolicyEffect: (effect) => { effects.push(effect); return () => { effects.splice(effects.indexOf(effect), 1); }; },
+    }));
+    await act(async () => { await delay(20); });
+    return { view, effects, box: view.container.querySelector<HTMLInputElement>('.agent-future-approval input[type="checkbox"]') };
+  };
+  for (const [sessionId, level] of [["ses-nobody", "routine"], ["ses-file", "routine"], ["ses-routine", "routine"], ["ses-stranger", "routine"]] as const) {
+    const { view, box } = await open(sessionId, level);
+    assert.ok(!box, `${sessionId}: not offered`);
+    await view.unmount();
+  }
+  const raise = await open("ses-routine", "all");
+  assert.ok(raise.box, "an agent on Auto-Approve can still be raised to Full access");
+  await raise.view.unmount();
+
+  const { view, effects, box } = await open("ses-own", "routine");
+  assert.ok(box, "offered on the agent's own session");
+  assert.equal(effects.length, 0, "unticked, the decision stays with this session");
+  await act(async () => { box.click(); await delay(10); });
+  assert.equal(effects.length, 1);
+  assert.ok(effects[0]!.confirmNote, "Full access's confirmation names it");
+  await act(async () => { box.click(); await delay(10); });
+  assert.equal(effects.length, 0, "unticking takes it back");
+  await act(async () => { box.click(); await delay(10); });
+  await act(async () => { effects[0]!.apply("routine"); await delay(30); });
+  assert.deepEqual(server.writes.filter((write) => write.url === "/api/schedule/own").map((write) => write.body), [{ permissions: "routine" }]);
+  assert.equal(agentsSnapshot().agents?.find((item) => item.id === "own")?.permissions, "routine", "what its settings read");
+  assert.match(getState().uiError ?? "", /Next sessions of own/);
+  await view.unmount();
+
+  const refused = await open("ses-refused", "routine");
+  await act(async () => { refused.box!.click(); await delay(10); });
+  await act(async () => { refused.effects[0]!.apply("routine"); await delay(30); });
+  assert.equal(agentsSnapshot().agents?.find((item) => item.id === "refused")?.permissions, undefined, "restored");
+  assert.match(getState().uiError ?? "", /was not saved/);
+  await refused.view.unmount();
+});
+
+test("an agent's settings say where the level applies", async () => {
+  resetRegistry();
+  seedProject("ag-level", "Level");
+  activateProject("ag-level");
+  fakeServer([{ ...taskFor("ag-level", "Build."), id: "agent-level", title: "Builder", permissions: "routine" } as ScheduleTaskDto]);
+  const view = await mounted(agentsPage("agent-level").element);
+  await act(async () => { await delay(30); });
+  await act(async () => { buttonNamed(view.container, "Settings")!.click(); await delay(30); });
+  assert.match(view.container.textContent ?? "", /Applies to every new session of this agent/);
+  assert.match(view.container.textContent ?? "", /Auto-approve/);
+  await view.unmount();
+});
+
+test("a question waits in its own card and is answered in its session", async () => {
+  resetRegistry();
+  seedProject("ag-ask", "Ask");
+  activateProject("ag-ask");
+  fakeServer([{
+    ...taskFor("ag-ask", "Ask things."),
+    id: "agent-ask", title: "Asker", runs: 1,
+    history: [{
+      runId: "r1", startedAt: Date.now() - 60_000, status: "running" as const, sessionId: "ses-5",
+      waiting: [{ requestId: "q-1", kind: "question" as const, title: "Which branch?", since: Date.now() - 30_000 }],
+    }],
+  }]);
+  const page = agentsPage("agent-ask");
+  const view = await mounted(page.element);
+  await act(async () => { await delay(30); });
+  const card = view.container.querySelector(".agent-dock .agent-request")!;
+  assert.match(card.textContent ?? "", /Which branch\?/);
+  assert.equal(page.slots.some((entry) => entry.slot === "session.permission.requests"), false, "no permission card for a question");
+  await view.unmount();
 });
 
 test("pausing an agent shows Paused at once and restores it when the server refuses", async () => {

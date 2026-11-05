@@ -1565,7 +1565,15 @@ host.slots.register({
   scrolling explanation and its decisions (context: `sessionId`, `requestId`,
   and `sourceSessionId` for a subagent's mirrored request), for package notes
   about that one request such as a permission judge's check or verdict; a contribution
-  renders `null` when it has nothing to say about the request.
+  renders `null` when it has nothing to say about the request. A note may also
+  extend the card's policy action through `policyLevel` and `addPolicyEffect`
+  ([permissions README](../../packages/permissions/README.md)).
+  A page that shows one session's requests outside its timeline mounts
+  `session.permission.requests` (context: `sessionId`, `requestIds`) and gets
+  that same card with the same decisions, never a card of its own. The socket
+  follows only the active chat, so the contribution reads the session's events
+  through `refreshBackgroundSession` while it is mounted; the Agents
+  conversation is the current host.
   `Composer.tsx` mounts `composer.leading`,
   `composer.trailing`, `composer.meta`, `composer.pending`; `Composer.tsx`
   also mounts `composer.config` on the quiet configuration row beside the model

@@ -9,7 +9,7 @@ import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { MarkdownDoc } from "../../../apps/web/src/markdown.tsx";
 import { fmtSessionElapsed } from "../../../apps/web/src/format.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
-import { useStore } from "../../../apps/web/src/store.ts";
+import { useSessionModel, useStore } from "../../../apps/web/src/store.ts";
 import { executionPathParts, executionPresentation } from "../../../apps/web/src/execution.ts";
 import ChatActionButton from "../../../apps/web/src/components/ChatActionButton.tsx";
 import ActivityTicker, { useTickerKey } from "../../../apps/web/src/components/ActivityTicker.tsx";
@@ -24,7 +24,7 @@ import { tokenTotal } from "../src/agentPrompt.ts";
 import { newestReportAt, shortDuration, type AgentLive } from "./agentLive.ts";
 import { agentName } from "./agentActions.ts";
 import { useNow } from "./agentClock.ts";
-import { optimistic, refreshAgents } from "./agentsStore.ts";
+import { optimistic } from "./agentsStore.ts";
 import AgentComposer, { type AgentMessage, type DroppedFiles } from "./AgentComposer.tsx";
 import {
   carries, conversationDays, dayItems, queues,
@@ -419,70 +419,97 @@ function ThreadHead({ opening, sessionId, onOpenSession }: {
   );
 }
 
-/** What waits for the person in the run that is working now. */
-function RequestCard({ task, run, request, onOpenSession }: {
-  task: ScheduleTaskDto;
-  run: ScheduleRunDto;
-  request: NonNullable<ScheduleRunDto["waiting"]>[number];
-  onOpenSession?: (sessionId: string) => void;
-}) {
-  const [busy, setBusy] = useState<"once" | "reject" | null>(null);
-  const now = useNow(true);
-  const reply = async (answer: "once" | "reject") => {
-    setBusy(answer);
-    try {
-      await api.replyPermission(run.sessionId!, request.requestId, answer);
-      void refreshAgents();
-    } finally {
-      setBusy(null);
-    }
-  };
+type WaitingRequest = NonNullable<ScheduleRunDto["waiting"]>[number];
+
+/** The permission requests of each run; a run's session shows them on one card. */
+function permissionRuns(waiting: AgentLive["waiting"]): Array<{ run: ScheduleRunDto; requests: WaitingRequest[] }> {
+  const runs = new Map<string, { run: ScheduleRunDto; requests: WaitingRequest[] }>();
+  for (const { run, request } of waiting) {
+    if (request.kind !== "permission") continue;
+    const entry = runs.get(run.runId) ?? { run, requests: [] };
+    entry.requests.push(request);
+    runs.set(run.runId, entry);
+  }
+  return [...runs.values()];
+}
+
+/** How long a request has waited, and what the agent's policy does about it. */
+function waitLine(task: ScheduleTaskDto, request: WaitingRequest, now: number): string {
   const policy = task.approvals && task.approvals.onTimeout !== "wait"
     ? tr(task.approvals.onTimeout === "reject" ? "agents.deniesAtValue" : "agents.stopsAtValue", {
       time: timeOf(request.since + task.approvals.timeoutMinutes * 60_000),
     })
     : "";
-  const question = request.kind === "question";
+  return `${tr("agents.waitingForValue", { duration: shortDuration(now - request.since, UNITS()) })}${policy ? ` · ${policy}` : ""}`;
+}
+
+/** A question the run waits on; it is answered in its session. */
+function QuestionCard({ task, run, request, onOpenSession }: {
+  task: ScheduleTaskDto;
+  run: ScheduleRunDto;
+  request: WaitingRequest;
+  onOpenSession?: (sessionId: string) => void;
+}) {
+  const now = useNow(true);
   return (
-    <GlassDock className="agent-request" role="group" aria-label={question ? tr("agents.requestQuestion") : tr("agents.requestPermission")}>
+    <GlassDock className="agent-request" role="group" aria-label={tr("agents.requestQuestion")}>
       <div className="agent-request-head">
         <span className="agent-request-icon" aria-hidden="true"><Icon icon={ShieldAlertIcon} size="sm" /></span>
         <span className="agent-request-heading">
-          <span className="agent-request-title">{question ? tr("agents.asksYou") : tr("agents.asksPermission")}</span>
-          <span className="agent-request-when">
-            {tr("agents.waitingForValue", { duration: shortDuration(now - request.since, UNITS()) })}
-            {policy ? ` · ${policy}` : ""}
-          </span>
+          <span className="agent-request-title">{tr("agents.asksYou")}</span>
+          <span className="agent-request-when">{waitLine(task, request, now)}</span>
         </span>
         {run.sessionId && onOpenSession && (
           <ChatActionButton
             icon={ExternalLinkIcon}
             className="agent-request-open"
-            label={question ? tr("agents.answerInSession") : tr("agents.openSession")}
+            label={tr("agents.answerInSession")}
             onClick={() => onOpenSession(run.sessionId!)}
           />
         )}
       </div>
-      {question
-        ? <p className="agent-request-question">{request.title}</p>
-        : <p className="agent-request-command" dir="ltr"><span aria-hidden="true">$</span><code>{request.title}</code></p>}
-      {question ? (
-        run.sessionId && onOpenSession && (
-          <div className="agent-request-actions">
-            <Button size="sm" variant="primary" onClick={() => onOpenSession(run.sessionId!)}>{tr("agents.answerInSession")}</Button>
-          </div>
-        )
-      ) : (
+      <p className="agent-request-question">{request.title}</p>
+      {run.sessionId && onOpenSession && (
         <div className="agent-request-actions">
-          <Button size="sm" variant="danger" busy={busy === "reject"} disabled={busy !== null} onClick={() => void reply("reject")}>
-            {tr("agents.deny")}
-          </Button>
-          <Button size="sm" variant="primary" busy={busy === "once"} disabled={busy !== null} onClick={() => void reply("once")}>
-            {tr("agents.allowOnce")}
-          </Button>
+          <Button size="sm" variant="primary" onClick={() => onOpenSession(run.sessionId!)}>{tr("agents.answerInSession")}</Button>
         </div>
       )}
     </GlassDock>
+  );
+}
+
+/** The run's permission requests: the card every chat shows, under a line with
+ *  what only the agent's page knows. That line and its way into the session stay
+ *  when the session's events cannot be read here. */
+function PermissionRequests({ host, task, run, requests, onOpenSession }: {
+  host?: WebPackageHost;
+  task: ScheduleTaskDto;
+  run: ScheduleRunDto;
+  requests: readonly WaitingRequest[];
+  onOpenSession?: (sessionId: string) => void;
+}) {
+  const now = useNow(true);
+  const requestIds = requests.map((request) => request.requestId);
+  // The run's record trails the session: a decided request says so here first.
+  const model = useSessionModel(run.sessionId!);
+  const open = requests.find((request) => model.permissions.find((known) => known.requestId === request.requestId)?.status !== "resolved");
+  return (
+    <div className="agent-permission" role="group" aria-label={tr("agents.requestPermission")}>
+      {open && (
+        <div className="agent-permission-wait">
+          <span className="agent-request-when">{waitLine(task, open, now)}</span>
+          {onOpenSession && (
+            <ChatActionButton
+              icon={ExternalLinkIcon}
+              className="agent-request-open"
+              label={tr("agents.openSession")}
+              onClick={() => onOpenSession(run.sessionId!)}
+            />
+          )}
+        </div>
+      )}
+      {host && <host.ui.Slot slot="session.permission.requests" context={{ sessionId: run.sessionId, requestIds }} />}
+    </div>
   );
 }
 
@@ -740,12 +767,22 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
               </div>
             </GlassDock>
           )}
-          {waiting.map(({ run, request }) => (
-            <RequestCard
+          {waiting.filter(({ request }) => request.kind === "question").map(({ run, request }) => (
+            <QuestionCard
               key={request.requestId}
               task={agent}
               run={run}
               request={request}
+              {...(openSession ? { onOpenSession: openSession } : {})}
+            />
+          ))}
+          {permissionRuns(waiting).map(({ run, requests }) => (
+            <PermissionRequests
+              key={run.runId}
+              {...(host ? { host } : {})}
+              task={agent}
+              run={run}
+              requests={requests}
               {...(openSession ? { onOpenSession: openSession } : {})}
             />
           ))}

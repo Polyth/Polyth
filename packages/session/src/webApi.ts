@@ -820,6 +820,8 @@ export interface ScheduleTaskDto extends AgentFieldsDto {
   nextRunAt: number | null;
   runs: number;
   source?: "ui" | "loop-file";
+  /** The person it acts for; an agent without one may not approve on its own. */
+  ownerUserId?: string;
   sourcePath?: string;
   parseError?: string;
   loopId?: string;

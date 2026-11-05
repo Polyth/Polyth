@@ -49,6 +49,25 @@ request. A contribution renders nothing when it has nothing to say about that
 request; the card never names the package behind it (a removable package such
 as Judges puts a permission judge's check and verdict there).
 
+A note can extend the card's policy action. Its context also carries `policyLevel`
+(`routine` or `all`, the level that action turns on; `null` when the card offers
+none) and `addPolicyEffect(effect)`, which returns the removal. After the session
+accepted the level, the card calls `effect.apply(level)`; a decision of Allow or
+Deny, a declined confirmation or a refused level never does. `effect.confirmNote`
+joins Full access's confirmation. `apply` reports its own failure, since the card
+has usually left by then. The Agents package uses this for "For all next sessions".
+
+## The card outside a chat — `session.permission.requests`
+
+A page that shows one session's requests outside its timeline (an agent's
+conversation) mounts this host slot with `sessionId` and the `requestIds` it knows
+are open. The package renders the chat's own `PermissionBanner` from that session's
+canonical events (`SessionPermissions.tsx`), so the decisions and their rules cannot
+differ from a chat's: Auto-Approve on a routine request, confirmed Allow all on a
+high-risk one, delegation for a subagent. It reads the events every second while
+mounted, because the socket follows only the active chat, and pages back when a
+known request is older than the first window. Mount it only while a request waits.
+
 ## Judgment second opinion — `permissions.scope-check`
 
 An opt-in Judgment use (scope `permissions.scope-check.v1`, Settings → Judgment).

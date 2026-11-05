@@ -1745,7 +1745,40 @@
   margin-inline: auto;
 }
 
-/* A request: the same card a chat shows for a permission. */
+/* A permission request is the chat's own card; this line above it holds what
+   only the agent's page knows. */
+.agents-page .agent-permission {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.agents-page .agent-permission-wait {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-inline-start: var(--space-3);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* Sits right above the card's policy action, the decision it extends. */
+.perm-banner .agent-future-approval {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.perm-banner .agent-future-approval .ui-checkbox { align-items: center; }
+.perm-banner .agent-future-approval .ui-checkbox-box { margin-block-start: 0; }
+.perm-banner .agent-future-approval .ui-checkbox-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* A question or a review: laid out on the chat's card. */
 .agents-page .agent-request {
   display: grid;
   gap: var(--space-2);
@@ -1781,31 +1814,6 @@
 .agents-page .agent-request-title { color: var(--text); font-weight: 600; }
 .agents-page .agent-request-when { min-width: 0; color: var(--muted); }
 .agents-page .agent-request-open { flex: none; margin-inline-end: calc(var(--space-1) * -1); }
-.agents-page .agent-request-command {
-  display: flex;
-  gap: var(--space-2);
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-control);
-  background: var(--sunken);
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: var(--font-code);
-  line-height: 1.55;
-}
-.agents-page .agent-request-command > span { flex: none; color: var(--faint); user-select: none; }
-.agents-page .agent-request .agent-request-command > code {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font-family: var(--mono);
-  font-size: inherit;
-  line-height: inherit;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
 .agents-page .agent-request-question {
   margin: 0;
   color: var(--text);

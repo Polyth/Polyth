@@ -6050,8 +6050,15 @@ export const UI_SLOTS = [
   // just above its decisions (for example a judge's verdict). Context:
   // sessionId (the chat showing the card), requestId, and sourceSessionId for
   // a delegated child's mirrored request. A contribution renders nothing when
-  // it has nothing to say about that request.
+  // it has nothing to say about that request. A note that extends the card's
+  // policy action also gets policyLevel (the level that action turns on, null
+  // when the card offers none) and addPolicyEffect(effect) => remove.
   "session.permission.notes",
+  // The permission card of one chosen session, for a page that shows that
+  // session's requests outside its timeline (an agent's conversation). Context:
+  // sessionId, and requestIds the page knows are open. Renders nothing when no
+  // request needs a person.
+  "session.permission.requests",
   "settings.harness.detail",
   "settings.packages.content",
   "session.footer",

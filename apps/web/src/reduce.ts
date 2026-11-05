@@ -1483,6 +1483,12 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    // The runtime no longer holds it: nothing can answer it now.
+    case "permission/expired": {
+      const p = model.permissions.find((x) => x.requestId === str(d, "requestId"));
+      if (p) p.status = "resolved";
+      break;
+    }
     case "question/asked": {
       const requestId = str(d, "requestId") ?? "";
       if (!model.questions.some((q) => q.requestId === requestId)) {

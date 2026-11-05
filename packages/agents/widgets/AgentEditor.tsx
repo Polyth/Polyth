@@ -631,6 +631,7 @@ export default function AgentEditor({
               onChange={(value) => set("permissions", value as PermissionChoice)}
             />
           </Field>
+          <p className="agent-field-hint">{tr("agents.permissionsScope")}</p>
           {permissionWarning}
           {advanced && (
             <>

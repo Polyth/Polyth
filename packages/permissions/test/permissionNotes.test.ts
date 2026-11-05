@@ -62,10 +62,16 @@ test("each request hands its identity to the notes slot, between its explanation
   const view = await mount(createElement(PermissionBanner, { permissions: model.permissions, Slot } as never));
   try {
     assert.deepEqual(seen.map((entry) => entry.slot), ["session.permission.notes", "session.permission.notes"]);
-    assert.deepEqual(seen.map((entry) => entry.context), [
+    const identities = seen.map(({ context }) => {
+      const { policyLevel: _level, addPolicyEffect: _add, ...identity } = context as Record<string, unknown>;
+      return identity;
+    });
+    assert.deepEqual(identities, [
       { sessionId: "parent", requestId: "own" },
       { sessionId: "parent", requestId: "mirrored", sourceSessionId: "child" },
     ]);
+    assert.deepEqual(seen.map(({ context }) => typeof context?.addPolicyEffect), ["function", "function"]);
+    assert.deepEqual(seen.map(({ context }) => context?.policyLevel), ["routine", "routine"], "the level the card's policy action turns on");
     for (const row of view.container.querySelectorAll(".permission-request")) {
       const children = [...row.children].map((child) => child.className);
       const note = children.indexOf("test-note");

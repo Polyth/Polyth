@@ -100,6 +100,7 @@ function requestTitle(event: SessionEvent): string {
 }
 
 const DEFAULT_MAX_RUN_MS = 24 * 60 * 60_000;
+const OPEN_REQUEST_POLL_MS = 2_000;
 
 const str = (event: SessionEvent, key: string): string | undefined => {
   const value = (event.data as JsonObject | undefined)?.[key];
@@ -300,7 +301,9 @@ export async function settleScheduledRun(
         await opts.onApprovalTimeout(request).catch(() => {});
       }
     }
-    poll = events.length ? minPoll : Math.min(maxPoll, Math.round(poll * 1.5));
+    // A person's decision should reach the agent's page soon after the click.
+    const pollLimit = open.size ? Math.min(maxPoll, OPEN_REQUEST_POLL_MS) : maxPoll;
+    poll = events.length ? minPoll : Math.min(pollLimit, Math.round(poll * 1.5));
     if (now() >= deadline) {
       return { status: "unknown", error: "No result was confirmed within the observation limit." };
     }

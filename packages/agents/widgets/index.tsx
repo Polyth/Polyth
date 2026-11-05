@@ -5,6 +5,7 @@ import AgentsPage from "./AgentsPage.tsx";
 import AgentNavSection, { type AgentNavContext } from "./AgentNavSection.tsx";
 import MakeAgentAction from "./MakeAgentAction.tsx";
 import AgentSessionChip from "./AgentSessionChip.tsx";
+import AgentFutureApproval, { type PolicyEffect } from "./AgentFutureApproval.tsx";
 import { bindAgentsHost } from "./agentsStore.ts";
 import { AGENTS_PAGE_ID, openAgentsHome } from "./agentActions.ts";
 import { AGENT_SESSION_PURPOSE } from "../src/agentSession.ts";
@@ -58,6 +59,23 @@ export default defineWebPackage((host) => () => {
       render: ({ sessionId }) => typeof sessionId === "string"
         ? createElement(AgentSessionChip, { key: sessionId, host, sessionId })
         : null,
+    }),
+    // A decision on an agent's own session can hold for its next sessions too.
+    host.slots.register({
+      slot: "session.permission.notes",
+      id: "schedule.future-approval",
+      order: 60,
+      render: ({ sessionId, sourceSessionId, policyLevel, addPolicyEffect }) =>
+        typeof sessionId === "string" && !sourceSessionId
+        && (policyLevel === "routine" || policyLevel === "all") && typeof addPolicyEffect === "function"
+          ? createElement(AgentFutureApproval, {
+            key: sessionId,
+            host,
+            sessionId,
+            level: policyLevel,
+            addPolicyEffect: addPolicyEffect as (effect: PolicyEffect) => () => void,
+          })
+          : null,
     }),
     host.slots.register({
       slot: "sidebar.session.actions",
