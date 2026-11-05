@@ -241,6 +241,10 @@ export const toolTimeoutContinuePrompt = (
   ].join("\n\n");
 };
 
+/** Why a chat in a guarded Space cannot turn on Auto-Approve or Full access. */
+export const GUARDED_SPACE_AUTO_APPROVE_MESSAGE =
+  "Auto-Approve and Full access are off in this Space because a member uses Protected mode: every request is asked of a person";
+
 /** Model-visible continuation after a person paused the session mid-turn and
  *  then chose Continue. Like the watchdog nudge it never replays the prompt. */
 export const PAUSE_CONTINUE_PROMPT = [
@@ -3411,6 +3415,10 @@ export function createSessionService(deps: {
     projectId: string | undefined,
     start?: SessionProjection,
   ): Promise<AutoAcceptLevel> {
+    // A guarded Space never auto-answers (`automaticPermissionResolution`),
+    // so no chat there may report Auto-Approve or Full access as on: the
+    // switch would show a level that every request then ignores.
+    if (deps.guardedSpace?.(spaceId)) return "off";
     const parents = new Map<string, string | undefined>();
     const settings = new Map<string, AutoAcceptSetting>();
     let id = startId;
@@ -3511,7 +3519,7 @@ export function createSessionService(deps: {
     }
     return rows.map((row) => ({
       ...row,
-      ...autoAcceptFlags(resolveAutoAcceptLevel(
+      ...autoAcceptFlags(deps.guardedSpace?.(row.spaceId) ? "off" : resolveAutoAcceptLevel(
         row.id,
         (id) => known.get(id)?.spaceId === row.spaceId ? settings.get(id) ?? "inherit" : "off",
         (id) => known.get(id)?.spaceId === row.spaceId ? known.get(id)?.parentId : undefined,
@@ -14680,6 +14688,11 @@ export function createSessionService(deps: {
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       if (setting !== "on" && setting !== "all" && setting !== "off" && setting !== "inherit") {
         throw Object.assign(new Error("setting must be on, all, off, or inherit"), { code: "invalid-input" });
+      }
+      // Saving a level the Space never applies would leave the switch on
+      // while every request still asks; say why instead.
+      if ((setting === "on" || setting === "all") && deps.guardedSpace?.(proj.spaceId)) {
+        throw Object.assign(new Error(GUARDED_SPACE_AUTO_APPROVE_MESSAGE), { code: "forbidden" });
       }
       await withSessionLock(sessionId, async () => {
         await applyProjection(sessionId, (current) => {

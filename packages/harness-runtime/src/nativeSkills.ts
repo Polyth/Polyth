@@ -50,27 +50,35 @@ export interface NativeSkillPolicy {
     muted: string[];
 }
 
-const DEFAULT_POLICY: NativeSkillPolicy = { inherit: false, muted: [] };
-
-/** Reads the stored policy. A missing or unreadable file is the safe default:
- * nothing native is inherited. */
-export async function readNativeSkillPolicy(file: string): Promise<NativeSkillPolicy> {
+/** Reads the stored policy. With no stored choice (no file, or a file without
+ * `inherit`) the harness's own default applies; an unreadable file is the
+ * safe default: nothing native is inherited. */
+export async function readNativeSkillPolicy(file: string, defaultInherit = false): Promise<NativeSkillPolicy> {
+    let text: string;
     try {
-        const raw = JSON.parse(await readFile(file, "utf8")) as Partial<NativeSkillPolicy> | null;
+        text = await readFile(file, "utf8");
+    }
+    catch (error) {
+        return { inherit: (error as NodeJS.ErrnoException).code === "ENOENT" && defaultInherit, muted: [] };
+    }
+    try {
+        const raw = JSON.parse(text) as Partial<NativeSkillPolicy> | null;
         return {
-            inherit: raw?.inherit === true,
+            inherit: typeof raw?.inherit === "boolean" ? raw.inherit : defaultInherit,
             muted: Array.isArray(raw?.muted)
                 ? raw.muted.filter((name): name is string => !nativeSkillNameError(name)).slice(0, MAX_SKILLS)
                 : [],
         };
     }
     catch {
-        return { ...DEFAULT_POLICY, muted: [] };
+        return { inherit: false, muted: [] };
     }
 }
 
-export async function updateNativeSkillPolicy(file: string, patch: HarnessNativeSkillPolicyPatch): Promise<NativeSkillPolicy> {
-    const current = await readNativeSkillPolicy(file);
+/** Applies one change and stores the whole policy, `inherit` included, so a
+ * later change of the harness default never flips a Space that chose. */
+export async function updateNativeSkillPolicy(file: string, patch: HarnessNativeSkillPolicyPatch, defaultInherit = false): Promise<NativeSkillPolicy> {
+    const current = await readNativeSkillPolicy(file, defaultInherit);
     const muted = new Set(current.muted);
     if (patch.skill) {
         if (patch.skill.enabled) muted.delete(patch.skill.name);

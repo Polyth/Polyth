@@ -553,7 +553,7 @@ caller's own `guardrails`. They are enforced server-side at these seams:
 | Space role | capped at `member` (no member/package/Space-integration administration) | `canonicalSpaces.ts` |
 | Models | catalog routes return only allowed models; explicit model/harness choices must be on the allowlist (first entry is the default for new chats; empty = the owner's project/harness defaults, no explicit choice) | `accountGuardrails.ts` |
 | Sessions | no composer shell, no Auto-Approve or Full access (only `off`/`inherit` pass), no "always" replies, "once" only with `approvals: "once"`, no native-session import | `accountGuardrails.ts` (outermost session facade) |
-| Guarded Space | a Space with any guarded member ignores standing allow rules, Auto-Approve and package-tool auto-approve: agents ask a human every time; deny rules still win | `guardedPermissions`, `sessions.ts` `guardedSpace`, `indexCore.ts` package-tool authorize |
+| Guarded Space | a Space with any guarded member ignores standing allow rules, Auto-Approve (Full access included) and package-tool auto-approve: agents ask a human every time; deny rules still win. Every chat there reports its effective level as off, and turning Auto-Approve or Full access on is refused with the reason (`GUARDED_SPACE_AUTO_APPROVE_MESSAGE`); a stored choice applies again once the Space is no longer guarded | `guardedPermissions`, `sessions.ts` `guardedSpace`, `indexCore.ts` package-tool authorize |
 
 The web UI only mirrors this (hidden shell/Auto-Approve/"always", owner-only
 settings, single-model picker); hiding is never the enforcement.

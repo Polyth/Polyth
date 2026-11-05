@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { createStore } from "@polyth/session";
 import type { AgentRuntime, Project, ProjectService, RuntimeEvent } from "@polyth/contracts";
 import { createApprovalDefaultsService, createAutoAcceptStore, type ApprovalDefaultsService, type PermissionRule, type PermissionScopeCheck, type PermissionService } from "@polyth/permissions";
-import { createSessionService, type Broadcaster } from "../src/sessions.ts";
+import { createSessionService, GUARDED_SPACE_AUTO_APPROVE_MESSAGE, type Broadcaster } from "../src/sessions.ts";
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
@@ -48,7 +48,8 @@ function harness(opts: {
   permission?: "allow" | "deny" | "ask";
   dir?: string;
   org?: boolean;
-  guardedSpace?: boolean;
+  /** True, or a live check for a Space that becomes guarded later. */
+  guardedSpace?: boolean | (() => boolean);
   approvalDefaults?: ApprovalDefaultsService;
   redactToolInput?: (tool: string, input: Record<string, unknown>) => Record<string, unknown>;
   permissionScopeCheck?: PermissionScopeCheck;
@@ -88,7 +89,7 @@ function harness(opts: {
   const sessions = createSessionService({
     redactToolInput: opts.redactToolInput,
     ...(opts.org ? { org: store } : {}),
-    ...(opts.guardedSpace ? { guardedSpace: () => true } : {}),
+    ...(opts.guardedSpace ? { guardedSpace: typeof opts.guardedSpace === "function" ? opts.guardedSpace : () => true } : {}),
     store, projects, permissions, broadcast, queue: store,
     runtimes: {
       forProject: async (projectId) => {
@@ -1278,6 +1279,31 @@ test("a guarded Space keeps subagent approvals with a person", async (t) => {
   fake.emit(root, { type: "permission/requested", requestId: "per_root", permission: "bash", patterns: ["npm test"] });
   await waitFor(async () => (await requestEvents(store, root, "permission/requested", "per_root")).length === 1);
   await assert.rejects(sessions.delegatePermission!(root, "per_root"), { code: "invalid-input" }, "a root session has no parent agent");
+});
+
+test("a guarded Space never shows Auto-Approve or Full access as on, nor accepts it", async (t) => {
+  let guardedNow = false;
+  const { dir, sessions, store, fake } = harness({ guardedSpace: () => guardedNow });
+  t.after(async () => { await sessions.dispose(); await store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.autoAcceptSet!(id, "all");
+  assert.equal((await sessions.autoAcceptGet!(id)).level, "all");
+
+  // A member in Protected mode joins: the stored choice stays, but nothing
+  // reports it as applying, because no request is answered automatically.
+  guardedNow = true;
+  assert.deepEqual(await sessions.autoAcceptGet!(id), { setting: "all", effective: false, level: "off", inherited: "off" });
+  const row = (await sessions.list("p1")).find((session) => session.id === id);
+  assert.equal(row?.autoAccept, false);
+  assert.equal(row?.autoAcceptAll, false);
+  fake.emit(id, { type: "permission/requested", requestId: "per_guarded_all", permission: "bash", patterns: ["npm test"] });
+  await flush();
+  assert.deepEqual(fake.permissionReplies, []);
+
+  await assert.rejects(sessions.autoAcceptSet!(id, "all"), { code: "forbidden", message: GUARDED_SPACE_AUTO_APPROVE_MESSAGE });
+  await assert.rejects(sessions.autoAcceptSet!(id, "on"), { code: "forbidden" });
+  assert.equal((await sessions.autoAcceptSet!(id, "off")).setting, "off", "lowering stays available");
+  assert.equal((await store.projection(id))?.autoAcceptSetting, "off");
 });
 
 test("the Judgment second opinion can only leave an automatic answer for a person, once per request", async () => {

@@ -869,8 +869,15 @@ project's `.claude/skills`, and skills of plugins that are installed and
 enabled in Claude). Polyth never edits those folders. The Space owns one
 policy per harness — **inherit** on/off plus a **muted** name list — stored in
 the backend package's Space storage (`harnesses/<harnessId>/native-skills.json`).
-Off (the default) keeps the explicit allowlist of Polyth's own skills, so
-unrelated host skills never enter a Space-private session. On launches Claude
+Off keeps the explicit allowlist of Polyth's own skills, so unrelated host
+skills never enter a Space-private session. A Space with no stored choice (no
+file, or a file without `inherit`) follows the harness default: Claude Code
+inherits by default (`INHERIT_SKILLS_BY_DEFAULT`,
+`packages/backend-claude/src/preferences.ts`), because native skills are only
+offered on a local single-user deployment, where the host's skills are the
+person's own. An unreadable file inherits nothing, and every update stores
+`inherit` explicitly, so a Space's choice survives a later default change.
+Without launch preferences the runtime itself still inherits nothing. On launches Claude
 with `skills: "all"` and `settings.skillOverrides[name] = "off"` for each muted
 skill; Polyth-provisioned skills are never muted by that list. Plugin skill
 components report `active` instead of `hidden-by-polyth` while inheriting.

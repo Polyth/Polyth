@@ -126,11 +126,17 @@ test("Claude native skill discovery lists project, user and enabled plugin skill
 
         const initial = await prefs.skills.list(ctx);
         assert.equal(initial.supported, true);
-        assert.equal(initial.inherit, false);
+        assert.equal(initial.inherit, true, "a local single-user Space with no choice inherits the person's own skills");
         assert.deepEqual(initial.skills.map((skill) => [skill.name, skill.source, skill.enabled]), [
-            ["deploy", "project", false], ["pdf", "user", false], ["tools:lint", "plugin", false],
+            ["deploy", "project", true], ["pdf", "user", true], ["tools:lint", "plugin", true],
         ]);
         assert.equal(initial.skills.find((skill) => skill.name === "pdf")?.description, "Read PDFs");
+        assert.equal((await prefs.launch(ctx)).inheritSkills, true);
+
+        const off = await prefs.skills.update(ctx, { inherit: false });
+        assert.equal(off.inherit, false);
+        assert.deepEqual(off.skills.map((skill) => skill.enabled), [false, false, false]);
+        assert.equal((await prefs.launch(ctx)).inheritSkills, false, "an explicit Off is kept");
 
         await prefs.skills.update(ctx, { inherit: true });
         const muted = await prefs.skills.update(ctx, { skill: { name: "pdf", enabled: false } });
