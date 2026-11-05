@@ -124,7 +124,10 @@ Always pair with `--motion-ease` (stack motion with `--motion-stack-ease`, windo
 Spinner/Skeleton, the composer's context liquid (it drifts only while a
 turn runs), the subagent state dot's ping (only while a chat's subagents
 work; a waiting dot holds still), the arc travelling round a working agent's
-mark (only while its run works; reduced motion leaves the arc still), the launch veil's breathing mark (only while a boot or connect
+mark (only while its run works; reduced motion leaves the arc still), the
+dictation recording's waveform (only while a recording runs, drawn from the
+measured voice level; reduced motion, Reduce animations and Low resource mode
+show a still dot instead), the launch veil's breathing mark (only while a boot or connect
 is still running after its status delay) and the one-shot puff of smoke that
 confirms a rail icon dragged away from every rail is gone (`railDrag.ts`, about
 480ms, none under reduced motion), which are activity semantics. A

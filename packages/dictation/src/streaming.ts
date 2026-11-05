@@ -1,7 +1,9 @@
-// Server-authoritative streaming dictation. The service owns audio session
-// state, bounded reordering, duplicate suppression, acks, limits and
-// idempotent finalization. Raw audio is never stored outside the live session.
-import { normalizeDictationContext, type DictationContext } from "./providers.ts";
+// Server-authoritative dictation. The service owns audio session state,
+// bounded reordering, duplicate suppression, acks, limits and idempotent
+// finalization for two kinds of session: "stream" feeds the provider while the
+// person speaks; "batch" collects one finished recording and transcribes it on
+// finalize. Raw audio is never stored outside the live session.
+import { DictationError, normalizeDictationContext, type DictationContext } from "./providers.ts";
 import {
   decodeDictationAudioFrame,
   isDictationAudioFrame,
@@ -17,6 +19,21 @@ export interface DictationFormat {
 }
 
 export const DICTATION_FORMAT: DictationFormat = { encoding: "pcm_s16le", sampleRate: 16000, channels: 1 };
+
+/** "stream": audio reaches the provider while the person speaks, with
+ *  partial text. "batch": a finished recording, uploaded in chunks and
+ *  transcribed once on finalize. */
+export type DictationSessionMode = "stream" | "batch";
+
+/** Recording limits shared by the browser recorder and the server. A
+ *  recording is uploaded in `chunkBytes` pieces so every request stays small
+ *  enough for a paired phone's body limit and a failed piece is resent alone. */
+export const DICTATION_RECORDING_LIMITS = {
+  /** 10 minutes of 16 kHz mono PCM16 is 19.2 MB. */
+  maxDurationMs: 10 * 60_000,
+  /** PCM bytes per upload request (16 s of audio); base64 adds a third. */
+  chunkBytes: 512 * 1024,
+} as const;
 
 export interface DictationTimingDto {
   startedAt: number;
@@ -43,6 +60,7 @@ export interface DictationMetricsDto {
 export interface DictationSessionDto {
   id: string;
   sessionId?: string;
+  mode: DictationSessionMode;
   status: "starting" | "recording" | "finalizing" | "done" | "failed";
   format: DictationFormat;
   acknowledgedSeq: number;
@@ -58,9 +76,54 @@ export interface SttStream {
   cancel?(): void | Promise<void>;
 }
 
+export interface SttTranscribeInput {
+  /** The whole recording as PCM in `format`. */
+  audio: Uint8Array;
+  format: DictationFormat;
+  language?: string;
+  context?: DictationContext;
+  signal?: AbortSignal;
+}
+
 export interface SttAdapter {
   engine: string;
   createStream(opts: { format: DictationFormat; language?: string; context?: DictationContext }): SttStream;
+  /** Transcribe a finished recording in one provider request. An adapter
+   *  without it still serves recordings: `transcribeRecording` feeds the audio
+   *  through its stream. */
+  transcribe?(input: SttTranscribeInput): Promise<string>;
+}
+
+/** PCM per stream write when a recording is fed through a live stream. */
+const FEED_MS = 100;
+
+/** Transcribe a finished recording with any adapter: its batch call when it
+ *  has one, otherwise its live stream (all audio pushed, then finalize). */
+export async function transcribeRecording(adapter: SttAdapter, input: SttTranscribeInput): Promise<string> {
+  input.signal?.throwIfAborted();
+  if (adapter.transcribe) return adapter.transcribe(input);
+  const stream = adapter.createStream({
+    format: input.format,
+    ...(input.language ? { language: input.language } : {}),
+    ...(input.context ? { context: input.context } : {}),
+  });
+  const cancel = () => { void stream.cancel?.(); };
+  input.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    const frame = input.format.channels * 2;
+    const step = Math.max(frame, Math.round(input.format.sampleRate * FEED_MS / 1000) * frame);
+    for (let at = 0; at < input.audio.byteLength; at += step) {
+      input.signal?.throwIfAborted();
+      await stream.push(input.audio.subarray(at, Math.min(at + step, input.audio.byteLength)));
+    }
+    input.signal?.throwIfAborted();
+    return await stream.finalize();
+  } catch (error) {
+    void stream.cancel?.();
+    throw error;
+  } finally {
+    input.signal?.removeEventListener("abort", cancel);
+  }
 }
 
 export interface DictationChunkResult {
@@ -73,6 +136,18 @@ export interface DictationChunkResult {
 export interface DictationServiceOptions {
   adapter?: SttAdapter | null | (() => SttAdapter | null);
   unavailableReason?: string;
+  /** Engine for recorded (batch) sessions. Defaults to `adapter`; a server
+   *  whose live route is browser-direct still transcribes recordings itself. */
+  batchAdapter?: SttAdapter | null | (() => SttAdapter | null);
+  /** Recorded audio cap. Defaults: 20 MiB and DICTATION_RECORDING_LIMITS. */
+  maxBatchBytes?: number;
+  maxBatchDurationMs?: number;
+  /** Highest chunk seq a recording may use. Default 1024. */
+  maxBatchChunks?: number;
+  /** A recording whose upload stalls this long expires. Default 5 min. */
+  batchIdleTimeoutMs?: number;
+  /** Deadline for the provider to transcribe a recording. Default 5 min. */
+  batchTimeoutMs?: number;
   /** Server-side privacy/policy gate applied after normalization and before any provider sees context. */
   contextFilter?: (context: DictationContext) => DictationContext;
   /** Maximum simultaneously recording/finalizing sessions. Completed results do not consume this budget. */
@@ -94,8 +169,13 @@ export interface DictationService {
   /** Binary hot-path decoding stays package-owned; the core WS gateway only
    * consumes this structural method and never imports @polyth/dictation. */
   decodeAudioFrame(value: ArrayBuffer | ArrayBufferView): DictationAudioFrame | null;
-  capability(): { available: boolean; engine?: string; reason?: string };
-  create(input: { sessionId?: string; language?: string; context?: Partial<DictationContext> }): DictationSessionDto;
+  capability(mode?: DictationSessionMode): { available: boolean; engine?: string; reason?: string };
+  create(input: {
+    sessionId?: string;
+    language?: string;
+    context?: Partial<DictationContext>;
+    mode?: DictationSessionMode;
+  }): DictationSessionDto;
   get(id: string): DictationSessionDto | null;
   push(id: string, seq: number, pcm: Uint8Array): Promise<DictationChunkResult>;
   finalize(id: string): Promise<DictationSessionDto>;
@@ -106,7 +186,15 @@ export interface DictationService {
 
 interface SessionState {
   dto: DictationSessionDto;
-  stream: SttStream;
+  /** Live provider stream; null for a batch session. */
+  stream: SttStream | null;
+  adapter: SttAdapter;
+  language?: string;
+  context: DictationContext;
+  /** Batch: uploaded chunks by seq until finalize joins them. */
+  recorded: Map<number, Uint8Array>;
+  /** Batch: aborts the provider call on cancel, teardown or deadline. */
+  abort: AbortController | null;
   bytes: number;
   revision: number;
   finalizeP: Promise<DictationSessionDto> | null;
@@ -130,7 +218,10 @@ const copyDto = (dto: DictationSessionDto): DictationSessionDto => ({
 });
 
 export function createDictationService(opts: DictationServiceOptions = {}): DictationService {
-  const adapterOf = typeof opts.adapter === "function" ? opts.adapter : () => (opts.adapter as SttAdapter | null | undefined) ?? null;
+  const selector = (value: DictationServiceOptions["adapter"]) =>
+    typeof value === "function" ? value : () => (value as SttAdapter | null | undefined) ?? null;
+  const adapterOf = selector(opts.adapter);
+  const batchAdapterOf = opts.batchAdapter === undefined ? adapterOf : selector(opts.batchAdapter);
   const maxSessions = opts.maxSessions ?? 8;
   const maxBytes = opts.maxBytes ?? 10 * 1024 * 1024;
   const maxDurationMs = opts.maxDurationMs ?? 120_000;
@@ -139,6 +230,11 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
   const maxBufferedBytes = opts.maxBufferedBytes ?? 2 * 1024 * 1024;
   const idleTimeoutMs = opts.idleTimeoutMs ?? 120_000;
   const resultRetentionMs = opts.resultRetentionMs ?? 5 * 60_000;
+  const maxBatchBytes = opts.maxBatchBytes ?? 20 * 1024 * 1024;
+  const maxBatchDurationMs = opts.maxBatchDurationMs ?? DICTATION_RECORDING_LIMITS.maxDurationMs;
+  const maxBatchChunks = opts.maxBatchChunks ?? 1024;
+  const batchIdleTimeoutMs = opts.batchIdleTimeoutMs ?? 5 * 60_000;
+  const batchTimeoutMs = opts.batchTimeoutMs ?? 5 * 60_000;
   const now = opts.now ?? Date.now;
   const sessions = new Map<string, SessionState>();
 
@@ -157,13 +253,22 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     s.pending.clear();
     s.acceptedSeqs.clear();
     s.pendingBytes = 0;
+    s.recorded.clear();
   };
+
+  /** Stop provider work: the live stream, or a recording's provider call. */
+  const stopWork = (s: SessionState): void => {
+    void s.stream?.cancel?.();
+    s.abort?.abort(err("session_expired", "dictation was cancelled"));
+  };
+
+  const idleLimit = (s: SessionState): number => s.dto.mode === "batch" ? batchIdleTimeoutMs : idleTimeoutMs;
 
   const sweep = (): void => {
     const at = now();
     for (const [id, s] of sessions) {
-      if (s.dto.status === "recording" && at - s.lastActivityAt > idleTimeoutMs) {
-        void s.stream.cancel?.();
+      if (s.dto.status === "recording" && at - s.lastActivityAt > idleLimit(s)) {
+        stopWork(s);
         clearAudioState(s);
         sessions.delete(id);
         continue;
@@ -177,8 +282,8 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
   const stateOf = (id: string): SessionState => {
     const s = sessions.get(id);
     if (!s) throw err("not-found", `dictation session ${id} not found`);
-    if (s.dto.status === "recording" && now() - s.lastActivityAt > idleTimeoutMs) {
-      void s.stream.cancel?.();
+    if (s.dto.status === "recording" && now() - s.lastActivityAt > idleLimit(s)) {
+      stopWork(s);
       clearAudioState(s);
       sessions.delete(id);
       throw err("session_expired", `dictation session ${id} expired after inactivity`);
@@ -190,7 +295,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     s.dto.status = "failed";
     s.acceptingAudio = false;
     s.lastActivityAt = now();
-    void s.stream.cancel?.();
+    stopWork(s);
     clearAudioState(s);
     throw err(code, message);
   };
@@ -200,13 +305,13 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     s.dto.status = "failed";
     s.acceptingAudio = false;
     s.lastActivityAt = now();
-    void s.stream.cancel?.();
+    stopWork(s);
     clearAudioState(s);
     throw error;
   };
 
   const refreshPartial = (s: SessionState): void => {
-    const partial = s.stream.partial?.() ?? "";
+    const partial = s.stream?.partial?.() ?? "";
     if (!partial || partial === s.dto.transcript) return;
     s.dto.transcript = partial;
     s.revision++;
@@ -216,6 +321,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
   };
 
   const queueProviderDrain = (s: SessionState): Promise<void> => {
+    const stream = s.stream!;
     const task = s.providerTail.then(async () => {
       for (;;) {
         const nextSeq = s.dto.acknowledgedSeq + 1;
@@ -224,7 +330,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
         s.pending.delete(nextSeq);
         s.pendingBytes -= next.byteLength;
         try {
-          await s.stream.push(next);
+          await stream.push(next);
         } catch (error) {
           failWith(s, error);
         }
@@ -240,20 +346,92 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     return task;
   };
 
+  /** A recording chunk is only stored: nothing reaches the provider before
+   *  finalize. A resent chunk is a duplicate, never a second copy. */
+  const pushRecorded = (s: SessionState, seq: number, pcm: Uint8Array): DictationChunkResult => {
+    if (!Number.isInteger(seq) || seq < 1 || seq > maxBatchChunks) {
+      throw err("invalid-input", `recording chunk seq must be 1..${maxBatchChunks}`);
+    }
+    if (pcm.byteLength === 0) throw err("invalid-input", "recording chunk is empty");
+    if ((pcm.byteLength & 1) !== 0) throw err("audio_format_error", "pcm_s16le chunks must contain whole 16-bit samples");
+    s.lastActivityAt = now();
+    const existing = s.recorded.get(seq);
+    if (existing || seq <= s.dto.acknowledgedSeq) {
+      if (existing && existing.byteLength !== pcm.byteLength) {
+        throw err("conflict", `recording chunk ${seq} was already received with different audio`);
+      }
+      s.dto.metrics.duplicateFrames++;
+      return { ack: s.dto.acknowledgedSeq, duplicate: true };
+    }
+    if (s.bytes + pcm.byteLength > maxBatchBytes || durationMs(s.bytes + pcm.byteLength) > maxBatchDurationMs) {
+      return fail(s, "too-long", "recording exceeded the audio cap");
+    }
+    if (seq > s.dto.acknowledgedSeq + 1) s.dto.metrics.reorderedFrames++;
+    s.recorded.set(seq, pcm.slice());
+    s.bytes += pcm.byteLength;
+    s.dto.metrics.acceptedFrames++;
+    s.dto.metrics.audioBytes = s.bytes;
+    s.dto.metrics.audioDurationMs = durationMs(s.bytes);
+    while (s.recorded.has(s.dto.acknowledgedSeq + 1)) s.dto.acknowledgedSeq++;
+    return {
+      ack: s.dto.acknowledgedSeq,
+      duplicate: false,
+      ...(s.dto.acknowledgedSeq < seq ? { buffered: true } : {}),
+    };
+  };
+
+  /** Join the uploaded chunks (finalize already checked there is no gap)
+   *  and transcribe the recording once. */
+  const transcribeRecorded = async (s: SessionState): Promise<string> => {
+    const audio = new Uint8Array(s.bytes);
+    let at = 0;
+    for (let seq = 1; seq <= s.dto.acknowledgedSeq; seq++) {
+      const chunk = s.recorded.get(seq)!;
+      audio.set(chunk, at);
+      at += chunk.byteLength;
+    }
+    s.recorded.clear();
+    s.dto.status = "finalizing";
+    s.lastActivityAt = now();
+    if (audio.byteLength === 0) return "";
+    const controller = new AbortController();
+    s.abort = controller;
+    const timer = setTimeout(() => controller.abort(new DictationError(
+      "network_error",
+      `speech-to-text did not answer within ${Math.round(batchTimeoutMs / 1000)} s`,
+    )), batchTimeoutMs);
+    try {
+      const first = Math.max(0, now() - s.dto.timing.startedAt);
+      s.dto.timing.connectMs ??= first;
+      s.dto.timing.firstAudioMs ??= first;
+      return await transcribeRecording(s.adapter, {
+        audio,
+        format: s.dto.format,
+        ...(s.language ? { language: s.language } : {}),
+        context: s.context,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+      s.abort = null;
+    }
+  };
+
   return {
     decodeAudioFrame(value) {
       return isDictationAudioFrame(value) ? decodeDictationAudioFrame(value) : null;
     },
 
-    capability() {
-      const adapter = adapterOf();
+    capability(mode = "stream") {
+      const adapter = mode === "batch" ? batchAdapterOf() : adapterOf();
       if (!adapter) return { available: false, reason: opts.unavailableReason ?? "no speech-to-text engine configured" };
       return { available: true, engine: adapter.engine };
     },
 
     create(input) {
       sweep();
-      const adapter = adapterOf();
+      const mode: DictationSessionMode = input.mode === "batch" ? "batch" : "stream";
+      const adapter = mode === "batch" ? batchAdapterOf() : adapterOf();
       if (!adapter) throw err("unavailable", opts.unavailableReason ?? "no speech-to-text engine configured");
       if (liveCount() >= maxSessions) throw err("limit", `too many live dictation sessions (max ${maxSessions})`);
       const id = randomUUID();
@@ -265,9 +443,11 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       const context = opts.contextFilter
         ? normalizeDictationContext(opts.contextFilter(normalizedContext))
         : normalizedContext;
+      const language = context.language !== "auto" ? context.language : undefined;
       const dto: DictationSessionDto = {
         id,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        mode,
         status: "recording",
         format: { ...DICTATION_FORMAT },
         acknowledgedSeq: 0,
@@ -285,11 +465,14 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       };
       sessions.set(id, {
         dto,
-        stream: adapter.createStream({
-          format: dto.format,
-          ...(context.language !== "auto" ? { language: context.language } : {}),
-          context,
-        }),
+        stream: mode === "stream"
+          ? adapter.createStream({ format: dto.format, ...(language ? { language } : {}), context })
+          : null,
+        adapter,
+        ...(language ? { language } : {}),
+        context,
+        recorded: new Map(),
+        abort: null,
         bytes: 0,
         revision: 0,
         finalizeP: null,
@@ -314,6 +497,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       if (s.dto.status !== "recording" || !s.acceptingAudio) {
         throw err("conflict", `dictation is ${s.dto.status === "recording" ? "finalizing" : s.dto.status}`);
       }
+      if (s.dto.mode === "batch") return pushRecorded(s, seq, pcm);
       if (!Number.isInteger(seq) || seq < 1 || seq > 0xffff_ffff) throw err("invalid-input", "seq must be a positive uint32");
       if ((pcm.byteLength & 1) !== 0) throw err("audio_format_error", "pcm_s16le chunks must contain whole 16-bit samples");
       s.lastActivityAt = now();
@@ -363,29 +547,49 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
 
       s.acceptingAudio = false;
       const operation = (async (): Promise<DictationSessionDto> => {
-        await s.providerTail;
-        if (s.pending.size > 0) {
-          s.acceptingAudio = true;
-          throw err("gap", `cannot finalize with missing audio before seq ${Math.min(...s.pending.keys())}`);
+        let text: string;
+        if (s.dto.mode === "batch") {
+          // Missing chunks leave the session recording, so the client can
+          // resend them and finalize again.
+          if (s.recorded.size !== s.dto.acknowledgedSeq) {
+            s.acceptingAudio = true;
+            throw err("gap", `cannot finalize a recording without chunk ${s.dto.acknowledgedSeq + 1}`);
+          }
+          try {
+            text = await transcribeRecorded(s);
+          } catch (error) {
+            s.dto.metrics.providerErrors++;
+            s.dto.status = "failed";
+            s.acceptingAudio = false;
+            s.lastActivityAt = now();
+            clearAudioState(s);
+            throw error;
+          }
+        } else {
+          await s.providerTail;
+          if (s.pending.size > 0) {
+            s.acceptingAudio = true;
+            throw err("gap", `cannot finalize with missing audio before seq ${Math.min(...s.pending.keys())}`);
+          }
+          s.dto.status = "finalizing";
+          s.lastActivityAt = now();
+          try {
+            text = await s.stream!.finalize();
+          } catch (error) {
+            s.dto.metrics.providerErrors++;
+            s.dto.status = "failed";
+            s.acceptingAudio = false;
+            s.lastActivityAt = now();
+            clearAudioState(s);
+            throw error;
+          }
         }
-        s.dto.status = "finalizing";
+        s.dto.transcript = text;
+        s.revision++;
+        s.dto.status = "done";
+        s.dto.timing.finalMs = Math.max(0, now() - s.dto.timing.startedAt);
         s.lastActivityAt = now();
-        try {
-          const text = await s.stream.finalize();
-          s.dto.transcript = text;
-          s.revision++;
-          s.dto.status = "done";
-          s.dto.timing.finalMs = Math.max(0, now() - s.dto.timing.startedAt);
-          s.lastActivityAt = now();
-          clearAudioState(s);
-        } catch (error) {
-          s.dto.metrics.providerErrors++;
-          s.dto.status = "failed";
-          s.acceptingAudio = false;
-          s.lastActivityAt = now();
-          clearAudioState(s);
-          throw error;
-        }
+        clearAudioState(s);
         return copyDto(s.dto);
       })();
       s.finalizeP = operation;
@@ -404,7 +608,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
       const s = sessions.get(id);
       if (!s) return;
       s.acceptingAudio = false;
-      void s.stream.cancel?.();
+      stopWork(s);
       clearAudioState(s);
       sessions.delete(id);
     },
@@ -412,7 +616,7 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
     closeAll() {
       for (const s of sessions.values()) {
         s.acceptingAudio = false;
-        void s.stream.cancel?.();
+        stopWork(s);
         clearAudioState(s);
       }
       sessions.clear();

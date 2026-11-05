@@ -131,6 +131,10 @@ export interface ProviderCapabilities {
   languages: readonly string[];
   audioFormats: readonly ProviderAudioFormat[];
   defaultModel?: string;
+  /** Model for a finished recording when the provider has a file
+   *  transcription endpoint; absent means the recording runs through the
+   *  live stream. */
+  recordingModel?: string;
   /** Compatibility mirror for older capability consumers. */
   context: boolean;
   local: boolean;
@@ -170,7 +174,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
     partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
     languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
     timestamps: true, transports: ["auto", "direct-browser", "server-proxy"],
-    languages: ["*"], audioFormats: RAW_16K, defaultModel: "scribe_v2_realtime", context: true, local: false,
+    languages: ["*"], audioFormats: RAW_16K, defaultModel: "scribe_v2_realtime", recordingModel: "scribe_v2", context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
@@ -186,7 +190,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
     partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
     languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
     timestamps: false, transports: ["auto", "server-proxy"],
-    languages: ["*"], audioFormats: RAW_24K, defaultModel: "gpt-live-transcribe", context: true, local: false,
+    languages: ["*"], audioFormats: RAW_24K, defaultModel: "gpt-live-transcribe", recordingModel: "gpt-transcribe", context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
@@ -194,7 +198,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
     partials: true, commits: true, finalOnly: false, manualCommit: true, vadCommit: true,
     languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: true,
     timestamps: false, transports: ["auto", "server-proxy"],
-    languages: ["*"], audioFormats: RAW_24K, defaultModel: "gpt-transcribe", context: true, local: false,
+    languages: ["*"], audioFormats: RAW_24K, defaultModel: "gpt-transcribe", recordingModel: "gpt-transcribe", context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: false, publicApi: true,
   },
   {
@@ -205,7 +209,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
     // and does not currently include every monolingual Nova-3 language (notably uk).
     languageAutoDetection: false, languageHints: true, contextualPrompting: true, vocabulary: true,
     timestamps: true, transports: ["auto", "direct-browser", "server-proxy"],
-    languages: ["*", "uk", "multi"], audioFormats: RAW_16K, defaultModel: "nova-3", context: true, local: false,
+    languages: ["*", "uk", "multi"], audioFormats: RAW_16K, defaultModel: "nova-3", recordingModel: "nova-3", context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: true, publicApi: true,
   },
   {
@@ -221,7 +225,7 @@ const CATALOG: readonly ProviderCapabilities[] = [
     partials: false, commits: false, finalOnly: true, manualCommit: false, vadCommit: false,
     languageAutoDetection: true, languageHints: true, contextualPrompting: true, vocabulary: false,
     timestamps: false, transports: ["auto", "server-proxy"],
-    languages: ["*"], audioFormats: WAV_16K, defaultModel: "whisper-1", context: true, local: false,
+    languages: ["*"], audioFormats: WAV_16K, defaultModel: "whisper-1", recordingModel: "whisper-1", context: true, local: false,
     localModelDownloadRequired: false, ephemeralClientAuth: false, publicApi: true,
   },
   {
@@ -256,6 +260,21 @@ const CATALOG: readonly ProviderCapabilities[] = [
 export const providerCatalog = (): readonly ProviderCapabilities[] => CATALOG;
 export const providerCapabilities = (id: DictationProviderId): ProviderCapabilities | undefined =>
   CATALOG.find((provider) => provider.id === id);
+
+/** The model a finished recording uses: the configured model when it can
+ *  transcribe files, otherwise the provider's file model. Realtime-only ids
+ *  (ElevenLabs `*_realtime`, OpenAI live/realtime models) map to it. */
+export function recordingModelFor(id: DictationProviderId, configured?: string): string | undefined {
+  const capability = providerCapabilities(id);
+  const model = configured?.trim() ?? "";
+  if (!capability?.recordingModel) return model || undefined;
+  if (!model || model === capability.defaultModel) return capability.recordingModel;
+  if (id === "elevenlabs") return model.replace(/_realtime$/, "") || capability.recordingModel;
+  if (id === "openai-live" || id === "openai-transcribe") {
+    return /live|realtime/i.test(model) ? capability.recordingModel : model;
+  }
+  return model;
+}
 
 export const isLocalDictationProvider = (id: DictationProviderId): boolean =>
   id === "local-nemotron" || id === "local-parakeet" || id === "web-speech";

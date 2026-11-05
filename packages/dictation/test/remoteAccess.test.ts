@@ -24,6 +24,13 @@ test("paired dictation policy exposes session use but not voice/model/runtime ad
   assert.equal(allowed("GET", "/api/dictation/sessions/session-1"), true);
   assert.equal(allowed("DELETE", "/api/dictation/sessions/session-1"), true);
   assert.equal(allowed("POST", "/api/dictation/sessions/session-1/finalize"), true);
+  // A phone in record mode uploads its recording in base64 JSON chunks.
+  assert.equal(allowed("POST", "/api/dictation/sessions/session-1/audio"), true);
+  assert.equal(allowed("PUT", "/api/dictation/sessions/session-1/audio"), false);
+  const audioRule = DICTATION_REMOTE_ACCESS.http.find((rule) => rule.path === "/api/dictation/sessions/:id/audio")!;
+  assert.equal(audioRule.capability, "dictation.use");
+  assert.ok(audioRule.maxBodyBytes! >= Math.ceil((512 * 1024) / 3) * 4 + 64, "one full chunk and its envelope fit");
+  assert.ok(audioRule.maxBodyBytes! <= 1024 * 1024, "the body stays bounded to one chunk");
   assert.equal(allowed("GET", "/api/voice/providers"), true);
   assert.equal(allowed("POST", "/api/dictation/token"), true);
 

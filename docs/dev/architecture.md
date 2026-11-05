@@ -491,8 +491,10 @@ answers 401 `unauthorized` without a valid session cookie, and `/ws` +
 ## WS protocol (`/ws`)
 
 Client → server: `subscribe {sessionId, afterSeq}`, `browser/subscribe
-{browserSessionId, afterRevision}`, `dictation/start {dictationId}`, `dictation/audio
-{dictationId, seq, pcm(base64)}`.
+{browserSessionId, afterRevision}`, `dictation/start {dictationId}`, and live dictation
+audio as binary frames (`packages/dictation/src/wire.ts`; JSON/base64 audio is refused on
+the socket). A finished recording is uploaded over HTTP instead (`POST
+/api/dictation/sessions/:id/audio`, see the polyth-voice skill).
 
 Server → client: `event {event: SessionEvent}` (gap-fill then live, seq-deduped),
 `projection {session}`, `notification/added {notification: NotificationRecord}`

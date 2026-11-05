@@ -49,6 +49,76 @@ body[data-dictate="false"] .mic-control .mic-btn {
   display: none;
 }
 
+/* A recording shows no words until it stops, so the mic grows into a capsule
+   carrying its take: a soft recording-hue wash with a hairline, the mic
+   rounded into it, the waveform of what it hears and the recording's length.
+   The waveform is a canvas (recordingWave.tsx) whose bars take `color` and
+   the --mic-wave-* geometry from here. Outside a composer (a header
+   placement) the take keeps only its length. */
+.mic-control.mic-recording {
+  gap: var(--space-2);
+  padding-inline-end: var(--space-3);
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 18%, transparent);
+}
+
+.mic-control.mic-recording .mic-btn {
+  border-radius: var(--radius-round);
+}
+
+.mic-control .mic-take {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  animation: mic-take-in var(--motion-normal) var(--motion-ease) both;
+}
+
+@keyframes mic-take-in {
+  from { opacity: 0; }
+}
+
+.mic-control .mic-wave {
+  --mic-wave-bar: 3px;
+  --mic-wave-gap: 2px;
+  --mic-wave-mode: scroll;
+  display: none;
+  inline-size: 112px;
+  block-size: 22px;
+  color: var(--red);
+}
+
+.composer-rail .mic-control .mic-wave {
+  display: block;
+}
+
+/* The still sign of a recording where the waveform may not move. */
+.mic-control .mic-take-dot {
+  flex: none;
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: var(--radius-circle);
+  background: var(--red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 22%, transparent);
+}
+
+.mic-control .mic-timer {
+  flex: none;
+  min-inline-size: 4ch;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: var(--font-meta-lh);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A recording that failed to send waits on the mic; the next press resends it. */
+.mic-control.has-recording .mic-btn {
+  color: var(--red);
+}
+
 /* Voice settings page. Rows, sections and save bars come from the shared
    settings primitives; only the voice-specific controls are styled here. */
 .pkg-dictation .voice-status {
@@ -220,6 +290,58 @@ body[data-dictate="false"] .mic-control .mic-btn {
     padding: 0;
   }
 
+}
+
+/* The phone composer gives the mic one tap-sized cell, so the take moves
+   inside the button instead of standing beside it: a small wave leaving the
+   middle above the recording's length, on the button's own wash. */
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-control.mic-recording {
+  display: inline-grid;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-control.mic-recording > * {
+  grid-area: 1 / 1;
+}
+
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-control.mic-recording .mic-btn {
+  border-radius: var(--radius-control);
+}
+
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-control.mic-recording .mic-btn > * {
+  visibility: hidden;
+}
+
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-take {
+  z-index: 1;
+  flex-direction: column;
+  place-self: center;
+  gap: 3px;
+  pointer-events: none;
+}
+
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-wave {
+  --mic-wave-bar: 2px;
+  --mic-wave-gap: 2px;
+  --mic-wave-mode: center;
+  inline-size: 30px;
+  block-size: 14px;
+}
+
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-take-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  margin-block: 4px;
+}
+
+:is(.composer-mobile .composer-mobile-extensions, .composer-mobile-grid .mobile-composer-launcher) .mic-timer {
+  min-inline-size: 0;
+  color: var(--red);
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* Reduced motion wants the state, not the movement: listening stays at a

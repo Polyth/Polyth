@@ -3,6 +3,7 @@
 // DOM/store wiring and deliberately bounded lexical context only.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  DICTATION_RECORDING_LIMITS,
   MICROPHONE_CLAIM_EVENT,
   VOICE_PREFS_KEY,
   applySpokenPunctuation,
@@ -31,6 +32,8 @@ import { requestComposerDictation } from "../../../apps/web/src/composerInsert.t
 import { getState, subscribeStore } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
+import { sendRecording, startRecording, type ActiveRecording, type Recording } from "./recordedDictation.ts";
+import { RecordingWave, WaveHistory, useWaveMotion, waveLevel } from "./recordingWave.tsx";
 import { createSpeechOutput, primeSpeechOutput, type SpeechOutput, type SpeechOutputSettings } from "./speechOutput.ts";
 import { canStartDirectProvider, startDirectProvider } from "./directProviders.ts";
 import { announce } from "../../../apps/web/src/components/a11y/live.tsx";
@@ -336,7 +339,26 @@ function currentDictationContext(language: string): DictationContext {
   };
 }
 
-type MicPhase = "idle" | "starting" | "listening" | "transcribing";
+type MicPhase = "idle" | "starting" | "listening" | "recording" | "transcribing";
+
+/** The run a recording belongs to, fixed when the recording started. */
+interface RecordedRun {
+  runId: string;
+  originScope: string;
+  sessionId: string | null;
+  language: string;
+  context?: DictationContext;
+}
+
+/** A recording waiting to be sent (again), kept only in memory. */
+interface PendingRecording extends RecordedRun {
+  recording: Recording;
+}
+
+const formatElapsed = (ms: number): string => {
+  const seconds = Math.floor(ms / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
 
 type RuntimeDictationSettings = {
   provider: DictationProviderId;
@@ -412,6 +434,17 @@ function MicButton() {
   const [serverSelection, setServerSelection] = useState<RuntimeDictationSettings | null | undefined>(undefined);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const streamRef = useRef<StreamingDictation | null>(null);
+  const recorderRef = useRef<ActiveRecording | null>(null);
+  const recordRunRef = useRef<RecordedRun | null>(null);
+  /** A recording whose send failed; the next press sends it again. */
+  const pendingRef = useRef<PendingRecording | null>(null);
+  const uploadRef = useRef<AbortController | null>(null);
+  const [pendingRecording, setPendingRecording] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  /** What the running recording hears, for its waveform. */
+  const waveRef = useRef<WaveHistory | null>(null);
+  const waveMotion = useWaveMotion();
+  const [recordCapability, setRecordCapability] = useState<{ available: boolean; reason?: string } | null>(null);
   const browserTranscriptRef = useRef("");
   const browserCommitRef = useRef(false);
   const startGeneration = useRef(0);
@@ -446,6 +479,10 @@ function MicButton() {
     && directCapability.transports.includes("direct-browser")
     && canStartDirectProvider(provider)
     && (transport === "auto" || transport === "direct-browser");
+  // Recording needs the server's engine. Until it answers the mic waits; if
+  // it cannot take recordings (browser recognition), dictation stays live.
+  const recordPreferred = prefs.dictation && prefs.dictationMode === "record";
+  const recordMode = recordPreferred && recordCapability?.available === true;
 
   // The mic is the only dictation indicator, so it carries the speech level
   // itself. The variable is written straight to the DOM: ~25 audio chunks a
@@ -490,6 +527,14 @@ function MicButton() {
     requestComposerDictation({ runId: runIdRef.current, text, final });
   };
 
+  const discardPending = (spoken = false) => {
+    if (!pendingRef.current) return;
+    pendingRef.current = null;
+    setPendingRecording(false);
+    setError(null);
+    if (spoken) announce(tr("voice.recordingDiscarded"));
+  };
+
   useEffect(() => () => {
     startGeneration.current++;
     originScopeRef.current = null;
@@ -497,6 +542,9 @@ function MicButton() {
     clearLevelTimer();
     recRef.current?.abort();
     streamRef.current?.cancel();
+    recorderRef.current?.cancel();
+    uploadRef.current?.abort();
+    pendingRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -514,10 +562,55 @@ function MicButton() {
     const stream = streamRef.current;
     streamRef.current = null;
     stream?.cancel();
+    // A recording (running, sending or waiting for a retry) belongs to the
+    // chat it started in and is dropped with it.
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    recordRunRef.current = null;
+    uploadRef.current?.abort();
+    uploadRef.current = null;
+    pendingRef.current = null;
+    setPendingRecording(false);
     resetLevel();
     setError(null);
     setPhase("idle");
   }, [composerScope]);
+
+  // Switching back to live drops a recording that was waiting for a retry.
+  useEffect(() => {
+    if (prefs.dictationMode !== "record") discardPending();
+  // discardPending only touches refs/setters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.dictationMode]);
+
+  useEffect(() => {
+    if (!recordPreferred) {
+      setRecordCapability(null);
+      return;
+    }
+    let cancelled = false;
+    setRecordCapability(null);
+    void fetch("/api/dictation/capability?mode=batch")
+      .then(async (response) => response.ok
+        ? response.json() as Promise<{ available?: boolean; reason?: string }>
+        : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((body) => {
+        if (!cancelled) setRecordCapability({ available: body.available === true, ...(body.reason ? { reason: body.reason } : {}) });
+      })
+      .catch((e) => {
+        if (!cancelled) setRecordCapability({ available: false, reason: boundedReason(e) });
+      });
+    return () => { cancelled = true; };
+  }, [recordPreferred, provider, transport, processingPolicy]);
+
+  // The recording's length, the only sign of progress while no words appear.
+  useEffect(() => {
+    if (phase !== "recording") return;
+    const tick = () => setElapsedMs(recorderRef.current?.elapsedMs() ?? 0);
+    tick();
+    const timer = setInterval(tick, 250);
+    return () => clearInterval(timer);
+  }, [phase]);
 
   useEffect(() => {
     if (!prefs.dictation) {
@@ -596,6 +689,8 @@ function MicButton() {
   const providerOrBrowserAvailable = Boolean(capability?.available) || browserFallback;
   const availability: { available: boolean; reason?: string } =
     !prefs.dictation ? { available: false, reason: tr("voice.dictationOff") }
+    : recordMode ? { available: true }
+    : recordPreferred && recordCapability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
     : browserFallback ? { available: true }
     : !selectionReady || capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
       : !providerOrBrowserAvailable
@@ -607,9 +702,13 @@ function MicButton() {
 
   // Dictation state is carried by the mic itself, never by text beside it, so
   // this string exists only for the live region screen readers hear.
-  const lifecycleStatus = error !== null ? tr("voice.dictationFailedValue", { error })
+  const failure = error === null ? null
+    : pendingRecording ? tr("voice.recordingFailedValue", { error })
+    : tr("voice.dictationFailedValue", { error });
+  const lifecycleStatus = failure !== null ? failure
     : phase === "starting" ? tr("voice.startingMicrophone")
     : phase === "listening" ? tr("voice.listening")
+    : phase === "recording" ? tr("voice.recording")
     : phase === "transcribing" ? tr("voice.transcribing")
     : availability.available ? null
     : availability.reason ?? null;
@@ -635,9 +734,48 @@ function MicButton() {
     const stream = streamRef.current;
     streamRef.current = null;
     stream?.cancel();
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    recordRunRef.current = null;
     resetLevel();
     setPhase("idle");
     setError(boundedReason(raw));
+  };
+
+  /** Send a finished recording; a failure keeps it for the next press. */
+  const sendRecorded = async (job: PendingRecording) => {
+    const generation = startGeneration.current;
+    pendingRef.current = null;
+    setPendingRecording(false);
+    setError(null);
+    setPhase("transcribing");
+    uploadRef.current?.abort();
+    const controller = new AbortController();
+    uploadRef.current = controller;
+    const stale = () => controller.signal.aborted
+      || startGeneration.current !== generation
+      || composerScopeKey() !== job.originScope;
+    try {
+      const text = await sendRecording(job.recording, {
+        ...(job.sessionId ? { sessionId: job.sessionId } : {}),
+        language: job.language,
+        ...(job.context ? { context: job.context } : {}),
+        signal: controller.signal,
+      });
+      if (stale()) return;
+      originScopeRef.current = null;
+      setPhase("idle");
+      requestComposerDictation({ runId: job.runId, text: text.trim(), final: true });
+    } catch (sendError) {
+      if (stale()) return;
+      originScopeRef.current = null;
+      pendingRef.current = job;
+      setPendingRecording(true);
+      setPhase("idle");
+      setError(boundedReason(sendError));
+    } finally {
+      if (uploadRef.current === controller) uploadRef.current = null;
+    }
   };
 
   const stop = () => {
@@ -645,6 +783,18 @@ function MicButton() {
     if (rec) {
       setPhase("transcribing");
       try { rec.stop(); } catch (stopError) { fail(stopError); }
+      return;
+    }
+
+    const recorder = recorderRef.current;
+    if (recorder) {
+      const run = recordRunRef.current;
+      recorderRef.current = null;
+      recordRunRef.current = null;
+      const recording = recorder.stop();
+      resetLevel();
+      if (run) void sendRecorded({ ...run, recording });
+      else setPhase("idle");
       return;
     }
 
@@ -821,7 +971,57 @@ function MicButton() {
     }
   };
 
+  const startRecorder = async (generation: number, originScope: string, originSessionId: string | null) => {
+    setPhase("starting");
+    const current = () => startGeneration.current === generation && composerScopeKey() === originScope;
+    try {
+      const context = contextInjection ? currentDictationContext(language) : undefined;
+      // Capture reports levels before it resolves; the wave keeps them all.
+      const wave = new WaveHistory();
+      const recorder = await startRecording({
+        onLevel: (rms) => {
+          if (!current()) return;
+          reportLevel(rms);
+          wave.push(waveLevel(rms));
+        },
+        onLimit: () => {
+          if (!current()) return;
+          announce(tr("voice.recordingLimit", { minutes: Math.round(DICTATION_RECORDING_LIMITS.maxDurationMs / 60_000) }));
+          live.current.release();
+        },
+        // A lost microphone ends the recording; what was said is still sent.
+        onEnded: () => { if (current()) live.current.release(); },
+      });
+      if (!current()) {
+        recorder.cancel();
+        return;
+      }
+      recorderRef.current = recorder;
+      waveRef.current = wave;
+      recordRunRef.current = {
+        runId: runIdRef.current,
+        originScope,
+        sessionId: originSessionId,
+        language,
+        ...(context ? { context } : {}),
+      };
+      setElapsedMs(0);
+      setPhase("recording");
+    } catch (startError) {
+      if (current()) fail(startError);
+    }
+  };
+
   const start = () => {
+    const pending = pendingRef.current;
+    if (pending && composerScopeKey() === pending.originScope) {
+      // The press sends the kept recording again rather than starting anew.
+      originScopeRef.current = pending.originScope;
+      startGeneration.current++;
+      void sendRecorded(pending);
+      return;
+    }
+    discardPending();
     setError(null);
     resetLevel();
     // One microphone owner at a time, and never dictate over our own voice.
@@ -832,7 +1032,9 @@ function MicButton() {
     originScopeRef.current = originScope;
     runIdRef.current = `dictation:${++dictationRuns}`;
     const generation = ++startGeneration.current;
-    if (capability?.available) {
+    if (recordMode) {
+      void startRecorder(generation, originScope, origin.activeSessionId);
+    } else if (capability?.available) {
       void startProvider(generation, originScope, origin.activeSessionId);
     } else if (browserFallback && support.stt) {
       startBrowser(generation, originScope);
@@ -848,7 +1050,7 @@ function MicButton() {
     resetLevel();
     setPhase("idle");
   };
-  const release = () => (recRef.current || streamRef.current ? stop() : abandon());
+  const release = () => (recRef.current || streamRef.current || recorderRef.current ? stop() : abandon());
 
   const busy = phase === "starting" || phase === "transcribing";
   // Commands and window listeners outlive a render; they read the latest one.
@@ -859,7 +1061,7 @@ function MicButton() {
     const controller: MicController = {
       toggle: () => {
         const current = live.current;
-        if (current.phase === "listening") {
+        if (current.phase === "listening" || current.phase === "recording") {
           current.release();
           return true;
         }
@@ -879,7 +1081,7 @@ function MicButton() {
     const claimed = (event: Event) => {
       const owner = (event as CustomEvent<{ owner?: string }>).detail?.owner;
       if (owner === ownerRef.current) return;
-      if (recRef.current || streamRef.current || live.current.phase === "starting") live.current.release();
+      if (recRef.current || streamRef.current || recorderRef.current || live.current.phase === "starting") live.current.release();
     };
     window.addEventListener(MICROPHONE_CLAIM_EVENT, claimed);
     return () => window.removeEventListener(MICROPHONE_CLAIM_EVENT, claimed);
@@ -887,7 +1089,7 @@ function MicButton() {
 
   // Escape ends a running dictation wherever focus is, keeping its words.
   useEffect(() => {
-    if (phase !== "listening") return;
+    if (phase !== "listening" && phase !== "recording") return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       live.current.release();
@@ -896,28 +1098,47 @@ function MicButton() {
     return () => window.removeEventListener("keydown", escape);
   }, [phase]);
 
-  const action = phase === "listening" ? tr("voice.stopDictation") : tr("voice.dictate");
+  const capturing = phase === "listening" || phase === "recording";
+  const action = phase === "recording" ? tr("voice.stopRecording")
+    : phase === "listening" ? tr("voice.stopDictation")
+    : pendingRecording ? tr("voice.sendRecordingAgain")
+    : tr("voice.dictate");
   // Why dictation cannot run, or why it stopped, stays truthful without taking
   // space in the composer rail: the tooltip carries it on demand and `announce`
   // already delivered it to the live region.
-  const detail = error !== null ? tr("voice.dictationFailedValue", { error })
+  const detail = failure !== null ? failure
     : availability.available ? null
     : availability.reason ?? null;
   // The mic is the whole control: no status text, no cancel and no retry
   // button beside it. Transcribed words go straight into the composer and the
-  // button brightens with the voice it hears.
+  // button brightens with the voice it hears. A recording shows no words until
+  // it stops, so the mic grows into a capsule carrying its take: the waveform
+  // of what it hears (a still dot where motion is reduced or the device runs
+  // in Low resource mode) and its length. A recording that failed to send
+  // stays on the mic, whose next press sends it again.
+  const wave = waveRef.current;
   return (
-    <span ref={controlRef} className={`mic-control mic-${error ? "failed" : phase}`}>
+    <span
+      ref={controlRef}
+      className={`mic-control mic-${error ? "failed" : phase}${pendingRecording ? " has-recording" : ""}`}
+    >
       <IconButton
         type="button"
-        className={`mic-btn${phase === "listening" ? " listening" : ""}`}
+        className={`mic-btn${capturing ? " listening" : ""}`}
         icon={MicIcon}
         size="md"
         variant="ghost"
         label={action}
         title={detail ?? action}
-        pressed={phase === "listening"}
+        pressed={capturing}
+        busy={phase === "transcribing" && recordMode}
         disabled={!availability.available || busy}
+        onKeyDown={(event) => {
+          // Esc on the mic drops a recording that is waiting to be resent.
+          if (event.key !== "Escape" || phase !== "idle" || !pendingRef.current) return;
+          event.preventDefault();
+          discardPending(true);
+        }}
         onPointerDown={(event) => {
           pressRef.current = null;
           // A mouse or pen press is user activation, so dictation starts on the
@@ -927,6 +1148,11 @@ function MicButton() {
           if (phase !== "idle" || !availability.available || busy) return;
           const press = { at: Date.now(), started: true };
           pressRef.current = press;
+          // Resending a kept recording is a plain press, never push-to-talk.
+          if (pendingRef.current) {
+            start();
+            return;
+          }
           const up = () => {
             window.removeEventListener("pointerup", up);
             window.removeEventListener("pointercancel", up);
@@ -941,10 +1167,16 @@ function MicButton() {
           pressRef.current = null;
           // The press already started (and maybe ended) this dictation.
           if (press?.started && event.detail !== 0) return;
-          if (phase === "listening") stop();
+          if (capturing) stop();
           else start();
         }}
       />
+      {phase === "recording" && (
+        <span className="mic-take" aria-hidden="true">
+          {waveMotion && wave ? <RecordingWave history={wave} /> : <span className="mic-take-dot" />}
+          <span className="mic-timer">{formatElapsed(elapsedMs)}</span>
+        </span>
+      )}
     </span>
   );
 }

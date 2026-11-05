@@ -2,9 +2,11 @@
 // (POST {baseUrl}/audio/transcriptions, multipart file upload). The adapter
 // buffers PCM in memory (the dictation service caps total bytes upstream) and
 // uploads once on finalize — no partials, no retention: audio is dropped as
-// soon as the request settles. Works in Node 22 and browsers (fetch/FormData/
+// soon as the request settles. A finished recording takes the same single
+// upload through `transcribe`. Works in Node 22 and browsers (fetch/FormData/
 // Blob are globals in both).
 import type { DictationContext } from "./providers.ts";
+import { postRecording, recordingLanguage, wavBlob } from "./recordingHttp.ts";
 import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
 
 export interface WhisperSttOptions {
@@ -62,10 +64,58 @@ const promptFromContext = (context?: DictationContext): string => {
   ].filter(Boolean).join("\n").slice(0, 1_500);
 };
 
+/** Upload one WAV to `{baseUrl}/audio/transcriptions` and return its text. */
+export async function transcribeWavOpenAI(opts: {
+  baseUrl: string;
+  model?: string;
+  apiKey?: string;
+  wav: Uint8Array;
+  language?: string;
+  context?: DictationContext;
+  signal?: AbortSignal;
+  fetchFn?: typeof fetch;
+  /** Provider name in error messages. */
+  provider?: string;
+}): Promise<string> {
+  const form = new FormData();
+  form.append("file", wavBlob(opts.wav), "audio.wav");
+  if (opts.model) form.append("model", opts.model);
+  const language = recordingLanguage(opts.language);
+  if (language) form.append("language", language);
+  const prompt = promptFromContext(opts.context);
+  if (prompt) form.append("prompt", prompt);
+  form.append("response_format", "json");
+
+  const raw = await postRecording(opts.provider ?? "speech-to-text server", opts.fetchFn ?? fetch, joinUrl(opts.baseUrl, "/audio/transcriptions"), {
+    ...(opts.apiKey ? { headers: { authorization: `Bearer ${opts.apiKey}` } } : {}),
+    body: form,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
+  try {
+    const parsed = JSON.parse(raw) as { text?: unknown };
+    return typeof parsed.text === "string" ? parsed.text.trim() : raw.trim();
+  } catch {
+    return raw.trim();
+  }
+}
+
 export function createWhisperSttAdapter(opts: WhisperSttOptions): SttAdapter {
-  const fetchFn = opts.fetchFn ?? fetch;
+  const upload = (wav: Uint8Array, language: string | undefined, context: DictationContext | undefined, signal?: AbortSignal) =>
+    transcribeWavOpenAI({
+      baseUrl: opts.baseUrl,
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
+      wav,
+      ...(language ?? opts.language ? { language: language ?? opts.language } : {}),
+      ...(context ? { context } : {}),
+      ...(signal ? { signal } : {}),
+      ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+    });
   return {
     engine: "whisper",
+    // A recording is already whole: one upload, exactly as finalize does.
+    transcribe: ({ audio, format, language, context, signal }) =>
+      audio.byteLength === 0 ? Promise.resolve("") : upload(pcmToWav(audio, format), language, context, signal),
     createStream({ format, language, context }): SttStream {
       const chunks: Uint8Array[] = [];
       let bytes = 0;
@@ -82,32 +132,7 @@ export function createWhisperSttAdapter(opts: WhisperSttOptions): SttAdapter {
           let at = 0;
           for (const c of chunks) { pcm.set(c, at); at += c.byteLength; }
           chunks.length = 0;
-          const wav = pcmToWav(pcm, format);
-
-          const form = new FormData();
-          form.append("file", new Blob([wav.buffer as ArrayBuffer], { type: "audio/wav" }), "audio.wav");
-          if (opts.model) form.append("model", opts.model);
-          const lang = language ?? opts.language;
-          if (lang && lang !== "auto") form.append("language", lang.split("-")[0] ?? lang);
-          const prompt = promptFromContext(context);
-          if (prompt) form.append("prompt", prompt);
-          form.append("response_format", "json");
-
-          const res = await fetchFn(joinUrl(opts.baseUrl, "/audio/transcriptions"), {
-            method: "POST",
-            ...(opts.apiKey ? { headers: { authorization: `Bearer ${opts.apiKey}` } } : {}),
-            body: form,
-          });
-          const raw = await res.text();
-          if (!res.ok) {
-            throw Object.assign(new Error(`speech-to-text server error: HTTP ${res.status}`), { code: "unavailable" });
-          }
-          try {
-            const parsed = JSON.parse(raw) as { text?: unknown };
-            return typeof parsed.text === "string" ? parsed.text.trim() : raw.trim();
-          } catch {
-            return raw.trim();
-          }
+          return upload(pcmToWav(pcm, format), language, context);
         },
         cancel() {
           cancelled = true;

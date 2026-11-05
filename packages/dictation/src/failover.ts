@@ -4,7 +4,7 @@ import {
   type DictationContext,
   type DictationErrorCode,
 } from "./providers.ts";
-import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
+import { transcribeRecording, type DictationFormat, type SttAdapter, type SttStream } from "./streaming.ts";
 
 const DEFAULT_REPLAY_BYTES = 10 * 1024 * 1024;
 const RECOVERABLE = new Set<DictationErrorCode>([
@@ -41,6 +41,21 @@ export function createFailoverSttAdapter(
 
   return {
     engine: `${primary.engine}->${fallback.engine}`,
+    // A finished recording is already whole, so the fallback simply gets the
+    // same audio after a recoverable primary failure; no replay budget applies.
+    async transcribe(input) {
+      try {
+        return await transcribeRecording(primary, input);
+      } catch (error) {
+        const failure = normalizeDictationError(error);
+        if (input.signal?.aborted || !recoverable(failure)) throw failure;
+        try {
+          return await transcribeRecording(fallback, input);
+        } catch (fallbackError) {
+          throw normalizeDictationError(fallbackError);
+        }
+      }
+    },
     createStream(opts: { format: DictationFormat; language?: string; context?: DictationContext }): SttStream {
       const primaryStream = primary.createStream(opts);
       let active = primaryStream;
