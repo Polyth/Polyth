@@ -2754,7 +2754,21 @@ mod tests {
 
         // The host drops the link (a phone suspended past the idle timeout, a
         // network hand-off or a host restart all look like this to the client).
+        let client_side = fixture
+            .state
+            .lock()
+            .await
+            .sessions
+            .get(&fixture.host_id)
+            .and_then(|session| session.link.borrow().clone())
+            .expect("the link is up");
         first.close(0u32.into(), b"gone");
+        // Requests park once the client knows the link is gone. One sent while
+        // the close is still in flight rides the dying connection and fails, so
+        // wait for the client to hear it.
+        tokio::time::timeout(Duration::from_secs(20), client_side.closed())
+            .await
+            .expect("the client never heard the close");
         let response = tokio::time::timeout(
             Duration::from_secs(20),
             proxied_get(fixture.port, &fixture.cookie),

@@ -368,11 +368,14 @@ mod tests {
 
     #[test]
     fn urgent_streams_outrank_file_bodies() {
-        // The transport sends the highest value first.
-        assert!(PRI_CONTROL > PRI_REVOKE);
-        assert!(PRI_REVOKE > PRI_SESSION);
-        assert!(PRI_SESSION > PRI_API);
-        assert!(PRI_API > PRI_FILE);
+        // The transport sends the highest value first. Checked at compile time:
+        // these are constants, so a wrong order fails the build of this test.
+        const {
+            assert!(PRI_CONTROL > PRI_REVOKE);
+            assert!(PRI_REVOKE > PRI_SESSION);
+            assert!(PRI_SESSION > PRI_API);
+            assert!(PRI_API > PRI_FILE);
+        }
     }
 
     #[test]
