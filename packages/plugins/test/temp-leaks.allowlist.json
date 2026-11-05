@@ -11,6 +11,5 @@
   "serverEntry.test.ts",
   "serverPackage.test.ts",
   "session1Security.test.ts",
-  "trustedServerSpaceGate.test.ts",
-  "uiBundle.test.ts"
+  "trustedServerSpaceGate.test.ts"
 ]
