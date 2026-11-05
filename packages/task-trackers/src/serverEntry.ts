@@ -31,6 +31,7 @@ import {
   createTaskTrackerService,
   isTaskTrackerProvider,
   reduceTaskLifecycle,
+  taskSessionTitle,
 } from "./index.ts";
 import {
   createTaskTrackerManagement,
@@ -323,7 +324,9 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
           task = await trackers.getTask(target.provider, target.taskId);
           const created = await deps.create({
             projectId,
-            title: `${task.key} · ${task.title}`.slice(0, 120),
+            // The tracker key is an id (Trello's is a random 24-character one),
+            // never a name: title the session by the task itself.
+            title: taskSessionTitle(task).slice(0, 120),
             ...(harness ? { harness } : {}),
             ...(model ? { model } : {}),
           }, request);

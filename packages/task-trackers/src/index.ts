@@ -68,6 +68,13 @@ export { createLinearClient, verifyLinearAccount, type LinearClientOptions } fro
 const boardTypeOf = (value: TaskTrackerCreateBoardInput["type"]): "kanban" | "scrum" =>
   value === "scrum" ? "scrum" : "kanban";
 
+/** Title of the session that works on a tracker task. A tracker key is not a
+ *  name — Trello's is the card's random 24-character id — so a dispatched task
+ *  takes the task's own name, and an unnamed one a stable label instead. */
+export const TASK_SESSION_TITLE_FALLBACK = "New to-do item";
+export const taskSessionTitle = (task: Pick<TaskTrackerTaskDto, "title">): string =>
+  task.title.trim() || TASK_SESSION_TITLE_FALLBACK;
+
 /** Plain text as an Atlassian document: one paragraph per line. */
 export const jiraDocument = (text: string) => ({
   type: "doc",
