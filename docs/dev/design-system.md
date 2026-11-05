@@ -223,6 +223,10 @@ the shell and every package stylesheet.
   `:not([aria-disabled="true"])`.
 - **Busy** (`aria-busy`, set by `busy`) keeps the variant, shows the spinner
   and uses `cursor: progress`; the button only stops answering the pointer.
+  The spinner takes the leading glyph's exact box (`.ui-btn-mark`), so a
+  pending action never changes width or moves its label or its neighbours,
+  and its ring is drawn from the button's own ink (`currentColor`) so it
+  reads on a filled primary as well as on a quiet chip.
 
 ## 8. Choosing an overlay
 

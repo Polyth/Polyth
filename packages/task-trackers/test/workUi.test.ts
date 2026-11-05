@@ -341,6 +341,42 @@ test("new task composer opens in the board, attaches images and can start an age
   }
 });
 
+test("a pending create keeps the primary button's box: the spinner takes the leading glyph's place", async () => {
+  const run = harness();
+  let release: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const create = api.taskTrackerCreate;
+  api.taskTrackerCreate = async (provider, input) => {
+    await blocked;
+    return create(provider, input);
+  };
+  const view = await mountBoard();
+  try {
+    await act(async () => { button(view.container, "New task")!.click(); });
+    const pane = view.container.querySelector<HTMLElement>(".tt-compose-pane")!;
+    typeInto(pane.querySelector<HTMLInputElement>('input[placeholder="What needs to happen?"]')!, "Fix login");
+    const submit = pane.querySelector<HTMLButtonElement>(".tt-compose-footer button[type=submit]")!;
+    assert.ok(submit.querySelector("svg.ui-icon"), "the idle action carries a leading glyph");
+    assert.equal(submit.querySelector(".ui-btn-label")?.textContent, "Create task");
+
+    await act(async () => { submit.click(); });
+    assert.equal(submit.getAttribute("aria-busy"), "true");
+    // The glyph's box stays; only what fills it changes. That is what keeps
+    // the button (and Cancel beside it) from jumping when it is pressed.
+    assert.ok(submit.querySelector(".ui-btn-mark--sm .ui-spinner"), "the pending mark is a spinner in the glyph's box");
+    assert.equal(submit.querySelector(".ui-icon"), null, "the glyph gives way instead of widening the button");
+    assert.equal(submit.querySelector(".ui-btn-label")?.textContent, "Create task", "the label is constant while pending");
+    assert.equal(button(pane, "Cancel")!.disabled, true, "Cancel waits with it");
+
+    release();
+    await settle(4);
+    assert.equal(view.container.querySelector(".tt-compose-pane"), null, "the pane closes once the task exists");
+  } finally {
+    await view.unmount();
+    run.restore();
+  }
+});
+
 test("a refused create shows the tracker's reason and keeps the draft; a lost answer says to check the board", async () => {
   const run = harness();
   const view = await mountBoard();

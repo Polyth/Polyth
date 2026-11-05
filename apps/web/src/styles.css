@@ -16992,6 +16992,17 @@ html[dir="rtl"] .reasoning-preview {
 .ui-btn--block { display: flex; width: 100%; }
 .ui-btn-label { overflow: hidden; text-overflow: ellipsis; }
 .ui-btn .ui-icon { color: currentColor; }
+/* A busy button keeps its geometry: the spinner sits in the leading glyph's
+   own box, and the ring reads on every variant (the accent fill included)
+   because it is drawn from the button's ink. The `body` step outranks the
+   theme styles' own spinner track, which would vanish on an accent fill. */
+.ui-btn-mark { display: inline-grid; flex: none; place-items: center; }
+.ui-btn-mark--sm { width: var(--icon-sm); height: var(--icon-sm); }
+.ui-btn-mark--md { width: var(--icon-md); height: var(--icon-md); }
+body .ui-btn .ui-spinner {
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+}
 
 .ui-btn--primary {
   background: linear-gradient(135deg, var(--accent-hi), var(--accent));
@@ -20623,6 +20634,12 @@ body[data-hide-borders="true"] *::after {
 body[data-hide-borders="true"] .ui-spinner {
   border-color: var(--accent-line) !important;
   border-top-color: var(--accent) !important;
+}
+/* Inside a button the ring is the button's ink, so it also reads on a filled
+   primary action rather than vanishing into the accent. */
+body[data-hide-borders="true"] .ui-btn .ui-spinner {
+  border-color: color-mix(in srgb, currentColor 28%, transparent) !important;
+  border-top-color: currentColor !important;
 }
 /* So is a session row's running ring (and the subagent dock's): without this
    the default borderless look showed running chats with an empty state mark.

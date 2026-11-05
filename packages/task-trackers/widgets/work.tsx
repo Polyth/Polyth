@@ -8,6 +8,7 @@ import type {
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
 import {
+  AddIcon,
   Button,
   CloseIcon,
   IconButton,
@@ -525,7 +526,7 @@ export function TaskComposer({
             <Button
               type="submit"
               variant="primary"
-              iconStart={startAgent && agentAvailable ? SendIcon : undefined}
+              iconStart={startAgent && agentAvailable ? SendIcon : AddIcon}
               busy={busy}
               disabled={!title.trim() || busy}
             >

@@ -51,7 +51,7 @@ export default function Button({
       {...rest}
     >
       {busy
-        ? <Spinner size={iconSize === "sm" ? "sm" : "md"} />
+        ? <span className={`ui-btn-mark ui-btn-mark--${iconSize}`}><Spinner /></span>
         : iconStart && <Icon icon={iconStart} size={iconSize} />}
       {children != null && <span className="ui-btn-label">{children}</span>}
       {iconEnd && <Icon icon={iconEnd} size={iconSize} />}
