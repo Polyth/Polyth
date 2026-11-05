@@ -76,6 +76,8 @@ export interface TaskTrackerDispatchInput {
   instructions?: string;
   harness?: HarnessSelection;
   model?: ModelRef;
+  /** Start each session in its own managed Git checkout. */
+  isolated?: boolean;
 }
 
 /** `connectionId` names one of the caller's own accounts (personal scope only). */

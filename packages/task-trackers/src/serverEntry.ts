@@ -2,6 +2,7 @@ import {
   CAP,
   roleAtLeast,
   type AgentCapabilityContributionRegistry,
+  type CreateIsolatedSessionInput,
   type CreateSessionInput,
   type Disposable,
   type HarnessSelection,
@@ -22,6 +23,7 @@ import {
 import { hasInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import {
   localOnlyRemoteAccess,
+  SERVER_SESSION_ISOLATION,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -40,6 +42,12 @@ import {
   type TrackerActor,
 } from "./management.ts";
 import { createTaskAgentTools, taskSkill, TASK_TRACKERS_PACKAGE_ID } from "./agentTool.ts";
+import {
+  attachmentsRefused,
+  stageTaskImages,
+  withoutAttachments,
+  type TaskImageStager,
+} from "./handoffImages.ts";
 import {
   TASK_TRACKER_PROVIDERS,
   type TaskTrackerConnectionScope,
@@ -180,6 +188,12 @@ interface TaskTrackerRouteDeps {
   send(sessionId: string, input: UserTurnInput, request: RouteRequest): Promise<unknown>;
   /** Creates a session in the caller's Space; absent disables dispatch. */
   create?(input: CreateSessionInput, request: RouteRequest): Promise<{ id: string }>;
+  /** Creates a session in its own managed checkout, owned by the caller;
+   *  absent (no Git package) refuses an isolated dispatch. */
+  createIsolated?(input: CreateIsolatedSessionInput, request: RouteRequest): Promise<{ id: string }>;
+  /** Stages the task's images as project uploads; absent sends none and
+   *  tells the agent why. Resolved per call: the files package binds late. */
+  images?(): TaskImageStager | undefined;
 }
 
 const patchOf = (input: Record<string, unknown>): TaskTrackerPreferencesPatch => {
@@ -205,6 +219,38 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
       return await deps.snapshot(sessionId, request);
     } catch {
       throw Object.assign(new Error("session not found"), { code: "not-found" });
+    }
+  };
+
+  /** The task's work prompt, with every image on the card attached. An
+   *  engine that cannot take pictures still gets the prompt, which then names
+   *  the images it is missing. */
+  const sendTaskWork = async (input: {
+    sessionId: string;
+    projectId: string;
+    task: TaskTrackerTaskDto;
+    instructions: string;
+    trackers: TaskTrackerService;
+    model?: ModelRef;
+    request: RouteRequest;
+  }): Promise<unknown> => {
+    const { sessionId, task, instructions, model, request } = input;
+    const images = await stageTaskImages({
+      task,
+      projectId: input.projectId,
+      trackers: input.trackers,
+      stager: deps.images?.(),
+    });
+    const turn = (staged: typeof images): UserTurnInput => ({
+      text: buildTaskWorkPrompt(task, instructions, staged),
+      ...(staged.attachments.length > 0 ? { attachments: staged.attachments } : {}),
+      ...(model ? { model } : {}),
+    });
+    try {
+      return await deps.send(sessionId, turn(images), request);
+    } catch (cause) {
+      if (images.attachments.length === 0 || !attachmentsRefused(cause)) throw cause;
+      return deps.send(sessionId, turn(withoutAttachments(images, messageOf(cause))), request);
     }
   };
 
@@ -315,6 +361,13 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
       const instructions = String(input.instructions ?? "").slice(0, 2000);
       const harness = harnessOf(input.harness);
       const model = modelOf(input.model);
+      if (input.isolated !== undefined && typeof input.isolated !== "boolean") {
+        throw invalid("isolated must be true or false", "isolated");
+      }
+      const isolated = input.isolated === true;
+      if (isolated && !deps.createIsolated) {
+        throw unavailable("Isolated sessions need the Git package, which is not enabled on this server");
+      }
       const results: TaskTrackerDispatchResultDto[] = [];
       // Sequential on purpose: each task becomes its own durable session, and
       // one failure must not hide which of the others already started.
@@ -322,14 +375,17 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
         let task: TaskTrackerTaskDto | undefined;
         try {
           task = await trackers.getTask(target.provider, target.taskId);
-          const created = await deps.create({
+          const sessionInput = {
             projectId,
             // The tracker key is an id (Trello's is a random 24-character one),
             // never a name: title the session by the task itself.
             title: taskSessionTitle(task).slice(0, 120),
             ...(harness ? { harness } : {}),
             ...(model ? { model } : {}),
-          }, request);
+          };
+          const created = isolated
+            ? await deps.createIsolated!(sessionInput, request)
+            : await deps.create(sessionInput, request);
           await deps.append(created.id, "task/selected", { ...selectedData(task) });
           deps.management?.recordLink(request.space, {
             provider: task.provider,
@@ -337,10 +393,15 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
             taskKey: task.key,
             sessionId: created.id,
           });
-          await deps.send(created.id, {
-            text: buildTaskWorkPrompt(task, instructions),
+          await sendTaskWork({
+            sessionId: created.id,
+            projectId,
+            task,
+            instructions,
+            trackers,
             ...(model ? { model } : {}),
-          }, request);
+            request,
+          });
           results.push({ provider: task.provider, taskId: task.id, taskKey: task.key, sessionId: created.id });
         } catch (cause) {
           results.push({
@@ -659,7 +720,7 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
       if (preferences && !preferences.agentHandoff && input.startAgent !== false) {
         throw unavailable("Agent handoff is turned off in Task tracker settings");
       }
-      await session(sessionId, request);
+      const linkedSession = await session(sessionId, request);
       const task = await trackers.getTask(provider, taskId);
 
       // Persist the semantic selection before either the model-visible prompt
@@ -675,9 +736,14 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
       });
       let turn: unknown;
       if (input.startAgent !== false) {
-        turn = await deps.send(sessionId, {
-          text: buildTaskWorkPrompt(task, String(input.instructions ?? "")),
-        }, request);
+        turn = await sendTaskWork({
+          sessionId,
+          projectId: linkedSession.projectId,
+          task,
+          instructions: String(input.instructions ?? ""),
+          trackers,
+          request,
+        });
       }
       json(200, {
         ok: true,
@@ -726,6 +792,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     ),
     send: (sessionId, input, request) => host.forSpace(request.space).sessions.send(sessionId, input),
     create: (input, request) => host.forSpace(request.space).sessions.create(input),
+    createIsolated: (input, request) => {
+      const isolation = host.services.get(SERVER_SESSION_ISOLATION);
+      if (!isolation?.createIsolatedSession) {
+        throw unavailable("Isolated sessions need the Git package, which is not enabled on this server");
+      }
+      return isolation.createIsolatedSession(input, { sessions: host.forSpace(request.space).sessions });
+    },
+    images: () => host.services.get(serverServiceKey<TaskImageStager>("files.attachments")) ?? undefined,
   });
   const space = (spaceId: string) => host.systemSpaceContext(spaceId);
   // An agent acts for the person who sent the turn; no person means system

@@ -340,7 +340,7 @@ export const en = {
   "tasktrackers.work.dropOrPaste": "Drop or paste images here",
   "tasktrackers.work.chooseImages": "Choose images",
   "tasktrackers.work.startAgentRightAway": "Start an agent right away",
-  "tasktrackers.work.startAgentHint": "Opens a new session with your composer’s agent and model.",
+  "tasktrackers.work.startAgentHint": "Opens a new session with the model chosen below.",
   "tasktrackers.work.openProjectForAgents": "Open a project to start agents.",
   "tasktrackers.work.createAndStart": "Create & start agent",
   "tasktrackers.work.createTask": "Create task",
@@ -351,7 +351,7 @@ export const en = {
   "tasktrackers.work.instructionsAria": "Instructions for every agent",
   "tasktrackers.work.startAgents": "Start {count} agents",
   "tasktrackers.work.startAgent": "Start agent",
-  "tasktrackers.work.eachTaskSession": "Each task gets its own session with your composer’s agent and model.",
+  "tasktrackers.work.eachTaskSession": "Each task gets its own session with the model chosen here.",
   "tasktrackers.work.imagesFailed": "{key} was created, but its images didn’t upload",
   "tasktrackers.work.agentFailed": "{key} was created, but the agent didn’t start",
   "tasktrackers.work.couldNotStartAgents": "Couldn’t start the agents",
@@ -603,6 +603,14 @@ export const en = {
   "tasktrackers.surface.widgets": "Task tracker widgets",
   "tasktrackers.surface.widgetsDescription": "Turn task tracker widgets on or off.",
   "tasktrackers.surface.projectTitle": "Task trackers",
+  "tasktrackers.start.workspace": "Working copy",
+  "tasktrackers.start.shared": "Shared",
+  "tasktrackers.start.isolated": "Isolated",
+  "tasktrackers.start.sharedHint": "Works in the project’s own checkout, beside other sessions.",
+  "tasktrackers.start.isolatedHint": "Works in its own Git worktree and branch; merge the result when it is done.",
+  "tasktrackers.start.openSession": "Open the session when it starts",
+  "tasktrackers.start.model": "Model",
+  "tasktrackers.start.modelComposer": "Same as composer",
 } as const;
 
 export type TaskTrackersMessageKey = keyof typeof en;

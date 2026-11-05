@@ -15,6 +15,7 @@ import type {
   AuthPrincipal,
   AuthResolution,
   CapabilityKey,
+  CreateIsolatedSessionInput,
   DelegatedIsolationDto,
   Disposable,
   HarnessSelection,
@@ -36,6 +37,7 @@ import type {
   SessionIsolation,
   SessionPersistence,
   SessionProjection,
+  SessionRef,
   SecureSafeService,
   SessionService,
   SessionPrivacy,
@@ -405,6 +407,15 @@ export interface ServerDelegatedMergeResult {
  *  itself a managed isolation — and merges back into it. Callers authorize the
  *  parent/child relationship and Space before calling. */
 export interface ServerSessionIsolationService {
+  /** A new chat in its own managed checkout, branched from the project's
+   *  current checkout, exactly as the new-session dialog's isolated option
+   *  starts one. Pass the requester's scoped `sessions` so the chat is created
+   *  in their Space and owned by them; the project is checked there. Refuses a
+   *  project that is not a local Git repository. */
+  createIsolatedSession(
+    input: CreateIsolatedSessionInput,
+    options?: { sessions?: Pick<SessionService, "create" | "snapshot"> },
+  ): Promise<SessionRef>;
   createDelegatedSession(input: ServerDelegatedSessionInput): Promise<ServerDelegatedSessionCreated>;
   /** The parent's delegated isolated children that still hold an isolation record. */
   delegatedChildren(parentSessionId: string): Promise<DelegatedIsolationDto[]>;

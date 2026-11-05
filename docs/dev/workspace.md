@@ -178,6 +178,10 @@ referenced files from the released checkout into the destination checkout —
 never overwriting an existing destination file, never leaving either root, and
 never blocking cleanup on a missing or oversized file. `_inbox/*` staged
 uploads already survive because their read/staging path is project-root pinned.
+A server package that fetched bytes itself (a tracker card's image handed to an
+agent) stages them the same way through `files.attachments` `stage`, which
+writes a fresh `_inbox/<uuid>-<name>` at the project root; the session's
+ordinary attachment preparation then materializes it into the execution root.
 
 Releasing an isolation record (merge, discard, abandon, repository discard or
 session deletion) leaves nothing Polyth-owned behind. Process closure covers
@@ -290,6 +294,15 @@ In the session's isolation card, **Resolve with AI and proceed** is the one
 resolve action for both kinds of conflict. Once pressed, the conflict card
 hides while the agent's resolve turn runs. When that turn ends, the card retries
 the merge on its own. If the merge conflicts again, the card comes back.
+
+### Package-started isolated sessions
+
+`SERVER_SESSION_ISOLATION.createIsolatedSession` is the server form of the new
+session dialog's isolated option (`POST /api/isolation/sessions`): a new chat
+with a managed checkout branched from the project's current checkout. Pass the
+requester's scoped `sessions` (`host.forSpace(rc.space).sessions`) so the chat
+is created in their Space and owned by them. Task trackers use it for
+**Isolated** task starts.
 
 ### Delegated isolation
 

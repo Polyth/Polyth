@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   AgentCapabilityContributionRegistry,
@@ -73,7 +74,17 @@ export interface AttachmentSourceService {
   /** Read an already-prepared attachment through the same guarded store, for
    *  harnesses whose file delivery is emulated as prompt text. */
   read(root: string, rel: string, projectId?: string): Promise<Uint8Array>;
+  /** Store bytes a server package fetched (a tracker card's image, for
+   *  example) as a fresh `_inbox/*` upload at the project root: the same
+   *  place and name shape a composer upload gets, so the session's ordinary
+   *  attachment preparation materializes it. Callers authorize the project in
+   *  the requester's Space first. Refuses more than `maxBytes`. */
+  stage?(input: { projectId: string; name: string; bytes: Uint8Array }): Promise<{ path: string; size: number }>;
 }
+
+/** A file name safe inside `_inbox/`, as the web composer's upload makes it. */
+export const inboxFileName = (name: string): string =>
+  name.replace(/[^\w.-]+/g, "_").replace(/^\.+/, "").slice(0, 80) || "file";
 
 /** Session-lifetime chat media seam consumed by the isolation lifecycle. A
  *  chat image is a project-relative path resolved against the session's
@@ -167,8 +178,21 @@ export function externalReadsRoute(store: ExternalReadStore): RouteHandler {
  *  reads and writes through the same store the routes use. */
 export function createAttachmentSourceService(
   filesFor: (projectId: string | null) => Promise<FileService>,
+  /** The project's own root, where `_inbox/*` is staged; absent disables `stage`. */
+  projectRoot?: (projectId: string) => Promise<string>,
 ): AttachmentSourceService {
   return {
+    ...(projectRoot ? {
+      stage: async ({ projectId, name, bytes }: { projectId: string; name: string; bytes: Uint8Array }) => {
+        if (bytes.length > MAX_RAW_BYTES) {
+          throw Object.assign(new Error("attachment is too large"), { code: "invalid-input" });
+        }
+        const fs = await filesFor(projectId);
+        const rel = `${INBOX_PREFIX}${randomUUID()}-${inboxFileName(name)}`;
+        await fs.writeBytes(await projectRoot(projectId), rel, bytes);
+        return { path: rel, size: bytes.length };
+      },
+    } : {}),
     maxBytes: MAX_RAW_BYTES,
     stat: async (root, rel, projectId) => {
       const fs = await filesFor(projectId ?? null);
@@ -626,7 +650,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   };
   host.services.provide(
     serverServiceKey<AttachmentSourceService>("files.attachments"),
-    createAttachmentSourceService(attachmentFilesFor),
+    createAttachmentSourceService(attachmentFilesFor, async (projectId) => {
+      const project = await host.projects.get(projectId);
+      if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
+      return project.path;
+    }),
   );
   host.services.provide(
     serverServiceKey<SessionMediaService>("files.session-media"),

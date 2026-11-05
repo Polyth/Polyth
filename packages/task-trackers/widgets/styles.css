@@ -2800,6 +2800,74 @@
   opacity: .5;
 }
 
+/* Where a started agent works, and whether the app follows it there. */
+.tt-start-options {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.tt-start-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tt-start-row > span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-start-row .tt-target {
+  flex: 0 1 auto;
+  grid-template-columns: repeat(2, auto);
+}
+
+.tt-start-row .tt-target button {
+  padding: 0 var(--space-3);
+}
+
+/* The model chip keeps its own size; a long model name truncates. The chip's
+   own 8px inner padding is pulled back so its chevron ends on the row's edge,
+   where the switch and the segmented control end. */
+.tt-model-picker {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  margin-inline-end: -8px;
+}
+
+.tt-dispatch-bar .tt-model-picker {
+  margin-inline: -8px 0;
+}
+
+.tt-start-row.is-disabled .tt-model-picker {
+  opacity: 0.55;
+}
+
+/* The new-task form shows the choices as one quiet panel under its switch. */
+.tt-compose-column > .tt-start-options {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+
+/* The floating bar lays the two choices side by side. */
+.tt-dispatch-bar .tt-start-options {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-4);
+}
+
+.tt-dispatch-bar .tt-start-row {
+  justify-content: flex-start;
+}
+
 .tt-action-row.single {
   grid-template-columns: minmax(0, 1fr);
 }

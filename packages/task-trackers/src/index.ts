@@ -1969,7 +1969,31 @@ const TASK_NOUNS: Record<TaskTrackerProvider, string> = {
   linear: "Linear issue",
 };
 
-export function buildTaskWorkPrompt(task: TaskTrackerTaskDto, instructions = ""): string {
+/** What became of the task's images on the way into the session. */
+export interface TaskPromptImages {
+  /** Names of the images attached to this message. */
+  attached: readonly string[];
+  /** Images the agent does not get, each with a short reason. */
+  missing: ReadonlyArray<{ name: string; reason: string }>;
+}
+
+const imageLines = (images: TaskPromptImages | undefined): string[] => {
+  if (!images || (images.attached.length === 0 && images.missing.length === 0)) return [];
+  return [
+    "",
+    ...(images.attached.length > 0
+      ? [`Task images attached to this message (${images.attached.length}): ${images.attached.join(", ")}`]
+      : []),
+    ...(images.missing.length > 0
+      ? [
+          `Task images not attached (${images.missing.length}); open them in the tracker if you need them:`,
+          ...images.missing.map((image) => `- ${image.name}: ${image.reason}`),
+        ]
+      : []),
+  ];
+};
+
+export function buildTaskWorkPrompt(task: TaskTrackerTaskDto, instructions = "", images?: TaskPromptImages): string {
   const custom = instructions.trim();
   return [
     `Work on ${TASK_NOUNS[task.provider]} ${task.key}: ${task.title}`,
@@ -1980,6 +2004,7 @@ export function buildTaskWorkPrompt(task: TaskTrackerTaskDto, instructions = "")
     "",
     "Task description:",
     task.description || "(No description provided.)",
+    ...imageLines(images),
     ...(custom ? ["", "Additional instructions:", custom] : []),
     "",
     "Complete the requested engineering work in this project.",
