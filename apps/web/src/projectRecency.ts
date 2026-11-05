@@ -1,8 +1,12 @@
-// New-session project order: projects with more recent chats rise to the top.
+// Frequently used projects: those with more recent chats rise to the top. The
+// new-session location row always lists projects this way, and the navigators
+// offer it as a sort, so a project ranks the same in both places.
 // Kept pure so the ranking is testable without React or the server.
 import { useEffect, useMemo, useState } from "react";
 import type { SessionProjection } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
+import { orderProjects, useProjectOrder, useProjectSortMode } from "./sidebarPrefs.ts";
+import { useSpaces } from "./spaces.ts";
 import { useStore } from "./store.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -76,5 +80,22 @@ export function useRecentlyActiveProjects<T extends { id: string }>(
   return useMemo(
     () => (enabled ? rankProjectsByRecentSessions(projects, [...loaded, ...recent]) : [...projects]),
     [enabled, projects, loaded, recent],
+  );
+}
+
+/** `orderProjects` bound to the stored preference, with "frequent" filled in
+ *  from the read above. Memoize `latestActivity` (useCallback) to keep this
+ *  memo stable. */
+export function useOrderedProjects<T extends { id: string; name?: string | undefined; path: string; createdAt?: number }>(
+  projects: readonly T[],
+  latestActivity?: (projectId: string) => number,
+): T[] {
+  const sort = useProjectSortMode();
+  const order = useProjectOrder();
+  const spaceId = useSpaces().activeSpaceId ?? "";
+  const frequent = useRecentlyActiveProjects(projects, sort === "frequent", spaceId);
+  return useMemo(
+    () => (sort === "frequent" ? frequent : orderProjects(projects, sort, order, latestActivity)),
+    [frequent, latestActivity, order, projects, sort],
   );
 }

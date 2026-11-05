@@ -307,7 +307,9 @@ All from `apps/web/src/components/ui` (see `index.ts`):
   given; the new-session location row passes projects ranked by recent chats
   (`apps/web/src/projectRecency.ts`): each top-level chat of the last 30 days
   adds a weight that halves every 7 days, ties go to the newest chat, and
-  projects without recent chats keep registry order after the rest.
+  projects without recent chats keep registry order after the rest. The
+  navigators' *Frequently used* sort and the project lists that follow it use
+  the same ranking.
 - `Menu` — `label`, `entries: (MenuAction | "separator")[]`, render-prop
   trigger receiving `{ref, onClick, aria-*}`. The popover is a flex column
   whose single `--menu-row-gap` (`--space-1`) spaces every child, so a

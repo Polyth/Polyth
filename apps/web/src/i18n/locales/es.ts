@@ -2087,6 +2087,7 @@ export const es: AppMessages = {
   "sidebar.failedCountValue": "; {count} falló ({codes})",
   "sidebar.filter": "Filtrar",
   "sidebar.filterSessions": "Filtrar sesiones",
+  "sidebar.frequentlyUsed": "Usados con frecuencia",
   "sidebar.importSessions": "Importar sesiones…",
   "sidebar.isolated": "Aisladas",
   "sidebar.listOptions": "Ordenar y filtrar",

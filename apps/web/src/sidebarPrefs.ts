@@ -484,14 +484,15 @@ export function setShowDateGroups(show: boolean): void {
 // ---- sidebar project ordering (mobile/desktop toolbar) -----------------------
 // The compact drawer replaced its decorative title with a search/sort/filter
 // toolbar. "manual" (shown as "Custom order") is the order the user moved the
-// projects into; moving a project under any sort switches to it. Both are
-// device navigator state (navigatorState.ts): durable in a browser and,
-// through the app-owned store, across mobile app launches.
+// projects into; moving a project under any sort switches to it. "frequent"
+// is the new-chat location row's ranking (projectRecency.ts). Both are device
+// navigator state (navigatorState.ts): durable in a browser and, through the
+// app-owned store, across mobile app launches.
 
-export type ProjectSortMode = "recent" | "name" | "manual";
+export type ProjectSortMode = "recent" | "frequent" | "name" | "manual";
 
 export function parseProjectSortMode(raw: string | null): ProjectSortMode {
-  return raw === "name" || raw === "manual" ? raw : "recent";
+  return raw === "frequent" || raw === "name" || raw === "manual" ? raw : "recent";
 }
 
 let storedProjectSort: ProjectSortMode = parseProjectSortMode(readNavigatorState(PROJECT_SORT_KEY));
@@ -585,16 +586,18 @@ export function applyManualProjectOrder<T extends { id: string; createdAt?: numb
 }
 
 /** The one ordering authority for projects. The desktop sidebar and the
- *  settings project picker consume this, so the same stored preference can
- *  never put a project in a different place (or appear not to have been saved
- *  at all) on another surface. The phone navigator shares the manual and name
- *  orders but ranks "recent" by attention first, on purpose.
+ *  settings project picker consume this through `useOrderedProjects`, so the
+ *  same stored preference can never put a project in a different place (or
+ *  appear not to have been saved at all) on another surface. The phone
+ *  navigator shares the manual, name and frequent orders but ranks "recent" by
+ *  attention first, on purpose.
  *
  *  "recent" ranks by the newest session activity the caller reports per project;
- *  `latestActivity` defaults to 0, which leaves the name tie-break in charge. */
+ *  `latestActivity` defaults to 0, which leaves the name tie-break in charge.
+ *  "frequent" needs a read of its own, so `useOrderedProjects` supplies it. */
 export function orderProjects<T extends { id: string; name?: string | undefined; path: string; createdAt?: number }>(
   projects: readonly T[],
-  sort: ProjectSortMode,
+  sort: Exclude<ProjectSortMode, "frequent">,
   order: readonly string[],
   latestActivity: (projectId: string) => number = () => 0,
 ): T[] {
@@ -602,20 +605,6 @@ export function orderProjects<T extends { id: string; name?: string | undefined;
   const byName = (a: T, b: T) => (a.name || a.path).localeCompare(b.name || b.path);
   if (sort === "name") return [...projects].sort(byName);
   return [...projects].sort((a, b) => latestActivity(b.id) - latestActivity(a.id) || byName(a, b));
-}
-
-/** `orderProjects` bound to the stored preference. Memoize `latestActivity`
- *  (useCallback) to keep this memo stable. */
-export function useOrderedProjects<T extends { id: string; name?: string | undefined; path: string; createdAt?: number }>(
-  projects: readonly T[],
-  latestActivity?: (projectId: string) => number,
-): T[] {
-  const sort = useProjectSortMode();
-  const order = useProjectOrder();
-  return useMemo(
-    () => orderProjects(projects, sort, order, latestActivity),
-    [latestActivity, order, projects, sort],
-  );
 }
 
 /** Pure: the full id list to persist after a move. `ordered` is every project

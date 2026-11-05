@@ -36,10 +36,11 @@ import { EXPANDED_PROJECTS_KEY, readNavigatorState, writeNavigatorState } from "
 import {
   permuteManualProjects,
   setProjectOrder, setProjectSortMode,
-  setSidebarViewMode, useOrderedProjects, useProjectSortMode,
+  setSidebarViewMode, useProjectSortMode,
   useSidebarViewMode, type SidebarViewMode,
   type ProjectSortMode,
 } from "../sidebarPrefs.ts";
+import { useOrderedProjects } from "../projectRecency.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
   CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu,
@@ -689,6 +690,13 @@ export default function Sidebar() {
       onSelect: () => setSort("recent"),
     },
     {
+      id: "frequent",
+      label: tr("sidebar.frequentlyUsed"),
+      kind: "radio",
+      checked: sort === "frequent",
+      onSelect: () => setSort("frequent"),
+    },
+    {
       id: "name",
       label: tr("sidebar.projectName"),
       kind: "radio",
@@ -745,7 +753,9 @@ export default function Sidebar() {
             ? tr("sidebar.projectName")
             : sort === "manual"
               ? tr("sidebar.manualOrder")
-              : tr("sidebar.recentActivity"),
+              : sort === "frequent"
+                ? tr("sidebar.frequentlyUsed")
+                : tr("sidebar.recentActivity"),
         })}
         title={tr("sidebar.moreSidebarActions")}
         align="end"

@@ -2090,6 +2090,7 @@ export const en = {
   "sidebar.failedCountValue": "; {count} failed ({codes})",
   "sidebar.filter": "Filter",
   "sidebar.filterSessions": "Filter sessions",
+  "sidebar.frequentlyUsed": "Frequently used",
   "sidebar.importSessions": "Import sessions…",
   "sidebar.isolated": "Isolated",
   "sidebar.listOptions": "Sort and filter",

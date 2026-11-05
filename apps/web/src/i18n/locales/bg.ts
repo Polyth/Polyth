@@ -2087,6 +2087,7 @@ export const bg: AppMessages = {
   "sidebar.failedCountValue": "; {count} неуспешно ({codes})",
   "sidebar.filter": "Филтър",
   "sidebar.filterSessions": "Филтриране на сесии",
+  "sidebar.frequentlyUsed": "Често използвани",
   "sidebar.importSessions": "Импортиране на сесии…",
   "sidebar.isolated": "Изолирани",
   "sidebar.listOptions": "Сортиране и филтриране",

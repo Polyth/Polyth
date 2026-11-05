@@ -437,8 +437,8 @@ while a session list is on screen (a project is open, or search is active), so
 an all-collapsed project list never ends in a link that reads as loading more
 projects. Which projects are open
 (`polyth.sidebar.expandedProjects`, shared by both navigators), the project sort
-chosen in the list options (`polyth.sidebar.projectSort`: recent activity, name
-or custom) and the custom order (`polyth.sidebar.projectOrder`, every known
+chosen in the list options (`polyth.sidebar.projectSort`: recent activity,
+frequently used, name or custom) and the custom order (`polyth.sidebar.projectOrder`, every known
 project id) are stored the same way. These keys are navigation presentation, so
 they stay out of the synced account preferences. Each time the phone navigator
 comes up (tap or swipe peek), and when the current chat changes while it is
@@ -480,8 +480,8 @@ While a project is up the lists take no hover, tooltip, peek, text selection,
 system long-press menu, image drag, pull-to-refresh or drawer swipe. The order
 is saved once, on landing, through `permuteManualProjects`, which keeps
 projects a filter hides in their slots. Any sort allows a move: one made under
-*Recent activity* or *Project name* keeps the order on screen and switches the
-sort to *Custom order* (announced). Alt+Shift+↑/↓ on a project row moves it one
+*Recent activity*, *Frequently used* or *Project name* keeps the order on screen
+and switches the sort to *Custom order* (announced). Alt+Shift+↑/↓ on a project row moves it one
 place the same way. Covered by `apps/web/test/projectArrange.test.ts`.
 
 On touch-capable screens (`any-pointer: coarse`) project row actions stay

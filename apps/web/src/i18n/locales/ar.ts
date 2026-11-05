@@ -2087,6 +2087,7 @@ export const ar: AppMessages = {
   "sidebar.failedCountValue": "؛ {count} فشل ({codes})",
   "sidebar.filter": "فلتر",
   "sidebar.filterSessions": "تصفية الجلسات",
+  "sidebar.frequentlyUsed": "الأكثر استخدامًا",
   "sidebar.importSessions": "استيراد الجلسات…",
   "sidebar.isolated": "معزولة",
   "sidebar.listOptions": "الترتيب والتصفية",

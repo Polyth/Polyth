@@ -109,6 +109,7 @@ import {
   useSessionSortMode,
   type ProjectSortMode,
 } from "../../sidebarPrefs.ts";
+import { useRecentlyActiveProjects } from "../../projectRecency.ts";
 import { guardedProjectAddAllowed, limitedProjectAddAllowed, useAccountLimits, useGuardrails } from "../../guardrails.ts";
 import {
   EXPANDED_PROJECTS_KEY,
@@ -1066,9 +1067,12 @@ export default function MobileNavigator() {
   // This keeps its own "recent" rule on purpose: the phone puts projects that
   // need attention first, which permanent tests guard (mobileNavigator,
   // projectArrange). Manual and name order are the sidebar's, so a drag lands
-  // in the same list the sidebar saves.
+  // in the same list the sidebar saves; "frequent" is the new-chat ranking.
+  const spaceId = useSpaces().activeSpaceId ?? "";
+  const frequentProjects = useRecentlyActiveProjects(projects, sort === "frequent", spaceId);
   const orderedProjects = useMemo(() => {
     if (sort === "manual") return applyManualProjectOrder(projects, projectOrder);
+    if (sort === "frequent") return frequentProjects;
     const score = (id: string) => {
       const list = (projectSessions.get(id) ?? []).filter((session) => sessionMatchesDateFilter(session, dateFilter));
       const bestPriority = list.reduce((best, session) => Math.min(best, statusPriority(session)), 4);
@@ -1081,7 +1085,7 @@ export default function MobileNavigator() {
       const right = score(b.id);
       return left.bestPriority - right.bestPriority || right.latest - left.latest;
     });
-  }, [dateFilter, projectOrder, projectSessions, projects, sort]);
+  }, [dateFilter, frequentProjects, projectOrder, projectSessions, projects, sort]);
 
   const visibleProjects = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -1208,6 +1212,13 @@ export default function MobileNavigator() {
       kind: "radio",
       checked: sort === "recent",
       onSelect: () => setSort("recent"),
+    },
+    {
+      id: "frequent",
+      label: tr("sidebar.frequentlyUsed"),
+      kind: "radio",
+      checked: sort === "frequent",
+      onSelect: () => setSort("frequent"),
     },
     {
       id: "name",

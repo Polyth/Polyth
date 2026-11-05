@@ -2087,6 +2087,7 @@ export const pl: AppMessages = {
   "sidebar.failedCountValue": "; {count} nie powiodło się ({codes})",
   "sidebar.filter": "Filtr",
   "sidebar.filterSessions": "Filtruj sesje",
+  "sidebar.frequentlyUsed": "Często używane",
   "sidebar.importSessions": "Importuj sesje…",
   "sidebar.isolated": "Izolowane",
   "sidebar.listOptions": "Sortowanie i filtrowanie",

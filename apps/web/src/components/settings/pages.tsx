@@ -7,7 +7,7 @@ import {
   updateSettings,
   useStore,
 } from "../../store.ts";
-import { useOrderedProjects } from "../../sidebarPrefs.ts";
+import { useOrderedProjects } from "../../projectRecency.ts";
 import { RAIL_SIZE_MAX, RAIL_SIZE_MIN, RAIL_SIZE_STEP, RAIL_SPACING_MAX, RAIL_SPACING_MIN, RAIL_SPACING_STEP, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type StatusBarMode, type SwipeNavigationMode } from "../../uiPrefs.ts";
 import { projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS, interfaceFontLabel, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "../../settings.ts";

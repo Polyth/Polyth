@@ -2087,6 +2087,7 @@ export const uk: AppMessages = {
   "sidebar.failedCountValue": "; не вдалося: {count} ({codes})",
   "sidebar.filter": "Фільтр",
   "sidebar.filterSessions": "Фільтрувати сесії",
+  "sidebar.frequentlyUsed": "Часто використовувані",
   "sidebar.importSessions": "Імпортувати сесії…",
   "sidebar.isolated": "Ізольовані",
   "sidebar.listOptions": "Сортування та фільтри",

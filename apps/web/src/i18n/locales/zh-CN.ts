@@ -2087,6 +2087,7 @@ export const zhCN: AppMessages = {
   "sidebar.failedCountValue": "；{count} 个失败（{codes}）",
   "sidebar.filter": "筛选",
   "sidebar.filterSessions": "筛选会话",
+  "sidebar.frequentlyUsed": "常用",
   "sidebar.importSessions": "导入会话…",
   "sidebar.isolated": "隔离",
   "sidebar.listOptions": "排序与筛选",
