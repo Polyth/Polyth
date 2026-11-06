@@ -116,6 +116,49 @@ test("Claude reports each API request's usage while the turn runs and only the r
     }
 });
 
+test("Claude's refusal of a full conversation stops as context-full, not as answer text", async () => {
+    const f = await openRuntime();
+    try {
+        await f.begin("turn-1");
+        // The shape the CLI really sends: a synthetic line, then an error "success".
+        f.push({
+            type: "assistant",
+            uuid: "synthetic",
+            parent_tool_use_id: null,
+            message: { model: "<synthetic>", content: [{ type: "text", text: "Prompt is too long" }] },
+        });
+        f.push({ type: "result", uuid: "result-1", is_error: true, subtype: "success" });
+        await flush();
+        assert.equal(f.events.some((event) => event.type === "assistant/message"), false);
+        const stopped = f.events.find((event) => event.type === "turn/stopped");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.code, "context-full");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.error, "Prompt is too long");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.retry, undefined, "resending cannot clear it");
+    } finally {
+        await f.runtime.dispose();
+    }
+});
+
+test("Claude's other synthetic lines and failures stay what they were", async () => {
+    const f = await openRuntime();
+    try {
+        await f.begin("turn-1");
+        f.push({
+            type: "assistant",
+            uuid: "synthetic",
+            parent_tool_use_id: null,
+            message: { model: "<synthetic>", content: [{ type: "text", text: "Something else went wrong" }] },
+        });
+        f.push({ type: "result", uuid: "result-1", is_error: true, subtype: "success" });
+        await flush();
+        assert.equal(f.events.some((event) => event.type === "assistant/message"), true);
+        const stopped = f.events.find((event) => event.type === "turn/stopped");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.code, "unknown");
+    } finally {
+        await f.runtime.dispose();
+    }
+});
+
 test("Claude never labels usage with the CLI's synthetic error model", async () => {
     const f = await openRuntime();
     try {

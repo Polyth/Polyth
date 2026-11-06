@@ -31,6 +31,7 @@ import type { ProjectRegistry } from "./projects.ts";
 import { createCanonicalSpaceGateway } from "./canonicalSpaces.ts";
 import type { HarnessAccess } from "./accountPermissions.ts";
 import type { PersonHarnessDefault } from "./personHarnessDefault.ts";
+import type { SessionPeopleOpener } from "./spaceScope.ts";
 import { verifyCanonicalAgentProfileOwnership } from "./profileOwnershipPreflight.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import { reconcileCanonicalResourcesAtBoot } from "./resourceStartupReconciliation.ts";
@@ -111,6 +112,7 @@ export interface SpaceGatewayOptions {
   harnessAccess?: HarnessAccess;
   /** The acting person's default harness for chats that pin none. */
   personHarnessDefault?: PersonHarnessDefault;
+  sharing?: () => SessionPeopleOpener | undefined;
 }
 
 export interface SpaceGatewayHandle {
@@ -137,6 +139,7 @@ function canonicalSpaceGateway(opts: SpaceGatewayOptions): SpaceGatewayHandle | 
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.harnessAccess ? { harnessAccess: opts.harnessAccess } : {}),
     ...(opts.personHarnessDefault ? { personHarnessDefault: opts.personHarnessDefault } : {}),
+    ...(opts.sharing ? { sharing: opts.sharing } : {}),
   });
   const ownerId = security.control.get<{ user_id: string }>(
     `SELECT r.user_id FROM instance_roles r JOIN principals p ON p.id=r.user_id
@@ -249,6 +252,7 @@ export async function createSpaceGateway(
     sessions: opts.sessions,
     guard,
     people,
+    ...(opts.sharing ? { sharing: opts.sharing } : {}),
   });
 
   if (migration.created || migration.projectsAdopted || migration.sessionsAdopted) {

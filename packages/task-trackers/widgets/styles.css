@@ -375,12 +375,22 @@
   scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
 }
 
+/* The board fills its pane so a column taller than it caps at the lane height
+   and scrolls its own cards under a fixed title; short lanes stay the height
+   of their cards. `height: 100%` only resolves in a fixed-height widget; a
+   package page keeps an auto height and scrolls the window body instead.
+   Without the bounded auto row every column grew to its cards, the card list
+   never overflowed, and `overscroll-behavior: contain` on that non-scrolling
+   child swallowed the wheel anywhere over a column (only the pane's bare edge
+   scrolled). */
 .tt-kanban {
   display: grid;
   min-width: 100%;
   width: max-content;
+  height: 100%;
   min-height: 100%;
   grid-auto-columns: minmax(248px, 292px);
+  grid-auto-rows: minmax(0, 1fr);
   grid-auto-flow: column;
   align-items: start;
   gap: var(--space-3);
@@ -543,7 +553,10 @@
   gap: var(--space-2);
   padding: 0 var(--tt-lane-inset) var(--tt-lane-inset);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* No `overscroll-behavior: contain`: when the pane has no fixed height (a
+     package page) this list never scrolls itself, and containing the wheel
+     there left the page unable to scroll anywhere over a column. Chaining is
+     harmless in a widget, whose pane has no vertical overflow left. */
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
 }
@@ -2787,6 +2800,74 @@
   opacity: .5;
 }
 
+/* Where a started agent works, and whether the app follows it there. */
+.tt-start-options {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.tt-start-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tt-start-row > span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.tt-start-row .tt-target {
+  flex: 0 1 auto;
+  grid-template-columns: repeat(2, auto);
+}
+
+.tt-start-row .tt-target button {
+  padding: 0 var(--space-3);
+}
+
+/* The model chip keeps its own size; a long model name truncates. The chip's
+   own 8px inner padding is pulled back so its chevron ends on the row's edge,
+   where the switch and the segmented control end. */
+.tt-model-picker {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  margin-inline-end: -8px;
+}
+
+.tt-dispatch-bar .tt-model-picker {
+  margin-inline: -8px 0;
+}
+
+.tt-start-row.is-disabled .tt-model-picker {
+  opacity: 0.55;
+}
+
+/* The new-task form shows the choices as one quiet panel under its switch. */
+.tt-compose-column > .tt-start-options {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+}
+
+/* The floating bar lays the two choices side by side. */
+.tt-dispatch-bar .tt-start-options {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-4);
+}
+
+.tt-dispatch-bar .tt-start-row {
+  justify-content: flex-start;
+}
+
 .tt-action-row.single {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -4794,6 +4875,7 @@ body[data-desktop-low-resource="true"] .tt-list-group-head {
   .tt-kanban-frame {
     display: flex;
     min-width: 0;
+    height: 100%;
     min-height: 100%;
     flex-direction: column;
     gap: var(--space-2);
@@ -4818,6 +4900,7 @@ body[data-desktop-low-resource="true"] .tt-list-group-head {
   /* The kanban is its own sideways scroller here, so columns snap like pages
      and the pager above stays put. */
   .tt-kanban {
+    height: auto;
     flex: 1;
     min-height: 0;
     overflow-x: auto;

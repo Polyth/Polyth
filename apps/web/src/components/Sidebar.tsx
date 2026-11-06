@@ -36,10 +36,11 @@ import { EXPANDED_PROJECTS_KEY, readNavigatorState, writeNavigatorState } from "
 import {
   permuteManualProjects,
   setProjectOrder, setProjectSortMode,
-  setSidebarViewMode, useOrderedProjects, useProjectSortMode,
+  setSidebarViewMode, useProjectSortMode,
   useSidebarViewMode, type SidebarViewMode,
   type ProjectSortMode,
 } from "../sidebarPrefs.ts";
+import { useOrderedProjects } from "../projectRecency.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
   CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu,
@@ -56,6 +57,7 @@ import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "./ConversationCreateDialog.tsx";
 import SpaceSwitcher from "./SpaceSwitcher.tsx";
+import DesktopServerSwitcher from "./DesktopServerSwitcher.tsx";
 import { tr } from "../i18n/index.ts";
 import { confirmAlert } from "../alerts.ts";
 import { errorFeedback, tapFeedback } from "../haptics.ts";
@@ -72,6 +74,8 @@ import {
 import { projectIsolationLevel, type Project, type SessionProjection } from "@polyth/contracts";
 import ProjectGlyph from "./ProjectGlyph.tsx";
 import { soloPersonalProject } from "../personalProject.ts";
+import { rootProjectId, rootProjects } from "../privateRoom.ts";
+import PrivateRoomSwitch from "./PrivateRoomSwitch.tsx";
 import { useShellDirection } from "../shellDirection.ts";
 import { listProjectSettings, subscribeProjectSettingsNavigation } from "../projectSettings.ts";
 import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../workspaceArrange.ts";
@@ -134,11 +138,16 @@ export default function Sidebar() {
   // Canonical registry truth: `projects` has one owner; loading and failure
   // never claim there are no projects.
   const registry = useStore((s) => s.projectRegistry);
-  const projects = registry.projects;
+  const projects = rootProjects(registry.projects) as typeof registry.projects;
   // Only the personal project: chats list flat, with no project row or rail
   // icon, until the person adds a real project.
   const soloPersonal = registry.status === "ready" ? soloPersonalProject(projects) : null;
-  const activeProjectId = useStore(workspaceProjectId);
+  // On screen, a private room is its project; only its chats differ.
+  const workspaceId = useStore(workspaceProjectId);
+  const activeRoom = registry.projects.find((candidate) => candidate.id === workspaceId && candidate.parentProjectId !== undefined);
+  const activeProjectId = activeRoom?.parentProjectId ?? workspaceId;
+  /** The lane of a project the person is in: its private room, or itself. */
+  const laneIdOf = (id: string): string => activeRoom?.parentProjectId === id ? activeRoom.id : id;
   const activeSessionId = useStore((s) => s.activeSessionId);
   const sessionsRaw = useStore((s) => s.sessions);
   const pendingSends = useStore((s) => s.pendingSends);
@@ -169,8 +178,12 @@ export default function Sidebar() {
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [conversationProjectId, setConversationProjectId] = useState<string | null>(null);
   const [projectSettingsPage, setProjectSettingsPage] = useState<"menu" | `contribution:${string}`>("menu");
-  useEffect(() => subscribeProjectSettingsNavigation(({ projectId, contributionId }) => {
-    if (!getState().projectRegistry.projects.some((candidate) => candidate.id === projectId)) return;
+  useEffect(() => subscribeProjectSettingsNavigation((request) => {
+    const { contributionId } = request;
+    const known = getState().projectRegistry.projects;
+    // From a private room, settings are its project's: the room follows it.
+    const projectId = rootProjectId(known, request.projectId) ?? request.projectId;
+    if (!known.some((candidate) => candidate.id === projectId)) return;
     const page = contributionId && listProjectSettings(projectId).some((item) => item.id === contributionId)
       ? `contribution:${contributionId}` as const : "menu";
     setProjectSettingsPage(page);
@@ -689,6 +702,13 @@ export default function Sidebar() {
       onSelect: () => setSort("recent"),
     },
     {
+      id: "frequent",
+      label: tr("sidebar.frequentlyUsed"),
+      kind: "radio",
+      checked: sort === "frequent",
+      onSelect: () => setSort("frequent"),
+    },
+    {
       id: "name",
       label: tr("sidebar.projectName"),
       kind: "radio",
@@ -745,7 +765,9 @@ export default function Sidebar() {
             ? tr("sidebar.projectName")
             : sort === "manual"
               ? tr("sidebar.manualOrder")
-              : tr("sidebar.recentActivity"),
+              : sort === "frequent"
+                ? tr("sidebar.frequentlyUsed")
+                : tr("sidebar.recentActivity"),
         })}
         title={tr("sidebar.moreSidebarActions")}
         align="end"
@@ -835,6 +857,13 @@ export default function Sidebar() {
     projectMenuReturnRef.current = target;
     setProjectMenuOpenId(id);
     setProjectMenuSource(source);
+  };
+  // Package rows live in the menu footer, so selecting one does not go through
+  // Menu's own select() and must dismiss the menu explicitly.
+  const closeProjectMenu = () => {
+    setProjectMenuOpenId(null);
+    setProjectMenuSource(null);
+    requestAnimationFrame(() => projectMenuReturnRef.current?.focus());
   };
   const onProjectContextMenu = (event: ReactMouseEvent<HTMLElement>, id: string, source: "card" | "rail") => {
     event.preventDefault();
@@ -959,7 +988,7 @@ export default function Sidebar() {
             aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
             onClick={(event) => {
               event.stopPropagation();
-              startFreshSession(p.id);
+              startFreshSession(laneIdOf(p.id));
               closeDrawer();
             }}
           ><Icon.plus /></button>
@@ -975,7 +1004,7 @@ export default function Sidebar() {
             }}
             returnFocusRef={projectMenuReturnRef}
             entries={projectMenuEntries(p)}
-            footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />}
+            footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id, closeMenu: closeProjectMenu }} />}
           >
             {(trigger) => (
               <button
@@ -1097,7 +1126,7 @@ export default function Sidebar() {
                     }}
                     returnFocusRef={projectMenuReturnRef}
                     entries={projectMenuEntries(candidate)}
-                    footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: candidate.id }} />}
+                    footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: candidate.id, closeMenu: closeProjectMenu }} />}
                   >
                     {(trigger) => (
                       <Tooltip
@@ -1219,6 +1248,7 @@ export default function Sidebar() {
               <div className="sidebar-drawer-tools" role="toolbar" aria-label={tr("sidebar.listOptions")}>
                 {/* Phone entry point: the header collapses on phones, so the
                     drawer carries the Space switcher instead. */}
+                <DesktopServerSwitcher />
                 <SpaceSwitcher />
                 <IconButton
                   icon={SearchIcon}
@@ -1231,7 +1261,7 @@ export default function Sidebar() {
                     icon={ComposeIcon}
                     label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
                     className="sidebar-drawer-tool sidebar-drawer-tool-compose"
-                    onClick={() => { startFreshSession(project.id); closeDrawer(); }}
+                    onClick={() => { startFreshSession(laneIdOf(project.id)); closeDrawer(); }}
                   />
                 )}
                 <Menu
@@ -1353,7 +1383,7 @@ export default function Sidebar() {
               label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
               className="sidebar-new-session"
               onClick={() => {
-                startFreshSession(project.id);
+                startFreshSession(laneIdOf(project.id));
                 closeDrawer();
               }}
             />
@@ -1423,7 +1453,7 @@ export default function Sidebar() {
                 return (
                   <SessionList
                     key={p.id}
-                    projectId={p.id}
+                    projectId={laneIdOf(p.id)}
                     query={projectMatches ? "" : query}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
@@ -1443,8 +1473,9 @@ export default function Sidebar() {
             if (effectiveViewMode === "rail") {
               return (
                 <div key={p.id} data-project-id={p.id} className="sidebar-focused-sessions">
+                  <PrivateRoomSwitch project={p} />
                   <SessionList
-                    projectId={p.id}
+                    projectId={laneIdOf(p.id)}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
@@ -1458,7 +1489,7 @@ export default function Sidebar() {
               return (
                 <div key={p.id} data-project-id={p.id} className="sidebar-focused-sessions">
                   <SessionList
-                    projectId={p.id}
+                    projectId={laneIdOf(p.id)}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
@@ -1484,8 +1515,9 @@ export default function Sidebar() {
                 {card}
                 {expandedTrees.has(p.id) && (
                   <div className="project-tree-sessions" data-arrange-control="">
+                    <PrivateRoomSwitch project={p} />
                     <SessionList
-                      projectId={p.id}
+                      projectId={laneIdOf(p.id)}
                       query={projectQuery}
                       attentionOnly={attentionOnly}
                       dateFilter={dateFilter}

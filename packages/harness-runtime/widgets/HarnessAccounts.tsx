@@ -5,6 +5,8 @@ import { invalidateRuntimeCatalogs, readHarnessSnapshots } from "@polyth/models/
 import { AddIcon, Button, confirmAlert, DeleteIcon, Dialog, EditIcon, IconButton, KeyIcon, Menu, MoreIcon, Notice, SharedIcon, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { CheckGroup, EmptyState, Section, Seg } from "../../../apps/web/src/components/settings/parts.tsx";
 import { useHarnessSignIn, useSetupProjectId } from "./HarnessSignIn.tsx";
+import { hostTranslate } from "./englishTranslate.ts";
+import { signInExpiryNote } from "./presentation.ts";
 import {
   accessBody,
   accessDraftFrom,
@@ -114,6 +116,10 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
     const usable = rowUsable(row);
     const plan = row.status.plan ? t("plan", { plan: `${row.status.plan.charAt(0).toUpperCase()}${row.status.plan.slice(1)}` }) : "";
     const detail = [row.status.email, plan].filter(Boolean).join(" · ");
+    // A login within 10 days of its sign-in end says so, and its sign-in
+    // button becomes the main action.
+    const expiry = usable && row.status.loggedIn === true ? signInExpiryNote(row.status.expiresAt, hostTranslate(host.ui.locale.translate), host.ui.locale.get()) : undefined;
+    const renew = expiry !== undefined && expiry.level !== "none";
     // An account the caller can't use keeps a neutral dot: its sign-in isn't theirs to fix.
     const state = !usable ? "off" : row.status.loggedIn === true ? "ready" : row.status.loggedIn === false ? "auth-required" : "unknown";
     const canEdit = row.removable && list.manageable;
@@ -126,11 +132,11 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
           </form>
         : <span className="pkg-harnesses-accounts-name">
             <span className="pkg-harnesses-accounts-title"><strong>{label}</strong></span>
-            <small><span className="pkg-harnesses-status" data-state={state}>{usable ? stateLabel(row, t) : t("state.unavailable")}</span>{detail && <span>{detail}</span>}</small>
+            <small><span className="pkg-harnesses-status" data-state={state}>{usable ? stateLabel(row, t) : t("state.unavailable")}</span>{detail && <span>{detail}</span>}{renew && <span className="pkg-harnesses-expiry" data-level={expiry.level} title={expiry.date}>{expiry.text}</span>}</small>
             {row.accessEditable && <small className="pkg-harnesses-accounts-access">{t("accessLine", { summary: accessSummary(row, choices.people, choices.spaces, t) })}</small>}
           </span>}
       {renaming?.id !== row.id && <span className="pkg-harnesses-accounts-actions">
-        {row.signInCommand && usable && <Button size="sm" variant={row.status.loggedIn === true ? "ghost" : "primary"} iconStart={KeyIcon} disabled={Boolean(busy) || !list.manageable} onClick={() => signIn(row)}>{row.status.loggedIn === true ? t("signInAgain") : t("signIn")}</Button>}
+        {row.signInCommand && usable && <Button size="sm" variant={row.status.loggedIn === true && !renew ? "ghost" : "primary"} iconStart={KeyIcon} disabled={Boolean(busy) || !list.manageable} onClick={() => signIn(row)}>{row.status.loggedIn === true ? t("signInAgain") : t("signIn")}</Button>}
         {row.accessEditable && <Button size="sm" variant="ghost" iconStart={SharedIcon} disabled={Boolean(busy)} aria-label={t("accessAria", { name: label })} onClick={() => { setFailure(""); setEditingAccess(row); }}>{t("access")}</Button>}
         {canEdit && <Menu label={t("menuLabel", { name: label })} align="end" entries={[
           { id: "rename", label: t("rename"), icon: EditIcon, disabled: Boolean(busy), onSelect: () => setRenaming({ id: row.id, name: row.name }) },

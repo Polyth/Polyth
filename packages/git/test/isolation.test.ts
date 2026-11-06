@@ -2044,6 +2044,53 @@ test("session deletion releases owned execution even when its workspace is absen
   assert.equal(releases, 1, "an absent checkout does not prove execution release");
 });
 
+test("session deletion removes a checkout whose branch an agent rewrote or left mid-rebase", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const rewritten = await sessions.snapshot((await isolation.createIsolatedSession({ projectId: "p1" })).id);
+  const detached = await sessions.snapshot((await isolation.createIsolatedSession({ projectId: "p1" })).id);
+  // The recorded base is no longer an ancestor: `inspectOwned` calls this unowned.
+  runGit(rewritten.isolation!.worktreePath, "commit", "-q", "--amend", "--allow-empty", "-m", "rewritten");
+  runGit(detached.isolation!.worktreePath, "checkout", "-q", "--detach");
+
+  await isolation.cleanupForSessionDelete(rewritten, async () => {});
+  await isolation.cleanupForSessionDelete(detached, async () => {});
+
+  for (const session of [rewritten, detached]) {
+    assert.equal(existsSync(session.isolation!.worktreePath), false);
+    assert.equal(await git.readRef(root, `refs/heads/${session.isolation!.worktreeBranch}`), null);
+  }
+  assert.equal(runGit(root, "worktree", "list").split("\n").length, 1);
+});
+
+test("session deletion clears what a checkout removed by hand leaves behind", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const session = await sessions.snapshot((await isolation.createIsolatedSession({ projectId: "p1" })).id);
+  const worktreePath = session.isolation!.worktreePath;
+  writeFileSync(join(worktreePath, "only-copy.txt"), "work\n");
+  runGit(worktreePath, "add", ".");
+  runGit(worktreePath, "commit", "-qm", "commits of its own");
+  const adminDir = runGit(worktreePath, "rev-parse", "--absolute-git-dir");
+  rmSync(worktreePath, { recursive: true, force: true });
+  assert.equal(existsSync(adminDir), true, "Git still has an entry for it");
+
+  await isolation.cleanupForSessionDelete(session, async () => {});
+
+  assert.equal(await git.readRef(root, `refs/heads/${session.isolation!.worktreeBranch}`), null);
+  assert.equal(existsSync(adminDir), false);
+  assert.equal(existsSync(resolve(worktreePath, "..")), false, "the emptied isolate folder is removed");
+});
+
+test("session deletion survives a repository that no longer exists", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const session = await sessions.snapshot((await isolation.createIsolatedSession({ projectId: "p1" })).id);
+  rmSync(resolve(session.isolation!.worktreePath, ".."), { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
+  await isolation.cleanupForSessionDelete(session, async () => {});
+});
+
 test("startup releases merged receipts only for known sessions without isolation", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root);

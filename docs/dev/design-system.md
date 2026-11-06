@@ -124,7 +124,10 @@ Always pair with `--motion-ease` (stack motion with `--motion-stack-ease`, windo
 Spinner/Skeleton, the composer's context liquid (it drifts only while a
 turn runs), the subagent state dot's ping (only while a chat's subagents
 work; a waiting dot holds still), the arc travelling round a working agent's
-mark (only while its run works; reduced motion leaves the arc still), the launch veil's breathing mark (only while a boot or connect
+mark (only while its run works; reduced motion leaves the arc still), the
+dictation recording's waveform (only while a recording runs, drawn from the
+measured voice level; reduced motion, Reduce animations and Low resource mode
+show a still dot instead), the launch veil's breathing mark (only while a boot or connect
 is still running after its status delay) and the one-shot puff of smoke that
 confirms a rail icon dragged away from every rail is gone (`railDrag.ts`, about
 480ms, none under reduced motion), which are activity semantics. A
@@ -220,6 +223,10 @@ the shell and every package stylesheet.
   `:not([aria-disabled="true"])`.
 - **Busy** (`aria-busy`, set by `busy`) keeps the variant, shows the spinner
   and uses `cursor: progress`; the button only stops answering the pointer.
+  The spinner takes the leading glyph's exact box (`.ui-btn-mark`), so a
+  pending action never changes width or moves its label or its neighbours,
+  and its ring is drawn from the button's own ink (`currentColor`) so it
+  reads on a filled primary as well as on a quiet chip.
 
 ## 8. Choosing an overlay
 
@@ -307,7 +314,9 @@ All from `apps/web/src/components/ui` (see `index.ts`):
   given; the new-session location row passes projects ranked by recent chats
   (`apps/web/src/projectRecency.ts`): each top-level chat of the last 30 days
   adds a weight that halves every 7 days, ties go to the newest chat, and
-  projects without recent chats keep registry order after the rest.
+  projects without recent chats keep registry order after the rest. The
+  navigators' *Frequently used* sort and the project lists that follow it use
+  the same ranking.
 - `Menu` — `label`, `entries: (MenuAction | "separator")[]`, render-prop
   trigger receiving `{ref, onClick, aria-*}`. The popover is a flex column
   whose single `--menu-row-gap` (`--space-1`) spaces every child, so a
@@ -337,12 +346,15 @@ All from `apps/web/src/components/ui` (see `index.ts`):
   close button; body owns overflow. `AlertDialog` stays for confirm/prompt.
 - `ResponsiveOverlay` — §8. `Sheet`/`SheetRow`/`SheetSection` re-exported for
   direct phone-surface composition.
+  `Sheet` takes `headerTrailing` for controls in its title row that are not one
+  text `action` (a ⋯ `Menu`), and `swipeBack` for a `dismiss="back"` destination
+  that follows a finger from the edge in hosts that own that gesture.
 - `Tabs` + `TabPanel` — `tabs/value/onChange/label`, arrow-key navigation,
   `idBase` links panels. The selected tab keeps its fill under the stuck
   `:hover` touch leaves on the tapped tab: the global touch reset that
   flattens quiet buttons skips `[aria-selected="true"]`, as it skips
   `[aria-pressed="true"]`.
-- `Tooltip` — `content`, wraps its trigger; hover (fine pointers, 350ms
+- `Tooltip` — `content`, wraps its trigger; hover (fine pointers, 700ms
   delay) + focus; the trigger must own its accessible name. `disabled`
   drops a pending or shown bubble while the trigger's context already shows
   the same thing (the project rail's tooltip while the sessions peek is

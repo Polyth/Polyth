@@ -41,7 +41,7 @@ const MODEL_SOURCE_ALIASES: Readonly<Record<string, string>> = {
 };
 
 export const canonicalSource = (id: string): string => SOURCE_ALIASES[sourceId(id)] ?? sourceId(id);
-const canonicalModelSource = (id: string): string =>
+export const canonicalModelSource = (id: string): string =>
   MODEL_SOURCE_ALIASES[sourceId(id)] ?? sourceId(id);
 
 export interface LimitSourceRef {
@@ -90,4 +90,17 @@ export function windowAppliesToModel(windowId: string, modelId: string | undefin
   if (slash < 0) return true;
   const have = new Set(words(modelId ?? ""));
   return words(windowId.slice(0, slash)).every((word) => have.has(word));
+}
+
+/** Whether a window meters this model on this source. On top of
+ *  `windowAppliesToModel`: Antigravity meters Google and third-party models in
+ *  separate `google-*` / `third-party-*` windows, so a Gemini model is never
+ *  blocked by (and never starts) the third-party window. */
+export function windowMetersModel(source: LimitSourceRef, windowId: string, modelID: string): boolean {
+  if (!windowAppliesToModel(windowId, modelID)) return false;
+  if (sourceFamily(source) !== "antigravity") return true;
+  const google = /gemini|gemma|google/i.test(modelID);
+  if (/^google[-_]/i.test(windowId)) return google;
+  if (/^third[-_]party[-_]/i.test(windowId)) return !google;
+  return true;
 }

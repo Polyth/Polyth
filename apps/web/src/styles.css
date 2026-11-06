@@ -2760,6 +2760,87 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   .composer-suggestion { animation: composer-suggestion-in var(--motion-normal) var(--motion-ease) both; }
 }
 @keyframes composer-suggestion-in { from { opacity: 0; transform: translate3d(0, 4px, 0); } to { opacity: 1; transform: none; } }
+/* A mentioned person who cannot open the chat: one plateless line of the pending
+   stack, on its grid. The sentence and its action read as one; × ends the line.
+   The sentence is the question, so it wraps rather than ellipsises. */
+.mention-access {
+  min-inline-size: 0; box-sizing: border-box;
+  margin: 0 0 var(--space-1);
+  padding-inline-start: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  padding-inline-end: calc(var(--composer-stack-end) - (max(var(--composer-stack-control), var(--hit-min)) - var(--icon-sm)) / 2);
+  color: var(--chat-ink-dim);
+  font-size: var(--font-composer-stack);
+}
+.mention-access-row {
+  display: flex; align-items: center;
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  min-block-size: var(--composer-stack-row);
+}
+.mention-access-mark.person-mark {
+  --person-mark: var(--icon-sm);
+  flex: none;
+  inline-size: var(--icon-sm); block-size: var(--icon-sm);
+  font-size: calc(var(--icon-sm) * .62);
+}
+.mention-access-check { display: inline-grid; flex: none; place-items: center; color: var(--chat-ink-green); }
+.mention-access-text { flex: 0 1 auto; min-inline-size: 0; line-height: 1.25; overflow-wrap: anywhere; text-wrap: pretty; }
+.mention-access[data-attention] .mention-access-text {
+  color: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-dim), var(--text));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mention-access { animation: composer-suggestion-in var(--motion-normal) var(--motion-ease) both; }
+  .mention-access[data-attention] .mention-access-text { animation: mention-access-nudge var(--motion-surface) var(--motion-ease); }
+}
+@keyframes mention-access-nudge { 0% { opacity: .35; } 100% { opacity: 1; } }
+.mention-access-action {
+  display: inline-flex; flex: none; align-items: center; gap: 2px;
+  min-block-size: max(var(--composer-stack-control), var(--hit-min));
+  padding: 0 var(--space-1);
+  border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--chat-ink-dim);
+  font: inherit; font-weight: 550; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.mention-access-action.is-primary { color: var(--chat-ink-accent); }
+.mention-access-action:disabled { opacity: .6; cursor: default; }
+@media (hover: hover) {
+  .mention-access-action:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.mention-access-action:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+.mention-access-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.mention-access-level.is-static { flex: none; font-weight: 550; }
+.mention-access .mention-access-dismiss {
+  flex: none; margin-inline-start: auto; color: var(--chat-ink-muted);
+  inline-size: max(var(--composer-stack-control), var(--hit-min)); block-size: max(var(--composer-stack-control), var(--hit-min));
+  border-radius: var(--radius-control);
+}
+/* The level menu is about as wide as its sentence. Where the two do not fit side
+   by side it takes a row under the words, rather than squeezing them into a
+   column one word wide; the × stays beside the first line. */
+.mention-access { container-type: inline-size; }
+@container (max-width: 34rem) {
+  .mention-access[data-state="granted"] .mention-access-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 0;
+  }
+  .mention-access[data-state="granted"] .mention-access-text { grid-area: 1 / 2; }
+  .mention-access[data-state="granted"] .mention-access-dismiss { grid-area: 1 / 3; }
+  .mention-access[data-state="granted"] .mention-access-level {
+    grid-area: 2 / 2;
+    justify-self: start;
+    margin-block-start: calc(var(--space-2) * -1);
+    margin-inline-start: calc(var(--space-1) * -1);
+  }
+}
+.mention-access-note {
+  margin: 0;
+  padding-inline-start: calc(var(--composer-stack-text) - var(--composer-stack-mark) + var(--icon-sm) / 2);
+  padding-inline-end: var(--space-1);
+  color: var(--chat-ink-muted);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
 .composer-mode-label {
   color: var(--accent); font-size: var(--font-meta); font-weight: 600; padding: 6px 10px 0;
 }
@@ -5487,6 +5568,11 @@ body[data-density="balanced"] .composer textarea { min-height: 44px; }
 body[data-density="compact"] .composer textarea { min-height: 40px; }
 body[data-chatwidth="wide"] { --chat-measure: 1180px; }
 body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, body[data-chatwidth="wide"] .tool-card { max-width: 100%; }
+/* Ultrawide keeps a readable cap instead of going edge to edge: on a 2560 or
+ * 3440 px screen the column is a centred 1600px, and on a narrower window it
+ * meets the gutters like Wide. */
+body[data-chatwidth="ultrawide"] { --chat-measure: 1600px; }
+body[data-chatwidth="ultrawide"] .bubble, body[data-chatwidth="ultrawide"] .reasoning, body[data-chatwidth="ultrawide"] .tool-card { max-width: 100%; }
 
 /* ---------- a11y primitives + IME-safe composer ---------- */
 .sr-only {
@@ -5579,14 +5665,67 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-dialog-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; container-type: inline-size; }
 .folder-list[aria-busy="true"] { opacity: 0.6; pointer-events: none; }
 .folder-dialog-head {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  display: flex; flex-direction: column; gap: 0;
   padding: 16px 18px 6px;
 }
+.folder-dialog-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
 .folder-dialog-heading { flex: 1; min-width: 0; }
-.folder-dialog-head > .folder-back { margin-inline-start: -6px; }
 .folder-dialog-title { font-size: var(--font-window-title); font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; }
 .folder-dialog-subtitle { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); margin-top: 3px; }
-.folder-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 18px 10px; }
+/* Stepped picker (project setup step 2): the same head stack step 1 renders —
+   flow label with the one close control on an icon-height line, then the
+   title and hint — so the title column never moves between steps. */
+.folder-dialog-step {
+  min-width: 0;
+  color: var(--accent);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+.folder-dialog-step-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: var(--control-h-sm);
+}
+.folder-dialog-head-stepped .folder-dialog-title {
+  margin: 6px 0 0;
+  font-size: var(--font-heading);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+.folder-dialog-head-stepped .folder-dialog-subtitle {
+  max-width: 62ch;
+  margin: 4px 0 0;
+}
+@media (max-width: 700px) {
+  .folder-dialog-head-stepped {
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid color-mix(in srgb, var(--material-glass-border) 72%, transparent);
+  }
+  /* The same head frame as desktop: step 2 holds step 1's height so the list
+     starts at the same place whichever way the person moves through the flow. */
+  .project-setup-head,
+  .folder-dialog-head-stepped { min-height: 140px; }
+}
+@media (min-width: 701px) {
+  .folder-dialog-head-stepped { padding: var(--space-5) var(--space-5) var(--space-4); border-bottom: 1px solid var(--hair); }
+  .folder-dialog-body-stepped :is(.folder-dialog-head, .folder-toolbar, .folder-foot) { padding-inline: var(--space-5); }
+  /* One head frame: step 1's two-line hint sets the height, and step 2 holds
+     the same frame so the body never moves when the flow advances. */
+  .project-setup-head,
+  .folder-dialog-head-stepped { min-height: 140px; }
+  .folder-dialog-body-stepped :is(.folder-list, .folder-error, .folder-missing) { margin-inline: var(--space-5); }
+  .folder-dialog-body-stepped .folder-list { height: auto; flex: 1 1 auto; min-height: 0; }
+  /* One dialog box for the whole flow: advancing a step must not resize it. */
+  .project-setup-flow-step,
+  .folder-dialog-stepped { height: min(608px, calc(100dvh - 96px)); }
+}
+.folder-toolbar { display: flex; flex: none; align-items: center; gap: 8px; padding: 6px 18px 10px; }
 .folder-toolbar .ui-icon-btn { flex-shrink: 0; }
 .folder-location { gap: 4px; padding-bottom: 4px; }
 .folder-location > .folder-path { margin-inline-start: 4px; }
@@ -5623,7 +5762,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .folder-crumb:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .folder-crumbs-edit { flex: 1 1 auto; align-self: stretch; min-width: 20px; padding: 0; border: 0; background: none; cursor: text; }
-.folder-location .folder-options { margin-inline-start: 2px; position: relative; }
+.folder-location .folder-options { margin-inline-start: 4px; position: relative; }
 /* A non-default view (hidden folders shown) marks the ⋯ trigger. */
 .folder-options[data-active]::before {
   position: absolute; top: 5px; inset-inline-end: 5px; width: 6px; height: 6px;
@@ -5652,13 +5791,42 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-row-enter > .ui-icon { color: var(--faint); }
 .folder-empty { color: var(--muted); font-size: var(--font-meta); padding: 18px 12px; text-align: center; }
 .folder-error { margin: 0 18px; }
+/* A typed location that does not exist yet: a notice above the bar, not an
+   error, because the primary action is the way out of it. */
+.folder-missing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 18px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--accent-line) 75%, var(--hair));
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
 /* One bottom bar: ways to add on the start side, primary on the end side. */
 .folder-foot {
-  display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: var(--space-2) var(--space-3);
+  display: flex; flex: none; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: var(--space-2) var(--space-3);
   margin-top: 2px; padding: 12px 18px 16px;
   border-top: 1px solid var(--hair);
 }
 .folder-foot .ghost-link { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+/* Secondary row of the bottom bar: the flow's Back, then the ways to add. */
+.folder-foot-secondary {
+  display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center;
+  gap: var(--space-2) var(--space-3); min-width: 0;
+}
+.folder-foot .folder-back { flex: none; }
+/* An armed source owns the remaining height and scrolls its own fields. */
+.folder-dialog-body[data-source-armed] .folder-foot {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .folder-open-btn { flex: none; max-width: min(46%, 300px); margin-inline-start: auto; }
 .folder-open-btn .ui-btn-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -9076,6 +9244,9 @@ html[dir="rtl"] .menu-popup button {
 html[dir="rtl"] .settings-nav-item {
   text-align: right;
 }
+html[dir="rtl"] .settings-nav-chevron {
+  transform: scaleX(-1);
+}
 html[dir="rtl"] .sidebar-search > svg,
 html[dir="rtl"] .side-search svg {
   left: auto;
@@ -9215,7 +9386,7 @@ html[dir="rtl"] input[type="number"] {
 .settings-nav-list { padding: 0 8px 10px; }
 .settings-nav-group { padding: 12px 10px 4px; font-size: var(--font-meta); }
 .settings-nav-item { min-height: var(--control-h-sm); display: flex; align-items: center; padding: 0 var(--space-2); border-radius: var(--radius-control); font-size: var(--font-body); }
-.settings-nav-item.active { color: var(--accent); background: var(--accent-wash); font-weight: 650; }
+.settings-nav-item.active { color: var(--text); background: var(--accent-wash); font-weight: 650; }
 .settings-nav-icon {
   display: inline-grid;
   place-items: center;
@@ -9756,9 +9927,8 @@ html[dir="rtl"] input[type="number"] {
   .settings-nav > .nav-foot { display: none; }
   .settings-nav-search { flex: none; margin: 12px 12px 8px; }
   .settings-nav-list {
-    flex: 1; min-height: 0; padding: 0 10px 14px;
+    padding: 0 10px 14px;
     flex-direction: column; align-items: stretch; gap: 2px;
-    overflow-x: hidden; overflow-y: auto;
   }
   .settings-nav-group { display: block; }
   .settings-nav-item { flex: none; width: 100%; min-height: 42px; padding-inline: 12px; white-space: normal; }
@@ -10347,6 +10517,8 @@ min-height: var(--tap);
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* The base Send holds a fixed disc through flex-basis, which beats `width`. */
+  flex: 0 1 auto;
   width: auto;
   max-inline-size: 220px;
   padding-inline: 12px 15px;
@@ -12334,6 +12506,11 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     line-height: var(--font-meta-lh);
   }
 }
+.session-context-bar > .ui-tooltip-host {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
 .context-isolation-control {
   flex: none;
   min-height: max(var(--control-h-sm), var(--hit-min));
@@ -12706,6 +12883,13 @@ width: var(--tap);
     color: var(--control-disabled-ink);
   }
   .composer-mobile .composer-action-label { display: none; }
+  /* Without its label the people Send is the same disc as any other. */
+  .composer-mobile .composer-rail .send.composer-people-send {
+    flex: 0 0 var(--composer-action-size);
+    width: var(--composer-action-size);
+    padding-inline: 0;
+    justify-content: center;
+  }
 
   /* Fresh and in-conversation chats use this same composer gutter. */
   .composer-chat.composer-mobile {
@@ -12925,7 +13109,8 @@ html[data-modal-surface="open"] body {
   overscroll-behavior: none;
 }
 
-.settings-mobile-nav-head { display: none; }
+.settings-nav-scroll,
+.settings-mobile-nav-head { display: contents; }
 .dialog-panel,
 .settings-pane,
 .settings-pane-body,
@@ -13025,23 +13210,6 @@ min-height: var(--tap);
     border: 0;
     border-radius: 0;
   }
-  .settings-mobile-nav-head {
-    min-height: calc(var(--tap) + var(--safe-top));
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex: none;
-    padding: var(--safe-top) var(--space-2) 0;
-    border-bottom: 0;
-    background: transparent;
-  }
-  .settings-mobile-nav-head strong {
-    min-width: 0;
-    flex: 1;
-    padding-bottom: 0;
-    font-size: max(var(--font-meta), 14px);
-  }
-  .settings-mobile-nav-head .close-btn,
   .settings-mobile-page .close-btn,
   .settings-mobile-back {
     min-width: var(--tap);
@@ -13184,7 +13352,8 @@ width: 100%; min-height: var(--tap);
   .folder-dialog-body { overflow: hidden; }
   .folder-dialog-head {
     flex: none;
-    padding: max(12px, var(--safe-top)) 14px 8px;
+    /* One phone gutter: head, toolbar, list and foot all start/end here. */
+    padding: max(12px, var(--safe-top)) var(--space-3) 8px;
   }
   .folder-toolbar {
     flex: none;
@@ -13208,7 +13377,8 @@ width: 100%; min-height: var(--tap);
     height: auto;
     min-height: 120px;
     flex: 1;
-    margin-inline: 8px;
+    /* Same gutter as the head, toolbar and foot above/below it. */
+    margin-inline: var(--space-3);
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
@@ -13219,7 +13389,8 @@ width: 100%; min-height: var(--tap);
     padding-block: 5px;
   }
   .folder-row-meta { display: none; }
-  .folder-error { margin-inline: 12px; }
+  .folder-error,
+  .folder-missing { margin-inline: 12px; }
   .folder-foot {
     flex: none;
     flex-wrap: wrap;
@@ -13234,8 +13405,35 @@ width: 100%; min-height: var(--tap);
   .folder-newname { width: 100%; }
   .folder-newname input { min-width: 0; flex: 1; }
   .folder-foot :is(button, .ghost-link) { min-height: var(--tap); }
-  /* Phones stack the ways to add over a full-width primary action. */
-  .folder-foot > .folder-source-row { flex-basis: 100%; }
+  /* Phones stack [Back + ways to add] over a full-width primary action. */
+  .folder-foot-secondary { flex: 1 1 100%; }
+  /* Inside the project flow the phone bar is one row — Back, the ways to add
+     and the primary action — so step 2 keeps step 1's footer height. */
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-foot { flex-wrap: nowrap; }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-foot-secondary {
+    flex: 0 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+  }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-back {
+    width: var(--tap);
+    min-width: var(--tap);
+    padding: 0;
+    justify-content: center;
+  }
+  .folder-dialog-body-stepped .folder-back-label { display: none; }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-new-folder { flex: none; }
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-open-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    margin-inline-start: 0;
+  }
+  /* The create offer names the folder it will make; give it the full bar
+     rather than an ellipsis. */
+  .folder-dialog-body-stepped[data-missing] .folder-foot { flex-wrap: wrap; }
+  .folder-dialog-body-stepped[data-missing] .folder-foot-secondary { flex: 1 1 100%; }
+  .folder-dialog-body-stepped[data-missing] .folder-open-btn { flex: 1 1 100%; }
   .folder-open-btn { flex: 1 1 100%; max-width: none; margin-left: auto; }
   .folder-source-row :is(button, .ghost-link) { min-height: var(--tap); }
   /* Ways to add are one swipeable row of soft pills above the primary
@@ -13249,7 +13447,9 @@ width: 100%; min-height: var(--tap);
   .folder-dialog-body:not([data-source-armed]) .folder-source-row::-webkit-scrollbar { display: none; }
   .folder-source-row > .folder-source-chip {
     flex: none;
-    border-radius: var(--radius-round);
+    /* The footer's other buttons use the control corner; a lone pill here
+       made New folder look like a different control family. */
+    border-radius: var(--radius-control);
     background: var(--surface-overlay-hover);
   }
   .folder-source-panel { padding: var(--space-3) 0 0; }
@@ -14996,22 +15196,17 @@ width: 100%;
 .package-window-resize--n, .package-window-resize--s { inset-inline: var(--space-3); height: var(--package-window-resize-hit); }
 .package-window-resize--n { inset-block-start: 0; cursor: ns-resize; }
 .package-window-resize--s { inset-block-end: 0; cursor: ns-resize; }
-.package-window-resize--e, .package-window-resize--w { inset-block: var(--space-3); width: var(--package-window-resize-hit); }
-.package-window-resize--e { inset-inline-end: 0; cursor: ew-resize; }
-.package-window-resize--w { inset-inline-start: 0; cursor: ew-resize; }
-.package-window-resize--ne, .package-window-resize--nw,
-.package-window-resize--se, .package-window-resize--sw { width: var(--space-3); height: var(--space-3); }
-/* Corners are logical like the edges ("e" = inline end), so an RTL locale or a
-   mirrored shell (shellDirection.ts) puts them on the matching side. */
-.package-window-resize--ne { inset-block: 0 auto; inset-inline: auto 0; cursor: nesw-resize; }
+/* No inline-end (content/scrollbar) edge: a resize hit area there intercepted
+   wheel and touch scrolling and left an empty strip beside the window. The
+   window resizes from its inline start, top/bottom edges and start corners. */
+.package-window-resize--w { inset-block: var(--space-3); width: var(--package-window-resize-hit); inset-inline-start: 0; cursor: ew-resize; }
+.package-window-resize--nw, .package-window-resize--sw { width: var(--space-3); height: var(--space-3); }
+/* Corners are logical like the edges ("w" = inline start), so an RTL locale or
+   a mirrored shell (shellDirection.ts) puts them on the matching side. */
 .package-window-resize--nw { inset-block: 0 auto; inset-inline: 0 auto; cursor: nwse-resize; }
-.package-window-resize--se { inset-block: auto 0; inset-inline: auto 0; cursor: nwse-resize; }
-.rail-dynamic > .package-window-resize--e,
-.rail-dynamic > .package-window-resize--ne,
-.rail-dynamic > .package-window-resize--se { inset-inline-end: var(--package-window-seam-padding); }
 .package-window-resize--sw { inset-block: auto 0; inset-inline: 0 auto; cursor: nesw-resize; }
-.package-window-resize:is(.package-window-resize--ne, .package-window-resize--sw):dir(rtl) { cursor: nwse-resize; }
-.package-window-resize:is(.package-window-resize--nw, .package-window-resize--se):dir(rtl) { cursor: nesw-resize; }
+.package-window-resize--sw:dir(rtl) { cursor: nwse-resize; }
+.package-window-resize--nw:dir(rtl) { cursor: nesw-resize; }
 .package-window-resize:focus-visible { outline: var(--focus-ring); outline-offset: calc(-1 * var(--package-window-resize-hit)); }
 html[data-package-window-resizing="true"] { user-select: none; cursor: grabbing; }
 html[data-package-window-resizing="true"] :is(.rail-workspace, .app-shell:has(.rail-dock-bottom)) { transition: none; }
@@ -16875,7 +17070,7 @@ html[dir="rtl"] .reasoning-preview {
   .msg.assistant .bubble { font-size: var(--font-body); line-height: 1.6; }
   .execution-summary.tool-disclosure {
     min-height: 36px;
-    grid-template-columns: 18px minmax(0, 1fr) auto 67px 14px;
+    grid-template-columns: 18px minmax(0, 1fr) auto 67px 16px;
     gap: 5px;
     padding-inline: 0;
   }
@@ -17006,6 +17201,17 @@ html[dir="rtl"] .reasoning-preview {
 .ui-btn--block { display: flex; width: 100%; }
 .ui-btn-label { overflow: hidden; text-overflow: ellipsis; }
 .ui-btn .ui-icon { color: currentColor; }
+/* A busy button keeps its geometry: the spinner sits in the leading glyph's
+   own box, and the ring reads on every variant (the accent fill included)
+   because it is drawn from the button's ink. The `body` step outranks the
+   theme styles' own spinner track, which would vanish on an accent fill. */
+.ui-btn-mark { display: inline-grid; flex: none; place-items: center; }
+.ui-btn-mark--sm { width: var(--icon-sm); height: var(--icon-sm); }
+.ui-btn-mark--md { width: var(--icon-md); height: var(--icon-md); }
+body .ui-btn .ui-spinner {
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+}
 
 .ui-btn--primary {
   background: linear-gradient(135deg, var(--accent-hi), var(--accent));
@@ -17517,13 +17723,14 @@ html[dir="rtl"] .reasoning-preview {
   position: fixed;
   z-index: var(--z-tooltip);
   max-width: 280px;
-  padding: 5px 9px;
-  background: var(--material-glass);
-  border: 1px solid var(--material-glass-border);
-  border-radius: calc(var(--radius-control) - 2px);
-  box-shadow: var(--shadow-sm);
-  color: var(--text-dim);
-  font-size: var(--font-meta);
+  padding: 7px 11px;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-control);
+  box-shadow: 0 4px 8px rgba(67, 78, 92, 0.16), 0 8px 16px rgba(55, 67, 82, 0.14);
+  color: #fff;
+  font-size: calc(var(--font-meta) + 2pt);
+  font-weight: 500;
   line-height: var(--font-meta-lh);
   pointer-events: none;
   animation: fade var(--motion-fast) var(--motion-ease);
@@ -17563,15 +17770,6 @@ html[dir="rtl"] .reasoning-preview {
       color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
-  }
-  /* Small, close-to-anchor overlays: lighter blur reads better at this size
-     than the full sheet-grade amount. */
-  :is(.ui-tooltip) {
-    background: var(--material-glass-texture), radial-gradient(140% 140% at 50% 50%,
-      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-fill), transparent) 0%,
-      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
-    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
-    backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
   }
   /* Chat-turn cards: one per assistant turn, not a repeated list row, so a
      lighter blur is worth the cost here (unlike the excluded list surfaces
@@ -17644,11 +17842,11 @@ html[dir="rtl"] .reasoning-preview {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .ui-tooltip, .dialog-panel, .sheet, .workspace-customize-panel, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip){
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .dialog-panel, .sheet, .workspace-customize-panel, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip){
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .ui-tooltip, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
   body[data-desktop-low-resource="true"] :is(.dialog-panel, .sheet, .composer-card, .workspace-customize-panel, .notify-card, .sync-catch-up){ background: var(--material-glass-strong); }
   body[data-desktop-low-resource="true"] .task-list { background: var(--surface-activity); }
   body[data-desktop-low-resource="true"] :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
@@ -17839,6 +18037,11 @@ html[dir="rtl"] .reasoning-preview {
    removed so its glass/border chrome never shows as an empty sliver. */
 .app:has(> .app-shell > .railbar[data-rail-strip="none"]) { --rail-strip-width-right: 0px; }
 .railbar:empty { display: none; }
+/* A closed window stays mounted (and hidden) to keep its state, so the host is
+   no longer :empty. With no strip and no pane on screen it still has nothing
+   to show, and in flow its look's margins and borders would take that room
+   from the chat beside it. */
+.railbar[data-rail-motion="idle"][data-rail-strip="none"] { display: none; }
 
 /* The launcher strip owns the viewport edge; scrolling belongs to the pane
    beside it, never underneath the strip. */
@@ -18032,7 +18235,7 @@ html[dir="rtl"] .reasoning-preview {
 /* The chevron owns the last track even when there is no diff to show, so
    every summary's chevron lines up at the same edge. */
 .ui-run-summary > .ui-run-summary-chevron { grid-column: -2 / -1; }
-.ui-run-summary-mark { width: var(--icon-md); height: var(--icon-md); display: grid; place-items: center; color: var(--muted); }
+.ui-run-summary-mark { flex: none; width: var(--icon-md); height: var(--icon-md); display: grid; place-items: center; color: var(--muted); }
 .ui-run-summary[data-state="active"] .ui-run-summary-mark,
 .ui-run-summary[data-state="completed"] .ui-run-summary-mark { color: var(--green); }
 .ui-run-summary[data-state="waiting"] .ui-run-summary-mark { color: var(--amber); }
@@ -18326,6 +18529,20 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   align-self: center;
   display: inline-flex;
   margin-inline-end: var(--activity-bleed);
+}
+/* Every block's chevron ends on the same edge, so Stop stands before it and
+   nothing on the line moves when Stop arrives. The chevron stays part of the
+   line's button; the block is its containing box because a folded summary is
+   not positioned. Where the summary is a pill that hugs its words (chip, Air),
+   the chevron stays in the pill and Stop follows it. */
+:where(body:not([data-activity-style="chip"], [data-shell-look="air"])) .activity-group.has-live-stop > .ui-run-summary > .ui-run-summary-chevron {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: var(--activity-bleed);
+  margin-block: auto;
+}
+:where(body:not([data-activity-style="chip"], [data-shell-look="air"])) .activity-group.has-live-stop > .activity-live-stop {
+  margin-inline-end: calc(var(--activity-bleed) + var(--icon-sm) + var(--conversation-row-gap));
 }
 
 /* Reduced motion and low-resource mode keep the same line: it changes in
@@ -18640,7 +18857,8 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   padding-inline-end: var(--conversation-frame-inline-end);
 }
 /* The transcript's strip lane (the border its scrollbar sits in) is part of
-   that frame. */
+   that frame: the inline-end padding gives the lane's width back, so the
+   reading column keeps its place while the scrollbar stops before the strip. */
 .timeline {
   padding-inline-end: max(0px, calc(var(--conversation-frame-inline-end) - var(--timeline-strip-lane)));
 }
@@ -18664,6 +18882,17 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   :is(.stage-new, .focus-conversation):dir(rtl) {
     --conversation-frame-inline-start: max(var(--conversation-chrome-inset), var(--safe-right-clear));
     --conversation-frame-inline-end: max(var(--conversation-chrome-inset), var(--safe-left-clear));
+  }
+  /* This frame is not capped by the reading measure, so neither is the status
+     line: it ends with the composer under it. */
+  .agent-status-dock {
+    width: calc(100% - var(--conversation-frame-inline-start) - var(--conversation-frame-inline-end));
+  }
+  /* The bookmark rests under the floating session actions: the same frame edge,
+     the same diameter, so its icon stands under theirs. */
+  .prompt-bookmark {
+    --prompt-bookmark-size: max(var(--tap), var(--mobile-island-height));
+    inset-inline: var(--conversation-frame-inline-start) var(--conversation-frame-inline-end);
   }
 }
 @media (max-width: 620px) {
@@ -18743,21 +18972,25 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   .railbar[data-side-strip] > .rail-icon-col.plugin-strip { --side-strip-head: 120px; }
 }
-@container app-shell (min-width: 961px) and (max-width: 1400px) {
+@container app-shell (min-width: 961px) {
   .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
   .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
-    --conversation-frame-inline-end: calc(
-      max(var(--gutter), (100% - var(--chat-measure)) / 2)
-      + var(--control-h-sm) + var(--space-5)
+    /* At least the lane clear of the floating launcher strip, and the centred
+       measure when that is wider: a column that does not fit the workspace
+       must not lose its inline end to the strip lane, so it stays flush with
+       the composer and the header frame below it. */
+    --conversation-frame-inline-end: max(
+      calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
+      calc((100% - var(--chat-measure)) / 2)
     );
   }
   /* A mirrored shell floats the strip at the other edge. Chat's content keeps
      the document direction there, so the lane moves to its inline start. */
   .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
   .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
-    --conversation-frame-inline-start: calc(
-      max(var(--gutter), (100% - var(--chat-measure)) / 2)
-      + var(--control-h-sm) + var(--space-5)
+    --conversation-frame-inline-start: max(
+      calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
+      calc((100% - var(--chat-measure)) / 2)
     );
     --conversation-frame-inline-end: max(var(--gutter), (100% - var(--chat-measure)) / 2);
   }
@@ -18813,25 +19046,27 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
     max-width: var(--chat-measure);
   }
 }
-@media (min-width: 961px) and (max-width: 1400px) {
-  .app > .header {
+/* The floating launcher strip needs the same lane in the header frame at
+   every width, so the title and session status stay over the chat column even
+   when that column meets the gutters (Wide or Ultra wide on a narrower
+   window). With a pane open the strip is in flow and reserves nothing. */
+@media (min-width: 961px) {
+  .app:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .app-shell > .railbar[data-rail-strip="none"])) > .header {
     --conversation-frame-inline-end: calc(
       var(--workspace-pane-inline-size, 0px)
       + max(
-        var(--gutter),
+        calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
         calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
       )
-      + var(--control-h-sm) + var(--space-5)
     );
   }
-  .app[data-shell-mirror="true"] > .header {
+  .app[data-shell-mirror="true"]:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .app-shell > .railbar[data-rail-strip="none"])) > .header {
     --conversation-frame-inline-start: calc(
       var(--workspace-pane-inline-size, 0px)
       + max(
-        var(--gutter),
+        calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
         calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
       )
-      + var(--control-h-sm) + var(--space-5)
     );
     --conversation-frame-inline-end: calc(
       var(--sidebar-inline-size, 0px) + var(--space-2)
@@ -18840,9 +19075,6 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
         calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
       )
     );
-  }
-  .desktop-session-status {
-    max-width: calc(var(--chat-measure) - var(--control-h-sm) - var(--space-5));
   }
 }
 
@@ -19171,7 +19403,6 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       .ui-popover,
       .picker-pop,
       .menu-popup,
-      .ui-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
       .jump-latest
@@ -19370,7 +19601,6 @@ body[data-glass="off"] :is(
   .prompt-nav-panel,
   .selection-menu,
   .selection-dock,
-  .ui-tooltip,
   .turn-rate-limit .turn-rate-limit-action,
   .turn-rate-limit .turn-rate-limit-model .picker-chip,
   .jump-latest
@@ -19634,30 +19864,30 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     border: 0;
     background: transparent;
   }
+  /* The status bar stays clear: rows scroll under this edge, not under the
+     clock. On the layer itself, so the list keeps its place under a page. */
+  .settings-shell > .settings-nav { padding-block-start: var(--safe-top); }
+  /* The list is one scroller from the status bar down: the search row sits at
+     its top and leaves with the first rows. The results below keep their own
+     scroll, so a query fits the screen and the field stays in reach. */
+  .settings-nav-scroll {
+    min-height: 0;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .settings-mobile-nav-head {
-    min-height: calc(var(--control-h-lg) + var(--space-4) * var(--density-scale));
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-2);
     flex: none;
-    margin: calc(var(--safe-top) + var(--space-1)) calc(var(--space-4) * var(--density-scale)) calc(var(--space-3) * var(--density-scale));
-    padding: 0 calc(var(--space-2) * var(--density-scale)) 0 calc(var(--space-4) * var(--density-scale));
-    border: 1px solid var(--material-glass-border);
-    border-radius: var(--radius-sheet);
-    background: var(--material-glass-strong);
-    box-shadow: var(--shadow-sm);
+    margin: var(--space-1) calc(var(--space-4) * var(--density-scale)) calc(var(--space-3) * var(--density-scale));
   }
-  .settings-mobile-nav-head strong {
-    min-width: 0;
-    flex: 1;
-    padding: 0;
-    color: var(--text);
-    font-size: var(--font-heading);
-    font-weight: 650;
-    line-height: 1.25;
-    letter-spacing: -.015em;
-  }
-  .settings-mobile-nav-head .ui-icon-btn {
+  .settings-mobile-nav-head > .ui-icon-btn {
     width: var(--tap);
     min-width: var(--tap);
     height: var(--tap);
@@ -19668,8 +19898,9 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     display: flex;
     align-items: center;
     gap: calc(var(--space-2) * var(--density-scale));
-    flex: none;
-    margin: 0 calc(var(--space-4) * var(--density-scale)) calc(var(--space-3) * var(--density-scale));
+    min-width: 0;
+    flex: 1;
+    margin: 0;
     padding: 0 calc(var(--space-3) * var(--density-scale));
     border: 1px solid var(--material-glass-border);
     border-radius: var(--radius-surface);
@@ -19715,14 +19946,11 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     opacity: 1;
   }
   .settings-nav-list {
-    flex: 1;
-    min-height: 0;
     display: flex;
+    flex: none;
     flex-direction: column;
     gap: calc(var(--space-5) * var(--density-scale));
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    overflow: visible;
     padding: calc(var(--space-4) * var(--density-scale)) calc(var(--space-4) * var(--density-scale)) max(calc(var(--space-6) * var(--density-scale)), var(--safe-bottom));
   }
   .settings-nav-section {
@@ -19810,7 +20038,7 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
   .settings-results {
     flex: 1;
     min-height: 0;
-    margin: 0 var(--space-4) max(var(--space-6), var(--safe-bottom));
+    margin: 0 calc(var(--space-4) * var(--density-scale)) max(var(--space-6), var(--safe-bottom));
     padding: var(--space-1);
     overflow-y: auto;
     border: 1px solid var(--material-glass-border);
@@ -19830,7 +20058,6 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
   .settings-result.cursor { background: var(--surface-overlay-hover); }
 
    body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) :is(
-     .settings-mobile-nav-head,
      .settings-nav-search-shell,
      .settings-nav-group-list,
      .settings-results
@@ -19842,13 +20069,11 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
     box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   }
   body[data-glass="off"] :is(
-    .settings-mobile-nav-head,
     .settings-nav-search-shell,
     .settings-nav-group-list,
     .settings-results
   ),
   body[data-desktop-low-resource="true"]:not([data-glass="off"]) :is(
-    .settings-mobile-nav-head,
     .settings-nav-search-shell,
     .settings-nav-group-list,
     .settings-results
@@ -20244,8 +20469,9 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
 .ui-checkbox:hover:not(.ui-checkbox--disabled) .ui-checkbox-box { border-color: color-mix(in srgb, var(--text) 62%, transparent); }
 
 /* ---- Settings shell (canonical; wins over the earlier tuning blocks) ----
-   Nav item states: hover = neutral overlay; selected = accent wash + accent
-   text + inline-start bar. Weight never changes, so labels never reflow. */
+   Nav item states: hover = neutral overlay; selected = accent wash + inline-
+   start bar. The label stays body ink: an accent on its own wash reached only
+   2.2-4.2:1 across the palettes. Weight never changes, so labels never reflow. */
 .settings-nav-item { font-weight: 500; }
 .settings-nav-item.active { font-weight: 500; }
 @media (min-width: 701px) {
@@ -20257,9 +20483,9 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
   @media (hover: hover) {
     .settings-nav-item:hover:where(:not(:disabled)) { color: var(--text); background: var(--surface-overlay-hover); }
   }
-  .settings-nav-item.active { color: var(--accent); background: var(--accent-wash); }
+  .settings-nav-item.active { color: var(--text); background: var(--accent-wash); }
   @media (hover: hover) {
-    .settings-nav-item.active:hover:where(:not(:disabled)) { color: var(--accent); background: var(--accent-wash); }
+    .settings-nav-item.active:hover:where(:not(:disabled)) { color: var(--text); background: var(--accent-wash); }
   }
   .settings-nav-item.active::before {
     content: ""; position: absolute; inset-block: 7px; inset-inline-start: 0;
@@ -20306,7 +20532,9 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
 
 /* Grouped search results: page header row, then its matching rows. */
 .settings-results { gap: 0; }
-.settings-result { text-align: start; }
+/* `flex: none`: the column scrolls; it must not squeeze a row until its text
+   runs over the next one. */
+.settings-result { flex: none; text-align: start; }
 .settings-result-pagehead {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
   column-gap: var(--space-2); margin-top: var(--space-2);
@@ -20365,8 +20593,10 @@ body[data-hide-borders="true"] .ui-checkbox input:checked + .ui-checkbox-box { b
 }
 .settings-head-help-slot:empty { visibility: hidden; }
 h1.settings-mobile-title { margin: 0; line-height: 1.3; }
-h1.settings-mobile-title:focus { outline: none; }
-.settings-pane-title:focus { outline: none; }
+/* These headings take focus only as a landing point for assistive tech. The
+   global :focus-visible wash would frame the title whenever Settings opens. */
+h1.settings-mobile-title:focus { outline: none; box-shadow: none; }
+.settings-pane-title:focus { outline: none; box-shadow: none; }
 
 /* Content pane stays (near-)opaque under glass so the blurred workspace never
    ghosts through rows and hints; glass remains on the nav and scrim. */
@@ -20618,6 +20848,12 @@ body[data-hide-borders="true"] .ui-spinner {
   border-color: var(--accent-line) !important;
   border-top-color: var(--accent) !important;
 }
+/* Inside a button the ring is the button's ink, so it also reads on a filled
+   primary action rather than vanishing into the accent. */
+body[data-hide-borders="true"] .ui-btn .ui-spinner {
+  border-color: color-mix(in srgb, currentColor 28%, transparent) !important;
+  border-top-color: currentColor !important;
+}
 /* So is a session row's running ring (and the subagent dock's): without this
    the default borderless look showed running chats with an empty state mark.
    It keeps its own tint (amber while reconnecting). */
@@ -20826,7 +21062,8 @@ body.desktop-app .lock-screen {
   grid-template-columns: auto 0 minmax(0, 1fr);
   grid-template-areas:
     "check mark line"
-    "check .    note";
+    "check .    note"
+    "check .    access";
   align-items: end;
   border-radius: var(--radius-card);
 }
@@ -20898,6 +21135,18 @@ body.desktop-app .lock-screen {
   padding-inline: var(--person-tail-w);
 }
 .person-message.is-own .person-message-line { flex-direction: row-reverse; }
+/* Bubble and its attachment cards stack as one column, so the cards wrap
+   under the words instead of widening the line. */
+.person-message-stack {
+  display: flex;
+  min-inline-size: 0;
+  max-inline-size: min(76%, 560px);
+  flex-direction: column;
+  align-items: flex-start;
+}
+.person-message.is-own .person-message-stack { align-items: flex-end; }
+.person-message-stack .person-message-text { max-inline-size: 100%; }
+.person-message-stack .attachment-pills { max-inline-size: 100%; }
 .person-message-text {
   position: relative;
   min-inline-size: 0;
@@ -20993,6 +21242,23 @@ body.desktop-app .lock-screen {
 }
 .person-message.is-own .person-message-carry { justify-self: end; }
 .person-message-carry[data-delivered] { color: var(--muted); }
+/* Asking to open the chat to someone: for the person asking and the person
+   asked, on the same line as the rest of the bubble's notes. */
+.person-message-access {
+  grid-area: access;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: start;
+  gap: 0 var(--space-1);
+  margin-block-start: var(--space-1);
+  padding-inline: calc(var(--person-tail-w) + var(--space-3));
+  color: var(--chat-ink-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.person-message.is-own .person-message-access { justify-self: end; justify-content: flex-end; }
+.person-message-access-error { flex-basis: 100%; color: var(--chat-ink-red); }
 /* A bubble that just arrived rises from its tail corner. */
 @media (prefers-reduced-motion: no-preference) {
   .msg.person-message.is-entering .person-message-text {

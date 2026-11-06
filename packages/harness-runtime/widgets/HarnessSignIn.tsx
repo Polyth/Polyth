@@ -185,7 +185,7 @@ export function usePendingSignIn(onReturn: () => Promise<void> | void) {
   return { pending, finish };
 }
 
-export type HarnessAccountStatus = { loggedIn: boolean | "unknown"; email?: string; plan?: string };
+export type HarnessAccountStatus = { loggedIn: boolean | "unknown"; email?: string; plan?: string; expiresAt?: number };
 
 /** Who a multi-account harness is signed in as, from its family's local
  *  account report (`claude auth status`, `codex login status`, …). Harnesses

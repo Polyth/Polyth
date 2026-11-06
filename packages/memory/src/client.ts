@@ -43,6 +43,48 @@ const query = (projectId: string, params: Record<string, string | number | undef
 };
 const projectPath = (projectId: string): string => encodeURIComponent(projectId);
 
+/** The signed-in person's own notes in one project. */
+export interface PersonalMemoryPage {
+  here: MemoryListItem[];
+  aboutMe: MemoryListItem[];
+  /** Personal notes the agent suggests adding to the shared memory. */
+  proposals: MemoryDto[];
+  /** Shared notes that came from chats only this person could read. */
+  review: MemoryDto[];
+  mode: MemoryPolicyMode;
+}
+const personalPath = (id: string, action?: string): string => `/api/memory/personal/${encodeURIComponent(id)}${action ? `/${action}` : ""}`;
+
+export const personalMemoryApi = {
+  page(projectId: string, signal?: AbortSignal) {
+    return api.get<PersonalMemoryPage>(`/api/memory/personal?projectId=${projectPath(projectId)}`, signal ? { signal } : undefined);
+  },
+  create(projectId: string, where: "here" | "about-me", title: string, body: string) {
+    return api.post<MemoryReceiptDto>("/api/memory/personal", { projectId, where, title, body });
+  },
+  get(projectId: string, id: string) {
+    return api.get<MemoryDto>(`${personalPath(id)}?projectId=${projectPath(projectId)}`);
+  },
+  update(projectId: string, id: string, expectedRevision: number, patch: { title: string; body: string }) {
+    return api.patch<MemoryReceiptDto>(personalPath(id), { projectId, expectedRevision, patch });
+  },
+  remove(projectId: string, id: string, expectedRevision: number) {
+    return api.delete<MemoryReceiptDto>(personalPath(id), { projectId, expectedRevision });
+  },
+  publish(projectId: string, id: string, expectedRevision: number) {
+    return api.post<MemoryReceiptDto>(personalPath(id, "publish"), { projectId, expectedRevision });
+  },
+  keep(projectId: string, id: string, expectedRevision: number) {
+    return api.post<MemoryReceiptDto>(personalPath(id, "keep"), { projectId, expectedRevision });
+  },
+  makePersonal(projectId: string, id: string, expectedRevision: number) {
+    return api.post<MemoryReceiptDto>(personalPath(id, "make-personal"), { projectId, expectedRevision });
+  },
+  sharedCount() {
+    return api.get<{ notes: number }>("/api/memory/shared-count");
+  },
+};
+
 export const memoryApi = {
   list(projectId: string, params: { limit: number; offset: number; q?: string; category?: string; lifecycle?: string }, signal?: AbortSignal) {
     return api.get<MemoryListResponse>(`/api/memory?${query(projectId, params)}`, signal ? { signal } : undefined);

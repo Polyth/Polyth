@@ -10,10 +10,11 @@ import {
 } from "./providers.ts";
 
 export {
-  createDictationService, createChunkBuffer, DICTATION_FORMAT,
-  type DictationFormat, type DictationSessionDto, type DictationChunkResult,
+  createDictationService, createChunkBuffer, transcribeRecording,
+  DICTATION_FORMAT, DICTATION_RECORDING_LIMITS,
+  type DictationFormat, type DictationSessionDto, type DictationSessionMode, type DictationChunkResult,
   type DictationService, type DictationServiceOptions,
-  type SttAdapter, type SttStream, type ChunkBuffer, type BufferedChunk,
+  type SttAdapter, type SttStream, type SttTranscribeInput, type ChunkBuffer, type BufferedChunk,
   type DictationTimingDto, type DictationMetricsDto,
 } from "./streaming.ts";
 export {
@@ -46,6 +47,9 @@ export type VoiceEngine = "browser" | "server";
 /** Read aloud: the browser's voices, a built-in voice on the Polyth server
  *  ("local"), or a custom OpenAI-compatible voice server ("server"). */
 export type TtsEngine = VoiceEngine | "local";
+/** How the composer mic turns speech into text: words while speaking
+ *  ("live"), or one recording sent after the mic stops ("record"). */
+export type DictationMode = "live" | "record";
 
 export interface VoicePrefs {
   /** Show the mic button and allow dictation. */
@@ -85,6 +89,9 @@ export interface VoicePrefs {
   spokenPunctuation: boolean;
   /** Ask the browser recognizer to stay on this device when it can. */
   onDeviceSpeech: boolean;
+  /** Live recognition while speaking, or record first and transcribe after
+   *  the mic stops. Recording needs the server's recognition engine. */
+  dictationMode: DictationMode;
 }
 
 export const VOICE_PREFS_KEY = "polyth.voice";
@@ -118,6 +125,7 @@ export function defaultVoicePrefs(): VoicePrefs {
     latencyPreference: DEFAULT_DICTATION_PREFERENCES.latencyPreference,
     spokenPunctuation: true,
     onDeviceSpeech: true,
+    dictationMode: "live",
   };
 }
 
@@ -159,6 +167,9 @@ export function parseVoicePrefs(raw: string | null): VoicePrefs {
       latencyPreference: dictation.latencyPreference,
       spokenPunctuation: typeof data.spokenPunctuation === "boolean" ? data.spokenPunctuation : d.spokenPunctuation,
       onDeviceSpeech: typeof data.onDeviceSpeech === "boolean" ? data.onDeviceSpeech : d.onDeviceSpeech,
+      // Anything but an explicit "record" (older prefs, a newer unknown mode)
+      // keeps the live behavior every existing install already has.
+      dictationMode: data.dictationMode === "record" ? "record" : d.dictationMode,
     };
   } catch {
     return d;

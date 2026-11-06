@@ -129,8 +129,18 @@ or `projects` field. "Forgot to scope this route" is not an available bug.
   derivable, nothing under `spaces/*/personal/` can be added as an ordinary
   project (`reservedForPersonal`, checked before any lookup, so the refusal is
   the same whether the folder exists).
+- `data/spaces/<…>/projects/<uuid>/` — a project in the Polyth folder on a
+  server, created by `POST /api/projects/managed` (`managedProjects.ts`). The
+  server picks the path and ignores any the client sends. Polyth Desktop
+  (`POLYTH_DESKTOP=1`) uses `~/Polyth/<name>` instead: a real folder its owner can
+  open. The name is reduced to one safe path segment, and `mkdir` without
+  `recursive` means an existing folder is never adopted (`Name 2` follows). This is
+  an ordinary `space`-visible project, not a reserved folder, so it can be reopened
+  through the picker after it is closed.
 - `Project.spaceId?` in `projects.json`; a personal project also stores its
-  owner (`personalOwner`, never sent to clients).
+  owner (`personalOwner`, never sent to clients), and a Polyth-folder project a
+  hash of its creator and `clientOperationId` (`managedOperation`, never sent
+  either) so a resend returns the same project without a second folder.
 - `SessionProjection.spaceId?`, plus session-store **migration v10**: a
   generated `space_id` column on `projections` with its own indexes (mirroring
   the existing `project_id` column) so listing and fan-out filter at the index.
@@ -553,7 +563,7 @@ caller's own `guardrails`. They are enforced server-side at these seams:
 | Space role | capped at `member` (no member/package/Space-integration administration) | `canonicalSpaces.ts` |
 | Models | catalog routes return only allowed models; explicit model/harness choices must be on the allowlist (first entry is the default for new chats; empty = the owner's project/harness defaults, no explicit choice) | `accountGuardrails.ts` |
 | Sessions | no composer shell, no Auto-Approve or Full access (only `off`/`inherit` pass), no "always" replies, "once" only with `approvals: "once"`, no native-session import | `accountGuardrails.ts` (outermost session facade) |
-| Guarded Space | a Space with any guarded member ignores standing allow rules, Auto-Approve and package-tool auto-approve: agents ask a human every time; deny rules still win | `guardedPermissions`, `sessions.ts` `guardedSpace`, `indexCore.ts` package-tool authorize |
+| Guarded Space | a Space with any guarded member ignores standing allow rules, Auto-Approve (Full access included) and package-tool auto-approve: agents ask a human every time; deny rules still win. Every chat there reports its effective level as off, and turning Auto-Approve or Full access on is refused with the reason (`GUARDED_SPACE_AUTO_APPROVE_MESSAGE`); a stored choice applies again once the Space is no longer guarded | `guardedPermissions`, `sessions.ts` `guardedSpace`, `indexCore.ts` package-tool authorize |
 
 The web UI only mirrors this (hidden shell/Auto-Approve/"always", owner-only
 settings, single-model picker); hiding is never the enforcement.
@@ -676,8 +686,9 @@ Known limits:
 
 Status: **stages 1–3 and 5 implemented** (source-inspected and
 unit/integration-tested; not live-verified against real providers or a running
-installation). Stage 4 (administration: break-glass, offboarding, audit) is
-**designed, not implemented**. The goal is
+installation). Stage 4 (administration) is **partly implemented**: what happens
+to private data is built (§14.5), installation ceilings and ownership transfer
+of shared work are not. The goal is
 full differentiation between people who share one installation: each person
 has their own chats, their own outside accounts (task trackers, GitHub,
 Google), and sharing that both the person and an administrator control.
@@ -698,8 +709,9 @@ Decisions (2026-10-13, product owner):
 |---|---|
 | Default visibility of a new chat in a shared Space | **Private** to its creator |
 | Whose account an agent uses in an outside service | **The person who sent the message** the turn answers |
-| Admin access to someone's private chat | **Break-glass**: audited, owner notified, time-limited |
+| Admin access to someone's private chat | **None**, not even break-glass (revised 2026-11-05; §14.5) |
 | Who connected accounts belong to | **The person**, enabled per Space (a Work Space never silently gets a personal GitHub) |
+| A person's notes inside a shared project | **Personal**: a private chat writes to them, a chat others read never reaches them; publishing is the person's own choice of exact text (2026-11-05; §14.6) |
 
 ### 14.2 Stage 1 — people in shared sessions (implemented)
 
@@ -924,19 +936,37 @@ unit/integration-tested; not live-verified):
   metadata-only `listFor(actorUserId)` and resolves with the turn's actor.
 - *Not yet*: the request's `existing` flag checks the Space only.
 
-### 14.5 Stage 4 — administration (designed)
+### 14.5 Stage 4 — administration (partly implemented)
+
+**Private data has no administrator path (implemented; decision 2026-11-05,
+replacing the break-glass and ownership-transfer designs).** Nobody but its owner
+opens a private chat, room or personal note through Polyth: `resourceAccess`
+already denied admins, and no grant or transfer can change that.
+
+| Seam | Behavior | Owner |
+|---|---|---|
+| Size | `GET /api/accounts/:id/private-data` → `{ bytes }`: chat history, room and personal-project folders, and what packages report through `SERVER_PERSON_DATA_VOLUME`. Instance owner only. No titles and no counts | `packages/server/src/routes/privateData.ts` |
+| Erase | `POST /api/accounts/:id/erase-private-data`: instance owner, a recent sign-in (`reauth-required` otherwise), and an account already `disabled`. Audited as `identity.private-data-erased`. If anything couldn't go it answers `erase-incomplete`, audited as `identity.private-data-erase-incomplete`, and can be run again. Unlisted in the remote policy, so a paired device is denied | same |
+| Account removal | Removing an account erases the same data: private chats (archived ones and ones that failed at startup too) with the attachments the person sent to them, rooms, personal project and folders first, then delivery routes, connected accounts, and package data through `SERVER_ACCOUNT_REMOVAL_BUS` (memory purges the person's notes, with history). The account is gone by then, so what can't be erased is logged, not retried | `indexCore.ts` `erasePerson` |
+| Data folder | Every person's data sits in the server's data folder, so it can't be opened as a project: `POST /api/projects` refuses a folder inside it (`holdsServerData`, the same answer whether or not it exists); a folder the server picks itself (personal project, room, Polyth-folder project from `POST /api/projects/managed`) is exempt. A project at a parent folder is fine and doesn't show it: the file service's `sealedRoots` cover the tree, lists, search, reads, writes and absolute-path external reads, and the folder picker reads as if it weren't there. Only a folder the server made inside it (room, personal project, Polyth-folder project, package workspace) sees its own files. A shell doesn't go through any of this (§14.7) | `packages/files`, `projects.ts`, `routes/browse.ts` |
+| Password reset | `/api/auth/me` carries `adminPasswordResetAt` while someone else's reset is newer than the person's own change, read from the append-only audit log. The shell shows a sticky notice the person can't dismiss, and the reset dialog tells the administrator it will | `identity/accounts.ts`, `PasswordResetNotice.tsx` |
+| Native import | Transcripts sit under the host's one OS account, whoever's chat they were. Only the instance owner may browse them (`ownerOnly` for anyone else), and never one behind a Polyth chat they can't open | `packages/session-import/src/serverEntry.ts` |
+
+**A password reset remains possible**: an instance owner can still set someone's
+password and sign in as them. The person finds out, nothing prevents it, and only
+per-person encryption would (not built).
+
+Designed, not built:
 
 - **Installation ceilings** (instance owner, or a new `sharing.manage`
   permission): e.g. no sharing for Protected accounts, no `space` visibility.
-- **Break-glass**: an admin opens a private chat only through an explicit,
-  reasoned, time-limited grant; it is audited and the owner is notified.
-- **Offboarding**: removing a member immediately voids their grants and stops
-  their accounts in that Space; their private chats move to a new owner the
-  admin picks, or are archived; a running turn they started is stopped and
-  their queued messages are dropped. Schedules they own already refuse to run
-  (stage 1).
-- **Audit**: share, grant, revoke, break-glass, ownership transfer and
-  credential use, with the actor and never a value.
+- **Offboarding of shared work**: removing a member immediately voids their
+  grants and stops their accounts in that Space; a chat others can read moves
+  to a new owner the admin picks, or is archived; a running turn they started
+  is stopped and their queued messages are dropped. Schedules they own already
+  refuse to run (stage 1).
+- **Audit view**: share, grant, revoke, ownership transfer and credential use,
+  with the actor and never a value.
 
 ### 14.6 Stage 5 — remaining stores (implemented)
 
@@ -950,10 +980,48 @@ that hold one person's data each have an owner (a person or the Space).
 | Handoff bundles | Visible to their creator and to whoever can open the source chat; legacy creatorless bundles to Space admins only |
 | Slash commands, snippets | `user` scope is personal (person storage) and overrides `project` (shared, admin-written). Expansion on send runs as the message's author. Legacy `~/.config/polyth` files are copied once to the instance owner only |
 
-"Remember" from a private chat defaulting to the person's memory is not built.
-The memory store already has a `person` layer (owner = user id, reached only
-through a server-minted layer grant; [memory](../dev/memory.md)), but nothing
-grants it to a session yet.
+**Personal notes and private rooms** (source-inspected and unit/integration-tested;
+live-verified against an isolated server, see below). The rule: what is personal
+sees what is shared, and what is shared never sees what is personal. Data moves
+from personal to shared only as text its owner confirmed.
+
+| Level | Who can read | Where it lives | When the agent reads it |
+|---|---|---|---|
+| Shared | Everyone who can open the project | The project and its `project` memory layer | Always |
+| Only me here | One person | A private room (`Project.parentProjectId`) with its own folder and chats, plus `person` records bound to the project | Only in a chat private to them |
+| About me | One person | `person` records with no project, across the Space | Only in a chat private to them |
+
+| Seam | Behavior | Owner |
+|---|---|---|
+| Private room | `POST /api/projects/:id/private-room` (`ensurePrivateRoom`): a real project owned by the caller with `private` visibility, in `personal/<person>/rooms/<project>`, created on first use. `list()` never returns it; `GET /api/projects` (`listForShell`) adds the reader's own rooms and `sharedWith`. Appearance and composition follow the parent, and it can't be edited directly. If the project is deleted the room becomes an ordinary private project (`detachedFromProjectId`) | `projects.ts`, `projectResourceAuthority.ts` |
+| Memory | A room shares its project's memory and policy (`service.scope`). `chatAccess` derives the layers from the chat's real audience (`host.sessionPrivacy`), never from a request or a model argument: a chat private to its owner gets `project` + that person's layers, any other chat gets `project` only | `packages/memory/src/service.ts` |
+| Writing | In a private chat of a project others can open, `memory_remember` and harvest write to the person's notes. Someone working alone keeps writing to the project. `target: "shared"` from such a chat stores a proposal, which only the person publishes, as a copy of exactly that text, so earlier personal revisions stay personal | same |
+| Who is speaking | Every admitted turn in a Space with two or more members persists `context/people-prepared` before delivery: who speaks, who reads, which memory applies. A retry resends the recorded block. A person joining someone else's running turn (steer) gets a one-line version. Names are reduced to letters and ordinary punctuation, so a display name can't close the block or read as a command | `sessionSharing.ts`, `sessions.ts` |
+| Whose fact | `about` on a record, labelled in the memory block (`· personal`, `· about Оля`). Harvest transcripts name each user line's author | `packages/knowledge/src/memory.ts` |
+| Reach | In a chat others read, `polyth`, `polyth_session_markers` and `memory_search_projects` hide rooms, personal projects and private chats; the last searches only projects every reader can open. `polyth_peer` stays inside one delegated tree | `sessionControlTool.ts`, `session-markers/agentTool.ts`, `service.ts` |
+| Staying private | A record with `layer: person` reaching the model sets `personalContext` on the chat and the chat it follows, before delivery. Such a chat and any chat in a room can only narrow: the harness's own context holds what the agent saw, so opening it would let the agent repeat that (`reason: personal-context` / `private-room`). A fork keeps the mark | `sessionSharing.ts` |
+| Old notes | Shared notes that came from a chat only this person could read are listed for them to make personal, moved with their history. Nothing moves by itself | `personalMemoryRoutes` |
+| Attachments | `_inbox` is left out of file listings, search, archives and folder routes however the path is spelled, so a private chat's attachments in a shared project open only by their unguessable name. Erasing a person's data removes the ones they sent (a fork's messages from someone else stay). Rooms have their own folder | `packages/files`, `routes/privateData.ts` |
+
+The generic `/api/memory` routes never grant the `person` layer; `/api/memory/personal*`
+takes the owner from the authenticated context and no request names one. Reflect's
+per-person proposals are unaffected, and its shared rules skip private chats.
+
+What this promises, and what it doesn't:
+
+| Who tries to read | How | Today |
+|---|---|---|
+| A member or Space admin | UI, API, search | Closed |
+| The instance owner | UI, API | Closed; they see one size (§14.5) |
+| The instance owner | Sets the password and signs in | Possible, and the person is told |
+| Another person's agent, or a terminal | Shell reads of files and databases | **Not closed**: every agent runs as one OS user (§14.7) |
+| Root, disk, backups | Direct file access | **Not closed**: nothing is encrypted per person |
+| The model provider | The account a chat runs through | **Not closed**: a shared account stays its owner's |
+
+So the interface says "Administrators can't read them through Polyth", never
+"nobody ever". A new chat is still private by default (§14.1), in the Shared lane
+too: it says so, and an admin who wants a family's chats readable by everyone sets
+the Space's default audience.
 
 **MCP servers have an owner** (source-inspected and unit/integration-tested;
 not live-verified with a real harness). Owner: `packages/server/src/mcp.ts`;
@@ -1047,17 +1115,20 @@ selected messages to an agent.
 
 | Seam | Behavior | Owner |
 |---|---|---|
-| Event | `person/message {text, author, mentions[], carryToAgent?, replyToSeq?, clientOperationId?}` (`PersonMessageData`). It never starts, queues or steers a turn, never touches the runtime and is allowed while a turn runs. It is not in `MODEL_VISIBLE_TYPES`; old reducers ignore it | `packages/contracts` "people talking in a session", `sessions.ts` `postPersonMessage` |
+| Event | `person/message {text, attachments?, author, mentions[], carryToAgent?, replyToSeq?, accessRequest?, clientOperationId?}` (`PersonMessageData`). It never starts, queues or steers a turn, never touches the runtime and is allowed while a turn runs. It is not in `MODEL_VISIBLE_TYPES`; old reducers ignore it | `packages/contracts` "people talking in a session", `sessions.ts` `postPersonMessage` |
+| Attachments | Prompt attachments travel with a person message (same `sanitizeAttachments` shape checks, bounded size, `_inbox/*` materialization, repository/existence checks and browser-artifact commit). Text may be empty when at least one attachment is present; a malformed ref is refused before the event is appended. They are for the people reading the message and do not become model input by themselves | `sessions.ts` `postPersonMessage` → `prepareAttachments`, `routes/org.ts` |
 | Author and mentions | The Space facade stamps the author like `send`. Mentions are deduplicated, capped (`PERSON_MESSAGE_MAX_MENTIONS`), exclude the author and keep only people who can open the chat (`sessionAudience`); a dropped id reveals nothing. `replyToSeq` must name a `person/message` of the same chat. A retry with the same `clientOperationId` returns the first result | `sessions.ts`, `sessionSharing.ts` |
-| Access | `postPersonMessage`, `mentionCandidates` and `setPersonMute` need `view`; `carryToAgent: true` needs `collaborate`; `startSessionFromConversation` needs `collaborate` | `sessionResourceAccess.ts` `METHOD_ACCESS`, `personMessageLevel` |
-| Next prompt | A carried message after the latest `user/message` joins the `<polyth-package-context>` block of the next prompt as "Message from {name}" (reference data, not instructions); `deriveMessages` treats it like `package/context`. Messages that are not carried never reach a model | `packages/session/src/packageContext.ts`, `deriveMessages` |
+| Mentioning someone outside the chat | Anyone may be mentioned; opening the chat is a separate, explicit act. `GET /api/sharing/new-chat?projectId=` answers the same for a chat not started yet, for whoever can open that project: everyone is outside unless the Space's default audience lets the project's people in, `action` is `share` or `none`, and the chat is then created before its first message. `GET /api/sessions/:id/sharing/outsiders` (any reader, the names `GET …/sharing` already gives them) lists the active Space members who cannot open the chat and what the reader can do: `share` with the `levels` they may give, `request` with the `approver` asked, or `none`. **Sharing:** `shareWith: [{userId, access}]` on a message opens the chat under the sender's own rights (`SessionSharingService.addPeople`, through `update`, so its policy, cap and revision checks apply), after everything else that can refuse the message and before mentions are decided, so a mention lands and nobody is told about a chat they cannot open. A refusal rejects the whole message and records nothing. People already inside and ids that are not active members change nothing and reveal nothing; a delegated subagent's chat opens through the chat it follows. The opening is not a transaction with the append: a failed append leaves the chat open and a retry finds nobody to add. **Asking:** `requestAccessFor: [userId]` records `accessRequest {people, approver}` on the message. Nobody it names is told. The approver (`sessionShareApprover`: the owner when able, else the first member with `manage` who may widen) gets the one alert and the mention mark. No approver, or nobody really outside, drops the request without a trace | `sessions.ts`, `sessionSharing.ts`, `spaceScope.ts` (`PersonMessageAdmission.openChatTo`) |
+| Answering a request | `POST /api/sessions/:id/person-messages/:seq/access {decision: "share"\|"decline", access?}` needs `manage`; `share` (default level `view`) goes through the answerer's own sharing rights, so losing them refuses it and the request stays open. The answer is `person/access-resolved {messageSeq, outcome, by, people}` (`PersonAccessResolvedData`), stamped by the server, never model-visible, ignored by old reducers. The first answer stands and a repeat returns it. `shared` delivers the original message to the people now inside as a mention from its author, with their mention mark at its seq; `declined` tells nobody outside. The request records who was asked when the message was sent, so `shared` carries only those who can open the chat at the answer | `sessions.ts` `decidePersonAccess`, `apps/web` `reduce.ts` |
+| Access | `postPersonMessage`, `mentionCandidates` and `setPersonMute` need `view`; `carryToAgent: true` needs `collaborate`; `startSessionFromConversation` needs `collaborate`; `decidePersonAccess` needs `manage` | `sessionResourceAccess.ts` `METHOD_ACCESS`, `personMessageLevel` |
+| Next prompt | A carried message after the latest `user/message` joins the `<polyth-package-context>` block of the next prompt as "Message from {name}" (reference data, not instructions); `deriveMessages` treats it like `package/context`. Its attachments are appended to that same prompt's attachment list, after the prompt's own and deduplicated against them (`attachmentDeliveryKey`), so words and files arrive together; the 16-attachment prompt bound applies to the combined list. An attachment-only carried message says "(attachment only)". Messages that are not carried never reach a model | `packages/session/src/packageContext.ts` (`pendingPackageContextItems`, `pendingPersonMessageAttachments`), `sessions.ts` `admitTurnCore`, `attachments.ts` |
 | Per person | `session_person_state.last_mention_seq` and `muted` (store v23). The reader's projection gets `muted` and `attention.mentions` (1 while a mention is newer than the reader's read cursor; `markRead` clears it). In a conversation, other people's messages count toward the reader's `attention.unread` | `packages/session` `setPersonMentionSeq`/`setPersonMute`/`unreadFor`, `sessionPeople.ts` |
-| Notifications | Kind `mention` to each kept mentioned person; in a conversation also kind `message` to every other participant who can open it and has not muted it. Access is rechecked at delivery. The key is `person-message:<sessionId>:<seq>:<kind>`; the title names sender and chat ("Ann · Small talk", "Ann mentioned you · Small talk"), the body is the message, and the inbox row (`NotificationRecord`) also carries `author: {userId, name}` and `chat`, so a client draws the sender (colour, monogram) without parsing the title; agent kinds and rows written before 2026-10-20 have neither. Delivery reuses the one per-recipient leg (inbox row, WS, Web Push, native push). Web Push carries one tag per chat (`polyth-people-<sessionId>`) plus `chat`/`line`, so the service worker stacks a burst into one re-alerting notification ("Small talk · 3 new messages", the last five lines); people kinds push with `urgency: high` and a 12-hour TTL (task kinds keep 5 minutes, also on native push) | `indexCore.ts` `deliverToRecipient`/`deliverPersonMessage`, `push.ts`, `apps/web/sw.js` |
+| Notifications | Kind `mention` to each kept mentioned person; in a conversation also kind `message` to every other participant who can open it and has not muted it. A request reaches its approver once, as kind `mention` so old clients still show the message: key suffix `access-request`, title "Ann asks you to share · Small talk", inbox field `accessRequest {messageSeq, people}`; a native push shows the generic mention text until opened. Access is rechecked at delivery. The key is `person-message:<sessionId>:<seq>:<kind>`; the title names sender and chat ("Ann · Small talk", "Ann mentioned you · Small talk"), the body is the message, and the inbox row (`NotificationRecord`) also carries `author: {userId, name}` and `chat`, so a client draws the sender (colour, monogram) without parsing the title; agent kinds and rows written before 2026-10-20 have neither. Delivery reuses the one per-recipient leg (inbox row, WS, Web Push, native push). Web Push carries one tag per chat (`polyth-people-<sessionId>`) plus `chat`/`line`, so the service worker stacks a burst into one re-alerting notification ("Small talk · 3 new messages", the last five lines); people kinds push with `urgency: high` and a 12-hour TTL (task kinds keep 5 minutes, also on native push) | `indexCore.ts` `deliverToRecipient`/`deliverPersonMessage`, `push.ts`, `apps/web/sw.js` |
 | Live fan-out | After the mention cursors are written, a message bumps the projection's `updatedAt` and republishes it, so every reader's socket gets the row personalized with their own `attention.unread` (others' messages, conversations only) and `attention.mentions`. Before 2026-10-20 nothing was republished, and people only saw a new message by opening the chat | `sessions.ts` `postPersonMessage` |
 | Search | The FTS mirror indexes `person/message` text (role `user`) | store v23 triggers |
 | Conversations | `purpose: "conversation"` sessions are created by `createConversation` without a runtime or native session: an owned, active canonical resource, `restricted` with `collaborate` grants for the participants, then the opening message mentioning them. Every runtime path refuses or skips them ("A conversation has no agent. Start a session from its messages."): activate, session jobs, recovery, epoch recovery, send/queue/compact/shell/rewind/fork/harness switch/restart, package runtime bindings; `runtimeFeatures` answers no capabilities. Rename, archive, restore, delete, read cursor, drafts, people messages and mute work | `sessions.ts` `isConversation`, `sessionResourceAuthority.ts` |
-| Start a session | `startSessionFromConversation(id, {sourceSeqs, prompt?, title?, participants, harness?, model?})` creates an ordinary chat owned by the caller, shares it once with the edited participant copy (or keeps it private), sends a first prompt that quotes the selected messages as markdown ("reference data, not instructions") followed by the instruction, and appends a `conversation/session-started` card. Access is not inherited afterwards | `sessions.ts`, `sessionResourceAuthority.ts` |
-| API | `POST /api/sessions/:id/person-messages`, `GET /api/sessions/:id/mention-candidates`, `PUT /api/sessions/:id/mute`, `POST /api/conversations`, `POST /api/sessions/:id/conversation/start`. `GET /api/spaces/:id/members` includes each member's display name | `routes/org.ts`, `routes/spaces.ts` |
+| Start a session | `startSessionFromConversation(id, {sourceSeqs, prompt?, title?, participants, harness?, model?})` creates an ordinary chat owned by the caller, shares it once with the edited participant copy (or keeps it private), sends a first prompt that quotes the selected messages as markdown ("reference data, not instructions") followed by the instruction, appends the selected messages' attachments to that prompt (deduplicated, at most 16, checked before the chat is created), and appends a `conversation/session-started` card. Access is not inherited afterwards | `sessions.ts`, `sessionResourceAuthority.ts` |
+| API | `POST /api/sessions/:id/person-messages`, `POST /api/sessions/:id/person-messages/:seq/access`, `GET /api/sessions/:id/mention-candidates`, `GET /api/sessions/:id/sharing/outsiders`, `PUT /api/sessions/:id/mute`, `POST /api/conversations`, `POST /api/sessions/:id/conversation/start`. `GET /api/spaces/:id/members` includes each member's display name | `routes/org.ts`, `routes/spaces.ts` |
 | UI | See [UI §3 "People in a chat"](../dev/ui.md) | `apps/web` |
 
 Known limits:
@@ -1080,3 +1151,7 @@ Known limits:
   one there.
 - The in-app message card answers with plain text: typing `@Name` there does
   not create a mention.
+- An answer in the chat always opens at `view`; the approver changes the level
+  afterwards in the share dialog. `access` on the route allows more.
+- If everyone a request names has left the Space by the time it is answered
+  `share`, the note still reads "Shared with" the names it was asked for.

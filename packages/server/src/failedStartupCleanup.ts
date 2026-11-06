@@ -15,7 +15,7 @@ export function autoDeleteFailedStartupPreference(settings: unknown): boolean {
 
 export type FailedStartupCleanupPolicy = (projection: SessionProjection) => Promise<boolean>;
 
-export interface FailedStartupCleanupPolicyDeps {
+export interface SessionAccountDeps {
   /** The Space a session belongs to (projection.spaceId or its project's Space). */
   spaceOf(projection: SessionProjection): string | undefined | Promise<string | undefined>;
   /** The account a session reports to inside that Space, if one was recorded. */
@@ -28,7 +28,29 @@ export interface FailedStartupCleanupPolicyDeps {
   projection(sessionId: string): Promise<SessionProjection | undefined>;
 }
 
+export type FailedStartupCleanupPolicyDeps = SessionAccountDeps;
+
 const MAX_PARENT_DEPTH = 16;
+
+/** The accounts whose choice decides what automatic cleanup may do to a
+ * session: the one recorded for it, else for its nearest recorded ancestor, else
+ * every member of its Space. An unresolvable Space yields nobody. */
+export async function accountsDecidingFor(
+  deps: SessionAccountDeps,
+  projection: SessionProjection,
+): Promise<readonly string[]> {
+  const spaceId = await deps.spaceOf(projection);
+  if (!spaceId) return [];
+  let current: SessionProjection | undefined = projection;
+  const seen = new Set<string>();
+  for (let depth = 0; current && depth < MAX_PARENT_DEPTH && !seen.has(current.id); depth++) {
+    seen.add(current.id);
+    const userId = await deps.accountForSession(current.id, spaceId);
+    if (userId) return [userId];
+    current = current.parentId ? await deps.projection(current.parentId) : undefined;
+  }
+  return deps.members(spaceId);
+}
 
 /** Deletion is allowed only when the owning account's preference allows it.
  * A session with no recorded account (and no recorded ancestor) falls back to
@@ -36,18 +58,8 @@ const MAX_PARENT_DEPTH = 16;
  * an unresolvable Space keeps the session. Keeping is never destructive. */
 export function createFailedStartupCleanupPolicy(deps: FailedStartupCleanupPolicyDeps): FailedStartupCleanupPolicy {
   return async (projection) => {
-    const spaceId = await deps.spaceOf(projection);
-    if (!spaceId) return false;
-    let current: SessionProjection | undefined = projection;
-    const seen = new Set<string>();
-    for (let depth = 0; current && depth < MAX_PARENT_DEPTH && !seen.has(current.id); depth++) {
-      seen.add(current.id);
-      const userId = await deps.accountForSession(current.id, spaceId);
-      if (userId) return autoDeleteFailedStartupPreference(deps.settingsFor(userId));
-      current = current.parentId ? await deps.projection(current.parentId) : undefined;
-    }
-    const members = deps.members(spaceId);
-    return members.length > 0
-      && members.every((userId) => autoDeleteFailedStartupPreference(deps.settingsFor(userId)));
+    const accounts = await accountsDecidingFor(deps, projection);
+    return accounts.length > 0
+      && accounts.every((userId) => autoDeleteFailedStartupPreference(deps.settingsFor(userId)));
   };
 }

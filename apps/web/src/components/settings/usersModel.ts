@@ -176,6 +176,7 @@ const ERROR_TEXT: Record<string, TranslationKey> = {
   "owner-credential-required": "settings.users.errorOwnerCredentialRequired",
   "owner-confirmation-required": "settings.users.errorOwnerConfirmationRequired",
   "passkey-cancelled": "settings.users.errorPasskeyCancelled",
+  "erase-incomplete": "settings.users.privateDataEraseIncomplete",
 };
 
 /** One human sentence for a failed owner action. */

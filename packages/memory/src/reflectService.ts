@@ -349,6 +349,8 @@ export function createReflectController(host: ServerPackageHost, access: Reflect
     alsoKnown: readonly ReflectProposalDto[] = [],
   ): Promise<number> => {
     if (!reflectSessionEligible(session)) return 0;
+    // The rules every member sees never come from a chat only one of them reads.
+    if (state.userId === undefined && host.sessionPrivacy?.(space.spaceId, session.id)?.privateTo) return 0;
     let cursor = state.cursors[session.id];
     if (cursor === undefined) {
       // First sight starts from a bounded recent window, never the whole log.

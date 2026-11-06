@@ -8,6 +8,7 @@
     "./analytics": "./src/analytics/contracts.ts",
     "./cache-ttl": "./src/analytics/cacheHealth.ts",
     "./session-cache": "./src/analytics/sessionCache.ts",
+    "./limit-sources": "./src/limitSources.ts",
     "./widgets": "./widgets/index.tsx",
     "./i18n/*": "./src/i18n/*.ts"
   },

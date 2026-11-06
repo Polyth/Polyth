@@ -1,8 +1,11 @@
 import WebSocket from "ws";
 import { DictationError, type DictationContext } from "./providers.ts";
+import { postRecording, recordingJson, wavBlob } from "./recordingHttp.ts";
 import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
+import { pcmToWav } from "./whisper.ts";
 
 const DEFAULT_URL = "wss://api.deepgram.com/v1/listen";
+const DEFAULT_RECORDING_URL = "https://api.deepgram.com/v1/listen";
 const DEFAULT_MODEL = "nova-3";
 const MAX_PROVIDER_BUFFER = 2 * 1024 * 1024;
 const FINAL_TIMEOUT_MS = 10_000;
@@ -25,6 +28,10 @@ export interface DeepgramSttOptions {
   endpointingMs?: number;
   finalTimeoutMs?: number;
   connect?: (url: string, headers: Record<string, string>) => SocketLike;
+  /** Pre-recorded endpoint for finished recordings. */
+  recordingUrl?: string;
+  /** Test seam for the recording request. */
+  fetchFn?: typeof fetch;
 }
 
 interface DeepgramMessage {
@@ -84,10 +91,34 @@ const deepgramLanguage = (language?: string): string => {
   return value;
 };
 
+interface DeepgramRecordingResponse {
+  results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> };
+}
+
 export function createDeepgramSttAdapter(options: DeepgramSttOptions): SttAdapter {
   if (!options.apiKey.trim()) throw new DictationError("invalid_credentials", "Deepgram API key is missing");
   return {
     engine: "deepgram",
+    // Pre-recorded transcription takes the whole WAV in one request. Unlike
+    // streaming it can detect the spoken language, so "auto" asks for that.
+    async transcribe({ audio, format, language, context, signal }) {
+      if (audio.byteLength === 0) return "";
+      const url = new URL(options.recordingUrl ?? DEFAULT_RECORDING_URL);
+      url.searchParams.set("model", options.model?.trim() || DEFAULT_MODEL);
+      url.searchParams.set("smart_format", "true");
+      url.searchParams.set("punctuate", "true");
+      const spoken = language?.trim();
+      if (!spoken || spoken.toLowerCase() === "auto") url.searchParams.set("detect_language", "true");
+      else url.searchParams.set("language", deepgramLanguage(spoken));
+      for (const term of keyterms(context)) url.searchParams.append("keyterm", term);
+      const raw = await postRecording("Deepgram", options.fetchFn ?? fetch, url.toString(), {
+        headers: { authorization: `Token ${options.apiKey}`, "content-type": "audio/wav" },
+        body: wavBlob(pcmToWav(audio, format)),
+        ...(signal ? { signal } : {}),
+      });
+      const body = recordingJson<DeepgramRecordingResponse>("Deepgram", raw);
+      return body.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? "";
+    },
     createStream({ format, language, context }) {
       if (format.encoding !== "pcm_s16le" || format.channels !== 1) {
         throw new DictationError("audio_format_error", "Deepgram realtime adapter expects mono pcm_s16le");

@@ -766,115 +766,120 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         aria-describedby={mobile ? undefined : "settings-close-hint"}
       >
         <div className="modal-nav settings-nav">
-          <div className="settings-mobile-nav-head">
-            <strong data-settings-focus-target tabIndex={-1}>{tr("common.settings")}</strong>
-            <IconButton icon={CloseIcon} label={tr("common.close")} onClick={closeSettings} />
-          </div>
-          <div className={`settings-nav-search-shell${mobile ? " ui-field-well" : ""}${filter ? " has-query" : ""}`}>
-            <span className="settings-nav-search-icon" aria-hidden="true">
-              <Icon icon={SearchIcon} size="sm" />
-            </span>
-            <TextInput
-              className="settings-nav-search"
-              uiSize="sm"
-              type="search"
-              value={filter}
-              placeholder={searchHint}
-              onChange={(e) => { setFilter(e.target.value); setCursor(0); }}
-              onKeyDown={onSearchKey}
-              aria-label={tr("settingsview.searchSettings")}
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={q ? true : false}
-              aria-controls={q ? "settings-search-results" : undefined}
-              aria-activedescendant={activeOption}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {filter ? (
-              <IconButton className="settings-nav-search-clear" icon={CloseIcon} size="sm" label={tr("settingsview.clearSearch")} onClick={clearSearch} />
+          {/* On a phone this one scroller carries the search row and the list,
+              so nothing stays pinned above the pages. It is a child because
+              the stack motion hangs its veil and transforms on .settings-nav. */}
+          <div className="settings-nav-scroll">
+            <div className="settings-mobile-nav-head">
+              {mobile && <h1 className="sr-only" data-settings-focus-target tabIndex={-1}>{tr("common.settings")}</h1>}
+              <div className={`settings-nav-search-shell${mobile ? " ui-field-well" : ""}${filter ? " has-query" : ""}`}>
+                <span className="settings-nav-search-icon" aria-hidden="true">
+                  <Icon icon={SearchIcon} size="sm" />
+                </span>
+                <TextInput
+                  className="settings-nav-search"
+                  uiSize="sm"
+                  type="search"
+                  value={filter}
+                  placeholder={searchHint}
+                  onChange={(e) => { setFilter(e.target.value); setCursor(0); }}
+                  onKeyDown={onSearchKey}
+                  aria-label={tr("settingsview.searchSettings")}
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={q ? true : false}
+                  aria-controls={q ? "settings-search-results" : undefined}
+                  aria-activedescendant={activeOption}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                {filter ? (
+                  <IconButton className="settings-nav-search-clear" icon={CloseIcon} size="sm" label={tr("settingsview.clearSearch")} onClick={clearSearch} />
+                ) : (
+                  !mobile && <kbd className="settings-nav-search-kbd" aria-hidden="true">{shortcutHint}</kbd>
+                )}
+              </div>
+              {mobile && <IconButton icon={CloseIcon} label={tr("common.close")} onClick={closeSettings} />}
+            </div>
+            {q ? (
+              <div className="settings-results" id="settings-search-results" role="listbox" aria-label={tr("settingsview.settingsSearchResults")}>
+                {searchEntries.map((entry, i) => entry.kind === "page" ? (
+                  <button
+                    key={`page:${entry.page.id}`}
+                    id={`settings-search-option-${i}`}
+                    type="button"
+                    tabIndex={-1}
+                    className={`settings-result settings-result-pagehead${cursor === i ? " cursor" : ""}`}
+                    role="option"
+                    aria-selected={cursor === i}
+                    onClick={() => openEntry(entry)}
+                    onPointerMove={() => setCursor(i)}
+                  >
+                    <span className="settings-result-icon" aria-hidden="true"><SettingsNavIcon pageId={entry.page.id} icon={entry.page.icon} /></span>
+                    <span className="settings-result-label">{entry.page.label}</span>
+                    <span className="settings-result-page">
+                      {entry.hidden > 0 ? tr("settingsview.moreInPage", { count: entry.hidden }) : tr("settingsview.pageResult")}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    key={`item:${entry.hit.item.id}`}
+                    id={`settings-search-option-${i}`}
+                    type="button"
+                    tabIndex={-1}
+                    className={`settings-result settings-result-item${cursor === i ? " cursor" : ""}`}
+                    role="option"
+                    aria-selected={cursor === i}
+                    onClick={() => openEntry(entry)}
+                    onPointerMove={() => setCursor(i)}
+                  >
+                    <span className="settings-result-label">{entry.hit.item.label}</span>
+                    {entry.hit.item.description && <span className="settings-result-hint">{entry.hit.item.description}</span>}
+                  </button>
+                ))}
+                {resultCount === 0 && (
+                  <div className="settings-results-empty" role="status">
+                    <strong>{tr("settingsview.noMatchesFor", { query: q })}</strong>
+                    <span>{tr("settingsview.noMatchesHint")}</span>
+                    <Button type="button" size="sm" variant="ghost" onClick={clearSearch}>{tr("settingsview.clearSearch")}</Button>
+                  </div>
+                )}
+              </div>
             ) : (
-              !mobile && <kbd className="settings-nav-search-kbd" aria-hidden="true">{shortcutHint}</kbd>
+              <nav className="settings-nav-list" aria-label={tr("settingsview.settingsPages")} aria-busy={!packagesSettled || undefined}>
+                {packagesSettled ? GROUP_ORDER.map((group) => {
+                  const groupPages = navPages.filter((page) => page.group === group);
+                  if (groupPages.length === 0) return null;
+                  return (
+                    <section className="settings-nav-section" key={group} aria-labelledby={`settings-nav-group-${group}`}>
+                      <div className="settings-nav-group" id={`settings-nav-group-${group}`}>{GROUP_LABELS[group]}</div>
+                      <div className="settings-nav-group-list">
+                        {groupPages.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            className={`settings-nav-item ${current.id === p.id ? "active" : ""}`}
+                            aria-current={current.id === p.id ? "page" : undefined}
+                            onClick={() => navigateTo(p.id)}
+                          >
+                            <span className="settings-nav-icon" aria-hidden="true"><SettingsNavIcon pageId={p.id} icon={p.icon} /></span>
+                            <span className="settings-nav-label">{p.label}</span>
+                            <Icon icon={ChevronRightIcon} size="sm" className="settings-nav-chevron" />
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                }) : (
+                  <div className="settings-nav-skeleton" role="status" aria-label={tr("settingsview.loadingPages")}>
+                    {Array.from({ length: NAV_SKELETON_ROWS }, (_, i) => (
+                      <span key={i} className={`settings-nav-skeleton-row${i % 5 === 0 ? " is-group" : ""}`} aria-hidden="true" />
+                    ))}
+                  </div>
+                )}
+              </nav>
             )}
           </div>
-          {q ? (
-            <div className="settings-results" id="settings-search-results" role="listbox" aria-label={tr("settingsview.settingsSearchResults")}>
-              {searchEntries.map((entry, i) => entry.kind === "page" ? (
-                <button
-                  key={`page:${entry.page.id}`}
-                  id={`settings-search-option-${i}`}
-                  type="button"
-                  tabIndex={-1}
-                  className={`settings-result settings-result-pagehead${cursor === i ? " cursor" : ""}`}
-                  role="option"
-                  aria-selected={cursor === i}
-                  onClick={() => openEntry(entry)}
-                  onPointerMove={() => setCursor(i)}
-                >
-                  <span className="settings-result-icon" aria-hidden="true"><SettingsNavIcon pageId={entry.page.id} icon={entry.page.icon} /></span>
-                  <span className="settings-result-label">{entry.page.label}</span>
-                  <span className="settings-result-page">
-                    {entry.hidden > 0 ? tr("settingsview.moreInPage", { count: entry.hidden }) : tr("settingsview.pageResult")}
-                  </span>
-                </button>
-              ) : (
-                <button
-                  key={`item:${entry.hit.item.id}`}
-                  id={`settings-search-option-${i}`}
-                  type="button"
-                  tabIndex={-1}
-                  className={`settings-result settings-result-item${cursor === i ? " cursor" : ""}`}
-                  role="option"
-                  aria-selected={cursor === i}
-                  onClick={() => openEntry(entry)}
-                  onPointerMove={() => setCursor(i)}
-                >
-                  <span className="settings-result-label">{entry.hit.item.label}</span>
-                  {entry.hit.item.description && <span className="settings-result-hint">{entry.hit.item.description}</span>}
-                </button>
-              ))}
-              {resultCount === 0 && (
-                <div className="settings-results-empty" role="status">
-                  <strong>{tr("settingsview.noMatchesFor", { query: q })}</strong>
-                  <span>{tr("settingsview.noMatchesHint")}</span>
-                  <Button type="button" size="sm" variant="ghost" onClick={clearSearch}>{tr("settingsview.clearSearch")}</Button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <nav className="settings-nav-list" aria-label={tr("settingsview.settingsPages")} aria-busy={!packagesSettled || undefined}>
-              {packagesSettled ? GROUP_ORDER.map((group) => {
-                const groupPages = navPages.filter((page) => page.group === group);
-                if (groupPages.length === 0) return null;
-                return (
-                  <section className="settings-nav-section" key={group} aria-labelledby={`settings-nav-group-${group}`}>
-                    <div className="settings-nav-group" id={`settings-nav-group-${group}`}>{GROUP_LABELS[group]}</div>
-                    <div className="settings-nav-group-list">
-                      {groupPages.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className={`settings-nav-item ${current.id === p.id ? "active" : ""}`}
-                          aria-current={current.id === p.id ? "page" : undefined}
-                          onClick={() => navigateTo(p.id)}
-                        >
-                          <span className="settings-nav-icon" aria-hidden="true"><SettingsNavIcon pageId={p.id} icon={p.icon} /></span>
-                          <span className="settings-nav-label">{p.label}</span>
-                          <Icon icon={ChevronRightIcon} size="sm" className="settings-nav-chevron" />
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                );
-              }) : (
-                <div className="settings-nav-skeleton" role="status" aria-label={tr("settingsview.loadingPages")}>
-                  {Array.from({ length: NAV_SKELETON_ROWS }, (_, i) => (
-                    <span key={i} className={`settings-nav-skeleton-row${i % 5 === 0 ? " is-group" : ""}`} aria-hidden="true" />
-                  ))}
-                </div>
-              )}
-            </nav>
-          )}
           <div className="nav-foot">
             <SlotHost slot="settings.footer" />
           </div>

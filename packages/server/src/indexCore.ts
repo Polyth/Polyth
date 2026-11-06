@@ -71,6 +71,7 @@ import {
   SERVER_TURN_STOPPED_BUS,
   SERVER_PERMISSION_WAITING_BUS,
   SERVER_ACCOUNT_REMOVAL_BUS,
+  SERVER_PERSON_DATA_VOLUME,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
   SERVER_BEHAVIOR_SECTIONS,
@@ -82,7 +83,7 @@ import {
 } from "@polyth/plugins";
 import { createProjectService } from "./projects.ts";
 import { createPermissionWaitingBus } from "./permissionWaiting.ts";
-import { watchEventLoopStalls } from "./eventLoopStall.ts";
+import { defaultStallReport, watchEventLoopStalls, type EventLoopStall } from "./eventLoopStall.ts";
 import {
   createSpaceGateway,
   spaceCookieHeader,
@@ -129,13 +130,16 @@ import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
+import { resolveSessionAccount } from "./sessionAccount.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
-import { createFailedStartupCleanupPolicy } from "./failedStartupCleanup.ts";
+import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
+import { createFailedStartupCleanupPolicy, type SessionAccountDeps } from "./failedStartupCleanup.ts";
+import { createExpiredSessionPolicy, sessionsKeptByPeople, startExpiredSessionCleanup } from "./expiredSessionCleanup.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig, PERSONAL_MCP_PACKAGE } from "./mcp.ts";
 import { createCapabilityProvisioningController, reconcilePinnedHarness } from "./capabilityProvisioning.ts";
 import { guardedPermissions, spaceHasGuardedMember } from "./accountGuardrails.ts";
@@ -150,8 +154,9 @@ import {
 import { assistRoutes } from "./routes/assist.ts";
 import { promptHistoryRoutes } from "./routes/promptHistory.ts";
 import { sharingRoutes } from "./routes/sharing.ts";
-import { createSessionSharingService, privateSessionOwner, rowForReader, sessionAccess } from "./sessionSharing.ts";
-import { projectVisibleToUser } from "./accountLimits.ts";
+import { createSessionSharingService, privateSessionOwner, rowForReader, sessionAccess, sessionPrivacy } from "./sessionSharing.ts";
+import { erasePrivateChats, privateDataBytes, privateDataRoutes } from "./routes/privateData.ts";
+import { projectVisibleToUser, setPrivateRoomParentLookup } from "./accountLimits.ts";
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -232,6 +237,9 @@ export interface BootOptions {
    * owner has no credential). Other hosts leave it unset.
    */
   desktopOwnerChannel?: boolean;
+  /** Told about each event-loop stall as well. A packaged desktop app has no
+   *  console, so without this its log never shows why the window froze. */
+  onEventLoopStall?: (stall: EventLoopStall) => void;
 }
 
 /** Keep protocol identity behind the runtime pool's stable facade, including
@@ -764,6 +772,7 @@ export async function boot(opts: BootOptions = {}) {
     onRemoved: (project) => cleanupProjectCapabilities(project),
   });
   root.provide(CAP.projects, projects);
+  setPrivateRoomParentLookup((projectId) => projects.parentOfRoom(projectId));
 
   // --- tenancy boundary. Built as early as possible so that package hosts,
   // route wiring, and the WS gateway can only ever be handed SCOPED services.
@@ -774,6 +783,14 @@ export async function boot(opts: BootOptions = {}) {
   // allowlists). Called at request time, after the harness registry below
   // exists; descriptors read their account record live.
   const harnessAccess = () => harnessAccessOf(harnesses.providers().map((provider) => provider.descriptor));
+  // Its seams resolve per call: everything they reach is composed further down.
+  const sessionSharing = createSessionSharingService({
+    projection: (sessionId) => store.projection(sessionId),
+    accessChanged: (projections, formerReaders) => broadcast.sessionAccessChanged?.(projections, formerReaders),
+    hasPersonalMcpServers: (userId) => mcp.hasPersonalServers(userId),
+    isPrivateRoom: (projectId) => projects.parentOfRoom(projectId) !== undefined,
+    leftPrivate: (spaceId, chats) => personalMcpReprovision?.leftPrivate(spaceId, chats),
+  });
   const { gateway: spaceGateway } = await createSpaceGateway({
     dataDir,
     registry: projects,
@@ -782,6 +799,7 @@ export async function boot(opts: BootOptions = {}) {
       if (!sessionsRef) throw new Error("session service is not composed yet");
       return sessionsRef;
     },
+    sharing: () => sessionSharing,
     // Read per call, after the harness registry below exists.
     harnessAccess,
     // harness-runtime owns the person's saved default; resolved per create.
@@ -2349,7 +2367,7 @@ export async function boot(opts: BootOptions = {}) {
   const deliverToRecipient = async (
     recipient: NotificationAccount,
     payload: PushPayload,
-    people?: Pick<NotificationRecord, "author" | "chat">,
+    people?: Pick<NotificationRecord, "author" | "chat" | "accessRequest">,
   ): Promise<void> => {
     const { key, projectId } = payload;
     if (!key || !payload.sessionId || !projectId) {
@@ -2383,6 +2401,7 @@ export async function boot(opts: BootOptions = {}) {
     text: string;
     mentions: Array<{ userId: string; name?: string }>;
     audience: Array<{ userId: string; name?: string }>;
+    accessRequest?: { approver: { userId: string }; people: Array<{ userId: string; name?: string }> };
   }): Promise<void> => {
     const target = await store.projection(input.sessionId);
     if (!target || !target.spaceId) return;
@@ -2390,11 +2409,17 @@ export async function boot(opts: BootOptions = {}) {
     const authorName = input.author.name?.trim() || input.author.userId;
     const sessionTitle = target.title || "Session";
     const excerpt = plainTextExcerpt(input.text, 200);
-    const deliver = (person: { userId: string }, kind: "mention" | "message"): void => {
+    const deliver = (
+      person: { userId: string },
+      kind: "mention" | "message",
+      asked?: NonNullable<NotificationRecord["accessRequest"]>["people"],
+    ): void => {
       // Recheck at delivery: content never reaches someone outside the audience.
       if (!sessionAccess(person.userId, spaceId, input.sessionId)) return;
       // Read like a messenger: who and where in the title, the words in the body.
-      const title = kind === "mention" ? `${authorName} mentioned you · ${sessionTitle}` : `${authorName} · ${sessionTitle}`;
+      const title = asked
+        ? `${authorName} asks you to share · ${sessionTitle}`
+        : kind === "mention" ? `${authorName} mentioned you · ${sessionTitle}` : `${authorName} · ${sessionTitle}`;
       const payload: PushPayload = {
         kind,
         sessionId: input.sessionId,
@@ -2403,20 +2428,32 @@ export async function boot(opts: BootOptions = {}) {
         // One notification per chat: the service worker stacks a burst into
         // it (`chat`/`line`) instead of piling up one alert per message.
         tag: `polyth-people-${input.sessionId}`,
-        key: `person-message:${input.sessionId}:${input.seq}:${kind}`,
+        key: `person-message:${input.sessionId}:${input.seq}:${asked ? "access-request" : kind}`,
         projectId: target.projectId,
         chat: plainTextExcerpt(sessionTitle, 100),
         line: plainTextExcerpt(`${authorName}: ${excerpt}`, 160),
       };
       // The inbox row also names the author and chat, so a client can draw
       // who wrote it (identity colour, monogram) without parsing the title.
-      const people = { author: { userId: input.author.userId, name: authorName }, chat: plainTextExcerpt(sessionTitle, 100) };
+      // A request is a `mention`: it needs the same urgency and alert routing,
+      // and a client that predates it still shows the message.
+      const people = {
+        author: { userId: input.author.userId, name: authorName },
+        chat: plainTextExcerpt(sessionTitle, 100),
+        ...(asked ? { accessRequest: { messageSeq: input.seq, people: asked } } : {}),
+      };
       void deliverToRecipient({ userId: person.userId, spaceId }, payload, people).catch((error) => {
         console.error("[polyth] person message notification failed", error);
       });
     };
     for (const person of input.mentions) deliver(person, "mention");
     for (const person of input.audience) deliver(person, "message");
+    if (input.accessRequest) {
+      deliver(input.accessRequest.approver, "mention", input.accessRequest.people.map((person) => ({
+        userId: person.userId,
+        name: person.name?.trim() || person.userId,
+      })));
+    }
   };
   const pushNotifier = createPushNotifier({
     send: async (payload) => {
@@ -2564,7 +2601,7 @@ export async function boot(opts: BootOptions = {}) {
     ?? smallModel();
   // "Delete failed startup sessions" is a synced client setting; every
   // server-side automatic removal honours the owning account's choice.
-  const failedStartupCleanupAllowed = createFailedStartupCleanupPolicy({
+  const sessionAccounts: SessionAccountDeps = {
     spaceOf: (projection) => projection.spaceId ?? projects.spaceOfProject(projection.projectId),
     accountForSession: async (sessionId, spaceId) =>
       (await notifications.recipientForSession(sessionId, { spaceId }))?.userId,
@@ -2573,7 +2610,8 @@ export async function boot(opts: BootOptions = {}) {
       .filter((userId) => Boolean(spaceGateway.store.roleOf(userId, spaceId))),
     settingsFor: (userId) => clientSettings.get(userId).settings,
     projection: (sessionId) => store.projection(sessionId),
-  });
+  };
+  const failedStartupCleanupAllowed = createFailedStartupCleanupPolicy(sessionAccounts);
 
   const turnCompletedListeners = new Set<
     (event: { sessionId: string; assistantText: string; userId?: string }) => void | Promise<void>
@@ -2621,6 +2659,13 @@ export async function boot(opts: BootOptions = {}) {
       return { dispose: () => { accountRemovedListeners.delete(listener); } };
     },
   });
+  const personDataMeasures = new Set<(userId: string) => number | Promise<number>>();
+  services.provide(SERVER_PERSON_DATA_VOLUME, {
+    contribute(measure) {
+      personDataMeasures.add(measure);
+      return { dispose: () => { personDataMeasures.delete(measure); } };
+    },
+  });
   const purposeContexts = new Map<string, (session: SessionProjection) => string>();
   services.provide(SESSION_PURPOSES, {
     register(purpose, context) {
@@ -2646,15 +2691,25 @@ export async function boot(opts: BootOptions = {}) {
       return undefined;
     }
   };
-  // The account a session belongs to: the recipient registered when it was
-  // created in its Space. Absent for legacy or Space-less sessions.
+  // The account a session belongs to: the recipient registered for it in its
+  // Space. Many chats have none (package, tool and isolation create paths
+  // never recorded one), so this falls back to the person it acts for and then
+  // to the Space's only member; both must still hold a role in that Space.
+  // Absent for Space-less sessions. Settings reads only: deletion policies
+  // keep their own every-member rule.
   const sessionAccountId = async (
-    projection: Pick<SessionProjection, "id" | "spaceId"> | null | undefined,
+    projection: Pick<SessionProjection, "id" | "spaceId" | "actor"> | null | undefined,
     purpose: string,
   ): Promise<string | undefined> => {
-    if (!projection?.spaceId) return undefined;
+    const spaceId = projection?.spaceId;
+    if (!projection || !spaceId) return undefined;
     try {
-      return (await notifications.recipientForSession(projection.id, { spaceId: projection.spaceId }))?.userId;
+      return resolveSessionAccount({
+        recipient: (await notifications.recipientForSession(projection.id, { spaceId }))?.userId,
+        actor: projection.actor?.userId,
+        members: () => sessionAccounts.members(spaceId),
+        isMember: (userId) => notificationAccess({ userId, spaceId }),
+      });
     } catch (error) {
       console.warn(`[polyth] ${purpose} account lookup failed`, error);
       return undefined;
@@ -2725,6 +2780,8 @@ export async function boot(opts: BootOptions = {}) {
         return undefined;
       }
     },
+    sessionPrivacy,
+    markPersonalContext: async (sessionId) => { await lazySessions.markPersonalContext?.(sessionId); },
     storageDir: dataDir,
     deployment: spaceGateway.deployment,
     spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),
@@ -2859,6 +2916,13 @@ export async function boot(opts: BootOptions = {}) {
         sessionRoute: { ...(model ? { model } : {}), ...(projection.resolvedHarnessId ? { harnessId: projection.resolvedHarnessId } : {}) },
         fallbackRoute: smallModelExecutionRoute(resolveSmallModel(userId), projection),
         projectRuntime: (harnessId) => runtimes.forProject(projection.projectId, project?.path, harnessId),
+        // A failure names the model and harness the person picked, e.g. "opus on Claude Code".
+        describe: (route) => {
+          const harnessName = route.harnessId
+            ? harnesses.providers().find((provider) => provider.descriptor.id === route.harnessId)?.descriptor.name ?? route.harnessId
+            : undefined;
+          return `${route.model?.modelID ?? "the default model"}${harnessName ? ` on ${harnessName}` : ""}`;
+        },
         run: async (rt, routeModel, requireDirect) => {
           const budget = await smallModels.inputBudget(rt, routeModel, maxOutputTokens);
           const { text } = await smallModels.complete(rt, {
@@ -2907,6 +2971,20 @@ export async function boot(opts: BootOptions = {}) {
         });
       }
       await isolation.cleanupForSessionDelete(projection, releaseExecution);
+    },
+    releaseArchivedCheckouts: async ({ sessionId, releaseExecution }) => {
+      const isolation = svc<{
+        releaseArchivedCheckouts(
+          sessionId: string,
+          release: (sessionId: string, cwd: string, options?: { sharer?: boolean }) => Promise<void>,
+        ): Promise<void>;
+      }>("isolation");
+      if (!isolation) {
+        throw Object.assign(new Error("git isolation cleanup is unavailable"), {
+          code: "unsupported",
+        });
+      }
+      await isolation.releaseArchivedCheckouts(sessionId, releaseExecution);
     },
     updateIsolatedWorkspace: async (sessionId, selection) => {
       const isolation = svc<{ updateIsolatedWorkspace: NonNullable<SessionDeps["updateIsolatedWorkspace"]> }>("isolation");
@@ -2990,6 +3068,12 @@ export async function boot(opts: BootOptions = {}) {
         return false;
       }
     },
+    compactionDefault: (userId) => userId
+      ? parseCompactionPreference((clientSettings.get(userId).settings as { product?: { compactionDefault?: unknown } } | null | undefined)?.product?.compactionDefault)
+      : undefined,
+    // Idempotent and never replaces a recorded owner; an account without a
+    // role in the Space is refused by the store.
+    personWrote: ({ sessionId, spaceId, userId }) => notifications.registerSessionRecipient(sessionId, { userId, spaceId }),
     // The hint points at agent.spawn, so it follows the subagent-routing policy.
     contextPressureEnabled: async () => {
       try {
@@ -3198,10 +3282,29 @@ export async function boot(opts: BootOptions = {}) {
       },
     });
   };
+  // "Clean up automatically" in Settings → Sessions. Nothing here runs before
+  // its first timer, well after boot recovery.
+  const releaseArchivedCheckouts = (sessionId: string): Promise<void> => {
+    if (!sessionsImpl?.releaseArchivedCheckouts) {
+      throw Object.assign(new Error("isolated workspace cleanup is unavailable"), { code: "unsupported" });
+    }
+    return sessionsImpl.releaseArchivedCheckouts(sessionId);
+  };
+  const expiredSessionCleanup = startExpiredSessionCleanup({
+    spaceIds: () => spaceGateway.store.allSpaces().map((space) => space.id),
+    sessionsFor: (spaceId) => spaceServices(spaceGateway.resolveInternal(spaceId)).sessions,
+    releaseCheckouts: releaseArchivedCheckouts,
+    policy: createExpiredSessionPolicy(sessionAccounts),
+    keep: (spaceId, sessionIds) => sessionsKeptByPeople(sessionIds, sessionAccounts.members(spaceId), store.personStates),
+    stopped: isShuttingDown,
+  });
   const settingsRoute = settingsRoutes({
     behavior, mcp,
     clientSettings,
-    broadcastClientSettings: (userId, state) => broadcast.clientSettingsChanged?.(userId, state),
+    broadcastClientSettings: (userId, state) => {
+      broadcast.clientSettingsChanged?.(userId, state);
+      expiredSessionCleanup.settingsChanged(userId, state.settings);
+    },
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
       const current = (await runtimeCatalog.agents()).find((agent) =>
@@ -3280,23 +3383,52 @@ export async function boot(opts: BootOptions = {}) {
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
 
+  /** Everything that was this one person's: nothing is handed to anyone, because
+   *  nobody but them could ever open it (Spaces §14.5). Their private chats and
+   *  rooms go first, while their ownership can still be read. */
+  const erasePerson = async (userId: string): Promise<{ failed: number }> => {
+    const { failed } = await erasePrivateChats(userId, {
+      projects,
+      deleteChat: async (session) => { await spaceServices(spaceGateway.resolveInternal(session.spaceId)).sessions.delete?.(session.id); },
+      store,
+      removeProject: (project) => spaceServices(spaceGateway.resolveInternal(project.spaceId)).projects.remove(project.id),
+    });
+    // Purge all durable delivery ownership before removing the credential;
+    // recreating the same stable account id must never adopt stale routes.
+    await notifications.removeAccount(userId);
+    push.removeAccount(userId);
+    await nativePush.removeAccount(userId);
+    // The person's connected accounts, secrets and enablement go with them.
+    people.removePerson(userId);
+    // Package-granted access (paired phones…) and package-held personal data
+    // such as memory notes end with the account.
+    const packages = await Promise.all([...accountRemovedListeners].map((listener) =>
+      Promise.resolve()
+        .then(() => listener({ userId }))
+        .then(() => 0, (error: unknown) => {
+          console.error("[polyth] package account removal listener failed", error);
+          return 1;
+        })));
+    return { failed: failed + packages.reduce<number>((sum, one) => sum + one, 0) };
+  };
   const staticCoreRoutes: RouteHandler[] = [
     async (request) => agentTools.route(request),
     authRoutes(auth, {
       onAccountRemoved: async (userId) => {
-        // Purge all durable delivery ownership before removing the credential;
-        // recreating the same stable account id must never adopt stale routes.
-        await notifications.removeAccount(userId);
-        push.removeAccount(userId);
-        await nativePush.removeAccount(userId);
-        // The person's connected accounts, secrets and enablement go with them.
-        people.removePerson(userId);
-        // Package-granted access (paired phones…) ends with the account.
-        await Promise.all([...accountRemovedListeners].map((listener) =>
-          Promise.resolve()
-            .then(() => listener({ userId }))
-            .catch((error) => console.error("[polyth] package account removal listener failed", error))));
+        const { failed } = await erasePerson(userId);
+        // The account is already gone, so nobody can retry from the page; what
+        // remains is unreadable through Polyth and this says it exists.
+        if (failed > 0) console.error(`[polyth] ${failed} item(s) of a removed account's private data could not be erased`);
       },
+    }),
+    privateDataRoutes({
+      erase: erasePerson,
+      volume: (userId) => privateDataBytes(userId, {
+        projects,
+        sessions: lazySessions,
+        store,
+        measures: personDataMeasures,
+      }),
     }),
     spaceRoutes({
       store: spaceGateway.store,
@@ -3367,14 +3499,9 @@ export async function boot(opts: BootOptions = {}) {
         return brief.trim().split(/\s+/).slice(0, 20).join(" ");
       },
     }),
-    sessionRetentionRoutes(spaceServices),
+    sessionRetentionRoutes(spaceServices, releaseArchivedCheckouts),
     promptHistoryRoutes({ spaces: spaceServices, store }),
-    sharingRoutes(createSessionSharingService({
-      projection: (sessionId) => store.projection(sessionId),
-      accessChanged: (projections, formerReaders) => broadcast.sessionAccessChanged?.(projections, formerReaders),
-      hasPersonalMcpServers: (userId) => mcp.hasPersonalServers(userId),
-      leftPrivate: (spaceId, chats) => personalMcpReprovision?.leftPrivate(spaceId, chats),
-    })),
+    sharingRoutes(sessionSharing),
     agentSessionRoutes({
       spaces: spaceServices,
       store,
@@ -3402,7 +3529,7 @@ export async function boot(opts: BootOptions = {}) {
     pushRoutes(push),
     nativePushRoutes(nativePush),
     notificationRoutes(notifications, async (space) => new Set((await spaceServices(space).projects.list()).map((p) => p.id))),
-    browseRoutes(),
+    browseRoutes(dataDir),
     iconifyRoutes(),
     releasesRoutes(),
     async (request) => {
@@ -3504,7 +3631,9 @@ export async function boot(opts: BootOptions = {}) {
   if (process.platform !== "win32") chmodSync(controlSocketPath, 0o600);
   console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${publicListeningPort}  data=${dataDir}`);
   console.log(`[polyth] agent control on ${controlSocketPath}`);
-  const stopStallWatch = watchEventLoopStalls();
+  const stopStallWatch = watchEventLoopStalls(opts.onEventLoopStall
+    ? { report: (stall) => { defaultStallReport(stall); opts.onEventLoopStall?.(stall); } }
+    : {});
   void sessionWatches.recover().catch((error) => {
     console.error("[polyth] session watch recovery failed", error);
   });
@@ -3563,6 +3692,7 @@ export async function boot(opts: BootOptions = {}) {
       await svc<{ closeAll(): Promise<void> }>("browser")?.closeAll().catch(() => {});
       await svc<{ closeAll(): Promise<void> }>("terminal")?.closeAll().catch(() => {});
       await pristineSweepFlight;
+      await expiredSessionCleanup.stop();
       await sessionWatches.close();
       await sessions.flushPendingStreams().catch((error) => console.error("[polyth] stream flush failed", error));
       sessions.dispose();

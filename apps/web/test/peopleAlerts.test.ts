@@ -122,3 +122,15 @@ test("the author and chat come from the row; malformed authors are dropped, old 
   assert.equal(recordChat(row("r1", { chat: undefined, title: "Ann mentioned you · Release · planning" })), "planning");
   assert.equal(recordChat(row("r1", { chat: undefined, title: "Weekend" })), "Weekend");
 });
+
+test("a card keeps the chat's newest request to open it, through later messages", () => {
+  const base = { kind: "mention", title: "Bea · Team", body: "look", ts: 1 } as const;
+  const asked = addToThread(undefined, {
+    ...base, id: "a", accessRequest: { messageSeq: 7, people: [{ userId: "u-cara", name: "Cara" }] },
+  });
+  assert.deepEqual(asked.accessRequest, { messageSeq: 7, people: [{ userId: "u-cara", name: "Cara" }] });
+  const later = addToThread(asked, { ...base, id: "b", kind: "message" });
+  assert.equal(later.accessRequest?.messageSeq, 7);
+  const malformed = addToThread(undefined, { ...base, id: "c", accessRequest: { messageSeq: "x", people: [] } });
+  assert.equal(malformed.accessRequest, undefined);
+});

@@ -11,12 +11,14 @@ import {
 } from "@polyth/plugins";
 import {
   DEFAULT_LOCAL_MODEL_ID,
+  DICTATION_RECORDING_LIMITS,
   ProviderRegistry,
   createDictationService,
   createWhisperSttAdapter,
   providerCapabilities,
   providerCatalog,
   providerToSttAdapter,
+  recordingModelFor,
   selectDictationAdapter,
   type DictationContext,
   type DictationLatencyPreference,
@@ -112,11 +114,34 @@ const createSession = async (
   const context = rawContext && typeof rawContext === "object" && !Array.isArray(rawContext)
     ? rawContext as Partial<DictationContext>
     : undefined;
+  if (input.mode !== undefined && input.mode !== "stream" && input.mode !== "batch") {
+    throw Object.assign(new Error("mode must be \"stream\" or \"batch\""), { code: "invalid-input" });
+  }
   return dictation.create({
     ...(input.sessionId ? { sessionId: String(input.sessionId) } : {}),
     ...(input.language ? { language: String(input.language) } : {}),
     ...(context ? { context } : {}),
+    ...(input.mode === "batch" ? { mode: "batch" as const } : {}),
   });
+};
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+/** Base64 length of one full recording chunk. */
+const MAX_AUDIO_CHUNK_CHARS = Math.ceil(DICTATION_RECORDING_LIMITS.chunkBytes / 3) * 4;
+
+/** A recording chunk travels as base64 JSON: a paired device's mutation body
+ *  is read as JSON by the gateway before any handler runs. */
+const decodeAudioChunk = (value: unknown): Uint8Array => {
+  if (typeof value !== "string" || !value || value.length % 4 !== 0 || !BASE64.test(value)) {
+    throw Object.assign(new Error("audio must be base64-encoded pcm_s16le"), { code: "invalid-input" });
+  }
+  if (value.length > MAX_AUDIO_CHUNK_CHARS) {
+    throw Object.assign(
+      new Error(`a recording chunk holds at most ${DICTATION_RECORDING_LIMITS.chunkBytes} bytes`),
+      { code: "too-long" },
+    );
+  }
+  return new Uint8Array(Buffer.from(value, "base64"));
 };
 
 /** The server's recognition routing choice. Paired devices cannot read
@@ -132,10 +157,11 @@ export interface DictationSelection {
 }
 
 export function dictationRoutes(dictation: DictationService, selection?: () => DictationSelection): RouteHandler {
-  return async ({ path, method, body, json }) => {
+  return async ({ path, method, body, json, url }) => {
     try {
       if (path === "/api/dictation/capability" && method === "GET") {
-        json(200, { ...dictation.capability(), ...(selection ? { selection: selection() } : {}) });
+        const mode = url?.searchParams.get("mode") === "batch" ? "batch" : "stream";
+        json(200, { ...dictation.capability(mode), ...(selection ? { selection: selection() } : {}) });
         return true;
       }
       if ((path === "/api/dictation/sessions" || path === "/api/dictation") && method === "POST") {
@@ -143,7 +169,22 @@ export function dictationRoutes(dictation: DictationService, selection?: () => D
         return true;
       }
 
-      let match = path.match(/^\/api\/dictation\/sessions\/([^/]+)$/);
+      let match = path.match(/^\/api\/dictation\/sessions\/([^/]+)\/audio$/);
+      if (match && method === "POST") {
+        // Live audio rides the /ws binary frames; this route only fills a
+        // recording, whose chunks reach no provider before finalize.
+        const current = dictation.get(match[1]!);
+        if (!current) throw Object.assign(new Error(`dictation session ${match[1]} not found`), { code: "not-found" });
+        if (current.mode !== "batch") {
+          throw Object.assign(new Error("audio upload is only for recorded dictation"), { code: "conflict" });
+        }
+        const input = await body();
+        const result = await dictation.push(match[1]!, Number(input.seq), decodeAudioChunk(input.audio));
+        json(200, { ack: result.ack, duplicate: result.duplicate, ...(result.buffered ? { buffered: true } : {}) });
+        return true;
+      }
+
+      match = path.match(/^\/api\/dictation\/sessions\/([^/]+)$/);
       if (match && method === "GET") {
         const session = dictation.get(match[1]!);
         json(session ? 200 : 404, session ?? { error: "not-found" });
@@ -502,6 +543,9 @@ export const DICTATION_REMOTE_ACCESS = {
     { methods: ["GET"] as const, path: "/api/dictation/sessions/:id", capability: "dictation.use", mutation: false },
     { methods: ["DELETE"] as const, path: "/api/dictation/sessions/:id", capability: "dictation.use", mutation: true },
     { methods: ["POST"] as const, path: "/api/dictation/sessions/:id/finalize", capability: "dictation.use", mutation: true, maxBodyBytes: 256 },
+    // One base64 recording chunk (DICTATION_RECORDING_LIMITS.chunkBytes of
+    // PCM) plus its JSON envelope.
+    { methods: ["POST"] as const, path: "/api/dictation/sessions/:id/audio", capability: "dictation.use", mutation: true, maxBodyBytes: 768 * 1024 },
     { methods: ["GET"] as const, path: "/api/voice/providers", capability: "dictation.use", mutation: false },
     { methods: ["POST"] as const, path: "/api/dictation/token", capability: "dictation.use", mutation: true, maxBodyBytes: 512 },
     // Built-in voices run on this server at no cost, so a paired phone may
@@ -601,7 +645,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       : providerCapabilities(id)?.defaultModel ?? "";
 
     if (id === "elevenlabs") {
-      return apiKey ? createElevenLabsSttAdapter({ apiKey, model: model || "scribe_v2_realtime" }) : null;
+      return apiKey ? createElevenLabsSttAdapter({
+        apiKey,
+        model: model || "scribe_v2_realtime",
+        recordingModel: recordingModelFor(id, model) ?? "scribe_v2",
+      }) : null;
     }
     if (id === "wispr") {
       return apiKey ? createWisprSttAdapter({ apiKey }) : null;
@@ -613,6 +661,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       return apiKey ? createOpenAIRealtimeSttAdapter({
         apiKey,
         model: model || (id === "openai-live" ? "gpt-live-transcribe" : "gpt-transcribe"),
+        recordingModel: recordingModelFor(id, model) ?? "gpt-transcribe",
         latencyPreference: settings.dictation.latencyPreference,
       }) : null;
     }
@@ -638,27 +687,32 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     return null;
   };
 
+  const routedAdapter = (forRecording: boolean): SttAdapter | null => {
+    const settings = voice.get();
+    const selected = settings.dictation;
+
+    // A recording always reaches the provider from this server, so a
+    // browser-direct live route still has a server engine for recordings.
+    if (selected.transport === "direct-browser" && !forRecording) return null;
+    if (selected.transport === "local-worker" && selected.provider !== "local-nemotron") return null;
+
+    const local = localNemotronAdapter(selected.localModel || DEFAULT_LOCAL_MODEL_ID);
+    const primary = adapterFor(selected.provider, settings, true);
+    const explicitFallback = selected.fallbackProvider
+      ? adapterFor(selected.fallbackProvider, settings, false)
+      : null;
+    return selectDictationAdapter({
+      policy: selected.processingPolicy,
+      selectedProvider: selected.provider,
+      selected: primary,
+      local,
+      explicitFallback,
+    });
+  };
+
   const dictation = createDictationService({
-    adapter: () => {
-      const settings = voice.get();
-      const selected = settings.dictation;
-
-      if (selected.transport === "direct-browser") return null;
-      if (selected.transport === "local-worker" && selected.provider !== "local-nemotron") return null;
-
-      const local = localNemotronAdapter(selected.localModel || DEFAULT_LOCAL_MODEL_ID);
-      const primary = adapterFor(selected.provider, settings, true);
-      const explicitFallback = selected.fallbackProvider
-        ? adapterFor(selected.fallbackProvider, settings, false)
-        : null;
-      return selectDictationAdapter({
-        policy: selected.processingPolicy,
-        selectedProvider: selected.provider,
-        selected: primary,
-        local,
-        explicitFallback,
-      });
-    },
+    adapter: () => routedAdapter(false),
+    batchAdapter: () => routedAdapter(true),
     contextFilter: (context) => {
       const settings = voice.get().dictation;
       if (settings.contextInjection) return context;

@@ -33,7 +33,7 @@ const family = (options: { storageDir?: string; deployment?: "local-trusted" | "
         deployment: options.deployment ?? "local-trusted",
         registry: () => registry,
         createProvider: (account) => { created.push(account); return provider(account?.harnessId ?? "codex"); },
-        status: async (account) => ({ loggedIn: !account }),
+        status: async (account) => account ? { loggedIn: false } : { loggedIn: true, expiresAt: Date.UTC(2026, 10, 26) },
         signInCommand: (account) => harnessCommandLine(["/opt/bin/codex", "login"], account ? { CODEX_HOME: account.dir } : {}),
         deviceSignInCommand: (account) => harnessCommandLine(["/opt/bin/codex", "login", "--device-auth"], account ? { CODEX_HOME: account.dir } : {}),
         limitsFamily: "codex",
@@ -87,6 +87,9 @@ test("every account is its own harness with a private directory and live name", 
     assert.equal(listed.body.manageable, true);
     assert.deepEqual(listed.body.accounts.map((row: { harnessId: string; removable: boolean; status: { loggedIn: boolean } }) => [row.harnessId, row.removable, row.status.loggedIn]),
         [["codex", false, true], ["codex-work-team", true, false], ["codex-account", true, false], ["codex-account-2", true, false]]);
+    // The CLI's own sign-in end travels with its row.
+    assert.equal(listed.body.accounts[0].status.expiresAt, Date.UTC(2026, 10, 26));
+    assert.equal("expiresAt" in listed.body.accounts[1].status, false);
 
     assert.equal((await call(accounts.routes, "DELETE", "/api/backend-codex/accounts/account")).code, 200);
     assert.deepEqual(ids(registry), ["codex", "codex-account-2", "codex-work-team"]);

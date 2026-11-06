@@ -198,7 +198,7 @@ function ownTransportInvocation(args: readonly string[]): { args: string[]; env:
 const gitBin = (): string => resolveGitBinary();
 const execGit = (cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> =>
   new Promise((resolvePromise) => {
-    execFile(gitBin(), args, { cwd, timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+    execFile(gitBin(), args, { cwd, timeout: 10_000, maxBuffer: 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
       (error, stdout) => resolvePromise({ ok: !error, stdout: String(stdout) }));
   });
 

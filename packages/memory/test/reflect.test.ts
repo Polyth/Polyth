@@ -588,3 +588,14 @@ test("proposals belong to the person who wrote the correction; unauthored and sy
     await assert.rejects(f.service.reflect.reject(as("bob"), "project-a", adaOwn.id), { code: "not-found" });
   } finally { f.db.close(); }
 });
+
+test("the rules every member sees never come from a chat only one of them reads", async () => {
+  const f = fixture();
+  try {
+    (f.host as unknown as { sessionPrivacy: (spaceId: string, sessionId: string) => { privateTo?: string } | undefined }).sessionPrivacy =
+      (_spaceId, sessionId) => sessionId === "s1" ? { privateTo: "somebody" } : undefined;
+    await f.service.reflect.kick("s1");
+    const view = await f.service.reflect.view(space("space-a"), "project-a");
+    assert.deepEqual(view.pending, []);
+  } finally { f.db.close(); }
+});

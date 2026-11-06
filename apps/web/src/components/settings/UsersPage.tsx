@@ -1,3 +1,5 @@
+import SlotHost from "../slots/SlotHost.ts";
+import { refreshProjects } from "../../init.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSpaceRole, type SpaceRole } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
@@ -96,6 +98,12 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  // Someone joining or leaving changes who each project is shared with, and with
+  // it the Shared / Only me switch.
+  const accountChanged = useCallback(async () => {
+    await refresh();
+    void refreshProjects();
+  }, [refresh]);
   useEffect(() => {
     let live = true;
     void fetchAuthStatus().then((status) => { if (live) setLocalAccess(status.accessMode === "local"); }, () => undefined);
@@ -173,7 +181,7 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
           spaceAccess={spaceAccess}
           withReauth={withReauth}
           onBack={() => { setFeedback(null); setOwnOpen(false); }}
-          onChanged={refresh}
+          onChanged={accountChanged}
         />
         {prompt}
       </div>
@@ -190,7 +198,7 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
           spaceAccess={spaceAccess}
           withReauth={withReauth}
           onBack={() => { setFeedback(null); setSelectedId(null); }}
-          onChanged={refresh}
+          onChanged={accountChanged}
           welcome={feedback?.tone === "success" ? feedback.text : undefined}
           onRemoved={(text) => {
             setSelectedId(null);
@@ -410,6 +418,7 @@ function AddUserDialog({ spaceAccess, withReauth, onClose, onCreated }: {
       if (role !== "none" && spaceAccess?.canManageMembers) {
         try {
           await grantSpaceMember(spaceAccess.id, account.id, role);
+          void refreshProjects();
         } catch (cause) {
           grantFailure = accountErrorText(cause);
         }
@@ -445,6 +454,8 @@ function AddUserDialog({ spaceAccess, withReauth, onClose, onCreated }: {
         <p className="users-dialog-intro">
           {tr("settings.users.addUserIntro")}
         </p>
+        {/* What the new person can read from day one, for whoever is inviting. */}
+        <SlotHost slot="settings.users.invite.notice" />
         <FormField label={tr("settings.users.name")}>
           <TextInput
             className="users-dialog-name"

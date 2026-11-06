@@ -145,3 +145,62 @@ test("snapshot publication rejects a project that is not in the caller's Space",
   await store.close();
   await rm(dir, { recursive: true, force: true });
 });
+
+test("native transcripts are the machine owner's to browse, and never one behind a chat they can't open", async () => {
+  const store = createStore(":memory:");
+  const dir = await mkdtemp(join(tmpdir(), "session-import-owner-"));
+  try {
+    const provider = {
+      descriptor: { id: "fake", name: "Fake Harness", integration: "test", priority: 1 },
+      source: {
+        list: async () => [
+          { ref: "native-theirs", title: "Someone else's private chat", updatedAt: 200 },
+          { ref: nativeRef, title: "Native one", updatedAt: 100 },
+        ],
+        async *read() { yield { role: "user" as const, text: "hello" }; },
+      },
+    };
+    const everyChat = [{ id: "theirs", backendSessionId: "native-theirs" }, { id: "mine", backendSessionId: "native-mine" }];
+    const host = {
+      forSpace: (context: SpaceContext) => ({
+        projects: { get: async (id: string) => (id === project.id ? project : undefined) },
+        sessions: { list: async () => context.userId === "system" ? everyChat : everyChat.filter((chat) => chat.id === "mine") },
+      }),
+      systemSpaceContext: () => ({ ...space, userId: "system" }),
+      personSpaceContext: (userId: string) => ({ ...space, userId }),
+      services: { require: () => ({ providers: () => [provider] }), get: () => undefined },
+      spaceStorage: () => ({ path: (relative: string) => join(dir, relative) }),
+      store,
+      broadcast: { projection: () => {} },
+    } as unknown as ServerPackageHost;
+    const { routes } = registerPackage(host);
+    const call = async (who: Partial<SpaceContext> & { instanceOwner?: boolean }, method: string, path: string, body?: Record<string, unknown>) => {
+      let response: { code: number; value: unknown } | undefined;
+      await routes({
+        path, method,
+        url: new URL(`http://polyth.test${path}?projectId=${project.id}`),
+        space: { ...space, ...who },
+        body: async () => ({ projectId: project.id, ...(body ?? {}) }),
+        json: (code: number, value: unknown) => { response = { code, value }; },
+      } as unknown as RouteRequest);
+      return response;
+    };
+
+    const member = await call({ userId: "user-b", role: "member", instanceOwner: false }, "GET", "/api/session-import/sources");
+    const [forMember] = member!.value as Array<{ items: unknown[]; ownerOnly?: boolean }>;
+    assert.equal(forMember!.ownerOnly, true);
+    assert.deepEqual(forMember!.items, [], "a member sees no transcript at all");
+    await assert.rejects(
+      call({ userId: "user-b", role: "member", instanceOwner: false }, "POST", "/api/session-import/snapshot", { ref: "anything" }),
+      { code: "forbidden" },
+    );
+
+    const owner = await call({ userId: "user-a", instanceOwner: true }, "GET", "/api/session-import/sources");
+    const [forOwner] = owner!.value as Array<{ items: Array<{ ref: string; title: string }>; ownerOnly?: boolean }>;
+    assert.equal(forOwner!.ownerOnly, undefined);
+    assert.deepEqual(forOwner!.items.map((item) => item.title), ["Native one"], "someone's private chat stays out of the owner's list");
+  } finally {
+    await store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

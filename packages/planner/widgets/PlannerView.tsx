@@ -1,3 +1,4 @@
+import { rootProjects } from "@polyth/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { openSettingsPage, useStore } from "../../../apps/web/src/store.ts";
@@ -203,7 +204,7 @@ export default function PlannerView({ host, projectId: shellProjectId }: {
     body = (
       <PlannerList
         tasks={tasks}
-        projects={projects}
+        projects={rootProjects(projects) as typeof projects}
         projectId={scopedProjectId}
         tab={prefs.tab}
         locale={locale}
@@ -227,7 +228,7 @@ export default function PlannerView({ host, projectId: shellProjectId }: {
           key={route.kind === "task" ? route.id : `new-${route.key}`}
           task={task}
           {...(route.kind === "new" && route.seed ? { seed: route.seed } : {})}
-          projects={projects}
+          projects={rootProjects(projects) as typeof projects}
           locale={locale}
           now={now}
           {...(host ? { host } : {})}

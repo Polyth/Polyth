@@ -35,7 +35,7 @@ import { checkoutScopeKey, publishCheckoutEdits, sessionLabel } from "./editor/s
 import { useOpenSessionEdits } from "./workbenchHints.ts";
 import { ContextMenuAnchor } from "./editor/contextMenuAnchor.tsx";
 import { confirmAlert, promptAlert } from "../../../apps/web/src/alerts.ts";
-import { desktopBridge } from "../../../apps/web/src/desktopBridge.ts";
+import { localDesktopBridge } from "../../../apps/web/src/desktopBridge.ts";
 import { RESOURCE_MIME, dragKind, getDragResource } from "../../../apps/web/src/dnd.ts";
 import { announceFilesChanged } from "./editor/FilePane.tsx"; // registers the "file" pane provider
 import { isDocDirty, peekFileDoc, removeDoc, renameDoc } from "./editor/fileDocs.ts";
@@ -1084,7 +1084,7 @@ export default function EditorView({
   };
 
   const revealNative = async (entry: FileEntry, repositoryId: string) => {
-    const desktop = desktopBridge();
+    const desktop = localDesktopBridge();
     const root = repositories.find((repository) => repository.repositoryId === repositoryId)?.path
       ?? session?.worktreePath ?? project?.path;
     if (!desktop || !root || project?.remote) return;
@@ -1429,7 +1429,7 @@ export default function EditorView({
           ctx.entry.dir
             ? { id: "download-zip", label: tr("filetree.downloadZip"), icon: DownloadIcon, onSelect: () => void downloadFolder(ctx.entry!.path, ctx.repositoryId ?? primaryRepository) }
             : { id: "download", label: tr("filetree.download"), icon: DownloadIcon, onSelect: () => downloadPath(ctx.entry!.path, ctx.repositoryId ?? primaryRepository) },
-          ...(desktopBridge() && !project?.remote
+          ...(localDesktopBridge() && !project?.remote
             ? [{
                 id: "reveal",
                 label: tr(ctx.entry.dir ? "editorview.openInFileManager" : "editorview.revealInFileManager"),

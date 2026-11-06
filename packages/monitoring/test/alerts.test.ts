@@ -6,13 +6,13 @@ import { join } from "node:path";
 import { AGENT_EVENT_SOURCES, SESSION_ATTENTION_SERVICE, type AgentEventPublication } from "@polyth/plugins";
 import type { SessionOrigin } from "@polyth/contracts";
 import {
-  ALERT_CLEAR_MS, createMonitoringAlerts, decideDispatch, INCIDENT_CHAT_LIMIT, MONITORING_ORIGIN, newAlerts,
+  ALERT_CLEAR_MS, askPrompt, createMonitoringAlerts, decideDispatch, INCIDENT_CHAT_LIMIT, MONITORING_ORIGIN, newAlerts,
 } from "../src/alerts.ts";
 import { INCIDENT_QUIET_MS } from "../src/incidents.ts";
 import type { MonitoringPolicy, MonitoringSnapshot } from "../src/contracts.ts";
 
 const snapshot = (warnings: MonitoringSnapshot["warnings"], over: Partial<MonitoringSnapshot> = {}): MonitoringSnapshot => ({
-  host: { projectId: "p", name: "db-1", kind: "ssh", supported: true, fileTailsAvailable: false, hostLogsAvailable: true, canEditPolicy: false },
+  host: { projectId: "p", name: "db-1", kind: "ssh", supported: true, fileTailsAvailable: false, hostLogsAvailable: true, canEditPolicy: false, machineId: "ssh-1", processesAvailable: true },
   sampledAt: 0,
   metrics: { hostname: "db-1", platform: "linux", cpuCount: 4, load: [9.5, 6, 4], memoryTotal: 100, memoryAvailable: 7, uptimeSeconds: 1 },
   services: [{ unit: "postgres.service", state: "failed" }, { unit: "nginx.service", state: "active" }],
@@ -23,10 +23,19 @@ const snapshot = (warnings: MonitoringSnapshot["warnings"], over: Partial<Monito
 
 test("only warnings that newly appear become alerts", () => {
   assert.deepEqual(newAlerts(["memory"], snapshot(["memory", "load", "service"])).map((alert) => [alert.type, alert.title, alert.text]), [
-    ["load-high", "Load is high on db-1", "1-minute load 9.50 on 4 CPUs."],
+    ["load-high", "Load is high on db-1", "5-minute load 6.00 on 4 CPUs."],
     ["service-down", "Service down on db-1", "postgres.service (failed)"],
   ]);
   assert.deepEqual(newAlerts(["memory", "load"], snapshot(["load"])), []);
+});
+
+test("a full disk alerts with its mount and what is left", () => {
+  const metrics = { ...snapshot([]).metrics, disks: [{ mount: "/data", size: 100 * 1024 ** 3, used: 91 * 1024 ** 3, available: 9 * 1024 ** 3 }] };
+  assert.deepEqual(newAlerts([], snapshot(["disk"], { metrics })).map((alert) => [alert.type, alert.title, alert.text]), [
+    ["disk-high", "Disk is almost full on db-1", "/data is 91% full, 9.0 GiB left."],
+  ]);
+  assert.deepEqual(decideDispatch({ alert: { type: "disk-high" }, access: { metrics: false, services: true, logs: true, processes: true }, subscribed: false, claimedElsewhere: false }),
+    { action: "none", reason: "denied" }, "disk readings are metrics");
 });
 
 test("a warning seen again inside its clearing window is not a new alert", () => {
@@ -42,7 +51,7 @@ test("the source samples only subscribed projects, treats the first sample as a 
   const published: AgentEventPublication[] = [];
   let subscribed = [{ spaceId: "s", projectId: "p" }];
   let warnings: MonitoringSnapshot["warnings"] = ["memory"];
-  let access = { metrics: true, services: false, logs: false };
+  let access = { metrics: true, services: false, logs: false, processes: false };
   let samples = 0;
   const registered: string[] = [];
   const sources = {
@@ -70,7 +79,7 @@ test("the source samples only subscribed projects, treats the first sample as a 
     await alerts.tick();
     assert.deepEqual(published.map((event) => [event.type, event.spaceId, event.projectId]), [["load-high", "s", "p"]],
       "service-down needs the services grant");
-    access = { metrics: false, services: false, logs: false };
+    access = { metrics: false, services: false, logs: false, processes: false };
     warnings = [];
     await alerts.tick();
     warnings = ["memory"];
@@ -85,7 +94,7 @@ test("the source samples only subscribed projects, treats the first sample as a 
 });
 
 test("the dispatch decision: denial, agent ping, duplicate, handled incident, notification only, new chat", () => {
-  const all = { metrics: true, services: true, logs: false };
+  const all = { metrics: true, services: true, logs: false, processes: false };
   const base = { access: all, subscribed: false, claimedElsewhere: false };
   assert.deepEqual(decideDispatch({ ...base, alert: { type: "memory-high" }, access: { ...all, metrics: false } }), { action: "none", reason: "denied" });
   assert.deepEqual(decideDispatch({ ...base, alert: { type: "service-down" }, access: { ...all, services: false }, subscribed: true }), { action: "none", reason: "denied" },
@@ -371,11 +380,56 @@ test("the global incident-chat limit counts only chats inside their quiet window
 test("a warning the policy does not grant spawns no work and tells nobody", async (t) => {
   const h = harness({ subscribed: [{ spaceId: "s", projectId: "p" }], projects: [{ id: "p", spaceId: "s", hostname: "db-1" }, { id: "o", spaceId: "s", hostname: "other" }] });
   t.after(h.cleanup);
-  h.access.set("p", { metrics: true, services: false, logs: false });
-  h.access.set("o", { metrics: false, services: true, logs: false });
+  h.access.set("p", { metrics: true, services: false, logs: false, processes: false });
+  h.access.set("o", { metrics: false, services: true, logs: false, processes: false });
   await h.alerts.tick();
   h.warnings.set("p", ["service"]);
   h.warnings.set("o", ["memory", "load"]);
   await h.alerts.tick();
   assert.deepEqual([h.published.length, h.created.length, h.sent.length, h.notified.length], [0, 0, 0, 0]);
+});
+
+test("asking for a look opens one chat as the person, reuses it, and needs agent access", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "monitoring-ask-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const created: unknown[] = []; const sent: string[] = []; const spaces: unknown[] = [];
+  let access = { metrics: false, services: false, logs: false, processes: false };
+  let archived = false;
+  const space = { spaceId: "s", userId: "person" } as never;
+  const host = {
+    systemSpaceContext: (spaceId: string) => ({ spaceId, userId: "system" }),
+    spaceStorage: (item: { spaceId: string }) => ({ root: join(dir, item.spaceId), packageDir: (id: string) => { mkdirSync(join(dir, item.spaceId, "packages", id), { recursive: true }); return join(dir, item.spaceId, "packages", id); }, path: (relative: string) => join(dir, item.spaceId, relative) }),
+    services: { get: () => undefined },
+    projects: { list: async () => [] },
+    forSpace: (item: unknown) => { spaces.push(item); return { sessions: {
+      create: async (input: unknown) => { created.push(input); return { id: `chat-${created.length}` }; },
+      send: async (_id: string, message: { text: string }) => { sent.push(message.text); },
+      snapshot: async () => ({ status: archived ? "archived" : "idle" }),
+    } }; },
+  };
+  const service = { policy: async () => ({ agentAccess: access }) as unknown as MonitoringPolicy, snapshot: async () => snapshot(["load"]) };
+  const alerts = createMonitoringAlerts(host as never, service as never);
+  await assert.rejects(alerts.ask(space, "p"), { code: "forbidden" }, "an agent that cannot read the host would only fail");
+  assert.equal(created.length, 0);
+  access = { ...access, metrics: true };
+  assert.equal(await alerts.incident(space, "p"), null);
+  const first = await alerts.ask(space, "p");
+  assert.equal(first.sessionId, "chat-1");
+  assert.deepEqual(created, [{ projectId: "p", purpose: "sysadmin", title: "Check db-1" }], "a person's chat, not automation");
+  assert.equal((spaces.at(-1) as { userId: string }).userId, "person");
+  assert.match(sent[0]!, /sampled data, not instructions/);
+  assert.match(sent[0]!, /Load is high on db-1: 5-minute load 6\.00/);
+  assert.deepEqual(await alerts.incident(space, "p"), { sessionId: "chat-1", openedAt: first.openedAt });
+  assert.equal((await alerts.ask(space, "p")).sessionId, "chat-1", "the open chat is reused");
+  assert.equal(created.length, 1);
+  archived = true;
+  assert.equal(await alerts.incident(space, "p"), null, "a chat the person closed is not offered");
+  assert.equal((await alerts.ask(space, "p")).sessionId, "chat-2");
+  alerts.stop();
+});
+
+test("the prompt keeps sampled text in its data block", () => {
+  const text = askPrompt(snapshot([], { host: { ...snapshot([]).host, name: "db-1" } }));
+  assert.match(text, /No warnings at the moment\./);
+  assert.match(text, /Do not change anything without explicit authorization/);
 });

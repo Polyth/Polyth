@@ -27,6 +27,11 @@ export type NotificationKindPref = NotificationKind;
 export type MessageCopyFormat = "markdown" | "json";
 export type TopRailAlignment = "center" | "left";
 export type GlassEffect = "off" | "matte" | "clear";
+/** Chat reading measure (`--chat-measure`): `normal` is the 768px default,
+ *  `wide` a 1180px column and `ultrawide` fills the workspace between the
+ *  gutters. */
+export type ChatWidth = "normal" | "wide" | "ultrawide";
+export const CHAT_WIDTHS: readonly ChatWidth[] = ["normal", "wide", "ultrawide"];
 /** How the top rail separates from the workspace below it: `shadow` keeps the
  *  bottom edge, `flat` drops the edge but keeps the bar, `floating` drops the
  *  bar too so its menus and icons read as free-standing. */
@@ -125,7 +130,9 @@ export interface UiSettings {
   shellLook: ShellLook;
   /** Mirror the wide shell: sidebar and project rail on the right, tools on the left. */
   mirrorLayout: boolean;
-  chatWidth: "normal" | "wide";
+  /** Chat reading measure: `normal` 768px, `wide` 1180px, `ultrawide` fills
+   *  the workspace between the gutters. */
+  chatWidth: ChatWidth;
   /** Browser notification when a turn finishes in a hidden tab. */
   notifyOnComplete: boolean;
   /** Short beep when a turn finishes. */
@@ -418,7 +425,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       hideBorders: typeof data.hideBorders === "boolean" ? data.hideBorders : UI_DEFAULTS.hideBorders,
       shellLook: SHELL_LOOKS.includes(data.shellLook as ShellLook) ? data.shellLook as ShellLook : UI_DEFAULTS.shellLook,
       mirrorLayout: typeof data.mirrorLayout === "boolean" ? data.mirrorLayout : UI_DEFAULTS.mirrorLayout,
-      chatWidth: data.chatWidth === "wide" ? "wide" : "normal",
+      chatWidth: oneOf(data.chatWidth, CHAT_WIDTHS, UI_DEFAULTS.chatWidth),
       notifyOnComplete: data.notifyOnComplete === true,
       notifySound: data.notifySound === true,
       notifyKinds: parseNotifyKinds(data.notifyKinds, data.notifyKindsVersion),

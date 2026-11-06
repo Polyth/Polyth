@@ -22,13 +22,14 @@ import { rowForReader, rowsForReader, sessionAccess } from "./sessionSharing.ts"
 const METHOD_ACCESS: Readonly<Record<string, SessionAccessLevel>> = {
   snapshot: "view", events: "view", replayPage: "view", activate: "view", debug: "view",
   clientMutationStatus: "view", queueList: "view", autoAcceptGet: "view", memoryPolicyGet: "view",
-  runtimeFeatures: "view", saveDraft: "view", markRead: "view", fork: "view",
+  runtimeFeatures: "view", saveDraft: "view", markRead: "view", fork: "view", markPersonalContext: "manage",
   postPersonMessage: "view", mentionCandidates: "view", setPersonMute: "view",
+  decidePersonAccess: "manage",
   startSessionFromConversation: "collaborate",
 
   send: "collaborate", abort: "collaborate", pause: "collaborate", continuePaused: "collaborate", replyPermission: "collaborate", replyQuestion: "collaborate",
   replySecret: "collaborate", delegatePermission: "collaborate", cancelResume: "collaborate",
-  setResumeCompact: "collaborate", resumeNow: "collaborate", rewind: "collaborate", clearRewind: "collaborate",
+  setResumeCompact: "collaborate", setCompactionPreference: "collaborate", resumeNow: "collaborate", rewind: "collaborate", clearRewind: "collaborate",
   runShell: "collaborate", compact: "collaborate", queueEditStart: "collaborate", queueEdit: "collaborate",
   queueSendNow: "collaborate", queueEditCancel: "collaborate", queueReorder: "collaborate",
   queueRemove: "collaborate", pinContext: "collaborate", unpinContext: "collaborate",

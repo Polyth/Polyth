@@ -353,7 +353,9 @@
       ],
       "testHints": [
         "apps/desktop/test/configuration.test.ts",
-        "apps/desktop/test/serverPackages.test.ts"
+        "apps/desktop/test/serverPackages.test.ts",
+        "apps/desktop/test/windowSurface.test.ts",
+        "apps/web/test/desktopServerList.test.ts"
       ],
       "risk": "high"
     },
@@ -542,6 +544,7 @@
         "packages/judgment-jev/**",
         "packages/judgment-local/**",
         "packages/share-chat/**",
+        "packages/limit-windows/**",
         "packages/computer-use/**",
         "packages/glance/**"
       ],
@@ -561,11 +564,13 @@
         "packages/judgment-jev/README.md",
         "packages/judgment-local/README.md",
         "packages/share-chat/README.md",
+        "packages/limit-windows/README.md",
         "packages/computer-use/README.md",
         "packages/glance/README.md",
         "packages/task-trackers/README.md"
       ],
       "testHints": [
+        "packages/limit-windows/test/decide.test.ts",
         "packages/judgment-jev/test/adapter.test.ts",
         "packages/judgment-jev/test/server.test.ts",
         "packages/docker/test/docker.test.ts",

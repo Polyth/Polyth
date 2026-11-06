@@ -1,10 +1,11 @@
 // Attachment pills — removable in the composer, read-only on timeline
 // user messages. Images and browser contexts show a thumbnail when available;
 // a file names its type with its extension instead of a glyph.
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import { browserContextHostPath } from "@polyth/contracts";
 import { browserContextChipTitle, PASTED_TEXT_NAME } from "../attachments.ts";
+import { THUMB_RETRY_DELAYS_MS, thumbQueue } from "../attachmentThumbQueue.ts";
 import { isBlockedAttachment } from "../composer/history.ts";
 import { formatNumber, tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
@@ -116,6 +117,71 @@ function useLiveStrip(attachments: AttachmentRef[], live: boolean) {
   return { strip, fresh: fresh.current };
 }
 
+/** How far past the screen a tile starts loading, so a scroll finds it ready. */
+const THUMB_NEAR_SCREEN = "400px";
+
+/** A tile's picture: starts near the screen, waits its turn in the page's queue,
+ *  and tries again after a dropped transfer (see attachmentThumbQueue.ts). */
+function AttachmentThumb({ url }: { url: string }) {
+  const element = useRef<HTMLImageElement | null>(null);
+  const release = useRef<(() => void) | null>(null);
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [src, setSrc] = useState<string | undefined>(undefined);
+  const [attempt, setAttempt] = useState(0);
+  const finish = () => {
+    release.current?.();
+    release.current = null;
+  };
+
+  useEffect(() => {
+    const img = element.current;
+    if (!img) return;
+    const start = () => {
+      release.current = thumbQueue.request(() => setSrc(url));
+    };
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver === "function") {
+      observer = new IntersectionObserver((entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer?.disconnect();
+        start();
+      }, { rootMargin: THUMB_NEAR_SCREEN });
+      observer.observe(img);
+    } else {
+      start();
+    }
+    return () => {
+      observer?.disconnect();
+      finish();
+      // Leaving the chat also stops a download still under way: it would keep
+      // its socket from the chat the person went to.
+      if (!img.complete) img.removeAttribute("src");
+      setSrc(undefined);
+    };
+  }, [url, attempt]);
+
+  useEffect(() => () => {
+    if (retry.current) clearTimeout(retry.current);
+  }, []);
+
+  return (
+    <img
+      ref={element}
+      className="att-thumb"
+      src={src}
+      alt=""
+      decoding="async"
+      onLoad={finish}
+      onError={() => {
+        finish();
+        setSrc(undefined);
+        const delay = THUMB_RETRY_DELAYS_MS[attempt];
+        if (delay !== undefined) retry.current = setTimeout(() => setAttempt((value) => value + 1), delay);
+      }}
+    />
+  );
+}
+
 export default function AttachmentPills({ attachments, onRemove }: {
   attachments: AttachmentRef[];
   /** Present = composer mode (removable); absent = read-only timeline render. */
@@ -137,10 +203,10 @@ export default function AttachmentPills({ attachments, onRemove }: {
           const imagePreview = kind === "image" && a.url && !blocked;
           const KindIcon = KIND_ICONS[kind] ?? Icon.file;
           const LeadIcon = a.name === PASTED_TEXT_NAME ? Icon.text : KindIcon;
-          const body = imagePreview ? <img className="att-thumb" src={a.url} alt="" /> : (
+          const body = imagePreview ? <AttachmentThumb url={a.url!} /> : (
             <>
               {kind === "browser-context" && a.url
-                ? <img className="att-thumb" src={a.url} alt="" />
+                ? <AttachmentThumb url={a.url} />
                 : type
                   ? <span className="att-icon att-type" aria-hidden>{type}</span>
                   : <span className="att-icon" aria-hidden><LeadIcon /></span>}

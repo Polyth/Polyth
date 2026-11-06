@@ -20,6 +20,7 @@ import {
   createJiraClient,
   createTrelloClient,
   reduceTaskLifecycle,
+  taskSessionTitle,
 } from "@polyth/task-trackers";
 import { createTaskTrackerManagement, type TaskTrackerVault } from "../src/management.ts";
 import registerPackage, { MAX_DISPATCH, taskTrackerRoutes, type ScopedTaskTrackerService } from "../src/serverEntry.ts";
@@ -502,6 +503,8 @@ function routeHarness(options: { role?: SpaceRole; handoff?: boolean } = {}) {
     listTasks: async () => [],
     getTask: async (_provider, id) => {
       if (id === "missing") throw Object.assign(new Error("Jira issue was not found"), { code: "not-found" });
+      if (id === "card-named") return { ...task(id), provider: "trello", id: "6ae984c2bf670a5b5821adce", key: "6ae984c2bf670a5b5821adce", title: "Name for a to-do item" };
+      if (id === "card-unnamed") return { ...task(id), provider: "trello", id: "6ae986fc658a99bac0a9f675", key: "6ae986fc658a99bac0a9f675", title: "   " };
       return task(id);
     },
     updateStatus: async (_provider, id) => task(id),
@@ -569,10 +572,10 @@ test("dispatch starts one session per task, records context first, and reports p
     ],
   });
   assert.deepEqual(log, [
-    "create:p1:POL-1 · Task 1:pinned",
+    "create:p1:Task 1:pinned",
     "append:s1:task/selected",
     "send:s1:Work on Jira issue POL-1: Task 1:opus",
-    "create:p1:POL-2 · Task 2:pinned",
+    "create:p1:Task 2:pinned",
     "append:s2:task/selected",
     "send:s2:Work on Jira issue POL-2: Task 2:opus",
   ]);
@@ -586,6 +589,28 @@ test("dispatch starts one session per task, records context first, and reports p
     { code: "invalid-input" },
   );
   await assert.rejects(call("POST", "/api/task-trackers/dispatch", { tasks: [{ provider: "jira", taskId: "1" }] }), { code: "invalid-input" });
+});
+
+test("taskSessionTitle trims the task name and labels an unnamed task", () => {
+  assert.equal(taskSessionTitle({ title: "  Write release notes " }), "Write release notes");
+  assert.equal(taskSessionTitle({ title: "" }), "New to-do item");
+  assert.equal(taskSessionTitle({ title: "   " }), "New to-do item");
+});
+
+test("a dispatched task is titled by its name, never the tracker's random id", async () => {
+  const { call, log } = routeHarness();
+  const { payload } = await call("POST", "/api/task-trackers/dispatch", {
+    projectId: "p1",
+    tasks: [{ provider: "trello", taskId: "card-named" }, { provider: "trello", taskId: "card-unnamed" }],
+  });
+  assert.deepEqual((payload as { results: unknown[] }).results, [
+    { provider: "trello", taskId: "6ae984c2bf670a5b5821adce", taskKey: "6ae984c2bf670a5b5821adce", sessionId: "s1" },
+    { provider: "trello", taskId: "6ae986fc658a99bac0a9f675", taskKey: "6ae986fc658a99bac0a9f675", sessionId: "s2" },
+  ]);
+  assert.deepEqual(log.filter((line) => line.startsWith("create:")), [
+    "create:p1:Name for a to-do item:",
+    "create:p1:New to-do item:",
+  ]);
 });
 
 test("viewers can read but not write; handoff off blocks dispatch", async () => {

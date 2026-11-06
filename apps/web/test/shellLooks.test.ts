@@ -215,6 +215,28 @@ test("the phone Settings page paints an opaque material, so the list never reads
   assert.match(css, /body\[data-shell-look="obsidian"\]:not\(#\\#\) \{[^}]*--look-overlay-solid: var\(--panel\);/);
 });
 
+test("phone Settings is a phone layer in every look: full-screen material, the look's cards, no window chrome", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const look = 'body\\[data-shell-look\\]:not\\(\\[data-shell-look="standard"\\]\\):not\\(#\\\\#\\)';
+  const start = css.search(new RegExp(`@media \\(max-width: 700px\\) \\{\\s*${look} \\.scrim\\.settings-scrim > \\.settings-shell > \\.settings-pane`));
+  assert.ok(start >= 0);
+  const block = css.slice(start, css.indexOf("\n}\n", start));
+  // A floating window's corners, edge and scrim would frame the screen, with
+  // the wallpaper showing in the corners.
+  assert.match(block, /\.scrim\.settings-scrim > \.settings-shell \{[^}]*border: 0 !important;[^}]*border-radius: 0 !important;[^}]*background: var\(--look-phone-layer\) !important;/);
+  assert.match(block, /\.scrim\.settings-scrim \{[^}]*background: transparent !important;/);
+  // The two-pane nav column's seam and tint stop at the wide window.
+  assert.match(block, /\.settings-shell > \.settings-nav \{[^}]*border: 0 !important;[^}]*background: transparent !important;/);
+  // Cards speak the look's panel card, so corners and rules match its field.
+  assert.match(block, /:is\(\.settings-nav-group-list, \.settings-results\) \{[^}]*border-radius: var\(--look-widget-radius\) !important;[^}]*background: var\(--look-widget\) !important;/);
+  // A current row stays visible where the navigator's plate is the card's own material.
+  assert.match(block, /\.settings-nav-group-list > \.settings-nav-item\.active \{[^}]*background: var\(--look-list-select\) !important;/);
+  assert.match(css, /body\[data-shell-look="monolith"\]:not\(#\\#\) \{[^}]*--look-list-select: var\(--look-select\);/);
+  assert.match(css, /body\[data-shell-look="monolith-reverse"\]:not\(#\\#\) \{[^}]*--look-list-select: var\(--look-plane-solid\);/);
+  // 11px mono made iOS zoom the page on focus and read as a data readout.
+  assert.doesNotMatch(css, /:is\([^)]*\.settings-nav-search[^)]*\) \{\s*font-family: var\(--mono\)/);
+});
+
 test("every look owns the chrome a platform style paints, each piece in its role", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   const shared = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#)';
@@ -336,6 +358,38 @@ test("the lines above the composer are text in every look", async () => {
   assert.doesNotMatch(css, /data-composer-status-style|--composer-tray-|--composer-header-rule/);
   // No look re-pads the lines: their mark and time keep the stack's columns.
   assert.doesNotMatch(css, /\.(?:agent-status-dock|subagent-island|pending-changes-bar)[^,{]*\{[^}]*padding-inline/);
+});
+
+test("Obsidian's phone Settings lists its categories without a frame", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const phone = css.match(/@media \(max-width: 700px\) \{\s*body\[data-shell-look="obsidian"\]:not\(#\\#\) :is\(\.settings-nav-group-list, \.settings-results\) \{[^}]*\}[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(phone, "the frame comes off at the phone breakpoint only");
+  assert.match(phone, /:is\(\.settings-nav-group-list, \.settings-results\) \{[^}]*border: 0;[^}]*background: none;[^}]*box-shadow: none;/);
+  // The list loses its clip, but long search results still have to scroll.
+  assert.match(phone, /\.settings-nav-group-list \{\s*overflow: visible;/);
+  assert.doesNotMatch(phone, /\.settings-results[^{]*\{[^}]*overflow/);
+  // Headings and rows keep one column, and a bare result row keeps a corner.
+  assert.match(phone, /:is\(\.settings-nav-group, \.settings-nav-item, \.settings-result-pagehead\) \{\s*padding-inline:/);
+  // A setting found inside a page keeps its own indent under that page's row.
+  assert.doesNotMatch(phone, /\.settings-result(?:-item)?[,)][^{]*\{[^}]*padding-inline/);
+  assert.match(phone, /\.settings-result \{\s*border-radius: var\(--look-select-radius\);/);
+  // No other look gives up its group cards.
+  for (const look of SHELL_LOOKS.filter((candidate) => candidate !== "obsidian")) {
+    assert.doesNotMatch(css, new RegExp(`body\\[data-shell-look="${look}"\\][^{]*\\.settings-nav-group-list`), look);
+  }
+});
+
+test("Obsidian's project marks are glass in the project's own colour, never the accent", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const look = 'body\\[data-shell-look="obsidian"\\]:not\\(#\\\\#\\)';
+  const tile = css.match(new RegExp(`${look} :is\\(\\.mobile-navigator, \\.context-selector-project \\.picker-trigger-icon\\) \\.project-glyph:not\\(:has\\(> img\\)\\) \\{[^}]*\\}`))?.[0] ?? "";
+  assert.ok(tile, "the phone navigator and the composer's project chip share one tile");
+  assert.match(tile, /background: radial-gradient\([^;]*currentColor[^;]*;/);
+  assert.doesNotMatch(tile, /--accent/);
+  // A colourless mark is neutral on every surface, but only through the default
+  // token: a `color` at this strength would beat the appearance dialog's preview.
+  assert.match(css, new RegExp(`${look} \\.project-glyph \\{\\s*--session-blue: var\\(--text-dim\\);\\s*\\}`));
+  assert.doesNotMatch(css, new RegExp(`${look} [^{]*\\.project-glyph[^{]*\\{[^}]*\\scolor:`));
 });
 
 test("Send and Stop share each look's corner, with no glow or ring", async () => {

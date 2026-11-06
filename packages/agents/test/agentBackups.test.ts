@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AutoAcceptSetting, SessionEvent } from "@polyth/contracts";
+import type { AutoAcceptSetting, HarnessSnapshot, SessionEvent } from "@polyth/contracts";
 import { parseAgentFile, serializeAgentFile, type AgentFileSpec } from "../src/agentFile.ts";
 import {
   agentSpecOf,
   createScheduleService,
+  harnessSignInRefusal,
   scheduleExecutionRoutes,
   validateFallbackModels,
   type ScheduleExecutionSelection,
@@ -160,4 +161,27 @@ test("backups live in agent files; the approval level never does", () => {
   const exported = agentSpecOf(task, "helper");
   assert.deepEqual(exported.fallbackModels, [{ model: "openai/gpt-5#high", harness: "codex" }]);
   assert.equal("permissions" in exported, false);
+});
+
+test("a signed-out or ended login refuses its route by name, so a backup takes over", async () => {
+  const now = Date.UTC(2026, 10, 4, 12);
+  const row = (availability: Partial<HarnessSnapshot["availability"]>, identity: Partial<HarnessSnapshot["identity"]> = {}): Pick<HarnessSnapshot, "identity" | "availability"> => ({
+    identity: { id: "claude-work", name: "Claude Code", integration: "Agent SDK", accountLabel: "Work", ...identity },
+    availability: { harnessId: "claude-work", installed: true, healthy: true, authenticated: true, state: "ready", checkedAt: now, ...availability },
+  });
+  assert.equal(harnessSignInRefusal(row({}), now), undefined);
+  assert.equal(harnessSignInRefusal(row({ authExpiresAt: now + 60_000 }), now), undefined, "ending soon still runs");
+  assert.equal(harnessSignInRefusal(row({ authenticated: "unknown", state: "unknown" }), now), undefined, "an unanswered check is no refusal");
+  const ended = harnessSignInRefusal(row({ authExpiresAt: now - 1 }), now)!;
+  assert.equal((ended as Error & { code?: string }).code, "auth-expired");
+  assert.match(ended.message, /^Claude Code · Work needs a new sign-in/);
+  const signedOut = harnessSignInRefusal(row({ authenticated: false, state: "auth-required" }, { name: "Work Claude" }), now)!;
+  assert.match(signedOut.message, /^Work Claude needs a new sign-in/, "a name that already names the account is not repeated");
+
+  const routes: ScheduleExecutionSelection[] = [{ model: sonnet, harness: { mode: "pinned", harnessId: "claude" } }, { model: gpt, harness: { mode: "pinned", harnessId: "codex" } }];
+  const result = await withRouteFailover(routes, 0, async (route) => {
+    if (route.harness?.mode === "pinned" && route.harness.harnessId === "claude") throw ended;
+    return route.model!.modelID;
+  });
+  assert.deepEqual(result, { value: "gpt-5", route: 1 });
 });

@@ -66,11 +66,12 @@ const now = Date.now();
 const alphaSession: SessionProjection = {
   id: "a1", projectId: "alpha", title: "Alpha chat", status: "idle", createdAt: now, updatedAt: now, lastTurnAt: now,
 };
+let summaryRows: SessionProjection[] = [alphaSession];
 (globalThis as { fetch?: unknown }).fetch = async (url: string) => {
   const u = new URL(String(url), "http://localhost:3000");
   const projectId = u.searchParams.get("projectId");
   const body: unknown = u.pathname === "/api/sessions/summaries"
-    ? { sessions: u.searchParams.get("archived") === "true" ? [] : [alphaSession], revision: 0, complete: true }
+    ? { sessions: u.searchParams.get("archived") === "true" ? [] : summaryRows, revision: 0, complete: true }
     : u.pathname === "/api/sessions"
       ? (!projectId || projectId === "alpha" ? [alphaSession] : [])
       : u.pathname === "/api/worktrees"
@@ -451,6 +452,50 @@ test("wide: the tree and the rail move projects with the mouse; a session row ne
   } finally {
     await unmount();
     restore();
+    setSidebarViewMode("tree");
+    shellWidth = 390;
+  }
+});
+
+// "Frequently used" is the new-chat location row's ranking. Gamma's and delta's
+// chats arrive only in the cross-project read: the store never loaded them.
+test("frequently used: both navigators rank like a new chat, and a move keeps that order", async () => {
+  reset();
+  setProjectSortMode("frequent");
+  const chat = (id: string, projectId: string): SessionProjection => ({ ...alphaSession, id, projectId });
+  summaryRows = [
+    chat("g1", "gamma"), chat("g2", "gamma"), chat("g3", "gamma"),
+    chat("d1", "delta"), chat("d2", "delta"),
+    alphaSession,
+  ];
+  const ranked = ["gamma", "delta", "alpha", "beta"];
+  try {
+    const unmountPhone = await mount(MobileNavigator);
+    try {
+      assert.deepEqual(phoneOrder(), ranked, "the phone takes the new-chat order, not its attention-first one");
+    } finally {
+      await unmountPhone();
+    }
+
+    shellWidth = 1400;
+    setSidebarViewMode("tree");
+    const unmountWide = await mount(Sidebar);
+    try {
+      assert.deepEqual(treeOrder(), ranked, "the sidebar lists the same order");
+      const alpha = treeNode("alpha").querySelector<HTMLElement>(".project-card")!;
+      await act(async () => {
+        alpha.dispatchEvent(new dom.KeyboardEvent("keydown", {
+          key: "ArrowDown", altKey: true, shiftKey: true, bubbles: true, cancelable: true,
+        }) as unknown as Event);
+      });
+      assert.equal(getProjectSortMode(), "manual", "a move is the custom order");
+      assert.deepEqual(getProjectOrder(), ["gamma", "delta", "beta", "alpha"], "saved from the order on screen");
+      assert.deepEqual(treeOrder(), ["gamma", "delta", "beta", "alpha"]);
+    } finally {
+      await unmountWide();
+    }
+  } finally {
+    summaryRows = [alphaSession];
     setSidebarViewMode("tree");
     shellWidth = 390;
   }

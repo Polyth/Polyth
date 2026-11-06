@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ComponentType } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import type { PendingPermission } from "../../../apps/web/src/reduce.ts";
@@ -410,6 +410,18 @@ async function failedRequests(
 /** The host's slot renderer, for package notes about one request (`session.permission.notes`). */
 export type PermissionNotesSlot = ComponentType<{ slot: UiSlot; context?: Record<string, unknown> }>;
 
+/** The session-wide level a card's policy action turns on. */
+export type PermissionPolicyLevel = "routine" | "all";
+
+/** What a package's note adds to the card's policy action, while it wants that.
+ *  `apply` runs once the session accepted the level and reports its own failure:
+ *  the card has usually left by then. `confirmNote` joins Full access's
+ *  confirmation, so the person reads all of what they are confirming. */
+export interface PermissionPolicyEffect {
+  confirmNote?: string;
+  apply(level: PermissionPolicyLevel): void;
+}
+
 function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot?: PermissionNotesSlot }) {
   const bodyRef = useScrollEdges();
   const [busy, setBusy] = useState<PermissionAction | null>(null);
@@ -451,6 +463,11 @@ function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot
 
   // A mirrored card belongs to the subagent: only its policy answers it.
   const policySessionId = p.sourceSessionId ?? p.sessionId;
+  const policyEffects = useRef(new Set<PermissionPolicyEffect>());
+  const addPolicyEffect = useCallback((effect: PermissionPolicyEffect) => {
+    policyEffects.current.add(effect);
+    return () => { policyEffects.current.delete(effect); };
+  }, []);
 
   const unhide = (ids: readonly string[]) => setAnswered((previous) => {
     const next = new Set(previous);
@@ -465,10 +482,11 @@ function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot
     // requests are covered; later arrivals need their own decision.
     const snapshot = [...pending];
     const snapshotIds = snapshot.map((request) => request.requestId);
+    const effects = action === "session" || action === "all" ? [...policyEffects.current] : [];
     if (action === "all") {
       // The only wait left is the person reading the confirmation.
       setBusy(action);
-      const confirmed = await confirmFullAccess();
+      const confirmed = await confirmFullAccess(effects.flatMap((effect) => effect.confirmNote ?? []).join(" "));
       setBusy(null);
       if (!confirmed) return;
     }
@@ -484,6 +502,7 @@ function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot
           unhide(snapshotIds);
           throw reason;
         }
+        for (const effect of effects) effect.apply(action === "all" ? "all" : "routine");
         // A policy acknowledgement is not an individual request resolution:
         // whatever it left open (a child's opt-out) comes back. Resolved
         // requests leave through canonical events, which may trail the HTTP
@@ -620,6 +639,8 @@ function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot
         sessionId: p.sessionId,
         requestId: p.requestId,
         ...(p.sourceSessionId ? { sourceSessionId: p.sourceSessionId } : {}),
+        policyLevel: mayAutoApprove && policyAction ? (policyAction === "all" ? "all" : "routine") : null,
+        addPolicyEffect,
       }} />}
       <div className="perm-actions" aria-label={tr("permissionbanner.permissionRequested")}>
         <Button size="sm" variant="danger" className="permission-deny" aria-label={tr("permissionbanner.deny")} busy={busy === "reject"} disabled={busy !== null} onClick={() => void reply("reject")}>

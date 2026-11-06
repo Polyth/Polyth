@@ -1,3 +1,4 @@
+import { rootProjects } from "@polyth/contracts";
 import "./mcp.css";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { HarnessCapabilityStatusDto, McpTransport } from "@polyth/contracts";
@@ -709,7 +710,7 @@ export default function McpPage() {
     : projectSpaces.size === 1 ? projects[0]!.spaceId ?? "default" : undefined;
   const scopeResolved = projectRegistry.status === "ready" && (spaceId !== undefined || projects.length === 0);
   const spaceProjects = useMemo(
-    () => spaceId ? projects.filter((project) => (project.spaceId ?? "default") === spaceId) : [],
+    () => spaceId ? rootProjects(projects).filter((project) => (project.spaceId ?? "default") === spaceId) : [],
     [projects, spaceId],
   );
 

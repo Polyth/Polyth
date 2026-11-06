@@ -37,6 +37,12 @@ const sanitizedRpcData = (value: unknown): unknown => {
         return undefined;
     }
 };
+/** Largest line read and parsed. Beyond this the line is skipped, not the runtime. */
+export const RPC_MAX_LINE_BYTES = 64 * 1024 * 1024;
+const MAX_LINE_BYTES = RPC_MAX_LINE_BYTES;
+const OVERSIZED_HEAD_BYTES = 256;
+/** Consecutive lines that are not JSON-RPC before the stream counts as broken. */
+const MAX_UNREADABLE_LINES = 32;
 export interface RpcPeer {
     request<T = Record<string, unknown>>(method: string, params: unknown, timeoutMs?: number): Promise<T>;
     notify(method: string, params: unknown): void;
@@ -67,7 +73,13 @@ export async function createStdioRpc(options: {
     const child = authority.spawn(options.command, options.args, { cwd: options.cwd, env: options.env ?? process.env });
     let closed = false;
     let nextId = 0;
-    let bytes = Buffer.alloc(0);
+    // The line being received, in the pieces it arrived in: one long response
+    // must not be copied again for every chunk that brings it closer to its end.
+    let pieces: Buffer[] = [];
+    let pieceBytes = 0;
+    /** Start of a line past the limit; the rest of it is thrown away. */
+    let oversizedHead: Buffer | undefined;
+    let unreadableLines = 0;
     const pending = new Map<number, {
         method: string;
         resolve(value: any): void;
@@ -101,74 +113,113 @@ export async function createStdioRpc(options: {
     child.stderr!.resume();
     const send = (value: unknown) => { if (closed)
         throw Object.assign(new Error("Runtime connection is closed"), { code: "outcome-unknown" }); child.stdin!.write(JSON.stringify(value) + "\n"); };
-    child.stdout!.on("data", (chunk: Buffer) => {
-        bytes = Buffer.concat([bytes, chunk]);
-        while (true) {
-            const end = bytes.indexOf(10);
-            if (end < 0)
-                break;
-            const line = bytes.subarray(0, end);
-            bytes = bytes.subarray(end + 1);
-            if (line.length > 8 * 1024 * 1024) {
-                disconnected();
-                void authority.close().catch(() => { });
-                return;
-            }
-            if (!line.length)
-                continue;
-            let message: any;
-            try {
-                message = JSON.parse(line.toString("utf8"));
-            }
-            catch {
-                disconnected();
-                void authority.close().catch(() => { });
-                return;
-            }
-            if (!message || typeof message !== "object" || Array.isArray(message)) {
-                disconnected();
-                void authority.close().catch(() => { });
-                return;
-            }
-            if (typeof message.method === "string") {
-                if (message.id !== undefined)
-                    void requests(message.method, message.params ?? {}).then((result) => send({ jsonrpc: "2.0", id: message.id, result }), () => send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Unsupported client request" } })).catch(() => { });
-                else
-                    try {
-                        notifications.forEach((cb) => cb(message.method, message.params ?? {}));
-                    }
-                    catch {
-                        disconnected();
-                        void authority.close().catch(() => { });
-                        return;
-                    }
-            }
-            else {
-                const entry = pending.get(message.id);
-                if (!entry)
-                    continue;
-                pending.delete(message.id);
-                clearTimeout(entry.timer);
-                if (message.error) {
-                    const remoteMessage = sanitizedRpcText(message.error.message);
-                    const rpcData = sanitizedRpcData(message.error.data);
-                    entry.reject(Object.assign(
-                        new Error(`runtime rejected "${entry.method}"${remoteMessage ? `: ${remoteMessage}` : ""}`),
-                        {
-                            code: "runtime-rejected",
-                            rpcMethod: entry.method,
-                            ...(typeof message.error.code === "number" ? { rpcCode: message.error.code } : {}),
-                            ...(remoteMessage ? { remoteMessage } : {}),
-                            ...(rpcData === undefined ? {} : { rpcData }),
-                        },
-                    ));
-                }
-                else entry.resolve(message.result);
-            }
+    const fail = () => {
+        disconnected();
+        void authority.close().catch(() => { });
+    };
+    /** One response too large to read fails its own request. The runtime is
+     *  alive and answering: killing it would cost the session far more. */
+    const dropOversizedLine = (head: Buffer) => {
+        const start = head.toString("utf8");
+        const idAt = start.search(/"id"\s*:\s*\d+/);
+        const methodAt = start.indexOf('"method"');
+        const id = idAt >= 0 && (methodAt < 0 || idAt < methodAt) ? Number(/"id"\s*:\s*(\d+)/.exec(start)?.[1]) : undefined;
+        const entry = id === undefined ? undefined : pending.get(id);
+        if (!entry)
+            return;
+        pending.delete(id!);
+        clearTimeout(entry.timer);
+        entry.reject(Object.assign(new Error(`Runtime response for "${entry.method}" was too large to read`), {
+            code: "outcome-unknown",
+            rpcMethod: entry.method,
+            responseTooLarge: true,
+        }));
+    };
+    const handleLine = (line: Buffer): boolean => {
+        if (!line.length)
+            return true;
+        let message: any;
+        try {
+            message = JSON.parse(line.toString("utf8"));
         }
-        if (bytes.length > 8 * 1024 * 1024) {
-            disconnected();
-            void authority.close().catch(() => { });
+        catch {
+            message = undefined;
+        }
+        if (!message || typeof message !== "object" || Array.isArray(message)) {
+            // A stray line (a shim's banner on Windows, a warning printed to
+            // stdout) says nothing about the session. A stream of them means
+            // this is not the protocol at all.
+            unreadableLines += 1;
+            if (unreadableLines <= MAX_UNREADABLE_LINES)
+                return true;
+            fail();
+            return false;
+        }
+        unreadableLines = 0;
+        if (typeof message.method === "string") {
+            if (message.id !== undefined)
+                void requests(message.method, message.params ?? {}).then((result) => send({ jsonrpc: "2.0", id: message.id, result }), () => send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Unsupported client request" } })).catch(() => { });
+            else
+                try {
+                    notifications.forEach((cb) => cb(message.method, message.params ?? {}));
+                }
+                catch {
+                    fail();
+                    return false;
+                }
+            return true;
+        }
+        const entry = pending.get(message.id);
+        if (!entry)
+            return true;
+        pending.delete(message.id);
+        clearTimeout(entry.timer);
+        if (message.error) {
+            const remoteMessage = sanitizedRpcText(message.error.message);
+            const rpcData = sanitizedRpcData(message.error.data);
+            entry.reject(Object.assign(
+                new Error(`runtime rejected "${entry.method}"${remoteMessage ? `: ${remoteMessage}` : ""}`),
+                {
+                    code: "runtime-rejected",
+                    rpcMethod: entry.method,
+                    ...(typeof message.error.code === "number" ? { rpcCode: message.error.code } : {}),
+                    ...(remoteMessage ? { remoteMessage } : {}),
+                    ...(rpcData === undefined ? {} : { rpcData }),
+                },
+            ));
+        }
+        else entry.resolve(message.result);
+        return true;
+    };
+    child.stdout!.on("data", (chunk: Buffer) => {
+        let start = 0;
+        for (let end = chunk.indexOf(10, start); end >= 0; end = chunk.indexOf(10, start)) {
+            const tail = chunk.subarray(start, end);
+            start = end + 1;
+            if (oversizedHead) {
+                const head = oversizedHead;
+                oversizedHead = undefined;
+                dropOversizedLine(head);
+                continue;
+            }
+            const line = pieces.length > 0 ? Buffer.concat([...pieces, tail]) : tail;
+            pieces = [];
+            pieceBytes = 0;
+            if (line.length > MAX_LINE_BYTES) {
+                dropOversizedLine(line.subarray(0, OVERSIZED_HEAD_BYTES));
+                continue;
+            }
+            if (!handleLine(line))
+                return;
+        }
+        if (start >= chunk.length || oversizedHead)
+            return;
+        pieces.push(chunk.subarray(start));
+        pieceBytes += chunk.length - start;
+        if (pieceBytes > MAX_LINE_BYTES) {
+            oversizedHead = Buffer.concat(pieces).subarray(0, OVERSIZED_HEAD_BYTES);
+            pieces = [];
+            pieceBytes = 0;
         }
     });
     try {

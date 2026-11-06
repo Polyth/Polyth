@@ -9,7 +9,8 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { AttachmentRef, HarnessSelection, ModelRef, TokenUsage, TurnAdmission } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, HarnessSnapshot, ModelRef, TokenUsage, TurnAdmission } from "@polyth/contracts";
+import { harnessSignInExpiry } from "@polyth/contracts";
 import { atomicWriteSync } from "@polyth/plugins";
 import {
   contentTrustMatches,
@@ -528,6 +529,26 @@ export const isRouteFailure = (error: unknown): boolean => {
   const code = (error as { code?: unknown } | null)?.code;
   return typeof code === "string" && ROUTE_FAILURE_CODES.has(code);
 };
+
+/** A route pinned to a harness whose last check says it is signed out, or
+ *  whose CLI-reported sign-in has ended, is refused before anything runs.
+ *  The refusal is a route failure, so a backup takes over, and without one
+ *  the run's error names the login to sign in again. */
+export function harnessSignInRefusal(
+  row: Pick<HarnessSnapshot, "identity" | "availability">,
+  now: number = Date.now(),
+): Error | undefined {
+  const { availability, identity } = row;
+  const ended = harnessSignInExpiry(availability.authExpiresAt, now).level === "ended";
+  if (!ended && availability.state !== "auth-required" && availability.authenticated !== false) return undefined;
+  // Same naming as the harness picker: a Space title can hide the account.
+  const label = identity.accountLabel?.trim();
+  const name = label && !identity.name.toLowerCase().includes(label.toLowerCase()) ? `${identity.name} · ${label}` : identity.name;
+  return Object.assign(
+    new Error(`${name} needs a new sign-in, so this run did not start on it. Sign in again under Settings → Harnesses.`),
+    { code: "auth-expired" },
+  );
+}
 
 /** Validate a backup list: harness-qualified refs, no duplicates, bounded. */
 export function validateFallbackModels(raw: unknown): ScheduleExecutionModel[] {

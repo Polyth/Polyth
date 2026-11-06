@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { createCodexRuntime } from "../src/index.ts";
 import { codexOverlays, createCodexProvisioner } from "../src/provisioner.ts";
 import { fakeRpc } from "../../harness-runtime/test/rpcPeer.ts";
-import type { HarnessContext, HarnessProvisioningPlan, RuntimeEvent, SpaceContext } from "@polyth/contracts";
+import type { HarnessContext, HarnessProvisioningPlan, JsonObject, RuntimeEvent, SpaceContext } from "@polyth/contracts";
 import { setCapabilityLaunchSink, setCapabilityReceiptSink } from "@polyth/harness-runtime";
 const context = { spaceId: "s", projectId: "p", cwd: "/tmp", sessionId: "canonical" };
 const binding = { canonicalSessionId: "canonical", backendSessionId: "native", authorityId: "authority", generation: 1, continuity: "verified" as const, location: { directory: "/tmp" } };
@@ -25,6 +25,118 @@ test("Codex rejects a missing permission reply before native delivery instead of
     const duplicate = await rt.replyPermissionOperation!("canonical", "approval", "once", "duplicate-reply");
     assert.equal(duplicate.kind, "rejected");
     if (duplicate.kind === "rejected") assert.equal(duplicate.code, "not-found");
+    await rt.dispose();
+});
+test("Codex routes an MCP tool approval through Polyth's permission flow instead of refusing it", async () => {
+    const f = fakeRpc();
+    f.handle(async () => ({ thread: { id: "native" } }));
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const elicit = (tool: string, input: JsonObject = {}) => f.request("mcpServer/elicitation/request", {
+        threadId: "native",
+        serverName: "docs",
+        mode: "form",
+        message: `Allow the docs MCP server to run tool "${tool}"?`,
+        requestedSchema: { type: "object", properties: {} },
+        _meta: { codex_approval_kind: "mcp_tool_call", persist: ["session", "always"], tool_params: input },
+    });
+    const requested = () => events.filter((event): event is Extract<RuntimeEvent, { type: "permission/requested" }> => event.type === "permission/requested");
+    const waitForRequests = async (count: number) => {
+        for (let attempt = 0; attempt < 100 && requested().length < count; attempt += 1) await new Promise((done) => setTimeout(done, 5));
+        assert.equal(requested().length, count);
+        return requested().at(-1)!;
+    };
+
+    const once = elicit("read_doc");
+    const first = await waitForRequests(1);
+    assert.equal(first.permission, "mcp__docs__read_doc");
+    assert.deepEqual(first.patterns, ["read_doc"]);
+    assert.equal(first.tool, "read_doc");
+    assert.equal((await rt.replyPermissionOperation!("canonical", first.requestId, "once", "reply-1")).kind, "confirmed");
+    assert.deepEqual(await once, { action: "accept", content: {}, _meta: null });
+
+    const always = elicit("write_doc", { file_path: "/tmp/a.md" });
+    const second = await waitForRequests(2);
+    assert.deepEqual(second.patterns, ["/tmp/a.md"]);
+    await rt.replyPermission("canonical", second.requestId, "always");
+    assert.deepEqual(await always, { action: "accept", content: {}, _meta: { persist: "session" } });
+
+    const refused = elicit("delete_doc");
+    const third = await waitForRequests(3);
+    await rt.replyPermission("canonical", third.requestId, "reject");
+    assert.deepEqual(await refused, { action: "decline", content: null, _meta: null });
+    await rt.dispose();
+});
+test("Codex declines a server's own MCP form without raising a permission", async () => {
+    const f = fakeRpc();
+    f.handle(async () => ({ thread: { id: "native" } }));
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const answer = await f.request("mcpServer/elicitation/request", {
+        threadId: "native", serverName: "docs", mode: "form", message: "Pick a colour", requestedSchema: { type: "object" },
+    });
+    assert.deepEqual(answer, { action: "decline", content: null, _meta: null });
+    assert.equal(events.some((event) => event.type === "permission/requested"), false);
+    await rt.dispose();
+});
+test("Codex reads a thread's name without its turns, and reconciles from the newest turns only", async () => {
+    const f = fakeRpc();
+    const reads: any[] = [];
+    let listed: any;
+    const turn = (id: string) => ({ id, status: "completed", items: [{ type: "agentMessage", id: `m-${id}`, text: id }] });
+    f.handle(async (method, params) => {
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "thread/read") { reads.push(params); return { thread: { id: "native", name: "Named", cwd: "/tmp", status: { type: "idle" } } }; }
+        if (method === "thread/turns/list") { listed = params; return { data: [turn("newer"), turn("older")], nextCursor: "more" }; }
+        return {};
+    });
+    const rt = await createCodexRuntime(context, f.rpc);
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.equal((await rt.sessions())[0]?.title, "Named");
+    assert.deepEqual(reads, [{ threadId: "native" }], "a title read asks for no turns");
+
+    reads.length = 0;
+    const snapshot = await rt.reconcile!(binding);
+    assert.deepEqual(listed, { threadId: "native", limit: 20, sortDirection: "desc", itemsView: "full" });
+    assert.deepEqual(reads, [{ threadId: "native" }], "reconciliation does not hydrate the full history");
+    const keys = snapshot.events.map((entry) => entry.entityKey);
+    assert.ok(keys.indexOf("m-older") < keys.indexOf("m-newer"), "turns reach Polyth oldest first");
+    await rt.dispose();
+});
+test("Codex reconciliation still works on a server without turn paging", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "thread/turns/list") throw Object.assign(new Error("runtime rejected"), { code: "runtime-rejected" });
+        if (method === "thread/read") return { thread: { id: "native", turns: [{ id: "t", status: "completed", items: [{ type: "agentMessage", id: "m", text: "kept" }] }] } };
+        return {};
+    });
+    const rt = await createCodexRuntime(context, f.rpc);
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.ok((await rt.reconcile!(binding)).events.some((entry) => entry.entityKey === "m"));
+    await rt.dispose();
+});
+test("Codex survives a thread too large to read whole", async () => {
+    const f = fakeRpc();
+    const reads: any[] = [];
+    f.handle(async (method, params) => {
+        if (method === "thread/start") return { thread: { id: "native" } };
+        if (method === "thread/turns/list") return {};
+        if (method === "thread/read") {
+            reads.push(params);
+            if (params.includeTurns) throw Object.assign(new Error("too large"), { code: "outcome-unknown", responseTooLarge: true });
+            return { thread: { id: "native", status: { type: "idle" } } };
+        }
+        return {};
+    });
+    const rt = await createCodexRuntime(context, f.rpc);
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    assert.deepEqual((await rt.reconcile!(binding)).events, []);
+    assert.deepEqual(reads, [{ threadId: "native", includeTurns: true }, { threadId: "native" }]);
     await rt.dispose();
 });
 test("Codex replaces writable roots for each canonical workspace and excludes missing repositories", async () => {
@@ -839,6 +951,27 @@ test("Codex maps native titles, per-response usage, occupancy, attachments, comp
     const stopped = events.findLast((event) => event.type === "turn/stopped");
     assert.equal(stopped?.code, "rate-limited");
     assert.equal(stopped?.retry?.resetAt, 2_000_000_000_000);
+});
+
+test("Codex keeps a compaction pending until its item completes, and reports one whose turn ends without it", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "thread/start" ? { thread: { id: "native" } } : {});
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+
+    const accepted = await rt.compactOperation!("canonical", "compact-1");
+    assert.equal(accepted.kind, "confirmed");
+    assert.deepEqual(accepted.kind === "confirmed" && accepted.value, { completion: "pending" });
+    f.emit("item/completed", { threadId: "native", item: { type: "contextCompaction", id: "item-1" } });
+    f.emit("turn/completed", { threadId: "native", turn: { id: "compaction-1", status: "completed" } });
+    assert.ok(events.some((event) => event.type === "session/compacted"));
+    assert.ok(!events.some((event) => event.type === "session/compaction-failed"), "a finished compaction reports no failure");
+
+    assert.equal((await rt.compactOperation!("canonical", "compact-2")).kind, "confirmed");
+    f.emit("turn/completed", { threadId: "native", turn: { id: "compaction-2", status: "failed", error: { message: "too long" } } });
+    assert.ok(events.some((event) => event.type === "session/compaction-failed"));
 });
 
 test("Codex maps string Unauthorized discriminant to auth-expired without regex", async () => {

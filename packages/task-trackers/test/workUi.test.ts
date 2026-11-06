@@ -69,6 +69,7 @@ const boardNotice = () => getNotifications().items.find((item) => item.id === "t
 const boardNoticeAction = (label: string) => getNotifications().items
   .find((item) => item.id === "task-trackers.board-notice")?.actions?.find((action) => action.label === label);
 const store = await import("../widgets/store.ts");
+const work = await import("../widgets/work.tsx");
 const { DEFAULT_TASK_TRACKER_PREFERENCES } = await import("../src/types.ts");
 
 const managementFor = (role: "admin" | "member" | "viewer"): TaskTrackerManagementDto => ({
@@ -234,6 +235,8 @@ function harness(options: { role?: "admin" | "member" | "viewer" } = {}): Harnes
     navigation: { openSettingsPage() {} },
   } as never);
   store.resetManagementForTests();
+  localStorage.removeItem("polyth.task-trackers.start");
+  work.resetTaskStartOptions();
   return {
     dispatches,
     created,
@@ -297,6 +300,84 @@ test("select mode sends several tasks to agents, one session each, with the comp
   }
 });
 
+test("agents start shared and in the background unless the person picks isolated or opening the session", async () => {
+  const run = harness();
+  const view = await mountBoard();
+  try {
+    await act(async () => { button(view.container, "Select")!.click(); });
+    await act(async () => { view.container.querySelector<HTMLButtonElement>('[aria-label^="Select POL-1:"]')!.click(); });
+    const bar = view.container.querySelector(".tt-dispatch-bar")!;
+    const workspace = bar.querySelector('[role="radiogroup"]')!;
+    assert.equal(workspace.querySelector('[aria-checked="true"]')?.textContent, "Shared", "shared checkout by default");
+    const open = bar.querySelector<HTMLButtonElement>('[role="switch"]')!;
+    assert.equal(open.getAttribute("aria-checked"), "false", "background by default");
+    await act(async () => { button(bar, "Start agent")!.click(); });
+    await settle(4);
+    assert.equal(run.dispatches[0]?.isolated, undefined);
+    assert.deepEqual(run.opened, [], "a background start stays on the board");
+
+    await act(async () => { button(view.container, "Select")!.click(); });
+    await act(async () => { view.container.querySelector<HTMLButtonElement>('[aria-label^="Select POL-2:"]')!.click(); });
+    const next = view.container.querySelector(".tt-dispatch-bar")!;
+    await act(async () => { button(next, "Isolated")!.click(); });
+    await act(async () => { next.querySelector<HTMLButtonElement>('[role="switch"]')!.click(); });
+    await act(async () => { button(next, "Start agent")!.click(); });
+    await settle(4);
+    assert.equal(run.dispatches[1]?.isolated, true);
+    assert.deepEqual(run.opened, ["s-2"], "the app switches to the started session");
+    assert.deepEqual(JSON.parse(localStorage.getItem("polyth.task-trackers.start") ?? "null"), { isolated: true, open: true });
+    assert.deepEqual(work.taskStartOptions(), { isolated: true, open: true }, "the choice is remembered for the next start");
+  } finally {
+    await view.unmount();
+    run.restore();
+  }
+});
+
+test("the start panel's model picker follows the composer until a model is chosen for this project's tasks", async () => {
+  const run = harness();
+  const view = await mountBoard();
+  try {
+    await act(async () => { button(view.container, "Select")!.click(); });
+    await act(async () => { view.container.querySelector<HTMLButtonElement>('[aria-label^="Select POL-1:"]')!.click(); });
+    const bar = () => view.container.querySelector(".tt-dispatch-bar")!;
+    const chip = () => bar().querySelector(".tt-model-picker")?.textContent ?? "";
+    assert.match(bar().textContent ?? "", /Model/, "the panel names the model row");
+    assert.match(chip(), /opus/, "it shows the composer's model");
+
+    await act(async () => {
+      work.setTaskStartAgent("project-1", {
+        harness: { mode: "pinned", harnessId: "codex" },
+        model: { providerID: "openai", modelID: "gpt-5", variant: "high" },
+      });
+    });
+    assert.match(chip(), /gpt-5/, "the chip shows the model chosen for tasks");
+    await act(async () => { button(bar(), "Start agent")!.click(); });
+    await settle(4);
+    assert.deepEqual(run.dispatches[0]?.harness, { mode: "pinned", harnessId: "codex" });
+    assert.deepEqual(run.dispatches[0]?.model, { providerID: "openai", modelID: "gpt-5", variant: "high" });
+    work.resetTaskStartOptions();
+    assert.deepEqual(work.taskStartOptions().agents, {
+      "project-1": {
+        harness: { mode: "pinned", harnessId: "codex" },
+        model: { providerID: "openai", modelID: "gpt-5", variant: "high" },
+      },
+    }, "the choice is remembered per project on this device");
+    assert.deepEqual(work.taskStartAgent("project-2"), {
+      harness: { mode: "pinned", harnessId: "claude" },
+      model: { providerID: "anthropic", modelID: "opus" },
+    }, "another project still follows its composer");
+
+    work.setTaskStartAgent("project-1", undefined);
+    assert.deepEqual(work.taskStartAgent("project-1"), {
+      harness: { mode: "pinned", harnessId: "claude" },
+      model: { providerID: "anthropic", modelID: "opus" },
+    }, "clearing the choice goes back to the composer");
+  } finally {
+    await view.unmount();
+    run.restore();
+  }
+});
+
 test("new task composer opens in the board, attaches images and can start an agent right away", async () => {
   const run = harness();
   const view = await mountBoard();
@@ -335,6 +416,42 @@ test("new task composer opens in the board, attaches images and can start an age
     assert.match(boardNotice(), /POL-9 created · agent started/);
     await act(async () => { await boardNoticeAction("Open session")!.run(); });
     assert.deepEqual(run.opened, ["s-9"]);
+  } finally {
+    await view.unmount();
+    run.restore();
+  }
+});
+
+test("a pending create keeps the primary button's box: the spinner takes the leading glyph's place", async () => {
+  const run = harness();
+  let release: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const create = api.taskTrackerCreate;
+  api.taskTrackerCreate = async (provider, input) => {
+    await blocked;
+    return create(provider, input);
+  };
+  const view = await mountBoard();
+  try {
+    await act(async () => { button(view.container, "New task")!.click(); });
+    const pane = view.container.querySelector<HTMLElement>(".tt-compose-pane")!;
+    typeInto(pane.querySelector<HTMLInputElement>('input[placeholder="What needs to happen?"]')!, "Fix login");
+    const submit = pane.querySelector<HTMLButtonElement>(".tt-compose-footer button[type=submit]")!;
+    assert.ok(submit.querySelector("svg.ui-icon"), "the idle action carries a leading glyph");
+    assert.equal(submit.querySelector(".ui-btn-label")?.textContent, "Create task");
+
+    await act(async () => { submit.click(); });
+    assert.equal(submit.getAttribute("aria-busy"), "true");
+    // The glyph's box stays; only what fills it changes. That is what keeps
+    // the button (and Cancel beside it) from jumping when it is pressed.
+    assert.ok(submit.querySelector(".ui-btn-mark--sm .ui-spinner"), "the pending mark is a spinner in the glyph's box");
+    assert.equal(submit.querySelector(".ui-icon"), null, "the glyph gives way instead of widening the button");
+    assert.equal(submit.querySelector(".ui-btn-label")?.textContent, "Create task", "the label is constant while pending");
+    assert.equal(button(pane, "Cancel")!.disabled, true, "Cancel waits with it");
+
+    release();
+    await settle(4);
+    assert.equal(view.container.querySelector(".tt-compose-pane"), null, "the pane closes once the task exists");
   } finally {
     await view.unmount();
     run.restore();

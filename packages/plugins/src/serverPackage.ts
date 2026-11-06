@@ -15,6 +15,7 @@ import type {
   AuthPrincipal,
   AuthResolution,
   CapabilityKey,
+  CreateIsolatedSessionInput,
   DelegatedIsolationDto,
   Disposable,
   HarnessSelection,
@@ -36,8 +37,10 @@ import type {
   SessionIsolation,
   SessionPersistence,
   SessionProjection,
+  SessionRef,
   SecureSafeService,
   SessionService,
+  SessionPrivacy,
   SpaceContext,
   SpaceStorage,
   DeploymentProfile
@@ -273,6 +276,15 @@ export interface ServerAccountRemovalBus {
 export const SERVER_ACCOUNT_REMOVAL_BUS =
   serverServiceKey<ServerAccountRemovalBus>("server.account-removed");
 
+/** A package holding someone's private data says how much, so the instance
+ *  owner can see its size when deciding about an account, and nothing else. */
+export interface ServerPersonDataVolume {
+  contribute(measure: (userId: string) => number | Promise<number>): Disposable;
+}
+
+export const SERVER_PERSON_DATA_VOLUME =
+  serverServiceKey<ServerPersonDataVolume>("server.person-data-volume");
+
 /** An event source a package offers agents (Monitoring, Git, Home Assistant…). */
 export interface AgentEventSourceDescriptor {
   /** Lowercase id, e.g. `monitoring`. */
@@ -395,6 +407,15 @@ export interface ServerDelegatedMergeResult {
  *  itself a managed isolation — and merges back into it. Callers authorize the
  *  parent/child relationship and Space before calling. */
 export interface ServerSessionIsolationService {
+  /** A new chat in its own managed checkout, branched from the project's
+   *  current checkout, exactly as the new-session dialog's isolated option
+   *  starts one. Pass the requester's scoped `sessions` so the chat is created
+   *  in their Space and owned by them; the project is checked there. Refuses a
+   *  project that is not a local Git repository. */
+  createIsolatedSession(
+    input: CreateIsolatedSessionInput,
+    options?: { sessions?: Pick<SessionService, "create" | "snapshot"> },
+  ): Promise<SessionRef>;
   createDelegatedSession(input: ServerDelegatedSessionInput): Promise<ServerDelegatedSessionCreated>;
   /** The parent's delegated isolated children that still hold an isolation record. */
   delegatedChildren(parentSessionId: string): Promise<DelegatedIsolationDto[]>;
@@ -707,6 +728,13 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
    * member (and on installations with a single person). Take the person from
    * server state such as a session's actor, never from request input. */
   personSpaceContext?(userId: string, spaceId: string): SpaceContext | undefined;
+  /** What a chat may reach: whose private chat it is and who reads it. The only
+   * source for granting a chat a person's notes; undefined means nothing
+   * personal exists to reach. */
+  sessionPrivacy?(spaceId: string, sessionId: string): SessionPrivacy | undefined;
+  /** Record that the agent of this chat read someone's personal notes. Such a
+   * chat can no longer be opened to others (Spaces §14.6). */
+  markPersonalContext?(sessionId: string): Promise<void>;
   /** Person-owned data (connected accounts, §14.4): storage and secrets under
    * `people/<userId>`, outside every Space, bound to this package's id. The
    * server always provides it; test hosts may omit it. Pick whose account to

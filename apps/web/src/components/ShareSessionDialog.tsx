@@ -119,9 +119,18 @@ export default function ShareSessionDialog() {
     ...(dto?.grants ?? []).map((grant) => [grant.userId, grant.name] as const),
   ]), [dto]);
 
+  // Once the agent has read personal notes in a chat, or the chat lives in Only
+  // me, it stays with its owner; the server refuses anything wider (§14.6).
+  const staysPrivate = useStore((state) => {
+    const row = state.sessions.find((candidate) => candidate.id === sessionId);
+    if (!row) return null;
+    if (state.projectRegistry.projects.find((candidate) => candidate.id === row.projectId)?.parentProjectId) return "room" as const;
+    return row.personalContext ? "personal" as const : null;
+  });
+
   if (!sessionId) return null;
   const close = () => setOverlay(null);
-  const editable = !!dto && dto.canShare && !dto.inherited;
+  const editable = !!dto && dto.canShare && !dto.inherited && staysPrivate === null;
   const dirty = !!dto && (visibility !== dto.visibility || (visibility !== "private" && !sameGrants(grants, dto.grants)));
   const levels = SESSION_ACCESS_LEVELS.filter((level) => dto?.maxGrant && sessionAccessAtLeast(dto.maxGrant, level));
   const granted = new Set(grants.map((grant) => grant.userId));
@@ -291,7 +300,12 @@ export default function ShareSessionDialog() {
         {dto.personalMcpDetachedOnShare && (editable ? visibility : dto.visibility) !== "private" && (
           <p className="session-sharing-note" data-sharing-mcp-detached="true">{tr("sharing.personalMcpDetached")}</p>
         )}
-        {!editable && <p className="session-sharing-note">{tr("sharing.readOnly")}</p>}
+        {staysPrivate && (
+          <p className="session-sharing-note" data-sharing-stays-private={staysPrivate}>
+            {tr(staysPrivate === "room" ? "sharing.privateRoomBlocked" : "sharing.personalContextBlocked")}
+          </p>
+        )}
+        {!editable && !staysPrivate && <p className="session-sharing-note">{tr("sharing.readOnly")}</p>}
       </>
     );
   };

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import type {
+  HarnessSelection,
   ModelRef,
   SessionProjection,
   TaskTrackerAttachmentInput,
@@ -8,6 +9,7 @@ import type {
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
 import {
+  AddIcon,
   Button,
   CloseIcon,
   IconButton,
@@ -19,6 +21,9 @@ import {
   Textarea,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { MOD } from "../../../apps/web/src/format.ts";
+import { useStore } from "../../../apps/web/src/store.ts";
+import ModelPicker from "@polyth/models/model-picker";
+import { useHarnessColors, useOtherHarnessModels, useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import { api, type TaskTrackerDispatchInput } from "./api.ts";
 import { PROVIDER_LABELS, ProviderMark, providerNouns } from "./brand.tsx";
 import { tt } from "./i18n.ts";
@@ -61,19 +66,258 @@ function executionFor(projectId: string): Pick<TaskTrackerDispatchInput, "harnes
   };
 }
 
+/** The agent and model a task's session starts with. */
+export interface TaskStartAgent {
+  harness?: HarnessSelection;
+  model?: ModelRef;
+}
+
+/** How a task's agent session starts: in the project's own checkout or an
+ *  isolated one, whether the app then switches to it or leaves it working in
+ *  the background, and, per project, an agent and model chosen for tasks. A
+ *  project without a choice follows the composer. A device preference,
+ *  remembered for the next start. */
+export interface TaskStartOptions {
+  isolated: boolean;
+  open: boolean;
+  agents?: Readonly<Record<string, TaskStartAgent>>;
+}
+
+const START_OPTIONS_KEY = "polyth.task-trackers.start";
+const DEFAULT_START_OPTIONS: TaskStartOptions = { isolated: false, open: false };
+const startListeners = new Set<() => void>();
+let startOptions: TaskStartOptions | null = null;
+
+const storedHarness = (value: unknown): HarnessSelection | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  if (item.mode === "auto") return { mode: "auto" };
+  return item.mode === "pinned" && typeof item.harnessId === "string" && item.harnessId
+    ? { mode: "pinned", harnessId: item.harnessId }
+    : undefined;
+};
+
+const storedModel = (value: unknown): ModelRef | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  if (typeof item.providerID !== "string" || !item.providerID) return undefined;
+  if (typeof item.modelID !== "string" || !item.modelID) return undefined;
+  return {
+    providerID: item.providerID,
+    modelID: item.modelID,
+    ...(typeof item.variant === "string" && item.variant ? { variant: item.variant } : {}),
+  };
+};
+
+const storedAgents = (value: unknown): Record<string, TaskStartAgent> | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const agents: Record<string, TaskStartAgent> = {};
+  for (const [projectId, raw] of Object.entries(value as Record<string, unknown>)) {
+    const item = (raw ?? {}) as Record<string, unknown>;
+    const harness = storedHarness(item.harness);
+    const model = storedModel(item.model);
+    if (harness || model) agents[projectId] = { ...(harness ? { harness } : {}), ...(model ? { model } : {}) };
+  }
+  return Object.keys(agents).length > 0 ? agents : undefined;
+};
+
+export function taskStartOptions(): TaskStartOptions {
+  if (startOptions) return startOptions;
+  try {
+    const stored = JSON.parse(localStorage.getItem(START_OPTIONS_KEY) ?? "null") as Record<string, unknown> | null;
+    const agents = storedAgents(stored?.agents);
+    startOptions = {
+      isolated: stored?.isolated === true,
+      open: stored?.open === true,
+      ...(agents ? { agents } : {}),
+    };
+  } catch {
+    startOptions = DEFAULT_START_OPTIONS;
+  }
+  return startOptions;
+}
+
+export function setTaskStartOptions(patch: Partial<TaskStartOptions>): void {
+  startOptions = { ...taskStartOptions(), ...patch };
+  try { localStorage.setItem(START_OPTIONS_KEY, JSON.stringify(startOptions)); } catch { /* preference only */ }
+  for (const listener of startListeners) listener();
+}
+
+/** Remember the agent and model for this project's task starts; `undefined`
+ *  goes back to following the composer. */
+export function setTaskStartAgent(projectId: string, agent: TaskStartAgent | undefined): void {
+  const { [projectId]: _previous, ...others } = taskStartOptions().agents ?? {};
+  setTaskStartOptions({ agents: agent && (agent.harness || agent.model) ? { ...others, [projectId]: agent } : others });
+}
+
+/** The agent and model a task started in this project gets: the one chosen
+ *  for tasks here, otherwise whatever the composer would use. */
+export function taskStartAgent(projectId: string, options: TaskStartOptions = taskStartOptions()): TaskStartAgent {
+  return options.agents?.[projectId] ?? executionFor(projectId);
+}
+
+/** Test seam: forget the remembered choice between isolated renders. */
+export function resetTaskStartOptions(): void {
+  startOptions = null;
+}
+
+const subscribeStart = (listener: () => void) => {
+  startListeners.add(listener);
+  return () => { startListeners.delete(listener); };
+};
+
+export function useTaskStartOptions(): TaskStartOptions {
+  return useSyncExternalStore(subscribeStart, taskStartOptions, () => DEFAULT_START_OPTIONS);
+}
+
+/** Starts one agent session per task with the remembered start options (or
+ *  the given ones), then switches to the first started session when asked. */
 export async function dispatchTasks(
   projectId: string,
   tasks: ReadonlyArray<Pick<TaskTrackerTaskDto, "provider" | "id">>,
   instructions = "",
+  options: TaskStartOptions = taskStartOptions(),
 ): Promise<TaskTrackerDispatchResultDto[]> {
   const { results } = await api.taskTrackerDispatch({
     projectId,
     tasks: tasks.map((task) => ({ provider: task.provider, taskId: task.id })),
     ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
-    ...executionFor(projectId),
+    ...taskStartAgent(projectId, options),
+    ...(options.isolated ? { isolated: true } : {}),
   });
   window.dispatchEvent(new Event(TASK_TRACKER_CHANGED));
+  const started = results.find((result) => result.sessionId)?.sessionId;
+  if (options.open && started) openSession(started);
   return results;
+}
+
+/** The composer's own agent tabs and model picker, choosing what a task
+ *  started in this project runs on. Until something is picked here it shows,
+ *  and starts with, the composer's current choice. */
+export function TaskModelPicker({ projectId, labelledBy }: { projectId: string; labelledBy?: string }) {
+  const host = taskTrackerHost();
+  const options = useTaskStartOptions();
+  // The composer's choice as a string, so an unchanged draft is a stable snapshot.
+  const composerKey = useSyncExternalStore(
+    host?.executionDraft.subscribe ?? noop,
+    () => JSON.stringify(executionFor(projectId)),
+    () => "{}",
+  );
+  const chosen = options.agents?.[projectId];
+  const agent = useMemo<TaskStartAgent>(() => chosen ?? JSON.parse(composerKey) as TaskStartAgent, [chosen, composerKey]);
+  const project = useStore((state) => state.projectRegistry.projects.find((item) => item.id === projectId));
+  const globalModels = useStore((state) => state.models);
+  const globalAgents = useStore((state) => state.agents);
+  const spaceId = project?.spaceId;
+  const pinnedHarnessId = agent.harness?.mode === "pinned" ? agent.harness.harnessId : undefined;
+  const catalog = useRuntimeCatalog(null, globalModels, globalAgents, {
+    projectId,
+    ...(spaceId ? { spaceId } : {}),
+    ...(project?.path ? { cwd: project.path } : {}),
+    ...(pinnedHarnessId ? { harnessId: pinnedHarnessId } : {}),
+  });
+  const catalogHarnessId = pinnedHarnessId ?? catalog.harnessId;
+  const models = useMemo(
+    () => catalogHarnessId
+      ? catalog.models.filter((candidate) => !candidate.harnessId || candidate.harnessId === catalogHarnessId)
+      : catalog.models,
+    [catalog.models, catalogHarnessId],
+  );
+  const otherHarnesses = useOtherHarnessModels({
+    projectId,
+    ...(spaceId ? { spaceId } : {}),
+    ...(project?.path ? { cwd: project.path } : {}),
+    ...(catalogHarnessId ? { excludeHarnessId: catalogHarnessId } : {}),
+  });
+  const harnessColors = useHarnessColors(projectId, spaceId);
+  const selection: HarnessSelection = agent.harness ?? { mode: "auto" };
+  const Slot = host?.ui.Slot;
+  const header = Slot ? (
+    <Slot
+      slot="modelPicker.header"
+      context={{
+        ...(spaceId ? { spaceId } : {}),
+        projectId,
+        harnessSelection: selection,
+        ...(catalogHarnessId ? { resolvedHarnessId: catalogHarnessId } : {}),
+        pendingHarnessSelection: selection,
+        onSelectHarness: (next: HarnessSelection) => {
+          // A model belongs to its agent; a different agent starts on its default.
+          const same = next.mode === "pinned" && next.harnessId === pinnedHarnessId;
+          setTaskStartAgent(projectId, { harness: next, ...(same && agent.model ? { model: agent.model } : {}) });
+        },
+      }}
+    />
+  ) : undefined;
+  return (
+    <div className="tt-model-picker" {...(labelledBy ? { role: "group", "aria-labelledby": labelledBy } : {})}>
+      <ModelPicker
+        models={models}
+        {...(catalogHarnessId ? { harnessId: catalogHarnessId } : {})}
+        {...(agent.model ? { value: { ...agent.model, ...(catalogHarnessId ? { harnessId: catalogHarnessId } : {}) } } : {})}
+        catalogLoading={catalog.discovery.state === "pending"}
+        emptyLabel={tt("tasktrackers.start.modelComposer")}
+        otherHarnesses={otherHarnesses}
+        harnessColors={harnessColors}
+        {...(header ? { header } : {})}
+        onPick={(picked) => {
+          if (!picked) {
+            setTaskStartAgent(projectId, undefined);
+            return;
+          }
+          const harnessId = picked.harnessId ?? pinnedHarnessId;
+          setTaskStartAgent(projectId, {
+            ...(harnessId ? { harness: { mode: "pinned", harnessId } } : agent.harness ? { harness: agent.harness } : {}),
+            model: {
+              providerID: picked.providerID,
+              modelID: picked.modelID,
+              ...(picked.variant ? { variant: picked.variant } : {}),
+            },
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+/** What the agent runs on, where it works and whether to follow it there. */
+export function TaskStartOptionsFields({ projectId, disabled = false }: { projectId: string; disabled?: boolean }) {
+  const options = useTaskStartOptions();
+  const id = useId();
+  return (
+    <div className="tt-start-options">
+      <div className={`tt-start-row${disabled ? " is-disabled" : ""}`} {...(disabled ? { inert: true } : {})}>
+        <span id={`${id}-model`}>{tt("tasktrackers.start.model")}</span>
+        <TaskModelPicker projectId={projectId} labelledBy={`${id}-model`} />
+      </div>
+      <div className="tt-start-row">
+        <span id={`${id}-workspace`}>{tt("tasktrackers.start.workspace")}</span>
+        <div className="tt-target" role="radiogroup" aria-labelledby={`${id}-workspace`}>
+          {([[false, tt("tasktrackers.start.shared")], [true, tt("tasktrackers.start.isolated")]] as const).map(([isolated, label]) => (
+            <button
+              key={label}
+              type="button"
+              role="radio"
+              aria-checked={options.isolated === isolated}
+              className={options.isolated === isolated ? "active" : ""}
+              title={isolated ? tt("tasktrackers.start.isolatedHint") : tt("tasktrackers.start.sharedHint")}
+              disabled={disabled}
+              onClick={() => setTaskStartOptions({ isolated })}
+            >{label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="tt-start-row">
+        <span id={`${id}-open`}>{tt("tasktrackers.start.openSession")}</span>
+        <Switch
+          checked={options.open}
+          disabled={disabled}
+          labelledBy={`${id}-open`}
+          onChange={(open) => setTaskStartOptions({ open })}
+        />
+      </div>
+    </div>
+  );
 }
 
 export function openSession(sessionId: string): void {
@@ -514,6 +758,7 @@ export function TaskComposer({
                 />
               </div>
             )}
+            {canStartAgent && startAgent && agentAvailable && <TaskStartOptionsFields projectId={projectId!} disabled={busy} />}
           </div>
         </div>
         <footer className="tt-compose-footer">
@@ -525,7 +770,7 @@ export function TaskComposer({
             <Button
               type="submit"
               variant="primary"
-              iconStart={startAgent && agentAvailable ? SendIcon : undefined}
+              iconStart={startAgent && agentAvailable ? SendIcon : AddIcon}
               busy={busy}
               disabled={!title.trim() || busy}
             >
@@ -595,6 +840,7 @@ export function DispatchBar({
           {count > 1 ? tt("tasktrackers.work.startAgents", { count }) : tt("tasktrackers.work.startAgent")}
         </Button>
       </div>
+      {projectId && <TaskStartOptionsFields projectId={projectId} disabled={busy} />}
       <small className="tt-dispatch-hint">
         {projectId
           ? tt("tasktrackers.work.eachTaskSession")

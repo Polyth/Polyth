@@ -63,6 +63,9 @@ const permissionLabel = (choice: PermissionChoice): string => tr(`agents.permiss
 
 // Advanced settings: one choice for every agent, kept in this browser.
 const ADVANCED_KEY = "polyth.agents.advancedSettings";
+/** The same words as a chat's memory card; a rolling thread also has "later",
+ *  because here Polyth itself decides when it is full. */
+const ROTATE_PRESETS = { earlier: 40, usual: 60, later: 80 } as const;
 const advancedListeners = new Set<() => void>();
 function readAdvanced(): boolean {
   try { return globalThis.localStorage?.getItem(ADVANCED_KEY) === "1"; } catch { return false; }
@@ -168,6 +171,10 @@ export default function AgentEditor({
   onRenewHook?: (triggerId: string) => Promise<void>;
 }) {
   const [view, setView] = useState<"form" | "file">("form");
+  const [rotateCustom, setRotateCustom] = useState(false);
+  const rotatePreset = rotateCustom
+    ? "custom"
+    : (Object.entries(ROTATE_PRESETS).find(([, percent]) => percent === draft.rotateAtPercent)?.[0] ?? "custom");
   const [advanced, setAdvanced] = useAdvanced();
   const advancedId = useId();
   // A freshly issued webhook URL is shown once: bring it into view.
@@ -624,6 +631,7 @@ export default function AgentEditor({
               onChange={(value) => set("permissions", value as PermissionChoice)}
             />
           </Field>
+          <p className="agent-field-hint">{tr("agents.permissionsScope")}</p>
           {permissionWarning}
           {advanced && (
             <>
@@ -701,20 +709,41 @@ export default function AgentEditor({
               />
               <span className="agent-field-hint">{tr("agents.keepWarmHint")}</span>
             </div>
-            <Field label={tr("agents.rotateAt")} hint={tr("agents.rotateAtHint")}>
-              <span className="agent-range">
-                <input
-                  type="range"
-                  min={30}
-                  max={90}
-                  step={5}
-                  value={draft.rotateAtPercent}
-                  aria-valuetext={`${draft.rotateAtPercent}%`}
-                  onChange={(event) => set("rotateAtPercent", Number(event.target.value))}
-                />
-                <output>{draft.rotateAtPercent}%</output>
-              </span>
-            </Field>
+            <div className="agent-field">
+              <span className="agent-field-label">{tr("agents.rotateWhen")}</span>
+              <Tabs
+                size="sm"
+                label={tr("agents.rotateWhen")}
+                value={rotatePreset}
+                tabs={[
+                  { id: "earlier", label: tr("agents.rotateEarlier") },
+                  { id: "usual", label: tr("agents.rotateUsual") },
+                  { id: "later", label: tr("agents.rotateLater") },
+                  { id: "custom", label: tr("agents.rotateCustom") },
+                ]}
+                onChange={(id) => {
+                  setRotateCustom(id === "custom");
+                  if (id !== "custom") set("rotateAtPercent", ROTATE_PRESETS[id as keyof typeof ROTATE_PRESETS]);
+                }}
+              />
+              {rotatePreset !== "custom" && <span className="agent-field-hint">{tr("agents.rotateWhenHint", { percent: `${draft.rotateAtPercent}%` })}</span>}
+            </div>
+            {rotatePreset === "custom" && (
+              <Field label={tr("agents.rotateAt")} hint={tr("agents.rotateAtHint")}>
+                <span className="agent-range">
+                  <input
+                    type="range"
+                    min={30}
+                    max={90}
+                    step={5}
+                    value={draft.rotateAtPercent}
+                    aria-valuetext={`${draft.rotateAtPercent}%`}
+                    onChange={(event) => set("rotateAtPercent", Number(event.target.value))}
+                  />
+                  <output>{draft.rotateAtPercent}%</output>
+                </span>
+              </Field>
+            )}
             </>
           )}
           {draft.context === "session" && (

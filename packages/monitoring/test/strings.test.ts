@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import ts from "typescript";
 import { MONITORING_TABLES, monitoringWords } from "../widgets/strings.ts";
 
@@ -10,7 +10,7 @@ const LOCALES = ["de", "fr", "pl", "pt-BR", "it", "es", "zh-CN", "bg", "ar", "pt
 // new phrase cannot ship without its translations.
 function phrases(): string[] {
   const found = new Set<string>();
-  for (const name of ["index.tsx", "MonitoringView.tsx"]) {
+  for (const name of readdirSync(new URL("../widgets/", import.meta.url)).filter((file) => file.endsWith(".tsx"))) {
     const path = new URL(`../widgets/${name}`, import.meta.url);
     const source = ts.createSourceFile(name, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const visit = (node: ts.Node): void => {
@@ -36,6 +36,15 @@ test("every monitoring phrase is translated in every non-English locale", () => 
     assert.deepEqual(missing, [], `${locale} misses ${missing.length} phrases`);
     const stale = Object.keys(table).filter((english) => !all.includes(english));
     assert.deepEqual(stale, [], `${locale} keeps phrases the widgets no longer use`);
+  }
+});
+
+test("translations keep every placeholder of their English phrase", () => {
+  const holes = (text: string) => [...text.matchAll(/\{\w+\}/g)].map((match) => match[0]).sort();
+  for (const locale of LOCALES) {
+    for (const [english, translated] of Object.entries(MONITORING_TABLES[locale]!)) {
+      assert.deepEqual(holes(translated), holes(english), `${locale}: ${english}`);
+    }
   }
 });
 

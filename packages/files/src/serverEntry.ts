@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   AgentCapabilityContributionRegistry,
@@ -48,6 +49,12 @@ import {
 /** `_inbox/` is an explicit project-root staging area for freshly attached
  *  files: uploads land here before any session/worktree owns the message. */
 export const INBOX_PREFIX = "_inbox/";
+/** Whether a requested folder is the attachment inbox or inside it, however the
+ *  path is spelled. */
+const isInboxFolder = (requested: string): boolean => {
+  const clean = path.posix.normalize(requested.replaceAll("\\", "/")).replace(/^(\.?\/)+/, "");
+  return clean === INBOX_PREFIX.slice(0, -1) || clean === INBOX_PREFIX || clean.startsWith(INBOX_PREFIX);
+};
 
 /** Attachment preparation seam consumed by the session service.
  *  Published so the composition root never imports this package. */
@@ -67,7 +74,17 @@ export interface AttachmentSourceService {
   /** Read an already-prepared attachment through the same guarded store, for
    *  harnesses whose file delivery is emulated as prompt text. */
   read(root: string, rel: string, projectId?: string): Promise<Uint8Array>;
+  /** Store bytes a server package fetched (a tracker card's image, for
+   *  example) as a fresh `_inbox/*` upload at the project root: the same
+   *  place and name shape a composer upload gets, so the session's ordinary
+   *  attachment preparation materializes it. Callers authorize the project in
+   *  the requester's Space first. Refuses more than `maxBytes`. */
+  stage?(input: { projectId: string; name: string; bytes: Uint8Array }): Promise<{ path: string; size: number }>;
 }
+
+/** A file name safe inside `_inbox/`, as the web composer's upload makes it. */
+export const inboxFileName = (name: string): string =>
+  name.replace(/[^\w.-]+/g, "_").replace(/^\.+/, "").slice(0, 80) || "file";
 
 /** Session-lifetime chat media seam consumed by the isolation lifecycle. A
  *  chat image is a project-relative path resolved against the session's
@@ -161,8 +178,21 @@ export function externalReadsRoute(store: ExternalReadStore): RouteHandler {
  *  reads and writes through the same store the routes use. */
 export function createAttachmentSourceService(
   filesFor: (projectId: string | null) => Promise<FileService>,
+  /** The project's own root, where `_inbox/*` is staged; absent disables `stage`. */
+  projectRoot?: (projectId: string) => Promise<string>,
 ): AttachmentSourceService {
   return {
+    ...(projectRoot ? {
+      stage: async ({ projectId, name, bytes }: { projectId: string; name: string; bytes: Uint8Array }) => {
+        if (bytes.length > MAX_RAW_BYTES) {
+          throw Object.assign(new Error("attachment is too large"), { code: "invalid-input" });
+        }
+        const fs = await filesFor(projectId);
+        const rel = `${INBOX_PREFIX}${randomUUID()}-${inboxFileName(name)}`;
+        await fs.writeBytes(await projectRoot(projectId), rel, bytes);
+        return { path: rel, size: bytes.length };
+      },
+    } : {}),
     maxBytes: MAX_RAW_BYTES,
     stat: async (root, rel, projectId) => {
       const fs = await filesFor(projectId ?? null);
@@ -341,6 +371,12 @@ export function workspaceRoutes(deps: {
   return async ({ path, method, url, body, json, req, res }) => {
     if (!path.startsWith("/api/files")) return false;
     const query = (key: string) => url.searchParams.get(key);
+    // A private chat's attachments live here too: they open by name from their
+    // chat and are never listed for whoever else can open the project.
+    if ((path === "/api/files/tree" || path === "/api/files/list" || path === "/api/files/archive") && isInboxFolder(query("path") ?? "")) {
+      json(404, { error: "not-found", message: "path not found" });
+      return true;
+    }
     const rootOfQuery = () => rootOf(query("projectId"), query("sessionId"), query("repositoryId"));
     const rootOfBody = (input: Record<string, unknown>) =>
       rootOf(
@@ -395,13 +431,22 @@ export function workspaceRoutes(deps: {
         || raw.mime === "application/xml"
         || raw.mime === "application/octet-stream");
       const data = Buffer.from(raw.data);
+      const etag = raw.revision ? `"${raw.revision}"` : undefined;
       const headers = {
         "content-type": raw.mime,
         "accept-ranges": "bytes",
         "x-content-type-options": "nosniff",
         "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(query("path")?.split(/[\\/]/).pop() ?? "file")}`,
         "cache-control": "no-cache",
+        ...(etag ? { etag } : {}),
       };
+      // Opening a chat again asks for all its photos again. One round trip
+      // answers that instead of megabytes through a phone's relay path.
+      if (etag && req.headers["if-none-match"] === etag && !req.headers.range) {
+        res.writeHead(304, headers);
+        res.end();
+        return true;
+      }
       // Media players (Safari always) fetch byte ranges to seek and refuse a
       // video served without them. The file is already in memory (bounded by
       // MAX_RAW_BYTES), so a single range is a slice of it.
@@ -595,7 +640,7 @@ export const FILES_REMOTE_ACCESS: RemoteAccessPolicy = {
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const externalReads = createExternalReadStore(packageDataDir(host));
-  const files = createFileService({ externalReads: externalReads.get });
+  const files = createFileService({ externalReads: externalReads.get, ...(host.storageDir ? { sealedRoots: () => [host.storageDir] } : {}) });
   host.services.provide(serverServiceKey<FileService>("files"), files);
   /** SSH transport binds late; resolve it per call so `materialize` reads and
    *  writes a remote project through the same remote FileService the routes use. */
@@ -605,7 +650,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   };
   host.services.provide(
     serverServiceKey<AttachmentSourceService>("files.attachments"),
-    createAttachmentSourceService(attachmentFilesFor),
+    createAttachmentSourceService(attachmentFilesFor, async (projectId) => {
+      const project = await host.projects.get(projectId);
+      if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
+      return project.path;
+    }),
   );
   host.services.provide(
     serverServiceKey<SessionMediaService>("files.session-media"),

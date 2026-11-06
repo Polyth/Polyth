@@ -41,6 +41,8 @@ import type {
   TrackCreateInput,
   TrackDto,
   Project,
+  ManagedProjectInput,
+  ManagedProjectLocationDto,
   ProjectCloneInput,
   ProjectPatch,
   ProjectPresentationSettingsDto,
@@ -87,6 +89,7 @@ import type {
 } from "@polyth/contracts";
 import { errorBodyText, readErrorDiagnostics } from "@polyth/contracts";
 import { fetchWithReadRetry } from "@polyth/contracts/transport-retry";
+import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
 import type { SourceControlProfileState } from "@polyth/contracts/source-control";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import type { ChangeRequest, ChangeRequestComment, ChangeRequestDetail, ChangeRequestFile, HostingIssue, HostingIssueComment, HostingIssueDetail, HostingRepository, HostingResult, HostingStatus } from "@polyth/code-hosting/types";
@@ -819,6 +822,8 @@ export interface ScheduleTaskDto extends AgentFieldsDto {
   nextRunAt: number | null;
   runs: number;
   source?: "ui" | "loop-file";
+  /** The person it acts for; an agent without one may not approve on its own. */
+  ownerUserId?: string;
   sourcePath?: string;
   parseError?: string;
   loopId?: string;
@@ -1027,6 +1032,14 @@ export const api = {
   /** The first-run personal project; the server chooses its folder. */
   ensurePersonalProject: (name?: string) =>
     jfetch<Project>("/api/projects/personal", json("POST", { name })),
+  /** The caller's own "Only me" room in a project; the server creates it. */
+  ensurePrivateRoom: (projectId: string) =>
+    jfetch<Project>(`/api/projects/${encodeURIComponent(projectId)}/private-room`, { method: "POST" }),
+  /** A project in the Polyth folder; the server chooses its folder. */
+  createManagedProject: (input: ManagedProjectInput) =>
+    jfetch<Project>("/api/projects/managed", json("POST", input)),
+  managedProjectLocation: () =>
+    jfetch<ManagedProjectLocationDto>("/api/projects/managed"),
   cloneProject: (input: ProjectCloneInput | string, parentPath?: string) =>
     jfetch<Project>("/api/projects/clone", json("POST", typeof input === "string"
       ? { repository: input, parentPath: parentPath ?? "" }
@@ -1089,6 +1102,8 @@ export const api = {
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   memoryPolicyGet: (id: string) =>
     jfetch<{ setting: MemoryNarrowing }>(`/api/sessions/${id}/memory-policy`),
+  setCompactionPreference: (id: string, preference: CompactionPreference | null) =>
+    jfetch<{ preference: CompactionPreference | null }>(`/api/sessions/${encodeURIComponent(id)}/compaction-preference`, json("PUT", { preference })),
   memoryPolicySet: (id: string, setting: MemoryNarrowing) =>
     jfetch<{ setting: MemoryNarrowing }>(`/api/sessions/${id}/memory-policy`, json("PUT", { memory: setting })),
   runtimeFeatures: (id: string) =>
@@ -2008,14 +2023,15 @@ export const api = {
     jfetch<ReviewFlowStateDto>(`/api/sessions/${encodeURIComponent(sessionId)}/review-flow/${action}`, { method: "POST" }),
 
 
-  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions") =>
+  /** Isolated sessions count only with an explicit `skipIsolated: false`. */
+  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions", options: { skipIsolated?: boolean } = {}) =>
     jfetch<SessionRetentionDto>(
-      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}`,
+      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}${options.skipIsolated === false ? "&skipIsolated=false" : ""}`,
     ),
-  runSessionRetention: (days: number, action: SessionRetentionAction = "archive") =>
+  runSessionRetention: (days: number, action: SessionRetentionAction = "archive", options: { skipIsolated?: boolean } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { days, action }),
+      json("POST", { days, action, ...(options.skipIsolated === false ? { skipIsolated: false } : {}) }),
     ),
   deleteArchivedSessions: (days: number) =>
     jfetch<SessionRetentionResultDto>(

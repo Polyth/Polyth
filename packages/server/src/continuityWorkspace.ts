@@ -11,8 +11,8 @@ export async function continuityWorkspace(cwd: string, remote = false): Promise<
   try {
     const bin = gitBinary();
     const [head, status] = await Promise.all([
-      exec(bin, ["rev-parse", "HEAD"], { cwd, timeout: 1500, maxBuffer: 8192 }),
-      exec(bin, ["status", "--porcelain=v1", "--branch"], { cwd, timeout: 1500, maxBuffer: 64 * 1024 }),
+      exec(bin, ["rev-parse", "HEAD"], { cwd, timeout: 1500, maxBuffer: 8192, windowsHide: true }),
+      exec(bin, ["status", "--porcelain=v1", "--branch"], { cwd, timeout: 1500, maxBuffer: 64 * 1024, windowsHide: true }),
     ]);
     const [branch, ...files] = status.stdout.trimEnd().split("\n");
     return { cwd, head: head.stdout.trim(), branch: branch?.slice(3).split("...")[0], dirty: files.length > 0, files: files.slice(0, 30).map((line) => line.slice(3, 203)) };

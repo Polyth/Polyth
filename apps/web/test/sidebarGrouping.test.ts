@@ -205,8 +205,9 @@ test("no surface re-implements the shared project ordering", async () => {
   }
 });
 
-test("project sort mode accepts activity, name, and manual with a recent fallback", () => {
+test("project sort mode accepts activity, frequency, name, and manual with a recent fallback", () => {
   assert.equal(parseProjectSortMode("recent"), "recent");
+  assert.equal(parseProjectSortMode("frequent"), "frequent");
   assert.equal(parseProjectSortMode("name"), "name");
   assert.equal(parseProjectSortMode("manual"), "manual");
   assert.equal(parseProjectSortMode("unknown"), "recent");

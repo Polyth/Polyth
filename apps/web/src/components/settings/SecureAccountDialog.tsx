@@ -5,7 +5,7 @@
 // signs in as `owner` from then on.
 import { Fragment, useState } from "react";
 import { prepareOwnerRecovery, protectOwnerAccount } from "../../accounts.ts";
-import { desktopBridge } from "../../desktopBridge.ts";
+import { localDesktopBridge } from "../../desktopBridge.ts";
 import { copyText } from "../../utils.ts";
 import { Button, Checkbox, CopiedIcon, CopyIcon, Dialog, DownloadIcon, Notice, TextInput } from "../ui/index.ts";
 import { FormField } from "./parts.tsx";
@@ -17,7 +17,7 @@ type Stage = "password" | "codes";
 /** The server accepts these steps only right after the Desktop main process
  *  confirmed this window's session; a copied cookie can never do it. */
 async function confirmOnThisComputer(): Promise<void> {
-  const confirm = desktopBridge()?.confirmOwnerSession;
+  const confirm = localDesktopBridge()?.confirmOwnerSession;
   if (confirm && !(await confirm().catch(() => false))) {
     throw Object.assign(new Error(tr("settings.secure.confirmFailed")), { code: "desktop-confirmation-failed" });
   }

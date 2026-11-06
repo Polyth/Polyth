@@ -40,6 +40,25 @@ test("the stored policy defaults to inheriting nothing and keeps a sorted mute l
   }
 });
 
+test("a harness default applies only while the Space has not chosen", async () => {
+  const root = await mkdtemp(join(tmpdir(), "polyth-skill-default-"));
+  try {
+    const file = join(root, "policy.json");
+    assert.deepEqual(await readNativeSkillPolicy(file, true), { inherit: true, muted: [] }, "no stored choice follows the default");
+    await writeFile(join(root, "broken.json"), "{");
+    assert.deepEqual(await readNativeSkillPolicy(join(root, "broken.json"), true), { inherit: false, muted: [] }, "unreadable stays the safe default");
+    await writeFile(join(root, "muted-only.json"), JSON.stringify({ muted: ["pdf"] }));
+    assert.deepEqual(await readNativeSkillPolicy(join(root, "muted-only.json"), true), { inherit: true, muted: ["pdf"] });
+    // Muting under the default stores the inherited state, so it survives a later default change.
+    await updateNativeSkillPolicy(file, { skill: { name: "pdf", enabled: false } }, true);
+    assert.deepEqual(await readNativeSkillPolicy(file, false), { inherit: true, muted: ["pdf"] });
+    await updateNativeSkillPolicy(file, { inherit: false }, true);
+    assert.deepEqual(await readNativeSkillPolicy(file, true), { inherit: false, muted: ["pdf"] }, "an explicit Off is kept");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("skill folders are scanned with descriptions and without following escapes", async () => {
   const root = await mkdtemp(join(tmpdir(), "polyth-skill-scan-"));
   try {
@@ -90,7 +109,7 @@ test("setup steps lead with install or sign-in and keep re-sign-in for ready har
   assert.equal(statusTone(snapshot({ state: "offline" })), "danger");
   assert.deepEqual(harnessSummary([
     snapshot({}), snapshot({ state: "auth-required" }), snapshot({ state: "not-installed", installed: false }), snapshot({}, undefined, false),
-  ]), { ready: 1, attention: 1, signIn: 1, off: 1, missing: 1, checking: 0, unverified: 0, updates: 0 });
+  ]), { ready: 1, attention: 1, signIn: 1, off: 1, missing: 1, checking: 0, unverified: 0, updates: 0, signInEnding: 0 });
 });
 
 test("the Skills section appears only on harnesses that can list native skills", () => {

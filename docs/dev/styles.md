@@ -190,7 +190,7 @@ when the locale switches between LTR and RTL.
 | `--density-scale` | Active interface-density multiplier used by conversation geometry. |
 | `--gutter` | Standard desktop content gutter; aliases `--space-5`. |
 | `--screen-gutter` | Compact/phone screen gutter; aliases `--space-4`. |
-| `--chat-measure` | Shared reading measure for the chat timeline, composer, and inline conversation widgets. |
+| `--chat-measure` | Shared reading measure for the chat timeline, composer, and inline conversation widgets. Settings → Chat → Width picks it: *Normal* 768px, *Wide* 1180px, *Ultra wide* 1600px. A measure wider than the workspace meets the gutters instead of overflowing, and the floating launcher strip's lane is reserved in the frame so the timeline, composer and header keep one right edge. |
 | `--conversation-inset` | Density-scaled conversation gutter. |
 | `--conversation-chrome-inset` | Density-scaled viewport inset for floating conversation chrome. |
 | `--conversation-related-gap` | Gap between tightly related conversation content. |
@@ -567,6 +567,12 @@ each look as a token schematic in the active theme, standing like a window on
 the background in use. A look restyles the shell only: picking one
 (`pickShellLook`) never changes the workspace background the person chose.
 
+A look's strip geometry (the margins and rim Air and Obsidian give `.railbar`) belongs
+to the wide shell. A compact shell shows a package window as a full-screen layer and
+floats no strip, so `shellLooks.css` resets those margins and borders there. An idle
+rail host with no strip is `display: none` even while closed windows stay mounted in
+it, so it never takes room from the chat. `chatFrameGeometry.test.ts` measures both.
+
 The Appearance page runs from the whole to the parts: **Look**, **Color**
 (mode, the one searchable scheme picker, accent, skin import), **Controls**
 (`themeStyle`, see "Theme layers"), **Background and surfaces** (the
@@ -671,7 +677,7 @@ class strength joins a role instead of getting a rule of its own:
 | 1c Options and buttons | Quiet chips; the default (quiet) button is an option and the destructive one its red wash; a disabled button keeps the base's neutral look | queue chips, attachments, New-session Shortcuts, prompt suggestion, add-menu tiles, `.ui-btn--quiet`, `.ui-btn--danger` | `--look-option*` |
 | 1f Fields | Every text field and select; a field well is the field and its input stays bare | navigator search, picker filter well, `.ui-field-well`, `.ui-input`, `.ui-textarea`, `.sel select`, the theme picker | `--look-field`, `--look-field-edge`, `--look-field-rule`, `--look-field-radius`, `--look-focus-ring` |
 | 1g Corners | One radius role per control | rows, menu items, icon buttons, segments → `--look-select-radius`; push buttons, chips, wells → `--look-control-radius` | — |
-| 1h Phone layers | The phone navigator and Workspace panel are one full-screen material; the navigator's current chat, titles and date captions speak the look's selection and quiet inks; launchers are the look's tile (Edit mode's tiles too, but not the drag hole or lifted copy); a widget is the look's panel card | `.mobile-navigator`, `.mobile-nav-session-row.is-active`, `.mobile-nav-date-divider`, `.workspace-panel-sheet`, `.workspace-panel-launcher`, `.workspace-editor-item--launcher`, `.workspace-panel-item--widget` (all panel rules sit in the panel's phone media query) | `--look-phone-layer*`, `--look-phone-select*`, `--look-select-mark`, `--look-tile*`, `--look-widget*` |
+| 1h Phone layers | The phone navigator and Workspace panel are one full-screen material; the navigator's current chat, titles and date captions speak the look's selection and quiet inks; launchers are the look's tile (Edit mode's tiles too, but not the drag hole or lifted copy); a widget is the look's panel card. Phone Settings is one too: the layer has no window corner, edge or scrim, each group of pages and the search results are the panel card, the ruled looks part its rows with `--look-rule`, and a current row is `--look-list-select` with `--look-select-mark` (the Monolith looks override it, because the navigator's plate is their card's own material) | `.mobile-navigator`, `.mobile-nav-session-row.is-active`, `.mobile-nav-date-divider`, `.mobile-nav-project-head` (its press plate), `.workspace-panel-sheet`, `.workspace-panel-launcher`, `.workspace-editor-item--launcher`, `.workspace-panel-item--widget` (all panel rules sit in the panel's phone media query) | `--look-phone-layer*`, `--look-phone-select*`, `--look-list-select*`, `--look-select-mark`, `--look-row-press*`, `--look-tile*`, `--look-widget*` |
 
 Role rules use `:is()` where the shared block owns the element; the button
 rules use `:where()` so a look that draws its own button (Line's hairline,
@@ -687,6 +693,17 @@ On the phone each look also carries its own character past the 1h tokens: a
 phone navigator row runs the screen's width, so `--look-phone-select*`
 (default: the look's `--look-select*`) lets the current chat differ from the
 desktop plate, and `--look-select-mark` adds a bar on its leading edge.
+A pressed project line is `--look-row-press` / `--look-row-press-edge` in
+the look's `--look-select-radius`: by default `--text` at 7% (the
+navigator's own press wash), Line a 6% fill with its strong hairline, Air
+`--accent` at 8% (a step under the current chat's 12–13% accent wash, over
+the island out to its edges), Monolith Reverse the well at half depth with
+its carve (the full well is the current chat), Obsidian `--accent` at 9%
+with an 18% accent ring. Measured on every bundled palette in both
+appearances, the press moves the surface by 2.5–9 OKLab ΔE (×100; more only
+on the near-black OLED and High Contrast canvases, where OKLab overstates
+the step) against 8–13 for the old accent tap highlight, and keeps `--text`
+at ≥ 6.6:1.
 
 | Look | Phone navigator | Workspace panel |
 | --- | --- | --- |
@@ -695,7 +712,7 @@ desktop plate, and `--look-select-mark` adds a bar on its leading edge.
 | `air` | Each project is an island, its mark as far in from the island's side as from its top (names, chats and Add project keep those columns); the toolbar steps in with them (title on the marks' edge, close on their ⋮ column); current chat an accent pill; marks are accent discs | Islands with the glyph in an accent disc; the widget is an island |
 | `monolith` | The backdrop; current chat is a raised piece of the sheet; heavier project names | Raised sheet tiles and widget on the backdrop |
 | `monolith-reverse` | The lit plane; current chat and marks carved into it | Keys carved into the plane (a press sinks deeper); the widget a recessed window |
-| `obsidian` | Dark glass (the light canvas in pearl); accent pill; polished accent discs | Glass tiles with the gradient rim; only a pressed tile takes the accent rim and glow |
+| `obsidian` | Dark glass (the light canvas in pearl); accent pill; marks are glass in the project's own colour, clear without one, on the composer's project chip too | Glass tiles with the gradient rim; only a pressed tile takes the accent rim and glow |
 | `editorial` | A contents page: a rule under the toolbar and between chapters, serif entries, the open one in italic, small-capital dates | A two-column index in serif with warm glyphs and a rule under each entry; the widget a ruled section |
 
 **Contract:**
@@ -1319,7 +1336,10 @@ project setup, and Workspace omit the surrounding backdrop because the surface
 fills the viewport. The phone Settings layer is opaque in every Glass mode
 except the user's explicit Clear choice: it is the whole screen rather than a
 sheet over the workspace, so the workspace must not ghost through its rows,
-group cards or page padding (the pane already fills with `--bg`). Workspace
+group cards or page padding (the pane already fills with `--bg`). The Obsidian
+look has no group cards there: categories and search results are plain lists
+on the glass, parted by their headings, with headings and rows on one column.
+Workspace
 shares the Navigator's glass material and effect
 preferences without an additional scrim or backdrop filter on its sheet host.
 Partial-height windows retain an opaque scrim and surface fallback

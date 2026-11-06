@@ -841,12 +841,63 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 /* 48px line (tap floor + 2px each side): a 32px mark keeps 16px of air to
    the next one, the same step at every density. */
 .mobile-nav-project-head {
+  /* The press plate below is laid out on the whole line, under its ink. */
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   min-height: var(--tap);
   padding-block: 2px;
   padding-inline: var(--nav-row-inset) 0;
   border-radius: var(--radius-control);
+  /* The plate's material, edge, corner and reach. An interface style sets
+     them (shellLooks.css) to its own row press. */
+  --nav-press: color-mix(in srgb, var(--text) 7%, transparent);
+  --nav-press-edge: none;
+  --nav-press-radius: var(--radius-control);
+  --nav-press-inset: 0;
+}
+
+/* Opening a project is the whole line: the button's plate spans the head
+   from the mark to ⋮ (as a chat row's open button spans its row), so a press
+   lights the line the finger is on in the row's own corner, never a patch
+   between the mark and New chat. The mark lets taps through to it; New chat
+   and ⋮ sit above it with their own press circles. The plate lights at once
+   and fades out on release. */
+.mobile-nav-project-head > .project-glyph {
+  pointer-events: none;
+}
+
+.mobile-nav-project-main::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: var(--nav-press-inset);
+  border-radius: var(--nav-press-radius);
+  transition: background-color var(--motion-normal) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease);
+}
+
+.mobile-nav-project-main:active:where(:not(:disabled))::before {
+  background-color: var(--nav-press);
+  box-shadow: var(--nav-press-edge);
+  transition-duration: 0s;
+}
+
+/* The plate is the press. The shared button press (styles.css: the .98
+   settle and the inset washes) would shrink and shade the button's own box,
+   the patch between the mark and New chat. */
+.mobile-navigator .mobile-nav-project-main:active:where(:not(:disabled)) {
+  transform: none;
+  box-shadow: none;
+}
+
+/* The keyboard ring is the plate too, not a box round the name. */
+.mobile-navigator .mobile-nav-project-main:focus-visible {
+  outline: none;
+}
+
+.mobile-nav-project-main:focus-visible::before {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 
 /* A still press lifts the row (workspaceArrange.ts), so the press itself must
@@ -985,6 +1036,9 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   color: inherit;
   background: transparent;
   border: 0;
+  /* The press is the plate (above); the system highlight would only light
+     the button's own box. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* The name gives up width first, but never below a readable stub. */
@@ -1829,7 +1883,8 @@ body[data-hide-borders="true"] .mobile-nav-running-ring {
 @media (prefers-reduced-motion: reduce) {
   .mobile-nav-running-ring,
   .mobile-nav-project-status.is-running .mobile-nav-state-icon { animation: none; }
-  .mobile-nav-session-row { transition: none; }
+  .mobile-nav-session-row,
+  .mobile-nav-project-main::before { transition: none; }
 }
 
 /* Small phones (iPhone SE/mini class) pull both edge columns in: the content

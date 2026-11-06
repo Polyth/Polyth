@@ -280,6 +280,39 @@ const verifyNativeMcp = async (
         }));
     }
 };
+type PermissionReply = "once" | "always" | "reject";
+
+/** Newest turns a reconciliation reads. A turn stays open only at the very end
+ *  of a thread, and a submitted turn that lost its reply is among the last. */
+const RECONCILE_TURNS = 20;
+
+const approvalAnswer = (reply: PermissionReply) => ({
+    decision: reply === "reject" ? "decline" : reply === "always" ? "acceptForSession" : "accept",
+});
+
+const mcpApprovalAnswer = (reply: PermissionReply) => reply === "reject"
+    ? { action: "decline", content: null, _meta: null }
+    : { action: "accept", content: {}, _meta: reply === "always" ? { persist: "session" } : null };
+
+/** Codex asks to run an MCP tool through `mcpServer/elicitation/request`, marked
+ *  `codex_approval_kind: "mcp_tool_call"`. The tool name is only in the message.
+ *  Anything else on this method is the server's own form, not a tool approval. */
+const mcpToolApproval = (params: {
+    serverName?: unknown;
+    message?: unknown;
+    _meta?: { codex_approval_kind?: unknown; tool_title?: unknown; tool_params?: unknown } | null;
+}): { permission: string; pattern: string; tool: string } | undefined => {
+    if (params._meta?.codex_approval_kind !== "mcp_tool_call") return undefined;
+    const server = typeof params.serverName === "string" && params.serverName ? params.serverName : "mcp";
+    const named = typeof params.message === "string" ? /\btool "([^"]+)"/.exec(params.message)?.[1] : undefined;
+    const tool = named ?? (typeof params._meta.tool_title === "string" && params._meta.tool_title ? params._meta.tool_title : "tool");
+    const input = params._meta.tool_params && typeof params._meta.tool_params === "object"
+        ? params._meta.tool_params as { command?: unknown; file_path?: unknown }
+        : {};
+    const subject = [input.command, input.file_path].find((value) => typeof value === "string" && value);
+    return { permission: `mcp__${server}__${tool}`, pattern: typeof subject === "string" ? subject : tool, tool };
+};
+
 const eventFor = (item: Item): RuntimeEvent | undefined => {
     if (item.type === "agentMessage" && typeof item.text === "string") return { type: "assistant/message", partId: item.id, text: item.text };
     if (item.type === "reasoning") {
@@ -544,6 +577,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
     let nativeId = "";
     let nativeModel: ModelRef | undefined;
     let activeTurn = "";
+    /** `thread/compact/start` was accepted and its item has not completed yet. */
+    let compactionPending = false;
     // `turn/plan/updated` carries Codex's complete update_plan list.
     const todos = createTodoSnapshotTracker({ revisionClock: Date.now });
     let connected = true;
@@ -564,6 +599,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
     const lifecycle = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
     const pending = new Map<string, {
         resolve(result: unknown): void;
+        /** Translates Polyth's reply into this request's native answer. */
+        answer(reply: PermissionReply): unknown;
         permission: string;
         patterns: string[];
     }>();
@@ -572,8 +609,9 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
     // fresh thread from canonical history instead of reattaching.
     const continuity = context.privateSession ? "generation-only" as const : "verified" as const;
     const endpoint = { authorityId: rpc.authorityId, generation: rpc.generation, continuity, url: "stdio:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: rpc.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
-    const emit = (event: RuntimeEvent, key: string, revision = digest(event)) => {
+    const emit = (event: RuntimeEvent, key: string, stated?: string) => {
         if (observations.size && reconciliationOrdinal > 0) {
+            const revision = stated ?? digest(event);
             const artifactKind = event.type.startsWith("tool/") ? "tool" : event.type.startsWith("turn/") ? "turn" : event.type === "permission/requested" ? "permission" : event.type === "assistant/chunk" ? "part" : "message";
             for (const cb of observations)
                 cb(sid, { channel: "sse", entityKey: key, identity: { ...endpoint, backendSessionId: nativeId, artifactKind, entityId: key, revision }, reconciliationOrdinal, events: [event] });
@@ -592,7 +630,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
         try {
             return await readThread(threadId, true);
         } catch (error) {
-            if (!turnsListingUnsupported(error)) throw error;
+            if (!turnsListingUnsupported(error) && !(error as { responseTooLarge?: unknown }).responseTooLarge) throw error;
             try {
                 const thread = await readThread(threadId);
                 return {
@@ -611,6 +649,25 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
                 };
             }
         }
+    };
+    /** The newest turns are all that reconciliation can still learn from: older
+     *  ones are already in Polyth's log. A long thread's full history is many
+     *  megabytes, read over and over during a turn. */
+    const readRecent = async (threadId: string): Promise<Thread> => {
+        let page: { data?: Thread["turns"] };
+        try {
+            page = await rpc.request<{ data?: Thread["turns"] }>("thread/turns/list", {
+                threadId,
+                limit: RECONCILE_TURNS,
+                sortDirection: "desc",
+                itemsView: "full",
+            });
+        } catch (error) {
+            if ((error as { code?: unknown }).code !== "runtime-rejected") throw error;
+            return read(threadId);
+        }
+        if (!Array.isArray(page?.data)) return read(threadId);
+        return { ...await readThread(threadId), turns: [...page.data].reverse() };
     };
     rpc.onClose(() => { connected = false; for (const cb of lifecycle)
         cb({ type: "stream-disconnected", authorityId: endpoint.authorityId, generation: endpoint.generation }); });
@@ -694,6 +751,11 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             lastUsageDigest = "";
             lastUsageTurnId = "";
             order++;
+            if (compactionPending) {
+                // The compaction's own turn ended without its item.
+                compactionPending = false;
+                emit({ type: "session/compaction-failed" }, `${params.turn.id}:compaction-failed`);
+            }
             const resetAt = resetAtFromSnapshot(lastRateLimits, Date.now());
             const pending = pendingFailure && pendingFailure.turnId === params.turn.id
                 ? pendingFailure.failure
@@ -708,6 +770,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             emit({ type: "assistant/reasoning-chunk", partId: params.itemId, text: params.delta }, params.itemId + ":reasoning:" + (++order));
         if (method === "item/completed" || (method === "item/started" && params.item?.type !== "agentMessage")) {
             if (method === "item/completed" && params.item?.type === "contextCompaction") {
+                compactionPending = false;
                 emit({ type: "session/compacted" }, `${params.item.id}:compacted`);
                 emit({
                     type: "context/updated",
@@ -721,15 +784,31 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
                 emit(event, params.item.id);
         }
     });
+    const requestPermission = (
+        requestId: string,
+        permission: string,
+        patterns: string[],
+        answer: (reply: PermissionReply) => unknown,
+        tool?: string,
+    ) => new Promise((resolve) => {
+        pending.set(requestId, { resolve, answer, permission, patterns });
+        emit({ type: "permission/requested", requestId, permission, patterns, ...(tool ? { tool } : {}) }, requestId, "pending");
+    });
     rpc.onRequest(async (method, params) => {
         if (params.threadId !== nativeId)
             throw new Error("unbound native thread");
+        if (method === "mcpServer/elicitation/request") {
+            const approval = mcpToolApproval(params);
+            // Codex reads an error here as the person's refusal and tells the
+            // model "user rejected MCP tool call", so answer explicitly. A
+            // server's own form has no surface in Polyth yet: decline it.
+            if (!approval) return { action: "decline", content: null, _meta: null };
+            return requestPermission(`mcp-approval:${randomUUID()}`, approval.permission, [approval.pattern], mcpApprovalAnswer, approval.tool);
+        }
         if (method !== "item/commandExecution/requestApproval" && method !== "item/fileChange/requestApproval")
             throw new Error("unsupported request");
-        const requestId = String(params.itemId);
         const permission = method.includes("commandExecution") ? "bash" : "edit";
-        const patterns = [String(params.command ?? params.reason ?? "Workspace changes")];
-        return new Promise((resolve) => { pending.set(requestId, { resolve, permission, patterns }); emit({ type: "permission/requested", requestId, permission, patterns }, requestId, "pending"); });
+        return requestPermission(String(params.itemId), permission, [String(params.command ?? params.reason ?? "Workspace changes")], approvalAnswer);
     });
     const mutate = async <T>(operationId: string, action: () => Promise<T>): Promise<MutationOutcome<T>> => {
         try {
@@ -1087,7 +1166,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
                 // found"); it ended with the App Server that started it.
                 if (context.privateSession)
                     throw Object.assign(new Error("A private Codex thread cannot be resumed after its App Server ended"), { code: "unknown-session" });
-                const resumed = await rpc.request<{ model?: string; modelProvider?: string }>("thread/resume", { threadId: input.backendSessionId, cwd: context.cwd, approvalPolicy: "on-request", sandbox: agentBetaEnabled() ? "read-only" : "workspace-write", config: { ...PLAN_TOOL_CONFIG } });
+                const resumed = await rpc.request<{ model?: string; modelProvider?: string }>("thread/resume", { threadId: input.backendSessionId, cwd: context.cwd, approvalPolicy: "on-request", sandbox: agentBetaEnabled() ? "read-only" : "workspace-write", excludeTurns: true, config: { ...PLAN_TOOL_CONFIG } });
                 if (resumed.model && resumed.modelProvider) nativeModel = { modelID: resumed.model, providerID: resumed.modelProvider };
                 nativeId = input.backendSessionId;
             }
@@ -1097,7 +1176,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
         sessions: async () => {
             if (nativeId) {
                 try {
-                    const thread = await read(nativeId);
+                    // Only the name: its turns can be the whole conversation.
+                    const thread = await readThread(nativeId);
                     if (thread.name) sessionTitle = thread.name;
                 } catch {
                     // Receipt-backed listing keeps the last known title when read fails.
@@ -1139,12 +1219,20 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
         async compact() {
             await rpc.request("thread/compact/start", { threadId: nativeId });
         },
+        // The request returns as soon as the compaction starts; a message sent
+        // meanwhile would land inside it, so it waits for the end like Claude's.
         compactOperation: (_id, operationId) => mutate(operationId, async () => {
-            await rpc.request("thread/compact/start", { threadId: nativeId });
-            return {};
+            compactionPending = true;
+            try {
+                await rpc.request("thread/compact/start", { threadId: nativeId });
+            } catch (error) {
+                compactionPending = false;
+                throw error;
+            }
+            return { completion: "pending" as const };
         }),
         async replyPermission(_id, requestId, reply) { const request = pending.get(requestId); if (!request)
-            throw Object.assign(new Error("permission is no longer pending"), { code: "not-found" }); pending.delete(requestId); request.resolve({ decision: reply === "reject" ? "decline" : reply === "always" ? "acceptForSession" : "accept" }); },
+            throw Object.assign(new Error("permission is no longer pending"), { code: "not-found" }); pending.delete(requestId); request.resolve(request.answer(reply)); },
         replyPermissionOperation: async (_id, requestId, reply, operationId) => {
             // This lookup precedes delivery: a missing local approval cannot
             // have applied this response. Do not turn it into an unknown
@@ -1161,7 +1249,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             reconciliationOrdinal = binding.reconciliationOrdinal ?? 0;
             const events: RuntimeSnapshot["events"] = [];
             const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
-            const thread = connected ? await read(binding.backendSessionId!) : undefined;
+            const thread = connected ? await readRecent(binding.backendSessionId!) : undefined;
             for (const turn of thread?.turns ?? []) {
                 for (const item of turn.items ?? []) {
                     if (item.type === "userMessage" && item.clientId)

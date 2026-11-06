@@ -3,9 +3,13 @@
 // queues or steers an agent turn. The server is the authority on mentions,
 // carry-to-agent access and mute scope, so these calls only shape requests.
 import type {
+  PersonAccessDecisionInput,
+  PersonAccessDecisionResult,
   PersonMessageInput,
   PersonMessageResult,
+  NewChatPeopleDto,
   SessionMentionCandidateDto,
+  SessionMentionOutsidersDto,
 } from "@polyth/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { sessionFetch } from "@polyth/session/web-api";
@@ -17,6 +21,9 @@ const personMessagesPath = (sessionId: string) =>
 const mentionCandidatesPath = (sessionId: string) =>
   `/api/sessions/${encodeURIComponent(sessionId)}/mention-candidates`;
 const mutePath = (sessionId: string) => `/api/sessions/${encodeURIComponent(sessionId)}/mute`;
+const outsidersPath = (sessionId: string) => `/api/sessions/${encodeURIComponent(sessionId)}/sharing/outsiders`;
+const personAccessPath = (sessionId: string, messageSeq: number) =>
+  `/api/sessions/${encodeURIComponent(sessionId)}/person-messages/${messageSeq}/access`;
 
 interface CandidateList { items?: unknown }
 
@@ -33,6 +40,18 @@ const isCandidate = (value: unknown): value is SessionMentionCandidateDto => {
  *  open and refreshes in the background; a failed refresh keeps the last
  *  known list rather than emptying the People group. */
 const candidateCache = new Map<string, SessionMentionCandidateDto[]>();
+/** Who hears when a chat's people change: its list here and in the composer. */
+const candidateListeners = new Map<string, Set<(items: SessionMentionCandidateDto[]) => void>>();
+
+function subscribeCandidates(sessionId: string, listener: (items: SessionMentionCandidateDto[]) => void): () => void {
+  const listeners = candidateListeners.get(sessionId) ?? new Set();
+  candidateListeners.set(sessionId, listeners);
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) candidateListeners.delete(sessionId);
+  };
+}
 
 export function cachedMentionCandidates(sessionId: string): SessionMentionCandidateDto[] {
   return candidateCache.get(sessionId) ?? [];
@@ -40,6 +59,7 @@ export function cachedMentionCandidates(sessionId: string): SessionMentionCandid
 
 export function forgetMentionCandidates(sessionId: string): void {
   candidateCache.delete(sessionId);
+  outsidersCache.delete(sessionId);
 }
 
 export async function loadMentionCandidates(
@@ -50,7 +70,57 @@ export async function loadMentionCandidates(
   const result = await sessionFetch<CandidateList>(mentionCandidatesPath(sessionId));
   const items = Array.isArray(result?.items) ? result.items.filter(isCandidate) : [];
   candidateCache.set(sessionId, items);
+  for (const listener of candidateListeners.get(sessionId) ?? []) listener(items);
   return items;
+}
+
+/** Who cannot open a chat and what the reader can do about it, per session.
+ *  Read only once someone starts a mention: most chats never need it. */
+const outsidersCache = new Map<string, SessionMentionOutsidersDto>();
+
+export function cachedMentionOutsiders(sessionId: string): SessionMentionOutsidersDto | null {
+  return outsidersCache.get(sessionId) ?? null;
+}
+
+export async function loadMentionOutsiders(sessionId: string): Promise<SessionMentionOutsidersDto> {
+  const result = await sessionFetch<SessionMentionOutsidersDto>(outsidersPath(sessionId));
+  outsidersCache.set(sessionId, result);
+  return result;
+}
+
+/** The same before a chat exists. Not cached: there is no session to key it by,
+ *  and the composer reads it only when a mention starts. */
+export const loadNewChatPeople = (projectId: string): Promise<NewChatPeopleDto> =>
+  sessionFetch<NewChatPeopleDto>(`/api/sharing/new-chat?projectId=${encodeURIComponent(projectId)}`);
+
+/** Answers a message's request to open the chat to someone. */
+export async function decidePersonAccess(
+  sessionId: string,
+  messageSeq: number,
+  input: PersonAccessDecisionInput,
+): Promise<PersonAccessDecisionResult> {
+  const result = await sessionFetch<PersonAccessDecisionResult>(personAccessPath(sessionId, messageSeq), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  // They are in the chat now, so everything naming its people should say so.
+  if (result.outcome === "shared") {
+    outsidersCache.delete(sessionId);
+    void loadMentionCandidates(sessionId, { refresh: true }).catch(() => { /* keep the last known people */ });
+  }
+  return result;
+}
+
+/** "Max", "Max and Olena": first names in the reader's language. The names
+ *  stay in the nominative, so a sentence never has to decline one. */
+export function firstNamesList(names: readonly string[], locale?: string): string {
+  const firsts = names.map((name) => name.trim().split(/\s+/)[0] || name);
+  try {
+    return new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(firsts);
+  } catch {
+    return firsts.join(", ");
+  }
 }
 
 export const postPersonMessage = (
@@ -162,10 +232,14 @@ export function useSessionPeople(sessionId: string | null): SessionMentionCandid
     if (!sessionId) { setPeople(EMPTY_PEOPLE); return; }
     setPeople(cachedMentionCandidates(sessionId));
     let live = true;
+    const unsubscribe = subscribeCandidates(sessionId, setPeople);
     void loadMentionCandidates(sessionId, { refresh: true })
       .then((items) => { if (live) setPeople(items); })
       .catch(() => { /* keep the last known people */ });
-    return () => { live = false; };
+    return () => {
+      live = false;
+      unsubscribe();
+    };
   }, [sessionId]);
   return people;
 }

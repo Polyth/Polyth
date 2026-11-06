@@ -9,6 +9,7 @@ import {
   type MemoryListItem,
   type MemoryPolicy,
 } from "../src/client.ts";
+import MyNotes from "./MyNotes.tsx";
 import ReflectPanel from "./ReflectPanel.tsx";
 import { reflectStrings } from "./reflectStrings.ts";
 import { englishTranslate, enumLabel, type Translate } from "./i18n.ts";
@@ -448,6 +449,8 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
       {error?.kind === "corrupt" && <p className="memory-help">{t("memory.help.corrupt")}</p>}
 
       {!writesBlocked && <ReflectPanel projectId={projectId} project={project} strings={reflectStrings(locale)} memoryOff={policy?.mode === "off"} onMemoryChanged={() => void load(offset)} />}
+
+      <MyNotes projectId={projectId} project={project} translate={t} />
 
       <section className="memory-section" aria-labelledby="memory-records-heading">
         <div className="memory-section-head">

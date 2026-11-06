@@ -122,23 +122,26 @@ if the records may be needed later. Import is staged: preview reports
 duplicates, conflicts, and invalid records; replace requires a recovery export
 and explicit project-labelled confirmation.
 
-**Layers and provenance (storage only).** Every record has a `layer`:
-`project` (bound to its project), or the Space-wide `space`, `agent` (owned
-by an agent id) and `person` (owned by a user id). A caller reaches a layer
-only through `MemoryScope.layers`, a server-minted list of grants; without
-it a scope sees exactly the project layer. Today no caller passes grants, so
-every existing record (migrated in place with `layer = 'project'`) and every
-new one is a project record, and recall, search, the management page, tools
-and export behave as before. Writes name their layer and author through the
+**Layers and provenance.** Every record has a `layer`:
+`project` (bound to its project), the Space-wide `space` and `agent` (owned
+by an agent id), and `person` (owned by a user id; with a `projectId` it is
+that person's note in one project, without one it is about them everywhere).
+A caller reaches a layer only through `MemoryScope.layers`, a server-minted
+list of grants; without it a scope sees exactly the project layer. Only
+`chatAccess` grants `person` to a chat, and only one private to that person;
+the rules are in [Spaces §14.6](../architecture/spaces-and-tenancy.md). The
+generic routes, export and clear stay on the project layer. A person reaches
+their own notes through `/api/memory/personal*`, shown as My notes in Project
+settings → Memory once someone else can open the project or they already hold
+notes. Writes name their layer and author through the
 store's trusted `MemoryWriteOptions`, never through `MemoryCreateInput`,
 which routes build from request bodies. Clear, export and import cover the
 project layer only; an import cannot reuse the id of a record in another
 layer. Records carry `authoredBy` (a person for manual saves, an agent and
 session for `memory_remember`, the system for harvest, Reflect and import;
 absent on records saved earlier) and `approvedBy` (the person who activated
-a candidate or approved a Reflect rule). The visibility resolver that will
-grant the other layers to sessions is not built yet; see
-[Spaces §14.6](../architecture/spaces-and-tenancy.md).
+a candidate or approved a Reflect rule), and optionally `about`, the name of
+the person a fact concerns.
 
 Memory evidence is bounded project context, not a complete native transcript
 or a guarantee that a provider retained or acted on it. Native context already

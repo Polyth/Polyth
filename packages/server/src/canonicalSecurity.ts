@@ -20,8 +20,8 @@ import {
   createResourceSharingAuthority,
   type ResourceSharingAuthority,
 } from "@polyth/control-plane/resource-sharing";
+import { accountMayUseProject } from "./accountLimits.ts";
 import {
-  accountLimitAllowsProject,
   accountLimitsEmpty,
   CLI_ACCESS_PROFILES,
   normalizeAccountGuardrails,
@@ -117,7 +117,7 @@ export function createCanonicalSecurity(options: CanonicalSecurityOptions): Cano
       // Owner-set project lists (Settings → Users) narrow every project,
       // session and package route that reads through this authority.
       projectAllowed: (principalId, projectId) =>
-        accountLimitAllowsProject(limitsOf.forUser(principalId).limits as AccountLimits | null, projectId),
+        accountMayUseProject(limitsOf.forUser(principalId).limits as AccountLimits | null, projectId),
     });
     const sharing = createResourceSharingAuthority(control, resources, options.now ? { now: options.now } : {});
     let auth: CanonicalAuthGateway;

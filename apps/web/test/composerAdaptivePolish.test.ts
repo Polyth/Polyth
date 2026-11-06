@@ -30,7 +30,8 @@ test("composer attachments are a row of the card between the model line and the 
   assert.ok(card > -1 && card < config && config < tray && tray < editor, "the tray is rendered inside the card, after the model line, before the editor");
   assert.match(css, /\.composer-tray > \.attachment-pills\s*\{[^}]*align-self:\s*end;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;/s);
   assert.match(css, /@keyframes composer-tray-open\s*\{\s*from\s*\{\s*grid-template-rows:\s*minmax\(0, 0fr\);/);
-  assert.match(pills, /imagePreview \? <img className="att-thumb"/, "a previewable image is a bare tile");
+  assert.match(pills, /imagePreview \? <AttachmentThumb /, "a previewable image is a bare tile");
+  assert.match(pills, /className="att-thumb"/, "its picture fills the tile");
 });
 
 test("attachment remove controls sit inside their own card", async () => {

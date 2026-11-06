@@ -21,6 +21,15 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.match(styles, /\.app > \.header\s*\{[^}]*--conversation-frame-inline-start:[^}]*--conversation-frame-inline-end:/s);
   assert.doesNotMatch(styles, /\.app > \.header\.header-chat\s*\{[^}]*--conversation-frame-inline-start:/s);
   assert.match(styles, /body\[data-chatwidth="wide"\]\s*\{\s*--chat-measure:\s*1180px;/);
+  assert.match(styles, /body\[data-chatwidth="ultrawide"\]\s*\{\s*--chat-measure:\s*1600px;/);
+  // A measure that does not fit the workspace must not lose its inline end to
+  // the floating launcher strip's lane: the frame reserves the lane explicitly
+  // so the timeline, composer and header share one right edge at every width.
+  assert.match(
+    styles,
+    /--conversation-frame-inline-end:\s*max\(\s*calc\(var\(--gutter\) \+ var\(--control-h-sm\) \+ var\(--space-5\)\),\s*calc\(\(100% - var\(--chat-measure\)\) \/ 2\)\s*\)/,
+  );
+  assert.match(styles, /\.timeline\s*\{[^}]*padding-inline-end:\s*max\(0px, calc\(var\(--conversation-frame-inline-end\) - var\(--timeline-strip-lane\)\)\)/s);
   assert.doesNotMatch(styles, /body\[data-chatwidth="wide"\] \.timeline\s*\{/);
   assert.doesNotMatch(styles, /\.timeline\s*\{[^}]*padding-inline-end:[^}]*--rail-strip-width-right/s);
 });

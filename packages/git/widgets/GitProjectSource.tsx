@@ -256,6 +256,7 @@ function CloneInlinePanel({ ctx, onCancel }: { ctx: HostContext; onCancel: () =>
   return (
     <div
       className="folder-source-panel git-clone-panel"
+      data-owns-escape=""
       role="group"
       aria-label={tr("gitprojectsource.cloneRepository")}
       // First Escape collapses this panel, the next closes the picker. The

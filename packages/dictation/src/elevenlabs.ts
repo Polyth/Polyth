@@ -1,9 +1,14 @@
 import WebSocket from "ws";
 import { DictationError, type DictationContext } from "./providers.ts";
+import { postRecording, recordingJson, recordingLanguage, wavBlob } from "./recordingHttp.ts";
 import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
+import { pcmToWav } from "./whisper.ts";
 
 const DEFAULT_BASE_URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime";
 const DEFAULT_MODEL = "scribe_v2_realtime";
+const DEFAULT_RECORDING_URL = "https://api.elevenlabs.io/v1/speech-to-text";
+/** Scribe's model for finished files; the realtime model only streams. */
+const DEFAULT_RECORDING_MODEL = "scribe_v2";
 const MAX_PROVIDER_BUFFER = 2 * 1024 * 1024;
 const FINAL_TIMEOUT_MS = 12_000;
 
@@ -25,6 +30,11 @@ export interface ElevenLabsSttOptions {
   /** Test seam; production uses `ws` directly. */
   connect?: (url: string, headers: Record<string, string>) => SocketLike;
   finalTimeoutMs?: number;
+  /** Model for finished recordings (`POST /v1/speech-to-text`). */
+  recordingModel?: string;
+  recordingUrl?: string;
+  /** Test seam for the recording request. */
+  fetchFn?: typeof fetch;
 }
 
 interface ElevenLabsMessage {
@@ -69,11 +79,69 @@ const elevenLabsKeyterms = (context?: DictationContext): string[] => {
   return out;
 };
 
+/** Batch Scribe accepts longer keyterms than realtime (<=50 chars, <=5 words).
+ *  The count stays at 50: more than 100 adds a minimum billed duration. */
+const recordingKeyterms = (context?: DictationContext): string[] => {
+  if (!context) return [];
+  const values = [
+    ...(context.keywords ?? []),
+    ...Object.entries(context.glossary ?? {}).flatMap(([from, to]) => [from, to]),
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const term = raw.replace(/[<>{}\[\]\\]/g, "").trim().replace(/\s+/g, " ").split(" ").slice(0, 5).join(" ").slice(0, 50).trim();
+    const key = term.toLocaleLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+    if (out.length >= 50) break;
+  }
+  return out;
+};
+
 export function createElevenLabsSttAdapter(options: ElevenLabsSttOptions): SttAdapter {
   if (!options.apiKey.trim()) throw new DictationError("invalid_credentials", "ElevenLabs API key is missing");
 
+  const transcribeOnce = async (
+    audio: Uint8Array,
+    format: DictationFormat,
+    language: string | undefined,
+    terms: string[],
+    signal: AbortSignal | undefined,
+  ): Promise<string> => {
+    const form = new FormData();
+    form.append("model_id", options.recordingModel?.trim() || DEFAULT_RECORDING_MODEL);
+    form.append("file", wavBlob(pcmToWav(audio, format)), "audio.wav");
+    const code = recordingLanguage(language);
+    if (code) form.append("language_code", code);
+    // Dictation wants words, not "(laughter)" or "(footsteps)".
+    form.append("tag_audio_events", "false");
+    for (const term of terms) form.append("keyterms", term);
+    const raw = await postRecording("ElevenLabs", options.fetchFn ?? fetch, options.recordingUrl ?? DEFAULT_RECORDING_URL, {
+      headers: { "xi-api-key": options.apiKey },
+      body: form,
+      ...(signal ? { signal } : {}),
+    });
+    const body = recordingJson<{ text?: unknown }>("ElevenLabs", raw);
+    return typeof body.text === "string" ? body.text.trim() : "";
+  };
+
   return {
     engine: "elevenlabs",
+    async transcribe({ audio, format, language, context, signal }) {
+      if (audio.byteLength === 0) return "";
+      const terms = recordingKeyterms(context);
+      try {
+        return await transcribeOnce(audio, format, language, terms, signal);
+      } catch (error) {
+        // Keyterms are a hint. If the request is refused as malformed while
+        // carrying them, the words still matter more than the hint.
+        if (!terms.length || signal?.aborted || (error as DictationError).code !== "provider_unavailable"
+          || !/HTTP (?:400|422)$/.test((error as Error).message)) throw error;
+        return transcribeOnce(audio, format, language, [], signal);
+      }
+    },
     createStream({ format, language, context }): SttStream {
       if (format.encoding !== "pcm_s16le" || format.channels !== 1) {
         throw new DictationError("audio_format_error", "ElevenLabs realtime adapter expects mono pcm_s16le");

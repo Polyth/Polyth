@@ -22,6 +22,11 @@ import { CLAUDE_QUESTION_DISMISSED, CLAUDE_QUESTION_TOOL, CLAUDE_QUESTION_UNREAD
 const UNADMITTED_INTERRUPT_AFTER = 25;
 /** How long a turn waits for an interrupted unadmitted loop to finish. */
 const UNADMITTED_SETTLE_MS = 10_000;
+/** A firing `ScheduleWakeup` is a plain queued prompt with no task notification
+ *  to hand off as a Polyth wake, so its loop is refused and interrupted while
+ *  the agent waits for it. The cron tools make the same promise of a later
+ *  prompt and go with it. */
+const NATIVE_SCHEDULING_TOOLS = ["ScheduleWakeup", "CronCreate", "CronDelete", "CronList"];
 /** A `/compact` reports its outcome in a status message; the CLI's closing
  *  `result` normally follows at once. Stop waiting for it after this long. */
 const COMPACTION_RESULT_GRACE_MS = 5_000;
@@ -100,7 +105,7 @@ const protectClaudeMcpConfigArgs = (
     return protectedArgs;
 };
 export const CLAUDE_CAPABILITIES = {
-    streaming: true, permissions: true, questions: true, compaction: true, subagents: false,
+    streaming: true, permissions: true, questions: true, compaction: true, autoCompactionSwitch: true, subagents: false,
     steering: false, resume: true, usage: true, cost: true, fork: false, mcp: true,
     title: "native" as const,
     attachments: { modalities: {
@@ -225,6 +230,11 @@ const CLAUDE_OAUTH_REFRESH_LOCK_RE = /Failed to refresh OAuth token: another Cla
  * "ECONNRESET: The socket connection was closed unexpectedly") once Claude
  * Code's own retries gave up. Tools run locally and finish before the next
  * request, so only a model call was lost: a bounded resend is safe. */
+/** The CLI's refusal once a conversation no longer fits. With its own compaction
+ *  on it compacts instead, when the next message no longer fits (not at the
+ *  threshold getContextUsage reports). With it off it refuses from about 88% of a
+ *  200k window, and every later message too, until a compaction. Measured on Haiku 4.5. */
+const CLAUDE_CONTEXT_FULL_RE = /\bprompt is too long\b/i;
 const CLAUDE_TRANSPORT_FAILURE_RE = /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|UND_ERR_SOCKET)\b|socket connection was closed unexpectedly|socket hang up|\bfetch failed\b|\bConnection error\b|\bRequest timed out\b/i;
 /** The SDK owns its protocol; Polyth owns the SDK's native child process and
  * records only public dialogue/tool outcomes. It never consumes thinking. */
@@ -252,6 +262,8 @@ export const DEFAULT_CLAUDE_LAUNCH_PREFERENCES: ClaudeLaunchPreferences = { prom
  * augmentation stays local rather than widening every SDK settings object. */
 type ClaudeLaunchSettings = Settings & { ultracode?: boolean };
 type ClaudeFlagSettings = Parameters<Query["applyFlagSettings"]>[0] & { ultracode?: boolean | null };
+/** `null` clears the session's override, back to the person's own Claude Code setting. */
+type ClaudeAutoCompactFlag = Omit<ClaudeFlagSettings, "autoCompactEnabled"> & { autoCompactEnabled: boolean | null };
 
 /** Map a picker variant to the SDK's effort and ultracode flags. Ultracode is
  * a separate session setting, not an effort level; selecting it runs at xhigh. */
@@ -363,6 +375,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
      *  result: a provider-limit stop shows the resume notice instead of this
      *  "You've hit your limit" line; any other outcome publishes it as before. */
     let syntheticNotices: Array<{ key: string; text: string }> = [];
+    /** The CLI's "conversation is full" line: the stop reports it as `context-full`,
+     *  so raw English never becomes the agent's answer. */
+    let contextFullNotice: { key: string; text: string } | undefined;
     let resolveStreamFinished!: () => void;
     const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve; });
     let streamLoopActive = false;
@@ -570,6 +585,12 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     /** Ultracode is a separate session flag, not an effort level. Track it so
      *  a variant change does not silently turn it off. */
     let appliedUltracode = false;
+    /** Chat memory's "manual" turns Claude Code's own compaction off. Measured
+     *  with getContextUsage on 0.3.263: `autoCompactEnabled` applies live and
+     *  clears with null. `autoCompactWindow` is no use here: it only lowers the
+     *  threshold, only at launch, and shrinks the window the CLI reports too. */
+    let desiredAutoCompact = true;
+    let appliedAutoCompact = true;
     let appliedWorkspaceDirectories: string[] | undefined = [];
     const initialize = async (id: string, resume = false, model?: string, variant?: string) => {
         if (query) {
@@ -594,7 +615,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         const launchSettings: ClaudeLaunchSettings = {
             ...(skillOptions.settings ?? {}),
             ...(launch.ultracode ? { ultracode: true } : {}),
+            ...(desiredAutoCompact ? {} : { autoCompactEnabled: false }),
         };
+        appliedAutoCompact = desiredAutoCompact;
         try {
             query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: true,
                     // A private session leaves no transcript in
@@ -606,8 +629,8 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     // Agent beta keeps read/browser interaction available but
                     // removes every native workspace mutation escape hatch.
                     disallowedTools: agentBetaEnabled()
-                        ? ["Agent", "Task", "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
-                        : ["Agent", "Task"],
+                        ? ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS, "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
+                        : ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS],
                     ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
                     ...(overlay?.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
                     ...(overlay?.plugins ? { plugins: overlay.plugins } : {}),
@@ -889,7 +912,10 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                                 : { scope: "rate", retryable: true };
                         }
                         for (const [index, block] of message.message.content.entries()) {
-                            if (block.type === "text" && block.text) syntheticNotices.push({ key: `${message.uuid}:${index}`, text: block.text });
+                            if (block.type !== "text" || !block.text) continue;
+                            const notice = { key: `${message.uuid}:${index}`, text: block.text };
+                            if (CLAUDE_CONTEXT_FULL_RE.test(block.text)) contextFullNotice = notice;
+                            else syntheticNotices.push(notice);
                         }
                     }
                     else if (message.type === "assistant") {
@@ -1037,6 +1063,11 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                                     : transportFailure ? { scope: "request" as const, provider: "anthropic", retryable: true }
                                     : undefined)
                             : undefined;
+                        const contextFull = Boolean(message.is_error && !retry
+                            && (contextFullNotice || CLAUDE_CONTEXT_FULL_RE.test(errorText ?? "")));
+                        const contextFullText = contextFullNotice?.text;
+                        if (contextFullNotice && !contextFull) syntheticNotices.push(contextFullNotice);
+                        contextFullNotice = undefined;
                         pendingRetry = undefined;
                         // The resume notice replaces the CLI's own limit line;
                         // its wording stays on the stop as the error text.
@@ -1049,8 +1080,8 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             reason: message.is_error ? "error" : "completed",
                             ...(retry ? { retry } : {}),
                             ...(message.is_error ? {
-                                error: errorText ?? limitNotice,
-                                code: authFailed ? "auth-expired" : oauthRefreshLock || transportFailure ? "unknown" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",
+                                error: errorText ?? limitNotice ?? (contextFull ? contextFullText : undefined),
+                                code: contextFull ? "context-full" : authFailed ? "auth-expired" : oauthRefreshLock || transportFailure ? "unknown" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",
                             } : {}),
                         }, turnId + ":stop");
                         // `active` names the admitted operation until the turn's
@@ -1144,6 +1175,13 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         appliedEffort = desiredEffort;
         appliedUltracode = target.ultracode;
     };
+    const applyAutoCompact = async (): Promise<void> => {
+        const target = desiredAutoCompact;
+        if (!query || appliedAutoCompact === target) return;
+        await query.applyFlagSettings({ autoCompactEnabled: target ? null : false } as ClaudeAutoCompactFlag as ClaudeFlagSettings);
+        appliedAutoCompact = target;
+        probeContext(true);
+    };
     const applyWorkspaceRoots = async (directories: string[], force = false): Promise<void> => {
         const applied = appliedWorkspaceDirectories;
         if (!force && applied !== undefined
@@ -1170,6 +1208,10 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             createdAt: 0,
             updatedAt: 0,
         }))), history: async () => [],
+        async setAutoCompaction(_sessionId, enabled) {
+            desiredAutoCompact = enabled;
+            await applyAutoCompact();
+        },
         async startTurnOperation(request, operationId) {
             if (request.sessionId) sid = request.sessionId;
             if (!query || active)
@@ -1260,6 +1302,8 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     message: "Claude Code did not accept the model or thinking level for this session.",
                 };
             }
+            // A compaction the person did not want is no reason to refuse the turn.
+            await applyAutoCompact().catch(() => {});
             if (unadmittedLoop) {
                 // Its stream would otherwise land inside this turn and its
                 // result would close it before the prompt below even ran.
@@ -1272,6 +1316,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             streamMessageOrdinal = -1;
             streamEventOrdinal = 0;
             syntheticNotices = [];
+            contextFullNotice = undefined;
             resetStreamParts();
             order++;
             return new Promise(resolve => { admission = () => resolve({ kind: "confirmed", value: { admissionId: operationId }, receipt: operationId }); inputs.push({ type: "user", uuid: operationId as SDKUserMessage["uuid"], session_id: nativeId, parent_tool_use_id: null, message: { role: "user", content: content as SDKUserMessage["message"]["content"] } }); wake?.(); });

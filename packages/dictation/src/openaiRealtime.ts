@@ -5,8 +5,12 @@ import {
   type DictationLatencyPreference,
 } from "./providers.ts";
 import type { DictationFormat, SttAdapter, SttStream } from "./streaming.ts";
+import { pcmToWav, transcribeWavOpenAI } from "./whisper.ts";
 
 const DEFAULT_URL = "wss://api.openai.com/v1/realtime";
+const DEFAULT_RECORDING_URL = "https://api.openai.com/v1";
+/** OpenAI's model for finished audio files (the live models are realtime-only). */
+const DEFAULT_RECORDING_MODEL = "gpt-transcribe";
 const OPENAI_SAMPLE_RATE = 24_000;
 const MAX_PROVIDER_BUFFER = 2 * 1024 * 1024;
 const FINAL_TIMEOUT_MS = 12_000;
@@ -29,6 +33,12 @@ export interface OpenAIRealtimeSttOptions {
   latencyPreference?: DictationLatencyPreference;
   finalTimeoutMs?: number;
   connect?: (url: string, headers: Record<string, string>) => SocketLike;
+  /** Model for finished recordings (`POST /v1/audio/transcriptions`). */
+  recordingModel?: string;
+  /** REST base for recordings; "/audio/transcriptions" is appended. */
+  recordingBaseUrl?: string;
+  /** Test seam for the recording request. */
+  fetchFn?: typeof fetch;
 }
 
 interface OpenAIRealtimeEvent {
@@ -182,6 +192,21 @@ export function createOpenAIRealtimeSttAdapter(options: OpenAIRealtimeSttOptions
 
   return {
     engine: model === "gpt-live-transcribe" ? "openai-live" : "openai-transcribe",
+    // A finished recording goes to the file transcription endpoint in one
+    // request instead of being replayed through a realtime session.
+    transcribe: ({ audio, format, language, context, signal }) => audio.byteLength === 0
+      ? Promise.resolve("")
+      : transcribeWavOpenAI({
+        provider: "OpenAI",
+        baseUrl: options.recordingBaseUrl ?? DEFAULT_RECORDING_URL,
+        model: options.recordingModel?.trim() || DEFAULT_RECORDING_MODEL,
+        apiKey: options.apiKey,
+        wav: pcmToWav(audio, format),
+        ...(language ? { language } : {}),
+        ...(context ? { context } : {}),
+        ...(signal ? { signal } : {}),
+        ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+      }),
     createStream({ format, language, context }) {
       if (format.encoding !== "pcm_s16le" || format.channels !== 1 || format.sampleRate !== 16_000) {
         throw new DictationError("audio_format_error", "OpenAI Realtime adapter expects Polyth mono PCM16 at 16 kHz");

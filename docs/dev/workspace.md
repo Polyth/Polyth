@@ -178,6 +178,10 @@ referenced files from the released checkout into the destination checkout —
 never overwriting an existing destination file, never leaving either root, and
 never blocking cleanup on a missing or oversized file. `_inbox/*` staged
 uploads already survive because their read/staging path is project-root pinned.
+A server package that fetched bytes itself (a tracker card's image handed to an
+agent) stages them the same way through `files.attachments` `stage`, which
+writes a fresh `_inbox/<uuid>-<name>` at the project root; the session's
+ordinary attachment preparation then materializes it into the execution root.
 
 Releasing an isolation record (merge, discard, abandon, repository discard or
 session deletion) leaves nothing Polyth-owned behind. Process closure covers
@@ -212,10 +216,11 @@ read-only, so recovery cannot run for it. Startup releases its isolation record
 only when nothing the record names can still hold work: the checkout directory
 is gone, and the isolate branch is gone or already contained in the target
 branch (a hand merge that kept the branch; the branch itself is left in place).
-When a discard or deletion finds the checkout already gone (`rm -rf` or
+When a discard finds the checkout already gone (`rm -rf` or
 `git worktree remove` by hand), it prunes Git's stale entry and deletes the
 isolate branch only if its tip is still the base commit or is contained in the
-target branch; a branch with commits of its own stays.
+target branch; a branch with commits of its own stays. Deleting the session goes
+further: nothing will read that branch again, so it goes too.
 A checkout deleted with `rm -rf` instead of `git worktree remove` leaves Git's
 stale worktree entry listed until a prune; the missing directory is the
 evidence, so that entry does not hold the record. The same release
@@ -230,6 +235,18 @@ registered. A restore or the next runtime epoch then starts there instead of in
 the missing path. An in-flight publication or corrupt record is kept. A live
 checkout or a branch with unmerged commits is kept too: restore the session to
 merge or discard it.
+
+A session that is leaving (deleted, or cleaned up by Settings → Sessions → Cleanup
+when "Skip isolated sessions" is off) proves ownership by its marker, branch name
+and path alone (`sessionLeaving`): an agent's rebase past the recorded base, a
+retarget that did not finish or a checkout left detached mid-rebase no longer
+strand it. A renamed branch still refuses, since that is how a preserved checkout
+leaves Polyth. The cleanup's archive action removes the same resources as a delete
+but keeps the sessions: `releaseArchivedCheckouts` walks an archived tree deepest
+first, carries the media its chats show to the target checkout, then moves every
+session off the removed checkouts as metadata. It refuses a session not at rest in
+the archive, a user outside the tree and a merge that has not settled. See the
+`expiredSessionCleanup.ts` entry in [architecture](architecture.md).
 
 Runtime epoch recovery checks that a session executing in its managed isolated
 worktree still has that directory before it records a `session-reset` intent. A
@@ -277,6 +294,15 @@ In the session's isolation card, **Resolve with AI and proceed** is the one
 resolve action for both kinds of conflict. Once pressed, the conflict card
 hides while the agent's resolve turn runs. When that turn ends, the card retries
 the merge on its own. If the merge conflicts again, the card comes back.
+
+### Package-started isolated sessions
+
+`SERVER_SESSION_ISOLATION.createIsolatedSession` is the server form of the new
+session dialog's isolated option (`POST /api/isolation/sessions`): a new chat
+with a managed checkout branched from the project's current checkout. Pass the
+requester's scoped `sessions` (`host.forSpace(rc.space).sessions`) so the chat
+is created in their Space and owned by them. Task trackers use it for
+**Isolated** task starts.
 
 ### Delegated isolation
 
@@ -601,7 +627,8 @@ account-wide defaults edited under Settings → Source Control → Display and
 synced through `package.git.preferences`: changes as folder tree or list,
 line counts as numbers/bar/hidden, compact or comfortable density, default
 diff layout, wrap, ignore whitespace, commit graph and relative or calendar
-dates. The page's view menu edits the same defaults. Diff toolbars (layout,
+dates. A phone wraps diffs by its own `phoneWrap` (on by default) and is always
+unified. The page's view menu edits the same defaults. Diff toolbars (layout,
 wrap, ignore whitespace) store a per-workspace override of only the keys they
 changed; everything else is inherited, so a later account change still reaches
 that workspace.
@@ -626,6 +653,9 @@ write and apply; a key deleted later never makes the stored state unreadable.
 
 Source Control offers Working tree and Branch vs base review. Isolated sessions
 default to Branch vs base; a deliberate scope choice is remembered per project.
+A phone has no scope switch: its first screen lists the working tree (or, with
+nothing uncommitted, what an isolated branch has to land) and opens Compare and
+Conflicts as layers ([ui.md](ui.md#4-the-seams-in-detail)).
 Review changes opens Branch scope. While the session's isolation is in
 conflict, a third Conflicts scope shows the conflict preview: the file list,
 then per region a "Line N" header, context, the target branch's lines and this

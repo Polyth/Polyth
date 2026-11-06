@@ -67,6 +67,8 @@ export interface FileRawResult {
   data: Uint8Array;
   mime: string;
   size: number;
+  /** On-disk revision at read time; the raw endpoint's validator. */
+  revision?: string;
 }
 
 // Only types the raw endpoint may serve inline. HTML/SVG/JS are deliberately
@@ -176,7 +178,17 @@ export interface FileServiceOptions {
    *  call so an owner's change applies at once. Default: the temp folder,
    *  media/PDF/text only. */
   externalReads?: () => ExternalReadPolicy;
+  /** Folders no project view enters: the server's own data, which holds
+   *  everyone's private chats and notes. A project at a parent folder doesn't
+   *  show them, and only a folder the server made inside one (a private room)
+   *  sees its own files there. Spaces §14.5. */
+  sealedRoots?: () => readonly string[];
 }
+
+const within = (parent: string, child: string): boolean => {
+  const rel = path.relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+};
 
 const posix = (p: string): string => p.split(path.sep).join("/");
 
@@ -197,12 +209,33 @@ const revisionOf = (st: { mtimeMs: number; size: number }): string =>
 
 export function createFileService(options: FileServiceOptions = {}): FileService {
   const externalReads = options.externalReads ?? (() => DEFAULT_EXTERNAL_READ_POLICY);
+  /** Whether a real path is sealed off from this project. */
+  const sealedFor = async (root: string): Promise<((real: string) => boolean) | undefined> => {
+    const sealed = options.sealedRoots?.() ?? [];
+    if (sealed.length === 0) return undefined;
+    const rootAbs = path.resolve(root);
+    const rootReal = await realpath(rootAbs).catch(() => rootAbs);
+    const folders = await Promise.all(sealed.map((folder) => realpath(folder).catch(() => path.resolve(folder))));
+    return (real) => folders.some((folder) => within(folder, real)
+      && !(folder !== rootReal && within(folder, rootReal) && within(rootReal, real)));
+  };
+  const reach = async (root: string, rel: string, opts?: { forWrite?: boolean; external?: ExternalReadPolicy }): Promise<string> => {
+    const abs = await resolveInside(root, rel, opts);
+    if ((await sealedFor(root))?.(abs)) throw notFound(rel);
+    return abs;
+  };
+  /** For a walk: answers without a syscall when nothing is sealed. */
+  const sealedDirectories = async (root: string): Promise<(abs: string) => Promise<boolean>> => {
+    const sealed = await sealedFor(root);
+    if (!sealed) return async () => false;
+    return async (abs) => sealed(await realpath(abs).catch(() => abs));
+  };
   return {
     async tree(root, opts = {}) {
       const rel = opts.path ?? "";
       let abs: string;
       try {
-        abs = await resolveInside(root, rel);
+        abs = await reach(root, rel);
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") throw notFound(rel, "Directory");
         throw err;
@@ -218,9 +251,12 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       const hidden = opts.hidden === true;
       const entries = await readdir(abs, { withFileTypes: true });
       const out: FileEntry[] = [];
+      const isSealed = await sealedDirectories(root);
       for (const ent of entries) {
         if (ent.name === ".git") continue;
         if (!hidden && ent.name.startsWith(".")) continue;
+        if (ent.name === ATTACHMENT_INBOX) continue;
+        if (ent.isDirectory() && await isSealed(path.join(abs, ent.name))) continue;
         const childRel = posix(rel ? path.join(rel, ent.name) : ent.name);
         const isDir = ent.isDirectory();
         const item: FileEntry = { name: ent.name, path: childRel, dir: isDir };
@@ -255,7 +291,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       const hidden = opts.hidden === true;
       let baseAbs: string;
       try {
-        baseAbs = await resolveInside(root, base);
+        baseAbs = await reach(root, base);
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") throw notFound(base, "Directory");
         throw err;
@@ -263,6 +299,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       const entries: FileEntry[] = [];
       let truncated = false;
       const deadline = Date.now() + LIST_TIME_BUDGET_MS;
+      const isSealed = await sealedDirectories(root);
       const walk = async (dirAbs: string, rel: string): Promise<void> => {
         if (truncated) return;
         let children;
@@ -280,6 +317,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
           const childRel = rel ? `${rel}/${ent.name}` : ent.name;
           const childAbs = path.join(dirAbs, ent.name);
           if (ent.isDirectory()) {
+            if (await isSealed(childAbs)) continue;
             await walk(childAbs, childRel);
             if (truncated) return;
           } else if (ent.isFile()) {
@@ -302,7 +340,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
     },
 
     async read(root, rel, opts) {
-      const abs = await resolveInside(root, rel, { external: externalReads() });
+      const abs = await reach(root, rel, { external: externalReads() });
       const cap = opts?.editable ? MAX_EDIT : MAX_READ;
       let fh;
       try {
@@ -335,7 +373,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
     },
 
     async stat(root, rel) {
-      const abs = await resolveInside(root, rel, { external: externalReads() });
+      const abs = await reach(root, rel, { external: externalReads() });
       let st;
       try {
         st = await lstat(abs);
@@ -353,7 +391,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
     },
 
     async readRaw(root, rel) {
-      const abs = await resolveInside(root, rel, { external: externalReads() });
+      const abs = await reach(root, rel, { external: externalReads() });
       let st;
       try {
         st = await lstat(abs);
@@ -364,12 +402,12 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       if (!st.isFile()) throw new Error(`Not a file: ${rel}`);
       if (st.size > MAX_RAW) throw new Error(`File too large to serve raw: ${rel}`);
       const data = await readFile(abs);
-      return { data, mime: rawMimeOf(rel), size: st.size };
+      return { data, mime: rawMimeOf(rel), size: st.size, revision: revisionOf(st) };
     },
 
     async write(root, rel, content, opts = {}) {
       assertBetaWritable();
-      const abs = await resolveInside(root, rel, { forWrite: true });
+      const abs = await reach(root, rel, { forWrite: true });
       let existing: Awaited<ReturnType<typeof lstat>> | null = null;
       try {
         existing = await lstat(abs);
@@ -399,42 +437,42 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       await mkdir(path.dirname(abs), { recursive: true });
       await writeFile(abs, content, "utf8");
       // Refuse if the written file (or a parent symlink) landed outside root.
-      await resolveInside(root, rel);
+      await reach(root, rel);
       const st = await lstat(abs);
       return { revision: revisionOf(st) };
     },
 
     async writeBytes(root, rel, data) {
       assertBetaWritable();
-      const abs = await resolveInside(root, rel, { forWrite: true });
+      const abs = await reach(root, rel, { forWrite: true });
       await mkdir(path.dirname(abs), { recursive: true });
       await writeFile(abs, data);
-      await resolveInside(root, rel);
+      await reach(root, rel);
     },
 
     async mkdir(root, rel) {
       assertBetaWritable();
-      const abs = await resolveInside(root, rel, { forWrite: true });
+      const abs = await reach(root, rel, { forWrite: true });
       await mkdir(abs, { recursive: true });
-      await resolveInside(root, rel);
+      await reach(root, rel);
     },
 
     async remove(root, rel) {
       assertBetaWritable();
-      const abs = await resolveInside(root, rel);
+      const abs = await reach(root, rel);
       await rm(abs, { recursive: true });
     },
 
     async rename(root, from, to) {
       assertBetaWritable();
-      const source = await resolveInside(root, from);
-      const target = await resolveInside(root, to, { forWrite: true });
+      const source = await reach(root, from);
+      const target = await reach(root, to, { forWrite: true });
       await lstat(target).then(() => { throw new Error(`Path already exists: ${to}`); }).catch((err: unknown) => {
         if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
         throw err;
       });
       await move(source, target);
-      await resolveInside(root, to);
+      await reach(root, to);
     },
 
     async search(root, q, limit) {
@@ -452,6 +490,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       // one giant repo cannot stall the palette.
       let visited = 0;
       const deadline = Date.now() + SEARCH_TIME_BUDGET_MS;
+      const isSealed = await sealedDirectories(root);
       const walk = async (dirAbs: string, rel: string): Promise<void> => {
         if (visited >= SEARCH_MAX_ENTRIES || Date.now() > deadline) return;
         let entries;
@@ -468,6 +507,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
           // Symlinks are never followed: loops and root escapes stay impossible.
           if (ent.isSymbolicLink()) continue;
           if (ent.isDirectory()) {
+            if (await isSealed(path.join(dirAbs, ent.name))) continue;
             if (includeDirs) {
               const scored = scorePath(childRel, query);
               if (scored) hits.push({ path: posix(childRel), kind: "dir", ...scored });
@@ -495,6 +535,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       let truncated = false;
       const include = normalizeGlobs(opts.include);
       const exclude = normalizeGlobs(opts.exclude);
+      const isSealed = await sealedDirectories(root);
 
       const walk = async (dirAbs: string, rel: string): Promise<void> => {
         abortContentSearch(signal);
@@ -520,6 +561,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
           const childRel = rel ? `${rel}/${ent.name}` : ent.name;
           if (ent.isDirectory() && exclude.some((pattern) => globMatches(pattern, childRel) || globMatches(pattern, `${childRel}/`))) continue;
           if (ent.isDirectory()) {
+            if (await isSealed(path.join(dirAbs, ent.name))) continue;
             await walk(path.join(dirAbs, ent.name), childRel);
           } else if (ent.isFile()) {
             if (!include.length || include.some((pattern) => globMatches(pattern, childRel))) {
@@ -546,7 +588,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
         if (ignored.has(rel)) continue;
         let fh;
         try {
-          const abs = await resolveInside(root, rel);
+          const abs = await reach(root, rel);
           fh = await open(abs, "r");
           const st = await fh.stat();
           if (!st.isFile() || st.size > CONTENT_SEARCH_MAX_FILE_BYTES) continue;
@@ -585,9 +627,12 @@ export function createFileService(options: FileServiceOptions = {}): FileService
   };
 }
 
+/** Attachments of every chat in the project, including private ones: readable
+ *  by their unguessable name from the chat that holds it, never browsable. */
+const ATTACHMENT_INBOX = "_inbox";
 const IGNORED_DIRS = new Set([
   ".git", "node_modules", "dist", "build", "out", "coverage",
-  ".next", ".cache", "target", "__pycache__", ".venv",
+  ".next", ".cache", "target", "__pycache__", ".venv", ATTACHMENT_INBOX,
 ]);
 const SEARCH_MAX_ENTRIES = 20_000;
 /** Flat listing bounds: enough for a large app, never a whole monorepo dump. */

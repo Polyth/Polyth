@@ -45,6 +45,23 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
   };
   return {
     activeOwnerUserId,
+    /** When someone else last set this person's password, while they haven't
+     *  set their own since. Read from the append-only audit log, which no UI
+     *  can edit, so it stays until they themselves take the account back. */
+    adminPasswordResetAt(userId: string): number | undefined {
+      const reset = control.get<{ at: number; seq: number }>(
+        `SELECT occurred_at_ms AS at,seq FROM audit_events
+          WHERE resource_id=? AND action IN ('auth.password-reset','auth.break-glass-password-reset')
+          ORDER BY seq DESC LIMIT 1`,
+        userId,
+      );
+      if (!reset) return undefined;
+      const retaken = control.get(
+        "SELECT 1 FROM audit_events WHERE resource_id=? AND actor_id=? AND action='auth.password-changed' AND seq>? LIMIT 1",
+        userId, userId, reset.seq,
+      );
+      return retaken ? undefined : reset.at;
+    },
     current(token: string): IdentityUser { return get(sessions.require(token).userId); },
     canManage(token: string): boolean { return hasOwnerRole(sessions.require(token).userId); },
     list(token: string): IdentityUser[] { return listFor(sessions.require(token).userId); },

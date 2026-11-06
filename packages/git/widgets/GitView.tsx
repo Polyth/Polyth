@@ -5,7 +5,9 @@ import { ConflictReviewPanel } from "./ConflictReview.tsx";
 import { setReviewScope, useReviewScopePreference } from "./gitPrefs.ts";
 import type { GitBranchDiffList, GitBranchFileDiff } from "../src/index.ts";
 import { useCallback, useEffect, useMemo, useRef, useId, useState, type DragEvent, type ReactNode } from "react";
-import { isManagedIsolationBranch, projectIsolationLevel } from "@polyth/contracts";
+import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
+import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.ts";
+import { isManagedIsolationBranch, isolationBlocksUserMutation, projectIsolationLevel } from "@polyth/contracts";
 import { resolveWorkspaceContext, type WorkspaceRepository } from "@polyth/contracts/workspace";
 import { api, errorCodeOf, errorChangesOf, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "@polyth/session/web-api";
 import { layoutGraph, type GraphRow } from "./git/graph.ts";
@@ -24,7 +26,7 @@ import {
   type DiffHunk, type ReviewComment,
 } from "../../../apps/web/src/review/anchors.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
-import { openWorktreeSessionDialog, setGitBranch, setGitDiffPath, setUiError, startNewSession, useStore, getState, workspaceProjectId, workspacePresentationKey } from "../../../apps/web/src/store.ts";
+import { closeAllModules, openWorktreeSessionDialog, setGitBranch, setGitDiffPath, setUiError, startNewSession, useStore, getState, workspaceProjectId, workspacePresentationKey } from "../../../apps/web/src/store.ts";
 import { diffStat } from "../../../apps/web/src/utils.ts";
 import { setPaneLastResource } from "../../../apps/web/src/workspace/panePrefs.ts";
 import {
@@ -39,6 +41,8 @@ import { summarizeUnifiedDiff, totalDiffStats, type DiffLineStats } from "./Pend
 import "./repository-scope.css";
 import RepoStackPanel from "./RepoStackPanel.tsx";
 import LandingBar from "./LandingBar.tsx";
+import GitPhoneView, { PhoneBasePicker, PhoneFileFoot, PhoneFileRow, type PhonePage } from "./GitPhoneView.tsx";
+import type { CommitPicks } from "./phoneOverview.ts";
 import { gitRefusalOf, openGitRefusal, reportGitError, type GitRefusal } from "./gitRefusal.ts";
 import { ChangeSection, fileStatKey, type ChangeGroup } from "./ChangeList.tsx";
 import { CommitFiles, DiffContent, DiffSkeleton, HunkBlock, parseCommitPrelude } from "./DiffViewer.tsx";
@@ -171,6 +175,7 @@ interface RepositoryOverviewEntry {
 }
 
 const EMPTY_REPOSITORIES: readonly WorkspaceRepository[] = [];
+const NO_PICKS: CommitPicks = new Map();
 
 const refusalField = (cause: unknown): { refusal?: GitRefusal } => {
   const refusal = gitRefusalOf(cause);
@@ -223,19 +228,25 @@ function RefBadges({ refs, remotes, limit }: { refs: readonly string[]; remotes:
   );
 }
 
+const logDisplayEntries = (prefs: GitPrefs): MenuEntry[] => [
+  { heading: tr("gitview.dates") },
+  { id: "dates-relative", kind: "radio", checked: prefs.dateStyle === "relative", label: tr("gitview.datesRelative"), onSelect: () => setGitPrefs({ dateStyle: "relative" }) },
+  { id: "dates-absolute", kind: "radio", checked: prefs.dateStyle === "absolute", label: tr("gitview.datesAbsolute"), onSelect: () => setGitPrefs({ dateStyle: "absolute" }) },
+  "separator",
+  { heading: tr("gitview.density") },
+  { id: "density-compact", kind: "radio", checked: prefs.density === "compact", label: tr("gitview.densityCompact"), onSelect: () => setGitPrefs({ density: "compact" }) },
+  { id: "density-comfortable", kind: "radio", checked: prefs.density === "comfortable", label: tr("gitview.densityComfortable"), onSelect: () => setGitPrefs({ density: "comfortable" }) },
+];
+
+const logViewEntries = (prefs: GitPrefs): MenuEntry[] => [
+  { id: "graph", kind: "checkbox", checked: prefs.logGraph, label: tr("gitview.showGraph"), onSelect: () => setGitPrefs({ logGraph: !prefs.logGraph }) },
+  "separator",
+  ...logDisplayEntries(prefs),
+];
+
 /** Account-wide list display choices. Diff layout stays per repository. */
 function ViewOptionsMenu({ prefs, log = false }: { prefs: GitPrefs; log?: boolean }) {
-  const entries: MenuEntry[] = log ? [
-    { id: "graph", kind: "checkbox", checked: prefs.logGraph, label: tr("gitview.showGraph"), onSelect: () => setGitPrefs({ logGraph: !prefs.logGraph }) },
-    "separator",
-    { heading: tr("gitview.dates") },
-    { id: "dates-relative", kind: "radio", checked: prefs.dateStyle === "relative", label: tr("gitview.datesRelative"), onSelect: () => setGitPrefs({ dateStyle: "relative" }) },
-    { id: "dates-absolute", kind: "radio", checked: prefs.dateStyle === "absolute", label: tr("gitview.datesAbsolute"), onSelect: () => setGitPrefs({ dateStyle: "absolute" }) },
-    "separator",
-    { heading: tr("gitview.density") },
-    { id: "density-compact", kind: "radio", checked: prefs.density === "compact", label: tr("gitview.densityCompact"), onSelect: () => setGitPrefs({ density: "compact" }) },
-    { id: "density-comfortable", kind: "radio", checked: prefs.density === "comfortable", label: tr("gitview.densityComfortable"), onSelect: () => setGitPrefs({ density: "comfortable" }) },
-  ] : [
+  const entries: MenuEntry[] = log ? logViewEntries(prefs) : [
     { heading: tr("gitview.showChangesAs") },
     { id: "view-tree", kind: "radio", checked: prefs.changesView === "tree", label: tr("gitview.viewAsTree"), onSelect: () => setGitPrefs({ changesView: "tree" }) },
     { id: "view-flat", kind: "radio", checked: prefs.changesView === "flat", label: tr("gitview.viewAsList"), onSelect: () => setGitPrefs({ changesView: "flat" }) },
@@ -339,7 +350,7 @@ function ConflictAgentBanner({
 
 const branchReviewClient = createBranchDiffClient();
 
-export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, missing, branches = [] }: {
+export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, missing, branches = [], phone }: {
   target: BranchReviewTarget;
   host?: WebPackageHost;
   prefs: ReturnType<typeof useGitPrefs>;
@@ -347,6 +358,8 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
   workspace: string;
   missing: boolean;
   branches?: readonly { name: string }[];
+  /** On a phone the list and a file are separate layers, led by the owner's Back. */
+  phone?: { path: string | null; onPath: (path: string | null) => void };
 }) {
   const activeSessionId = useStore((state) => state.activeSessionId);
   const [baseDraft, setBaseDraft] = useState("");
@@ -354,7 +367,10 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
   const [revision, retry] = useState(0);
   const [list, setList] = useState<GitBranchDiffList | null>(null);
   const [patch, setPatch] = useState<GitBranchFileDiff | null>(null);
-  const [path, selectPath] = useState<string | null>(null);
+  const [ownPath, setOwnPath] = useState<string | null>(null);
+  const path = phone ? phone.path : ownPath;
+  const selectPath = (next: string | null) => { if (phone) phone.onPath(next); else setOwnPath(next); };
+  const [basePicking, setBasePicking] = useState(false);
   const [error, setError] = useState("");
   const [errorCode, setErrorCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -380,7 +396,7 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
   };
   useEffect(() => {
     let active = true;
-    setList(null); setPatch(null); selectPath(null); setError(""); setErrorCode(""); setDraftHunk(null); setInserted(false);
+    setList(null); setPatch(null); if (!phone) selectPath(null); setError(""); setErrorCode(""); setDraftHunk(null); setInserted(false);
     if (missing) return;
     setLoading(true);
     void branchReviewClient.list(request).then((value) => { if (active) setList(value); })
@@ -432,8 +448,24 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
   const currentNotes = notes.filter((note) => !note.outdated);
   const canInsert = Boolean(host && target.sessionId && activeSessionId === target.sessionId);
   const compare = () => { setBase(baseDraft.trim()); retry((n) => n + 1); };
+  const diffWrap = phone ? prefs.phoneWrap : prefs.wrap;
+  const pathIndex = list && path ? list.files.findIndex((file) => file.path === path) : -1;
   return <section className="git-branch-review" aria-label={tr("gitview.branchVsBase")}>
-    <div className="git-branch-review-toolbar">
+    {phone && !path && <>
+      <button type="button" className="git-phone-row git-phone-base" onClick={() => setBasePicking(true)}>
+        <UiIcon icon={CompareIcon} size="md" />
+        <span className="git-phone-row-label">{tr("gitphone.compareWith")}</span>
+        <span className="git-phone-row-value mono">{list?.base ?? base}</span>
+        <UiIcon icon={ChevronRightIcon} size="sm" className="git-phone-row-chevron" />
+      </button>
+      {basePicking && <PhoneBasePicker
+        branches={branches}
+        current={list?.base ?? base}
+        onClose={() => setBasePicking(false)}
+        onChoose={(next) => { setBase(next); setBasePicking(false); phone.onPath(null); retry((n) => n + 1); }}
+      />}
+    </>}
+    {!phone && <div className="git-branch-review-toolbar">
       <form className="git-branch-review-base" onSubmit={(event) => { event.preventDefault(); if (baseDraft.trim() && !loading) compare(); }}>
         <label htmlFor={`${basePickerId}-input`}>{tr("gitview.reviewBase")}</label>
         <TextInput id={`${basePickerId}-input`} uiSize="sm" className="mono" list={basePickerId} value={baseDraft} placeholder={list?.base ?? "main"} onChange={(event) => setBaseDraft(event.target.value)} />
@@ -446,18 +478,24 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
         <Button size="sm" variant="ghost" aria-pressed={prefs.ignoreWhitespace} onClick={() => setGitPrefs({ ignoreWhitespace: !prefs.ignoreWhitespace }, prefsScope)}>{tr("gitview.ignoreWhitespaceReview")}</Button>
         <IconButton icon={RefreshIcon} size="sm" variant="ghost" label={tr("common.retry")} onClick={() => retry((n) => n + 1)} />
       </div>
-    </div>
+    </div>}
     {missing ? <div className="source-inline-status" role="status">{tr("gitview.reviewMissingWorktree")}</div> : loading ? <div role="status" className="git-branch-review-loading" aria-busy="true"><span>{tr("gitview.reviewLoading")}</span><DiffSkeleton /></div> : error && <div className="source-inline-status error" role="alert">{errorCode === "no-base" ? tr("gitview.reviewNoBase") : errorCode === "no-merge-base" ? tr("gitview.reviewNoMergeBase") : error}</div>}
     {list && <>
-      <p className="git-branch-review-identity">
+      {phone ? !path && list.files.length > 0 && <p className="git-phone-compare-meta">
+        {list.ahead === 1 ? tr("gitphone.oneCommit") : tr("gitphone.commitsCount", { count: list.ahead })}
+        {" · "}{list.files.length === 1 ? tr("gitphone.oneFile") : tr("gitphone.filesCount", { count: list.files.length })}
+        {" · "}<LineStats stats={list.files.reduce((sum, file) => ({ additions: sum.additions + (file.additions ?? 0), deletions: sum.deletions + (file.deletions ?? 0) }), { additions: 0, deletions: 0 })} mode="numbers" />
+      </p> : <p className="git-branch-review-identity">
         <span className="git-branch-review-ref mono" title={list.headRef ?? list.head}><UiIcon icon={BranchIcon} size="sm" />{list.headRef ?? "HEAD"}</span>
         <span className="git-branch-review-vs" aria-hidden="true">←</span>
         <span className="git-branch-review-ref git-branch-review-ref--base mono" title={list.base}>{list.base}</span>
         <span className="muted">{tr("gitview.reviewIdentity", { head: list.headRef ?? "HEAD", base: list.base, mergeBase: list.mergeBase.slice(0, 8), count: list.ahead })}</span>
-      </p>
+      </p>}
       {list.truncated && <p className="source-inline-status" role="status">{tr("gitview.reviewTruncated")}</p>}
       {list.files.length === 0 ? <EmptyState variant="compact" mark={<UiIcon icon={CompareIcon} size="lg" />} title={tr("gitview.reviewNoChanges", { base: list.base })} /> : <div className="git-branch-review-columns">
-        <nav aria-label={tr("gitview.changedFiles")} className="git-branch-review-files">{list.files.map((file) => {
+        {phone ? !path && <div className="git-phone-files" role="list">{list.files.map((file) => <div role="listitem" key={file.path}>
+          <PhoneFileRow path={file.path} {...(file.previousPath ? { origPath: file.previousPath } : {})} status={file.status} stats={{ additions: file.additions ?? 0, deletions: file.deletions ?? 0 }} lineStats={prefs.lineStats} onClick={() => selectPath(file.path)} />
+        </div>)}</div> : <nav aria-label={tr("gitview.changedFiles")} className="git-branch-review-files">{list.files.map((file) => {
           const identity = fileIdentity(file.path);
           return <button type="button" key={file.path} className="git-branch-review-file" aria-pressed={path === file.path} title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path} onClick={() => selectPath(file.path)}>
             <StatusChip status={file.status} />
@@ -467,10 +505,10 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
             </span>
             <LineStats stats={file} mode={prefs.lineStats === "hidden" ? "numbers" : prefs.lineStats} />
           </button>;
-        })}</nav>
-        <div className="git-branch-review-detail">
+        })}</nav>}
+        {(!phone || path) && <div className="git-branch-review-detail">
           {fileLoading ? <div role="status" aria-busy="true" className="git-branch-review-loading"><span>{tr("gitview.reviewLoading")}</span></div> : patch ? <>
-            {patch.binary ? <p className="source-inline-status">{tr("gitview.reviewBinary")}</p> : <DiffContent diff={patch.diff} path={patch.path} split={prefs.layout === "split"} wrap={prefs.wrap} />}
+            {patch.binary ? <p className="source-inline-status">{tr("gitview.reviewBinary")}</p> : <DiffContent diff={patch.diff} path={patch.path} split={!phone && prefs.layout === "split"} wrap={diffWrap} />}
             {patch.truncated && <p className="source-inline-status" role="status">{tr("gitview.reviewTruncated")}</p>}
             {!patch.binary && <div className="git-branch-review-hunks" aria-label={tr("gitview.addReviewNote")}>
               {splitHunks(patch.diff).map((hunk, index) => <Button key={hunkDigest(hunk)} size="sm" variant="ghost" iconStart={AddIcon} aria-pressed={draftHunk ? hunkDigest(draftHunk) === hunkDigest(hunk) : false} onClick={() => { setDraftHunk(hunk); setText(""); }}>{tr("gitview.reviewNoteNearLineValue", { line: hunk.startNew })} · {index + 1}</Button>)}
@@ -482,7 +520,8 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
               </div>
             </div>}
           </> : <EmptyState title={tr("gitview.selectAFileToReview")} description={tr("gitview.chooseAFileFromTheChangeList")} />}
-        </div>
+          {phone && path && <PhoneFileFoot index={pathIndex} total={list.files.length} onStep={(delta) => { const next = list.files[pathIndex + delta]; if (next) selectPath(next.path); }} />}
+        </div>}
       </div>}
       {notes.length > 0 && <div className="review-list">
         <div className="stat-label">{tr("gitview.reviewNotesValue", { count: notes.length })}</div>
@@ -511,6 +550,25 @@ export default function GitView({
   sessionId: scopedSessionId,
 }: SurfaceComponentProps & { host?: WebPackageHost } = {}) {
   const Slot = host?.ui.Slot;
+  const phone = useShellMode() === "phone";
+  const phoneRef = useRef(phone);
+  phoneRef.current = phone;
+  const [phonePage, setPhonePage] = useState<PhonePage | null>(null);
+  // What the next commit leaves out outlives the window; its open sheets do not.
+  const [phonePicks, setPhonePicks] = useState<Readonly<Record<string, CommitPicks>>>({});
+  // The window stays mounted while closed, hidden, but its layers and sheets are
+  // portalled out of it and would stay on screen. Closing it takes them along.
+  const paneVisible = usePaneVisible();
+  const [phoneOpening, setPhoneOpening] = useState(0);
+  const paneWasVisible = useRef(paneVisible);
+  useEffect(() => {
+    if (paneWasVisible.current && !paneVisible && phoneRef.current) {
+      setPhonePage(null);
+      setMobileDetail(false);
+      setPhoneOpening((value) => value + 1);
+    }
+    paneWasVisible.current = paneVisible;
+  }, [paneVisible]);
   const storeProjectId = useStore(workspaceProjectId);
   const storeSessionId = useStore((state) => state.activeSessionId);
   const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;
@@ -633,6 +691,7 @@ export default function GitView({
           setConflictRequest((current) => ({ path, seq: (current?.seq ?? 0) + 1 }));
         }
         setTab("changes");
+        setPhonePage(handoff.scope === "conflicts" ? { kind: "conflicts" } : handoff.scope === "branch" ? { kind: "compare", path: null, fromOverview: false } : null);
       }
       return handoff;
     };
@@ -704,7 +763,9 @@ export default function GitView({
     const saved = getGitViewState(gitViewScope);
     setSelected(saved.selected ?? null);
     setClosedGroups(new Set(saved.closedGroups));
-    setMobileDetail(Boolean(saved.selected));
+    // A phone always opens on its overview; a remembered file is only a highlight.
+    setMobileDetail(Boolean(saved.selected) && !phoneRef.current);
+    setPhonePage(null);
     queueMicrotask(() => { viewStateHydrated.current = gitViewScope; });
   }, [gitViewScope]);
   useEffect(() => {
@@ -719,7 +780,8 @@ export default function GitView({
       const saved = getGitViewState(gitViewScope);
       setSelected(saved.selected ?? null);
       setClosedGroups(new Set(saved.closedGroups));
-      setMobileDetail(Boolean(saved.selected));
+      // Other devices' presentation must not pull a phone out of what it reads.
+      if (!phoneRef.current) setMobileDetail(Boolean(saved.selected));
       queueMicrotask(() => { viewStateHydrated.current = gitViewScope; });
     };
     window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, onHydrated);
@@ -875,6 +937,7 @@ export default function GitView({
     setCommitSel(null);
     setSelected({ path: diffPath, staged: file?.staged ?? false });
     setMobileDetail(true);
+    setPhonePage(null);
   }, [diffPath, status]);
 
   useEffect(() => {
@@ -882,7 +945,8 @@ export default function GitView({
   }, [projectId, repositoryId, selected]);
 
   useEffect(() => {
-    if (!projectId || !selected || status?.isRepo === false || reviewView !== "working") return;
+    // A phone opens a working-tree file from its overview, whatever scope a wider window last read.
+    if (!projectId || !selected || status?.isRepo === false || (reviewView !== "working" && !phone)) return;
     let active = true;
     setDiff("");
     setDiffSnapshotDigest("");
@@ -900,7 +964,7 @@ export default function GitView({
       })
       .finally(() => { if (active) setDiffLoading(false); });
     return () => { active = false; };
-  }, [projectId, repositoryId, sessionId, selected, status?.isRepo, prefs.ignoreWhitespace, diffRetry, reviewView]);
+  }, [projectId, repositoryId, sessionId, selected, status?.isRepo, prefs.ignoreWhitespace, diffRetry, reviewView, phone]);
 
   useEffect(() => {
     if (!projectId || !commitSel) return;
@@ -999,9 +1063,9 @@ export default function GitView({
 
   // One button: commit what's staged (when a message is present), then sync via
   // the server-owned fetch/integrate/publish flow.
-  const syncRepository = async () => {
+  const syncRepository = async (committed = false) => {
     if (!projectId) return;
-    if (commitMsg.trim() && (status?.staged.length ?? 0) > 0) {
+    if (!committed && commitMsg.trim() && (status?.staged.length ?? 0) > 0) {
       await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined, repositoryId);
       setCommitMsg("");
       setSelected(null);
@@ -1010,14 +1074,14 @@ export default function GitView({
     await api.gitSync(projectId, selectedRemoteName, sessionId ?? undefined, { repositoryId });
   };
 
-  const runRemote = async (step: RemoteStep) => {
+  const runRemote = async (step: RemoteStep, committed = false) => {
     if (!projectId || !remoteTargetAvailable || autoRebaseBusy) return;
     const remote = selectedRemoteName;
     setBusyRemote(step);
     setRemoteStatus(null);
     try {
       if (step === "sync") {
-        await syncRepository();
+        await syncRepository(committed);
       } else {
         const action = step === "fetch" ? api.gitFetch : step === "pull" ? api.gitPull : api.gitPush;
         await action(projectId, remote, sessionId ?? undefined, { repositoryId });
@@ -1126,13 +1190,13 @@ export default function GitView({
     });
   };
 
-  const openConflictAgentDraft = async (target: ConflictAgentTarget, problem?: string) => {
-    if (conflictAgentBusy || autoRebaseBusy || !projectId) return;
+  const openConflictAgentDraft = async (target: ConflictAgentTarget, problem?: string): Promise<boolean> => {
+    if (conflictAgentBusy || autoRebaseBusy || !projectId) return false;
     const currentSessionId = sessionId;
     if (target === "current-session" && !currentSessionId) {
       setConflictAgentFailed(true);
       setConflictAgentMsg(tr("pullrequestview.conflictAgentNeedsCurrentSession"));
-      return;
+      return false;
     }
     setConflictAgentBusy(target);
     setConflictAgentMsg("");
@@ -1148,7 +1212,7 @@ export default function GitView({
       if (!result.ok) {
         setConflictAgentFailed(true);
         setConflictAgentMsg(result.reason);
-        return;
+        return false;
       }
       if (target === "new-session") {
         startNewSession(projectId, { draft: result.data.prompt });
@@ -1157,9 +1221,11 @@ export default function GitView({
         requestComposerReplace(result.data.prompt);
       }
       setConflictAgentMsg(tr("gitview.conflictAgentDraftReady"));
+      return true;
     } catch (cause) {
       setConflictAgentFailed(true);
       setConflictAgentMsg(friendlyError(tr("pullrequestview.conflictAgentFailed"), cause));
+      return false;
     } finally {
       setConflictAgentBusy(null);
     }
@@ -1407,97 +1473,12 @@ export default function GitView({
     ...branchChips.map((ref) => ({ value: ref, label: ref })),
   ];
   const commitBody = commitDiff ? parseCommitPrelude(commitDiff).body : "";
+  // A phone reads one column and does not scroll sideways by default.
+  const diffSplit = !phone && prefs.layout === "split";
+  const diffWrap = phone ? prefs.phoneWrap : prefs.wrap;
 
-  return (
-    <div className="git-page" data-density={prefs.density}>
-      <WorkspaceSurfaceHeader
-        className="source-control-head"
-        label={tr("gitview.sourceControl")}
-        scope={repositoryOptions.length > 1 ? <RepositoryScopePicker
-          mode="all"
-          label={tr("gitview.repository")}
-          repositories={repositoryOptions}
-          value={selectedRepositoryId ?? null}
-          onChange={chooseRepository}
-        /> : undefined}
-        context={<div className="source-control-title">
-          {/* Title + close come from the shared ContextRail / ModuleView header. */}
-          <span className="source-branch" title={status?.upstream ? tr("gitview.trackingValue", { upstream: status.upstream }) : status?.branch || undefined}>
-            <UiIcon icon={BranchIcon} size="sm" />
-            <span className="mono">{status?.branch || tr("gitview.detachedHead")}</span>
-          </span>
-          {status && statusMatchesSelectedRemote && (status.ahead > 0 || status.behind > 0) && (
-            <span className="git-ahead-behind">
-              {status.ahead > 0 && <span className="ahead" title={tr("gitview.commitsToPushValue", { count: status.ahead })}>↑ {status.ahead}</span>}
-              {status.behind > 0 && <span className="behind" title={tr("gitview.commitsToPullValue", { count: status.behind })}>↓ {status.behind}</span>}
-            </span>
-          )}
-          {selectedRepository && repositoryOptions.length > 1 && <span className="muted source-repo-alias" title={selectedRepository.path}>{selectedRepository.alias}</span>}
-          {Slot && isPrimaryRepository && <Slot slot="git.repository.identity" context={{ projectId, sessionId }} />}
-        </div>}
-        actions={<div className="source-remote-actions" aria-label={tr("gitview.remoteRepositoryActions")}>
-          <div className="git-remote-context">
-            {remoteChoices.length > 1 ? (
-              <Select
-                label={tr("gitview.remote")}
-                ariaLabel={tr("gitview.chooseGitRemote")}
-                value={selectedRemoteName}
-                options={remoteChoices}
-                onChange={(next) => {
-                  if (!projectId) return;
-                  setStoredRemoteName(next);
-                  setGitRemoteSelection(projectId, sessionId, next, repositoryId);
-                }}
-                disabled={busy || busyRemote !== null || autoRebaseBusy || !remoteTargetAvailable}
-                className="git-remote-picker"
-              />
-            ) : (
-              <span
-                className={`git-remote-name${remoteTargetAvailable ? "" : " is-unavailable"}`}
-                title={selectedRemote ? `${remoteDetail(selectedRemote)} · ${tr("gitview.remoteTransportHint")}` : tr("gitview.remoteTransportHint")}
-              >
-                <span className="sr-only">{tr("gitview.remote")} </span>
-                {remoteTargetAvailable ? selectedRemoteName : tr("gitview.remoteUnavailable")}
-              </span>
-            )}
-          </div>
-          <div className="source-remote-buttons">
-            {remoteOptionsError && <Button size="sm" variant="ghost" onClick={retryRemoteInspection}>{tr("common.retry")}</Button>}
-            <Button
-              size="sm"
-              className="source-action-btn source-sync-btn"
-              iconStart={SyncIcon}
-              busy={busyRemote !== null || autoRebaseBusy}
-              disabled={remoteBlocked}
-              title={tr("gitview.syncWithValue", { remote: selectedRemoteName })}
-              onClick={() => void runRemote("sync")}
-            >
-              {busyRemote ? remoteLabel[busyRemote].busy : autoRebaseBusy ? remoteLabel.sync.busy : remoteLabel.sync.idle}
-            </Button>
-            <Menu
-              label={tr("gitview.remoteRepositoryActions")}
-              align="end"
-              entries={(["fetch", "pull", "push"] as const).map((step) => ({
-                id: step,
-                label: remoteLabel[step].idle,
-                detail: selectedRemoteName,
-                icon: step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon,
-                disabled: remoteBlocked,
-                onSelect: () => { void runRemote(step); },
-              }))}
-            >
-              {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" label={tr("gitview.remoteRepositoryActions")} disabled={remoteBlocked} />}
-            </Menu>
-            <IconButton icon={RefreshIcon} size="sm" className="source-refresh-btn" label={tr("gitview.refreshSourceControl")} disabled={busy || busyRemote !== null || autoRebaseBusy} onClick={() => { void refresh(); retryRemoteInspection(); }} />
-          </div>
-        </div>}
-      />
-
-      {(remoteOptionsError || remoteOptions.length === 0) && <div className="source-inline-status git-remote-error" role="status">
-        <UiIcon icon={WarningIcon} size="sm" />
-        <span>{remoteOptionsError || tr("gitview.noGitRemoteConfigured")}</span>
-      </div>}
-
+  const feedback = (
+    <>
       <div className="git-feedback">
         {remoteStatus && (
           <div className={`source-inline-status ${remoteStatus.error ? "error" : "success"}`} role={remoteStatus.error ? "alert" : "status"}>
@@ -1514,7 +1495,7 @@ export default function GitView({
           </div>
         )}
 
-        {isPrimaryRepository && ((remoteStatus?.error && !remoteStatus.refusal) || (tab === "changes" && !!status?.conflicted.length)) && (
+        {isPrimaryRepository && ((remoteStatus?.error && !remoteStatus.refusal) || (!phone && tab === "changes" && !!status?.conflicted.length)) && (
           <ConflictAgentBanner
             hint={[
               remoteStatus?.error && !remoteStatus.refusal ? (isDivergedError(remoteStatus.error)
@@ -1535,14 +1516,20 @@ export default function GitView({
 
       </div>
 
+      {phone && conflictAgentFailed && conflictAgentMsg && (
+        <div className="source-inline-status error" role="alert"><span>{conflictAgentMsg}</span></div>
+      )}
+
       {loadError && status && (
         <div className="source-inline-status error" role="alert">
           <span>{loadError}</span>
           <Button size="sm" disabled={loading} onClick={() => void refresh(true)}>{tr("common.retry")}</Button>
         </div>
       )}
+    </>
+  );
 
-      {confirmRequest && (
+  const confirmDialog = confirmRequest && (
         <Dialog
           title={confirmRequest.title}
           onClose={() => setConfirmRequest(null)}
@@ -1562,161 +1549,20 @@ export default function GitView({
             <p>{confirmRequest.description}</p>
           </div>
         </Dialog>
-      )}
+  );
 
-      <SourceControlTabs
-        value={tab}
-        tabs={[
-          { id: "changes", label: tabLabel(tr("gitview.tabChanges"), all.length, conflictCount > 0 ? "danger" : all.length > 0 ? "accent" : "neutral") },
-          { id: "log", label: tr("gitview.tabLog") },
-          { id: "branches", label: tabLabel(tr("gitview.tabBranches"), branches.branches.length) },
-          { id: "stashes", label: tabLabel(tr("gitview.tabStashes"), stashes.length) },
-        ]}
-        onChange={selectTab}
-      />
-
-      {tab === "changes" && (
-        <div className="git-changes-layout">
-          <div className="source-subbar">
-            <div className="git-review-scope source-segmented" role="group" aria-label={tr("gitview.reviewScope")}>
-              {(["working", "branch"] as const).map((scope) => <Button key={scope} size="sm" variant="ghost" aria-pressed={reviewView === scope} onClick={() => {
-                updateReviewScope(scope);
-                if (projectId) setReviewScope(projectId, scope);
-              }}>{tr(scope === "working" ? "gitview.workingTree" : "gitview.branchVsBase")}</Button>)}
-              {conflictIsolation && (
-                <Button size="sm" variant="ghost" className="git-review-scope-conflicts" aria-pressed={reviewView === "conflicts"} onClick={() => updateReviewScope("conflicts")}>
-                  {tr("gitview.conflicts")}
-                </Button>
-              )}
-            </div>
-            <span className="header-spacer" />
-            {reviewView === "working" && <ViewOptionsMenu prefs={prefs} />}
-          </div>
-
-          {reviewView === "conflicts" && sessionId && (
-            <ConflictReviewPanel key={sessionId} sessionId={sessionId} conflictKey={conflictKey} requestedPath={conflictRequest} wrap={prefs.wrap} />
-          )}
-
-          {reviewView === "branch" && projectId && (
-            <BranchReviewPanel key={`${workspacePresentationKey("git-branch-review", projectId, sessionId ?? null)}:${gitViewScope}`} target={{ projectId, sessionId, repositoryId }} host={host} prefs={prefs}
-              prefsScope={gitViewScope} workspace={selectedRepository?.path ?? session?.worktreePath ?? project?.path ?? ""}
-              branches={branches.branches} missing={workspaceInvalid || selectedRepository?.state === "missing" || session?.worktreeState === "missing"} />
-          )}
-
-          {reviewView === "working" && (
-            <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}${all.length === 0 ? " is-clean" : ""}`}>
-              <section className="git-master-pane" aria-label={tr("gitview.changedFiles")}>
-                {all.length > 0 && <div className="git-pane-toolbar">
-                  <div className="git-pane-summary">
-                    <strong>{all.length === 1 ? tr("gitview.oneChangedFile") : tr("gitview.changedFilesValue", { count: all.length })}</strong>
-                    <span className="muted">{[
-                      conflictCount > 0 ? tr("gitview.conflictedValue", { count: conflictCount }) : "",
-                      tr("gitview.stagedValue", { count: stagedCount }),
-                    ].filter(Boolean).join(" · ")}</span>
-                  </div>
-                  {(totalFileStats.additions > 0 || totalFileStats.deletions > 0) && (
-                    <span
-                      className="diff-stat"
-                      aria-label={tr("pendingchangesbar.valueAdditionsValueDeletions", {
-                        additions: totalFileStats.additions,
-                        deletions: totalFileStats.deletions,
-                      })}
-                    >
-                      <span>+{totalFileStats.additions}</span>
-                      <span>−{totalFileStats.deletions}</span>
-                    </span>
-                  )}
-                  <div className="git-pane-actions">
-                    {(status?.unstaged.length || status?.untracked.length || status?.conflicted.length) ? (
-                      <Button size="sm" variant="ghost" className="git-stage-all" iconStart={StageIcon} disabled={busy} title={tr("gitview.stageAll")} onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined, repositoryId))}>
-                        {tr("gitview.stageAll")}
-                      </Button>
-                    ) : null}
-                    {(status?.unstaged.length || status?.untracked.length) ? (
-                      <IconButton icon={UndoIcon} size="sm" variant="ghost" className="git-file-discard" label={tr("gitview.revertAll")} disabled={busy} onClick={() => setConfirmRequest({
-                        title: tr("gitview.revertAllChangesQuestion"),
-                        description: tr("pendingchangesbar.undoAllChangesDescription", {
-                          count: (status?.unstaged.length ?? 0) + (status?.untracked.length ?? 0),
-                        }),
-                        confirmLabel: tr("gitview.revertAll"),
-                        action: () => api.gitFolder(projectId, "", "discard", sessionId ?? undefined, repositoryId),
-                      })} />
-                    ) : null}
-                    {stagedCount > 0 && (
-                      <IconButton icon={MinusIcon} size="sm" variant="ghost" label={tr("gitview.unstageAll")} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined, repositoryId))} />
-                    )}
-                  </div>
-                </div>}
-                <div className="git-change-groups">
-                  {/* The default (bare) variant: the pane is already the card, and a
-                      Look repaints compact/panel states as cards of their own. */}
-                  {all.length === 0 && <EmptyState
-                    mark={<UiIcon icon={CheckIcon} size="lg" />}
-                    title={tr("gitview.workingTreeClean")}
-                    description={tr("gitview.localEditsWillAppearHere")}
-                  />}
-                  {changeGroups.map((group) => (
-                    <ChangeSection
-                      key={group.id}
-                      group={group}
-                      view={prefs.changesView}
-                      lineStats={prefs.lineStats}
-                      closed={closedGroups}
-                      selected={selected}
-                      busy={busy}
-                      fileStats={fileStats}
-                      ResourceLink={ResourceLink}
-                      resourceFor={resourceFor}
-                      onToggle={toggleGroup}
-                      onOpen={openFile}
-                      onDragFile={host?.resources.drag ? dragFile : undefined}
-                      onStage={(file) => void run(() => file.staged
-                        ? api.gitUnstage(projectId, [file.path], sessionId ?? undefined, repositoryId)
-                        : api.gitStage(projectId, [file.path], sessionId ?? undefined, repositoryId))}
-                      onDiscard={requestDiscard}
-                      onStageMany={stageMany}
-                    />
-                  ))}
-                </div>
-              </section>
-              {all.length > 0 && <section className="git-detail-pane" aria-label={tr("gitview.changeDetails")}>
-                {!selected ? (
-                  <EmptyState
-                    title={tr("gitview.selectAFileToReview")}
-                    description={tr("gitview.chooseAFileFromTheChangeList")}
-                  />
-                ) : (
-                  <>
-                    <div className="git-detail-head">
-                      <div className="git-mobile-detail-head">
-                        <IconButton icon={BackIcon} size="sm" variant="ghost" label={tr("gitview.backToChanges")} onClick={() => setMobileDetail(false)} />
-                      </div>
-                      {selectedFile && <StatusChip status={selectedFile.status} staged={selectedFile.staged} />}
-                      <div className="git-detail-title" title={selected.path}>
-                        <strong>{fileIdentity(selected.path).name}</strong>
-                        <span className="muted"><span className="mono">{fileIdentity(selected.path).directory}</span>{fileIdentity(selected.path).directory ? " · " : ""}{selected.staged ? tr("gitview.stagedChangesLower") : tr("gitview.workingTreeChanges")}</span>
-                      </div>
-                      {(addCount + delCount > 0) && <span className="diff-stat"><span>+{addCount}</span><span>−{delCount}</span></span>}
-                      {selectedFile && <div className="git-detail-actions">
-                        {!selectedFile.staged && selectedFile.status !== "conflicted" && <IconButton icon={UndoIcon} size="sm" variant="ghost" className="git-file-discard" label={tr("gitview.revertValue", { path: selectedFile.path })} title={tr("gitview.revert")} disabled={busy} onClick={() => requestDiscard(selectedFile)} />}
-                        <Button size="sm" iconStart={selectedFile.staged ? MinusIcon : StageIcon} disabled={busy} onClick={() => void run(() => selectedFile.staged
-                          ? api.gitUnstage(projectId, [selectedFile.path], sessionId ?? undefined, repositoryId)
-                          : api.gitStage(projectId, [selectedFile.path], sessionId ?? undefined, repositoryId))}>
-                          {selectedFile.staged ? tr("gitview.unstage") : selectedFile.status === "conflicted" ? tr("gitview.markResolved") : tr("gitview.stage")}
-                        </Button>
-                      </div>}
-                    </div>
-                    <DiffPrefsToolbar scope={gitViewScope} />
+  const renderFileDiff = () => selected && (
+    <>
                     {diffLoading ? <DiffSkeleton /> : diffError ? (
                       <div className="source-inline-status error" role="alert">
                         <span>{diffError}</span>
                         <Button size="sm" onClick={() => setDiffRetry((value) => value + 1)}>{tr("common.retry")}</Button>
                       </div>
-                    ) : prefs.layout === "split" || hunks.length === 0 ? (
-                      <DiffContent diff={diff} path={selected.path} split={prefs.layout === "split"} wrap={prefs.wrap} />
+                    ) : diffSplit || hunks.length === 0 ? (
+                      <DiffContent diff={diff} path={selected.path} split={diffSplit} wrap={diffWrap} />
                     ) : (
                       <div className="copy-wrap source-diff">
-                        <pre className={`git-diff git-diff-page${prefs.wrap ? " wrap" : ""}`} data-diff-path={selected.path}>
+                        <pre className={`git-diff git-diff-page${diffWrap ? " wrap" : ""}`} data-diff-path={selected.path}>
                           {hunks.map((hunk, index) => (
                             <HunkBlock
                               key={index}
@@ -1776,106 +1622,10 @@ export default function GitView({
                         })}
                       </div>
                     )}
-                  </>
-                )}
-              </section>}
-            </div>
-          )}
+    </>
+  );
 
-          {reviewView === "working" && status && status.staged.length > 0 && (
-            <section className="git-commit-composer ui-field-frame" aria-label={tr("gitview.commitStagedChanges")}>
-              <Textarea
-                className="git-commit-msg"
-                minRows={1}
-                maxRows={4}
-                autoGrow
-                aria-label={tr("gitview.commitMessage")}
-                placeholder={tr("gitview.commitMessage")}
-                value={commitMsg}
-                onChange={(event) => setCommitMsg(event.target.value)}
-                onKeyDown={(event) => {
-                  if (isImeComposing(event)) return;
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && commitMsg.trim() && !busy) {
-                    event.preventDefault();
-                    void run(commitStaged);
-                  }
-                }}
-              />
-              <div className="git-commit-rail">
-                <div className="git-commit-heading">
-                  <strong>{status.staged.length === 1 ? tr("gitview.commitOneStagedFile") : tr("gitview.commitStagedFilesValue", { count: status.staged.length })}</strong>
-                  <span className="git-commit-branch" title={status.branch || "HEAD"}>
-                    <UiIcon icon={BranchIcon} size="sm" />
-                    <span className="mono">{status.branch || "HEAD"}</span>
-                  </span>
-                  {subjectLength > 0 && (
-                    <span className="git-commit-counter" data-over={subjectLength > SUBJECT_SOFT_LIMIT ? "true" : undefined} title={tr("gitview.subjectLengthValue", { count: subjectLength, limit: SUBJECT_SOFT_LIMIT })}>
-                      {subjectLength}/{SUBJECT_SOFT_LIMIT}
-                    </span>
-                  )}
-                </div>
-                <div className="git-commit-actions">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    iconStart={AssistIcon}
-                    title={tr("gitview.generateWithAi")}
-                    busy={generating}
-                    disabled={generating || busy}
-                    onClick={() => {
-                      const generation = scopeGeneration.current;
-                      const requestedScope = commitScopeKey;
-                      setGenerating(true);
-                      void api.gitCommitMessage(projectId, sessionId ?? undefined, repositoryId)
-                        .then((result) => {
-                          if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current && result.message) setCommitMsg(result.message);
-                        })
-                        .catch((error) => {
-                          if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current) setUiError(friendlyError(tr("gitview.generate"), error));
-                        })
-                        .finally(() => {
-                          if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current) setGenerating(false);
-                        });
-                    }}
-                  >{tr("gitview.generate")}</Button>
-                  <Button
-                    size="sm"
-                    iconStart={SyncIcon}
-                    busy={busyRemote === "sync"}
-                    disabled={busy || busyRemote !== null || !remoteTargetAvailable}
-                    title={tr("gitview.commitAndSyncHint")}
-                    onClick={() => void runRemote("sync")}
-                  >{tr("gitview.syncRepository")}</Button>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    className="git-commit-submit"
-                    iconStart={CheckIcon}
-                    busy={busy && !!commitMsg.trim()}
-                    disabled={!commitMsg.trim() || busy}
-                    title={tr("gitview.commitShortcutHint")}
-                    onClick={() => void run(commitStaged)}
-                  >{tr("gitview.commit")}</Button>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {landingIsolation && projectId && sessionId && (
-            <LandingBar
-              key={sessionId}
-              host={host}
-              projectId={projectId}
-              sessionId={sessionId}
-              repositoryId={repositoryId}
-              uncommitted={all.length}
-              onReviewConflicts={conflictIsolation && reviewView !== "conflicts" ? () => updateReviewScope("conflicts") : undefined}
-            />
-          )}
-        </div>
-      )}
-
-      {tab === "log" && (
+  const renderLog = () => (
         <div className={`git-master-detail git-log-layout ${mobileDetail ? "detail-open" : ""}`}>
           <section className="git-master-pane" aria-label={tr("gitview.tabLog")}>
             <div className="git-log-toolbar">
@@ -1884,7 +1634,7 @@ export default function GitView({
                 <TextInput uiSize="sm" value={graphQuery} placeholder={tr("gitview.searchCommitsAuthorsOrRefs")} aria-label={tr("gitview.searchCommitLog")} onChange={(event) => setGraphQuery(event.target.value)} />
                 {graphQuery && <IconButton icon={CloseIcon} size="sm" variant="ghost" className="source-search-clear" label={tr("gitview.clearSearch")} onClick={() => setGraphQuery("")} />}
               </div>
-              {branchChips.length > 0 && <Select
+              {!phone && branchChips.length > 0 && <Select
                 label={tr("gitview.filterByBranch")}
                 ariaLabel={tr("gitview.filterByBranch")}
                 value={graphRef}
@@ -1892,7 +1642,7 @@ export default function GitView({
                 onChange={setGraphRef}
                 className="git-log-branch-filter"
               />}
-              <ViewOptionsMenu prefs={prefs} log />
+              {!phone && <ViewOptionsMenu prefs={prefs} log />}
             </div>
             <div className="git-graph" data-graph={prefs.logGraph ? "on" : "off"}>
               {!loadError && visibleGraph.length === 0 && <EmptyState mark={<UiIcon icon={graphQuery || graphRef ? SearchIcon : CommitIcon} size="lg" />} title={graphQuery || graphRef ? tr("gitview.noCommitsMatchThisFilter") : tr("gitview.noCommitsYet")} />}
@@ -1902,7 +1652,7 @@ export default function GitView({
                   setSelected(null);
                   setMobileDetail(true);
                 }}>
-                  {prefs.logGraph && row && !graphQuery && !graphRef && <GraphSvg row={row} />}
+                  {!phone && prefs.logGraph && row && !graphQuery && !graphRef && <GraphSvg row={row} />}
                   <AuthorAvatar name={commit.author} size="sm" />
                   <span className="git-graph-copy">
                     <span className="git-graph-subject-line">
@@ -1940,22 +1690,22 @@ export default function GitView({
                     {selectedCommit && selectedCommit.refs.length > 0 && <div className="git-commit-detail-refs"><RefBadges refs={selectedCommit.refs} remotes={remoteNames} /></div>}
                   </div>
                 </div>
-                <DiffPrefsToolbar scope={gitViewScope} />
+                {!phone && <DiffPrefsToolbar scope={gitViewScope} />}
                 {commitDiffLoading ? <DiffSkeleton /> : commitDiffError ? (
                   <div className="source-inline-status error" role="alert">
                     <span>{commitDiffError}</span>
                     <Button size="sm" onClick={() => setCommitDiffRetry((value) => value + 1)}>{tr("common.retry")}</Button>
                   </div>
-                ) : commitDiff ? <CommitFiles key={commitSel} diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} /> : <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />}
+                ) : commitDiff ? <CommitFiles key={commitSel} diff={commitDiff} split={diffSplit} wrap={diffWrap} /> : <DiffContent diff={commitDiff} split={diffSplit} wrap={diffWrap} />}
               </>
             )}
           </section>
         </div>
-      )}
+  );
 
-      {tab === "branches" && (
+  const renderBranches = () => (
         <div className="git-resource-page">
-          <div className="git-resource-head">
+          {!phone && <div className="git-resource-head">
             <div className="git-resource-head-copy">
               <h2>{tr("gitview.branchesAmpWorktrees")}</h2>
               <p>{tr("gitview.switchContextOrStartAnIsolated")}</p>
@@ -1977,7 +1727,7 @@ export default function GitView({
                 setShowTreeForm(false);
               }}>{tr("gitview.createPr")}</Button>}
             </div>
-          </div>
+          </div>}
 
           {showPrForm && isPrimaryRepository && Slot && <Slot slot="git.change-request.create" context={{ projectId, sessionId, selectedProvider: selectedChangeProvider, onSelectProvider: setSelectedChangeProvider, onClose: () => { setShowPrForm(false); setSelectedChangeProvider(null); } }} />}
 
@@ -2212,16 +1962,16 @@ export default function GitView({
           </div>
           <RepoStackPanel projectId={projectId} repositoryId={repositoryId} />
         </div>
-      )}
+  );
 
-      {tab === "stashes" && (
+  const renderStashes = () => (
         <div className="git-resource-page">
-          <div className="git-resource-head">
+          {!phone && <div className="git-resource-head">
             <div className="git-resource-head-copy">
               <h2>{tr("gitview.tabStashes")}</h2>
               <p>{tr("gitview.temporarilySetAsideLocalChanges")}</p>
             </div>
-          </div>
+          </div>}
           <form className="git-stash-composer" onSubmit={(event) => {
             event.preventDefault();
             if (busy || all.length === 0) return;
@@ -2249,7 +1999,17 @@ export default function GitView({
                         <span aria-hidden="true"> · </span><When value={stash.date} style={prefs.dateStyle} />
                       </span>
                     </div>
-                    <div className="git-stash-actions">
+                    {phone ? <Menu label={tr("gitphone.moreActions")} title={stash.ref} phonePresentation="sheet" entries={[
+                      { id: "apply", label: tr("common.apply"), icon: StashApplyIcon, disabled: busy, onSelect: () => void run(() => api.gitStashApply(projectId, stash.ref, sessionId ?? undefined, repositoryId)) },
+                      { id: "drop", label: tr("gitview.drop"), detail: tr("gitphone.asksFirst"), icon: DeleteIcon, danger: true, disabled: busy, onSelect: () => setConfirmRequest({
+                        title: tr("gitview.dropStashQuestion"),
+                        description: tr("gitview.stashWillBePermanentlyDeleted", { ref: stash.ref }),
+                        confirmLabel: tr("gitview.dropStash"),
+                        action: () => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined, repositoryId),
+                      }) },
+                    ]}>
+                      {(trigger) => <IconButton {...trigger} icon={MoreIcon} variant="ghost" label={tr("gitphone.moreActions")} />}
+                    </Menu> : <div className="git-stash-actions">
                       <Button size="sm" iconStart={StashApplyIcon} disabled={busy} onClick={() => void run(() => api.gitStashApply(projectId, stash.ref, sessionId ?? undefined, repositoryId))}>{tr("common.apply")}</Button>
                       <IconButton icon={DeleteIcon} size="sm" variant="danger" label={`${tr("gitview.drop")} ${stash.ref}`} title={tr("gitview.drop")} disabled={busy} onClick={() => setConfirmRequest({
                         title: tr("gitview.dropStashQuestion"),
@@ -2257,14 +2017,539 @@ export default function GitView({
                         confirmLabel: tr("gitview.dropStash"),
                         action: () => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined, repositoryId),
                       })} />
-                    </div>
+                    </div>}
                   </article>
                 );
               })}
             </div>
           ) : null}
         </div>
+  );
+
+  if (phone && status) {
+    const applyStagePlan = async (plan: { stage: string[]; unstage: string[] }) => {
+      if (plan.unstage.length) await api.gitUnstage(projectId, plan.unstage, sessionId ?? undefined, repositoryId);
+      if (plan.stage.length) await api.gitStage(projectId, plan.stage, sessionId ?? undefined, repositoryId);
+    };
+    return (
+      <GitPhoneView
+        key={`${gitViewScope}\0${phoneOpening}`}
+        {...(host ? { host } : {})}
+        projectId={projectId}
+        sessionId={sessionId}
+        {...(repositoryId ? { repositoryId } : {})}
+        status={status}
+        fileStats={fileStats}
+        prefs={prefs}
+        prefsScope={gitViewScope}
+        picks={phonePicks[gitViewScope] ?? NO_PICKS}
+        setPicks={(next) => setPhonePicks((current) => ({ ...current, [gitViewScope]: next }))}
+        busy={busy}
+        feedback={feedback}
+        overlay={confirmDialog}
+        isolated={isolatedReview}
+        isolationTarget={isolatedReview && session?.isolation ? session.isolation.targetBranch : null}
+        isolationState={session?.isolation?.state ?? null}
+        landingActive={landingIsolation}
+        conflictFiles={conflictIsolation ? conflictIsolation.conflict?.files ?? [] : null}
+        // A turn that ends may have committed without touching the status counts.
+        headRevision={`${graph[0]?.sha ?? ""}\0${session && isolationBlocksUserMutation(session.status) ? "working" : session?.updatedAt ?? ""}`}
+        repository={{
+          options: repositoryOptions,
+          selectedId: selectedRepositoryId,
+          alias: selectedRepository?.alias ?? null,
+          choose: chooseRepository,
+        }}
+        identity={Slot && isPrimaryRepository ? <Slot slot="git.repository.identity" context={{ projectId, sessionId }} /> : null}
+        remote={{
+          name: selectedRemoteName,
+          choices: remoteChoices,
+          available: remoteTargetAvailable,
+          problem: remoteOptionsError || tr("gitview.noGitRemoteConfigured"),
+          busyStep: autoRebaseBusy ? "sync" : busyRemote,
+          blocked: remoteBlocked,
+          run: (step) => { void runRemote(step); },
+          choose: (next) => {
+            setStoredRemoteName(next);
+            setGitRemoteSelection(projectId, sessionId, next, repositoryId);
+          },
+          retry: () => { void refresh(); retryRemoteInspection(); },
+        }}
+        branchCount={branches.branches.length}
+        stashCount={stashes.length}
+        page={phonePage}
+        setPage={(next) => {
+          setPhonePage(next);
+          // Leaving a page leaves whatever it had open.
+          if (!next) { setMobileDetail(false); setCommitSel(null); }
+        }}
+        file={!phonePage && mobileDetail && selected ? selected : null}
+        openFile={openFile}
+        closeFile={() => setMobileDetail(false)}
+        commitTitle={phonePage?.kind === "history" && mobileDetail && commitSel ? selectedCommit?.shortSha ?? commitSel.slice(0, 7) : null}
+        closeCommit={() => { setMobileDetail(false); setCommitSel(null); }}
+        renderFileDiff={renderFileDiff}
+        renderLog={renderLog}
+        renderBranches={renderBranches}
+        renderStashes={renderStashes}
+        renderConflicts={() => sessionId ? <ConflictReviewPanel key={sessionId} sessionId={sessionId} conflictKey={conflictKey} requestedPath={conflictRequest} wrap={prefs.phoneWrap} /> : null}
+        renderCompare={(path, onPath) => <BranchReviewPanel
+          key={`${workspacePresentationKey("git-branch-review", projectId, sessionId ?? null)}:${gitViewScope}`}
+          target={{ projectId, sessionId, repositoryId }}
+          host={host}
+          prefs={prefs}
+          prefsScope={gitViewScope}
+          workspace={selectedRepository?.path ?? session?.worktreePath ?? project?.path ?? ""}
+          branches={branches.branches}
+          missing={workspaceInvalid || selectedRepository?.state === "missing" || session?.worktreeState === "missing"}
+          phone={{ path, onPath }}
+        />}
+        branchActions={[
+          { id: "new-branch", label: tr("gitview.newBranch"), icon: BranchIcon, onSelect: () => { setShowBranchForm(true); setShowTreeForm(false); setShowPrForm(false); } },
+          ...(isPrimaryRepository ? [
+            { id: "new-worktree", label: tr("gitview.newWorktree"), icon: WorktreeIcon, onSelect: () => { setShowTreeForm(true); setShowBranchForm(false); setShowPrForm(false); } },
+            { id: "new-pr", label: tr("gitview.createPr"), icon: PullRequestIcon, onSelect: () => { setShowPrForm(true); setShowBranchForm(false); setShowTreeForm(false); } },
+          ] : []),
+        ]}
+        logActions={[
+          ...(branchChips.length > 0 ? [
+            { heading: tr("gitview.filterByBranch") },
+            ...branchFilterOptions.map((option): MenuEntry => ({
+              id: `branch:${option.value}`,
+              kind: "radio",
+              checked: graphRef === option.value,
+              label: option.label,
+              onSelect: () => setGraphRef(option.value),
+            })),
+            "separator" as const,
+          ] : []),
+          ...logDisplayEntries(prefs),
+        ]}
+        openConflict={(path) => {
+          if (path !== undefined) setConflictRequest((current) => ({ path, seq: (current?.seq ?? 0) + 1 }));
+          setPhonePage({ kind: "conflicts" });
+        }}
+        stageFile={(file, stage) => void run(() => stage
+          ? api.gitStage(projectId, [file.path], sessionId ?? undefined, repositoryId)
+          : api.gitUnstage(projectId, [file.path], sessionId ?? undefined, repositoryId))}
+        discardFile={requestDiscard}
+        stash={() => void run(async () => {
+          await api.gitStashPush(projectId, undefined, sessionId ?? undefined, repositoryId);
+          setSelected(null);
+          setMobileDetail(false);
+        })}
+        revertAll={() => setConfirmRequest({
+          title: tr("gitview.revertAllChangesQuestion"),
+          description: tr("pendingchangesbar.undoAllChangesDescription", { count: all.length }),
+          confirmLabel: tr("gitview.revertAll"),
+          action: async () => {
+            if (status.staged.length) await api.gitFolder(projectId, "", "unstage", sessionId ?? undefined, repositoryId);
+            await api.gitFolder(projectId, "", "discard", sessionId ?? undefined, repositoryId);
+          },
+        })}
+        abortMerge={() => setConfirmRequest({
+          title: tr("gitphone.abortMergeQuestion"),
+          description: tr("gitphone.abortMergeDescription"),
+          confirmLabel: tr("gitphone.abortMerge"),
+          action: () => api.gitMergeAbort(projectId, sessionId ? { sessionId, ...(repositoryId ? { repositoryId } : {}) } : (repositoryId ? { repositoryId } : undefined)),
+        })}
+        resolveWithAgent={(target) => {
+          void openConflictAgentDraft(target).then((ready) => {
+            // The draft waits in the chat's composer: that is where to go next.
+            if (ready) closeAllModules();
+          });
+        }}
+        resolveIsolation={() => {
+          if (!sessionId) return;
+          void run(async () => {
+            await api.isolationResolve(sessionId);
+            closeAllModules();
+          });
+        }}
+        conflictAgentTarget={settings.conflictAgentTarget}
+        conflictAgentBusy={conflictAgentBusy !== null}
+        commitMessage={commitMsg}
+        setCommitMessage={setCommitMsg}
+        generating={generating}
+        generateMessage={(plan) => {
+          const generation = scopeGeneration.current;
+          const requestedScope = commitScopeKey;
+          setGenerating(true);
+          void applyStagePlan(plan)
+            .then(() => api.gitCommitMessage(projectId, sessionId ?? undefined, repositoryId))
+            .then((result) => {
+              if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current && result.message) setCommitMsg(result.message);
+            })
+            .catch((error) => {
+              if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current) setUiError(friendlyError(tr("gitview.generate"), error));
+            })
+            .finally(() => {
+              if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current) setGenerating(false);
+              void refresh();
+            });
+        }}
+        commit={async (plan, sync) => {
+          setBusy(true);
+          let done = false;
+          try {
+            await applyStagePlan(plan);
+            await commitStaged();
+            done = true;
+          } catch (cause) {
+            reportGitError(tr("gitview.couldntUpdateTheRepository"), cause);
+          }
+          // A commit that failed may still have changed the index: show it.
+          await refresh();
+          setBusy(false);
+          if (done && sync) await runRemote("sync", true);
+          return done;
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="git-page" data-density={prefs.density}>
+      <WorkspaceSurfaceHeader
+        className="source-control-head"
+        label={tr("gitview.sourceControl")}
+        scope={repositoryOptions.length > 1 ? <RepositoryScopePicker
+          mode="all"
+          label={tr("gitview.repository")}
+          repositories={repositoryOptions}
+          value={selectedRepositoryId ?? null}
+          onChange={chooseRepository}
+        /> : undefined}
+        context={<div className="source-control-title">
+          {/* Title + close come from the shared ContextRail / ModuleView header. */}
+          <span className="source-branch" title={status?.upstream ? tr("gitview.trackingValue", { upstream: status.upstream }) : status?.branch || undefined}>
+            <UiIcon icon={BranchIcon} size="sm" />
+            <span className="mono">{status?.branch || tr("gitview.detachedHead")}</span>
+          </span>
+          {status && statusMatchesSelectedRemote && (status.ahead > 0 || status.behind > 0) && (
+            <span className="git-ahead-behind">
+              {status.ahead > 0 && <span className="ahead" title={tr("gitview.commitsToPushValue", { count: status.ahead })}>↑ {status.ahead}</span>}
+              {status.behind > 0 && <span className="behind" title={tr("gitview.commitsToPullValue", { count: status.behind })}>↓ {status.behind}</span>}
+            </span>
+          )}
+          {selectedRepository && repositoryOptions.length > 1 && <span className="muted source-repo-alias" title={selectedRepository.path}>{selectedRepository.alias}</span>}
+          {Slot && isPrimaryRepository && <Slot slot="git.repository.identity" context={{ projectId, sessionId }} />}
+        </div>}
+        actions={<div className="source-remote-actions" aria-label={tr("gitview.remoteRepositoryActions")}>
+          <div className="git-remote-context">
+            {remoteChoices.length > 1 ? (
+              <Select
+                label={tr("gitview.remote")}
+                ariaLabel={tr("gitview.chooseGitRemote")}
+                value={selectedRemoteName}
+                options={remoteChoices}
+                onChange={(next) => {
+                  if (!projectId) return;
+                  setStoredRemoteName(next);
+                  setGitRemoteSelection(projectId, sessionId, next, repositoryId);
+                }}
+                disabled={busy || busyRemote !== null || autoRebaseBusy || !remoteTargetAvailable}
+                className="git-remote-picker"
+              />
+            ) : (
+              <span
+                className={`git-remote-name${remoteTargetAvailable ? "" : " is-unavailable"}`}
+                title={selectedRemote ? `${remoteDetail(selectedRemote)} · ${tr("gitview.remoteTransportHint")}` : tr("gitview.remoteTransportHint")}
+              >
+                <span className="sr-only">{tr("gitview.remote")} </span>
+                {remoteTargetAvailable ? selectedRemoteName : tr("gitview.remoteUnavailable")}
+              </span>
+            )}
+          </div>
+          <div className="source-remote-buttons">
+            {remoteOptionsError && <Button size="sm" variant="ghost" onClick={retryRemoteInspection}>{tr("common.retry")}</Button>}
+            <Button
+              size="sm"
+              className="source-action-btn source-sync-btn"
+              iconStart={SyncIcon}
+              busy={busyRemote !== null || autoRebaseBusy}
+              disabled={remoteBlocked}
+              title={tr("gitview.syncWithValue", { remote: selectedRemoteName })}
+              onClick={() => void runRemote("sync")}
+            >
+              {busyRemote ? remoteLabel[busyRemote].busy : autoRebaseBusy ? remoteLabel.sync.busy : remoteLabel.sync.idle}
+            </Button>
+            <Menu
+              label={tr("gitview.remoteRepositoryActions")}
+              align="end"
+              entries={(["fetch", "pull", "push"] as const).map((step) => ({
+                id: step,
+                label: remoteLabel[step].idle,
+                detail: selectedRemoteName,
+                icon: step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon,
+                disabled: remoteBlocked,
+                onSelect: () => { void runRemote(step); },
+              }))}
+            >
+              {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" label={tr("gitview.remoteRepositoryActions")} disabled={remoteBlocked} />}
+            </Menu>
+            <IconButton icon={RefreshIcon} size="sm" className="source-refresh-btn" label={tr("gitview.refreshSourceControl")} disabled={busy || busyRemote !== null || autoRebaseBusy} onClick={() => { void refresh(); retryRemoteInspection(); }} />
+          </div>
+        </div>}
+      />
+
+      {(remoteOptionsError || remoteOptions.length === 0) && <div className="source-inline-status git-remote-error" role="status">
+        <UiIcon icon={WarningIcon} size="sm" />
+        <span>{remoteOptionsError || tr("gitview.noGitRemoteConfigured")}</span>
+      </div>}
+
+      {feedback}
+
+      {confirmDialog}
+
+      <SourceControlTabs
+        value={tab}
+        tabs={[
+          { id: "changes", label: tabLabel(tr("gitview.tabChanges"), all.length, conflictCount > 0 ? "danger" : all.length > 0 ? "accent" : "neutral") },
+          { id: "log", label: tr("gitview.tabLog") },
+          { id: "branches", label: tabLabel(tr("gitview.tabBranches"), branches.branches.length) },
+          { id: "stashes", label: tabLabel(tr("gitview.tabStashes"), stashes.length) },
+        ]}
+        onChange={selectTab}
+      />
+
+      {tab === "changes" && (
+        <div className="git-changes-layout">
+          <div className="source-subbar">
+            <div className="git-review-scope source-segmented" role="group" aria-label={tr("gitview.reviewScope")}>
+              {(["working", "branch"] as const).map((scope) => <Button key={scope} size="sm" variant="ghost" aria-pressed={reviewView === scope} onClick={() => {
+                updateReviewScope(scope);
+                if (projectId) setReviewScope(projectId, scope);
+              }}>{tr(scope === "working" ? "gitview.workingTree" : "gitview.branchVsBase")}</Button>)}
+              {conflictIsolation && (
+                <Button size="sm" variant="ghost" className="git-review-scope-conflicts" aria-pressed={reviewView === "conflicts"} onClick={() => updateReviewScope("conflicts")}>
+                  {tr("gitview.conflicts")}
+                </Button>
+              )}
+            </div>
+            <span className="header-spacer" />
+            {reviewView === "working" && <ViewOptionsMenu prefs={prefs} />}
+          </div>
+
+          {reviewView === "conflicts" && sessionId && (
+            <ConflictReviewPanel key={sessionId} sessionId={sessionId} conflictKey={conflictKey} requestedPath={conflictRequest} wrap={prefs.wrap} />
+          )}
+
+          {reviewView === "branch" && projectId && (
+            <BranchReviewPanel key={`${workspacePresentationKey("git-branch-review", projectId, sessionId ?? null)}:${gitViewScope}`} target={{ projectId, sessionId, repositoryId }} host={host} prefs={prefs}
+              prefsScope={gitViewScope} workspace={selectedRepository?.path ?? session?.worktreePath ?? project?.path ?? ""}
+              branches={branches.branches} missing={workspaceInvalid || selectedRepository?.state === "missing" || session?.worktreeState === "missing"} />
+          )}
+
+          {reviewView === "working" && (
+            <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}${all.length === 0 ? " is-clean" : ""}`}>
+              <section className="git-master-pane" aria-label={tr("gitview.changedFiles")}>
+                {all.length > 0 && <div className="git-pane-toolbar">
+                  <div className="git-pane-summary">
+                    <strong>{all.length === 1 ? tr("gitview.oneChangedFile") : tr("gitview.changedFilesValue", { count: all.length })}</strong>
+                    <span className="muted">{[
+                      conflictCount > 0 ? tr("gitview.conflictedValue", { count: conflictCount }) : "",
+                      tr("gitview.stagedValue", { count: stagedCount }),
+                    ].filter(Boolean).join(" · ")}</span>
+                  </div>
+                  {(totalFileStats.additions > 0 || totalFileStats.deletions > 0) && (
+                    <span
+                      className="diff-stat"
+                      aria-label={tr("pendingchangesbar.valueAdditionsValueDeletions", {
+                        additions: totalFileStats.additions,
+                        deletions: totalFileStats.deletions,
+                      })}
+                    >
+                      <span>+{totalFileStats.additions}</span>
+                      <span>−{totalFileStats.deletions}</span>
+                    </span>
+                  )}
+                  <div className="git-pane-actions">
+                    {(status?.unstaged.length || status?.untracked.length || status?.conflicted.length) ? (
+                      <Button size="sm" variant="ghost" className="git-stage-all" iconStart={StageIcon} disabled={busy} title={tr("gitview.stageAll")} onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined, repositoryId))}>
+                        {tr("gitview.stageAll")}
+                      </Button>
+                    ) : null}
+                    {(status?.unstaged.length || status?.untracked.length) ? (
+                      <IconButton icon={UndoIcon} size="sm" variant="ghost" className="git-file-discard" label={tr("gitview.revertAll")} disabled={busy} onClick={() => setConfirmRequest({
+                        title: tr("gitview.revertAllChangesQuestion"),
+                        description: tr("pendingchangesbar.undoAllChangesDescription", {
+                          count: (status?.unstaged.length ?? 0) + (status?.untracked.length ?? 0),
+                        }),
+                        confirmLabel: tr("gitview.revertAll"),
+                        action: () => api.gitFolder(projectId, "", "discard", sessionId ?? undefined, repositoryId),
+                      })} />
+                    ) : null}
+                    {stagedCount > 0 && (
+                      <IconButton icon={MinusIcon} size="sm" variant="ghost" label={tr("gitview.unstageAll")} disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined, repositoryId))} />
+                    )}
+                  </div>
+                </div>}
+                <div className="git-change-groups">
+                  {/* The default (bare) variant: the pane is already the card, and a
+                      Look repaints compact/panel states as cards of their own. */}
+                  {all.length === 0 && <EmptyState
+                    mark={<UiIcon icon={CheckIcon} size="lg" />}
+                    title={tr("gitview.workingTreeClean")}
+                    description={tr("gitview.localEditsWillAppearHere")}
+                  />}
+                  {changeGroups.map((group) => (
+                    <ChangeSection
+                      key={group.id}
+                      group={group}
+                      view={prefs.changesView}
+                      lineStats={prefs.lineStats}
+                      closed={closedGroups}
+                      selected={selected}
+                      busy={busy}
+                      fileStats={fileStats}
+                      ResourceLink={ResourceLink}
+                      resourceFor={resourceFor}
+                      onToggle={toggleGroup}
+                      onOpen={openFile}
+                      onDragFile={host?.resources.drag ? dragFile : undefined}
+                      onStage={(file) => void run(() => file.staged
+                        ? api.gitUnstage(projectId, [file.path], sessionId ?? undefined, repositoryId)
+                        : api.gitStage(projectId, [file.path], sessionId ?? undefined, repositoryId))}
+                      onDiscard={requestDiscard}
+                      onStageMany={stageMany}
+                    />
+                  ))}
+                </div>
+              </section>
+              {all.length > 0 && <section className="git-detail-pane" aria-label={tr("gitview.changeDetails")}>
+                {!selected ? (
+                  <EmptyState
+                    title={tr("gitview.selectAFileToReview")}
+                    description={tr("gitview.chooseAFileFromTheChangeList")}
+                  />
+                ) : (
+                  <>
+                    <div className="git-detail-head">
+                      <div className="git-mobile-detail-head">
+                        <IconButton icon={BackIcon} size="sm" variant="ghost" label={tr("gitview.backToChanges")} onClick={() => setMobileDetail(false)} />
+                      </div>
+                      {selectedFile && <StatusChip status={selectedFile.status} staged={selectedFile.staged} />}
+                      <div className="git-detail-title" title={selected.path}>
+                        <strong>{fileIdentity(selected.path).name}</strong>
+                        <span className="muted"><span className="mono">{fileIdentity(selected.path).directory}</span>{fileIdentity(selected.path).directory ? " · " : ""}{selected.staged ? tr("gitview.stagedChangesLower") : tr("gitview.workingTreeChanges")}</span>
+                      </div>
+                      {(addCount + delCount > 0) && <span className="diff-stat"><span>+{addCount}</span><span>−{delCount}</span></span>}
+                      {selectedFile && <div className="git-detail-actions">
+                        {!selectedFile.staged && selectedFile.status !== "conflicted" && <IconButton icon={UndoIcon} size="sm" variant="ghost" className="git-file-discard" label={tr("gitview.revertValue", { path: selectedFile.path })} title={tr("gitview.revert")} disabled={busy} onClick={() => requestDiscard(selectedFile)} />}
+                        <Button size="sm" iconStart={selectedFile.staged ? MinusIcon : StageIcon} disabled={busy} onClick={() => void run(() => selectedFile.staged
+                          ? api.gitUnstage(projectId, [selectedFile.path], sessionId ?? undefined, repositoryId)
+                          : api.gitStage(projectId, [selectedFile.path], sessionId ?? undefined, repositoryId))}>
+                          {selectedFile.staged ? tr("gitview.unstage") : selectedFile.status === "conflicted" ? tr("gitview.markResolved") : tr("gitview.stage")}
+                        </Button>
+                      </div>}
+                    </div>
+                    <DiffPrefsToolbar scope={gitViewScope} />
+                    {renderFileDiff()}
+                  </>
+                )}
+              </section>}
+            </div>
+          )}
+
+          {reviewView === "working" && status && status.staged.length > 0 && (
+            <section className="git-commit-composer ui-field-frame" aria-label={tr("gitview.commitStagedChanges")}>
+              <Textarea
+                className="git-commit-msg"
+                minRows={1}
+                maxRows={4}
+                autoGrow
+                aria-label={tr("gitview.commitMessage")}
+                placeholder={tr("gitview.commitMessage")}
+                value={commitMsg}
+                onChange={(event) => setCommitMsg(event.target.value)}
+                onKeyDown={(event) => {
+                  if (isImeComposing(event)) return;
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && commitMsg.trim() && !busy) {
+                    event.preventDefault();
+                    void run(commitStaged);
+                  }
+                }}
+              />
+              <div className="git-commit-rail">
+                <div className="git-commit-heading">
+                  <strong>{status.staged.length === 1 ? tr("gitview.commitOneStagedFile") : tr("gitview.commitStagedFilesValue", { count: status.staged.length })}</strong>
+                  <span className="git-commit-branch" title={status.branch || "HEAD"}>
+                    <UiIcon icon={BranchIcon} size="sm" />
+                    <span className="mono">{status.branch || "HEAD"}</span>
+                  </span>
+                  {subjectLength > 0 && (
+                    <span className="git-commit-counter" data-over={subjectLength > SUBJECT_SOFT_LIMIT ? "true" : undefined} title={tr("gitview.subjectLengthValue", { count: subjectLength, limit: SUBJECT_SOFT_LIMIT })}>
+                      {subjectLength}/{SUBJECT_SOFT_LIMIT}
+                    </span>
+                  )}
+                </div>
+                <div className="git-commit-actions">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    iconStart={AssistIcon}
+                    title={tr("gitview.generateWithAi")}
+                    busy={generating}
+                    disabled={generating || busy}
+                    onClick={() => {
+                      const generation = scopeGeneration.current;
+                      const requestedScope = commitScopeKey;
+                      setGenerating(true);
+                      void api.gitCommitMessage(projectId, sessionId ?? undefined, repositoryId)
+                        .then((result) => {
+                          if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current && result.message) setCommitMsg(result.message);
+                        })
+                        .catch((error) => {
+                          if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current) setUiError(friendlyError(tr("gitview.generate"), error));
+                        })
+                        .finally(() => {
+                          if (generation === scopeGeneration.current && requestedScope === commitScopeRef.current) setGenerating(false);
+                        });
+                    }}
+                  >{tr("gitview.generate")}</Button>
+                  <Button
+                    size="sm"
+                    iconStart={SyncIcon}
+                    busy={busyRemote === "sync"}
+                    disabled={busy || busyRemote !== null || !remoteTargetAvailable}
+                    title={tr("gitview.commitAndSyncHint")}
+                    onClick={() => void runRemote("sync")}
+                  >{tr("gitview.syncRepository")}</Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    className="git-commit-submit"
+                    iconStart={CheckIcon}
+                    busy={busy && !!commitMsg.trim()}
+                    disabled={!commitMsg.trim() || busy}
+                    title={tr("gitview.commitShortcutHint")}
+                    onClick={() => void run(commitStaged)}
+                  >{tr("gitview.commit")}</Button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {landingIsolation && projectId && sessionId && (
+            <LandingBar
+              key={sessionId}
+              host={host}
+              projectId={projectId}
+              sessionId={sessionId}
+              repositoryId={repositoryId}
+              uncommitted={all.length}
+              onReviewConflicts={conflictIsolation && reviewView !== "conflicts" ? () => updateReviewScope("conflicts") : undefined}
+            />
+          )}
+        </div>
       )}
+
+      {tab === "log" && renderLog()}
+
+      {tab === "branches" && renderBranches()}
+
+      {tab === "stashes" && renderStashes()}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { NavigatorButton } from "./PageBar.tsx";
 import { conversationMenuEntries } from "./agentConversationsMenu.ts";
 import { agentLive, type AgentLive } from "./agentLive.ts";
 import { statusLine } from "./agentText.ts";
+import { useAgentSignInNotice } from "./agentSignIn.tsx";
 import { useNow } from "./agentClock.ts";
 import { onAgentPageRequest, putAgent, takeAgentPageRequest, type AgentTab } from "./agentsStore.ts";
 import {
@@ -146,6 +147,7 @@ export default function AgentScreen({
         : <Button size="sm" iconStart={PlayIcon} disabled={busy} onClick={() => void guard(() => runAgent(agent))}>{tr("scheduleview.runNow")}</Button>
     );
   const tone = statusTone(live.phase);
+  const signIn = useAgentSignInNotice(host, agent);
 
   return (
     <div className="agent-screen" data-phase={live.phase} aria-busy={busy || undefined}>
@@ -193,14 +195,15 @@ export default function AgentScreen({
         </div>
       </header>
 
-      {error && (
+      {(error || signIn) && (
         <div className="agent-notices">
-          <Notice
+          {signIn}
+          {error && <Notice
             tone="error"
             actions={<IconButton icon={CloseIcon} size="sm" label={tr("common.close")} onClick={onDismissError} />}
           >
             {error}
-          </Notice>
+          </Notice>}
         </div>
       )}
 

@@ -87,7 +87,7 @@ html[data-theme-style="macos"][data-appearance="dark"] {
   --macos-fill-control: rgba(255, 255, 255, 0.25);
   --macos-fill-control-pressed: rgba(255, 255, 255, 0.34);
   --macos-fill-well: rgba(255, 255, 255, 0.1);
-  --macos-fill-segment: rgba(255, 255, 255, 0.24);
+  --macos-fill-segment: rgba(255, 255, 255, 0.2);
   --macos-fill-check: rgba(255, 255, 255, 0.25);
   --macos-fill-switch: rgba(255, 255, 255, 0.14);
   --macos-knob: #e3e3e3;
@@ -208,14 +208,6 @@ html[data-theme-style="macos"] .menu-kbd {
   color: var(--text-dim); font: 400 var(--font-meta)/1 var(--ui-font-family);
 }
 
-/* Help tag: a small light plate on the surface stroke. */
-html[data-theme-style="macos"] .ui-tooltip {
-  padding: 4px 8px;
-  border-color: var(--macos-stroke-surface);
-  border-radius: calc(5px * var(--macos-round));
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
-  color: var(--text);
-}
 
 /* Alert and sheet: the content surface on the surface stroke under the alert
    shadow; title and commands share it, with no rules or bands between. */

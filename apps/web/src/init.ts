@@ -12,7 +12,7 @@ import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./proje
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
 import { projectIsolationLevel } from "@polyth/contracts";
 import { CONNECTION_RESTORED_EVENT, setConnectionGate } from "@polyth/contracts/transport-retry";
-import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, reconcilePushSubscription, registerServiceWorker } from "./push.ts";
 import { alertPersonMessage, installNotify } from "./notify.ts";
@@ -39,7 +39,8 @@ import { shouldRefreshRuntimeFeatures } from "./runtimeFeaturesSync.ts";
 import { flushClientPersistence, type PersistenceScope } from "./clientPersistence.ts";
 import { hydrateLocalMutationIntent, loadLocalMutationIntent, reconcileLocalMutationIntent, submitDirectPrompt } from "./mutationIntent.ts";
 import { createSessionWithRecovery } from "./sessionCreateRecovery.ts";
-import { isNativeMobile, isPolythLinkLoopbackOrigin, returnToMobileConnectionHub } from "@polyth/mobile/runtime";
+import { isNativeMobile, isPolythLinkLoopbackOrigin } from "@polyth/mobile/runtime";
+import { isLinkClientPage, returnToConnectionHub } from "./nativeConnections.ts";
 import { loadScopedDraftRecord, scopedDraftCacheKey, updateScopedDraftRecord, type ScopedDraftRecord } from "./draftRecord.ts";
 import { clientPersistenceScope, persistenceScopeIsCurrent } from "./reliabilityContext.ts";
 import {
@@ -596,7 +597,7 @@ function publishSyncStatus(status: SyncStatus): void {
 }
 
 function verifyNativeLoopbackProxy(): Promise<void> {
-  if (!isNativeMobile() || !isPolythLinkLoopbackOrigin(location.origin)
+  if (!isLinkClientPage() || !isPolythLinkLoopbackOrigin(location.origin)
     || returningToConnectionHub) return Promise.resolve();
   if (nativeProxyProbe) return nativeProxyProbe;
   nativeProxyProbe = (async () => {
@@ -628,10 +629,7 @@ function verifyNativeLoopbackProxy(): Promise<void> {
         && (typeof document === "undefined" || document.visibilityState !== "hidden")) {
         returningToConnectionHub = true;
         await flushClientPersistence().catch(() => undefined);
-        await returnToMobileConnectionHub(
-          `${location.pathname}${location.search}${location.hash}`,
-          { resume: true },
-        );
+        await returnToConnectionHub(`${location.pathname}${location.search}${location.hash}`);
       }
     } finally {
       clearTimeout(timeout);
@@ -1731,10 +1729,16 @@ export async function openSession(
   // the loading state so an incomplete WS fragment can never masquerade as the
   // full log.
   if (useCachedView) {
-    if (cachedSession.projectId !== before.activeProjectId) {
-      store.setOpeningSession(sessionId);
-      store.activateProject(cachedSession.projectId);
-    }
+    // The composer needs its draft before it mounts. On the phone that read is
+    // an HTTP request to the app's own loopback, and it waits for a socket like
+    // any other, so it can take seconds on a busy page. The claim makes a slow
+    // read show the loading layer: the previous chat must not stay on screen as
+    // if the tap had done nothing. A fast read never reaches the layer's delay,
+    // and a chat already on screen (a new one, opened as it is created) has
+    // nothing to replace.
+    const projectChanges = cachedSession.projectId !== before.activeProjectId;
+    if (projectChanges || before.activeSessionId !== cachedSessionId) store.setOpeningSession(sessionId);
+    if (projectChanges) store.activateProject(cachedSession.projectId);
     const hydrationClaim = store.getState();
     await hydrateComposerDraft(cachedSessionId);
     if (generation !== openSessionGeneration) return;
@@ -1742,7 +1746,10 @@ export async function openSession(
     if (afterHydration.activeProjectId !== hydrationClaim.activeProjectId
       || afterHydration.activeSessionId !== hydrationClaim.activeSessionId
       || afterHydration.newSessionIntent !== hydrationClaim.newSessionIntent
-      || afterHydration.activePage !== hydrationClaim.activePage) return;
+      || afterHydration.activePage !== hydrationClaim.activePage) {
+      if (afterHydration.openingSessionId === sessionId) store.setOpeningSession(null);
+      return;
+    }
     void reconcileClientMutation(cachedSessionId, true);
     store.activateSession(cachedSessionId);
     activateRuntime(cachedSessionId);
@@ -1916,6 +1923,15 @@ export async function addProject(path: string, name?: string): Promise<Project> 
 
 export async function createProject(path: string, name?: string): Promise<Project> {
   const p = await api.createProject(path, name);
+  store.applyProjectAdded(p);
+  void refreshProjects("reconcile");
+  return p;
+}
+
+/** A project in the Polyth folder: same atomic upsert-and-activate transition,
+ *  with the folder chosen by the server. */
+export async function createManagedProject(input: ManagedProjectInput): Promise<Project> {
+  const p = await api.createManagedProject(input);
   store.applyProjectAdded(p);
   void refreshProjects("reconcile");
   return p;

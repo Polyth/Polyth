@@ -10,6 +10,7 @@ import { useId } from "react";
 import type { Project } from "@polyth/contracts";
 import Picker from "../Picker.tsx";
 import Switch from "../ui/Switch.tsx";
+import Tooltip from "../ui/Tooltip.tsx";
 import ProjectPicker from "../ui/ProjectPicker.tsx";
 import { LockIcon, RepositoriesIcon, UnlockIcon } from "../ui/icons.ts";
 import { Icon } from "../../icons.tsx";
@@ -275,23 +276,26 @@ export default function SessionContextBar({
         {...(branchRefreshing ? { refreshing: true } : {})}
       />
       {onToggleWorkInIsolation && showIsolation && (
-        <span
-          className="context-isolation-control"
-          data-active={workInIsolation ? "true" : undefined}
-          title={multiRepository ? tr("mobile.sessioncontextbar.isolateRepositoriesHint") : tr("isolation.workInIsolationHint")}
+        <Tooltip
+          content={multiRepository ? tr("mobile.sessioncontextbar.isolateRepositoriesHint") : tr("isolation.workInIsolationHint")}
         >
-          <span className="context-isolation-icon" aria-hidden="true">
-            {workInIsolation ? <LockIcon /> : <UnlockIcon />}
+          <span
+            className="context-isolation-control"
+            data-active={workInIsolation ? "true" : undefined}
+          >
+            <span className="context-isolation-icon" aria-hidden="true">
+              {workInIsolation ? <LockIcon /> : <UnlockIcon />}
+            </span>
+            <span id={isolationLabelId} className="context-isolation-label">
+              {tr("isolation.isolate")}
+            </span>
+            <Switch
+              checked={workInIsolation ?? false}
+              onChange={onToggleWorkInIsolation}
+              labelledBy={isolationLabelId}
+            />
           </span>
-          <span id={isolationLabelId} className="context-isolation-label">
-            {tr("isolation.isolate")}
-          </span>
-          <Switch
-            checked={workInIsolation ?? false}
-            onChange={onToggleWorkInIsolation}
-            labelledBy={isolationLabelId}
-          />
-        </span>
+        </Tooltip>
       )}
     </div>
   );

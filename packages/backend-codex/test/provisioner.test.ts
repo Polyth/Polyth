@@ -80,6 +80,28 @@ test("Codex emits explicit disabled configuration and native readback for projec
   } finally { await provisioner.release?.(context); }
 });
 
+test("Codex skips its own approval only for Polyth's tool server, which authorizes every call itself", async () => {
+  const context = contextAt(temporaryDirectory());
+  const provisioner = createCodexProvisioner();
+  const server = (id: string, name: string) => ({
+    capability: { id, kind: "mcp-server" as const, owner: "polyth", scope: "project" as const, revision: `${name}:1`, name, enabled: true, transport: { kind: "stdio" as const, command: "node", args: ["bridge.mjs"], envKeys: [] } },
+    mode: "config" as const, mutability: "session-create" as const,
+  });
+  const plan: HarnessProvisioningPlan = {
+    harnessId: "codex", desiredRevision: "approval-r1", items: [
+      server("polyth.agent-tools", "polyth-agent-tools"),
+      server("polyth.mcp.docs", "docs"),
+    ],
+  };
+  try {
+    await provisioner.apply(context, plan, { mcpSecrets: () => ({}) });
+    const overlay = codexOverlays.peek(context, "codex")!.value;
+    const servers = overlay.mcpServers as Record<string, Record<string, unknown>>;
+    assert.equal(servers["polyth-agent-tools"]!.default_tools_approval_mode, "approve");
+    assert.equal("default_tools_approval_mode" in servers.docs!, false);
+  } finally { await provisioner.release?.(context); }
+});
+
 test("Codex preserves global then harness-specific developer instructions", async () => {
   const storage = temporaryDirectory();
   const context = contextAt(storage);

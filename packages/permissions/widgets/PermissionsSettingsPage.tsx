@@ -1,3 +1,4 @@
+import { rootProjects } from "@polyth/contracts";
 import type { Project } from "@polyth/contracts";
 import { PERMISSION_RISK_REASONS } from "../src/risk.ts";
 import ProjectGlyph from "../../../apps/web/src/components/ProjectGlyph.tsx";
@@ -98,7 +99,7 @@ export default function PermissionsSettingsPage() {
 /** Every project of the Space with the level its chats start from. */
 function ProjectLevels({ state, busy, save }: { state: ApprovalDefaultsState; busy: boolean; save: Save }) {
   const registry = useStore((store) => store.projectRegistry);
-  const projects = registry.status === "ready" ? registry.projects : [];
+  const projects = registry.status === "ready" ? rootProjects(registry.projects) : [];
   const spaceDefault = tr("permissionbanner.useSpaceDefault", { level: levelTitle(state.level) });
   const choose = async (project: Project, value: string) => {
     const next = value === "inherit" ? "inherit" : value as ApprovalLevel;

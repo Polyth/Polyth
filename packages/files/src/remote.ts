@@ -208,7 +208,12 @@ export function createRemoteFileService(
       if (st.kind !== "file") throw new Error(`Not a file: ${rel}`);
       if (st.size > MAX_RAW_BYTES) throw new Error(`File too large to serve raw: ${rel}`);
       const encoded = await collect(host, `cd -- ${shq(root)} && base64 < ${shq(rel)}`);
-      return { data: Buffer.from(encoded.replace(/\s+/g, ""), "base64"), mime: rawMimeOf(rel), size: st.size };
+      return {
+        data: Buffer.from(encoded.replace(/\s+/g, ""), "base64"),
+        mime: rawMimeOf(rel),
+        size: st.size,
+        ...(st.revision ? { revision: st.revision } : {}),
+      };
     },
 
     async write(root, rel, content, opts: WriteOptions = {}) {

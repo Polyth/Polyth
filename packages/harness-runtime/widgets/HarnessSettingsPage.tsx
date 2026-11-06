@@ -5,15 +5,16 @@ import { hiddenModelMatcher } from "@polyth/models";
 import { pickerCatalogModels } from "@polyth/models/model-picker-state";
 import { useModelPrefs } from "@polyth/models/web-prefs";
 import { createApiTransport, type SettingsNavigationTarget, type WebPackageHost } from "@polyth/web-sdk";
-import { BackIcon, Button, ChevronRightIcon, Dialog, DownloadIcon, DragHandleIcon, ExternalLinkIcon, Icon, IconButton, KeyIcon, NewChatIcon, Notice, RefreshIcon, Select, SessionIcon, Spinner, Switch, Tabs, TabPanel, TextInput, Tooltip } from "../../../apps/web/src/components/ui/index.ts";
+import { BackIcon, Button, ChevronRightIcon, ClockIcon, Dialog, DownloadIcon, DragHandleIcon, ExternalLinkIcon, Icon, IconButton, KeyIcon, NewChatIcon, Notice, RefreshIcon, Select, SessionIcon, Spinner, Switch, Tabs, TabPanel, TextInput, Tooltip } from "../../../apps/web/src/components/ui/index.ts";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import { EmptyState, ErrorState, ReadonlyRow, Row, Section } from "../../../apps/web/src/components/settings/parts.tsx";
 import ProviderLogo from "@polyth/models/provider-logo";
 import { canExecute, useHarnesses } from "./harnessData.ts";
 import {
   attachmentFacts, autoCandidates, availabilityLabel, configurationSections, displayVersion, harnessProfileName, harnessSummary, harnessTint as tint, integrationLabel, orderedHarnesses,
-  pendingLabel, projectionFacts, resolvedAuto, routingLabel, runtimeFacts, setupStep, statusTone, supportLabel, type CapabilityFact,
+  pendingLabel, projectionFacts, resolvedAuto, routingLabel, runtimeFacts, setupStep, signInEndsSoon, signInExpiryNote, statusTone, supportLabel, type CapabilityFact,
 } from "./presentation.ts";
+import { hostTranslate } from "./englishTranslate.ts";
 import { useHarnessAccountStatus, useHarnessSignIn, usePendingSignIn, useSetupProjectId } from "./HarnessSignIn.tsx";
 import { PersonDefaultHarnessSection, usePersonDefaultHarness } from "./PersonDefaultHarness.tsx";
 import HarnessAppearance from "./HarnessAppearance.tsx";
@@ -257,7 +258,7 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
   const startUpdate = (row: HarnessSnapshot) => void runHarnessUpdate(row.identity.id, projectId);
 
   /** The one next step that makes a harness usable, or a quiet re-sign-in. */
-  const stepAction = (row: HarnessSnapshot, options: { quiet?: boolean } = {}) => {
+  const stepAction = (row: HarnessSnapshot, options: { quiet?: boolean; primary?: boolean } = {}) => {
     const step = setupStep(row);
     const setupUrl = row.setup?.setupUrl;
     const start = (kind: "install" | "sign-in" | "sign-in-again", command: string) => signIn.start({
@@ -272,7 +273,7 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
     }
     if (step.kind === "sign-in") return <Button size="sm" variant={options.quiet ? "ghost" : "primary"} iconStart={KeyIcon} onClick={() => start("sign-in", step.command)}>{t("action.signIn")}</Button>;
     if (step.kind === "guide") return <a className="ui-btn ui-btn--ghost ui-btn--sm" href={step.url} target="_blank" rel="noreferrer">{t("action.guide")}<Icon icon={ExternalLinkIcon} size="sm" /></a>;
-    if (step.kind === "sign-in-again" && !options.quiet) return <Button size="sm" variant="ghost" iconStart={KeyIcon} onClick={() => start("sign-in-again", step.command)}>{signInText("action.again")}</Button>;
+    if (step.kind === "sign-in-again" && !options.quiet) return <Button size="sm" variant={options.primary ? "primary" : "ghost"} iconStart={KeyIcon} onClick={() => start("sign-in-again", step.command)}>{signInText("action.again")}</Button>;
     return null;
   };
   const outcome = (row: HarnessSnapshot) => {
@@ -370,6 +371,7 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
           {checkingAny && <li data-tone="neutral" data-busy="true"><Spinner size="sm" />{countText(s("summary.checking", { count: COUNT_MARK }), summary.checking)}</li>}
           {installing > 0 && <li data-tone="accent" data-busy="true"><Spinner size="sm" />{t("summary.installing", { count: installing })}</li>}
           {summary.attention > 0 && <li data-tone="warning">{countText(s(`summary.${summary.signIn === summary.attention ? "signIn" : "attention"}.${summary.attention === 1 ? "one" : "other"}`, { count: COUNT_MARK }), summary.attention)}</li>}
+          {summary.signInEnding > 0 && <li data-tone="warning">{countText(s(`summary.signInEnding.${summary.signInEnding === 1 ? "one" : "other"}`, { count: COUNT_MARK }), summary.signInEnding)}</li>}
           {summary.updates > 0 && <li data-tone="accent">{countText(s(`summary.updates.${summary.updates === 1 ? "one" : "other"}`, { count: COUNT_MARK }), summary.updates)}</li>}
           {summary.unverified > 0 && <li data-tone="neutral">{countText(s("summary.unverified", { count: COUNT_MARK }), summary.unverified)}</li>}
           {summary.missing > 0 && <li data-tone="neutral">{countText(s("summary.missing", { count: COUNT_MARK }), summary.missing)}</li>}
@@ -422,6 +424,11 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
                 {install
                   ? <span className="pkg-harnesses-status" data-state={install.failed ? "install-failed" : "installing"} data-checking={install.busy ? "true" : undefined}>{install.busy && <Spinner size="sm" />}{install.label}</span>
                   : <span className="pkg-harnesses-status" data-state={row.availability.state} data-checking={checking ? "true" : undefined}>{checking && <Spinner size="sm" />}{availabilityLabel(row, { checking })}</span>}
+                {(() => {
+                  // Only a sign-in that needs renewing earns room in the list.
+                  const expiry = row.policy.enabled && signInEndsSoon(row) ? signInExpiryNote(row.availability.authExpiresAt, hostTranslate(host.ui.locale.translate), host.ui.locale.get()) : undefined;
+                  return expiry && <span className="pkg-harnesses-expiry" data-level={expiry.level} title={expiry.date}>{expiry.text}</span>;
+                })()}
                 <span className="pkg-harnesses-route" data-route={!row.policy.enabled ? "off" : row.policy.autoSelect ? "auto" : "manual"}>{routingLabel(row, rows)}</span>
                 <VersionText t={s} row={row} {...(update ? { update } : {})} />
                 {pendingChanges ? <span>{pendingChanges}</span> : null}
@@ -502,7 +509,7 @@ function HarnessDetail({
   onRefresh: () => void;
   onToggle: (enabled: boolean) => void;
   onExplain: (fact: CapabilityFact) => void;
-  stepAction: (row: HarnessSnapshot, options?: { quiet?: boolean }) => ReactNode;
+  stepAction: (row: HarnessSnapshot, options?: { quiet?: boolean; primary?: boolean }) => ReactNode;
   installStatus?: { label: string; busy: boolean; failed: boolean };
   banner: ReactNode;
   dialogs: ReactNode;
@@ -520,6 +527,10 @@ function HarnessDetail({
   const accountLine = account?.loggedIn === true
     ? account.email || accountPlan || host.ui.locale.translate("harnessruntime.accounts.state.signedIn")
     : account?.loggedIn === false ? host.ui.locale.translate("harnessruntime.accounts.state.signedOut") : undefined;
+  // The CLI's own sign-in end; a signed-out login has none to show.
+  const expiry = detail.availability.authenticated !== false && detail.availability.state !== "auth-required"
+    ? signInExpiryNote(detail.availability.authExpiresAt, hostTranslate(host.ui.locale.translate), host.ui.locale.get())
+    : undefined;
   const pending = pendingLabel(detail);
   const step = setupStep(detail);
   const needsSetup = step.kind === "install" || step.kind === "sign-in" || step.kind === "guide";
@@ -559,6 +570,7 @@ function HarnessDetail({
         {accountLine && <p className="pkg-harnesses-hero-account" data-signed-in={account?.loggedIn === true ? "true" : "false"} title={[accountLine, account?.email ? accountPlan : ""].filter(Boolean).join(" · ")}>
           <Icon icon={SessionIcon} size="sm" /><span>{accountLine}</span>{account?.email && accountPlan && <span className="pkg-harnesses-hero-account-plan">{accountPlan}</span>}
         </p>}
+        {expiry && <p className="pkg-harnesses-hero-expiry" data-level={expiry.level} title={expiry.date}><Icon icon={ClockIcon} size="sm" /><span>{expiry.text}</span></p>}
         {update?.available && !update.canUpdate && update.latest && <p className="pkg-harnesses-hero-message">{t(update.reason === "remote" ? "versionAvailableRemote" : "versionAvailableOwner", { version: displayVersion(update.latest) ?? "" })}</p>}
         {detail.message && detail.availability.state !== "ready" && !checking && <p className="pkg-harnesses-hero-message">{detail.message}</p>}
       </div>
@@ -568,7 +580,7 @@ function HarnessDetail({
             : <Button size="sm" variant="primary" iconStart={DownloadIcon} busy={running} onClick={onUpdate}>{running ? t("updatingEllipsis") : displayVersion(update?.latest) ? t("updateTo", { version: displayVersion(update?.latest) ?? "" }) : t("updateToLatest")}</Button>}
         </div>}
         <div className="pkg-harnesses-hero-tools">
-          {step.kind === "sign-in-again" && stepAction(detail)}
+          {step.kind === "sign-in-again" && stepAction(detail, expiry && expiry.level !== "none" ? { primary: true } : {})}
           <IconButton icon={RefreshIcon} label={t("checkAgain")} busy={loading || checking} onClick={onRefresh} />
         </div>
       </div>

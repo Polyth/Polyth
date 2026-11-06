@@ -358,7 +358,9 @@ persisted field keeps its migration name) and `promptBookmarkDesktop` for wide
 windows; both default off. The component mounts when either is on and carries
 `data-narrow="off"`/`data-wide="off"` so CSS hides it on the disabled side. The
 bookmark sits at the conversation's inline edge below the
-phone menu and remains available while the latest prompt is visible. It opens
+phone menu and remains available while the latest prompt is visible. In a compact
+shell it rests on the conversation frame with the floats' diameter, so its icon
+stands under the last floating action; that frame is also the area it drags within. It opens
 a compact shared `Popover` with the desktop navigator's material, type and rows,
 safe-area/keyboard collision handling, outside dismissal and Escape support.
 Both prompt-history panels use the menu text size. Opening focuses a prompt;
@@ -435,8 +437,8 @@ while a session list is on screen (a project is open, or search is active), so
 an all-collapsed project list never ends in a link that reads as loading more
 projects. Which projects are open
 (`polyth.sidebar.expandedProjects`, shared by both navigators), the project sort
-chosen in the list options (`polyth.sidebar.projectSort`: recent activity, name
-or custom) and the custom order (`polyth.sidebar.projectOrder`, every known
+chosen in the list options (`polyth.sidebar.projectSort`: recent activity,
+frequently used, name or custom) and the custom order (`polyth.sidebar.projectOrder`, every known
 project id) are stored the same way. These keys are navigation presentation, so
 they stay out of the synced account preferences. Each time the phone navigator
 comes up (tap or swipe peek), and when the current chat changes while it is
@@ -478,8 +480,8 @@ While a project is up the lists take no hover, tooltip, peek, text selection,
 system long-press menu, image drag, pull-to-refresh or drawer swipe. The order
 is saved once, on landing, through `permuteManualProjects`, which keeps
 projects a filter hides in their slots. Any sort allows a move: one made under
-*Recent activity* or *Project name* keeps the order on screen and switches the
-sort to *Custom order* (announced). Alt+Shift+↑/↓ on a project row moves it one
+*Recent activity*, *Frequently used* or *Project name* keeps the order on screen
+and switches the sort to *Custom order* (announced). Alt+Shift+↑/↓ on a project row moves it one
 place the same way. Covered by `apps/web/test/projectArrange.test.ts`.
 
 On touch-capable screens (`any-pointer: coarse`) project row actions stay
@@ -629,24 +631,76 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   header ("With Ann, Max", each name in its colour — the chat's legend), the
   message card and the notification centre.
 - **Mentions**: the composer `@` list shows a "People" group (who can open
-  the chat: identity mark, full name, access) before files. Picking a person
-  inserts `@FirstName`, or `@First_Last` when another person here shares the
-  first name (`mentionTokenFor`); deleting the token drops the mention. A
-  private chat lists nobody; when its `@` list is empty and the Space has
-  other members (the sharing DTO's `people`), the owner sees one quiet line,
-  "This chat is private…", with a "Share…" button that opens sharing.
+  the chat: identity mark, full name, access), then a "Not in this chat yet"
+  group (the rest of the Space, name only), then files. Everyone can be
+  mentioned, in a private chat too. Picking a person inserts `@FirstName`, or
+  `@First_Last` when another person listed shares the first name
+  (`mentionTokenFor`); deleting the token drops the mention. The outside list
+  (`GET …/sharing/outsiders`) is read when a mention starts, not when the chat
+  opens. A new chat, with no session yet, asks `GET /api/sharing/new-chat`
+  instead and works the same way.
+- **Mentioning someone outside the chat**: one plateless line of the pending
+  stack above the composer (`MentionAccessLine.tsx`, decisions in
+  `composer/people.ts`) asks once, with a wrapping sentence, a primary action
+  and ×, and never blocks typing:
+  - It says "{names} can't see this chat yet" with "Share"; for someone who may
+    not share, "{names} can't see this chat. {name} can share it" with "Ask";
+    with nobody able to share (`action: "none"`) it only says so and the
+    message still goes.
+  - Answering sends and opens nothing: the answer takes effect with the
+    message, so a token deleted from the draft has opened nothing. The line
+    then says what the message will do, with a level menu (share only; "Can
+    view" by default, "Can collaborate" in a conversation) and × to undo. In a
+    line under 34rem wide the menu takes its own row under the words, so they
+    are never squeezed into a column.
+  - × on the question leaves the words as plain text and tells nobody; the
+    message stays in people mode, because words written for a person must not
+    become a prompt by being declined.
+  - A send with a question open sends nothing: the line pulses and, with a fine
+    pointer, focus moves to its action, so a habitual Enter cannot open a
+    private chat. Focus stays put on touch, where moving it would close the
+    keyboard. The Send label already names whoever the message will reach.
+  - Switching to Agent removes the line: nobody will be told.
+  - If what the sender can do changes meanwhile, a given answer is cleared and
+    the question returns: "ask" never becomes "share" by itself. A person given
+    access meanwhile simply stops being an outsider.
+  - It names the personal MCP servers the chat's agent would stop loading when
+    sharing would take a private chat out of private
+    (`personalMcpDetachedOnShare`).
+  - Mentions and answers live with the open composer, not the draft: a restored
+    draft comes back as plain words, so it can neither notify anyone nor open a
+    chat.
+  - A send owns its words from the moment it leaves. The message's own event can
+    arrive before the response and, in an empty chat, replace the new-chat
+    composer with the transcript's. So the draft empties at send and no blur,
+    autosave or unmount writes those words back; a failed send gives them back;
+    and the server consumes a stored draft still holding them
+    (`consumeAdmittedDraft`), as it does for a prompt. On a mouse or trackpad
+    screen the writer stays in the input across that swap.
+  - In a new chat, Send makes the chat for the message, with no agent turn and
+    no model needed: the chat holds the words as its draft, the message goes,
+    then the chat opens. Making it can take seconds and there is no echo, so the
+    words stay in the field and Send reads "Creating…". An unanswered question
+    makes no chat. If the chat cannot be made everything stays where it was; if
+    only the message fails, the chat opens with the words in place. "Pass to the
+    agent" is not offered there; choosing Agent makes it an ordinary first prompt.
+    The chat's first words to a person name it, as a first prompt would.
 - **People mode** (a collaborator mentions someone): the model/effort row
   steps aside and one quiet line above the editor holds a People | Agent
   segmented choice (radio semantics; People by default) and, with
   `collaborate`, a "Share with the agent" switch (off by default). The send
   action becomes a pill naming the recipient ("Send to {first name}",
   "Send to N people"); it posts a `person/message` and never queues behind or
-  steers the agent.
+  steers the agent. Pending attachment cards travel with that message exactly
+  as they do with a prompt (an attachment alone is a message), and the pills
+  leave the composer only for the refs that were sent.
 - **People-only composers** (a conversation; a reader with only `view`): no
   model row, Add menu, shell, stop/queue or agent toggle. The rail passes
   `context.agentless = true`, and the host leaves out widgets that declare
   `agentOnly` (goal, approvals, workflows, recap, voice with the agent,
-  conversation tools); dictation stays. Viewers get one quiet line, "You can
+  conversation tools); dictation stays. There is no Add menu, so files still
+  arrive by paste or drop, but they travel with the person message like any
+  other pill. Viewers get one quiet line, "You can
   view this chat · Ask {owner} if you need the agent". The placeholder says
   the agent will not see the message (a short "Message people…" on phones).
 - **Timeline**: a person message is a chat bubble in the Messages manner
@@ -669,8 +723,18 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   ink on one's own bubble); the reader's own mention is the one solid
   accent. A carried
   message says "The agent gets this with the next message", then "Shared
-  with the agent" once a prompt has delivered it. It is not a prompt: no
-  prompt recall, title, queue or activity grouping.
+  with the agent" once a prompt has delivered it; its attachment cards ride
+  that same prompt. It is not a prompt: no
+  prompt recall, title, queue or activity grouping. Attachment cards stack
+  under the bubble in the same read-only form a prompt uses, wrapped inside
+  the bubble's column so they never widen the row.
+  A message that asks to open the chat to someone carries one quiet note under
+  the bubble, for the two people it concerns (`PersonAccessNote`): the asker
+  reads "Asked {name} to share this chat", the person asked reads "Asks to
+  share with {names}" with "Share" and "Not now", and both then read "Shared
+  with {names}" or "Not shared with {names}". Everyone else sees only the
+  message. A name in a pending request is plain text; it becomes a mention chip
+  once the chat opens to them.
   `conversation/session-started` is a centered link row with the agent glyph
   that opens the new chat.
 - **Navigator**: an `@` mark while `attention.mentions` is set; conversations
@@ -699,7 +763,10 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
     the reader (idempotent `clientOperationId`) and marks the chat read; a
     started reply keeps the card (sticky) until it is sent or cleared,
     "Reply sent" shows briefly, a failure keeps the words. Escape clears a
-    draft, then closes the card. Lifetimes: 8 s (`message`), 10 s
+    draft, then closes the card. A request to open the chat to someone replaces
+    the reply field with "Share" and "Not now" and says "Asks to share with
+    {names}" (a failure keeps the card); the same answer stays available under
+    the message in the chat. Lifetimes: 8 s (`message`), 10 s
     (`mention`); the desktop stack widens to 360px while one shows. Plus the
     completion sound and, with "Only in background" off, the OS alert, when
     the kind is chosen in Settings → Notifications;
@@ -929,7 +996,18 @@ launcher starts on the `top` or `right` rail; an unlisted kind starts it under
 More. Several directions take the most prominent rail any of them asks for. A
 capability without `defaultRails` keeps its `standardTier` where its package
 auto-places (`autoPlacesContribution`); an explicitly included package always
-gets a visible rail. A person's Personal project (`Project.personal`, §3.3) is
+gets a visible rail. A private room (`Project.parentProjectId`) is never a
+project of its own in any picker, list or rail: `rootProjects` removes it, and
+anything about the project (settings, appearance) resolves through
+`rootProjectId`. Under a project someone else can open (`sharedWith > 0`), the
+Shared / Only me switch (`PrivateRoomSwitch`) moves the person between the
+project and their room, and marks the lane they aren't in when a chat there is
+waiting, since its rows are hidden; someone working alone sees neither it nor My
+notes.
+`ChatAudienceLine`, above the composer of any chat in a Space with several
+people, says who can read it and which memory the agent has, and offers
+Continue privately, which starts a room chat quoting only the title. What was
+already said stays where it was. A person's Personal project (`Project.personal`, §3.3) is
 the `personal` kind whatever its composition says (`projectKinds(…, { personal })`,
 `RailPlanOptions`): only launchers that list `personal` start on a rail —
 today Files, Agents and Planner on the right rail, the top rail empty — and
@@ -1077,7 +1155,8 @@ project/checkout bar above it (`SessionContextBar` is not mounted), the tablet
 header titles a fresh chat "New chat" and captions no project, the fresh
 chat greets with `personalproject.greeting` instead of naming the project, and
 starters keep to everyday ones (`StarterContext.personal`,
-`PERSONAL_STARTERS`). Its storage path is never shown as a detail. Adding a
+`PERSONAL_STARTERS`; General projects outside Git share them, §New Chat
+Shortcuts). Its storage path is never shown as a detail. Adding a
 real project turns it into an ordinary project group again, and all of that
 chrome comes back. Its rails stay simple either way: it is the `personal`
 project kind, so it starts with only Files, Agents and Planner on the right
@@ -1086,7 +1165,7 @@ More (§3.2, Default arrangement).
 
 ### 3.4 New project flow and folder picker
 
-Add project opens `ProjectSetupFlowDialog`: step 1 asks "What are you working
+Add project opens `ProjectSetupFlowDialog`. Step 1 asks "What are you working
 on?" with `ProjectCompositionEditor` (`purposeHeading={false}`, since the step
 header asks it). Per-package visibility sits in that editor's collapsed
 Workspace accordion. The accordion lists only enabled, non-core packages that
@@ -1094,20 +1173,94 @@ own a rail launcher: a registered capability with `rail !== false`
 (`railLauncherPackageIds`). It ignores the active project's relevance.
 Background helpers, importers and settings-only integrations get no Show/Hide.
 An earlier override on a package that is no longer listed appears as a
-removable row. Below the step header, everything from General to the
-Cancel/Continue row is one scroll region (`.project-setup-scroll`); the
-expanded Workspace list never scrolls on its own, so a short (half-screen)
-window stays usable. Continue opens step 2, `ProjectFolderDialog` with
-`onBack`. Back keeps the chosen directions. Settings reuse the same picker
-without `onBack`.
+removable row. Below the step header, the directions scroll on their own
+(`.project-setup-scroll`) with the Continue bar pinned under them; the
+expanded Workspace list never becomes its own scroll box, so a short
+(half-screen) window stays usable.
+
+What follows depends on what the project is for. The step labels count the path
+actually taken, and step 1 updates as Engineering is toggled.
+
+| Directions | Path | The project is created |
+| --- | --- | --- |
+| Includes Engineering | Folder picker (`ProjectFolderDialog` with `onBack`), then the window. Three steps | When the folder is opened |
+| Anything else, including General | The window, with files in the Polyth folder. Two steps | When the window is confirmed |
+
+**The window** is `ProjectIdentityStep`: name, colour (`ProjectColorPresets`) and
+icon, all with defaults from `projectIdentity.ts`, so one press is enough: a name
+from the single chosen direction or "New project" (numbered if taken), a colour
+no project uses yet, and the direction's first icon. Fourteen bundled icons per
+direction keep it working offline; "All icons" swaps them for
+`ProjectIconPickerField`, the picker the appearance dialog uses. A phone opens it
+with focus on the heading, never a keyboard; a desktop selects the name.
+
+- **Polyth folder.** A quiet line says where files go, with "Choose another",
+  which detours through the picker (unnumbered, `onBack` returns with every choice
+  intact). Nothing exists until "Create project", because the folder takes its name
+  from the project. `POST /api/projects/managed` carries a `clientOperationId`, so
+  a resend after a lost response finds the first project instead of making another.
+  Escape and Cancel leave no trace. `GET /api/projects/managed` tells the flow
+  whether a folder can be chosen: a `multi-tenant-sandboxed` deployment has no host
+  browsing, so it offers no link and sends Engineering down the same path.
+- **Chosen folder.** The project already exists and its directions are saved. The
+  window shows the path, takes its name from the folder unless one was typed, and
+  has "Skip" and "Done". Skip and Escape write nothing. Opening a folder that is
+  already a project goes straight to it, with no window.
+
+The directions step and the picker are one dialog box and one head grid
+(`apps/web/test/projectFlowLayout.test.ts` measures it in a browser):
+
+- **One box.** On desktop both panels are `min(608px, calc(100dvh - 96px))`
+  tall, so advancing never resizes or re-centres the window. Phones keep the
+  full-screen sheet. Both heads also hold one frame (`min-height: 140px`:
+  step 1's two-line hint sets it, step 2 reserves it), so the body starts at
+  the same y either way.
+- **Head.** An icon-height line holds the flow label and the single X at the
+  end column, then the title (`18px/700`, the same on both steps), then the
+  hint (12px muted, `max-width: 62ch`). The label, the X, the title and the
+  hint keep the same position and the same content column on both steps, so
+  nothing moves when Continue is pressed.
+- **Back.** Step 2 leads its footer with Back, not its head; the head has
+  exactly one control. X leaves the flow from either step, Back returns to
+  the directions without losing the chosen ones. The picker opened from the
+  window's "Choose another" is a detour: no step label, and Back returns to
+  the window with every choice intact.
+- **One content column.** 24px gutters on desktop, 12px on phones, shared by
+  the head, the cards/list, the toolbar and the footer. The Workspace
+  accordion carries a package icon so its text starts on the direction
+  cards' text column.
+- **Footer.** Pinned outside the scroll region on both steps, one height and
+  one primary action: step 1's compact Continue matches the picker's Open.
+  On phones the flow's picker footer is one row too — Back (icon-only, named
+  for assistive tech), New folder, then the flexible Open — so the bar keeps
+  step 1's height. Only the directions scroll; the expanded Workspace list
+  still never becomes its own scroll box.
+- **Focus.** The X is never the opening focus (`initialFocus` is the first
+  `.project-direction-card`), so Enter on an open step 1 does not dismiss it.
+  Coming Back from the picker returns focus to Continue. On the picker the
+  folder list keeps that role. Escape closes every step, except that it first
+  disarms an open alternative source (SSH, clone) instead of ending the flow.
 
 When the account uses one interface for every project (Settings → Projects →
-Interface across projects, `projectInterfaceScope.ts`), directions shape
-nothing, so the flow opens `ProjectFolderDialog` directly: no step labels, no
-`onBack`, the project is created as General and the shared arrangement is
-never reseeded (`seedInitialProjectWorkspace` is skipped).
+Interface across projects, `projectInterfaceScope.ts`), directions shape nothing,
+so the flow opens the window directly as General: no step labels, Cancel instead of
+Back, and the shared arrangement is never reseeded (`seedInitialProjectWorkspace`
+is skipped). Settings reuse the same picker without `onBack`.
 
 `ProjectFolderDialog` keeps its contract in its header comment. The main rules:
+
+- **Escape inside an alternative source.** A source panel that closes itself
+  on Escape marks its root `data-owns-escape` (the Git clone panel does); the
+  picker then leaves the key to it. Any other armed source is disarmed by the
+  picker first, so Escape never throws away the whole flow by accident.
+- **A typed path that does not exist.** Enter, or the primary action, on a
+  location that is not on disk reports it as a notice — "“{path}” doesn’t
+  exist yet." — rather than a red error, and the primary action becomes
+  **Create “{name}”**. Pressing it creates exactly that path (recursively) and
+  selects it, so the next press opens it. A missing location is never silently
+  replaced by the folder that happens to be on screen, including when Open is
+  pressed while the path field is still open. Escape abandons the typed
+  attempt and the offer with it.
 
 - **No keyboard on open.** Initial focus is the `.folder-list` listbox,
   never a text field. Typing a path is opt-in: click the empty end of the
@@ -1156,7 +1309,9 @@ what cannot be defaulted:
   the button saying what happens next. The first two need no password: Start
   calls `completeLocalSetup()` on the desktop bridge (the main process takes
   the name from the OS account) and restarts into the workspace; "from my
-  phone too" then opens Polyth Link (`/?settings=tunnel`). The progress dots
+  phone too" then opens Polyth Link (`/?settings=tunnel`). A quiet link under
+  the foot, "Connect to Polyth on another computer", opens the app's
+  [server list](desktop.md#connecting-to-another-polyth). The progress dots
   stay hidden (height kept) for this one-step start. "With other people" shows
   three dots and continues to the account (name, and a password with a reveal
   toggle instead of a confirmation field) → recovery codes → automatic restart;
@@ -1169,7 +1324,9 @@ what cannot be defaulted:
   in `/api/auth/status`) a locked Desktop window asks its main process for a
   new session once per minute (`claimOwnerSessionRenewal`) and reloads; the
   lock screen shows no sign-in form but "Welcome back" + Continue in Desktop,
-  or, in a browser, where Polyth opens and where to set a password. Settings →
+  or, in a browser, where Polyth opens and where to set a password. The desktop
+  window on another server takes the browser's path on these screens and adds
+  "Choose another server" (`DesktopServerExit`), since they show no shell. Settings →
   Users → your account offers "Set a password…" (`SecureAccountDialog`:
   password → recovery codes → Protect account); "Add user" opens the same
   dialog first, then the add-user form.
@@ -1274,6 +1431,48 @@ working-tree conflicts in one recovery region above its tabs, with one set of
 agent draft actions. The failure reason and remote stay together; conflict
 counts remain visible alongside the recovery hint. Without a remote failure,
 the conflict recovery region appears only on Changes.
+
+On a phone (`useShellMode() === "phone"`) `GitView` presents through
+`GitPhoneView`, which owns placement only: every request and mutation stays in
+`GitView`, and `phoneOverview.ts` decides the state without touching the DOM.
+The first screen answers what changed and what happens next:
+
+- A title and one line (`5 files changed`, `+84 −12 · not committed`), then the
+  branch row in plain words (`Isolated branch · based on devel`). There are no
+  tabs, no Working tree / Branch vs base switch and no diff options.
+- The branch row opens a sheet (a `Menu`): the exact branch name with copy,
+  Sync, Fetch, Pull, Push, *Compare with*, Remote and Repository when there is a
+  choice, Refresh, and the identity slot. Status is already polled, so Refresh
+  is the only manual one and there is no pull-to-refresh gesture.
+- Files are always listed, one row per path; a partly staged file is one row.
+  History, Branches and Stashes are rows below them.
+- One primary action sits at the thumb and follows the state: **Commit N files**
+  with uncommitted work; **Integrate into …** for an isolated branch with
+  committed work (`useLanding`, shared with `LandingBar`); **Push/Pull/Sync** for
+  an ordinary branch out of step with its upstream; **Resolve with agent** for a
+  conflict; nothing when there is nothing to do. ⋯ holds what is rarer in that
+  state (stash, revert all, the integration target, stop the merge).
+
+Committing does not ask for staging first. An untouched index means everything
+is included; a non-empty index was chosen on purpose (hunks staged here, another
+device, an agent), so only those files are, and a partly staged file commits its
+staged part, which its row says. The commit sheet's file list and each file's
+*Include* button change that; `commitStagePlan` applies the difference to the
+index just before the commit (and before *Generate*, so the message describes
+what will go in). A failed commit leaves the sheet and message in place.
+
+A file, Compare, History, Branches, Stashes and Conflicts are full-screen layers
+built on `Sheet` (`dismiss="back"`, `.git-phone-layer`): opaque, moving by the
+phone stack's grammar, covering the window's head so there is one Back and one
+title. In the installed app a swipe pops them; in a phone browser the browser
+keeps that gesture (`swipeHost.ts`). A file layer has its options behind ⋯ (wrap
+lines, ignore whitespace, which part of a partly staged file, copy path, revert),
+previous and next, and Include or Mark resolved; hunk actions stay on the hunks.
+Diffs are unified with one line number per row, and wrap by default through their
+own `phoneWrap` preference. The log has no lane graph on a phone, and its branch
+filter moves to the layer's ⋯. A cold open always lands on the first screen, while
+a link to a file (`gitDiffPath`) and the isolation card's review hand-offs open
+their layer directly. The all-repositories overview is unchanged.
 
 Settings → Source control (`GitSettings.tsx`) is one page with five
 `SettingsTabs`, one per job: **Accounts** (default), **This project** (only with
@@ -1396,7 +1595,15 @@ host.slots.register({
   scrolling explanation and its decisions (context: `sessionId`, `requestId`,
   and `sourceSessionId` for a subagent's mirrored request), for package notes
   about that one request such as a permission judge's check or verdict; a contribution
-  renders `null` when it has nothing to say about the request.
+  renders `null` when it has nothing to say about the request. A note may also
+  extend the card's policy action through `policyLevel` and `addPolicyEffect`
+  ([permissions README](../../packages/permissions/README.md)).
+  A page that shows one session's requests outside its timeline mounts
+  `session.permission.requests` (context: `sessionId`, `requestIds`) and gets
+  that same card with the same decisions, never a card of its own. The socket
+  follows only the active chat, so the contribution reads the session's events
+  through `refreshBackgroundSession` while it is mounted; the Agents
+  conversation is the current host.
   `Composer.tsx` mounts `composer.leading`,
   `composer.trailing`, `composer.meta`, `composer.pending`; `Composer.tsx`
   also mounts `composer.config` on the quiet configuration row beside the model
@@ -1521,6 +1728,12 @@ receive `sessionId`, `status`, and `closeMenu()` for dismissing the invoking
 menu after an action succeeds. Use
 the shared menu-item styling and semantics so keyboard navigation includes the
 contributed action; unregister it when the package is disabled.
+
+`sidebar.project.actions` renders in the footer of a project's action menu
+(the desktop card menu and the project rail menu). Contributions receive
+`projectId` and `closeMenu()`; close the menu as soon as an action takes over
+the interaction. A footer contribution is unmounted with its menu, so content
+that must outlive the dropdown (a dialog, a panel) belongs in `app.layers`.
 
 **Navigator multi-select.** A select toggle (`SelectIcon`, `aria-pressed`)
 sits immediately left of the session search field in the desktop service
@@ -1788,7 +2001,12 @@ package keeps its place in `apps.ids` and reappears when it returns.
 
 **New Chat Shortcuts** (`builtin.hero-starters`, model in `apps/web/src/starters.ts`):
 pinned starters lead, then workspace-state suggestions; the `+` chip opens
-`StarterPicker`. Besides prompts, commands and skills, the picker lists every
+`StarterPicker`. Built-ins follow the project's directions (code work only in
+Engineering). A plain folder (`isPlainFolder`) gets only the everyday ones
+(`PERSONAL_STARTERS`): the Personal project, and a General project (no
+directions) once Git reports its folder is not a repository
+(`StarterContext.repository`). A new project in the Polyth folder is one. Until
+the status loads, General keeps every built-in. Besides prompts, commands and skills, the picker lists every
 package that opens a window (*Package windows*: placeable, available
 capabilities with a registered surface, minus Edit workspace —
 `windowPackages` in `starterPackages.ts`). Their ids are `package:<capabilityId>`;
@@ -1920,15 +2138,27 @@ window): the pie never leaves an open session, because its card is also the
 way to the cache controls and compaction. It is dimmed while the last known
 value of the same context awaits fresh telemetry. A new unsent chat has no
 pie. Its accessible name and tooltip carry
-percent and tokens; activation opens the shared `ContextUsageCard` (also used
-by the session overview) in an anchored `Popover`, which is the only way to
-read the numbers on touch. Below the card it says when the agent was asked to
+percent and tokens; activation opens `ChatMemoryCard` ("Chat memory") in an
+anchored `Popover`, which is the only way to read the numbers on touch. It speaks
+in plain words: the share, a meter with a mark where Polyth itself will compact or
+remind (Auto has none, because no harness says when it really compacts), one
+sentence on what will happen, the Earlier / Auto / Manual switch for this chat, a
+hint, a Compact now button that runs the same path as `/compact` (disabled while
+the session works), a "How does this work?" disclosure, and whether the chat
+follows the person's default (link to Settings → Sessions → Long conversations)
+or has its own choice (link back to the default). A harness that cannot switch its
+own compaction off keeps Manual tappable, marked `aria-disabled`, so a touch can
+still read why. The rules live in [architecture](architecture.md) under Chat
+memory. Without a session it falls back to the shared `ContextUsageCard` (also
+used by the session overview). Below the card it says when the agent was asked to
 delegate (the model's `contextPressureLevel`, from the server's context-pressure
-stamp), mounts the `composer.context.details` slot (Usage fills it with the
+stamp) and mounts the `composer.context.details` slot (Usage fills it with the
 session's cache warmth, the re-write a cooled cache costs and **Keep warm** for
-30 min–8 h; see the Usage README) and, when the
-harness supports compaction, a Compact button that runs the same path as
-`/compact` (disabled while the session works). Focus returns to the pie on close only when the pie
+30 min–8 h; see the Usage README). A manual chat from 75% gets one
+`ChatMemoryReminder` row above the composer (Compact now, Continue in a new chat),
+never a toast. A turn stopped with code `context-full` opens the same row in any mode
+with its own sentence, and suppresses the generic failure notice, whose Retry could
+not help. Focus returns to the pie on close only when the pie
 held focus, so a tap while the phone editor is focused keeps the keyboard and
 the engaged composer. The resting phone row keeps the pie right after Add
 (the model line dissolves with `display: contents` and only the pie stays).
@@ -2423,11 +2653,19 @@ runs. Steps are separated by rhythm alone (34 px rows,
 `--hit-min` on touch). A finished step shows its duration but no tick, since
 the block's own mark says done; failures and running steps keep their glyph.
 The summary title (weight 500) never truncates; its counts give way first.
+Every look keeps this geometry: the mark starts and the chevron ends on the prose
+edges, the thread hangs from the mark's centre (`--activity-thread-x`), and steps
+start on the title column. A look that draws a rule or a pill on the summary (Line,
+Air) sets `--activity-bleed: 0px` so its edge stands on the frame instead of resetting
+the summary's padding. `chatFrameGeometry.test.ts` measures this in every look.
 An open summary pins to the top while its steps scroll. It does so only where
 `container-type: scroll-state` exists, and it takes the readable glass only
 while `scroll-state(stuck: top)` holds. Elsewhere it stays in flow rather than
 sitting bare on the steps. The inline command Stop is a red outline with no
-fill.
+fill. Beside a live line it stands before the chevron, which keeps the column
+every block's chevron uses, so nothing on the line moves when Stop arrives; where
+the summary is a pill that hugs its words (chip, Air) the chevron stays in the pill
+and Stop follows it.
 
 **The live line:** a block is one row, live or not. While it is the tail of a
 working turn (nothing follows it yet), its summary line names the step in
@@ -2486,7 +2724,10 @@ shadow or glass in any platform style or look. Everything sits on one grid
 measured from the card's outer edge: marks are centred on the model logo's column
 (`--composer-stack-mark`), labels start at the model name
 (`--composer-stack-text`), trailing glyphs end where the marks start
-(`--composer-stack-end`). A line reads `--composer-stack-row` tall; on touch, a line
+(`--composer-stack-end`). The phone's resting row, which shows no model line,
+stands on the same grid: Add centres on the marks' column and the Stop/Send disc
+ends with the trailing column. In the compact shell's uncapped frame the status line
+spans the composer's full width. A line reads `--composer-stack-row` tall; on touch, a line
 that opens something keeps its full target by reaching up into the timeline's
 bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
 ([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset theme and
@@ -3190,6 +3431,12 @@ host.surfaces.register({
   one of its pages is open) is not an outside click for a dynamic window;
   otherwise pointerdown dismisses the window and the click reopens it. A new
   launcher surface must carry the attribute.
+- **A floating window never resizes from its content edge:** its width handle
+  is the inline-start edge (the side facing Chat), with the top/bottom edges
+  and the start corners; the inline-end edge carries the scrollbar and is not
+  a resize edge. A hit area there intercepted wheel and touch scrolling and
+  grew an empty strip beside the window. Pointer and keyboard resizing both
+  use the same start-edge handle (`ContextRail` `RESIZE_EDGES`).
 - **Keep the pinned window** (Settings → Behavior → *Package windows*,
   `UiSettings.sharedPinnedWindow`, on by default; a record saved before
   `sharedPinnedWindowVersion` 2 was written while it was opt-in, so its
@@ -3502,6 +3749,13 @@ host.capabilities.register({
 
 The host Settings search field shows no keyboard shortcut hint in phone mode
 (viewport at most 700px); desktop keeps its shortcut hint in the placeholder.
+On a phone the list stage has no title bar: the search field and Close share
+one row at the top of a single scroller (`.settings-nav-scroll`) and leave with
+the first rows, so nothing stays pinned over the pages. The scroller starts
+below the status bar, so rows never run under the clock. The title remains for
+assistive technology (`sr-only`, the stage's focus target). A query's results
+fit the screen and scroll on their own, so the field stays in reach. A page
+keeps its fixed Back, title and Close bar. Desktop keeps its two-pane window.
 
 - `registerPage` contributes a page into the Settings modal
   (`settings.pages` slot under the hood). `group` is one of
@@ -3579,8 +3833,8 @@ empty or error markup.
   Space or a click chooses) and the risky option confirms first.
   A number → `NumberField({ unit, min, max })` (commits on blur/Enter, clamps,
   Escape reverts); a visual size/scale → `SizeStepper`.
-- **Sub-pages and states.** A page with sub-views (harness detail, Monitoring,
-  Source control) uses `SettingsTabs({ tabs, value, onChange, label })` (wraps
+- **Sub-pages and states.** A page with sub-views (harness detail, Source
+  control) uses `SettingsTabs({ tabs, value, onChange, label })` (wraps
   `ui/Tabs` + `TabPanel` with the settings spacing) — never a `Seg` or custom
   CSS as a tab strip — and every panel starts with `Section`s, except where its
   only heading would repeat the tab label: then rows or a one-line lede open the
@@ -3656,6 +3910,12 @@ which buttons exist, where they sit or their order. Below it, three groups of
 *More options* fold; `CHAT_ROW_ITEMS` and `CHAT_MORE_ITEMS` say which row owns
 each `chat.*` item, and a test holds that to the search registry. A registered
 label is the name the page shows, so search finds what the person reads.
+The *Width* row picks the shared conversation measure: Normal (768px), Wide
+(1180px) or Ultra wide (1600px, a centred column on a 2560 or 3440 px screen
+and a full-width column when the window is narrower). The conversation frame
+reserves the floating launcher strip's lane on the inline end, so the timeline,
+composer, above-composer status and header keep the same right edge in every
+width mode.
 
 The preview (`ChatSettingsPreview.tsx`) is a sample conversation drawn from the
 same preferences, with the looks copied from "Activity block looks" and the
@@ -3980,6 +4240,17 @@ paused, finished); when a narrow phone cannot fit them all, the name keeps a
 readable stub and the pills that do not fit drop whole from the end (the
 group's label still lists every count). An expanded project with nothing to
 list says "No sessions".
+A project header opens and closes on the whole line: its open button's plate
+(`.mobile-nav-project-main::before`) spans the header from the mark to ⋮ and
+the mark lets taps through to it, while New chat and ⋮ keep their own press
+circles above it. A press lights that plate at once in the row's corner and
+fades it on release; the button opts out of the system tap highlight and the
+shared button press (the .98 settle and inset washes), which painted only
+the button's own box, a patch between the mark and New chat. The plate's
+material, edge, corner and reach are `--nav-press*`; an interface style sets
+them from its `--look-row-press*` (Air lights the whole island of a closed
+project and the head of an open one, square where its chats begin). The
+keyboard ring is the same plate.
 The phone Navigator is one grid (`MobileNavigator.css`, pinned by
 `mobileNavigatorLayout.test.ts` at 320–430px, every density and RTL). Most
 rows leave the leading column empty and every row ends in ⋮, so both edge
@@ -4019,7 +4290,9 @@ name on the content edge, at a project name's size and a firmer weight; in
 the native app it opens the native server menu (the separate Switch server
 tool is gone), with several Spaces it is the Space switcher whose last entry
 is the server menu, and with nothing to choose it is plain text (the page
-never learns a paired server's name). The tools are search, select, Settings
+never learns a paired server's name; the desktop app's page does, from the main
+process, and shows it in a chip beside the Space switcher only when the server is
+elsewhere). The tools are search, select, Settings
 and close. Add project is a quiet last row of the list (a dashed tile in the
 mark column, the label on the name edge), hidden while searching or
 selecting. The search field is not on screen until the search tool is

@@ -24,6 +24,17 @@ export interface DesktopSettings {
   controlsTheme: DesktopControlTheme;
 }
 
+/** What the window shows: this computer's server, the bundled server list, or
+ *  another Polyth. Absent from shells older than client mode (they are always
+ *  on this computer's server). */
+export type DesktopWindowSurface = "local" | "hub" | "remote";
+
+/** The server on screen, by the name the person knows it. */
+export interface DesktopServerInfo {
+  kind: "local" | "link" | "address";
+  label: string;
+}
+
 export interface DesktopInfo {
   appVersion: string;
   opencodeVersion: string;
@@ -40,6 +51,8 @@ export interface DesktopInfo {
   /** The macOS 12 build on macOS 12: updates come from stable releases only.
    *  Absent from shells older than that build. */
   macLegacyUpdates?: boolean;
+  /** Absent from shells older than client mode. */
+  server?: DesktopServerInfo;
 }
 
 /** The blocker as the desktop main process holds it. */
@@ -103,7 +116,48 @@ export type DesktopLocalSetupResult =
   | { ok: true }
   | { ok: false; error: "setup-completed" | "recovery-required" | "unavailable" };
 
+export interface DesktopServerAnchor {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DesktopServersView {
+  active: { kind: "local" } | { kind: "link"; id: string } | { kind: "address"; url: string };
+  runLocalServer: boolean;
+  local: "running" | "setup" | "stopped";
+  /** The Link client is part of this build. */
+  linkAvailable: boolean;
+  addresses: { url: string; lastUsedAt: number }[];
+}
+
+/** A failure travels as a value: IPC keeps only an error's message. */
+export type DesktopServersResult<T> = { ok: true; result: T } | { ok: false; code: string };
+
+export type DesktopOpenServer = { kind: "local"; path?: string } | { kind: "address"; url: string };
+
+export interface PolythDesktopServersApi {
+  /** The native server menu at `anchor`; the page never reads the list. */
+  menu(anchor?: DesktopServerAnchor): Promise<void>;
+  /** Show the server list, optionally leading with adding a server. */
+  list(options?: { add?: boolean }): Promise<void>;
+  /** The open server's page lost its local proxy: reconnect it at `path`. */
+  resume(path?: string): Promise<void>;
+  /** The rest answer only on the server list's own page. */
+  state(): Promise<DesktopServersView>;
+  open(target: DesktopOpenServer): Promise<DesktopServersResult<void>>;
+  link(method: string, params?: Record<string, unknown>): Promise<DesktopServersResult<unknown>>;
+  forgetAddress(url: string): Promise<DesktopServersView>;
+  setRunLocalServer(run: boolean): Promise<DesktopServersView>;
+}
+
 export interface PolythDesktopApi {
+  /** Absent from shells older than client mode. */
+  surface?: DesktopWindowSurface | null;
+  /** A local Link proxy serves this page, so it can lose that proxy. */
+  linkProxy?: boolean;
+  servers?: PolythDesktopServersApi;
   getInfo(): Promise<DesktopInfo>;
   requestSetupClaim(request?: DesktopSetupClaimRequest): Promise<DesktopSetupClaim>;
   restartAfterSetup(): Promise<void>;
@@ -149,3 +203,14 @@ declare global {
 
 export const desktopBridge = (): PolythDesktopApi | undefined =>
   typeof window === "undefined" ? undefined : window.polythDesktop;
+
+/** The bridge only when the window shows this computer's own server: file paths
+ *  name files here, and only then may they open in the native file manager. */
+export const localDesktopBridge = (): PolythDesktopApi | undefined => {
+  const bridge = desktopBridge();
+  // Undefined is a shell older than client mode, always on this computer's server.
+  return bridge && (bridge.surface === undefined || bridge.surface === "local") ? bridge : undefined;
+};
+
+/** The window shows another Polyth, through Link or by address. */
+export const onRemoteDesktopSurface = (): boolean => desktopBridge()?.surface === "remote";

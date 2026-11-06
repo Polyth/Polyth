@@ -424,7 +424,10 @@ body:has(.statusbar) .notify-stack[data-shell="desktop"] { --notify-lift: calc(v
 /* Reply in place: a quiet pill under the text column, the send turning to the
    accent once there is something to send. */
 .notify-reply,
-.notify-reply-sent { grid-column: 2 / -1; }
+.notify-reply-sent,
+.notify-access { grid-column: 2 / -1; }
+.notify-access { display: flex; flex-direction: column; gap: var(--space-1); }
+.notify-access-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .notify-reply { display: flex; flex-direction: column; gap: var(--space-1); }
 .notify-reply-field {
   display: flex;

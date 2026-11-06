@@ -584,6 +584,95 @@ test("projection working state shows live activity before turn-start hydration",
   }
 });
 
+test("a running turn reads Git for what changed, not for every streamed event or unchanged status", async () => {
+  const projectId = "turn-git-reads-project";
+  const sessionId = "turn-git-reads-session";
+  const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"];
+  let statusReads = 0;
+  let diffReads = 0;
+  let inFlightDiffs = 0;
+  let peakDiffs = 0;
+  let untracked: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      statusReads += 1;
+      return new Response(JSON.stringify({
+        isRepo: true, branch: "main", ahead: 0, behind: 0, staged: [],
+        unstaged: files.map((path) => ({ path, status: "modified", staged: false })),
+        untracked: untracked.map((path) => ({ path, status: "untracked", staged: false })),
+        conflicted: [], clean: false,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.startsWith("/api/git/diff")) {
+      diffReads += 1;
+      inFlightDiffs += 1;
+      peakDiffs = Math.max(peakDiffs, inFlightDiffs);
+      await delay(5);
+      inFlightDiffs -= 1;
+      return new Response(JSON.stringify({ diff: "" }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const repoRoot = "/tmp/turn-git-reads";
+  activateProject(projectId);
+  applyProjectAdded({ id: projectId, path: repoRoot, name: "turn git reads", createdAt: 1 });
+  seedSessionCache({ id: sessionId, projectId, title: "turn", status: "working", createdAt: 1, updatedAt: 2 });
+  activateSession(sessionId);
+  let seq = 0;
+  const ev = (type: string, data: JsonObject): SessionEvent => {
+    seq += 1;
+    return { id: `${sessionId}-e${seq}`, sessionId, seq, time: 1_700_000_000_000 + seq, type, data, v: 1 };
+  };
+  await act(async () => {
+    applyEvents([
+      ev("user/message", { text: "edit" }),
+      ev("turn/started", { turnId: "t" }),
+      ...files.flatMap((path, index) => [
+        ev("tool/call", { callId: `edit-${index}`, tool: "write", input: { filePath: `${repoRoot}/${path}` } }),
+        ev("tool/result", { callId: `edit-${index}`, tool: "write", output: "ok" }),
+      ]),
+    ]);
+  });
+  const view = await mounted(createElement(PendingChangesBar));
+  try {
+    await act(async () => { await delay(400); });
+    assert.equal(diffReads, files.length, "one read per changed file");
+    await act(async () => { await delay(100); });
+    assert.ok(peakDiffs <= 3, `at most three diff reads at a time, saw ${peakDiffs}`);
+
+    const before = diffReads;
+    for (let chunk = 0; chunk < 40; chunk += 1) {
+      await act(async () => {
+        applyEvents([ev("assistant/chunk", { partId: "p", text: "word " })]);
+      });
+    }
+    await act(async () => { await delay(400); });
+    assert.equal(diffReads, before, "streamed text does not read any diff again");
+
+    await act(async () => { await refreshGitStatus(projectId); await delay(400); });
+    assert.equal(diffReads, before, "an unchanged status does not read any diff again");
+
+    const statusBefore = statusReads;
+    untracked = ["src/new.ts"];
+    await act(async () => {
+      for (let index = 0; index < 5; index += 1) {
+        applyEvents([
+          ev("tool/call", { callId: `run-${index}`, tool: "bash", input: { command: "touch" } }),
+          ev("tool/result", { callId: `run-${index}`, tool: "bash", output: "ok" }),
+        ]);
+        await delay(5);
+      }
+      await delay(1_200);
+    });
+    assert.equal(statusReads, statusBefore + 1, "a burst of finished tools collapses into one status read");
+  } finally {
+    await view.unmount();
+    activateSession(null);
+    activateProject(null);
+  }
+});
+
 test("edited-files bubble expands to a card, lists a preview, reviews a file, and undoes via gitDiscard", async () => {
   const projectId = "edited-files-card-project";
   const sessionId = "edited-files-card-session";
@@ -770,8 +859,11 @@ test("edited-files bubble expands to a card, lists a preview, reviews a file, an
     assert.ok(collapse, "Collapse returns to the bubble");
     assert.equal(collapse.querySelector(".ui-btn-label"), null, "Collapse is icon-only");
     assert.ok(collapse.querySelector("svg"), "Collapse keeps a visible icon");
-    const actions = [...view.container.querySelectorAll(".pending-changes-actions button")];
-    assert.equal(actions.at(-1), collapse, "Collapse is the rightmost header action");
+    assert.equal(
+      collapse.previousElementSibling?.classList.contains("pending-changes-actions"),
+      true,
+      "Collapse follows the header actions, on the right",
+    );
     await act(async () => { collapse.click(); });
     const collapsed = view.container.querySelector<HTMLButtonElement>(".pending-changes-bar--collapsed .ui-run-summary");
     assert.ok(collapsed);

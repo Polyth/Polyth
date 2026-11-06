@@ -3,6 +3,8 @@ import type { Project } from "@polyth/contracts";
 import { api, type ScheduleLoopErrorDto, type ScheduleTaskDto } from "@polyth/session/web-api";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
+import { friendlyError } from "../../../apps/web/src/settings.ts";
+import { setUiError } from "../../../apps/web/src/store.ts";
 import {
   BotIcon, Button, CloseIcon, Icon, IconButton, Notice, PlusIcon, ShieldAlertIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
@@ -42,10 +44,23 @@ function Row({ host, agent, live }: { host?: WebPackageHost; agent: ScheduleTask
 
 /** Waiting requests across every agent, answered where they are. */
 function Waiting({ host, agent, live }: { host?: WebPackageHost; agent: ScheduleTaskDto; live: AgentLive }) {
-  const [busy, setBusy] = useState(false);
+  // The list reports a decision only after the run's observer sees it, so an
+  // answered request leaves at the click and comes back only if it failed.
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
+  const answer = (sessionId: string, requestId: string, reply: "once" | "reject") => {
+    setAnswered((previous) => new Set(previous).add(requestId));
+    void api.replyPermission(sessionId, requestId, reply).then(() => refreshAgents()).catch((reason: unknown) => {
+      setAnswered((previous) => {
+        const next = new Set(previous);
+        next.delete(requestId);
+        return next;
+      });
+      setUiError(friendlyError(tr("common.error"), reason));
+    });
+  };
   return (
     <>
-      {live.waiting.map(({ run, request }) => (
+      {live.waiting.filter(({ request }) => !answered.has(request.requestId)).map(({ run, request }) => (
         <li key={request.requestId} className="agents-home-request">
           <span className="agents-home-request-icon" aria-hidden="true"><Icon icon={ShieldAlertIcon} size="sm" /></span>
           <span className="agents-home-copy">
@@ -57,14 +72,8 @@ function Waiting({ host, agent, live }: { host?: WebPackageHost; agent: Schedule
           <span className="agents-home-request-actions">
             {request.kind === "permission" && run.sessionId ? (
               <>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => {
-                  setBusy(true);
-                  void api.replyPermission(run.sessionId!, request.requestId, "reject").finally(() => { setBusy(false); void refreshAgents(); });
-                }}>{tr("agents.deny")}</Button>
-                <Button size="sm" disabled={busy} onClick={() => {
-                  setBusy(true);
-                  void api.replyPermission(run.sessionId!, request.requestId, "once").finally(() => { setBusy(false); void refreshAgents(); });
-                }}>{tr("agents.allowOnce")}</Button>
+                <Button size="sm" variant="ghost" onClick={() => answer(run.sessionId!, request.requestId, "reject")}>{tr("agents.deny")}</Button>
+                <Button size="sm" onClick={() => answer(run.sessionId!, request.requestId, "once")}>{tr("agents.allowOnce")}</Button>
               </>
             ) : (
               <Button size="sm" onClick={() => host && openAgent(host, agent)}>{tr("agents.openAgent")}</Button>

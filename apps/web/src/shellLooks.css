@@ -135,6 +135,10 @@
   --look-phone-layer-blur: var(--look-float-blur);
   --look-phone-select: var(--look-select);
   --look-phone-select-edge: var(--look-select-edge);
+  /* A current row inside a phone card (Settings): the same mark, unless the
+     navigator's plate is the card's own material and would vanish on it. */
+  --look-list-select: var(--look-phone-select);
+  --look-list-select-edge: var(--look-phone-select-edge);
   --look-select-mark: transparent;
   --look-tile: var(--look-option);
   --look-tile-edge: inset 0 0 0 1px var(--look-option-edge);
@@ -142,6 +146,11 @@
   --look-tile-ink: var(--accent);
   --look-tile-press: var(--look-hover);
   --look-tile-press-edge: var(--look-tile-edge);
+  /* A pressed navigator line (a project's head): a plate in the look's row
+     corner (--look-select-radius), a step firmer than hover so a quick tap
+     still reads, and never the selection itself. */
+  --look-row-press: color-mix(in srgb, var(--text) 7%, transparent);
+  --look-row-press-edge: none;
   --look-widget: var(--look-card);
   --look-widget-edge: var(--look-card-edge);
   /* The widget's top edge alone: the looks built on rules part it from the
@@ -433,6 +442,18 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railb
   align-self: stretch !important;
 }
 
+/* A compact shell shows a package window as a full-screen layer and floats no
+   strip, so the island a look gives its strip (Air, Obsidian) never reaches it:
+   those margins and borders left the layer short of the screen's edges. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar {
+    margin: 0 !important;
+  }
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:not([data-side-strip]) {
+    border-width: 0 !important;
+  }
+}
+
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > :is(.rail-dynamic, .plugin-strip) {
   background: var(--look-rail) !important;
   backdrop-filter: var(--look-rail-blur) !important;
@@ -633,6 +654,13 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-dat
   color: var(--look-ink-quiet);
 }
 
+/* A pressed project line (MobileNavigator.css draws the plate). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-project-head {
+  --nav-press: var(--look-row-press);
+  --nav-press-edge: var(--look-row-press-edge);
+  --nav-press-radius: var(--look-select-radius);
+}
+
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet.sheet {
     background: var(--look-phone-layer) !important;
@@ -688,7 +716,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-dat
 
 /* 3a. Floating surfaces: toasts, menus, tooltips, dialogs, settings. */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner, .workspace-customize-panel) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.notify-card, .ui-popover, .dialog-panel, .modal.settings-shell, .perm-banner, .workspace-customize-panel) {
   background: color-mix(in srgb, var(--look-float) var(--look-float-a), transparent) !important;
   backdrop-filter: var(--look-float-blur) !important;
   border: 1px solid var(--look-float-edge) !important;
@@ -738,6 +766,81 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.setting
   body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .scrim.settings-scrim > .settings-shell > .settings-pane {
     background: linear-gradient(var(--look-overlay-solid), var(--look-overlay-solid)), var(--bg) !important;
   }
+
+  /* The rest of phone Settings is a phone layer (1h): the whole screen in one
+     material. The floating window's corners, edge and scrim, and the nav
+     column's seam and tint, belong to the wide two-pane window. */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .scrim.settings-scrim {
+    background: transparent !important;
+    backdrop-filter: none !important;
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .scrim.settings-scrim > .settings-shell {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--look-phone-layer) !important;
+    backdrop-filter: var(--look-phone-layer-blur) !important;
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-shell > .settings-nav {
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  /* Each group of pages and the search results are the look's panel card;
+     the looks built on rules part the rows with their line. */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.settings-nav-group-list, .settings-results) {
+    border: 1px solid var(--look-widget-edge) !important;
+    border-block-start-color: var(--look-widget-rule) !important;
+    border-radius: var(--look-widget-radius) !important;
+    background: var(--look-widget) !important;
+    box-shadow: var(--look-widget-shadow) !important;
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.settings-nav-item:not(:last-child), .settings-result:not(:last-of-type)) {
+    border-bottom: 1px solid var(--look-rule) !important;
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-nav-group {
+    color: var(--look-ink-quiet);
+  }
+
+  /* The card clips a row flush, so the current one is the card's band, with
+     the bar the navigator gives its current chat. */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-shell .settings-nav-group-list > .settings-nav-item {
+    position: relative;
+    border-radius: 0 !important;
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-shell .settings-nav-group-list > .settings-nav-item.active {
+    background: var(--look-list-select) !important;
+    box-shadow: var(--look-list-select-edge) !important;
+  }
+
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-shell .settings-nav-group-list > .settings-nav-item.active::before {
+    content: "" !important;
+    position: absolute;
+    inset-inline-start: 0;
+    top: 50%;
+    width: 3px;
+    height: calc(var(--icon-md) + 2px);
+    margin-block-start: calc((var(--icon-md) + 2px) / -2);
+    border-radius: var(--look-pill-radius);
+    background: var(--look-select-mark);
+    pointer-events: none;
+  }
+}
+
+/* Hints, placeholders and captions inside Settings take the look's quiet ink.
+   A sheet lifted well above the theme's panels (dark Air's island, dark
+   Reverse monolith's lit plane) needs the stronger one: the theme's quiet ink
+   was checked against the panels and falls under 4.5:1 there. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-shell {
+  --muted: var(--look-ink-quiet);
+}
+
+html:not(.light) body:is([data-shell-look="air"], [data-shell-look="monolith-reverse"]):not(#\#) .settings-shell {
+  --look-ink-quiet: var(--text-dim);
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.scrim.settings-scrim, .dialog-backdrop) {
@@ -991,10 +1094,6 @@ body[data-shell-look="paper"]:not(#\#) .md-code-block {
   border-radius: var(--look-select-radius) !important;
 }
 
-body[data-shell-look="paper"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="paper"]:not(#\#) .activity-group .ui-run-summary-copy strong {
   font-weight: 500;
 }
@@ -1141,6 +1240,10 @@ body[data-shell-look="line"]:not(#\#) {
   --look-tile-edge: inset 0 0 0 1px var(--look-line);
   --look-tile-radius: var(--look-r);
   --look-tile-press-edge: inset 0 0 0 1px var(--look-line-strong);
+  /* A pressed line is a hairline cell, as a pressed launcher is; its fill a
+     step over hover so the cell still reads on the lightest palettes. */
+  --look-row-press: color-mix(in srgb, var(--text) 6%, transparent);
+  --look-row-press-edge: inset 0 0 0 1px var(--look-line-strong);
   --look-widget-radius: var(--look-r);
 }
 
@@ -1166,7 +1269,7 @@ body[data-shell-look="line"]:not(#\#) .sidebar-project-rail {
   border-inline-end: 1px solid var(--look-line) !important;
 }
 
-body[data-shell-look="line"]:not(#\#) :is(.project-path, .activity-summary-counts, .execution-duration, .chat-response-duration, .msg-time, .settings-nav-search) {
+body[data-shell-look="line"]:not(#\#) :is(.project-path, .activity-summary-counts, .execution-duration, .chat-response-duration, .msg-time) {
   font-family: var(--mono) !important;
   font-size: 11px !important;
   letter-spacing: 0;
@@ -1220,10 +1323,14 @@ body[data-shell-look="line"]:not(#\#) .md-code-block {
 /* The rule sits on the touch box's bottom edge: no touch trim under it. */
 body[data-shell-look="line"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
 
+/* The rule runs from frame edge to frame edge: this block does not bleed. */
+body[data-shell-look="line"]:not(#\#) .activity-group {
+  --activity-bleed: 0px;
+}
+
 body[data-shell-look="line"]:not(#\#) .activity-group > .ui-run-summary {
   border-radius: 0 !important;
   border-bottom: 1px solid var(--look-line-strong) !important;
-  padding-inline: 2px !important;
 }
 
 body[data-shell-look="line"]:not(#\#) .activity-group:not(.open) > .ui-run-summary {
@@ -1412,6 +1519,9 @@ body[data-shell-look="air"]:not(#\#) {
   --look-tile-radius: calc(18px * var(--look-round));
   --look-tile-press: color-mix(in srgb, var(--look-island-solid) 90%, var(--accent));
   --look-tile-press-edge: var(--look-shadow-lift);
+  /* A pressed project tints its island the way a pressed launcher does, a
+     step under the current chat's accent wash (12–13%). */
+  --look-row-press: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 html:not(.light) body[data-shell-look="air"]:not(#\#) {
@@ -1479,6 +1589,14 @@ body[data-shell-look="air"]:not(#\#) .md-code-block {
 /* The pill (and the open block's island) fill the row's whole touch box:
    no touch trim, so they keep the full gap to the rows around them. */
 body[data-shell-look="air"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+
+/* The pill's edge stands on the frame; the thread and the steps follow the
+   mark and the title inside it. */
+body[data-shell-look="air"]:not(#\#) .activity-group {
+  --activity-bleed: 0px;
+  --activity-thread-x: calc(12px + var(--icon-md) / 2 - .5px);
+  --activity-step-inset: calc(12px + var(--icon-md) + var(--space-2));
+}
 
 body[data-shell-look="air"]:not(#\#) .activity-group > .ui-run-summary {
   width: auto !important;
@@ -1555,6 +1673,19 @@ body[data-shell-look="air"]:not(#\#) .mobile-nav-project {
   box-shadow: var(--look-shadow);
 }
 
+/* A press lights the island, out to its edges and in its corners: a closed
+   project is all head, so the whole island; an open one its head, square
+   where the chats begin. */
+body[data-shell-look="air"]:not(#\#) .mobile-nav-project > .mobile-nav-project-head {
+  --nav-press-inset: calc(var(--space-1) * -1) 0;
+  --nav-press-radius: calc(22px * var(--look-round));
+}
+
+body[data-shell-look="air"]:not(#\#) .mobile-nav-project.is-expanded > .mobile-nav-project-head {
+  --nav-press-inset: calc(var(--space-1) * -1) 0 0;
+  --nav-press-radius: calc(22px * var(--look-round)) calc(22px * var(--look-round)) 0 0;
+}
+
 /* Inside an island the mark sits as far in from its side as from its top,
    and names and chats keep their edge after it; a current chat's pill still
    spans the island. The lifted copy of a project keeps the same inset. */
@@ -1591,6 +1722,15 @@ body[data-shell-look="air"]:not(#\#) .mobile-nav-search {
   background: var(--look-island) !important;
   box-shadow: var(--look-shadow) !important;
   border-radius: var(--look-pill-radius) !important;
+}
+
+/* The phone layer is Air's pale field, so a field in the field color would
+   vanish on it: the Settings search is an island, as the navigator's is. */
+@media (max-width: 700px) {
+  body[data-shell-look="air"]:not(#\#) .settings-shell > .settings-nav .settings-nav-search-shell.ui-field-well:not(:focus-within) {
+    background: var(--look-island) !important;
+    box-shadow: var(--look-shadow) !important;
+  }
 }
 
 body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) {
@@ -1661,6 +1801,8 @@ body[data-shell-look="monolith"]:not(#\#) {
   --look-phone-layer: color-mix(in srgb, var(--look-backdrop) var(--look-overlay-a), transparent);
   --look-phone-select: var(--look-sheet-solid);
   --look-phone-select-edge: var(--look-sheet-shadow);
+  --look-list-select: var(--look-select);
+  --look-list-select-edge: none;
   --look-tile: var(--look-sheet-solid);
   --look-tile-edge: var(--look-sheet-shadow);
   --look-tile-radius: calc(12px * var(--look-round));
@@ -1766,30 +1908,12 @@ body[data-shell-look="monolith"]:not(#\#) .md-code-block {
   border-radius: calc(12px * var(--look-round)) !important;
 }
 
-body[data-shell-look="monolith"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="monolith"]:not(#\#) .activity-group .ui-run-summary-copy strong {
   font-weight: 550;
 }
 
-body[data-shell-look="monolith"]:not(#\#) .activity-group.open .activity-group-items {
-  position: relative;
-}
-
 body[data-shell-look="monolith"]:not(#\#) .activity-group.open .activity-group-items::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 8px;
-  top: 0;
-  bottom: 10px;
-  width: 1px;
   background: color-mix(in srgb, var(--text) 16%, transparent);
-}
-
-body[data-shell-look="monolith"]:not(#\#) .activity-group .execution-summary {
-  padding-inline-start: 22px !important;
 }
 
 body[data-shell-look="monolith"]:not(#\#) .execution-status-icon {
@@ -1840,7 +1964,7 @@ body[data-shell-look="monolith"]:not(#\#) :is(.mobile-float-navigation, .mobile-
   border-radius: calc(14px * var(--look-round)) !important;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   body[data-shell-look="monolith"]:not(#\#) .app {
     background: var(--look-sheet) !important;
     --look-canvas-blur: var(--look-blur);
@@ -1904,11 +2028,18 @@ body[data-shell-look="monolith-reverse"]:not(#\#) {
      look's selection), launchers and widgets are cut into it, and a pressed
      launcher sinks deeper. */
   --look-phone-layer: color-mix(in srgb, var(--look-plane-solid) var(--look-overlay-a), transparent);
+  --look-list-select: var(--look-plane-solid);
+  --look-list-select-edge: none;
   --look-tile: var(--look-well-solid);
   --look-tile-edge: var(--look-carve);
   --look-tile-radius: calc(11px * var(--look-round));
   --look-tile-press: var(--look-well-solid);
   --look-tile-press-edge: inset 0 2px 5px rgba(0, 0, 0, 0.3);
+  /* A pressed line starts to sink: the well's carve at half its depth, so
+     it never reads as the current chat (the full well) and stays as quiet
+     on a dark plane as the other looks' presses. */
+  --look-row-press: color-mix(in srgb, var(--look-well-solid) 50%, transparent);
+  --look-row-press-edge: var(--look-carve);
   --look-widget: var(--look-well-solid);
   --look-widget-edge: transparent;
   --look-widget-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 6px -2px rgba(0, 0, 0, 0.3);
@@ -2005,30 +2136,12 @@ html.light body[data-shell-look="monolith-reverse"]:not(#\#) .md-code-block {
   background: color-mix(in srgb, var(--look-plane-solid) 70%, transparent) !important;
 }
 
-body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group .ui-run-summary-copy strong {
   font-weight: 550;
 }
 
-body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group.open .activity-group-items {
-  position: relative;
-}
-
 body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group.open .activity-group-items::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 8px;
-  top: 0;
-  bottom: 10px;
-  width: 1px;
   background: color-mix(in srgb, var(--text) 16%, transparent);
-}
-
-body[data-shell-look="monolith-reverse"]:not(#\#) .activity-group .execution-summary {
-  padding-inline-start: 22px !important;
 }
 
 body[data-shell-look="monolith-reverse"]:not(#\#) .execution-status-icon {
@@ -2074,7 +2187,7 @@ body[data-shell-look="monolith-reverse"]:not(#\#) :is(.mobile-float-navigation, 
   border-radius: calc(14px * var(--look-round)) !important;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   body[data-shell-look="monolith-reverse"]:not(#\#) .app {
     background: var(--look-well) !important;
   }
@@ -2148,6 +2261,9 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-tile-ink: var(--accent-hi);
   --look-tile-press: linear-gradient(var(--look-fill-strong), var(--look-fill-strong)) padding-box, var(--look-rim-accent) border-box;
   --look-tile-press-edge: 0 8px 22px -8px var(--accent);
+  /* A pressed line is the selection's accent glass, a step lighter. */
+  --look-row-press: color-mix(in srgb, var(--accent) 9%, transparent);
+  --look-row-press-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
   --look-widget: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box;
   --look-widget-edge: transparent;
   --look-widget-shadow: var(--look-glass-shadow);
@@ -2206,7 +2322,7 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher
   box-shadow: var(--look-glass-shadow) !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.notify-card, .ui-popover, .dialog-panel, .modal.settings-shell, .perm-banner) {
   border: 1px solid transparent !important;
   background: linear-gradient(var(--look-fill-strong), var(--look-fill-strong)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
@@ -2270,30 +2386,12 @@ body[data-shell-look="obsidian"]:not(#\#) .question-option:has(input:checked) {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent), 0 0 18px -8px var(--accent) !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
-}
-
 body[data-shell-look="obsidian"]:not(#\#) .activity-group .ui-run-summary-mark {
   filter: drop-shadow(0 0 6px color-mix(in srgb, var(--green) 60%, transparent));
 }
 
-body[data-shell-look="obsidian"]:not(#\#) .activity-group.open .activity-group-items {
-  position: relative;
-}
-
 body[data-shell-look="obsidian"]:not(#\#) .activity-group.open .activity-group-items::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 8px;
-  top: 0;
-  bottom: 10px;
-  width: 1px;
   background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 0%, transparent));
-}
-
-body[data-shell-look="obsidian"]:not(#\#) .activity-group .execution-summary {
-  padding-inline-start: 22px !important;
 }
 
 body[data-shell-look="obsidian"]:not(#\#) .execution-status-icon {
@@ -2329,12 +2427,54 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-float-navigation, .mobile-
   backdrop-filter: var(--look-glass-blur) !important;
 }
 
-/* A project's mark is a polished accent disc. */
-body[data-shell-look="obsidian"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
+/* A project's mark is a gem: its own colour seen through glass. Without a colour
+   it is clear rather than the accent, on every surface that shows a mark. The
+   default goes through the token because a `color` at this strength would beat
+   the appearance dialog's preview, which follows the colour being chosen. */
+body[data-shell-look="obsidian"]:not(#\#) .project-glyph {
+  --session-blue: var(--text-dim);
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-navigator, .context-selector-project .picker-trigger-icon) .project-glyph {
   border-radius: var(--look-pill-radius);
-  background: linear-gradient(135deg, var(--accent-hi), var(--accent));
-  color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 28%, transparent), 0 4px 12px -6px var(--accent);
+}
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-navigator, .context-selector-project .picker-trigger-icon) .project-glyph:not(:has(> img)) {
+  background: radial-gradient(120% 120% at 30% 12%, color-mix(in srgb, currentColor 30%, transparent), color-mix(in srgb, currentColor 9%, transparent) 70%);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, currentColor 32%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 6px 14px -9px currentColor;
+}
+
+/* Phone Settings: categories are plain lists on the glass, parted by their
+   headings rather than framed. Headings and rows share one column with the
+   search field's icon; only the current row carries a shape. */
+@media (max-width: 700px) {
+  body[data-shell-look="obsidian"]:not(#\#) :is(.settings-nav-group-list, .settings-results) {
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  /* Rows clip to no card now; the results list keeps its own scrolling. */
+  body[data-shell-look="obsidian"]:not(#\#) .settings-nav-group-list {
+    overflow: visible;
+  }
+
+  body[data-shell-look="obsidian"]:not(#\#) .settings-results {
+    margin-inline: calc(var(--space-4) * var(--density-scale));
+    padding: 0;
+  }
+
+  /* A setting found inside a page keeps its indent under that page's row. */
+  body[data-shell-look="obsidian"]:not(#\#) :is(.settings-nav-group, .settings-nav-item, .settings-result-pagehead) {
+    padding-inline: calc(var(--space-3) * var(--density-scale));
+  }
+
+  body[data-shell-look="obsidian"]:not(#\#) .settings-result {
+    border-radius: var(--look-select-radius);
+  }
 }
 
 /*
@@ -2492,10 +2632,6 @@ body[data-shell-look="editorial"]:not(#\#) .msg.assistant .bubble p.md-para > st
 body[data-shell-look="editorial"]:not(#\#) .md-code-block {
   background: color-mix(in srgb, var(--text) 4%, transparent) !important;
   border-radius: calc(4px * var(--look-round)) !important;
-}
-
-body[data-shell-look="editorial"]:not(#\#) .activity-group > .ui-run-summary {
-  padding-inline: 0 !important;
 }
 
 body[data-shell-look="editorial"]:not(#\#) .activity-group .ui-run-summary-copy strong {
@@ -2695,5 +2831,23 @@ body[data-shell-look="editorial"]:not(#\#) .mobile-nav-date-divider:not(.is-pinn
     font-size: calc(var(--subheader-font-size) + 3px);
     font-weight: 600;
     letter-spacing: 0;
+  }
+}
+
+/* ---- compact shell: a package window fills the screen ------------------------
+   In the compact shell the railbar is only the host of a full-screen layer
+   (styles.css), never the floating launcher strip the looks above dress. Their
+   `!important` margins and frames would otherwise inset every package window. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> :is(.rail-fullscreen, .panel-sheet)) {
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    background: transparent !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
   }
 }

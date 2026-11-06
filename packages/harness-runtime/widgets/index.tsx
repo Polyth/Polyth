@@ -5,9 +5,11 @@ import HarnessAccounts from "./HarnessAccounts.tsx";
 import HarnessAuthRecovery from "./HarnessAuthRecovery.tsx";
 import HarnessMaintenance from "./HarnessMaintenance.tsx";
 import HarnessPlugins from "./HarnessPlugins.tsx";
+import HarnessSignInExpiry from "./HarnessSignInExpiry.tsx";
 import HarnessSkills from "./HarnessSkills.tsx";
 import HarnessSystemPrompt from "./HarnessSystemPrompt.tsx";
 import McpPage from "./McpPage.tsx";
+import { getSignInExpiryLedger, replaceSignInExpiryLedger, SIGN_IN_EXPIRY_PREFERENCE_ID, subscribeSignInExpiryLedger } from "./signInExpiryLedger.ts";
 
 /** Canonical package entry: existing harness UI plus package-owned recovery and MCP surfaces. */
 export default defineWebPackage((host) => () => {
@@ -29,6 +31,25 @@ export default defineWebPackage((host) => () => {
       pendingHarnessSelection={props.pendingHarnessSelection as HarnessSelection | undefined}
       transition={props.harnessTransition as HarnessTransition | undefined}
     />,
+  });
+  // A login nearing its sign-in end: one notification per level, plus a
+  // notice for the open chat's own login in its last 48 hours.
+  const disposeSignInExpiry = host.slots.register({
+    id: "harnesses.sign-in-expiry",
+    slot: "session.composer.before",
+    order: 11,
+    render: (props) => <HarnessSignInExpiry
+      host={host}
+      projectId={props.projectId as string | undefined}
+      spaceId={props.spaceId as string | undefined}
+      resolvedHarnessId={props.resolvedHarnessId as string | undefined}
+    />,
+  });
+  // What was already announced follows the person to every device.
+  const disposeSignInExpiryLedger = host.preferences.register(SIGN_IN_EXPIRY_PREFERENCE_ID, {
+    read: getSignInExpiryLedger,
+    write: replaceSignInExpiryLedger,
+    subscribe: subscribeSignInExpiryLedger,
   });
   const disposeSystemPrompt = host.slots.register({
     id: "harnesses.system-prompt",
@@ -158,6 +179,8 @@ export default defineWebPackage((host) => () => {
     disposeMaintenance();
     disposePlugins();
     disposeSkills();
+    disposeSignInExpiryLedger();
+    disposeSignInExpiry();
     disposeRecovery();
     disposeBase();
   };

@@ -349,6 +349,10 @@ export function createAntigravityPackage(
         runtime.completeSmallModel = (request: SmallModelCompletionRequest) => smallModel.complete(request);
         return runtime;
       },
+      async completeUtility(request: SmallModelCompletionRequest) {
+        const binary = await resolveBinary();
+        return createAntigravitySmallModelRunner({ command: binary.command, cwd: request.cwd, env: binary.env }).complete(request);
+      },
       async releaseExecution(context, binding, operationId) {
         let file: string;
         try { file = stateFile(context); } catch { return { kind: "rejected", code: "unsupported", message: "A validated local Space and session are required" }; }

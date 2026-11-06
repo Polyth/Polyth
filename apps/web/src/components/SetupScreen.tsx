@@ -13,7 +13,8 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import { authJson, clearAuthCsrf, type AuthJsonResult } from "../authClient.ts";
 import { acceptAuthenticatedBrowserAccount } from "../authPrefetch.ts";
-import { desktopBridge, type DesktopSetupClaim, type PolythDesktopApi } from "../desktopBridge.ts";
+import { localDesktopBridge, type DesktopSetupClaim, type PolythDesktopApi } from "../desktopBridge.ts";
+import { DesktopServerExit } from "./DesktopServerSwitcher.tsx";
 import { getLocaleSnapshot, subscribeLocale, tr, type TranslationKey } from "../i18n/index.ts";
 import { copyText } from "../utils.ts";
 import { MIN_PASSWORD_LENGTH } from "./settings/usersModel.ts";
@@ -145,7 +146,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   // A language switch re-renders the flow in place (bootstrap does not remount
   // it), so the step and everything typed survive the switch.
   useSyncExternalStore(subscribeLocale, getLocaleSnapshot, getLocaleSnapshot);
-  const desktop = desktopBridge();
+  const desktop = localDesktopBridge();
   // Shells older than password-less first run go straight to the account.
   const askUsage = typeof desktop?.completeLocalSetup === "function";
   const [usage, setUsage] = useState<Usage>("solo");
@@ -547,6 +548,13 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
                 </Button>
               </div>
               <p className="setup-signin">{tr(USAGE_OPTIONS.find((option) => option.id === usage)!.foot)}</p>
+              {desktop?.servers && (
+                <p className="setup-signin">
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => void desktop.servers?.list({ add: true })}>
+                    {tr("setup.usage.connectElsewhere")}
+                  </Button>
+                </p>
+              )}
             </>
           )}
 
@@ -703,6 +711,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
             {tr("common.back")}
           </Button>
         )}
+        <DesktopServerExit />
       </form>
     </div>
   );

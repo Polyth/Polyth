@@ -1,8 +1,30 @@
 import "./styles.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import MemorySettings from "./MemorySettings.tsx";
+import { ChatMemoryScope, InvitationNotice, ShareProposalCard } from "./MyNotes.tsx";
 
 export default defineWebPackage((host) => () => {
+  const translate = host.ui.locale.translate;
+  const slots = [
+    host.slots.register({
+      id: "memory.chat-scope",
+      slot: "session.audience.details",
+      render: (props) => <ChatMemoryScope privateChat={props.privateChat === true} translate={translate} />,
+    }),
+    host.slots.register({
+      id: "memory.share-proposals",
+      slot: "composer.pending",
+      order: 5,
+      render: (props) => props.privateAmongOthers === true
+        ? <ShareProposalCard projectId={typeof props.projectId === "string" ? props.projectId : null} sessionId={typeof props.sessionId === "string" ? props.sessionId : null} working={props.working === true} translate={translate} />
+        : null,
+    }),
+    host.slots.register({
+      id: "memory.invitation-notice",
+      slot: "settings.users.invite.notice",
+      render: () => <InvitationNotice translate={translate} />,
+    }),
+  ];
   const unregister = host.projectSettings.register({
     id: "memory",
     order: 30,
@@ -22,5 +44,8 @@ export default defineWebPackage((host) => () => {
       />
     ),
   });
-  return unregister;
+  return () => {
+    unregister();
+    for (const dispose of slots) dispose();
+  };
 });

@@ -209,7 +209,7 @@ test("Claude query receives overlay systemPrompt append and mcpServers", async (
         append: "Global behavior.\n\nClaude-only behavior.",
     });
     assert.deepEqual(options.mcpServers, { ping: { command: "node", args: ["x"] } });
-    assert.deepEqual(options.disallowedTools, ["Agent", "Task"]);
+    assert.deepEqual(options.disallowedTools, ["Agent", "Task", "ScheduleWakeup", "CronCreate", "CronDelete", "CronList"]);
     await rt.dispose();
 });
 

@@ -74,6 +74,7 @@ const eventFixtures = new Map<string, unknown[]>();
 const store = await import("../src/store.ts");
 const { createSession, openSession, pollSessionTail, prefetchSessionTail } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
+const { setClientPersistenceBackend } = await import("../src/clientPersistence.ts");
 const { getWorkspacePanePrefs, workspacePaneKey } = await import("../src/workspace/panePrefs.ts");
 const { getWorkspaceMode, setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
 const { PROJECT_PRESENTATION_HYDRATED_EVENT } = await import("../src/projectPresentationSync.ts");
@@ -652,5 +653,40 @@ test("full browser storage does not block opening or creating sessions", async (
     assert.equal(store.getState().activeSessionId, created);
   } finally {
     Object.defineProperty(globalThis, "localStorage", { value: originalStorage, configurable: true });
+  }
+});
+
+test("a warmed chat whose local draft read waits for a socket claims the loading layer", async () => {
+  // The phone's draft is an HTTP read of the app's own loopback. While it waits,
+  // the previous chat must not stay on screen as if the tap had done nothing.
+  const sessionId = "warmed-slow-draft";
+  store.upsertSession({ id: sessionId, projectId: "p1", title: "Warmed", status: "idle", createdAt: 1, updatedAt: 1 });
+  eventFixtures.set(sessionId, [{
+    id: `${sessionId}-1`, sessionId, seq: 1, time: 1, type: "user/message", data: { text: "ready" }, v: 1,
+  }]);
+  prefetchSessionTail(sessionId);
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const previous = store.getState().activeSessionId;
+  assert.notEqual(previous, sessionId);
+
+  let finishRead: (value: string | null) => void = () => {};
+  setClientPersistenceBackend({
+    get: () => new Promise<string | null>((resolve) => { finishRead = resolve; }),
+    set: async () => {},
+    remove: async () => {},
+  });
+  try {
+    const opening = openSession(sessionId);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    assert.equal(store.getState().activeSessionId, previous, "the read is still on its way");
+    assert.equal(store.getState().openingSessionId, sessionId, "the surface can show its loading layer");
+
+    finishRead(null);
+    await opening;
+    assert.equal(store.getState().activeSessionId, sessionId);
+    assert.equal(store.getState().openingSessionId, null, "the claim ends with the open");
+  } finally {
+    setClientPersistenceBackend(null);
+    eventFixtures.delete(sessionId);
   }
 });

@@ -27,6 +27,15 @@ test("voice prefs parse defaults, clamp rate, round-trip", () => {
   assert.deepEqual(parseVoicePrefs(serializeVoicePrefs(p)), p);
 });
 
+test("dictation mode defaults to live and keeps only an explicit record choice", () => {
+  assert.equal(defaultVoicePrefs().dictationMode, "live");
+  assert.equal(parseVoicePrefs('{"dictation": true}').dictationMode, "live", "older prefs keep live dictation");
+  assert.equal(parseVoicePrefs('{"dictationMode": "record"}').dictationMode, "record");
+  assert.equal(parseVoicePrefs('{"dictationMode": "hold-to-record"}').dictationMode, "live", "an unknown mode reads as live");
+  const recorded = { ...defaultVoicePrefs(), dictationMode: "record" as const };
+  assert.deepEqual(parseVoicePrefs(serializeVoicePrefs(recorded)), recorded);
+});
+
 test("mergeTranscript joins chunks with single spaces", () => {
   assert.equal(mergeTranscript("", "  hello "), "hello");
   assert.equal(mergeTranscript("hello", "world"), "hello world");

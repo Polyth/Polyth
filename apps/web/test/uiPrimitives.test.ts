@@ -183,13 +183,24 @@ test("Button: variants, sizes, busy state", async () => {
     assert.equal(clicks, 1);
   } finally { await view.unmount(); }
 
-  const busy = await mount(createElement(ui.Button, { busy: true }, "Working"));
+  const busy = await mount(createElement(ui.Button, { busy: true, iconStart: ui.AddIcon }, "Working"));
   try {
     const button = busy.container.querySelector("button")!;
     assert.equal(button.getAttribute("aria-busy"), "true");
     assert.ok(button.hasAttribute("disabled"));
     assert.ok(busy.container.querySelector(".ui-spinner"), "busy buttons show a spinner");
+    const mark = button.querySelector(".ui-btn-mark--sm");
+    assert.ok(mark?.querySelector(".ui-spinner"), "the spinner takes the leading glyph's box");
+    assert.equal(mark?.querySelector(".ui-icon"), null, "so the button never changes width while busy");
   } finally { await busy.unmount(); }
+
+  // Markup cannot prove geometry: pin the box the mark reserves and the ink
+  // the ring is drawn from, so a spinner reads on the accent fill too.
+  const styles = await read("../src/styles.css");
+  assert.match(styles, /\.ui-btn-mark--sm \{ width: var\(--icon-sm\); height: var\(--icon-sm\); \}/);
+  assert.match(styles, /\.ui-btn-mark--md \{ width: var\(--icon-md\); height: var\(--icon-md\); \}/);
+  assert.match(styles, /body \.ui-btn \.ui-spinner \{\n  border-color: color-mix\(in srgb, currentColor 28%, transparent\);\n  border-top-color: currentColor;/);
+  assert.match(styles, /body\[data-hide-borders="true"\] \.ui-btn \.ui-spinner \{[\s\S]*?border-top-color: currentColor !important;/);
 });
 
 test("AgentStatusDock is a passive live status unless a details action exists", async () => {

@@ -6,7 +6,6 @@
   "auth.test.ts",
   "authIngress.test.ts",
   "bodyLimit.test.ts",
-  "browse.test.ts",
   "canonicalIdentityHttp.test.ts",
   "capabilityProvisioning.production.test.ts",
   "capabilityProvisioning.runtimeLifetime.test.ts",

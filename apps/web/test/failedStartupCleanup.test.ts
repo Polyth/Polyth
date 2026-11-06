@@ -86,6 +86,15 @@ test("only an assistant-less terminal startup failure qualifies for deletion", (
     ]),
     false,
   );
+  // A first message refused for being too long: the chat keeps what was written.
+  assert.equal(
+    shouldDeleteFailedStartupSession([
+      event(1, "session/created"),
+      event(2, "user/message", { text: "hello" }),
+      event(3, "turn/stopped", { reason: "error", code: "context-full" }),
+    ]),
+    false,
+  );
   assert.equal(
     shouldDeleteFailedStartupSession([
       ...failedEvents(),

@@ -134,7 +134,7 @@ test("switching harness releases only through a verified job", { skip: process.p
 
 // ------------------------------------------------- the real Windows boundary
 
-const jobs = (process.platform === "win32" ? windowsJobContainment() : undefined) ?? null;
+const jobs = (process.platform === "win32" ? await windowsJobContainment() : undefined) ?? null;
 const windowsOnly = { skip: !jobs && "needs Windows and a built polyth-job.exe (npm run build:supervisor)" };
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (condition: () => boolean, ms = 5_000) => {

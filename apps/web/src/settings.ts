@@ -3,6 +3,7 @@
 // one-time copy without ever writing the legacy key again.
 import { THEME_STYLE_CHOICES, applyThemeSetting, type AppearanceMode, type ThemeStyleChoice } from "./theme.ts";
 import { readErrorDiagnostics } from "@polyth/contracts";
+import { COMPACTION_AUTO, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { isRequestAbort, isTransportFailure, shortMessage } from "./errorPresentation.ts";
 import { tr } from "./i18n/index.ts";
 
@@ -104,6 +105,11 @@ export interface PolythSettings {
   /** Delete a newly-created session after a confirmed first-turn startup
    * failure when the canonical log contains no assistant output. */
   autoDeleteFailedStartupSessions: boolean;
+  /** "Clean up automatically": the server applies the Cleanup settings to
+   * expired sessions on its own schedule. Off until the person turns it on. */
+  autoCleanupExpiredSessions: boolean;
+  /** "Chat memory": when this person's chats are compacted, unless a chat says otherwise. */
+  compactionDefault: CompactionPreference;
   showArchived: boolean; // show archived sessions in the sidebar
   /** Number of sessions the navigator shows before the user expands it. */
   defaultVisibleSessionCount: number;
@@ -141,6 +147,8 @@ export const DEFAULT_SETTINGS: PolythSettings = {
   defaultModel: "",
   autoTitleSessions: true,
   autoDeleteFailedStartupSessions: true,
+  autoCleanupExpiredSessions: false,
+  compactionDefault: COMPACTION_AUTO,
   showArchived: false,
   defaultVisibleSessionCount: DEFAULT_VISIBLE_SESSION_COUNT,
   branchTemplate: "feat/{slug}",
@@ -225,6 +233,8 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     defaultModel: pickString(r.defaultModel, d.defaultModel),
     autoTitleSessions: pickBool(r.autoTitleSessions, d.autoTitleSessions),
     autoDeleteFailedStartupSessions: pickBool(r.autoDeleteFailedStartupSessions, d.autoDeleteFailedStartupSessions),
+    autoCleanupExpiredSessions: pickBool(r.autoCleanupExpiredSessions, d.autoCleanupExpiredSessions),
+    compactionDefault: parseCompactionPreference(r.compactionDefault) ?? d.compactionDefault,
     showArchived: pickBool(r.showArchived, d.showArchived),
     defaultVisibleSessionCount: pickNumber(
       r.defaultVisibleSessionCount,

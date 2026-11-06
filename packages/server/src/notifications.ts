@@ -85,13 +85,25 @@ function validateRecord(raw: unknown): NotificationRecord | null {
 }
 
 /** The optional people fields, kept only when well formed. */
-function peopleFields(r: Record<string, unknown>): Pick<NotificationRecord, "author" | "chat"> {
+function peopleFields(r: Record<string, unknown>): Pick<NotificationRecord, "author" | "chat" | "accessRequest"> {
   const author = r.author as Record<string, unknown> | undefined;
+  const asked = r.accessRequest as { messageSeq?: unknown; people?: unknown } | undefined;
+  const askedPeople = asked && typeof asked === "object" && Array.isArray(asked.people)
+    ? asked.people.flatMap((raw) => {
+        const person = raw as { userId?: unknown; name?: unknown } | null;
+        return person && isNonEmptyString(person.userId) && typeof person.name === "string"
+          ? [{ userId: person.userId, name: person.name }]
+          : [];
+      })
+    : [];
   return {
     ...(author && typeof author === "object" && isNonEmptyString(author.userId) && typeof author.name === "string"
       ? { author: { userId: author.userId, name: author.name } }
       : {}),
     ...(typeof r.chat === "string" ? { chat: r.chat } : {}),
+    ...(asked && Number.isSafeInteger(asked.messageSeq) && askedPeople.length > 0
+      ? { accessRequest: { messageSeq: asked.messageSeq as number, people: askedPeople } }
+      : {}),
   };
 }
 

@@ -1,6 +1,7 @@
 import "./styles.css";
 import "./source-control.css";
 import "./source-control-settings.css";
+import "./source-control-phone.css";
 import { createElement } from "react";
 import { resolveSourceControlContext } from "@polyth/contracts/source-control";
 import type { SessionStatus } from "@polyth/contracts";

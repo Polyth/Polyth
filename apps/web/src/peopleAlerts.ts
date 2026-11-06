@@ -66,12 +66,33 @@ export interface PeopleThread {
   count: number;
   /** Once a burst mentions the reader the card says so until it leaves. */
   mention: boolean;
+  /** The newest request to open the chat to someone, while the card is up. */
+  accessRequest?: PeopleAccessRequest;
+}
+
+export interface PeopleAccessRequest {
+  messageSeq: number;
+  people: Array<{ userId: string; name: string }>;
 }
 
 type PeopleRecord = Pick<NotificationRecord, "id" | "kind" | "title" | "body" | "ts"> & {
   author?: unknown;
   chat?: unknown;
+  accessRequest?: unknown;
 };
+
+/** The record's request to open the chat to someone, when well formed. */
+function recordAccessRequest(record: PeopleRecord): PeopleAccessRequest | undefined {
+  const raw = record.accessRequest as { messageSeq?: unknown; people?: unknown } | null | undefined;
+  if (!raw || !Number.isSafeInteger(raw.messageSeq) || !Array.isArray(raw.people)) return undefined;
+  const people = raw.people.flatMap((value) => {
+    const person = value as { userId?: unknown; name?: unknown } | null;
+    return person && typeof person.userId === "string" && typeof person.name === "string"
+      ? [{ userId: person.userId, name: person.name }]
+      : [];
+  });
+  return people.length > 0 ? { messageSeq: raw.messageSeq as number, people } : undefined;
+}
 
 /** The record's author, when the server named one well formed. */
 export function recordAuthor(record: PeopleRecord): { userId: string; name: string } | null {
@@ -99,9 +120,11 @@ export function addToThread(thread: PeopleThread | undefined, record: PeopleReco
     mention: record.kind === "mention",
     ts: record.ts,
   };
+  const accessRequest = recordAccessRequest(record) ?? current.accessRequest;
   return {
     lines: [...current.lines, line].slice(-THREAD_LINES),
     count: current.count + 1,
     mention: current.mention || line.mention,
+    ...(accessRequest ? { accessRequest } : {}),
   };
 }

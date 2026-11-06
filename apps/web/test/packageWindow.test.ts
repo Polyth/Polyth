@@ -286,7 +286,10 @@ test("workspace package hosts never blur Chat", async () => {
 });
 
 test("dynamic peek shares the launcher seam and owns the selected glass material", async () => {
-  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const [css, source] = await Promise.all([
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8"),
+  ]);
   assert.match(css, /\.rail-dynamic\s*\{[^}]*width:\s*calc\(var\(--rail-w\) \+ var\(--package-window-seam-padding\)\);/s);
   assert.match(css, /\.rail-dynamic\s*\{[^}]*max-width:[^;]*--package-window-seam-padding[^;]*;/s);
   assert.match(css, /\.rail-dynamic\s*\{[^}]*background:\s*var\(--material-glass\);/s);
@@ -296,11 +299,22 @@ test("dynamic peek shares the launcher seam and owns the selected glass material
     "inline and pinned package frames also grow around their preserved content width",
   );
   assert.match(css, /@keyframes rail-window-open-inline[\s\S]*?width:\s*calc\(var\(--rail-w\) \+ var\(--package-window-seam-padding\)\);/s);
+  assert.doesNotMatch(
+    css,
+    /\.package-window-resize--(?:e|ne|se)\b/,
+    "a floating window offers no resize edge on its content/scrollbar side",
+  );
   assert.match(
     css,
-    /\.rail-dynamic > \.package-window-resize--e,[\s\S]*?\.rail-dynamic > \.package-window-resize--se\s*\{[^}]*inset-inline-end:\s*var\(--package-window-seam-padding\);/s,
-    "the resize affordance follows the content edge instead of the frame padding",
+    /\.package-window-resize--w\s*\{[^}]*inset-inline-start:\s*0[^}]*cursor:\s*ew-resize;/s,
+    "the inline-start edge stays the window's width handle",
   );
+  assert.match(
+    source,
+    /const RESIZE_EDGES: ResizeEdge\[\] = \["n", "nw", "w", "sw", "s"\];/,
+    "the floating window mounts no inline-end resize edge",
+  );
+  assert.match(source, /edge === "w" \|\| edge === "s"/, "only the start edge and the bottom edge are keyboard resizers");
   assert.match(
     css,
     /\.app-shell:has\(\.rail-pinned-narrow\) > \.railbar > \.rail-pinned-narrow[\s\S]*?inset-inline-end:\s*var\(--rail-strip-width-right, calc\(var\(--control-h-sm\) \+ var\(--space-3\) \+ 1px\)\);/s,

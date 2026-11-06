@@ -404,7 +404,8 @@ test("mobile Settings swaps a vertical page list for content with a back action"
   assert.ok(settings.includes('className="settings-pane-head-bar"'), "mobile back and close actions share a header bar");
   assert.match(mobileHeader, /current\.label/, "the mobile detail header identifies the selected settings page");
   assert.match(mobile, /\.settings-nav-list\s*\{[^}]*flex-direction:\s*column/);
-  assert.match(mobile, /\.settings-nav-list\s*\{[^}]*overflow-y:\s*auto/);
+  // One scroller carries the search row and the list, so nothing stays pinned.
+  assert.match(mobile, /\.settings-nav-scroll\s*\{[^}]*overflow-y:\s*auto/);
   assert.match(mobile, /\.settings-mobile-nav \.settings-pane\s*\{[^}]*display:\s*none/);
   // The list stays laid out under a page (unpainted), so Back reveals it
   // already rendered and a swipe can show it peeking in.
@@ -420,6 +421,11 @@ test("mobile Settings swaps a vertical page list for content with a back action"
   assert.match(mobile, /\.settings-pane-body \.set-row\s*\{[^}]*flex-direction:\s*column/);
   assert.match(mobile, /\.settings-pane-body \.set-row-control\s*\{[^}]*width:\s*100%/);
   assert.doesNotMatch(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
+  // Settings lands focus on its heading: the global ring must not frame the title.
+  assert.match(mobile, /\.settings-pane-title:focus\s*\{[^}]*outline:\s*none;[^}]*box-shadow:\s*none/);
+  assert.match(mobile, /h1\.settings-mobile-title:focus\s*\{[^}]*outline:\s*none;[^}]*box-shadow:\s*none/);
+  // An accent label on its own accent wash fell to 2.2:1 in the Classic palettes.
+  assert.doesNotMatch(mobile, /\.settings-nav-item\.active(:hover:where\(:not\(:disabled\)\))?\s*\{[^}]*color:\s*var\(--accent\)/);
 });
 
 test("shared menu, destructive, transient-error, and header-action contracts stay wired", async () => {

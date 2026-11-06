@@ -4,12 +4,53 @@
 import { parseBrowserContext, type AttachmentRef, type BrowserContext } from "@polyth/contracts";
 
 const MAX_ATTACHMENTS = 16;
+export const MAX_TURN_ATTACHMENTS = MAX_ATTACHMENTS;
 const NAME_MAX = 200;
 const MIME_RE = /^[\w.+-]+\/[\w.+-]+$/;
 const URL_MAX = 2048;
 
 const invalid = (message: string): Error =>
   Object.assign(new Error(message), { code: "invalid-input" });
+
+/** Stable identity of an attachment for de-duplicating a prompt's own refs
+ *  against carried/selected ones: same browser artifact, same link, or the
+ *  same file range. Unknown/invalid entries get no key and survive unchanged
+ *  so the shape check can still report them. */
+export function attachmentDeliveryKey(raw: unknown): string | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const a = raw as Record<string, unknown>;
+  const id = typeof a.id === "string" && a.id ? a.id : undefined;
+  if (!id) return undefined;
+  if (a.kind === "browser-context") {
+    const ctx = a.browserContext as { id?: unknown } | undefined;
+    return `browser:${typeof ctx?.id === "string" ? ctx.id : id}`;
+  }
+  if (a.kind === "url") return typeof a.url === "string" ? `url:${a.url}` : `id:${id}`;
+  if (typeof a.path === "string" && a.path) {
+    const range = Array.isArray(a.range) ? `${a.range[0]}-${a.range[1]}` : "";
+    return `file:${typeof a.repositoryId === "string" ? a.repositoryId : ""}:${a.path}:${range}`;
+  }
+  return `id:${id}`;
+}
+
+/** Append carried refs to a prompt's own raw list, dropping an exact repeat.
+ *  A non-array primary is returned untouched so the shape check reports it. */
+export function mergeAttachmentInputs(primary: unknown, carried: readonly AttachmentRef[]): unknown {
+  if (carried.length === 0) return primary;
+  if (primary === undefined || primary === null) return [...carried];
+  if (!Array.isArray(primary)) return primary;
+  const seen = new Set<string>();
+  const out: unknown[] = [];
+  for (const raw of [...primary, ...carried]) {
+    const key = attachmentDeliveryKey(raw);
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(raw);
+  }
+  return out;
+}
 
 /** Same relative-path rule the files package enforces: no absolute paths,
  *  drive letters, `..` segments, or NUL bytes. */

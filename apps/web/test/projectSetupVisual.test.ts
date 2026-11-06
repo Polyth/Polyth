@@ -24,15 +24,31 @@ test("new-project mobile surfaces follow theme glass and compact phone geometry"
   assert.match(composition, /CoachIcon/);
 });
 
-test("new-project step 1 scrolls from General to the actions as one region", async () => {
-  const [setupCss, setupTsx] = await Promise.all([
+test("new-project step 1 pins its primary action and shares step 2's head grid", async () => {
+  const [setupCss, setupTsx, styles] = await Promise.all([
     readFile(new URL("../src/components/ProjectSetupFlowDialog.css", import.meta.url), "utf8"),
     readFile(new URL("../src/components/ProjectSetupFlowDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
   ]);
 
-  // Editor and Cancel/Continue live inside the same scroll container.
-  assert.match(setupTsx, /<div className="project-setup-scroll">\s*(?:\{[^}]*\}\s*)?<ProjectCompositionEditor[^>]*\/>\s*<div className="project-setup-actions">/);
+  // Only the directions scroll; the Continue bar is a pinned sibling, exactly
+  // like the picker's footer on step 2.
+  assert.match(setupTsx, /<div className="project-setup-scroll">\s*<ProjectCompositionEditor[^>]*\/>\s*<\/div>\s*<div className="project-setup-actions">/);
   assert.match(setupCss, /\.project-setup-scroll \{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s);
+
+  // One head anatomy: flow label and the single X on an icon-height line,
+  // then the title, then the hint. Never a bottom Cancel.
+  assert.match(setupTsx, /<div className="project-setup-head-top">\s*<span className="project-setup-step">[\s\S]*?<IconButton icon=\{CloseIcon\} label=\{tr\("common\.close"\)\} onClick=\{cancel\} \/>\s*<\/div>\s*<h2 className="project-setup-title">[\s\S]*?<p className="project-setup-hint">/);
+  assert.match(setupTsx, /<div className="project-setup-actions">\s*<Button size="sm" variant="primary"[^>]*>[\s\S]*?<\/div>/);
+  assert.doesNotMatch(setupTsx, /<div className="project-setup-actions">\s*<Button[^>]*onClick=\{cancel\}/);
+
+  // The picker is step 2 of the same flow: same head classes, same fixed height.
+  // The step count is interpolated because Engineering takes three steps and
+  // everything else two; the picker is always the second one.
+  assert.match(setupTsx, /stepLabel: tr\("projectcomposition\.setupStep", \{ step: 2, total: totalSteps \}\)/);
+  assert.match(setupTsx, /subtitle=\{tr\("projectcomposition\.pickerHint"\)\}/);
+  assert.match(styles, /\.project-setup-flow-step,\s*\n\s*\.folder-dialog-stepped \{ height:\s*min\(608px, calc\(100dvh - 96px\)\); \}/);
+
   // The expanded Workspace list must not become a nested scroll box here:
   // in a half-height window it collapsed to 0px.
   assert.match(setupCss, /\.project-setup-scroll \.project-package-list \{[^}]*max-height:\s*none;[^}]*overflow:\s*visible;/s);

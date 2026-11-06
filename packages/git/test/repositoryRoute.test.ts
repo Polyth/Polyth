@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ProjectService, SessionProjection, SessionService } from "@polyth/contracts";
 import { gitRoutes, isolationRoutes } from "../src/serverEntry.ts";
 import { createGitService, type GitService } from "../src/index.ts";
@@ -62,6 +65,61 @@ test("Git resolves an explicit repository without a global active repository", a
   const result = await call(h.routes, { projectId: "p1", repositoryId: "api" });
   assert.equal((result as { isRepo: boolean }).isRepo, true);
   assert.deepEqual(h.roots, ["/api"]);
+});
+
+test("status readers of one checkout share a read, and a plain folder starts no process", async () => {
+  const statusBody = { branch: "main", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [], clean: true };
+  const route = (git: Partial<GitService>) => gitRoutes({
+    projects: { get: async (id: string) => ({ id, name: "Project", path: "/repo" }) } as unknown as ProjectService,
+    sessions: { snapshot: async () => undefined, list: async () => [] } as unknown as SessionService,
+    git: git as GitService,
+    commitMessage: async () => "",
+  });
+
+  let statusReads = 0;
+  let isRepoReads = 0;
+  let release = () => {};
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const shared = route({
+    mayBeWorkTree: async () => true,
+    isRepo: async () => { isRepoReads += 1; return true; },
+    status: async () => { statusReads += 1; await blocked; return statusBody as never; },
+  });
+  const readers = [call(shared, { projectId: "p1" }), call(shared, { projectId: "p1" }), call(shared, { projectId: "p1" })];
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  release();
+  for (const answer of await Promise.all(readers)) assert.equal((answer as { isRepo: boolean }).isRepo, true);
+  assert.equal(statusReads, 1);
+  assert.equal(isRepoReads, 0, "a repository needs no separate check before its status");
+  await call(shared, { projectId: "p1" });
+  assert.equal(statusReads, 2, "the next read after one finished asks Git again");
+
+  let plainProcesses = 0;
+  const plain = route({
+    mayBeWorkTree: async () => false,
+    isRepo: async () => { plainProcesses += 1; return false; },
+    status: async () => { plainProcesses += 1; return statusBody as never; },
+  });
+  assert.equal(((await call(plain, { projectId: "p1" })) as { isRepo: boolean }).isRepo, false);
+  assert.equal(plainProcesses, 0);
+
+  const broken = route({
+    mayBeWorkTree: async () => true,
+    isRepo: async () => false,
+    status: async () => { throw new Error("fatal: not a git repository"); },
+  });
+  assert.equal(((await call(broken, { projectId: "p1" })) as { isRepo: boolean }).isRepo, false, "a `.git` Git refuses is still not a repository");
+});
+
+test("a folder with no .git above it cannot be a work tree", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "polyth-work-tree-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = createGitService();
+  const nested = join(root, "a", "b");
+  mkdirSync(nested, { recursive: true });
+  assert.equal(await git.mayBeWorkTree!(nested), false);
+  mkdirSync(join(root, ".git"));
+  assert.equal(await git.mayBeWorkTree!(nested), true, "Git also finds a repository above the folder");
 });
 
 test("Git rejects unknown, excluded, and foreign repository context", async () => {

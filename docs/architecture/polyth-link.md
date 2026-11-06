@@ -50,7 +50,13 @@ or unauthenticated share link.
    did not negotiate it is a protocol error. Older peers neither send nor read
    the field, so a mixed pair keeps plain frames. The host's own leg to the
    server stays uncompressed (a local unix socket).
-7. **Mobile proxy.** The Android/iOS native adapter runs the shared Rust Link
+7. **Stream priorities.** The transport sends the pending stream with the
+   highest priority value first (`PRI_*`, `polyth-link-core/src/protocol.rs`):
+   control above API and WebSocket, file bodies (`/files`, `/attachment` paths)
+   below everything, so a download cannot hold back API answers. A priority only
+   orders what has not left the host yet; data already queued on a relay still
+   goes first (numbers: [Phone: opening a chat that has photos](../agents/performance.md#phone-opening-a-chat-that-has-photos)).
+8. **Mobile proxy.** The Android/iOS native adapter runs the shared Rust Link
    client and loads the bundled web app through a one-time `bootstrapUrl` on
    a Rust-owned `127.0.0.1` listener. The browser receives only non-secret
    connection metadata and the loopback bootstrap URL. The app enters it
@@ -81,11 +87,11 @@ or unauthenticated share link.
     the proxy the app opened: the native side draws the server list itself and
     returns only the kind of choice, so connection metadata still never reaches
     loopback JavaScript (`docs/mobile/polyth-link.md`).
-8. **Local numeric pairing.** Nearby discovery supplies only a pinned bootstrap
+9. **Local numeric pairing.** Nearby discovery supplies only a pinned bootstrap
    hint. The six-digit code is authenticated with OPAQUE using the fixed
    `argon2id-v1-m65536-t3-p1` profile, a 120-second lifetime, and bounded
    per-device, endpoint, and host attempts; it never becomes persistent trust.
-9. **Interrupted pairing recovery.** A durable `prepared` record is never an
+10. **Interrupted pairing recovery.** A durable `prepared` record is never an
    active connection. Only the explicit native recovery operation may probe the
    pinned host. It promotes an accepted device, or removes the matching native
    identity and metadata only after an exact authoritative orphan rejection.
@@ -120,7 +126,9 @@ or unauthenticated share link.
   already in flight on the dead link fail as before (a mutation stays
   outcome-unknown). Only an authoritative host answer — revoked, unknown
   device, identity or version mismatch — or `disconnect`/`forget` ends the
-  session. A listener whose accept loop dies is rebound on the same port;
+  session. A host closes a revoked device's connection right after saying so,
+  and the close can outrun the message, so the close reason `revoked` counts as
+  the same answer. A listener whose accept loop dies is rebound on the same port;
   if that fails the session reports `disconnected` so the native shell
   reconnects with a new origin. `status` stays `connected` (with
   `reconnecting: true` and no `transport`) while the link is re-established,
@@ -129,7 +137,11 @@ or unauthenticated share link.
   without the matching `Pong` within 5 s the link is treated as lost and
   replaced. After a suspension the old connection still looks open (QUIC
   measures its idle timeout in awake time), so without this probe requests and
-  the page's WebSocket hung on it for tens of seconds.
+  the page's WebSocket hung on it for tens of seconds. Stream data arriving
+  meanwhile re-arms the wait, for at most 30 s: a relay path queues the `Pong`
+  behind everything already on its way to the phone, and replacing a link that
+  is delivering would cut those very transfers. ACKs do not count, because a
+  host whose application has stopped still sends them.
   `status` and `connect` first prove the origin is served: a loopback probe
   must be *accepted by this proxy's accept loop* (a reclaimed iOS listener
   can fail silently, and a bare TCP connect could reach another local
@@ -149,6 +161,13 @@ or unauthenticated share link.
   for an explicit choice.
 - `crates/polyth-link-uniffi` — stable native C ABI over the shared client.
   It contains no second pairing or transport implementation.
+- `polyth-link-client stdio <data dir>` — the desktop app's transport to the same
+  client: JSON lines over stdin/stdout, on Windows too, with no socket on disk. End of
+  stdin is the owner leaving and closes the sessions. `connect` takes an optional
+  `preferredPort` so a page keeps its origin, falling back to a free port.
+  `POLYTH_WEB_PACKAGES_DIR` serves package bundles from `<id>/dist/web` without a
+  fallback to the shell, for builds that keep them apart. See
+  [Polyth Desktop](../dev/desktop.md#connecting-to-another-polyth).
 
 ## Host readiness and recovery
 
@@ -236,14 +255,15 @@ See `packages/server/src/remotePolicy.ts` and each package `serverEntry`.
 ## Owner UX
 
 The desktop Link page (`packages/tunnel/widgets`) shows the device list and
-host status only. Pair phone creates the invitation immediately (QR, numeric
-code when the host issues one, safety words). An optional "Access"
+host status only. Pair device creates the invitation immediately (QR, numeric
+code when the host issues one, a copyable pairing link for a computer, safety
+words). An optional "Access"
 disclosure picks a narrower preset, which reissues the invitation. Each device's
 Permissions disclosure holds the Full access switch; switching it off keeps the
 device's other grants and reveals presets plus per-capability toggles
 (`widgets/permissions.ts` names every capability, pinned by test). Fingerprint,
 diagnostics and identity reset live under Advanced. The host card's **Name on
-phones** field sets the server name (see below). The phone connection screen
+other devices** field sets the server name (see below). The phone connection screen
 has one primary action (Scan QR code, or tapping a known computer). Nearby/code
 pairing are quiet links, network failures render on the affected server card,
 and manual/insecure URLs stay under Advanced. Phones cannot edit grants.
@@ -257,7 +277,9 @@ or maker and model. Older apps sent the placeholder "This phone"; the tunnel
 package shows a placeholder as the platform ("iPhone", "Android",
 `src/deviceLabel.ts`). One account's devices never share a name: a new pairing
 stores the first free numbered form ("iPhone 2"), and device rows of older
-same-named pairings are numbered by pairing time when listed.
+same-named pairings are numbered by pairing time when listed. The desktop app
+sends its platform ("Mac", "Windows PC", "Linux PC"), never the host name, which
+often carries a person's name to someone else's server.
 
 ## Server name
 

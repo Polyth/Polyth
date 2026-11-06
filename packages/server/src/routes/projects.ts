@@ -3,6 +3,7 @@ import { AGENT_BETA_READ_ONLY_MESSAGE, agentBetaEnabled } from "@polyth/harness-
 import type { RouteHandler } from "../http.ts";
 import type { SpaceServicesFor } from "../spaceScope.ts";
 import { loadAllowlistedIconifySvg, parseAllowlistedIconifyName, type IconifyFetch } from "./iconify.ts";
+import { managedProjectLocation } from "../managedProjects.ts";
 import { isProjectIconRef, projectIconRef, sendProjectIcon } from "../projectIconRefs.ts";
 import { ensureProjectIconSvgXmlns, sanitizeProjectIconSvg } from "../projects.ts";
 
@@ -60,6 +61,36 @@ export function projectRoutes(
       const input = await body();
       if (input.name !== undefined && typeof input.name !== "string") throw invalid("name must be text");
       json(200, await projects.ensurePersonal(input.name as string | undefined));
+      return true;
+    }
+
+    // "Only me" inside a shared project: the caller's own room, created when
+    // they first turn to it. The server picks the folder and the owner.
+    const roomMatch = path.match(/^\/api\/projects\/([^/]+)\/private-room$/);
+    if (roomMatch && method === "POST") {
+      if (!projects.ensurePrivateRoom) throw Object.assign(new Error("private rooms are unavailable"), { code: "not-supported" });
+      json(200, await projects.ensurePrivateRoom(decodeURIComponent(roomMatch[1]!)));
+      return true;
+    }
+
+    // A project in the Polyth folder. The server picks the folder; any `path`
+    // in the body is ignored, and input is validated by the project service.
+    if (path === "/api/projects/managed" && method === "GET") {
+      json(200, managedProjectLocation(rc.space));
+      return true;
+    }
+    if (path === "/api/projects/managed" && method === "POST") {
+      if (agentBetaEnabled()) {
+        json(403, { error: { code: "forbidden", message: AGENT_BETA_READ_ONLY_MESSAGE } });
+        return true;
+      }
+      if (!projects.createManaged) throw Object.assign(new Error("the Polyth folder is unavailable"), { code: "not-supported" });
+      const input = await body();
+      json(200, await projects.createManaged({
+        name: input.name as string,
+        ...(input.composition !== undefined ? { composition: input.composition as ProjectComposition } : {}),
+        ...(input.clientOperationId !== undefined ? { clientOperationId: input.clientOperationId as string } : {}),
+      }));
       return true;
     }
 

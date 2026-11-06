@@ -10,6 +10,7 @@
     "./queue-pause": "./src/queuePause.ts",
     "./output-cache": "./src/outputCache.ts",
     "./conversation": "./src/conversationText.ts",
+    "./compaction-handoff": "./src/compactionHandoff.ts",
     "./worktree-names": "./src/worktreeNames.ts",
     "./create-operation": "./src/createOperation.ts"
   },

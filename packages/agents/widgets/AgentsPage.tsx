@@ -1,3 +1,4 @@
+import { rootProjects } from "@polyth/contracts";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { api, type AgentDraftDto, type AgentEventSourceDto, type ScheduleTaskDto } from "@polyth/session/web-api";
@@ -245,7 +246,7 @@ export default function AgentsPage({ host, resource }: { host?: WebPackageHost; 
         <div className="agents-scroll">
           <div className="agents-column">
             <AgentStart
-              projects={projects}
+              projects={rootProjects(projects) as typeof projects}
               projectId={seed?.projectId ?? defaultProjectId}
               seed={seed}
               onTemplate={startFromTemplate}
@@ -273,7 +274,7 @@ export default function AgentsPage({ host, resource }: { host?: WebPackageHost; 
           <AgentEditor
             draft={newDraft.draft}
             onChange={(draft) => setNewDraft({ ...newDraft, draft })}
-            projects={projects}
+            projects={rootProjects(projects) as typeof projects}
             task={null}
             otherAgents={otherAgents}
             sources={sources}
@@ -328,7 +329,7 @@ export default function AgentsPage({ host, resource }: { host?: WebPackageHost; 
           <AgentEditor
             draft={settings.draft}
             onChange={(next) => setSettingsDraft(agent, next)}
-            projects={projects}
+            projects={rootProjects(projects) as typeof projects}
             task={agent}
             readOnly={agent.source === "loop-file"}
             otherAgents={otherAgents}
@@ -369,7 +370,7 @@ export default function AgentsPage({ host, resource }: { host?: WebPackageHost; 
     <AgentsHome
       host={host}
       agents={agents ?? []}
-      projects={projects}
+      projects={rootProjects(projects) as typeof projects}
       loopErrors={loopErrors}
       loadError={loadError}
       onTemplate={startFromTemplate}

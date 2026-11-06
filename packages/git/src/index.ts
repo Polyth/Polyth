@@ -212,6 +212,9 @@ export interface WorktreeService {
 
 export interface GitService {
   isRepo(root: string): Promise<boolean>;
+  /** False when no `.git` exists in the folder or above it, so no `git` process
+   *  could call it a work tree. Costs a few `stat`s, not a process. */
+  mayBeWorkTree?(root: string): Promise<boolean>;
   status(root: string): Promise<GitStatus>;
   diff(root: string, opts?: { path?: string; staged?: boolean; ignoreWhitespace?: boolean }): Promise<{ path: string | null; diff: string }>;
   show(root: string, sha: string, opts?: { ignoreWhitespace?: boolean }): Promise<{ sha: string; diff: string }>;
@@ -520,6 +523,7 @@ export async function cloneRepository(
       cwd: parentPath,
       timeout: timeoutMs,
       maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...transport.env },
     }, (error, stdout, stderr) => {
       if (!error) { resolvePromise(); return; }
@@ -984,6 +988,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         cwd: root,
         timeout: opts.timeoutMs ?? timeout,
         maxBuffer: 32 * 1024 * 1024,
+        windowsHide: true,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", ...(opts.env ?? {}), ...transport.env },
       }, (err, stdout, stderr) => {
         const execErr = err as (Error & {
@@ -1373,6 +1378,20 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
   };
 
   const service: GitService = {
+    async mayBeWorkTree(root) {
+      if (process.env.GIT_DIR) return true;
+      let directory = resolve(root);
+      while (true) {
+        try {
+          await lstat(join(directory, ".git"));
+          return true;
+        } catch { /* keep looking upward */ }
+        const parent = dirname(directory);
+        if (parent === directory) return false;
+        directory = parent;
+      }
+    },
+
     async isRepo(root) {
       try {
         const r = await run(root, ["rev-parse", "--is-inside-work-tree"], true);

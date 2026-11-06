@@ -7,7 +7,10 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  net,
+  powerMonitor,
   powerSaveBlocker,
+  protocol,
   screen,
   session,
   shell,
@@ -27,9 +30,24 @@ import { setLinuxAutostartEnabled } from "./linuxAutostart.ts";
 import { validateAbsoluteLocalPath } from "./localPath.ts";
 import { desktopServerPackages } from "./serverPackages.ts";
 import { createDesktopSetupClaimBroker } from "./setupClaim.ts";
+import { hubResponse } from "./hubProtocol.ts";
 import { osDisplayName } from "./osDisplayName.ts";
+import { createPolythLinkClient, type PolythLinkClient } from "./polythLinkClient.ts";
 import { withoutForeignSessionCookies } from "./sessionCookieGuard.ts";
 import { readSavedServerPort, reserveServerPort, saveServerPort } from "./serverPort.ts";
+import {
+  DEFAULT_SERVERS_STATE,
+  isConnectionId,
+  isThisComputersServer,
+  normalizeServerAddress,
+  readServersStateSync,
+  rememberAddress,
+  sameTarget,
+  startupPlan,
+  writeServersState,
+  type DesktopServersState,
+  type DesktopServerTarget,
+} from "./servers.ts";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   normalizeDesktopSettings,
@@ -42,9 +60,15 @@ import type {
   DesktopInfo,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
+  DesktopOpenServer,
+  DesktopServerAnchor,
+  DesktopServerInfo,
+  DesktopServersResult,
+  DesktopServersView,
   DesktopSettings,
   DesktopUpdateState,
   DesktopWindowAction,
+  DesktopWindowPlacement,
   DesktopWindowState,
 } from "./types.ts";
 import { assertUpdaterCapability } from "./updaterCapability.ts";
@@ -61,6 +85,19 @@ import {
 import { desktopChromeOptions, normalizeTitleBarAppearance, trayIconSize } from "./windowChrome.ts";
 import { stagedChromiumExecutable } from "./chromiumResource.ts";
 import { keepAwakeWanted } from "./keepAwake.ts";
+import {
+  blockedFromLocalServer,
+  channelAllowed,
+  HUB_SCHEME,
+  hubUrl,
+  linkRequest,
+  navigationAllowed,
+  safeNextPath,
+  settingsPatchFor,
+  windowSurface,
+  type HubOptions,
+  type WindowOrigins,
+} from "./windowSurface.ts";
 
 declare const __POLYTH_OPENCODE_VERSION__: string;
 declare const __POLYTH_DESKTOP_FLAVOR__: string;
@@ -88,6 +125,10 @@ const bootstrapTrace = (message: string): void => {
   } catch {}
 };
 bootstrapTrace(`main module evaluated on ${process.platform}-${process.arch}`);
+// The server list's own origin; privileges must be declared before the app is ready.
+protocol.registerSchemesAsPrivileged([
+  { scheme: HUB_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
 if (process.env.POLYTH_DESKTOP_USER_DATA) {
   bootstrapTrace("before app.setPath(userData)");
   app.setPath("userData", resolve(process.env.POLYTH_DESKTOP_USER_DATA));
@@ -128,6 +169,16 @@ let logPath = "";
 let settingsPath = "";
 let windowStatePath = "";
 let serverPortPath = "";
+let serversPath = "";
+let linkClientDir = "";
+let servers: DesktopServersState = DEFAULT_SERVERS_STATE;
+let serversWrite: Promise<void> = Promise.resolve();
+let linkClient: PolythLinkClient | null = null;
+/** Other servers this launch has opened: their origin, and which server it is. */
+const remoteOrigins = new Map<string, Exclude<DesktopServerTarget, { kind: "local" }>>();
+/** The saved Link servers as the native menus show them; the list refreshes it. */
+let linkConnections: { id: string; hostLabel: string; revoked: boolean }[] = [];
+let lastLinkNudgeAt = 0;
 let serverLifecycle: Awaited<ReturnType<typeof boot>> | null = null;
 let updateState: DesktopUpdateState = { phase: "idle", message: "Updates are ready to check." };
 let quitting = false;
@@ -199,6 +250,12 @@ const webPackagesPath = (): string => app.isPackaged
 const linkHostPath = (): string | undefined => {
   if (process.env.POLYTH_LINK_HOST) return process.env.POLYTH_LINK_HOST;
   const executable = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
+  return app.isPackaged ? packagedResource(join("polyth-link", executable)) : undefined;
+};
+
+const linkClientBinary = (): string | undefined => {
+  if (process.env.POLYTH_LINK_CLIENT) return process.env.POLYTH_LINK_CLIENT;
+  const executable = process.platform === "win32" ? "polyth-link-client.exe" : "polyth-link-client";
   return app.isPackaged ? packagedResource(join("polyth-link", executable)) : undefined;
 };
 
@@ -562,6 +619,409 @@ const runUpdateWindowAction = async (action: UpdateWindowAction): Promise<void> 
   else await retryUpdate();
 };
 
+/** Started on first use: an install that only runs its own server never spawns it. */
+const requireLinkClient = (): PolythLinkClient => {
+  if (linkClient) return linkClient;
+  const binary = linkClientBinary();
+  if (!binary || !existsSync(binary)) throw Object.assign(new Error("link-unavailable"), { code: "link-unavailable" });
+  const client = createPolythLinkClient({
+    binary,
+    dataDir: linkClientDir,
+    webDist: webDistPath(),
+    packagesDir: webPackagesPath(),
+    log,
+  });
+  // Its sessions and proxies went with it: an open page has nothing behind it.
+  client.onExit(() => {
+    if (servers.active.kind !== "link" || surfaceOf(mainWindow?.webContents.getURL() ?? "") !== "remote") return;
+    void openServerList({ open: servers.active.id, resume: true });
+  });
+  linkClient = client;
+  return client;
+};
+
+/** One write at a time, and each writes the latest state: a change often comes
+ *  right after another, and an older write must not land on top of a newer one. */
+const persistServers = (next: DesktopServersState): void => {
+  servers = next;
+  serversWrite = serversWrite
+    .then(() => writeServersState(serversPath, servers))
+    .catch((error: unknown) => log("Could not save the server list", error));
+};
+
+const windowOrigins = (): WindowOrigins => ({
+  local: baseUrl ? new URL(baseUrl).origin : null,
+  remote: new Set(remoteOrigins.keys()),
+});
+
+const surfaceOf = (url: string) => windowSurface(url, windowOrigins());
+
+const serversView = (): DesktopServersView => {
+  const lifecycle = serverLifecycle;
+  const binary = linkClientBinary();
+  return {
+    active: servers.active,
+    runLocalServer: servers.runLocalServer,
+    local: !lifecycle ? "stopped" : "setup" in lifecycle && lifecycle.setup === true ? "setup" : "running",
+    linkAvailable: !!binary && existsSync(binary),
+    addresses: servers.addresses,
+  };
+};
+
+const addressLabel = (url: string): string => {
+  try { return new URL(url).host; } catch { return url; }
+};
+
+const activeServerInfo = (): DesktopServerInfo => {
+  const active = servers.active;
+  if (active.kind === "link") {
+    return { kind: "link", label: linkConnections.find((item) => item.id === active.id)?.hostLabel || "Polyth" };
+  }
+  return active.kind === "address" ? { kind: "address", label: addressLabel(active.url) } : { kind: "local", label: "This computer" };
+};
+
+/** The name a pairing shows on the other computer's device list: the platform,
+ *  never the host name, which often carries a person's name to someone else's
+ *  server. The Link page numbers repeats ("Mac 2"). */
+const deviceLabel = (): string =>
+  process.platform === "darwin" ? "Mac" : process.platform === "win32" ? "Windows PC" : "Linux PC";
+
+const dropLinkOrigin = (connectionId: string): void => {
+  for (const [origin, target] of remoteOrigins) {
+    if (target.kind === "link" && target.id === connectionId) remoteOrigins.delete(origin);
+  }
+};
+
+/** Live Link sessions are only ever the one on screen. */
+const disconnectLinkSessions = async (except?: string): Promise<void> => {
+  const ids = [...remoteOrigins.values()].flatMap((target) => target.kind === "link" && target.id !== except ? [target.id] : []);
+  for (const connectionId of ids) {
+    dropLinkOrigin(connectionId);
+    await linkClient?.invoke("disconnect", { connectionId }).catch((error: unknown) => log("Could not close a Link session", error));
+  }
+};
+
+const refreshLinkConnections = async (): Promise<void> => {
+  // Nothing was ever paired: no reason to start the client for a menu.
+  if (!existsSync(join(linkClientDir, "connections.json"))) return;
+  try {
+    rememberLinkConnections(await requireLinkClient().invoke("connections.list"));
+  } catch (error) {
+    log("Could not read the saved servers", error);
+  }
+};
+
+const rememberLinkConnections = (raw: unknown): void => {
+  linkConnections = (Array.isArray(raw) ? raw as Array<Record<string, unknown>> : [])
+    .filter((item) => isConnectionId(item.id))
+    .map((item) => ({
+      id: item.id as string,
+      hostLabel: typeof item.hostLabel === "string" ? item.hostLabel : "",
+      revoked: item.revoked === true || item.pairingState === "revoked",
+    }));
+  rebuildTrayMenu();
+};
+
+/** A proxy the client just opened, in the shape the list expects, and the port
+ *  to ask for next time so this server keeps its origin and its shell state. */
+const noteLinkLaunch = (raw: Record<string, unknown>, fallbackId?: string): { origin: string; bootstrapUrl: string; connectionId: string } => {
+  const origin = String(raw.origin ?? "");
+  const bootstrapUrl = String(raw.bootstrapUrl ?? raw.bootstrap ?? "");
+  const connectionId = String(raw.connectionId ?? fallbackId ?? "");
+  if (!origin || !bootstrapUrl || !isConnectionId(connectionId)) {
+    throw Object.assign(new Error("transport-protocol-error"), { code: "transport-protocol-error" });
+  }
+  const parsed = new URL(origin);
+  if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1") {
+    throw Object.assign(new Error("transport-protocol-error"), { code: "transport-protocol-error" });
+  }
+  remoteOrigins.set(parsed.origin, { kind: "link", id: connectionId });
+  const port = Number(parsed.port);
+  if (servers.linkPorts[connectionId] !== port) {
+    persistServers({ ...servers, linkPorts: { ...servers.linkPorts, [connectionId]: port } });
+  }
+  return { origin: parsed.origin, bootstrapUrl, connectionId };
+};
+
+const failureCode = (error: unknown): string => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && code ? code : "unavailable";
+};
+
+const linkCall = async (rawMethod: unknown, rawParams: unknown): Promise<DesktopServersResult<unknown>> => {
+  try {
+    const { method, params } = linkRequest(rawMethod, rawParams);
+    const client = requireLinkClient();
+    const id = typeof params.connectionId === "string" ? params.connectionId : undefined;
+    const port = id ? servers.linkPorts[id] : undefined;
+    const sent = method === "pairing.begin"
+      ? { label: deviceLabel(), ...params }
+      : (method === "connect" || method === "connection.recover") && port
+        ? { ...params, preferredPort: port }
+        : params;
+    const result = await client.invoke<Record<string, unknown>>(method, sent);
+    switch (method) {
+      case "connections.list":
+        rememberLinkConnections(result);
+        return { ok: true, result };
+      case "connect":
+      case "pairing.confirm": {
+        const launch = noteLinkLaunch(result, id);
+        await refreshLinkConnections();
+        return { ok: true, result: launch };
+      }
+      case "connection.recover":
+        if (result.state === "orphaned") {
+          // The host answered that this pairing never finished: the identity is
+          // useless, so it goes and the person pairs again.
+          await client.invoke("forget", { connectionId: id });
+          await refreshLinkConnections();
+          return { ok: true, result: { state: "needs-pairing", connectionId: id } };
+        }
+        return { ok: true, result: { state: "connected", launch: noteLinkLaunch(result, id) } };
+      case "disconnect":
+        if (id) dropLinkOrigin(id);
+        return { ok: true, result };
+      case "forget": {
+        if (id) {
+          dropLinkOrigin(id);
+          const { [id]: _forgotten, ...linkPorts } = servers.linkPorts;
+          const active = servers.active.kind === "link" && servers.active.id === id
+            ? { kind: "local" as const }
+            : servers.active;
+          const microphoneServers = servers.microphoneServers.filter((key) => key !== `link:${id}`);
+          persistServers({ ...servers, linkPorts, active, microphoneServers });
+        }
+        await refreshLinkConnections();
+        return { ok: true, result };
+      }
+      default:
+        return { ok: true, result };
+    }
+  } catch (error) {
+    return { ok: false, code: failureCode(error) };
+  }
+};
+
+const loadInWindow = async (url: string): Promise<void> => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    await createWindow(url);
+    return;
+  }
+  showWindow();
+  await mainWindow.loadURL(url).catch((error: unknown) => log("Window navigation failed", error));
+};
+
+const openServerList = (options: HubOptions = {}): Promise<void> => loadInWindow(hubUrl(options));
+
+/** The status route of a server, with where its redirects ended: `net.fetch`
+ *  reports neither the final URL nor, in manual mode, the redirect's target. */
+const readServerStatus = (url: string): Promise<{ finalUrl: string; status: number; text: string }> =>
+  new Promise((resolvePromise, rejectPromise) => {
+    let finalUrl = url;
+    let hops = 0;
+    const request = net.request({ url, redirect: "manual" });
+    const timer = setTimeout(() => {
+      request.abort();
+      rejectPromise(new Error("timed out"));
+    }, 8_000);
+    const fail = (error: Error): void => {
+      clearTimeout(timer);
+      rejectPromise(error);
+    };
+    request.on("redirect", (_status, _method, location) => {
+      hops += 1;
+      if (hops > 5) {
+        request.abort();
+        fail(new Error("too many redirects"));
+        return;
+      }
+      finalUrl = location;
+      request.followRedirect();
+    });
+    request.on("response", (response) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on("data", (chunk) => {
+        size += chunk.length;
+        if (size <= 64 * 1024) chunks.push(chunk);
+      });
+      response.on("end", () => {
+        clearTimeout(timer);
+        resolvePromise({ finalUrl, status: response.statusCode, text: Buffer.concat(chunks).toString("utf8") });
+      });
+      response.on("error", fail);
+    });
+    request.on("error", fail);
+    request.end();
+  });
+
+/**
+ * Polyth answers its status route with a boolean `required`; nothing else does.
+ * Returns the origin that answered: a server that sends http to https (or to
+ * another name) is that origin from here on, because a page the window was not
+ * told about has no surface and so no window controls.
+ */
+const checkServerAddress = async (url: string): Promise<string> => {
+  const unreachable = (cause: unknown): Error => {
+    log(`Could not reach ${url}`, cause);
+    return Object.assign(new Error("server-unreachable"), { code: "server-unreachable" });
+  };
+  let answer: Awaited<ReturnType<typeof readServerStatus>>;
+  try {
+    answer = await readServerStatus(`${url}/api/auth/status`);
+  } catch (error) {
+    throw unreachable(error);
+  }
+  // A proxy in front of a stopped server answers too: that is not a wrong address.
+  if (answer.status >= 500) throw unreachable(new Error(`HTTP ${answer.status}`));
+  let body: unknown = null;
+  try {
+    body = JSON.parse(answer.text);
+  } catch { /* not this API */ }
+  if (answer.status >= 400 || typeof (body as { required?: unknown } | null)?.required !== "boolean") {
+    throw Object.assign(new Error("not-polyth"), { code: "not-polyth" });
+  }
+  return normalizeServerAddress(new URL(answer.finalUrl).origin);
+};
+
+const openServer = async (target: DesktopOpenServer): Promise<void> => {
+  if (target.kind === "local") {
+    if (!servers.runLocalServer) persistServers({ ...servers, runLocalServer: true });
+    if (!serverLifecycle) await startServer();
+    await loadInWindow(`${baseUrl}${safeNextPath(target.path) ?? ""}`);
+    return;
+  }
+  const typed = normalizeServerAddress(target.url);
+  if (isThisComputersServer(typed, baseUrl)) return openServer({ kind: "local" });
+  const url = await checkServerAddress(typed);
+  if (isThisComputersServer(url, baseUrl)) return openServer({ kind: "local" });
+  remoteOrigins.set(url, { kind: "address", url });
+  persistServers(rememberAddress(servers, url, Date.now()));
+  await loadInWindow(url);
+};
+
+/**
+ * First-run setup of this computer's server never finished and the person went
+ * to another server: they only connect. The setup server holds nothing, so it
+ * stops now, and choosing "This computer" later brings first-run back.
+ */
+const retireUnfinishedLocalSetup = async (): Promise<void> => {
+  const lifecycle = serverLifecycle;
+  if (!lifecycle || !("setup" in lifecycle) || lifecycle.setup !== true) return;
+  serverLifecycle = null;
+  baseUrl = "";
+  desktopSetupClaims.reset();
+  persistServers({ ...servers, runLocalServer: false });
+  await lifecycle.shutdown().catch((error: unknown) => log("Could not stop the setup server", error));
+  log("Stopped the unfinished first-run server: this app connects to another Polyth");
+};
+
+/** The window reached a page: remember the server it belongs to. */
+const noteWindowServer = (url: string): void => {
+  const surface = surfaceOf(url);
+  if (surface === "remote") {
+    let origin = "";
+    try { origin = new URL(url).origin; } catch { return; }
+    const target = remoteOrigins.get(origin);
+    if (target && !sameTarget(target, servers.active)) persistServers({ ...servers, active: target });
+    void disconnectLinkSessions(target?.kind === "link" ? target.id : undefined);
+    void retireUnfinishedLocalSetup();
+  } else if (surface === "local") {
+    if (servers.active.kind !== "local") persistServers({ ...servers, active: { kind: "local" } });
+    void disconnectLinkSessions();
+  }
+  rebuildTrayMenu();
+};
+
+/** A connection may have gone stale while this computer slept or the window sat
+ *  in the background. Reading the status makes the client probe it, as the phone
+ *  apps do on returning to the foreground. */
+const nudgeActiveLink = (): void => {
+  const active = servers.active;
+  if (active.kind !== "link" || !linkClient) return;
+  const now = Date.now();
+  if (now - lastLinkNudgeAt < 30_000) return;
+  lastLinkNudgeAt = now;
+  void linkClient.invoke("status", { connectionId: active.id }).catch(() => undefined);
+};
+
+const serverKey = (target: Exclude<DesktopServerTarget, { kind: "local" }>): string =>
+  target.kind === "link" ? `link:${target.id}` : `address:${target.url}`;
+
+/**
+ * This window never asks before using the microphone on this computer's own
+ * server. Another server is asked about once, by name, because its packages run
+ * in this window. Remembered per server.
+ */
+const allowRemoteMicrophone = async (origin: string): Promise<boolean> => {
+  const target = remoteOrigins.get(origin);
+  if (!target) return false;
+  const key = serverKey(target);
+  if (servers.microphoneServers.includes(key)) return true;
+  const label = target.kind === "address"
+    ? addressLabel(target.url)
+    : linkConnections.find((item) => item.id === target.id)?.hostLabel || "this server";
+  const options = {
+    type: "question" as const,
+    message: `Let ${label} use the microphone?`,
+    detail: "This Polyth is on another computer. It hears what the microphone on this computer picks up while it records.",
+    buttons: ["Allow", "Don't allow"],
+    defaultId: 1,
+    cancelId: 1,
+  };
+  const { response } = await (mainWindow && !mainWindow.isDestroyed()
+    ? dialog.showMessageBox(mainWindow, options)
+    : dialog.showMessageBox(options));
+  if (response !== 0) return false;
+  persistServers({ ...servers, microphoneServers: [...servers.microphoneServers, key] });
+  return true;
+};
+
+const serverMenuItems = (): MenuItemConstructorOptions[] => {
+  const active = servers.active;
+  return [
+    {
+      label: "This computer",
+      type: "radio",
+      checked: active.kind === "local",
+      click: () => void openServer({ kind: "local" }).catch((error: unknown) => log("Could not open this computer's server", error)),
+    },
+    ...linkConnections.map((connection): MenuItemConstructorOptions => ({
+      label: connection.hostLabel || "Polyth",
+      type: "radio",
+      checked: active.kind === "link" && active.id === connection.id,
+      enabled: !connection.revoked,
+      click: () => {
+        if (active.kind === "link" && active.id === connection.id && surfaceOf(mainWindow?.webContents.getURL() ?? "") === "remote") return;
+        void openServerList({ open: connection.id });
+      },
+    })),
+    ...servers.addresses.map((address): MenuItemConstructorOptions => ({
+      label: addressLabel(address.url),
+      type: "radio",
+      checked: active.kind === "address" && active.url === address.url,
+      click: () => {
+        void openServer({ kind: "address", url: address.url })
+          .catch((error: unknown) => void openServerList({ error: failureCode(error) }));
+      },
+    })),
+    { type: "separator" },
+    { label: "Add Server…", click: () => void openServerList({ add: true }) },
+    { label: "Manage Servers…", click: () => void openServerList() },
+  ];
+};
+
+const popupServerMenu = async (anchor?: unknown): Promise<void> => {
+  await refreshLinkConnections();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const rect = anchor as Partial<DesktopServerAnchor> | null | undefined;
+  const placed = rect && [rect.x, rect.y, rect.height].every(Number.isFinite)
+    ? { x: Math.round(rect.x!), y: Math.round(rect.y! + rect.height!) }
+    : {};
+  Menu.buildFromTemplate(serverMenuItems()).popup({ window: mainWindow, ...placed });
+};
+
 const shutdownServer = async (): Promise<void> => {
   if (serverStopped) return;
   serverStopped = true;
@@ -576,6 +1036,10 @@ const shutdownServer = async (): Promise<void> => {
     powerSaveBlocker.stop(keepAwakeBlockerId);
   }
   keepAwakeBlockerId = null;
+  // Closed before the app quits: an installer replaces this binary next.
+  await linkClient?.close().catch((error: unknown) => log("Link client shutdown failed", error));
+  linkClient = null;
+  await serversWrite;
   await serverLifecycle?.shutdown().catch((error) => log("Server shutdown failed", error));
   serverLifecycle = null;
   log("Polyth server stopped");
@@ -592,12 +1056,25 @@ function rebuildTrayMenu(): void {
     { label: mainWindow?.isVisible() ? "Focus Polyth" : "Show Polyth", click: showWindow },
     { label: "Hide", enabled: mainWindow?.isVisible() ?? false, click: () => { mainWindow?.hide(); broadcastWindowState(); } },
     { type: "separator" },
-    { label: "Open data folder", click: () => void shell.openPath(dataDir).then((error) => { if (error) log(`Could not open data folder: ${error}`); }) },
+    { label: "Servers", submenu: serverMenuItems() },
+    { type: "separator" },
+    { label: "Open data folder", visible: servers.runLocalServer, click: () => void shell.openPath(dataDir).then((error) => { if (error) log(`Could not open data folder: ${error}`); }) },
     { label: "Install command-line tool…", visible: app.isPackaged, click: () => void installCommandLineTool() },
     { label: "Close to tray", type: "checkbox", checked: settings.closeToTray, click: ({ checked }) => void persistSettings({ closeToTray: checked }) },
     { label: "Launch at login", type: "checkbox", visible: app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform), checked: settings.launchAtLogin, click: ({ checked }) => void persistSettings({ launchAtLogin: checked }) },
     { label: settings.keepAwakeMode === "working" ? "Keep awake while agents work" : "Keep awake while running", type: "checkbox", checked: settings.keepAwake, click: ({ checked }) => void persistSettings({ keepAwake: checked }) },
     { type: "separator" },
+    { label: "Update automatically", type: "checkbox", checked: settings.automaticUpdates, click: ({ checked }) => void persistSettings({ automaticUpdates: checked }) },
+    {
+      label: "Update channel",
+      visible: !macLegacyUpdates,
+      submenu: (["stable", "test", "nightly"] as const).map((channel): MenuItemConstructorOptions => ({
+        label: channel === "stable" ? "Stable" : channel === "test" ? "Test" : "Nightly",
+        type: "radio",
+        checked: settings.updateChannel === channel,
+        click: () => void persistSettings({ updateChannel: channel }),
+      })),
+    },
     {
       label: updateState.phase === "downloading"
         ? "Show update download…"
@@ -659,6 +1136,7 @@ const installCommandLineTool = async (): Promise<void> => {
 const openFromSecondInstance = (argv: readonly string[]): void => {
   showWindow();
   const path = openPathFromArgv(argv);
+  // The local CLI names a chat on this computer's server, wherever the window is.
   if (!path || !baseUrl || !mainWindow || mainWindow.isDestroyed()) return;
   void mainWindow.loadURL(`${baseUrl}${path}`).catch((error) => log("Could not open the requested path", error));
 };
@@ -699,6 +1177,7 @@ const installApplicationMenu = (): void => {
       { label: "Command Palette…", ...rendererShortcut("CommandOrControl+K"), click: () => sendCommand("command-palette") },
       { type: "separator" },
       { label: "Show Polyth", accelerator: "CommandOrControl+Shift+P", click: showWindow },
+      { label: "Switch Server…", click: () => void popupServerMenu() },
       { label: "Open Data Folder", click: () => void shell.openPath(dataDir) },
       { label: "Install Command-Line Tool…", enabled: app.isPackaged, click: () => void installCommandLineTool() },
       ...(mac ? [] : [{ type: "separator" as const }, settingsItem]),
@@ -764,12 +1243,19 @@ const safeExternalUrl = (raw: string): boolean => {
   catch { return false; }
 };
 
-const isLocalNavigation = (raw: string): boolean => {
-  try { return new URL(raw).origin === new URL(baseUrl).origin; }
-  catch { return false; }
+/** Where a new window opens: the server the person was last on. */
+const firstWindowUrl = (): string => {
+  const plan = startupPlan(servers);
+  if (plan.open === "local" && baseUrl) return baseUrl;
+  const active = servers.active;
+  if (plan.open === "address" && active.kind === "address") {
+    remoteOrigins.set(active.url, active);
+    return active.url;
+  }
+  return hubUrl(plan.connect ? { open: plan.connect } : {});
 };
 
-const createWindow = async (): Promise<void> => {
+const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   const saved = readSavedWindowState();
   const bounds = visibleBounds(saved.bounds);
   const chrome = desktopChromeOptions(process.platform, nativeTheme.shouldUseDarkColors);
@@ -803,13 +1289,36 @@ const createWindow = async (): Promise<void> => {
   // hidden-title-bar window must never grow an in-window menu bar.
   if (process.platform !== "darwin") window.setMenuBarVisibility(false);
   window.webContents.on("context-menu", (_event, params) => showContextMenu(window, params));
+  // With the stall log above this tells a frozen server from a frozen page.
+  window.on("unresponsive", () => log("Window page stopped responding"));
+  window.on("responsive", () => log("Window page is responding again"));
   window.webContents.setWindowOpenHandler(({ url }) => { if (safeExternalUrl(url)) void shell.openExternal(url); return { action: "deny" }; });
-  window.webContents.on("will-navigate", (event, url) => { if (isLocalNavigation(url)) return; event.preventDefault(); if (safeExternalUrl(url)) void shell.openExternal(url); });
+  window.webContents.on("will-navigate", (event, url) => {
+    if (navigationAllowed(window.webContents.getURL(), url, windowOrigins())) return;
+    event.preventDefault();
+    if (safeExternalUrl(url)) void shell.openExternal(url);
+  });
   window.webContents.on("render-process-gone", (_event, details) => {
     log(`Renderer stopped: ${details.reason} (${details.exitCode})`);
     resetAgentActivity();
   });
-  window.webContents.on("did-navigate", resetAgentActivity);
+  window.webContents.on("did-navigate", (_event, url) => {
+    resetAgentActivity();
+    noteWindowServer(url);
+  });
+  // A server that stopped answering must not leave an error page with no way back.
+  window.webContents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
+    if (!isMainFrame || code === -3 || surfaceOf(url) !== "remote") return;
+    if (surfaceOf(window.webContents.getURL()) === "hub") return;
+    log(`Could not open a server page: ${description} (${code})`);
+    void openServerList({ error: "server-unreachable" });
+  });
+  // Which Polyth this window is on, where the system shows window names.
+  window.on("page-title-updated", (event, title) => {
+    if (surfaceOf(window.webContents.getURL()) !== "remote") return;
+    event.preventDefault();
+    window.setTitle(`${title} — ${activeServerInfo().label}`);
+  });
   window.on("resize", scheduleWindowStateSave);
   window.on("move", scheduleWindowStateSave);
   window.on("maximize", () => { broadcastWindowState(); scheduleWindowStateSave(); });
@@ -818,7 +1327,7 @@ const createWindow = async (): Promise<void> => {
   window.on("leave-full-screen", broadcastWindowState);
   window.on("show", () => { broadcastWindowState(); rebuildTrayMenu(); });
   window.on("hide", () => { broadcastWindowState(); rebuildTrayMenu(); });
-  window.on("focus", broadcastWindowState);
+  window.on("focus", () => { broadcastWindowState(); nudgeActiveLink(); });
   window.on("blur", broadcastWindowState);
   window.on("close", (event) => {
     if (!quitting && settings.closeToTray) { event.preventDefault(); window.hide(); broadcastWindowState(); log("Window hidden to tray"); }
@@ -831,8 +1340,17 @@ const createWindow = async (): Promise<void> => {
   });
   const maxRendererNavigationAttempts = 8;
   for (let attempt = 1; ; attempt += 1) {
-    try { await window.loadURL(baseUrl); break; }
+    try { await window.loadURL(startUrl); break; }
     catch (error) {
+      // A page that replaced itself while loading (the Link bootstrap does) is fine.
+      if ((error as { code?: unknown } | null)?.code === "ERR_ABORTED") break;
+      // Only this computer's server is worth waiting for: it is starting. A
+      // server elsewhere is answered by the list, which says what went wrong.
+      if (surfaceOf(startUrl) !== "local") {
+        log("Could not open the server", error);
+        if (surfaceOf(startUrl) === "remote") await window.loadURL(hubUrl({ error: "server-unreachable" })).catch(() => undefined);
+        break;
+      }
       if (attempt >= maxRendererNavigationAttempts || window.isDestroyed()) throw error;
       log(`Renderer navigation attempt ${attempt} failed; retrying`, error);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(1_000, attempt * 500)));
@@ -840,14 +1358,16 @@ const createWindow = async (): Promise<void> => {
   }
 };
 
-const ensureTrustedSender = (event: IpcMainInvokeEvent): void => {
+const senderSurface = (event: IpcMainInvokeEvent) => surfaceOf(event.senderFrame?.url ?? "");
+
+/** What may ask depends on what the window shows, read from the sender's own frame. */
+const ensureTrustedSender = (event: IpcMainInvokeEvent, channel: string): void => {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Untrusted desktop IPC sender");
-  const url = event.senderFrame?.url ?? "";
-  if (!isLocalNavigation(url)) throw new Error("Untrusted desktop IPC sender");
+  if (!channelAllowed(senderSurface(event), channel)) throw new Error("Untrusted desktop IPC sender");
 };
 
 const trustedHandle = <Args extends unknown[], Result>(channel: string, handler: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>): void => {
-  ipcMain.handle(channel, (event, ...args: Args) => { ensureTrustedSender(event); return handler(event, ...args); });
+  ipcMain.handle(channel, (event, ...args: Args) => { ensureTrustedSender(event, channel); return handler(event, ...args); });
 };
 
 const isUpdateWindowPage = (url: string): boolean => {
@@ -1001,20 +1521,76 @@ const reportPendingUpdate = (): void => {
 };
 
 const installIpc = (): void => {
-  trustedHandle("desktop:info", (): DesktopInfo => ({
-    appVersion: app.getVersion(), opencodeVersion: __POLYTH_OPENCODE_VERSION__, platform: process.platform, arch: process.arch,
-    dataDir, logPath, packaged: app.isPackaged, trayAvailable: tray !== null,
-    canLaunchAtLogin: app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform),
-    keepAwakeActive: keepAwakeActive(), lowResourceMode: startupLowResourceMode,
-    softwareRendering: startupSoftwareRendering, macLegacyUpdates,
-  }));
+  // Sent while a page loads, before it has a surface to reason about.
+  ipcMain.on("desktop:surface", (event) => {
+    const url = event.senderFrame?.url ?? "";
+    const surface = mainWindow && event.sender === mainWindow.webContents ? surfaceOf(url) : null;
+    let linkProxy = false;
+    if (surface === "remote") {
+      try { linkProxy = remoteOrigins.get(new URL(url).origin)?.kind === "link"; } catch { /* no origin, no proxy */ }
+    }
+    event.returnValue = { surface, linkProxy } satisfies DesktopWindowPlacement;
+  });
+  trustedHandle("desktop:info", (event): DesktopInfo => {
+    // A profile path names the person; another server has no use for it.
+    const remote = senderSurface(event) === "remote";
+    return {
+      appVersion: app.getVersion(), opencodeVersion: __POLYTH_OPENCODE_VERSION__, platform: process.platform, arch: process.arch,
+      dataDir: remote ? "" : dataDir, logPath: remote ? "" : logPath, packaged: app.isPackaged, trayAvailable: tray !== null,
+      canLaunchAtLogin: !remote && app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform),
+      keepAwakeActive: keepAwakeActive(), lowResourceMode: startupLowResourceMode,
+      softwareRendering: startupSoftwareRendering, macLegacyUpdates,
+      server: activeServerInfo(),
+    };
+  });
+  trustedHandle("desktop:servers:menu", (_event, anchor: unknown) => popupServerMenu(anchor));
+  trustedHandle("desktop:servers:list", (_event, options: unknown) =>
+    openServerList({ add: (options as { add?: unknown } | null)?.add === true }));
+  trustedHandle("desktop:servers:resume", async (_event, path: unknown) => {
+    if (servers.active.kind !== "link") return;
+    const next = safeNextPath(path);
+    await openServerList({ open: servers.active.id, resume: true, ...(next ? { next } : {}) });
+  });
+  trustedHandle("desktop:servers:state", serversView);
+  trustedHandle("desktop:servers:open", async (_event, target: unknown): Promise<DesktopServersResult<void>> => {
+    const wanted = target as { kind?: unknown; url?: unknown; path?: unknown } | null;
+    try {
+      if (wanted?.kind === "local") await openServer({ kind: "local", ...(typeof wanted.path === "string" ? { path: wanted.path } : {}) });
+      else if (wanted?.kind === "address" && typeof wanted.url === "string") await openServer({ kind: "address", url: wanted.url });
+      else return { ok: false, code: "invalid-request" };
+      return { ok: true, result: undefined };
+    } catch (error) {
+      log("Could not open the server", error);
+      return { ok: false, code: failureCode(error) };
+    }
+  });
+  trustedHandle("desktop:link", (_event, method: unknown, params: unknown) => linkCall(method, params));
+  trustedHandle("desktop:servers:forget-address", (_event, url: unknown): DesktopServersView => {
+    if (typeof url !== "string") return serversView();
+    const active = servers.active.kind === "address" && servers.active.url === url ? { kind: "local" as const } : servers.active;
+    persistServers({
+      ...servers,
+      active,
+      addresses: servers.addresses.filter((address) => address.url !== url),
+      microphoneServers: servers.microphoneServers.filter((key) => key !== `address:${url}`),
+    });
+    rebuildTrayMenu();
+    return serversView();
+  });
+  trustedHandle("desktop:servers:run-local", async (_event, run: unknown): Promise<DesktopServersView> => {
+    persistServers({ ...servers, runLocalServer: run === true });
+    // Turning it off never stops work in progress: it only stays off from the next launch.
+    if (run === true && !serverLifecycle) await startServer().catch((error: unknown) => log("Could not start this computer's server", error));
+    rebuildTrayMenu();
+    return serversView();
+  });
   trustedHandle("desktop:setup:claim", (_event, request: unknown) => desktopSetupClaims.request(request));
   trustedHandle("desktop:setup:restart", async () => { await restartDesktopSetupServer(); });
   trustedHandle("desktop:setup:local", completeLocalSetup);
   trustedHandle("desktop:session:renew", ensureDesktopOwnerSession);
   trustedHandle("desktop:session:confirm", confirmDesktopOwnerSession);
   trustedHandle("desktop:settings:get", () => settings);
-  trustedHandle("desktop:settings:set", (_event, patch: unknown) => persistSettings(patch));
+  trustedHandle("desktop:settings:set", (event, patch: unknown) => persistSettings(settingsPatchFor(senderSurface(event), patch)));
   trustedHandle("desktop:window:get", () => windowState());
   trustedHandle("desktop:window:titlebar", (_event, appearance: unknown) => {
     if (process.platform !== "win32" || !mainWindow || mainWindow.isDestroyed()) return;
@@ -1052,8 +1628,9 @@ const installIpc = (): void => {
     return runUpdateWindowAction(action as UpdateWindowAction);
   });
   trustedHandle("desktop:keep-awake:get", keepAwakeState);
-  trustedHandle("desktop:keep-awake:activity", (_event, working: unknown) => {
-    const next = working === true;
+  trustedHandle("desktop:keep-awake:activity", (event, working: unknown) => {
+    // Agents on another computer do not need this one awake.
+    const next = working === true && senderSurface(event) !== "remote";
     if (next !== agentsWorking) {
       agentsWorking = next;
       applyKeepAwakeSetting();
@@ -1169,6 +1746,7 @@ const configureUpdater = async (): Promise<void> => {
 };
 
 const startServer = async (preferredPort?: number): Promise<void> => {
+  serverStopped = false;
   const binary = opencodePath();
   const webDist = webDistPath();
   const bundledOpenCode = existsSync(binary);
@@ -1203,6 +1781,9 @@ const startServer = async (preferredPort?: number): Promise<void> => {
   serverLifecycle = await boot({
     port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
     desktopOwnerChannel: true,
+    onEventLoopStall: (stall) => {
+      log(`Event loop blocked for ${(stall.blockedMs / 1000).toFixed(1)}s (rss ${Math.round(process.memoryUsage().rss / 1_048_576)} MB)`);
+    },
     ...(bundledOpenCode ? { opencode: { bin: binary, binarySource: "bundled" as const } } : {}),
   });
   log(`Polyth server started at ${baseUrl}`);
@@ -1242,32 +1823,68 @@ async function start(): Promise<void> {
   settingsPath = join(desktopDir, "settings.json");
   windowStatePath = join(desktopDir, "window-state.json");
   serverPortPath = join(desktopDir, "server-port.json");
+  serversPath = join(desktopDir, "servers.json");
+  linkClientDir = join(desktopDir, "link-client");
+  servers = readServersStateSync(serversPath);
   updatePendingPath = join(desktopDir, "update-pending.json");
   settings = await readDesktopSettings(settingsPath, desktopSettingsDefaults);
   if (startupLowResourceMode) log("Low-resource mode active");
   if (startupSoftwareRendering) log("Software rendering active (GPU acceleration disabled)");
   await applyLoginSetting();
   applyKeepAwakeSetting();
+  protocol.handle(HUB_SCHEME, (request) => hubResponse(webDistPath(), request));
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    const trusted = isLocalNavigation(webContents.getURL());
+    const url = webContents.getURL();
+    const surface = surfaceOf(url);
+    if (surface !== "local" && surface !== "remote") { callback(false); return; }
     const mediaTypes = "mediaTypes" in details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
-    callback(trusted && (permission === "notifications" || (permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio"))));
+    const microphone = permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio");
+    if (surface === "remote" && microphone) {
+      void allowRemoteMicrophone(new URL(url).origin).then(callback, () => callback(false));
+      return;
+    }
+    callback(permission === "notifications" || microphone);
   });
-  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) =>
-    !!webContents && isLocalNavigation(webContents.getURL()) && (permission === "notifications" || (permission === "media" && details.mediaType === "audio")));
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    const surface = webContents ? surfaceOf(webContents.getURL()) : null;
+    return (surface === "local" || surface === "remote") && (permission === "notifications" || (permission === "media" && details.mediaType === "audio"));
+  });
+  // Only this computer's own page may call this computer's server.
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    const contents = mainWindow?.webContents;
+    const fromWindow = contents !== undefined && details.webContents === contents;
+    callback({ cancel: fromWindow && blockedFromLocalServer(details, details.frame?.url ?? contents.getURL(), windowOrigins()) });
+  });
   // Cookies ignore ports: Polyth's session never leaves for another local port.
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const headers = details.requestHeaders;
     const name = Object.keys(headers).find((key) => key.toLowerCase() === "cookie");
-    const next = name && baseUrl ? withoutForeignSessionCookies(headers[name] ?? "", details.url, baseUrl) : null;
+    const lifecycle = serverLifecycle;
+    const next = name
+      ? withoutForeignSessionCookies(headers[name] ?? "", details.url, {
+          local: baseUrl ? { url: baseUrl, cookieName: lifecycle && "localSessionCookieName" in lifecycle ? lifecycle.localSessionCookieName : null } : null,
+          addresses: [...remoteOrigins].flatMap(([origin, target]) => target.kind === "address" ? [origin] : []),
+        })
+      : null;
     if (name && next !== null) {
       if (next) headers[name] = next;
       else delete headers[name];
     }
     callback({ requestHeaders: headers });
   });
-  log("Starting Polyth server");
-  await startServer();
+  const plan = startupSmoke ? { bootLocal: true, open: "local" as const } : startupPlan(servers);
+  if (plan.bootLocal) {
+    log("Starting Polyth server");
+    try {
+      await startServer();
+    } catch (error) {
+      // The window was going to another server anyway: that one still works.
+      if (plan.open === "local") throw error;
+      log("Could not start this computer's server", error);
+    }
+  } else {
+    log("This app only connects to other servers; no local server this launch");
+  }
   if (startupSmoke) {
     log("Desktop startup smoke passed");
     quitting = true;
@@ -1277,8 +1894,11 @@ async function start(): Promise<void> {
   }
   installIpc();
   await configureUpdater();
+  await refreshLinkConnections();
   createTray();
   installApplicationMenu();
+  powerMonitor.on("resume", nudgeActiveLink);
+  powerMonitor.on("unlock-screen", nudgeActiveLink);
   await createWindow();
   if (app.isPackaged) reportPendingUpdate();
 }

@@ -9,7 +9,10 @@
 // Contract: initial focus lands on the folder list — never a
 // text field, so opening the picker does not summon a phone keyboard. Typing
 // a path is opt-in (click the location bar, Mod+L, "/" or "~" in the list, or
-// the ⋯ menu). Mod+Enter is an additive direct-confirmation shortcut; during
+// the ⋯ menu). A typed location that does not exist is reported as a notice
+// and the primary action offers to create exactly that folder; pressing Open
+// never falls back to the folder that happens to be on screen. Mod+Enter is an
+// additive direct-confirmation shortcut; during
 // Add the target and controls cannot change and Escape does not abandon the
 // in-flight request; success closes only after the atomic store transition is
 // observable and hands focus to the composer; cancellation restores the
@@ -19,7 +22,7 @@ import Dialog from "./a11y/Dialog.tsx";
 import { isImeComposing } from "./input/editorCore.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { announce } from "./a11y/live.tsx";
-import { api, type BrowseEntryDto } from "@polyth/session/web-api";
+import { api, errorCodeOf, type BrowseEntryDto } from "@polyth/session/web-api";
 import { addProject } from "../init.ts";
 import { COMPOSER_INPUT_SELECTOR, focusComposer, getState } from "../store.ts";
 import { ago, MOD } from "../format.ts";
@@ -119,6 +122,7 @@ export default function ProjectFolderDialog({
   confirmLabel,
   title = tr("projectfolderdialog.openAProject"),
   subtitle = tr("projectfolderdialog.chooseLocalFolder"),
+  stepLabel,
 }: {
   onClose: () => void;
   /** Called after the project has been added/activated. */
@@ -132,6 +136,9 @@ export default function ProjectFolderDialog({
   confirmLabel?: string;
   title?: string;
   subtitle?: string;
+  /** Flow position ("New project · Step 2 of 2") shown as the head eyebrow,
+   *  exactly where step 1 shows its own. Absent outside a multi-step flow. */
+  stepLabel?: string;
 }) {
   const [path, setPath] = useState("");
   const [pathInput, setPathInput] = useState("");
@@ -142,6 +149,9 @@ export default function ProjectFolderDialog({
   const [entries, setEntries] = useState<BrowseEntryDto[]>([]);
   const [hidden, setHidden] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  /** A typed location that does not exist (yet): reported instead of opening
+   *  the previous folder, and the primary action offers to create it. */
+  const [missingPath, setMissingPath] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -155,6 +165,10 @@ export default function ProjectFolderDialog({
   const pathInputRef = useRef<HTMLInputElement>(null);
   const crumbsRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  /** The path typed into the location field when the primary action was
+   *  pressed. The button focus blurs (and closes) the field first, so the
+   *  press captures the text on pointerdown. */
+  const typedPathRef = useRef<string | null>(null);
   const typeaheadRef = useRef({ text: "", at: 0 });
   const editSeedRef = useRef<string | null>(null);
   const configurators = useRef(new Map<string, (projectId: string) => Promise<void>>());
@@ -169,28 +183,63 @@ export default function ProjectFolderDialog({
   const outcomeRef = useRef<"cancel" | "success">("cancel");
   const announcedPathRef = useRef<string | null>(null);
 
+  /** Adopt a browsed directory: the list, the location bar and the crumbs. */
+  const applyBrowse = useCallback((r: Awaited<ReturnType<typeof api.browseHost>>) => {
+    setPath(r.path);
+    setPathInput(r.path);
+    setHome(r.home);
+    setParent(r.parent);
+    setEntries(r.entries);
+    setSelected(null);
+    setMissingPath(null);
+    // Directory changes announce the canonical current path politely.
+    if (announcedPathRef.current !== null && announcedPathRef.current !== r.path) {
+      announce(tr("projectfolderdialog.currentFolderValue", { path: r.path }));
+    }
+    announcedPathRef.current = r.path;
+  }, []);
+
   const load = useCallback(async (target?: string, showHidden?: boolean): Promise<boolean> => {
     try {
       setError("");
-      const r = await api.browseHost(target, showHidden ?? hidden);
-      setPath(r.path);
-      setPathInput(r.path);
-      setHome(r.home);
-      setParent(r.parent);
-      setEntries(r.entries);
-      setSelected(null);
-      // Directory changes announce the canonical current path politely.
-      if (announcedPathRef.current !== null && announcedPathRef.current !== r.path) {
-        announce(tr("projectfolderdialog.currentFolderValue", { path: r.path }));
-      }
-      announcedPathRef.current = r.path;
+      applyBrowse(await api.browseHost(target, showHidden ?? hidden));
       return true;
     } catch (e) {
       // Browse errors keep the picker open at the last valid directory.
       setError(e instanceof Error ? e.message : String(e));
       return false;
     }
-  }, [hidden]);
+  }, [applyBrowse, hidden]);
+
+  /** Resolve a location the person typed. A missing one is not an error the
+   *  person can act on: it becomes the "create this folder" offer, so the
+   *  primary action can create exactly what they asked for. */
+  const resolveTypedPath = useCallback(async (raw: string): Promise<string | null> => {
+    const target = raw.trim();
+    if (!target) return null;
+    try {
+      setError("");
+      const r = await api.browseHost(target, hidden);
+      applyBrowse(r);
+      return r.path;
+    } catch (e) {
+      if (errorCodeOf(e) === "not-found") {
+        setError("");
+        setMissingPath(target);
+      } else {
+        setMissingPath(null);
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      return null;
+    }
+  }, [applyBrowse, hidden]);
+
+  /** The typed location, when it differs from the folder already shown. */
+  const consumeTypedPath = useCallback((): string => {
+    const typed = typedPathRef.current ?? (editingPath ? pathInput.trim() : "");
+    typedPathRef.current = null;
+    return typed && typed !== path && typed !== selected ? typed : "";
+  }, [editingPath, path, pathInput, selected]);
 
   useEffect(() => { void load(initialPath); /* default: home dir */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -208,6 +257,7 @@ export default function ProjectFolderDialog({
    *  request, which is what keeps the keyboard closed on open. */
   const beginPathEdit = (seed?: string) => {
     if (busy) return;
+    setMissingPath(null);
     editSeedRef.current = seed ?? null;
     setPathInput(seed ?? path);
     setEditingPath(true);
@@ -229,8 +279,21 @@ export default function ProjectFolderDialog({
   };
 
   const submitPathEdit = async () => {
-    if (await load(pathInput.trim() || "~")) endPathEdit(true);
-    else queueFocusHandoff(() => pathInputRef.current);
+    const wanted = pathInput.trim();
+    // "~" alone means home, which always exists; any other text is resolved
+    // and, when missing, becomes a create offer instead of a dead end.
+    if (wanted === "~" || wanted === "") {
+      if (await load(wanted || "~")) endPathEdit(true);
+      else queueFocusHandoff(() => pathInputRef.current);
+      return;
+    }
+    if (await resolveTypedPath(wanted) !== null) {
+      setEditingPath(false);
+      queueFocusHandoff(() => listRef.current);
+    } else {
+      setEditingPath(true);
+      queueFocusHandoff(() => pathInputRef.current);
+    }
   };
 
   /** Close requests are ignored while an Add is in flight — Escape, the Close
@@ -270,11 +333,22 @@ export default function ProjectFolderDialog({
   };
 
   const openProject = async () => {
-    const target = selected ?? path;
-    if (!target || busy) return;
+    if (busy) return;
+    const typed = consumeTypedPath();
+    const wanted = typed || selected || path;
+    if (!wanted) return;
     setBusy(true);
     setError("");
     try {
+      // A typed location is authoritative: verify it before touching any
+      // project. A missing one is offered for creation, never silently
+      // replaced by the folder that happens to be on screen.
+      let target = wanted;
+      if (typed) {
+        const resolved = await resolveTypedPath(typed);
+        if (resolved === null) return;
+        target = resolved;
+      }
       if (onChoose) {
         await onChoose(target);
         onClose();
@@ -318,6 +392,31 @@ export default function ProjectFolderDialog({
     focusAfterActivation();
   };
 
+  /** Create the typed location that does not exist yet, then browse into it
+   *  with it selected, so the primary action can open exactly that folder. */
+  const createMissingFolder = async () => {
+    const target = missingPath;
+    if (!target || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.browseMkdir(target);
+      const r = await api.browseHost(target, hidden);
+      applyBrowse(r);
+      setSelected(r.path);
+      setEditingPath(false);
+      setMissingPath(null);
+      successFeedback();
+      announce(tr("projectfolderdialog.createdFolderValue", { value: r.path }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      errorFeedback();
+      queueFocusHandoff(() => errorRef.current);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const createFolder = async () => {
     const name = newName.trim();
     if (!name || busy) return;
@@ -350,6 +449,7 @@ export default function ProjectFolderDialog({
     const entry = entries[index];
     if (!entry) return;
     setSelected(entry.path);
+    setMissingPath(null);
     document.getElementById(optionId(index))?.scrollIntoView({ block: "nearest" });
   };
 
@@ -452,24 +552,52 @@ export default function ProjectFolderDialog({
       title={title}
       onClose={requestClose}
       size="lg"
-      className="folder-dialog"
+      className={`folder-dialog${stepLabel ? " folder-dialog-stepped" : ""}`}
       initialFocus=".folder-list"
       resolveRestoreFocus={resolveRestoreFocus}
     >
       <div
-        className="folder-dialog-body"
+        className={`folder-dialog-body${stepLabel ? " folder-dialog-body-stepped" : ""}`}
         data-source-armed={armedSource?.id}
+        data-missing={missingPath ? "" : undefined}
         onKeyDown={onDialogKeyDown}
+        onKeyDownCapture={(e) => {
+          // An armed alternative source is a step inside this dialog: its
+          // Escape closes the source, never the whole flow. Menus and the
+          // typed-path field own their own Escape first.
+          if (!armedSource || e.key !== "Escape" || e.defaultPrevented) return;
+          const target = e.target instanceof Element ? e.target : null;
+          // A source panel that owns its Escape (data-owns-escape), a menu and
+          // the typed-path field all close themselves first.
+          if (target?.closest('[data-owns-escape], [role="menu"], .folder-path')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setArmedSource(null);
+        }}
       >
-        <div className="folder-dialog-head">
-          {onBack && (
-            <IconButton icon={BackIcon} variant="quiet" className="folder-back" label={tr("common.back")} disabled={busy} onClick={onBack} />
+        <div className={`folder-dialog-head${stepLabel ? " folder-dialog-head-stepped" : ""}`}>
+          {/* A stepped flow renders the same head stack as step 1: the flow
+              label with the single close control on an icon-height line, then
+              the title and its hint. Back is a footer action, so the title
+              column and the X never move between steps. */}
+          {stepLabel ? (
+            <>
+              <div className="folder-dialog-step-row">
+                <span className="folder-dialog-step">{stepLabel}</span>
+                <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
+              </div>
+              <h2 className="folder-dialog-title">{title}</h2>
+              <div className="folder-dialog-subtitle">{subtitle}</div>
+            </>
+          ) : (
+            <div className="folder-dialog-head-row">
+              <div className="folder-dialog-heading">
+                <div className="folder-dialog-title">{title}</div>
+                <div className="folder-dialog-subtitle">{subtitle}</div>
+              </div>
+              <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
+            </div>
           )}
-          <div className="folder-dialog-heading">
-            <div className="folder-dialog-title">{title}</div>
-            <div className="folder-dialog-subtitle">{subtitle}</div>
-          </div>
-          <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
         </div>
 
         {/* A `solo` alternative source (e.g. SSH) drives its own browser, so
@@ -505,7 +633,7 @@ export default function ProjectFolderDialog({
                   autoCorrect="off"
                   enterKeyHint="go"
                   disabled={busy}
-                  onChange={(e) => setPathInput(e.target.value)}
+                  onChange={(e) => { setPathInput(e.target.value); setMissingPath(null); }}
                   onKeyDown={(e) => {
                     if (isImeComposing(e)) return;
                     if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
@@ -521,6 +649,9 @@ export default function ProjectFolderDialog({
                     if (e.key !== "Escape") return;
                     e.preventDefault();
                     e.stopPropagation();
+                    // Escape abandons the typed location, including a create
+                    // offer that belonged to it.
+                    setMissingPath(null);
                     endPathEdit(true);
                   }}
                   onBlur={() => endPathEdit(false)}
@@ -589,6 +720,7 @@ export default function ProjectFolderDialog({
                       return;
                     }
                     setSelected(entry.path);
+                    setMissingPath(null);
                     listRef.current?.focus();
                   }}
                   onDoubleClick={() => enter(entry)}
@@ -604,6 +736,11 @@ export default function ProjectFolderDialog({
           </>
         )}
 
+        {!armedSource && missingPath && (
+          <div className="folder-missing" role="status">
+            <span>{tr("projectfolderdialog.folderDoesNotExist", { path: missingPath })}</span>
+          </div>
+        )}
         {!armedSource && error && <div ref={errorRef} tabIndex={-1} className="form-error folder-error" role="alert">{error}</div>}
 
         {/* One bottom bar: every "way to add" — New folder plus contributed
@@ -611,81 +748,102 @@ export default function ProjectFolderDialog({
             action on the end side. A source reveals its fields inline below
             the chips and owns the primary action while open. */}
         <div className="folder-foot">
-          <div className="folder-source-row">
-            {creating ? (
-              <span className="folder-newname">
-                <TextInput
-                  autoFocus
-                  uiSize="sm"
-                  value={newName}
-                  placeholder={tr("projectfolderdialog.newFolderName2")}
-                  aria-label={tr("projectfolderdialog.newFolderName")}
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  disabled={busy}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (isImeComposing(e)) return;
-                    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void createFolder();
-                  }}
-                  // Escape cancels only this sub-operation, not the dialog
-                  // (claimed while capturing, as for the path field).
-                  onKeyDownCapture={(e) => {
-                    if (isImeComposing(e)) return;
-                    if (e.key !== "Escape") return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCreating(false);
-                  }}
-                />
-                <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>
-                  {tr("common.create")}
-                </Button>
-              </span>
-            ) : (
+          {/* Secondary actions on the start side: the way back to the previous
+              flow step, then the ways to add a folder or another source. */}
+          <div className="folder-foot-secondary">
+            {onBack && (
               <Button
                 size="sm"
-                className="ghost-link folder-source-chip folder-new-folder"
-                iconStart={AddIcon}
+                variant="ghost"
+                className="folder-back"
+                iconStart={BackIcon}
+                aria-label={tr("common.back")}
                 disabled={busy}
-                onClick={() => { setArmedSource(null); setCreating(true); }}
+                onClick={onBack}
               >
-                {tr("projectfolderdialog.newFolder")}
+                <span className="folder-back-label">{tr("common.back")}</span>
               </Button>
             )}
-            {!onChoose && <SlotHost
-              slot="project.create.options"
-              context={{
-                busy,
-                browsedPath: selected ?? path,
-                armedId: armedSource?.id ?? null,
-                arm: (id: string, opts?: { soloBrowser?: boolean }) => {
-                  setCreating(false);
-                  setError("");
-                  setArmedSource({ id, solo: opts?.soloBrowser === true });
-                },
-                // Guarded: a source releasing on unmount/collapse must not
-                // clear a *different* source that armed itself in between.
-                disarm: (id: string) => setArmedSource((cur) => (cur && cur.id === id ? null : cur)),
-                onProjectOpened: completeExternally,
-                onConfigure,
-              }}
-            />}
+            <div className="folder-source-row">
+              {creating ? (
+                <span className="folder-newname">
+                  <TextInput
+                    autoFocus
+                    uiSize="sm"
+                    value={newName}
+                    placeholder={tr("projectfolderdialog.newFolderName2")}
+                    aria-label={tr("projectfolderdialog.newFolderName")}
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    disabled={busy}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (isImeComposing(e)) return;
+                      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) void createFolder();
+                    }}
+                    // Escape cancels only this sub-operation, not the dialog
+                    // (claimed while capturing, as for the path field).
+                    onKeyDownCapture={(e) => {
+                      if (isImeComposing(e)) return;
+                      if (e.key !== "Escape") return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCreating(false);
+                    }}
+                  />
+                  <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>
+                    {tr("common.create")}
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  className="ghost-link folder-source-chip folder-new-folder"
+                  iconStart={AddIcon}
+                  disabled={busy}
+                  onClick={() => { setArmedSource(null); setCreating(true); }}
+                >
+                  {tr("projectfolderdialog.newFolder")}
+                </Button>
+              )}
+              {!onChoose && <SlotHost
+                slot="project.create.options"
+                context={{
+                  busy,
+                  browsedPath: selected ?? path,
+                  armedId: armedSource?.id ?? null,
+                  arm: (id: string, opts?: { soloBrowser?: boolean }) => {
+                    setCreating(false);
+                    setError("");
+                    setMissingPath(null);
+                    setArmedSource({ id, solo: opts?.soloBrowser === true });
+                  },
+                  // Guarded: a source releasing on unmount/collapse must not
+                  // clear a *different* source that armed itself in between.
+                  disarm: (id: string) => setArmedSource((cur) => (cur && cur.id === id ? null : cur)),
+                  onProjectOpened: completeExternally,
+                  onConfigure,
+                }}
+              />}
+            </div>
           </div>
 
           {/* The local primary action steps aside while an alternative source
-              is open — that panel carries its own confirm button. */}
+              is open — that panel carries its own confirm button. A typed
+              location that does not exist turns this into the create offer. */}
           {!armedSource && (
             <Button
               size="sm"
               variant="primary"
               className="folder-open-btn"
-              title={target ? `${target} · ${MOD} ↵` : undefined}
-              disabled={busy || (!selected && !path)}
+              data-action={missingPath ? "create-missing" : "open"}
+              title={missingPath ? missingPath : target ? `${target} · ${MOD} ↵` : undefined}
+              disabled={busy || (!missingPath && !selected && !path)}
               aria-busy={busy || undefined}
-              onClick={() => void openProject()}
+              onPointerDown={() => { typedPathRef.current = editingPath ? pathInput.trim() : null; }}
+              onClick={() => void (missingPath ? createMissingFolder() : openProject())}
             >
-              {primaryLabel}
+              {missingPath ? tr("projectfolderdialog.createFolderNamed", { name: folderName(missingPath) }) : primaryLabel}
             </Button>
           )}
         </div>

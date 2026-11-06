@@ -53,6 +53,8 @@ export interface MemoryWriteOptions {
   authoredBy?: MemoryAuthor;
   /** The person accepting the record; recorded only when it is created active. */
   approver?: { userId: string };
+  /** The agent proposes this personal note for the shared memory. */
+  shareProposed?: boolean;
 }
 
 export interface MemoryForgetInput {
@@ -120,7 +122,8 @@ export interface MemoryStore {
   resetHarvestCursor(scope: MemoryScope, sessionId: string, policyGeneration: string, nextSeq: number): MemoryHarvestCursor;
   claimHarvest(scope: MemoryScope, owner: string, leaseMs?: number, now?: number): MemoryHarvestJobDto | undefined;
   completeHarvest(scope: MemoryScope, jobKey: string, owner: string, receiptId: string, checkpointDigest: string): boolean;
-  commitHarvest(scope: MemoryScope, jobKey: string, owner: string, policyGeneration: string, records: MemoryHarvestRecordInput[], receiptId: string, checkpointDigest: string, nextSeq: number): { committed: number; duplicates: number };
+  /** `placement` must be one of the scope's grants. Absent = project. */
+  commitHarvest(scope: MemoryScope, jobKey: string, owner: string, policyGeneration: string, records: MemoryHarvestRecordInput[], receiptId: string, checkpointDigest: string, nextSeq: number, placement?: MemoryLayerGrant): { committed: number; duplicates: number };
   skipHarvest(scope: MemoryScope, jobKey: string, owner: string, policyGeneration: string, checkpointDigest: string, nextSeq: number): boolean;
   reserveUtilityCall(scope: MemoryScope, maxOutputTokens: number): MemoryUtilityReservation;
   reconcileUtilityCall(scope: MemoryScope, reservationId: string, outcome: "consumed" | "released"): void;
@@ -128,6 +131,24 @@ export interface MemoryStore {
   exportProject(scope: MemoryScope, options?: { includeCandidates?: boolean; includeArchived?: boolean; includeHistory?: boolean }): MemoryExport;
   importPreview(scope: MemoryScope, input: MemoryExport): MemoryImportPreview;
   importRecords(scope: MemoryScope, input: MemoryExport, mode?: MemoryImportMode): MemoryReceiptDto;
+  /** Move a record, with its history, into another granted layer. Used to make
+   * an old shared note personal. Publishing never moves: it copies the exact
+   * confirmed text, so a personal note's earlier revisions stay personal. */
+  moveToLayer(scope: MemoryScope, id: string, expectedRevision: number, target: MemoryLayerGrant): MemoryReceiptDto;
+  /** Personal notes the agent proposed for the shared memory, oldest first. */
+  shareProposals(scope: MemoryScope): MemoryRecordDto[];
+  /** Close a proposal: `kept` makes the note an ordinary active personal note,
+   * `published` archives it because its text now lives in the shared memory. */
+  settleShareProposal(scope: MemoryScope, id: string, expectedRevision: number, outcome: "kept" | "published"): MemoryReceiptDto;
+  /** Live project-layer records that came from a chat, newest first, for a
+   * person to review which of their old notes should become personal. */
+  sessionSourcedRecords(scope: MemoryScope, limit?: number): MemoryRecordDto[];
+  /** Active shared records of this project, for an invitation notice. */
+  sharedRecordCount(scope: MemoryScope): number;
+  /** Byte volume of a person's notes in this Space. Never titles or counts. */
+  personalBytes(scope: MemoryScope, userId: string): number;
+  /** Delete a person's notes in this Space, with their history. */
+  purgePerson(scope: MemoryScope, userId: string): number;
   close(): void;
 }
 
@@ -154,6 +175,8 @@ interface MemoryRow {
   owner_id: string;
   authored_by: string | null;
   approved_by: string | null;
+  about: string | null;
+  share_proposed_at: number | null;
 }
 
 interface PolicyRow {
@@ -288,7 +311,10 @@ const MAX_GRANTS = 8;
 const PROJECT_GRANT: readonly MemoryLayerGrant[] = Object.freeze([{ layer: "project" } as const]);
 const ownerOf = (grant: MemoryLayerGrant): string =>
   grant.layer === "agent" ? grant.agentId : grant.layer === "person" ? grant.userId : "";
-const grantKey = (grant: MemoryLayerGrant): string => `${grant.layer}:${ownerOf(grant)}`;
+/** The project a person grant is bound to; empty for their Space-wide notes. */
+const personProject = (grant: MemoryLayerGrant): string =>
+  grant.layer === "person" ? grant.projectId ?? "" : "";
+const grantKey = (grant: MemoryLayerGrant): string => `${grant.layer}:${ownerOf(grant)}:${personProject(grant)}`;
 
 /** The scope's grants, validated. A malformed grant refuses the whole call
  * rather than silently widening or narrowing what the caller sees. */
@@ -303,15 +329,19 @@ const grantsOf = (scope: MemoryScope): readonly MemoryLayerGrant[] => {
       const owner = ownerOf(grant);
       if (typeof owner !== "string" || !owner.trim() || owner.length > 128) fail("memory layer grant owner is invalid", "forbidden");
     }
+    if (layer === "person") {
+      const bound = (grant as { projectId?: unknown }).projectId;
+      if (bound !== undefined && (typeof bound !== "string" || !bound.trim() || bound.length > 200)) fail("memory layer grant project is invalid", "forbidden");
+    }
     seen.set(grantKey(grant), grant);
   }
   return [...seen.values()];
 };
 
-/** Columns a new record gets for its layer. Only the project layer is bound to
- * a project; the other layers are Space-wide. */
+/** Columns a new record gets for its layer. The project layer and a person's
+ * notes in one project are bound to a project; the rest are Space-wide. */
 const placementOf = (scope: MemoryScope, grant: MemoryLayerGrant): { layer: MemoryLayer; ownerId: string; projectId: string } => ({
-  layer: grant.layer, ownerId: ownerOf(grant), projectId: grant.layer === "project" ? scope.projectId : "",
+  layer: grant.layer, ownerId: ownerOf(grant), projectId: grant.layer === "project" ? scope.projectId : personProject(grant),
 });
 
 /** SQL restricting rows to the granted layers. `alias` prefixes columns. */
@@ -322,6 +352,7 @@ const layerClause = (scope: MemoryScope, alias = ""): { sql: string; params: str
   const parts = grants.map((grant) => {
     if (grant.layer === "project") { params.push(scope.projectId); return `(${alias}layer='project' AND ${alias}project_id=?)`; }
     if (grant.layer === "space") return `(${alias}layer='space')`;
+    if (grant.layer === "person") { params.push(ownerOf(grant), personProject(grant)); return `(${alias}layer='person' AND ${alias}owner_id=? AND ${alias}project_id=?)`; }
     params.push(ownerOf(grant)); return `(${alias}layer='${grant.layer}' AND ${alias}owner_id=?)`;
   });
   return { sql: `(${parts.join(" OR ")})`, params };
@@ -345,6 +376,17 @@ const authorOf = (value: unknown): MemoryAuthor | undefined => {
   return fail("authoredBy is invalid");
 };
 
+const MAX_ABOUT = 80;
+/** A name shown beside a note. Data for the model, so it cannot carry markup,
+ * line breaks or anything that reads as an instruction. */
+const aboutOf = (value: unknown): string | undefined => {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") return fail("about must be text");
+  const clean = (value as string).replace(/[^\p{L}\p{M}\p{N} .'\u2019-]/gu, " ").replace(/\s+/g, " ").trim();
+  if (clean.length > MAX_ABOUT) return fail(`about exceeds ${MAX_ABOUT} characters`);
+  return clean || undefined;
+};
+
 const normalizeInput = (input: MemoryCreateInput) => {
   if (!input.projectId?.trim()) fail("projectId is required");
   if (typeof input.title !== "string" || !input.title.trim()) fail("title is required");
@@ -359,12 +401,14 @@ const normalizeInput = (input: MemoryCreateInput) => {
   if (!evidence.has(itemEvidence)) fail("evidence is invalid");
   const itemFreshness = input.freshness ?? "unknown";
   if (!freshness.has(itemFreshness)) fail("freshness is invalid");
+  const about = aboutOf(input.about);
   return {
     title: input.title.trim(), body: input.body,
     category, tags: boundedStrings(input.tags, "tags"), aliases: boundedStrings(input.aliases, "aliases"),
     applicability: applicabilityOf(input.applicability), sources: sourcesOf(input.sources),
     lifecycle: itemLifecycle, evidence: itemEvidence, freshness: itemFreshness,
     pinned: input.pinned === true, userLocked: input.userLocked === true,
+    ...(about ? { about } : {}),
   } as const;
 };
 
@@ -386,6 +430,8 @@ const itemFrom = (row: MemoryRow): MemoryRecordDto => {
   ...(row.owner_id ? { ownerId: row.owner_id } : {}),
   ...(authoredBy ? { authoredBy } : {}),
   ...(approvedBy ? { approvedBy } : {}),
+  ...(row.about ? { about: row.about } : {}),
+  ...(row.share_proposed_at ? { shareProposedAt: Number(row.share_proposed_at) } : {}),
   };
 };
 
@@ -465,11 +511,16 @@ export const excludedByPolicy = (item: MemoryRecordDto, exclusions: MemoryPolicy
   || exclusions.sources.some((x) => sourceKeys(item.sources).includes(x))
   || exclusions.paths.some((x) => item.applicability.paths?.includes(x));
 
+/** What the model should know about a record before reading it: a personal
+ * note must not be repeated to others, and a note may be about someone else. */
+const recordLabel = (item: Pick<MemoryContribution["selected"][number], "layer" | "about">): string =>
+  `${item.layer === "person" ? " · personal" : ""}${item.about ? ` · about ${item.about}` : ""}`;
+
 const memoryEnvelope = (items: readonly MemoryContribution["selected"][number][]): string => {
   if (!items.length) return "";
   return [
     "<polyth-project-memory>",
-    ...items.map((item) => `[${item.memoryId} rev ${item.revision}]\n${item.text}`),
+    ...items.map((item) => `[${item.memoryId} rev ${item.revision}${recordLabel(item)}]\n${item.text}`),
     "</polyth-project-memory>",
   ].join("\n");
 };
@@ -540,7 +591,9 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       layer TEXT NOT NULL DEFAULT 'project',
       owner_id TEXT NOT NULL DEFAULT '',
       authored_by TEXT,
-      approved_by TEXT
+      approved_by TEXT,
+      about TEXT,
+      share_proposed_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_records(space_id, project_id, lifecycle, updated_at);
     CREATE TABLE IF NOT EXISTS memory_revisions (
@@ -653,6 +706,8 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
   if (!recordColumns.has("owner_id")) db.exec("ALTER TABLE memory_records ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''");
   if (!recordColumns.has("authored_by")) db.exec("ALTER TABLE memory_records ADD COLUMN authored_by TEXT");
   if (!recordColumns.has("approved_by")) db.exec("ALTER TABLE memory_records ADD COLUMN approved_by TEXT");
+  if (!recordColumns.has("about")) db.exec("ALTER TABLE memory_records ADD COLUMN about TEXT");
+  if (!recordColumns.has("share_proposed_at")) db.exec("ALTER TABLE memory_records ADD COLUMN share_proposed_at INTEGER");
   db.exec("CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_records(space_id, layer, owner_id, lifecycle, updated_at)");
   db.exec(`CREATE TABLE IF NOT EXISTS memory_utility_reservations (
     reservation_id TEXT PRIMARY KEY,
@@ -739,9 +794,10 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
     return db.prepare(`SELECT * FROM memory_records WHERE id=? AND space_id=? AND ${layers.sql}`).get(id, scope.spaceId, ...layers.params) as unknown as MemoryRow | undefined;
   };
   const insertRecord = (spaceId: string, item: MemoryRecordDto, placement: { layer: MemoryLayer; ownerId: string }, authoredBy: MemoryAuthor | undefined): void => {
-    db.prepare(`INSERT INTO memory_records(id,space_id,project_id,title,body,category,tags,aliases,applicability,sources,lifecycle,evidence,freshness,pinned,user_locked,revision,created_at,updated_at,layer,owner_id,authored_by,approved_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    db.prepare(`INSERT INTO memory_records(id,space_id,project_id,title,body,category,tags,aliases,applicability,sources,lifecycle,evidence,freshness,pinned,user_locked,revision,created_at,updated_at,layer,owner_id,authored_by,approved_by,about,share_proposed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       item.id, spaceId, item.projectId, item.title, item.body, item.category, json(item.tags), json(item.aliases), json(item.applicability), json(item.sources), item.lifecycle, item.evidence, item.freshness, item.pinned ? 1 : 0, item.userLocked ? 1 : 0, item.revision, item.createdAt, item.updatedAt,
       placement.layer, placement.ownerId, authoredBy ? json(authoredBy) : null, item.approvedBy ? json(item.approvedBy) : null,
+      item.about ?? null, item.shareProposedAt ?? null,
     );
   };
   const revision = (item: MemoryRecordDto, at: number): void => {
@@ -791,8 +847,9 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
     const next = normalizeInput({ ...current, ...patch, projectId: scope.projectId, evidence: current.evidence, freshness: patch.freshness ?? current.freshness });
     return tx(db, () => {
       const t = now(); const nextItem: MemoryRecordDto = { ...current, ...next, projectId: current.projectId, revision: current.revision + 1, updatedAt: t, userLocked: actor === "user" ? true : current.userLocked, ...(approvedBy ? { approvedBy } : {}) };
-      const result = db.prepare(`UPDATE memory_records SET title=?,body=?,category=?,tags=?,aliases=?,applicability=?,sources=?,lifecycle=?,evidence=?,freshness=?,pinned=?,user_locked=?,revision=?,updated_at=?,approved_by=? WHERE id=? AND project_id=? AND space_id=? AND revision=?`).run(
-        nextItem.title, nextItem.body, nextItem.category, json(nextItem.tags), json(nextItem.aliases), json(nextItem.applicability), json(nextItem.sources), nextItem.lifecycle, nextItem.evidence, nextItem.freshness, nextItem.pinned ? 1 : 0, nextItem.userLocked ? 1 : 0, nextItem.revision, t, nextItem.approvedBy ? json(nextItem.approvedBy) : null, nextItem.id, current.projectId, scope.spaceId, current.revision,
+      if (!("about" in next)) delete nextItem.about;
+      const result = db.prepare(`UPDATE memory_records SET title=?,body=?,category=?,tags=?,aliases=?,applicability=?,sources=?,lifecycle=?,evidence=?,freshness=?,pinned=?,user_locked=?,revision=?,updated_at=?,approved_by=?,about=? WHERE id=? AND project_id=? AND space_id=? AND revision=?`).run(
+        nextItem.title, nextItem.body, nextItem.category, json(nextItem.tags), json(nextItem.aliases), json(nextItem.applicability), json(nextItem.sources), nextItem.lifecycle, nextItem.evidence, nextItem.freshness, nextItem.pinned ? 1 : 0, nextItem.userLocked ? 1 : 0, nextItem.revision, t, nextItem.approvedBy ? json(nextItem.approvedBy) : null, nextItem.about ?? null, nextItem.id, current.projectId, scope.spaceId, current.revision,
       );
       if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
       updateFts(nextItem, scope.spaceId); revision(nextItem, t); const policy = policyRow(scope); bump(scope);
@@ -929,6 +986,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       if (input.projectId !== scope.projectId) fail("project scope mismatch", "forbidden");
       const target = options.placement ?? { layer: "project" };
       if (!grantsOf(scope).some((grant) => grantKey(grant) === grantKey(target))) fail("memory layer is not granted", "forbidden");
+      if (options.shareProposed && target.layer !== "person") fail("only a personal note can be proposed for the shared memory");
       const placement = placementOf(scope, target);
       const authoredBy = authorOf(options.authoredBy);
       const approver = options.approver?.userId;
@@ -949,6 +1007,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
           id, projectId: placement.projectId, ...normalized, revision: 1, createdAt: t, updatedAt: t,
           layer: placement.layer, ...(placement.ownerId ? { ownerId: placement.ownerId } : {}), ...(authoredBy ? { authoredBy } : {}),
           ...(approver && normalized.lifecycle === "active" ? { approvedBy: { userId: approver.trim(), at: t } } : {}),
+          ...(options.shareProposed ? { shareProposedAt: t } : {}),
         };
         insertRecord(scope.spaceId, item, placement, authoredBy);
         updateFts(item, scope.spaceId); revision(item, t); const dataRevision = bump(scope);
@@ -984,8 +1043,8 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
         const { layer: _layer, ownerId: _ownerId, authoredBy: _authoredBy, approvedBy: _approvedBy, ...content } = restoredItem;
         const next: MemoryRecordDto = { ...content, projectId: current.projectId, revision: expectedRevision + 1, updatedAt: t, userLocked: true,
           layer: current.layer ?? "project", ...(current.ownerId ? { ownerId: current.ownerId } : {}), ...(current.authoredBy ? { authoredBy: current.authoredBy } : {}), ...(current.approvedBy ? { approvedBy: current.approvedBy } : {}) };
-        const result = db.prepare(`UPDATE memory_records SET title=?,body=?,category=?,tags=?,aliases=?,applicability=?,sources=?,lifecycle=?,evidence=?,freshness=?,pinned=?,user_locked=?,revision=?,updated_at=? WHERE id=? AND project_id=? AND space_id=? AND revision=?`).run(
-          next.title, next.body, next.category, json(next.tags), json(next.aliases), json(next.applicability), json(next.sources), next.lifecycle, next.evidence, next.freshness, next.pinned ? 1 : 0, 1, next.revision, t, id, current.projectId, scope.spaceId, expectedRevision,
+        const result = db.prepare(`UPDATE memory_records SET title=?,body=?,category=?,tags=?,aliases=?,applicability=?,sources=?,lifecycle=?,evidence=?,freshness=?,pinned=?,user_locked=?,revision=?,updated_at=?,about=? WHERE id=? AND project_id=? AND space_id=? AND revision=?`).run(
+          next.title, next.body, next.category, json(next.tags), json(next.aliases), json(next.applicability), json(next.sources), next.lifecycle, next.evidence, next.freshness, next.pinned ? 1 : 0, 1, next.revision, t, next.about ?? null, id, current.projectId, scope.spaceId, expectedRevision,
         );
         if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
         updateFts(next, scope.spaceId); revision(next, t); const policy = policyRow(scope); bump(scope);
@@ -1050,7 +1109,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
         if (selected.length >= maxRecords) break;
         const evidence = `${item.title}\n${item.body}`;
         const reason = item.pinned ? "pinned" : (degraded ? "bounded-lexical-fallback" : "fts");
-        const full = { memoryId: item.id, revision: item.revision, digest: digest(json(item)), reason, text: evidence };
+        const full = { memoryId: item.id, revision: item.revision, digest: digest(json(item)), reason, text: evidence, ...(item.layer === "person" ? { layer: item.layer } : {}), ...(item.about ? { about: item.about } : {}) };
         if (bytes(memoryEnvelope([...selected, full])) <= maxBytes) {
           selected.push(full);
           continue;
@@ -1099,8 +1158,10 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
         return apiJob(db.prepare("SELECT * FROM memory_harvest_jobs WHERE job_key=?").get(row.job_key) as unknown as JobRow);
       });
     },
-    commitHarvest(scope, jobKey, owner, policyGeneration, records, receiptId, checkpointDigest, nextSeq) {
+    commitHarvest(scope, jobKey, owner, policyGeneration, records, receiptId, checkpointDigest, nextSeq, target = { layer: "project" }) {
       assertScope(scope);
+      if (!grantsOf(scope).some((grant) => grantKey(grant) === grantKey(target))) fail("memory layer is not granted", "forbidden");
+      const placement = placementOf(scope, target);
       if (!jobKey.trim() || !owner.trim() || !policyGeneration.trim() || !receiptId.trim() || !checkpointDigest.trim() || !Number.isSafeInteger(nextSeq) || nextSeq < 1) fail("harvest commit is invalid");
       const normalized = records.map((record) => ({ ...normalizeInput({ ...record, projectId: scope.projectId }), idempotencyKey: record.idempotencyKey, requestFingerprint: record.requestFingerprint }));
       return tx(db, () => {
@@ -1115,7 +1176,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
             if (idem.fingerprint !== item.requestFingerprint) fail("idempotency key is already bound to another payload", "conflict");
             duplicates++; continue;
           }
-          const existing = db.prepare("SELECT id FROM memory_records WHERE space_id=? AND project_id=? AND layer='project' AND title=? AND body=? AND category=? AND lifecycle != 'forgotten'").get(scope.spaceId, scope.projectId, item.title, item.body, item.category) as { id: string } | undefined;
+          const existing = db.prepare("SELECT id FROM memory_records WHERE space_id=? AND project_id=? AND layer=? AND owner_id=? AND title=? AND body=? AND category=? AND lifecycle != 'forgotten'").get(scope.spaceId, placement.projectId, placement.layer, placement.ownerId, item.title, item.body, item.category) as { id: string } | undefined;
           const operationId = `${jobKey}:${item.idempotencyKey}`;
           if (existing) {
             const receipt: MemoryReceiptDto = { operationId, status: "duplicate", memoryId: existing.id, generation: policy.generation };
@@ -1125,8 +1186,8 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
           const id = randomUUID();
           const { idempotencyKey: _idempotencyKey, requestFingerprint: _requestFingerprint, ...normalizedItem } = item;
           const authoredBy: MemoryAuthor = { kind: "system", via: "harvest" };
-          const record: MemoryRecordDto = { id, projectId: scope.projectId, ...normalizedItem, userLocked: false, revision: 1, createdAt: t, updatedAt: t, layer: "project", authoredBy };
-          insertRecord(scope.spaceId, record, { layer: "project", ownerId: "" }, authoredBy);
+          const record: MemoryRecordDto = { id, projectId: placement.projectId, ...normalizedItem, userLocked: false, revision: 1, createdAt: t, updatedAt: t, layer: placement.layer, ...(placement.ownerId ? { ownerId: placement.ownerId } : {}), authoredBy };
+          insertRecord(scope.spaceId, record, placement, authoredBy);
           updateFts(record, scope.spaceId); revision(record, t);
           const receipt: MemoryReceiptDto = { operationId, status: "committed", memoryId: id, revision: 1, generation: policy.generation, digest: digest(json(record)) };
           db.prepare("INSERT INTO memory_idempotency(project_id,operation_key,fingerprint,receipt,created_at) VALUES(?,?,?,?,?)").run(scope.projectId, item.idempotencyKey, item.requestFingerprint, json(receipt), t);
@@ -1233,6 +1294,73 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
         }
         if (imported) bump(scope);
         return { operationId: randomUUID(), status: "committed", generation: policy.generation, message: `imported ${imported} record(s)` };
+      });
+    },
+    moveToLayer(scope, id, expectedRevision, target) {
+      assertScope(scope);
+      if (!grantsOf(scope).some((grant) => grantKey(grant) === grantKey(target))) fail("memory layer is not granted", "forbidden");
+      const row = grantedRow(scope, id);
+      if (!row) fail("memory record not found", "not-found");
+      const loaded = row as MemoryRow;
+      if (Number(loaded.revision) !== expectedRevision) fail("memory record changed since it was loaded", "conflict");
+      if (loaded.lifecycle === "forgotten") fail("forgotten memory requires explicit restoration", "conflict");
+      const placement = placementOf(scope, target);
+      return tx(db, () => {
+        const t = now();
+        const result = db.prepare("UPDATE memory_records SET layer=?, owner_id=?, project_id=?, revision=revision+1, updated_at=? WHERE id=? AND space_id=? AND revision=?").run(placement.layer, placement.ownerId, placement.projectId, t, id, scope.spaceId, expectedRevision);
+        if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
+        db.prepare("UPDATE memory_revisions SET project_id=? WHERE record_id=?").run(placement.projectId, id);
+        const next = itemFrom({ ...loaded, layer: placement.layer, owner_id: placement.ownerId, project_id: placement.projectId, revision: expectedRevision + 1, updated_at: t });
+        updateFts(next, scope.spaceId); revision(next, t); bump(scope);
+        return { operationId: randomUUID(), status: "committed", memoryId: id, revision: next.revision, generation: policyRow(scope).generation, digest: digest(json(next)) };
+      });
+    },
+    shareProposals(scope) {
+      assertScope(scope);
+      const layers = layerClause(scope);
+      const rows = db.prepare(`SELECT * FROM memory_records WHERE space_id=? AND ${layers.sql} AND layer='person' AND lifecycle='candidate' AND share_proposed_at IS NOT NULL ORDER BY share_proposed_at LIMIT 50`).all(scope.spaceId, ...layers.params) as unknown as MemoryRow[];
+      return rows.map(itemFrom);
+    },
+    settleShareProposal(scope, id, expectedRevision, outcome) {
+      assertScope(scope);
+      const row = grantedRow(scope, id);
+      if (!row) fail("memory record not found", "not-found");
+      const loaded = row as MemoryRow;
+      if (loaded.layer !== "person" || loaded.share_proposed_at === null) fail("this note is not waiting for a decision", "conflict");
+      if (Number(loaded.revision) !== expectedRevision) fail("memory record changed since it was loaded", "conflict");
+      return tx(db, () => {
+        const t = now(); const lifecycle = outcome === "kept" ? "active" : "archived";
+        const result = db.prepare("UPDATE memory_records SET lifecycle=?, share_proposed_at=NULL, revision=revision+1, updated_at=? WHERE id=? AND space_id=? AND revision=?").run(lifecycle, t, id, scope.spaceId, expectedRevision);
+        if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
+        const next = itemFrom({ ...loaded, lifecycle, share_proposed_at: null, revision: expectedRevision + 1, updated_at: t });
+        updateFts(next, scope.spaceId); revision(next, t); bump(scope);
+        return { operationId: randomUUID(), status: "committed", memoryId: id, revision: next.revision, generation: policyRow(scope).generation };
+      });
+    },
+    sessionSourcedRecords(scope, limit = 200) {
+      assertScope(scope);
+      const rows = db.prepare(`SELECT * FROM memory_records WHERE space_id=? AND project_id=? AND layer='project' AND lifecycle IN ('active','candidate') AND sources LIKE '%"sessionId"%' ORDER BY updated_at DESC LIMIT ?`).all(scope.spaceId, scope.projectId, Math.max(1, Math.min(limit, 500))) as unknown as MemoryRow[];
+      return rows.map(itemFrom);
+    },
+    sharedRecordCount(scope) {
+      assertScope(scope);
+      return Number((db.prepare("SELECT count(*) AS count FROM memory_records WHERE space_id=? AND project_id=? AND layer='project' AND lifecycle='active'").get(scope.spaceId, scope.projectId) as { count: number }).count);
+    },
+    personalBytes(scope, userId) {
+      assertScope(scope);
+      return Number((db.prepare("SELECT coalesce(sum(length(CAST(title AS BLOB))+length(CAST(body AS BLOB))),0) AS size FROM memory_records WHERE space_id=? AND layer='person' AND owner_id=? AND lifecycle!='forgotten'").get(scope.spaceId, userId) as { size: number }).size);
+    },
+    purgePerson(scope, userId) {
+      assertScope(scope);
+      return tx(db, () => {
+        const ids = (db.prepare("SELECT id FROM memory_records WHERE space_id=? AND layer='person' AND owner_id=?").all(scope.spaceId, userId) as Array<{ id: string }>).map((row) => row.id);
+        for (const id of ids) {
+          db.prepare("DELETE FROM memory_fts WHERE memory_id=?").run(id);
+          db.prepare("DELETE FROM memory_revisions WHERE record_id=?").run(id);
+          db.prepare("DELETE FROM memory_records WHERE id=? AND space_id=?").run(id, scope.spaceId);
+        }
+        if (ids.length) bump(scope);
+        return ids.length;
       });
     },
     close() { if (!closed) { closed = true; } },

@@ -199,6 +199,15 @@
   overflow: hidden;
   overscroll-behavior: contain;
 }
+/* A page scrolls under the home bar and pads its own end (above), so the layer
+   must not stop it short: a card was cut flat 34pt above the screen's edge. An
+   edge-to-edge workspace has no such padding and keeps the layer's inset. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  .module-view--main:is([data-content-mode="page"], [data-content-mode="panel"]),
+  :is(.rail-fullscreen, .panel-sheet):has(> .module-view:is([data-content-mode="page"], [data-content-mode="panel"])) {
+    padding-block-end: var(--keyboard-inset, 0px);
+  }
+}
 .module-view--phone .module-view-content--page {
   --module-content-inline: var(--screen-gutter);
   --module-content-block: var(--space-3);

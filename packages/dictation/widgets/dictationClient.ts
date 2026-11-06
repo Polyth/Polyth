@@ -29,7 +29,7 @@ export interface StreamingDictation {
   metrics?(): Readonly<DictationTransportMetrics>;
 }
 
-async function sessionJson<T>(path: string, init?: RequestInit): Promise<T> {
+export async function sessionJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
     if (response.status === 401 && typeof window !== "undefined") {

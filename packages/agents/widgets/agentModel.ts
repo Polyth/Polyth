@@ -42,6 +42,12 @@ export interface BackupModelDraft {
 export type PermissionChoice = "inherit" | AgentPermissionLevelDto;
 export const MAX_BACKUP_MODELS = 8;
 
+const LEVEL_RANK: Readonly<Record<AgentPermissionLevelDto, number>> = { ask: 0, routine: 1, all: 2 };
+/** Whether an agent already starts its sessions at `level` or above. A project
+ *  default (no level of its own) is not the agent's to count on. */
+export const agentLevelAtLeast = (current: AgentPermissionLevelDto | undefined, level: AgentPermissionLevelDto): boolean =>
+  current !== undefined && LEVEL_RANK[current] >= LEVEL_RANK[level];
+
 export interface AgentDraftState {
   name: string;
   description: string;

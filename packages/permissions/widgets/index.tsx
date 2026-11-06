@@ -3,6 +3,7 @@ import { createElement, Fragment, useEffect, useRef, useState, type MouseEvent }
 import { defineWebPackage, type WidgetRenderContext } from "@polyth/web-sdk";
 import { api } from "@polyth/session/web-api";
 import PermissionBanner, { type PermissionNotesSlot } from "./PermissionBanner.tsx";
+import SessionPermissions from "./SessionPermissions.tsx";
 import PermissionsSettingsPage from "./PermissionsSettingsPage.tsx";
 import ProjectApprovals from "./ProjectApprovals.tsx";
 import { confirmFullAccess } from "./fullAccess.ts";
@@ -256,6 +257,17 @@ export default defineWebPackage((host) => () => {
       id: "permissions.requests",
       order: 20,
       render: () => createElement(PendingPermissionsWidget, { Slot: host.ui.Slot }),
+    }),
+    host.slots.register({
+      slot: "session.permission.requests",
+      id: "permissions.session-requests",
+      render: ({ sessionId, requestIds }) => typeof sessionId === "string"
+        ? createElement(SessionPermissions, {
+          sessionId,
+          requestIds: Array.isArray(requestIds) ? requestIds.filter((id): id is string => typeof id === "string") : [],
+          Slot: host.ui.Slot,
+        })
+        : null,
     }),
     host.widgets.registerPlugin({
       id: "permissions",

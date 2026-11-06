@@ -21,6 +21,7 @@ import {
   HomeIcon,
   Icon,
   LayersIcon,
+  PackageIcon,
   WorkflowIcon,
   type LucideIcon,
 } from "./ui/index.ts";
@@ -180,6 +181,7 @@ export default function ProjectCompositionEditor({
           aria-controls="project-composition-tools"
           onClick={() => setCustomize((open) => !open)}
         >
+          <span className="project-composition-disclosure-icon"><Icon icon={PackageIcon} size="sm" /></span>
           <span className="project-composition-disclosure-copy">
             <strong id="project-composition-review">{tr("projectcomposition.workspace")}</strong>
             <span>{loading

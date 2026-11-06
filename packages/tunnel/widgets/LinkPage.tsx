@@ -13,6 +13,7 @@ import { SERVER_NAME_MAX_CHARS, type TunnelServerNameDto } from "../src/serverNa
 import { CheckGroup, EmptyState, ErrorState, PageHead, ReadonlyRow, Row, SaveStatus, Section, Seg, Toggle, type SaveStatusState } from "../../../apps/web/src/components/settings/parts.tsx";
 import { Badge, Button, ChevronDownIcon, Dialog, Icon, IconButton, QrCodeIcon, RefreshIcon, Spinner, TextInput, type BadgeTone } from "../../../apps/web/src/components/ui/index.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
+import { copyText } from "../../../apps/web/src/utils.ts";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { applyTunnelStatusToCapability, setPolythLinkCapabilityAvailable } from "./availability.ts";
 import { createTranslate, type Translate } from "./i18n.ts";
@@ -90,6 +91,21 @@ function secondsUntil(value: string | undefined, now: number): number | null {
 }
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+
+/** A computer cannot scan its own screen, so it takes the invitation as a link. */
+function CopyPairingLink({ link, t }: { link: string; t: Translate }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 1_500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <Button size="sm" variant="ghost" onClick={() => void copyText(link).then((ok) => { if (ok) setCopied(true); })}>
+      {t(copied ? "tunnel.dialog.linkCopied" : "tunnel.dialog.copyLink")}
+    </Button>
+  );
+}
 
 function QrMatrix({ modules, t }: { modules: boolean[][]; t: Translate }) {
   return (
@@ -660,6 +676,12 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
                 )}
                 {offerSeconds !== null && offerSeconds > 0 && <>{t("tunnel.dialog.expiresIn", { time: clock(offerSeconds) })}</>}
               </p>
+              {!expired && offer.qrPayload && (
+                <p className="pkg-tunnel-computer">
+                  <span>{t("tunnel.dialog.computer")}</span>
+                  <CopyPairingLink link={offer.qrPayload} t={t} />
+                </p>
+              )}
               <details className="pkg-tunnel-access">
                 <summary>{t("tunnel.dialog.accessSummary", { access: accessOptions.find(([id]) => id === profile)?.[1] ?? "" })}</summary>
                 <Seg label={t("tunnel.dialog.accessAria")} value={profile} options={accessOptions} disabled={busy} onChange={changeAccess} />

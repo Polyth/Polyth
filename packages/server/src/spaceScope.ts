@@ -10,6 +10,7 @@
 // denial would turn any id parameter into an existence oracle for other
 // tenants.
 import type {
+  PersonMessageAdmission,
   ProjectService,
   SessionActivateOptions,
   SessionProjection,
@@ -27,11 +28,15 @@ import type { ProjectRegistry } from "./projects.ts";
 import { canonicalProjectService } from "./projectResourceAuthority.ts";
 import { admittedAuthor, contextPerson, type SessionPeople } from "./sessionPeople.ts";
 import { accessControlledSessionService } from "./sessionResourceAccess.ts";
+import type { SessionSharingService } from "./sessionSharing.ts";
 import { canonicalSessionService } from "./sessionResourceAuthority.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 
 const notFound = (): Error =>
   Object.assign(new Error("session not found"), { code: "not-found" });
+
+/** The part of the sharing service a person message needs. */
+export type SessionPeopleOpener = Pick<SessionSharingService, "addPeople">;
 
 /** Everything the guard needs from the durable store. */
 export interface SpaceOwnershipSource {
@@ -155,6 +160,7 @@ function scopeSessions(
   guard: SpaceGuard,
   projects: ProjectService,
   people?: SessionPeople,
+  sharing?: () => SessionPeopleOpener | undefined,
 ): SessionService {
   const g = (sessionId: string): string => {
     guard.assertSession(ctx, sessionId);
@@ -168,6 +174,11 @@ function scopeSessions(
   const mine = (rows: SessionProjection[]): SessionProjection[] =>
     person && people ? people.personalize(rows, person.userId) : rows;
   const mineOne = (row: SessionProjection): SessionProjection => mine([row])[0]!;
+  // Opening a chat runs under this context's own rights, whoever asks for it.
+  const opener = (sessionId: string): Pick<PersonMessageAdmission, "openChatTo"> => {
+    const service = sharing?.();
+    return service ? { openChatTo: (entries) => service.addPeople(ctx, sessionId, entries) } : {};
+  };
   const withoutPrivatePreset = <T extends { agentProfileId?: string | null }>(input: T): T => {
     if (input.agentProfileId === undefined) return input;
     const { agentProfileId: _privatePresetId, ...rest } = input;
@@ -360,7 +371,16 @@ function scopeSessions(
     // HTTP body and admission never choose who speaks.
     scoped.postPersonMessage = (sessionId, message, admission) => guarded(async () => {
       const author = admittedAuthor(ctx, admission?.author, people?.directory);
-      return postPersonMessage(g(sessionId), message, author ? { author } : {});
+      return postPersonMessage(g(sessionId), message, { ...(author ? { author } : {}), ...opener(sessionId) });
+    });
+  }
+  if (base.decidePersonAccess) {
+    const decidePersonAccess = base.decidePersonAccess.bind(base);
+    // Answering is the acting person's own sharing decision; the access layer
+    // (METHOD_ACCESS) and the sharing rules decide whether they may.
+    scoped.decidePersonAccess = (sessionId, messageSeq, input, admission) => guarded(async () => {
+      const author = admittedAuthor(ctx, admission?.author, people?.directory);
+      return decidePersonAccess(g(sessionId), messageSeq, input, { ...(author ? { author } : {}), ...opener(sessionId) });
     });
   }
   if (base.createConversation) {
@@ -393,6 +413,7 @@ function scopeSessions(
   }
   assign("memoryPolicyGet", bySession(base.memoryPolicyGet));
   assign("memoryPolicySet", bySession(base.memoryPolicySet));
+  assign("setCompactionPreference", bySession(base.setCompactionPreference));
   // Isolation and worktree lifecycle methods are required by the governed
   // package host (see packageHostAuthority SESSION_METHODS). Dropping them
   // here made every package-owned isolation merge fail closed as
@@ -432,6 +453,8 @@ export function createSpaceServices(deps: {
   personHarnessDefault?: PersonHarnessDefault;
   /** Message authors and per-person session state; absent in test doubles. */
   people?: SessionPeople;
+  /** Opens a chat to the people a message names; read per call. */
+  sharing?: () => SessionPeopleOpener | undefined;
 }): (ctx: SpaceContext) => SpaceServices {
   return (ctx) => {
     const projects = canonicalProjectService(ctx, deps.registry);
@@ -447,7 +470,7 @@ export function createSpaceServices(deps: {
       // before the limits pick their first entry.
       sessions: sessionsForActor(ctx, personDefaultSessionsForActor(ctx, limitedSessionsForActor(ctx, privateHarnessSessionsForActor(
         ctx,
-        scopeSessions(sessions, ctx, deps.guard, projects, deps.people),
+        scopeSessions(sessions, ctx, deps.guard, projects, deps.people, deps.sharing),
         deps.harnessAccess,
       ), undefined, deps.harnessAccess), deps.personHarnessDefault)),
       guard: deps.guard,

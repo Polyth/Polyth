@@ -25,6 +25,10 @@ test("a provider-limit stop never falls back to the generic failure notice", () 
   assert.equal(transientTurnNoticeKey("session-a", { turnId: "turn-1", status: "failed", providerLimited: true }), null);
 });
 
+test("a refusal for a full chat offers no Retry: the composer's row says what helps", () => {
+  assert.equal(transientTurnNoticeKey("session-a", { turnId: "turn-1", status: "failed", contextFull: true }), null);
+});
+
 test("a failure on a harness the session switched away from has no notice", () => {
   const turn = { turnId: "turn-1", status: "failed" as const, harnessId: "claude" };
   assert.equal(transientTurnNoticeKey("session-a", turn, "claude"), "session-a:turn-1:failed");

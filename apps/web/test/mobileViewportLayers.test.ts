@@ -83,9 +83,9 @@ const settingRows = Array.from({ length: 22 }, (_, i) =>
 // A page id is a class on the shell, so a page-scoped rule can re-size the
 // layer for that page alone; Usage once kept a 4vh/2vw box on phones.
 const settings = (stage: "page" | "nav", pageId = "general") => `<div class="scrim settings-scrim"><div class="modal settings-shell settings-page-${pageId} settings-mobile-${stage}">
-  <div class="modal-nav settings-nav"><div class="settings-mobile-nav-head"><strong>Settings</strong><button class="ui-icon-btn" aria-label="Close">×</button></div>
-    <div class="settings-nav-search-shell"><input class="ui-input ui-input--sm settings-nav-search" type="search" placeholder="Search settings"></div>
-    <nav class="settings-nav-list">${Array.from({ length: 24 }, (_, i) => `<button class="settings-nav-item"><span class="settings-nav-label">Page ${i}</span></button>`).join("")}</nav></div>
+  <div class="modal-nav settings-nav"><div class="settings-nav-scroll"><div class="settings-mobile-nav-head"><h1 class="sr-only">Settings</h1>
+    <div class="settings-nav-search-shell"><input class="ui-input ui-input--sm settings-nav-search" type="search" placeholder="Search settings"></div><button class="ui-icon-btn" aria-label="Close">×</button></div>
+    <nav class="settings-nav-list">${Array.from({ length: 24 }, (_, i) => `<button class="settings-nav-item"><span class="settings-nav-label">Page ${i}</span></button>`).join("")}</nav></div></div>
   <div class="modal-main settings-pane"><div class="modal-head settings-pane-head"><div class="settings-pane-head-bar"><button class="settings-mobile-back">Back</button><h1 class="settings-mobile-title">General</h1><div class="settings-pane-head-actions"><button class="ui-icon-btn" aria-label="Close">×</button></div></div></div>
     <div class="modal-body settings-pane-body">${settingRows}</div></div></div></div>`;
 
@@ -99,7 +99,7 @@ interface Family { html: string; layer: string; head: string; scroller: string }
 const FAMILIES: Record<string, Family> = {
   "settings page": { html: shell({ inApp: settings("page") }), layer: ".settings-shell", head: ".settings-pane-head", scroller: ".settings-pane-body" },
   "usage settings page": { html: shell({ inApp: settings("page", "usage") }), layer: ".settings-shell", head: ".settings-pane-head", scroller: ".settings-pane-body" },
-  "settings navigation": { html: shell({ inApp: settings("nav") }), layer: ".settings-shell", head: ".settings-mobile-nav-head", scroller: ".settings-nav-list" },
+  "settings navigation": { html: shell({ inApp: settings("nav") }), layer: ".settings-shell", head: ".settings-mobile-nav-head", scroller: ".settings-nav-scroll" },
   "phone navigator": {
     html: shell({ inShell: `<div class="mobile-nav-backdrop"></div><nav class="mobile-navigator" role="dialog"><div class="mobile-nav-toolbar"><div class="mobile-nav-search"><input type="search" placeholder="Search"></div></div><div class="mobile-nav-scroll">${rows(22)}</div></nav>` }),
     layer: ".mobile-navigator", head: ".mobile-nav-toolbar", scroller: ".mobile-nav-scroll",
@@ -191,11 +191,20 @@ for (const variant of VARIANTS) for (const [name, family] of Object.entries(FAMI
           };
           const layerEl = document.querySelector(layer)!;
           const scrollerEl = document.querySelector<HTMLElement>(scroller)!;
+          // Read at rest: a phone Settings list carries its head in the scroller.
+          const headBox = box(document.querySelector(head))!;
           scrollerEl.scrollTop = scrollerEl.scrollHeight;
           const inputs = [...layerEl.querySelectorAll("input")].filter((input) => input.getClientRects().length > 0);
+          // A field the scroller carried away above its view scrolls back to it
+          // (the Settings search). Only this scroller moves, never the page.
+          const lastInput = inputs[inputs.length - 1];
+          if (lastInput && scrollerEl.contains(lastInput)) {
+            const above = scrollerEl.getBoundingClientRect().top - lastInput.getBoundingClientRect().top;
+            if (above > 0) scrollerEl.scrollTop -= above;
+          }
           const hitAt = (y: number) => !!document.elementFromPoint(probeX, Math.max(1, Math.min(window.innerHeight - 1, y)))?.closest(layer);
           return {
-            layer: box(layerEl)!, root: box(document.getElementById("root"))!, head: box(document.querySelector(head))!,
+            layer: box(layerEl)!, root: box(document.getElementById("root"))!, head: headBox,
             scroller: box(scrollerEl)!, lastInput: box(inputs[inputs.length - 1] ?? null),
             hitTop: hitAt(Math.max(1, (box(layerEl)!.top) + 4)),
             hitBottom: hitAt(Math.min(window.innerHeight, box(layerEl)!.bottom) - 4),
@@ -352,6 +361,48 @@ test("revealing never scrolls an overflow: hidden box and does nothing for a fie
   } finally {
     await close();
   }
+});
+
+// A look dresses the railbar as a floating strip with `!important` margins. In the
+// compact shell that same element only hosts the package window, which then stopped
+// 11px short of the right and bottom screen edges (Obsidian, Air).
+test("a package window fills the phone screen in every interface look", { skip: !available }, async () => {
+  const looks = (await read("shellLooks.css")).replace(/@import[^;]+;/g, "");
+  const context = await browser.newContext({ viewport: { width: WIDTH, height: 844 } });
+  const page = await context.newPage();
+  try {
+    await page.setContent(`<!doctype html><meta name="viewport" content="width=device-width"><style>${css}\n${looks}</style><body>${FAMILIES["fullscreen rail pane"]!.html}</body>`);
+    for (const look of ["standard", "paper", "line", "air", "monolith", "monolith-reverse", "obsidian", "editorial"]) {
+      const rect = await page.evaluate((name) => {
+        document.body.dataset.shellLook = name;
+        document.getAnimations().forEach((animation) => animation.finish());
+        const box = document.querySelector(".rail-fullscreen")!.getBoundingClientRect();
+        return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+      }, look);
+      assert.deepEqual(rect, { left: 0, top: 0, right: WIDTH, bottom: 844 }, look);
+    }
+  } finally { await context.close(); }
+});
+
+// The page pads its own end, so it can scroll under the home bar; an edge-to-edge
+// workspace has no such padding and keeps the layer's inset.
+test("a page scrolls to the screen's bottom edge and still ends above the home bar", { skip: !available }, async () => {
+  const context = await browser.newContext({ viewport: { width: WIDTH, height: 844 } });
+  const page = await context.newPage();
+  try {
+    await page.setContent(`<!doctype html><meta name="viewport" content="width=device-width"><style>${css}\n:root { --safe-bottom: 34px; --keyboard-inset: 0px; }</style><body>${FAMILIES["fullscreen rail pane"]!.html}</body>`);
+    const measure = (mode: string) => page.evaluate((contentMode) => {
+      document.querySelector(".module-view")!.setAttribute("data-content-mode", contentMode);
+      const scroller = document.querySelector<HTMLElement>(".module-view-content")!;
+      scroller.scrollTop = scroller.scrollHeight;
+      const last = scroller.lastElementChild!.getBoundingClientRect();
+      return { scrollerBottom: scroller.getBoundingClientRect().bottom, lastBottom: last.bottom };
+    }, mode);
+    const pageMode = await measure("page");
+    assert.equal(pageMode.scrollerBottom, 844, "nothing is cut flat above the screen's edge");
+    assert.ok(pageMode.lastBottom <= 844 - 34, "the last line still clears the home bar");
+    assert.equal((await measure("workspace")).scrollerBottom, 844 - 34, "a workspace keeps the layer's inset");
+  } finally { await context.close(); }
 });
 
 test("the band block keeps the layers' own top clearance: the notch, not a shell header", () => {

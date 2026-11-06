@@ -178,3 +178,18 @@ test("socket open neither races the boot answer under a remembered list nor give
   const failed = publishListFailure(remembered, 1, "offline");
   assert.equal(shouldRefreshProjectsOnSyncOpen(failed, "one"), true, "a failed boot answer is asked again");
 });
+
+test("a project keeps its audience through a mutation's answer, which doesn't carry it", () => {
+  const shared = { id: "p", name: "Wellness", path: "/p", createdAt: 0, sharedWith: 2 } as Project;
+  const ready = upsertProject(initialProjectRegistry(), shared);
+  const renamed = upsertProject(ready, { id: "p", name: "Здоров'я", path: "/p", createdAt: 0 } as Project);
+  assert.equal(renamed.status === "ready" && renamed.projects[0]?.sharedWith, 2);
+  assert.equal(renamed.status === "ready" && renamed.projects[0]?.name, "Здоров'я");
+});
+
+test("the replacement for a removed project is never someone's private room", () => {
+  const room = { id: "room", name: "Wellness", path: "/r", createdAt: 0, parentProjectId: "gone" } as Project;
+  const other = { id: "other", name: "Other", path: "/o", createdAt: 0 } as Project;
+  assert.equal(replacementActiveId([room, other], "gone"), "other");
+  assert.equal(replacementActiveId([room], "gone"), "room", "with nothing else, the chats still have a home");
+});

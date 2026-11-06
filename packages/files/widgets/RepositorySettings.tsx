@@ -7,7 +7,7 @@ import { applyProjectUpsert, useStore } from "../../../apps/web/src/store.ts";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
-import { desktopBridge } from "../../../apps/web/src/desktopBridge.ts";
+import { localDesktopBridge } from "../../../apps/web/src/desktopBridge.ts";
 import { Button, Checkbox, Menu, Notice, ResponsiveOverlay, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import "./repositories.css";
 
@@ -116,7 +116,7 @@ export default function RepositorySettings({ projectId, project, folderPicker: F
             <span className="files-repository-id">{[row.id === primary ? tr("filesreg.rowPrimary") : "", health[row.id]?.unavailable ? tr("filesreg.rowUnavailable") : health[row.id]?.branch ?? "", health[row.id]?.changes ? tr("filesreg.rowChanged", { count: health[row.id]!.changes! }) : ""].filter(Boolean).join(" · ")}</span>
           </div>
           <div className="files-repository-actions">
-            {desktopBridge() && <Button size="sm" variant="ghost" onClick={() => void desktopBridge()!.revealPath(row.path).catch((cause) => setError(friendlyError(tr("filesreg.errRevealRepo"), cause)))}>{tr("filesreg.reveal")}</Button>}
+            {localDesktopBridge() && <Button size="sm" variant="ghost" onClick={() => void localDesktopBridge()!.revealPath(row.path).catch((cause) => setError(friendlyError(tr("filesreg.errRevealRepo"), cause)))}>{tr("filesreg.reveal")}</Button>}
             {health[row.id]?.unavailable && <Button size="sm" disabled={busy} onClick={() => setChooser(row)}>{tr("filesreg.locate")}</Button>}
             <Menu label={tr("filesreg.actionsFor", { alias: row.alias })} entries={[
               { id: "rename", label: tr("filesreg.renameAlias"), disabled: busy, onSelect: () => { setRename(row); setAlias(row.alias); } },

@@ -3,6 +3,9 @@ import { fmtTokens } from "../format.ts";
 import { tr } from "../i18n/index.ts";
 import { contextTone, formatContextPercent, type ContextGauge } from "../reduce.ts";
 import { contextUsageLabel } from "../sessionMetrics.ts";
+import type { ChatMemoryState } from "../chatMemory.ts";
+import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
+import ChatMemoryCard from "./ChatMemoryCard.tsx";
 import type { ContextGaugeDisplay } from "./ContextLiquid.tsx";
 import { ContextUsageCard } from "./SessionActivityDetails.tsx";
 import SlotHost from "./slots/SlotHost.ts";
@@ -30,7 +33,7 @@ export function contextPieLabel(gauge: ContextGauge): string {
   const percent = formatContextPercent(gauge);
   const usage = contextUsageLabel(gauge, percent, null, tr("context.usageUnavailable"), fmtTokens);
   if (!percent) return usage;
-  const head = tr("context.indicatorPercent", { percent });
+  const head = tr("chatmemory.indicator", { percent });
   return usage === percent ? head : `${head} · ${usage}`;
 }
 
@@ -65,13 +68,15 @@ export function ContextPieGlyph({ gauge }: { gauge: ContextGauge }) {
  *  the agent was asked to delegate (`pressureLevel`), hosts package details
  *  such as cache warmth (`composer.context.details`) and offers compaction
  *  when the harness supports it. */
-export default function ContextPie({ gauge, phone = false, sessionId, projectId, pressureLevel, compact }: {
+export default function ContextPie({ gauge, phone = false, sessionId, projectId, pressureLevel, compact, memory }: {
   gauge: ContextGaugeDisplay | null;
   phone?: boolean;
   sessionId?: string;
   projectId?: string;
   pressureLevel?: number | undefined;
   compact?: { pending: boolean; disabled: boolean; run: () => void };
+  /** The chat's "Chat memory" choice. Without one the card only reports usage. */
+  memory?: { state: ChatMemoryState; personDefault: CompactionPreference } | undefined;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -115,17 +120,19 @@ export default function ContextPie({ gauge, phone = false, sessionId, projectId,
           align="start"
           compact={phone}
           restoreFocus={restoreFocus}
-          ariaLabel={tr("capabilities.context")}
+          ariaLabel={tr("chatmemory.title")}
           className="composer-context-pop"
         >
-          <ContextUsageCard gauge={gauge} />
+          {memory && sessionId
+            ? <ChatMemoryCard sessionId={sessionId} gauge={gauge} state={memory.state} personDefault={memory.personDefault} compact={compact} />
+            : <ContextUsageCard gauge={gauge} />}
           {pressureLevel !== undefined && (
             <p className="composer-context-note">
               {tr("context.delegationHint", { percent: `${Math.round(pressureLevel * 100)}%` })}
             </p>
           )}
           <SlotHost slot="composer.context.details" context={{ sessionId: sessionId ?? null, projectId: projectId ?? null }} />
-          {compact && (
+          {compact && !(memory && sessionId) && (
             <Button
               type="button"
               size="sm"

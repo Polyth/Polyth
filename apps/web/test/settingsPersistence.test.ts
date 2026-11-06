@@ -214,6 +214,14 @@ test("saving either settings domain preserves the other domain byte-for-byte", (
   assert.equal(stored.get("polyth.settings")?.includes("Legacy name"), true, "migration source remains read-only");
 });
 
+test("chat width accepts the three measures and rejects unknown values", () => {
+  assert.equal(ui.parseUiSettings(JSON.stringify({ chatWidth: "ultrawide" })).chatWidth, "ultrawide");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ chatWidth: "wide" })).chatWidth, "wide");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ chatWidth: "gigantic" })).chatWidth, "normal");
+  for (const width of ui.CHAT_WIDTHS) ui.setUiSettings({ chatWidth: width });
+  assert.equal(ui.getUiSettings().chatWidth, "ultrawide");
+});
+
 test("response action layouts preserve order and reject unknown ids", () => {
   const parsed = ui.parseUiSettings(JSON.stringify({
     // Retired setting from older records: it must not survive a read.

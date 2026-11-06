@@ -16,6 +16,7 @@ import {
   voiceTier,
   type OnDeviceSpeechAvailability,
   type DictationLatencyPreference,
+  type DictationMode,
   type DictationProcessingPolicy,
   type DictationProviderId,
   type DictationTransport,
@@ -354,6 +355,32 @@ function OnDeviceRow({ lang, enabled }: { lang: string; enabled: boolean }) {
 type TtsSettings = Required<ServerVoiceSettings["tts"]>;
 
 /** Older servers omit the provider fields; they only speak OpenAI-compatible. */
+/** Live words while speaking, or one recording transcribed after the mic
+ *  stops. A recording always goes through the server's engine, so browser
+ *  recognition (which hands over no audio) can only run live. */
+function DictationModeRow({ mode, browserEngine }: { mode: DictationMode; browserEngine: boolean }) {
+  const hint = browserEngine ? tr("settings.voicepage.dictationModeBrowserOnly")
+    : mode === "record" ? tr("settings.voicepage.dictationModeRecordHint")
+      : tr("settings.voicepage.dictationModeLiveHint");
+  // With browser recognition only live works. The control stays usable while
+  // "record" is stored (another device may have chosen it) so it can be undone.
+  const locked = browserEngine && mode === "live";
+  return (
+    <Row label={tr("settings.voicepage.dictationMode")} hint={hint} itemId="voice.dictation-mode" disabled={locked}>
+      <Seg
+        value={mode}
+        label={tr("settings.voicepage.dictationMode")}
+        disabled={locked}
+        options={[
+          ["live", tr("settings.voicepage.dictationModeLive")],
+          ["record", tr("settings.voicepage.dictationModeRecord")],
+        ]}
+        onChange={(dictationMode) => setVoicePrefs({ dictationMode })}
+      />
+    </Row>
+  );
+}
+
 const ttsSettings = (tts: ServerVoiceSettings["tts"]): TtsSettings => ({
   provider: "openai-compatible", secretKeyEnv: "", region: "", ...tts,
 });
@@ -994,6 +1021,12 @@ export default function VoicePage() {
         <Row label={tr("settings.voicepage.showMicButton")} hint={support.stt || streaming?.available ? tr("settings.voicepage.showsTheMicButtonInTheComposer") : streaming?.reason ?? tr("settings.voicepage.notSupportedInThisBrowser")} itemId="voice.dictation">
           <Toggle on={prefs.dictation} onChange={(dictation) => setVoicePrefs({ dictation })} label={tr("settings.voicepage.showMicButton")} />
         </Row>
+        <DictationModeRow
+          mode={prefs.dictationMode}
+          // A paired phone cannot read the server settings; the capability
+          // names the server's engine instead.
+          browserEngine={(server?.dictation.provider ?? (streaming as { selection?: { provider?: string } } | null)?.selection?.provider) === "web-speech"}
+        />
         {support.stt && (
           <Row label={tr("settings.voicepage.spokenPunctuation")} hint={tr("settings.voicepage.spokenPunctuationHint")} itemId="voice.spoken-punctuation">
             <Toggle on={prefs.spokenPunctuation} onChange={(spokenPunctuation) => setVoicePrefs({ spokenPunctuation })} label={tr("settings.voicepage.spokenPunctuation")} />

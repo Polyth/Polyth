@@ -4,6 +4,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HarnessNativePluginManager, HarnessNativeSkillManager } from "./capabilityInstallations.ts";
 import type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext } from "./workspace.ts";
 export type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext, WorkspaceRepository } from "./workspace.ts";
+import type { CompactionPreference } from "./compactionPolicy.ts";
+export type { CompactionMode, CompactionPreference } from "./compactionPolicy.ts";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 export { readErrorDiagnostics, type ErrorDiagnostics } from "./errorDiagnostics.ts";
@@ -666,6 +668,9 @@ export type RuntimeErrorCode =
   /** The provider refused the selected model for this account/plan. Recoverable
    * by picking another model; never by waiting or by silently substituting one. */
   | "model-unavailable"
+  /** The conversation no longer fits and the harness refuses every message until
+   * it is compacted. Neither waiting nor resending can clear it. */
+  | "context-full"
   | "unsupported" | "unknown";
 
 /**
@@ -1516,7 +1521,13 @@ export const PERSON_MESSAGE_MAX_MENTIONS = 32;
  *  it as reference data (see `pendingPackageContext`). Old clients ignore the
  *  unknown type. */
 export interface PersonMessageData {
+  /** The words; empty is allowed when the message carries an attachment. */
   text: string;
+  /** Server-prepared attachment refs (files, images, links, browser context).
+   *  Same shape and existence rules as a prompt attachment, but they are only
+   *  for the people reading the message and never reach a model unless the
+   *  message is handed over by an explicit later path. */
+  attachments?: AttachmentRef[];
   /** Server-stamped from the authenticated person, never from input. */
   author: SessionPerson;
   /** Mentioned people, filtered server-side to people who can open the
@@ -1526,16 +1537,60 @@ export interface PersonMessageData {
   carryToAgent?: boolean;
   /** Seq of the `person/message` this replies to. */
   replyToSeq?: number;
+  /** People the message names who cannot open the chat, and who was asked to
+   *  open it for them. They are told only if the chat is opened to them, by
+   *  a later `person/access-resolved`. */
+  accessRequest?: PersonAccessRequest;
+}
+
+/** Someone without the right to share named people who cannot open the chat. */
+export interface PersonAccessRequest {
+  /** Space members who could not open the chat when the message was sent. */
+  people: SessionPerson[];
+  /** Who may open it: the owner when they are able to, else someone who is. */
+  approver: SessionPerson;
+}
+
+/** Event type of the answer to a message's `accessRequest`. Never model-visible
+ *  and never a prompt; old clients ignore the unknown type. */
+export const PERSON_ACCESS_RESOLVED_EVENT = "person/access-resolved" as const;
+export type PersonAccessOutcome = "shared" | "declined";
+export interface PersonAccessResolvedData {
+  /** The `person/message` whose request this answers. */
+  messageSeq: number;
+  outcome: PersonAccessOutcome;
+  /** Server-stamped from the authenticated person, never from input. */
+  by: SessionPerson;
+  /** `shared`: those who can open the chat now. `declined`: those asked for. */
+  people: SessionPerson[];
+}
+
+/** One person a chat is opened to together with a message. */
+export interface PersonMessageShare {
+  userId: string;
+  access: SessionAccessLevel;
 }
 
 /** What a client may supply for a `person/message`. */
 export interface PersonMessageInput {
+  /** Required unless `attachments` is non-empty. */
   text: string;
+  /** Prepared like prompt attachments (shape-checked, existence-checked,
+   *  bounded); people-only, never model-visible. */
+  attachments?: AttachmentRef[];
   /** User ids. Unknown people and people who cannot open the session are
    *  dropped without revealing whether they exist. */
   mentions?: string[];
   carryToAgent?: boolean;
   replyToSeq?: number;
+  /** Open the chat to these people with this message, under the sender's own
+   *  sharing rights: refused as a whole if they do not allow it, in which case
+   *  no message is recorded. People who can already open it are skipped; ids
+   *  that are not active Space members are dropped without a trace. */
+  shareWith?: PersonMessageShare[];
+  /** Ask whoever can share to open the chat to these people (user ids). Ids
+   *  that are not people outside the chat are dropped without a trace. */
+  requestAccessFor?: string[];
   /** Opaque client UUID: a retry with the same id returns the first result. */
   clientOperationId?: string;
 }
@@ -1544,6 +1599,28 @@ export interface PersonMessageResult {
   seq: number;
   /** Mentioned user ids that were kept. */
   mentions: string[];
+  /** User ids the chat was asked to be opened to. */
+  requested?: string[];
+}
+
+/** Answer to a message's `accessRequest`. */
+export interface PersonAccessDecisionInput {
+  decision: "share" | "decline";
+  /** Access for `share`; `view` when absent. */
+  access?: SessionAccessLevel;
+}
+
+export interface PersonAccessDecisionResult {
+  outcome: PersonAccessOutcome;
+  /** User ids the outcome is about. */
+  people: string[];
+}
+
+/** Server-set by the Space-scoped facade: never from a request body. */
+export interface PersonMessageAdmission extends TurnAdmission {
+  /** Opens the chat to these people under the acting person's own sharing
+   *  rights, or throws. */
+  openChatTo?(people: readonly PersonMessageShare[]): Promise<void>;
 }
 
 /** A person who can be mentioned in a session (the reader excluded). */
@@ -1551,6 +1628,31 @@ export interface SessionMentionCandidateDto {
   userId: string;
   name?: string;
   access: SessionAccessLevel;
+}
+
+/** `GET /api/sessions/:id/sharing/outsiders`: the Space members who cannot open
+ *  the chat, and what the reader can do about that. Any reader of the chat may
+ *  ask; the names are the ones `GET …/sharing` already gives them. */
+export interface SessionMentionOutsidersDto {
+  people: Array<{ userId: string; name?: string }>;
+  /** `share`: the reader opens the chat themselves. `request`: `approver` is
+   *  asked to. `none`: nobody can right now, so a mention stays plain text. */
+  action: "share" | "request" | "none";
+  /** `share`: access levels the reader may give, lowest first. */
+  levels: SessionAccessLevel[];
+  /** `request`: who is asked. */
+  approver?: SessionPerson;
+  /** `share`: opening this private chat stops its agent loading the reader's
+   *  personal MCP servers (Spaces §14.6). */
+  personalMcpDetachedOnShare?: boolean;
+}
+
+/** `GET /api/sharing/new-chat?projectId=`: the same answer for a chat that does
+ *  not exist yet, read as its owner-to-be. `action` is never `request`: nobody
+ *  else could open a chat before it is opened to them. */
+export interface NewChatPeopleDto extends SessionMentionOutsidersDto {
+  /** Those the chat reaches as soon as it exists, by the Space's default audience. */
+  inside: SessionMentionCandidateDto[];
 }
 
 /** Package-free purpose of a people-first session: no runtime, no agent;
@@ -1632,6 +1734,22 @@ export interface SessionSharingView {
   owner?: SessionPerson;
   /** Someone other than the reader can open this chat. */
   shared: boolean;
+  /** The Space has other members, so who reads a chat is worth saying. */
+  multiPerson?: boolean;
+}
+
+/** What a chat's memory and tools may reach. Server-derived: a private chat
+ *  reaches its owner's personal notes, any other chat never does. */
+export interface SessionPrivacy {
+  /** The one person who can open this chat, when that is the case. */
+  privateTo?: string;
+  /** Everyone who can open it. */
+  audience: SessionPerson[];
+  /** How many people can open the project it lives in; for a private room,
+   *  the project the room belongs to. */
+  projectAudience: number;
+  /** The chat lives in a person's private room. */
+  inPrivateRoom?: boolean;
 }
 
 /** A person a chat is shared with by name. */
@@ -1653,6 +1771,8 @@ export interface SessionSharePersonDto {
 export interface SessionSharingDto {
   sessionId: string;
   visibility: SessionVisibility;
+  /** Everyone who can open the chat, in member order. */
+  readers?: SessionPerson[];
   /** A delegated subagent: its sharing follows `parentSessionId`. */
   inherited: boolean;
   parentSessionId?: string;
@@ -2318,6 +2438,10 @@ export interface SessionProjection {
    *  outside services must act as this person and nobody else. Absent on
    *  sessions no person has written to since authorship shipped. */
   actor?: SessionPerson;
+  /** The agent of this chat, or one of its subagents, has read someone's
+   *  personal notes. The harness's own context now holds them, so the chat can
+   *  no longer be opened to others (Spaces §14.6). A fork keeps it. */
+  personalContext?: true;
   /** The reader's view of who can open this chat. Added per person on every
    *  read and broadcast; never persisted. Absent without canonical identity. */
   sharing?: SessionSharingView;
@@ -2400,6 +2524,8 @@ export interface SessionProjection {
   autoAcceptSetting?: "on" | "off" | "all";
   /** Session-owned memory narrowing. Omitted fields inherit project policy. */
   memoryPolicy?: MemoryNarrowing;
+  /** This chat's own "Chat memory" choice; absent follows the person's default. */
+  compactionPreference?: CompactionPreference;
   /** Per-session composer draft text, persisted server-side so it syncs
    *  across clients. Cleared on send. */
   draft?: string;
@@ -2713,6 +2839,11 @@ export interface SessionService {
     from: string;
     to: string;
   }): Promise<SessionProjection>;
+  /** Remove every isolated checkout of an archived session tree, with its branch
+   *  and everything else Polyth made for it; the sessions stay archived on the
+   *  checkouts their work targeted. Host-only cleanup: no Space or package facade
+   *  exposes it, and a caller checks access by archiving the tree first. */
+  releaseArchivedCheckouts?(sessionId: string): Promise<void>;
   /** Persist isolation metadata without changing runtime cwd. */
   patchIsolation?(sessionId: string, isolation: SessionIsolation | null): Promise<SessionProjection>;
   /**
@@ -2759,6 +2890,8 @@ export interface SessionService {
   /** Read/set session-owned memory narrowing; empty means inherit project policy. */
   memoryPolicyGet?(sessionId: string): Promise<{ setting: MemoryNarrowing }>;
   memoryPolicySet?(sessionId: string, setting: MemoryNarrowing): Promise<{ setting: MemoryNarrowing }>;
+  /** Set this chat's "Chat memory" choice; null returns it to the person's default. */
+  setCompactionPreference?(sessionId: string, preference: CompactionPreference | null): Promise<{ preference: CompactionPreference | null }>;
   /** User-confirmed borrowed/external runtime replacement. Never auto-epochs. */
   confirmBorrowedRuntimeEpoch?(sessionId: string): Promise<SessionProjection>;
   /** Persist a per-session composer draft server-side (synced via projection).
@@ -2769,11 +2902,15 @@ export interface SessionService {
    *  updated attention so navigator unread bold reflects what was viewed.
    *  With `person` the cursor is that person's own. */
   markRead?(sessionId: string, seq: number, person?: SessionPersonScope): Promise<void>;
+  /** Trusted server seam: this chat's agent read someone's personal notes. */
+  markPersonalContext?(sessionId: string): Promise<void>;
   /** Append a `person/message`. Never touches the runtime, queue or turn;
    *  allowed while a turn runs. Needs `view`; `carryToAgent` needs
    *  `collaborate`. Notifies mentioned people (kind `mention`) and, in a
    *  conversation, every unmuted participant (kind `message`). */
-  postPersonMessage?(sessionId: string, input: PersonMessageInput, admission?: TurnAdmission): Promise<PersonMessageResult>;
+  postPersonMessage?(sessionId: string, input: PersonMessageInput, admission?: PersonMessageAdmission): Promise<PersonMessageResult>;
+  /** Answers a message's `accessRequest`; a repeat returns the first answer. */
+  decidePersonAccess?(sessionId: string, messageSeq: number, input: PersonAccessDecisionInput, admission?: PersonMessageAdmission): Promise<PersonAccessDecisionResult>;
   /** People the reader may mention here: those who can open the session. */
   mentionCandidates?(sessionId: string, person?: SessionPersonScope): Promise<SessionMentionCandidateDto[]>;
   /** Mute/unmute one conversation for one person: only mentions notify. */
@@ -2939,6 +3076,8 @@ export interface SessionPersistence {
    *  must treat turn closure as unproven. */
   lastTurnEventType?(sessionId: string): Promise<"started" | "stopped" | undefined>;
   latestSeq(sessionId: string): Promise<number>;
+  /** Bytes of this chat's stored history. Optional so fakes stay valid. */
+  eventBytes?(sessionId: string): Promise<number>;
   copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void>;
   upsertProjection(p: SessionProjection): Promise<void>;
   projection(sessionId: string): Promise<SessionProjection | undefined>;
@@ -3982,6 +4121,9 @@ export interface RuntimeCapabilities {
   permissions: boolean;
   questions: boolean;
   compaction: boolean;
+  /** The harness's own automatic compaction can be turned off for one session
+   *  (`AgentRuntime.setAutoCompaction`). */
+  autoCompactionSwitch?: boolean;
   subagents: boolean;
   steering?: boolean;
   resume?: boolean;
@@ -4134,12 +4276,33 @@ export interface HarnessProbe {
   harnessId: string;
   installed: boolean;
   authenticated: boolean | "unknown";
+  /** When the harness's stored sign-in ends (epoch ms), as its CLI's own
+   *  local report states it. Only for a signed-in login; absent when the CLI
+   *  does not report one. Never derived from credential files. */
+  authExpiresAt?: number;
   healthy: boolean;
   version?: string;
   message?: string;
   /** Legacy providers may omit this; the registry derives it conservatively. */
   state?: HarnessAvailabilityState;
 }
+/** How close a harness sign-in is to its end. `soon` starts 10 days ahead,
+ *  as Claude Code's own warning does; `imminent` in the last 48 hours. */
+export type HarnessSignInExpiryLevel = "none" | "soon" | "imminent" | "ended";
+export const HARNESS_SIGN_IN_SOON_MS = 10 * 24 * 60 * 60 * 1000;
+export const HARNESS_SIGN_IN_IMMINENT_MS = 48 * 60 * 60 * 1000;
+export const harnessSignInExpiry = (
+  expiresAt: number | undefined,
+  now: number = Date.now(),
+): { level: HarnessSignInExpiryLevel; remainingMs?: number } => {
+  if (expiresAt === undefined || !Number.isFinite(expiresAt)) return { level: "none" };
+  const remainingMs = expiresAt - now;
+  const level = remainingMs <= 0 ? "ended"
+    : remainingMs <= HARNESS_SIGN_IN_IMMINENT_MS ? "imminent"
+      : remainingMs <= HARNESS_SIGN_IN_SOON_MS ? "soon"
+        : "none";
+  return { level, remainingMs };
+};
 export type HarnessControlKind = "toggle" | "select" | "text" | "action";
 export type HarnessControlScope = "draft" | "session" | "project" | "harness";
 export type HarnessControlPlacement =
@@ -4588,6 +4751,13 @@ export interface HarnessProvider {
    * and never falls back to another login. Absent means the provider's
    * default account. Must not start a process. */
   limitsAccount?(): HarnessLimitsAccount | undefined;
+  /** One stateless completion on this harness's own login, answered by its
+   * CLI's print mode: no runtime, native session or project, so background work
+   * that has none can reach a harness whose runtime exists only for a canonical
+   * session. It runs a real model turn in `request.cwd`, and only on this
+   * server's own login. `request.model` is required. Absent: use a project
+   * runtime's `completeSmallModel`. */
+  completeUtility?(request: SmallModelCompletionRequest): Promise<SmallModelCompletionResult>;
 }
 export interface HarnessRegistry {
   register(provider: HarnessProvider): Disposable;
@@ -4985,6 +5155,10 @@ export interface AgentRuntime {
   onEvent(cb: (sessionId: string, ev: RuntimeEvent) => void): Disposable;
   /** Native slash-command catalog for this session, when discovery is supported. */
   commands?(sessionId: string): Promise<RuntimeCommandDescriptor[]>;
+  /** Turn the harness's own automatic compaction on or off for this session.
+   *  Called before every turn and when the person changes their choice, so it
+   *  must be cheap when nothing changes. Declared by `autoCompactionSwitch`. */
+  setAutoCompaction?(sessionId: string, enabled: boolean): Promise<void>;
   /** Request context compaction when the runtime exposes a real API. */
   compact?(sessionId: string, model?: ModelRef): Promise<void>;
   /** `completion: "pending"`: the runtime accepted the compaction and finishes
@@ -5099,6 +5273,30 @@ export interface Project {
    *  run (`POST /api/projects/personal`). Only its owner can see it. While it
    *  is a person's only project the shell shows no project chrome at all. */
   personal?: true;
+  /** A person's private room ("Only me") inside this project: owner-only, with
+   *  its own folder and chats, shown under the project rather than beside it.
+   *  Appearance and composition follow the parent. `list()` never returns it. */
+  parentProjectId?: string;
+  /** A room whose project was deleted: now an ordinary private project, whose
+   *  personal notes stay bound to the old project id. */
+  detachedFromProjectId?: string;
+  /** How many other people can open this project. Only on the shell's own
+   *  list (`GET /api/projects`), which is per reader. */
+  sharedWith?: number;
+}
+
+const rootProjectLists = new WeakMap<readonly object[], readonly object[]>();
+/** The projects a person picks from: never the private rooms the shell's
+ *  registry also holds so a chat in one can find its project. The same input
+ *  array yields the same output array, so this is safe in a store selector. */
+export function rootProjects<T extends { parentProjectId?: string }>(projects: readonly T[]): readonly T[] {
+  const known = rootProjectLists.get(projects);
+  if (known) return known as readonly T[];
+  const roots = projects.some((project) => project.parentProjectId !== undefined)
+    ? projects.filter((project) => project.parentProjectId === undefined)
+    : projects;
+  rootProjectLists.set(projects, roots);
+  return roots;
 }
 
 /** Agent-oriented project inventory with session activity counts. */
@@ -5200,6 +5398,16 @@ export interface ProjectCloneInput {
   identity?: { profileId: string };
 }
 
+/** What the new-project flow may offer in this deployment
+ *  (`GET /api/projects/managed`). */
+export interface ManagedProjectLocationDto {
+  /** The host folder picker works here; a sandboxed deployment has none. */
+  canChooseFolder: boolean;
+  /** Display form of the Polyth folder where the person can reach it directly
+   *  (`~/Polyth` on Desktop). Absent when it lives in server storage. */
+  rootLabel?: string;
+}
+
 export interface ProjectService {
   list(): Promise<Project[]>;
   add(path: string, name?: string): Promise<Project>;
@@ -5225,6 +5433,15 @@ export interface ProjectService {
    *  project: it is the first-run start, not a second project kind. Optional
    *  so old fakes remain valid. */
   ensurePersonal?(name?: string): Promise<Project>;
+  /** The caller's private room in a project they can open, created on first
+   *  use. Only a person has one; a room or a personal project has none. */
+  ensurePrivateRoom?(parentProjectId: string): Promise<Project>;
+  /** Rooms of one project this caller may open: their own, or every room for
+   *  trusted server work. Optional so old fakes remain valid. */
+  privateRooms?(parentProjectId: string): Promise<Project[]>;
+  /** `list()` plus the caller's own rooms, each with `sharedWith`: what the
+   *  shell's project registry holds. */
+  listForShell?(): Promise<Project[]>;
 }
 
 // ---------------------------------------------------------------- packages
@@ -5843,11 +6060,20 @@ export const UI_SLOTS = [
   // just above its decisions (for example a judge's verdict). Context:
   // sessionId (the chat showing the card), requestId, and sourceSessionId for
   // a delegated child's mirrored request. A contribution renders nothing when
-  // it has nothing to say about that request.
+  // it has nothing to say about that request. A note that extends the card's
+  // policy action also gets policyLevel (the level that action turns on, null
+  // when the card offers none) and addPolicyEffect(effect) => remove.
   "session.permission.notes",
+  // The permission card of one chosen session, for a page that shows that
+  // session's requests outside its timeline (an agent's conversation). Context:
+  // sessionId, and requestIds the page knows are open. Renders nothing when no
+  // request needs a person.
+  "session.permission.requests",
   "settings.harness.detail",
   "settings.packages.content",
   "session.footer",
+  "session.audience.details",
+  "settings.users.invite.notice",
   // Fresh-session widgets (starters, recents, or a plugin replacement). This
   // is deliberately a slot rather than a SessionHero import: idle-screen
   // information density is user-configurable and plugins can replace it.
@@ -7295,6 +7521,8 @@ export type NotificationRecord = {
   author?: { userId: string; name: string };
   /** People kinds: the chat's title when the row was made. */
   chat?: string;
+  /** Someone asks the recipient to open this chat to these people. */
+  accessRequest?: { messageSeq: number; people: Array<{ userId: string; name: string }> };
 };
 
 // Well-known capability keys

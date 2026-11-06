@@ -163,6 +163,8 @@ export async function boot(opts: BootOptions = {}) {
       return {
         ...runtime,
         ...(opts.desktopOwnerChannel === true ? {
+          /** What this installation calls its session cookie, for the app's cookie guard. */
+          localSessionCookieName: authority.http.cookieName,
           /** The Desktop window's owner session while the owner has no
            *  credential; null once they protected the account. */
           issueLocalOwnerSession(): LocalOwnerSession | null {

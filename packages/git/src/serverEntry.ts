@@ -284,6 +284,25 @@ export function gitRoutes(deps: {
     }
     return match.path;
   };
+  // Status is read by every open view and running turn. One read per checkout at
+  // a time, and no process just to learn that a folder is not a repository.
+  const statusReads = new Map<string, Promise<JsonObject>>();
+  const readStatus = (root: string): Promise<JsonObject> => {
+    const running = statusReads.get(root);
+    if (running) return running;
+    const notRepo = { branch: null, ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [], clean: true, isRepo: false };
+    const read = (async (): Promise<JsonObject> => {
+      if (await git.mayBeWorkTree?.(root) === false) return notRepo;
+      try {
+        return { ...await git.status(root), isRepo: true } as unknown as JsonObject;
+      } catch (error) {
+        if (!await git.isRepo(root)) return notRepo;
+        throw error;
+      }
+    })().finally(() => { statusReads.delete(root); });
+    statusReads.set(root, read);
+    return read;
+  };
   const rootOf = async (
     projectId: string | null | undefined,
     sessionId?: string | null,
@@ -609,11 +628,7 @@ export function gitRoutes(deps: {
         void topology.observe(query("projectId")!, await projectRootOf(query("projectId")))
           .catch(() => undefined);
       }
-      if (!(await git.isRepo(root))) {
-        json(200, { branch: null, ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [], clean: true, isRepo: false });
-        return true;
-      }
-      json(200, { ...(await git.status(root)), isRepo: true });
+      json(200, await readStatus(root));
       return true;
     }
     if (path === "/api/git/diff" && method === "GET") {

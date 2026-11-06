@@ -144,7 +144,12 @@ export function publishListFailure(
 export function upsertProject(state: ProjectRegistryState, project: Project): ProjectRegistryState {
   const base: Project[] = state.status === "ready" ? state.projects : [];
   const i = base.findIndex((p) => p.id === project.id);
-  const projects = i >= 0 ? base.map((p, j) => (j === i ? project : p)) : [...base, project];
+  // `sharedWith` is per reader and comes only with the list: a rename's answer
+  // lacks it, and losing it would hide the Only me switch until the next refresh.
+  const kept = (p: Project): Project => project.sharedWith === undefined && p.sharedWith !== undefined
+    ? { ...project, sharedWith: p.sharedWith }
+    : project;
+  const projects = i >= 0 ? base.map((p, j) => (j === i ? kept(p) : p)) : [...base, project];
   return {
     status: "ready",
     requestId: state.requestId,
@@ -220,7 +225,8 @@ export function replacementActiveId(
   currentActiveId: string | null,
 ): string | null {
   if (currentActiveId && projects.some((p) => p.id === currentActiveId)) return currentActiveId;
-  return projects[0]?.id ?? null;
+  // Never a private room: its project is what a person lands on.
+  return projects.find((p) => p.parentProjectId === undefined)?.id ?? projects[0]?.id ?? null;
 }
 
 /** True only when the id names a project in a ready registry. */

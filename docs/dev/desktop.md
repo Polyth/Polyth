@@ -62,11 +62,97 @@ account (Settings → "Set a password…") first calls `desktop:session:confirm`
 the main process reads its own cookie and `confirmLocalOwnerSession(token)`
 elevates that session for five minutes. The
 token never crosses the bridge, so a browser or another app on the machine
-stays at the sign-in screen. Cookies ignore ports, so the main process strips
-Polyth's `polyth_auth_*` cookies from every window request to another local
-port (`src/sessionCookieGuard.ts`, `webRequest.onBeforeSendHeaders`). Once the owner sets a password the method returns
+stays at the sign-in screen. Cookies ignore ports, so the main process keeps
+each `polyth_auth_*` cookie on the server it belongs to
+(`src/sessionCookieGuard.ts`, `webRequest.onBeforeSendHeaders`). Once the owner sets a password the method returns
 null and the window signs in like any browser. See
 [Spaces §3.1](../architecture/spaces-and-tenancy.md#31-access-modes-accounts-or-a-password-less-desktop-owner).
+
+## Connecting to another Polyth
+
+The app is a client as well as a server: its window can show this computer's
+Polyth or one elsewhere, and someone who only connects need not run a server at
+all. There are two ways to reach a server.
+
+- **Polyth Link.** On the other computer: Polyth Link → Pair device → *Copy pairing
+  link*, because a computer cannot scan its own screen. The same invitation as the
+  QR code, with the same safety words and approval. It needs that server to have a
+  Link host, which Windows does not ship yet. The connection works across networks
+  and keeps its device grants.
+- **By address.** Any server already open in a browser, such as an HTTPS origin.
+  The page is that server's own code, and it signs in like any browser.
+
+### Parts
+
+- **Server list** (`apps/web/src/components/DesktopServerList.tsx`). This
+  build's shell on its own origin, `polyth-app://hub/`, answered from the shipped
+  files with no server behind it (`src/hubProtocol.ts`, CSP by hash). It is the only
+  page that may pair, connect or forget, and it reuses the phones' connection state
+  machine (`ConnectionController`) over the main process. It opens whenever there is a
+  choice to make; a server that opens takes over the window.
+- **Link client** (`src/polythLinkClient.ts`). One `polyth-link-client stdio
+  <data dir>` process, started on first use, JSON lines over stdin/stdout on all three
+  platforms. When the app dies for any reason, stdin closes and the client ends; if
+  the client dies, the window goes back through the list and reconnects at the same
+  path. Its identity and connections live in `desktop/link-client/` under the app's
+  user data, with Unix file modes where the platform has them. Unlike the phones it
+  has no OS keychain, so the private key is protected like an SSH key.
+- **Saved state** (`src/servers.ts`, `desktop/servers.json`). The server on screen,
+  whether to run this computer's server, saved addresses, per-server microphone
+  choices, and each Link server's proxy port. The port is part of the page's origin, so
+  keeping it keeps that server's shell state between launches. It is kept apart from
+  `settings.json`, which pages may read and write. Rollback: an older build ignores
+  the file and opens this computer's server.
+- **Switching.** The chip beside the Space switcher names the server when it is
+  elsewhere and opens the native server menu; the same menu is in the account menu,
+  the tray (Servers) and the app menu (Switch Server…). The command palette and
+  Settings → Desktop open the list. Screens with no shell (sign-in, setup, "couldn't
+  reach") carry *Choose another server*.
+
+### Launch
+
+`startupPlan` decides. The window returns to the server it was last on, through
+the list for Link (`?open=<id>`) and directly for an address. *Keep this computer's
+server running* in the list applies from the next launch; turning it off never stops
+work in progress. If first-run setup never finished and the person goes to another
+server, the setup server stops and the app counts as connect-only, since it held
+nothing. Choosing This computer starts it again.
+
+### What another server's page may do
+
+`windowSurface()` sorts the sender's own frame URL into `local`, `hub`, `remote` or
+nothing, and `channelAllowed` decides per channel. A `remote` page runs packages from
+that server, so treat it as untrusted code in this window.
+
+- It may move and report on the window, read display settings, go back to the list, quit
+  the app and start an update it has already been offered. The last two are a nuisance at
+  worst: updates stay signed, and quitting loses nothing durable.
+- It may not pair, connect, forget, list saved servers, reach paths, the data folder,
+  setup or the owner session. `desktop:info` hides the data and log paths from it.
+- `settingsPatchFor` drops the choices that outlive the window: launch at login and
+  automatic updates and their channel. These stay in the tray.
+- It cannot call this computer's server. Sites ignore ports, so a Link page on
+  `127.0.0.1` is the same site as that server and SameSite would let its session
+  through; `blockedFromLocalServer` cancels every non-navigation request from any other
+  page to that host, WebSockets too (`webRequest.onBeforeRequest`).
+- This computer's session cookie goes only to its server, by name, even when an address
+  shares its host (an SSH tunnel to `127.0.0.1:<port>`).
+- The microphone asks once per server, by name; agents on another computer do not hold
+  this one awake.
+- Reveal-in-file-manager stays off (`localDesktopBridge`): those paths name files
+  over there.
+
+Known limit: two servers opened by address on one host name (two tunnels on
+`127.0.0.1`) share a cookie jar, as they would in any browser, so each receives the
+other's session cookie. This computer's session stays out of that, in both directions.
+
+### Not verified
+
+Live-tested only on Linux arm64 with debug binaries in an unpackaged Electron: pairing,
+Link and address sessions, restart, connect-only launch, client crash, revocation and
+blocked requests. `polyth-link-client` is type-checked for `x86_64-pc-windows-gnu`, not
+linked or run. No package, macOS or Windows window has run this. The `arm64` Windows
+release carries the x64 client under emulation because that job builds on an x64 runner.
 
 ## Command-line tool
 
@@ -329,6 +415,19 @@ green with "Awake" while held; a click toggles keep-awake). The decision is
 window has loaded count as work; source-inspected and unit-tested, not
 device-verified.
 
+## Diagnosing a frozen window
+
+The server runs inside Electron's main process, so anything that holds its thread
+also stops the window: synchronous store reads, a synchronous process start, a long
+JSON parse. `polyth-desktop.log` in the app's `desktop` user-data folder tells the
+cases apart:
+
+- `Event loop blocked for …s` means the server held the main thread.
+- `Window page stopped responding` means the page itself froze while the main
+  process kept running.
+- Neither line during a freeze points outside this process: harness children, the
+  disk or a scanner. Compare with Task Manager while it happens.
+
 ## Low-resource mode
 
 Desktop settings includes an opt-in low-resource mode for older machines. It
@@ -394,10 +493,11 @@ xvfb-run -a node apps/desktop/test/appimage-profile.mjs \
 
 - Renderer: `sandbox: true`, `contextIsolation: true`, no Node integration.
 - Preload: a fixed API for settings, window actions/state, title-bar overlay colors,
-  native menu commands, updates, and absolute local paths.
-- IPC: accepted only from the loopback Polyth origin.
-- Navigation: stays on the local origin; allowlisted HTTP(S)/mailto links open in the
-  system browser.
-- Permissions: only audio capture (not camera/video) and notifications are accepted for the local app.
+  native menu commands, updates, absolute local paths and the server list.
+- IPC: decided per channel from the sender frame's own origin
+  (see [What another server's page may do](#what-another-servers-page-may-do)).
+- Navigation: a page stays on its own origin, and only the server list may hand the
+  window to a server it connected; allowlisted HTTP(S)/mailto links open in the system browser.
+- Permissions: only audio capture (not camera/video) and notifications. Another server asks once for the microphone.
 - Server: binds to `127.0.0.1` in desktop mode.
 - Secrets: desktop settings contain presentation and lifecycle preferences only.

@@ -40,6 +40,8 @@ const {
 const { default: SessionsPage } = await import("../src/components/settings/SessionsPage.tsx");
 const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
 const { setRoleKind } = await import("../src/rolePrefs.ts");
+const { resolveAlert, useAlert } = await import("../src/alerts.ts");
+const { getSessionDefaults, parseSessionDefaults, setSessionDefaults } = await import("../src/sessionDefaults.ts");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
   id: "s", projectId: "p", title: "session", status: "idle",
@@ -117,7 +119,15 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     assert.match(text, /Cleanup/);
     assert.match(text, /Expire sessions after/);
     assert.match(text, /When cleaning up/);
-    assert.match(text, /Nothing is cleaned up automatically/);
+    assert.match(text, /Sessions still in use are always skipped/);
+    assert.doesNotMatch(text, /Nothing is cleaned up automatically/);
+    assert.match(text, /Clean up automatically/);
+    assert.match(text, /Off\. Expired sessions stay until you clean them up below\./);
+    assert.equal(
+      container.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Clean up automatically"]')?.getAttribute("aria-checked"),
+      "false",
+      "automatic cleanup stays off until a person turns it on",
+    );
     assert.match(text, /Clean up expired sessions/);
     assert.match(text, /Expired sessions right now: 2\./);
     assert.match(text, /Delete archives older than/);
@@ -126,7 +136,7 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     // rows and their copy-pasted hints are gone.
     assert.doesNotMatch(text, /Manual Cleanup/i);
     const headings = [...container.querySelectorAll(".settings-section-title")].map((node) => node.textContent);
-    assert.deepEqual(headings, ["New sessions", "Behavior", "Cleanup", "Archive"]);
+    assert.deepEqual(headings, ["New sessions", "Long conversations", "Behavior", "Cleanup", "Archive"]);
     assert.doesNotMatch(text, /__default__|When sessions expire/);
     assert.doesNotMatch(text, /Fix the flaky test|Ship the release|Other project session/);
     assert.equal(container.querySelectorAll(".model-picker").length, 3);
@@ -186,6 +196,157 @@ test("large navigator defaults require an explicit performance confirmation", as
     assert.equal(getState().settings.defaultVisibleSessionCount, 21);
   } finally {
     updateSettings({ defaultVisibleSessionCount: 6 });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("isolated sessions are skipped until the person accepts what cleaning them removes", async () => {
+  setSessionDefaults({ retentionAction: "archive", retentionDays: 30, retentionSkipIsolated: undefined });
+  const requests: Array<{ url: string; body?: string }> = [];
+  const originalFetch = globalThis.fetch;
+  const stubbed = originalFetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    requests.push({ url: String(input), ...(typeof init?.body === "string" ? { body: init.body } : {}) });
+    return ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ days: 30, cutoff: 1, eligibleCount: 2, succeeded: [], failed: [] }),
+      text: async () => "",
+    });
+  }) as unknown as typeof fetch;
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const toggle = () => container.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Skip isolated sessions"]')!;
+  let shownAlert: string | undefined;
+  const AlertProbe = () => { shownAlert = useAlert()?.message; return null; };
+  const countRequests = () => requests.filter(({ url }) => url.includes("/api/session-retention") && url.includes("target=sessions"));
+  try {
+    await act(async () => { root.render(createElement("div", null, createElement(SessionsPage), createElement(AlertProbe))); });
+    await act(async () => { await Promise.resolve(); });
+
+    // On by default, and the count on screen leaves isolated sessions out.
+    assert.equal(toggle().getAttribute("aria-checked"), "true");
+    assert.match(container.textContent ?? "", /Sessions with their own checkout stay, with their changes\./);
+    assert.ok(countRequests().length > 0);
+    assert.ok(countRequests().every(({ url }) => !url.includes("skipIsolated")), "an older server sees the same request");
+
+    // Declining changes nothing.
+    await act(async () => { toggle().click(); });
+    assert.match(shownAlert ?? "", /including changes that were never merged\. This cannot be undone\./);
+    await act(async () => { resolveAlert(false); });
+    assert.equal(getSessionDefaults().retentionSkipIsolated, undefined);
+    assert.equal(toggle().getAttribute("aria-checked"), "true");
+
+    // Accepting counts them, and the button acts on what it counted.
+    await act(async () => { toggle().click(); });
+    await act(async () => { resolveAlert(true); });
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(getSessionDefaults().retentionSkipIsolated, false);
+    assert.equal(toggle().getAttribute("aria-checked"), "false");
+    assert.match(container.textContent ?? "", /Their checkouts and branches are removed, including changes that were never merged\./);
+    assert.ok(countRequests().at(-1)?.url.includes("skipIsolated=false"));
+    const archiveNow = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Archive now");
+    assert.ok(archiveNow);
+    await act(async () => { archiveNow.click(); });
+    await act(async () => { await Promise.resolve(); });
+    const run = requests.find(({ body }) => body?.includes("\"action\":\"archive\""));
+    assert.equal(JSON.parse(run!.body!).skipIsolated, false);
+
+    // Going back to skipping needs no question.
+    await act(async () => { toggle().click(); });
+    assert.equal(getSessionDefaults().retentionSkipIsolated, true);
+  } finally {
+    globalThis.fetch = stubbed;
+    setSessionDefaults({ retentionSkipIsolated: undefined });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("the setting survives the synced record's parser only as a real boolean", () => {
+  assert.equal(parseSessionDefaults(JSON.stringify({ retentionSkipIsolated: false })).retentionSkipIsolated, false);
+  assert.equal(parseSessionDefaults(JSON.stringify({ retentionSkipIsolated: true })).retentionSkipIsolated, true);
+  assert.equal("retentionSkipIsolated" in parseSessionDefaults(JSON.stringify({ retentionSkipIsolated: "false" })), false);
+  assert.equal("retentionSkipIsolated" in parseSessionDefaults("{}"), false);
+});
+
+test("automatic cleanup: archiving needs no question, unattended deletion always does", async () => {
+  updateSettings({ autoCleanupExpiredSessions: false });
+  setSessionDefaults({ retentionAction: "archive", retentionDays: 30 });
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const toggle = () => container.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Clean up automatically"]')!;
+  const segment = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent?.trim() === label)!;
+  const typeDays = async (value: string) => {
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Expire sessions after (days)"]')!;
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")?.set;
+      setValue?.call(input, value);
+      input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector<HTMLInputElement>('input[aria-label="Expire sessions after (days)"]')!
+        .dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+  };
+  try {
+    await act(async () => { root.render(createElement(SessionsPage)); });
+    await act(async () => { await Promise.resolve(); });
+
+    // Archiving is reversible: on at once.
+    await act(async () => { toggle().click(); });
+    assert.equal(getState().settings.autoCleanupExpiredSessions, true);
+    assert.match(container.textContent ?? "", /Expired sessions are archived automatically\. Checked every hour\./);
+
+    // Moving a running automation to Delete asks first; declining changes nothing.
+    await act(async () => { segment("Delete").click(); });
+    assert.equal(getSessionDefaults().retentionAction ?? "archive", "archive");
+    await act(async () => { resolveAlert(false); });
+    assert.equal(getSessionDefaults().retentionAction ?? "archive", "archive");
+
+    await act(async () => { segment("Delete").click(); });
+    await act(async () => { resolveAlert(true); });
+    assert.equal(getSessionDefaults().retentionAction, "delete");
+    assert.match(container.textContent ?? "", /Expired sessions are deleted permanently, with no further confirmation/);
+
+    // A shorter period widens unattended deletion: a declined one restores the field.
+    await typeDays("2");
+    assert.equal(getSessionDefaults().retentionDays, 30);
+    await act(async () => { resolveAlert(false); });
+    assert.equal(getSessionDefaults().retentionDays, 30);
+    assert.equal(
+      container.querySelector<HTMLInputElement>('input[aria-label="Expire sessions after (days)"]')?.value,
+      "30",
+    );
+
+    await typeDays("2");
+    await act(async () => { resolveAlert(true); });
+    assert.equal(getSessionDefaults().retentionDays, 2);
+
+    // A longer period only narrows it.
+    await typeDays("40");
+    assert.equal(getSessionDefaults().retentionDays, 40);
+
+    // Off needs no question; back on with Delete selected asks again.
+    await act(async () => { toggle().click(); });
+    assert.equal(getState().settings.autoCleanupExpiredSessions, false);
+    assert.match(container.textContent ?? "", /Off\. Expired sessions stay until you clean them up below\./);
+
+    await act(async () => { toggle().click(); });
+    assert.equal(getState().settings.autoCleanupExpiredSessions, false);
+    await act(async () => { resolveAlert(true); });
+    assert.equal(getState().settings.autoCleanupExpiredSessions, true);
+  } finally {
+    resolveAlert(false);
+    updateSettings({ autoCleanupExpiredSessions: false });
+    setSessionDefaults({ retentionAction: "archive", retentionDays: 30 });
     await act(async () => { root.unmount(); });
     container.remove();
   }

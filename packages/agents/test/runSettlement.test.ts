@@ -100,3 +100,25 @@ test("detaching the observer rejects instead of inventing an outcome", async () 
   setTimeout(() => controller.abort(), 20);
   await assert.rejects(pending, { name: "AbortError" });
 });
+
+test("while a request waits for a person the observer keeps looking, so a decision shows soon", async () => {
+  const waits: number[] = [];
+  const reports: number[] = [];
+  const source = feed([
+    [ev(11, "turn/started"), ev(12, "permission/requested", { requestId: "req", permission: "bash", patterns: ["ls"] })],
+    [], [], [], [], [], [], [], [], [],
+    [ev(13, "permission/resolved", { requestId: "req", reply: "once" })],
+    [ev(14, "turn/stopped", { reason: "completed" })],
+  ]);
+  const settled = await settleScheduledRun(run, {
+    events: source.events,
+    signal: new AbortController().signal,
+    minPollMs: 1_000,
+    maxPollMs: 15_000,
+    sleep: async (ms) => { waits.push(ms); },
+    onWaiting: (waiting) => { reports.push(waiting.length); },
+  });
+  assert.equal(settled.status, "ok");
+  assert.deepEqual(reports, [1, 0]);
+  assert.ok(Math.max(...waits) <= 2_000, `never looked away for long: ${waits.join(", ")}`);
+});

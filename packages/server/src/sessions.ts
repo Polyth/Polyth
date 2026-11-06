@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { selectAgentToolSessionOwner } from "./agentToolSession.ts";
-import { ownsLegacySessionState } from "./sessionPeople.ts";
+import { ownsLegacySessionState, personAccessRequestOf, personMessageShares } from "./sessionPeople.ts";
 import { continuityWorkspace } from "./continuityWorkspace.ts";
 import {
   emptyStreamCheckpoints,
@@ -37,6 +37,7 @@ import type {
   RuntimeSession, SendResult, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef, SessionWorkspace, MemoryNarrowing,
   SessionService, SessionPersistence, SessionWorkspaceSelection, UserTurnInput, WorkspaceMutationScope, WorkspaceContext,
   SessionPerson, SessionPersonScope, TurnAdmission,
+  PersonAccessDecisionResult, PersonAccessOutcome, PersonAccessRequest, PersonAccessResolvedData,
   PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto,
   CreateConversationInput, StartSessionFromConversationInput, StartSessionFromConversationResult,
   RuntimeCapabilities,
@@ -49,6 +50,7 @@ import {
   readErrorDiagnostics,
   runtimeBatchAdmitsTurnContent,
   runtimeEventHasTurnContent,
+  PERSON_ACCESS_RESOLVED_EVENT,
   PERSON_MESSAGE_EVENT,
   PERSON_MESSAGE_MAX_CHARS,
   PERSON_MESSAGE_MAX_MENTIONS,
@@ -57,9 +59,10 @@ import {
   SESSION_PAUSE_ENDED_EVENT,
   normalizeSessionOrigin,
 } from "@polyth/contracts";
-import { sessionMentionCandidates, sessionAudience } from "./sessionSharing.ts";
+import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
+import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
@@ -99,7 +102,9 @@ import {
   normalizeCompactionSummary,
   selectConfirmedEpochRecoveryEvents,
   pendingPackageContext,
+  pendingPersonMessageAttachments,
   planRuntimeEpochRecovery,
+  runtimeEpochRecoveryPending,
   recoveredUserText,
   unrestoredCompactionSeq,
   contextPressureText,
@@ -119,7 +124,7 @@ import {
   restartRecoveredOperationIds as restartRecoveredOperationIdsOf,
 } from "./operationAdmission.ts";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
-import { sanitizeAttachments } from "./attachments.ts";
+import { MAX_TURN_ATTACHMENTS, mergeAttachmentInputs, sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createSpawnTelemetry, type SpawnTelemetry } from "./spawnTelemetry.ts";
 import {
@@ -235,6 +240,10 @@ export const toolTimeoutContinuePrompt = (
     "Everything you already did — your reasoning, earlier tool results, and the files you read — is intact, and this turn continues from exactly there. Do not repeat that call. Continue with bounded work instead: read one file at a time, cap piped output, and pass an explicit timeout to any long command. If the deliverable is already complete, write it and finish.",
   ].join("\n\n");
 };
+
+/** Why a chat in a guarded Space cannot turn on Auto-Approve or Full access. */
+export const GUARDED_SPACE_AUTO_APPROVE_MESSAGE =
+  "Auto-Approve and Full access are off in this Space because a member uses Protected mode: every request is asked of a person";
 
 /** Model-visible continuation after a person paused the session mid-turn and
  *  then chose Continue. Like the watchdog nudge it never replays the prompt. */
@@ -806,6 +815,13 @@ export function createSessionService(deps: {
   /** Server-owned gate for the context-pressure delegation hint. Omitted
    * means disabled. */
   contextPressureEnabled?: () => Promise<boolean>;
+  /** A person's default "Chat memory" choice. Omitted means `auto`. */
+  compactionDefault?: (userId: string | undefined) => CompactionPreference | undefined;
+  /** A person typed a message into a top-level chat. The composition root
+   *  records them as the chat's owning account (notification recipient) when
+   *  none was recorded at creation, which package, tool and isolation create
+   *  paths never did. It never replaces a recorded owner. */
+  personWrote?: (input: { sessionId: string; spaceId: string; userId: string }) => Promise<unknown>;
   /** Package-owned context for a `purpose` session. It is persisted on every
    * user/message with the rest of the turn context before runtime delivery,
    * so the model sees it on each turn while chat rows show only the prompt. */
@@ -823,6 +839,13 @@ export function createSessionService(deps: {
   cleanupSessionResources?: (info: {
     projection: SessionProjection;
     releaseExecution(cwd: string): Promise<void>;
+  }) => void | Promise<void>;
+  /** Package-owned removal of the isolated checkouts of an archived session
+   * tree, keeping the sessions (Settings → Sessions → Cleanup). Runs outside any
+   * session lock. `releaseExecution` is `cleanupSessionResources`' proof. */
+  releaseArchivedCheckouts?: (info: {
+    sessionId: string;
+    releaseExecution(sessionId: string, cwd: string, options?: { sharer?: boolean }): Promise<void>;
   }) => void | Promise<void>;
   /** Drop volatile provisioning for one session-lifetime harness after this
    *  session released its execution occupancy. Physical-runtime targets are
@@ -895,7 +918,8 @@ export function createSessionService(deps: {
     /** A `person/message` was appended. `mentions` are the kept mentioned
      *  people (kind `mention`); `audience`, only for a conversation, is every
      *  other person who can open it and has not muted it (kind `message`).
-     *  The author is never in either list. */
+     *  The author is never in either list. `accessRequest` asks its approver,
+     *  who is in neither list, to open the chat to its people. */
     personMessage?(input: {
       sessionId: string;
       seq: number;
@@ -903,6 +927,7 @@ export function createSessionService(deps: {
       text: string;
       mentions: SessionPerson[];
       audience: SessionPerson[];
+      accessRequest?: PersonAccessRequest;
     }): void;
   };
   /** Hard ceiling for one runtime tool execution. A hung tool is aborted and
@@ -1844,6 +1869,9 @@ export function createSessionService(deps: {
           const reason = data.reason;
           facts.lastStopReason =
             reason === "completed" || reason === "aborted" || reason === "error" ? reason : null;
+          // The harness answered by refusing a conversation that no longer fits.
+          // Nothing failed and compacting needs an idle session, so it stays one.
+          if (data.code === "context-full") facts.turnAnswered = true;
           facts.turnOpen = false;
           facts.turnBoundarySeq = ev.seq;
           facts.openTurnId = undefined;
@@ -2133,6 +2161,17 @@ export function createSessionService(deps: {
       console.error("[polyth] projection broadcast hydration failed", error);
       broadcast.projection(overlayProjection(proj));
     });
+  };
+
+  /** The agent of this chat read someone's personal notes. Durable, and marked
+   *  on the chat whose sharing this one follows too: what a subagent read
+   *  reaches its parent, and a fork of either keeps the mark. */
+  const markPersonalContext = async (sessionId: string): Promise<void> => {
+    for (const id of new Set([sessionId, sharingRootId(sessionId)])) {
+      const current = await store.projection(id);
+      if (!current || current.personalContext) continue;
+      await applyProjection(id, (latest) => latest.personalContext ? latest : { ...latest, personalContext: true });
+    }
   };
 
   const applyProjection = async (
@@ -3376,6 +3415,10 @@ export function createSessionService(deps: {
     projectId: string | undefined,
     start?: SessionProjection,
   ): Promise<AutoAcceptLevel> {
+    // A guarded Space never auto-answers (`automaticPermissionResolution`),
+    // so no chat there may report Auto-Approve or Full access as on: the
+    // switch would show a level that every request then ignores.
+    if (deps.guardedSpace?.(spaceId)) return "off";
     const parents = new Map<string, string | undefined>();
     const settings = new Map<string, AutoAcceptSetting>();
     let id = startId;
@@ -3476,7 +3519,7 @@ export function createSessionService(deps: {
     }
     return rows.map((row) => ({
       ...row,
-      ...autoAcceptFlags(resolveAutoAcceptLevel(
+      ...autoAcceptFlags(deps.guardedSpace?.(row.spaceId) ? "off" : resolveAutoAcceptLevel(
         row.id,
         (id) => known.get(id)?.spaceId === row.spaceId ? settings.get(id) ?? "inherit" : "off",
         (id) => known.get(id)?.spaceId === row.spaceId ? known.get(id)?.parentId : undefined,
@@ -3593,6 +3636,7 @@ export function createSessionService(deps: {
 
   const clearRuntimeFeatureState = (sessionId: string): void => {
     runtimeFeatureState.delete(sessionId);
+    compactionAttempts.delete(sessionId);
     clearAutomaticTitleTracking(sessionId);
   };
 
@@ -4370,9 +4414,10 @@ export function createSessionService(deps: {
    *  be finishing in the background (see `compactionSettled`). */
   const compactLocked = async (
     sessionId: string,
-    options: { forResume?: boolean; model?: ModelRef; background?: boolean; fallback?: boolean } = {},
+    options: { forResume?: boolean; model?: ModelRef; background?: boolean; fallback?: boolean; beforeQueuedTurn?: boolean } = {},
   ): Promise<"native" | "polyth" | "fresh-epoch"> => {
-    const { proj } = await assertMutable(sessionId);
+    // The queue a compaction runs for is exactly what it may run in front of.
+    const { proj } = await assertMutable(sessionId, options.beforeQueuedTurn ? { allowQueued: true } : {});
     // A replaced runtime has no native context left to compact. Recovering the
     // fresh epoch, as a send would, already gives the next turn a small one.
     if (proj.status === "epoch-pending" && !proj.harnessTransition) {
@@ -4543,6 +4588,7 @@ export function createSessionService(deps: {
       throw error;
     }
     const summarizer = deps.compactionSummary;
+    const contextFraction = projectionContextWindow(sessionId, proj)?.fraction;
     const finish = async (): Promise<void> => {
       try {
         // A background summary runs in the next lock flight; anything that
@@ -4608,6 +4654,7 @@ export function createSessionService(deps: {
           summary,
           epochMarkerSeq: marker.seq,
           ...(confirmed.length ? { compactedThroughSeq: confirmed.at(-1)!.seq } : {}),
+          ...(contextFraction !== undefined ? { contextFraction } : {}),
         }, { ignorable: true, producerPlugin: "polyth" });
         await publishCompactionState(sessionId, { active: false, lastAt: Date.now() });
       } catch (error) {
@@ -4673,6 +4720,70 @@ export function createSessionService(deps: {
     } catch (error) {
       console.error(`[polyth] compaction before rate-limit resume failed for ${sessionId}`, error);
     }
+  };
+
+  // Chat memory: the person's choice of when a long conversation is compacted.
+  // A delegated worker or an Agent's thread has nobody watching its memory and
+  // keeps its own rules, so only a choice made on that very chat applies there.
+  const compactionPreferenceOf = (proj: SessionProjection): CompactionPreference => effectiveCompactionPreference(
+    proj.compactionPreference,
+    proj.parentId || proj.purpose ? undefined : deps.compactionDefault?.(proj.actor?.userId),
+  );
+
+  /** Tells the harness whether its own compaction stays on. Never awaited on a
+   *  turn's path: the runtime records the choice and applies it itself. */
+  const syncAutoCompaction = (sessionId: string, proj: SessionProjection, runtime: AgentRuntime): void => {
+    if (!runtime.setAutoCompaction) return;
+    void runtime.setAutoCompaction(sessionId, compactionPreferenceOf(proj).mode !== "manual").catch((error: unknown) => {
+      console.warn(`[polyth] could not apply the compaction choice of ${sessionId}`, error);
+    });
+  };
+
+  // A summary is a paid request, so one that failed or left the conversation
+  // over the line is not repeated on every message: it waits a while, or until
+  // the conversation has clearly grown. Process memory; a restart allows one more.
+  const COMPACTION_RETRY_MS = 10 * 60_000;
+  const COMPACTION_RETRY_GROWTH = 0.05;
+  const compactionAttempts = new Map<string, { at: number; fraction: number }>();
+
+  /** The person asked to compact before this conversation grows further. Done
+   *  before a message rather than after an answer, so an abandoned chat costs
+   *  nothing. Only a quiet, measured session qualifies. */
+  const compactionDueBeforeTurn = (sessionId: string, proj: SessionProjection): boolean => {
+    if (!deps.queue || proj.status !== "idle" || proj.paused || proj.harnessTransition || !proj.backendSessionId) return false;
+    if (turnActive(sessionId) || compactions.has(sessionId)) return false;
+    const window = projectionContextWindow(sessionId, proj);
+    if (!window || window.source === "unknown" || window.compaction?.active) return false;
+    if (!compactionDue(compactionPreferenceOf(proj), window)) return false;
+    const last = compactionAttempts.get(sessionId);
+    return !last
+      || Date.now() - last.at >= COMPACTION_RETRY_MS
+      || (window.fraction ?? 0) >= last.fraction + COMPACTION_RETRY_GROWTH;
+  };
+
+  /** Starts it and returns at once: a summary can outlast a proxy's read
+   *  timeout, and the message that triggered it waits in the queue like any
+   *  other sent during a compaction. Compaction only saves tokens, so a failure
+   *  is recorded and the queue still runs. */
+  const startCompactionBeforeTurn = (sessionId: string, proj: SessionProjection): void => {
+    compactionAttempts.set(sessionId, {
+      at: Date.now(),
+      fraction: projectionContextWindow(sessionId, proj)?.fraction ?? 0,
+    });
+    beginCompaction(sessionId);
+    void withSessionLock(sessionId, () => compactLocked(sessionId, { background: true, beforeQueuedTurn: true })).then(
+      (strategy) => {
+        // A Polyth summary ends itself; so does a native one the runtime
+        // finishes in the background, which leaves its backstop timer here.
+        if (strategy === "polyth") return;
+        if (strategy === "native" && compactions.get(sessionId) !== undefined) return;
+        endCompaction(sessionId);
+      },
+      (error: unknown) => {
+        console.warn(`[polyth] compaction before the next message failed for ${sessionId}`, error);
+        endCompaction(sessionId);
+      },
+    );
   };
 
   /** Boot: re-arm timers for sessions that stopped rate-limited before a
@@ -5505,10 +5616,11 @@ export function createSessionService(deps: {
       }
       case "session/compacted": {
         const { type: _t, ...data } = ev;
+        const contextFraction = runtimeFeatureState.get(sessionId)?.contextWindow?.fraction;
         await persist(
           sessionId,
           "session/compacted",
-          data as unknown as JsonObject,
+          { ...data, ...(contextFraction !== undefined ? { contextFraction } : {}) } as unknown as JsonObject,
           { ignorable: true, producerPlugin: sessionRuntime.get(sessionId)?.harnessId ? `backend-${sessionRuntime.get(sessionId)!.harnessId}` : "runtime" },
         );
         if (sideEffects) {
@@ -6169,7 +6281,40 @@ export function createSessionService(deps: {
     }
   });
 
+  /** Every event of these types, through the indexed read: what a send needs
+   *  to look up must not cost a parse of the session's whole log. */
+  const eventsOfTypeList = async (sessionId: string, types: readonly string[]): Promise<SessionEvent[]> => {
+    if (!store.eventsOfTypes) {
+      const wanted = new Set(types);
+      return (await store.events(sessionId)).filter((event) => wanted.has(event.type));
+    }
+    const through = await store.latestSeq(sessionId);
+    const found: SessionEvent[] = [];
+    for (let after = 0; ;) {
+      const page = await store.eventsOfTypes(sessionId, types, after, through, 500);
+      found.push(...page);
+      if (page.length < 500) return found;
+      after = page.at(-1)!.seq;
+    }
+  };
+
   const dialogueThrough = (events: readonly SessionEvent[]) => effectiveHistory([...events]).events.filter((event) => !event.ignorable && (event.type === "user/message" || event.type === "assistant/message")).at(-1)?.seq ?? 0;
+
+  /** Whether the dialogue moved past what the native leg has seen. Asked on every
+   *  send with no rewind pending, when the usual answer is one indexed query. */
+  const runtimeLegIsStale = async (sessionId: string, canonicalThroughSeq: number | undefined): Promise<boolean> => {
+    if (canonicalThroughSeq !== undefined && store.eventsOfTypes) {
+      const newer = await store.eventsOfTypes(
+        sessionId,
+        ["user/message", "assistant/message"],
+        canonicalThroughSeq,
+        await store.latestSeq(sessionId),
+        1,
+      );
+      if (newer.length === 0) return false;
+    }
+    return canonicalThroughSeq !== dialogueThrough(await store.events(sessionId));
+  };
 
   const runtimeFor = async (projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime> => {
     const runtime = runtimes.forSession
@@ -6629,7 +6774,7 @@ export function createSessionService(deps: {
    *  offered action into a deterministic 409. */
   const assertMutable = async (
     sessionId: string,
-    opts: { allowActiveTurn?: boolean } = {},
+    opts: { allowActiveTurn?: boolean; allowQueued?: boolean } = {},
   ): Promise<{ proj: SessionProjection; events: SessionEvent[] }> => {
     const proj = await store.projection(sessionId);
     if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -6669,7 +6814,7 @@ export function createSessionService(deps: {
     if (openRequestCount(events) > 0) {
       throw Object.assign(new Error("unavailable while a request is waiting"), { code: "conflict" });
     }
-    if (deps.queue && (await deps.queue.queueList(sessionId)).length > 0) {
+    if (!opts.allowQueued && deps.queue && (await deps.queue.queueList(sessionId)).length > 0) {
       throw Object.assign(new Error("unavailable while messages are queued"), { code: "conflict" });
     }
     return { proj, events };
@@ -7165,7 +7310,18 @@ export function createSessionService(deps: {
     proj: SessionProjection, raw: unknown, sessionId: string,
   ): Promise<AttachmentRef[] | undefined> => {
     const maxBytes = deps.attachments?.maxBytes ?? 20 * 1024 * 1024;
-    const refs = sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId, sessionId });
+    return prepareShapedAttachments(
+      proj,
+      sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId, sessionId }),
+      sessionId,
+    );
+  };
+
+  /** The IO half of preparation for refs that are already shape-checked
+   *  (the prompt's own plus carried person-message refs). */
+  const prepareShapedAttachments = async (
+    proj: SessionProjection, refs: AttachmentRef[], sessionId: string,
+  ): Promise<AttachmentRef[] | undefined> => {
     if (refs.length === 0) return undefined;
     const committedIds: string[] = [];
     for (const ref of refs) {
@@ -7415,6 +7571,10 @@ export function createSessionService(deps: {
   ) => {
     if (!events.some((event) => event.type === "runtime/epoch-replaced" || event.type === "session/snapshot-imported")) return null;
     const operations = await durable.operations(sessionId);
+    // The marker stays in the log for good; only the first confirmed prompt of an
+    // epoch carries the recovery. Every later send must stop here, before any of
+    // the work below: it would hold the server (and on the desktop, the window).
+    if (!includeRestored && !runtimeEpochRecoveryPending(events, operations)) return null;
     const heldQueueIds = new Set(
       (await deps.queue?.queueList(sessionId) ?? [])
         .filter((item) => item.heldForReview)
@@ -7426,7 +7586,6 @@ export function createSessionService(deps: {
     const proj = await store.projection(sessionId);
     const sensitiveEnv = Object.entries(process.env).filter(([key, value]) => value && /TOKEN|SECRET|PASSWORD|API_KEY|AUTHORIZATION/i.test(key)).map(([, value]) => value!);
     const sanitize = (value: string) => redactContinuity(deps.secureSafe?.redact?.(value) ?? value, sensitiveEnv);
-    const safeEvents = events.map((event) => ({ ...event, data: JSON.parse(JSON.stringify(event.data, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as JsonObject }));
     const project = proj ? await projects.get(proj.projectId) : undefined;
     const workspace = proj && project
       ? await continuityWorkspace(await executionCwd(proj, project), Boolean(project.remote))
@@ -7434,7 +7593,8 @@ export function createSessionService(deps: {
     const safeWorkspace = workspace ? JSON.parse(JSON.stringify(workspace, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as typeof workspace : undefined;
     const safeWorkflow = workflow ? JSON.parse(JSON.stringify(workflow, (_key, value) => typeof value === "string" ? sanitize(value) : value)) as typeof workflow : undefined;
     return planRuntimeEpochRecovery({
-      events: safeEvents,
+      events,
+      sanitize,
       ...(safeWorkspace ? { workspace: safeWorkspace } : {}),
       operations,
       heldQueueIds,
@@ -7492,6 +7652,11 @@ export function createSessionService(deps: {
         if (reconciliation?.state === "reconciling"
           || reconciliation?.state === "blocked"
           || reconciliation?.state === "unknown") return;
+        // Ending the compaction runs this dispatcher again.
+        if (!queued[0].command && compactionDueBeforeTurn(sessionId, proj)) {
+          startCompactionBeforeTurn(sessionId, proj);
+          return;
+        }
         // A replacement submitted while the old turn was running is queued
         // ahead of its abort. Only after the confirmed stop reaches this idle
         // dispatcher do we replace the runtime leg and resolve the soft rewind.
@@ -7684,6 +7849,33 @@ export function createSessionService(deps: {
       }
       selectedModel = selection.descriptor;
     }
+    // The pending-context window is read before attachments are decided: a
+    // carried person message keeps its attachments owed to this exact prompt.
+    const recoveryEvents = await store.events(sessionId);
+    // A native command runs only as the runtime's exact input: recovery,
+    // instructions or memory around it turn it into an ordinary prompt. None
+    // rides with it; each stays pending for the next ordinary turn, whose
+    // user/message records what it restored.
+    const contextFree = nativeDescriptor !== undefined;
+    const carriedAttachments = contextFree ? [] : pendingPersonMessageAttachments(recoveryEvents);
+    if (carriedAttachments.length > 0) {
+      const merged = mergeAttachmentInputs(input.attachments, carriedAttachments);
+      if (Array.isArray(merged) && merged.length > MAX_TURN_ATTACHMENTS) {
+        throw Object.assign(
+          new Error(`the next message would carry ${merged.length} attachments (max ${MAX_TURN_ATTACHMENTS})`),
+          { code: "invalid-input" },
+        );
+      }
+      const shaped = sanitizeAttachments(merged, {
+        maxBytes: deps.attachments?.maxBytes ?? 20 * 1024 * 1024,
+        projectId: proj.projectId,
+        sessionId,
+      });
+      const prepared = await prepareShapedAttachments(proj, shaped, sessionId);
+      input = { ...input };
+      if (prepared) input.attachments = prepared;
+      else delete input.attachments;
+    }
     // One delivery decision per attachment, shared with the send-time check.
     // A `text-projection` plan is emulated HERE so the adapter only ever sees
     // refs its harness can actually deliver.
@@ -7779,12 +7971,6 @@ export function createSessionService(deps: {
         behaviorLogged.set(sessionId, cur.revision);
       }
     }
-    const recoveryEvents = await store.events(sessionId);
-    // A native command runs only as the runtime's exact input: recovery,
-    // instructions or memory around it turn it into an ordinary prompt. None
-    // rides with it; each stays pending for the next ordinary turn, whose
-    // user/message records what it restored.
-    const contextFree = nativeDescriptor !== undefined;
     const firstTurnOfRuntimeLeg = proj.runtimeLeg
       ? proj.runtimeLeg.bootstrap !== "native-resume"
       : !contextTurnStarted(recoveryEvents);
@@ -7905,7 +8091,7 @@ export function createSessionService(deps: {
       ...(input.author ? { author: input.author as unknown as JsonObject } : {}),
     };
     let operation = reserved?.operation;
-    const existingEvents = await store.events(sessionId);
+    const existingEvents = await eventsOfTypeList(sessionId, ["user/message", "queue/enqueued", "context/memory-prepared"]);
     type MemoryDeliveryMode = "structured-context" | "text" | "unsupported";
     type MemoryDeliveryStatus = "confirmed" | "degraded" | "unsupported" | "failed";
     const appendMemoryDeliveryReceipt = async (
@@ -7913,7 +8099,7 @@ export function createSessionService(deps: {
       transportReceipt?: string,
     ): Promise<void> => {
       if (!deps.memory) return;
-      const events = await store.events(sessionId);
+      const events = await eventsOfTypeList(sessionId, ["context/memory-prepared", "context/memory-delivery"]);
       const prepared = events.find((event) =>
         event.type === "context/memory-prepared"
         && (event.data as { operationId?: unknown }).operationId === operation?.operationId,
@@ -8013,6 +8199,15 @@ export function createSessionService(deps: {
       await applyProjection(sessionId, (current) =>
         isDeepStrictEqual(current.actor, turnAuthor) ? current : { ...current, actor: turnAuthor });
     }
+    // Only a person who typed it (no delegation, schedule or judge) can own
+    // the chat; a delegated child inherits its parent's owner instead.
+    if (messageAdmittedHere && turnAuthor && !turnAuthor.via && !proj.parentId && proj.spaceId && deps.personWrote) {
+      try {
+        await deps.personWrote({ sessionId, spaceId: proj.spaceId, userId: turnAuthor.userId });
+      } catch (error) {
+        console.warn(`[polyth] owner registration failed for ${sessionId}`, error);
+      }
+    }
     if (messageAdmittedHere && !hiddenUserMessage) {
       await consumeAdmittedDraft(sessionId, turnAuthor, [input.text, text, raw]);
     }
@@ -8023,6 +8218,33 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("Workspace changed since this turn was prepared; submit a new turn in the current workspace"), { code: "conflict" });
       }
       turnWorkspace = recordedWorkspace;
+    }
+
+    // Who is speaking, who reads this chat and which memory it has. Persisted
+    // before delivery; a retry sends the exact recorded block, so a changed
+    // audience never rewrites what an operation already told the model.
+    if (operation && !contextFree && input.keepAlive !== true) {
+      const recorded = existingEvents.find((event) =>
+        event.type === "context/people-prepared"
+        && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+      );
+      let peopleText = typeof (recorded?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
+        ? (recorded!.data as { modelVisibleText: string }).modelVisibleText
+        : undefined;
+      if (!recorded) {
+        const spaceId = proj.spaceId ?? (await projects.get(proj.projectId))?.spaceId;
+        const block = spaceId ? turnPeopleBlock(spaceId, sessionId, turnAuthor) : undefined;
+        if (block) {
+          await appendAndBroadcast(sessionId, "context/people-prepared", {
+            operationId: operation.operationId,
+            modelVisibleText: block.text,
+            ...(block.speaker ? { speaker: block.speaker as unknown as JsonObject } : {}),
+            readers: block.readers as unknown as JsonObject[],
+          }, { ignorable: true });
+          peopleText = block.text;
+        }
+      }
+      if (peopleText) projectedSections.push(peopleText);
     }
 
     // Memory is prepared after the durable operation has an operationId, but
@@ -8101,6 +8323,10 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("memory is required before this turn can run"), { code: "memory-required" });
       }
       if (memoryContribution.modelVisibleText) projectedSections.push(memoryContribution.modelVisibleText);
+      // Before delivery: once it is sent the harness holds it for good.
+      if (memoryContribution.selected.some((item) => (item as { layer?: unknown }).layer === "person")) {
+        await markPersonalContext(sessionId);
+      }
     }
 
     admitting.add(sessionId);
@@ -8164,6 +8390,7 @@ export function createSessionService(deps: {
           ...(model ? { model } : {}),
           ...(agent ? { agent } : {}),
         };
+        syncAutoCompaction(sessionId, proj, rt);
         return rt.startTurnOperation
           ? rt.startTurnOperation(request, operationId)
           : rt.startTurn(request);
@@ -9298,6 +9525,39 @@ export function createSessionService(deps: {
    * the old harness keeps the chat, its binding and generation, and nothing is
    * started or replayed. A shutdown keeps the intent durable instead, and a
    * transition already past release keeps its own failed/retry path. */
+  const releaseIdleDetachedExecution = async (
+    sessionId: string,
+    projection: SessionProjection,
+    transition: HarnessTransition,
+  ): Promise<MutationOutcome<ExecutionReleaseProof> | undefined> => {
+    const binding = projection.runtimeBinding;
+    if (
+      transition.timing === "stop-now"
+      || projection.status !== "idle"
+      || sessionRuntime.has(sessionId)
+      || turnActive(sessionId)
+      || !binding?.backendSessionId
+      || !runtimes.releaseSessionExecution
+      || (await durable.operations(sessionId)).some(isRuntimeOperationBlocking)
+    ) return undefined;
+    const harnessId = projection.resolvedHarnessId;
+    const shared = (await store.projections()).some((other) => other.id !== sessionId
+      && (other.runtimeBinding?.authorityId === binding.authorityId
+        || (other.runtimeBinding?.location.directory === binding.location.directory
+          && other.resolvedHarnessId === harnessId)));
+    if (shared) return undefined;
+    const outcome = await boundedRuntimeAwait(Promise.resolve(runtimes.releaseSessionExecution(projection, {
+      canonicalSessionId: sessionId,
+      backendSessionId: binding.backendSessionId,
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      continuity: binding.continuity,
+      location: binding.location,
+    }, transition.id)), transition.id).catch(() => undefined);
+    // Anything less than proof takes the ordinary path with a live runtime.
+    return outcome?.kind === "confirmed" ? outcome : undefined;
+  };
+
   const finishHarnessSwitchUnderLock = async (
     sessionId: string,
     retryFailed = false,
@@ -9365,7 +9625,11 @@ export function createSessionService(deps: {
       if (transition.timing === "after-turn" && turnActive(sessionId)) return projection;
       let old: AgentRuntime | undefined;
       let epochPendingError: unknown;
-      try {
+      // An idle chat whose old harness is no longer running here has nothing to
+      // reconcile. Starting that harness only to stop it would add its whole
+      // launch to the switch, so release its authority directly when possible.
+      let released: MutationOutcome<ExecutionReleaseProof> | undefined = await releaseIdleDetachedExecution(sessionId, projection, transition);
+      if (!released) try {
         old = await runtimeFor(projection, cwd);
         if (transition.timing === "stop-now") {
           await abortTurnUnderLock(sessionId, "user", "Stopped to change harness", "harness-switch");
@@ -9398,8 +9662,9 @@ export function createSessionService(deps: {
         continuity: oldBinding.continuity,
         location: oldBinding.location,
       };
-      let released: MutationOutcome<ExecutionReleaseProof> | undefined;
-      if (epochPendingError) {
+      if (released) {
+        // Proven above, without a runtime.
+      } else if (epochPendingError) {
         // A same-harness transition only asks for a fresh native leg on the
         // harness already in use. When the retired epoch cannot be released
         // for this session alone, the owned-epoch recovery a send uses gives
@@ -9551,7 +9816,7 @@ export function createSessionService(deps: {
       // has no native history to reset and uses the fresh create seam.
       const sameHarness = transition.targetHarnessId === (projection.resolvedHarnessId ?? target.harnessId);
       stage = "creating-native-session";
-      const events = await store.events(sessionId);
+      const events = await eventsOfTypeList(sessionId, ["harness/native-create-requested"]);
       const intent = events.findLast((event) => event.type === "harness/native-create-requested" && event.data.transitionId === transition!.id);
       let operation = intent ? (await durable.operations(sessionId)).find((op) => op.ownerEventSeq === intent.seq) : undefined;
       // A rejected create is settled: the target gave a definitive
@@ -9837,6 +10102,16 @@ export function createSessionService(deps: {
     && !sessionRuntime.get(projection.id)
     && !turnActive(projection.id) && !admitting.has(projection.id);
 
+  /** Moves without an execution release: a session that never ran, or an
+   *  archived one at rest whose checkout is gone, as when the Cleanup settings
+   *  released the checkout it shared. Nothing can run in a directory that no
+   *  longer exists, and the next epoch replaces the old binding. */
+  const isRelocatableAsMetadata = (projection: SessionProjection): boolean => {
+    if (isUnmaterializedRelocatable(projection)) return true;
+    const directory = projection.runtimeBinding?.location.directory ?? projection.worktreePath;
+    return isArchivedAtRest(projection) && directory !== undefined && !existsSync(directory);
+  };
+
   /** Archived, or waiting for a runtime epoch that has not started: in both no
    *  runtime is attached and the next execution starts from a fresh native
    *  session in whatever checkout the workspace names. */
@@ -9844,6 +10119,17 @@ export function createSessionService(deps: {
     (projection.status === "archived" || projection.status === "epoch-pending")
     && !sessionRuntime.get(projection.id)
     && !turnActive(projection.id) && !admitting.has(projection.id);
+
+  /** A nested isolation's target branch left with its parent's checkout. */
+  const releasedTargetBranch = (isolation: SessionIsolation): string | null =>
+    isolation.targetBranch && !isManagedIsolationBranch(isolation.targetBranch) ? isolation.targetBranch : null;
+
+  /** A workspace row whose isolated checkout is gone works on its target again. */
+  const releaseVanishedRow = (row: SessionWorkspace["repositories"][number]): SessionWorkspace["repositories"][number] => {
+    const record = row.isolation;
+    if (record?.kind !== "git-worktree" || !record.targetPath || existsSync(record.worktreePath)) return row;
+    return { ...row, path: record.targetPath, state: "ready", isolation: undefined, branch: releasedTargetBranch(record) ?? undefined };
+  };
 
   /** Dropping the record of an isolated checkout that no longer exists (its
    *  worktree was removed outside Polyth) also moves the session's execution
@@ -9854,12 +10140,12 @@ export function createSessionService(deps: {
     workspace: SessionWorkspace | undefined;
     scalar: Parameters<WorkspaceMutationScope["commit"]>[1];
   } | undefined> => {
-    const isolation = current.isolation;
+    const executionRow = current.workspace?.repositories
+      .find((row) => row.repositoryId === current.workspace?.executionRepositoryId);
+    const isolation = current.isolation ?? executionRow?.isolation;
     if (isolation?.kind !== "git-worktree" || !isAtRestForVanishedRelease(current)) return undefined;
     if (existsSync(isolation.worktreePath) || !isolation.targetPath) return undefined;
     const source = resolve(isolation.worktreePath);
-    const executionRow = current.workspace?.repositories
-      .find((row) => row.repositoryId === current.workspace?.executionRepositoryId);
     const executesThere = executionRow
       ? resolve(executionRow.path) === source
       : current.worktreePath !== undefined && resolve(current.worktreePath) === source;
@@ -9867,12 +10153,12 @@ export function createSessionService(deps: {
     const project = await projects.get(current.projectId);
     if (!project || project.remote) return undefined;
     const destination = isolation.targetPath;
-    const branch = isolation.targetBranch || undefined;
+    const branch = releasedTargetBranch(isolation);
     const workspace = current.workspace && cloneWorkspace(current.workspace);
     if (workspace) {
       workspace.repositories = workspace.repositories.map((row) => row.repositoryId === workspace.executionRepositoryId
-        ? { ...row, path: destination, state: "ready" as const, isolation: undefined, ...(branch ? { branch } : {}) }
-        : row);
+        ? { ...row, path: destination, state: "ready" as const, isolation: undefined, branch: branch ?? undefined }
+        : releaseVanishedRow(row));
       workspace.revision = (workspace.revision ?? 0) + 1;
       // The destination must be a registered checkout of this project.
       await validateWorkspacePaths({ projects, worktrees: deps.worktrees }, project, workspace);
@@ -9882,7 +10168,7 @@ export function createSessionService(deps: {
       scalar: {
         isolation: null,
         worktreePath: resolve(destination) === resolve(project.path) ? null : destination,
-        ...(branch ? { branch } : {}),
+        branch,
       },
     };
   };
@@ -9921,7 +10207,7 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("cannot release isolation during active execution"), { code: "conflict" });
       }
     } else if (!metadataOnly) await assertWorkspaceMutationSafe(current);
-    else if (!isUnmaterializedRelocatable(current)) {
+    else if (!isRelocatableAsMetadata(current)) {
       throw Object.assign(new Error("cannot relocate a session with a runtime execution"), { code: "conflict" });
     }
     const next: SessionProjection = { ...current, workspace, updatedAt: Date.now() };
@@ -9969,7 +10255,7 @@ export function createSessionService(deps: {
       throw Object.assign(new Error("Corrupt isolation evidence requires explicit repair"), { code: "conflict" });
     }
     const unmaterializedRelocation = input.relocateManagedCheckout === true && !afterRelease
-      && isUnmaterializedRelocatable(projection);
+      && isRelocatableAsMetadata(projection);
     if (projection.status === "archived" && !unmaterializedRelocation) {
       throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
     }
@@ -10278,6 +10564,114 @@ export function createSessionService(deps: {
     if (mutationFailure !== undefined) throw mutationFailure;
     return finalized ?? (await store.projection(sessionId)) ?? next;
   };
+
+  /** Prove nothing still executes in a checkout before it is removed: the exact
+   *  persisted binding's authority confirms its release. Undefined when the
+   *  session has no execution to release. `shared` skips the sole-user check for
+   *  a caller that already proved everyone else on this checkout is leaving too;
+   *  `optional` accepts a harness with nothing to say about this binding. */
+  const proveCheckoutExecutionReleased = async (input: {
+    projection: SessionProjection;
+    runtime: AgentRuntime | undefined;
+    cwd: string;
+    operation: string;
+    shared?: boolean;
+    optional?: boolean;
+  }): Promise<{ cwd: string; harnessId: string | undefined } | undefined> => {
+    const { projection: proj, runtime: rt } = input;
+    const sessionId = proj.id;
+    const persisted = proj.runtimeBinding;
+    if (!persisted) {
+      if (rt) {
+        throw Object.assign(new Error("runtime identity is missing; workspace release cannot be proven"), {
+          code: "outcome-unknown",
+        });
+      }
+      return undefined;
+    }
+    const ownedPaths = [persisted.location.directory, proj.isolation?.worktreePath,
+      ...(proj.workspace?.repositories.map((row) => row.isolation?.worktreePath) ?? [])];
+    if (!ownedPaths.some((path) => path && resolve(path) === resolve(input.cwd))) {
+      throw Object.assign(new Error("checkout release is outside the session workspace"), { code: "invalid-input" });
+    }
+    const binding: RuntimeSessionBinding = {
+      canonicalSessionId: sessionId,
+      backendSessionId: persisted.backendSessionId,
+      authorityId: persisted.authorityId,
+      generation: persisted.generation,
+      continuity: persisted.continuity,
+      location: persisted.location,
+    };
+    const operationId = [
+      input.operation,
+      sessionId,
+      binding.authorityId,
+      String(binding.generation),
+      binding.backendSessionId,
+    ].join(":");
+    const exclusive = input.shared || ([proj.isolation, ...(proj.workspace?.repositories.map((row) => row.isolation) ?? [])]
+      .some((isolation) => isolation?.kind === "git-worktree" && resolve(isolation.worktreePath) === resolve(binding.location.directory))
+      && (await workspaceDependents(binding.location.directory, sessionId)).length === 0);
+    let outcome = exclusive ? await runtimes.releaseSessionExecution?.(proj, binding, operationId) : undefined;
+    if (outcome?.kind === "rejected"
+      && (outcome.code === "unsupported" || outcome.code === "not-found")) {
+      outcome = undefined;
+    }
+    if (!outcome && rt?.releaseExecution) {
+      outcome = await boundedRuntimeAwait(rt.releaseExecution(binding, operationId), operationId);
+    }
+    if (!outcome) {
+      if (input.optional) return undefined;
+      throw Object.assign(new Error("the current harness cannot prove workspace release"), {
+        code: "unsupported",
+      });
+    }
+    if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+    if (
+      outcome.value.authorityId !== binding.authorityId
+      || outcome.value.generation !== binding.generation
+      || outcome.value.backendSessionId !== binding.backendSessionId
+    ) {
+      throw Object.assign(new Error("workspace release proof does not match the deleted session"), {
+        code: "stale-evidence",
+      });
+    }
+    return { cwd: binding.location.directory, harnessId: proj.resolvedHarnessId ?? rt?.harnessId };
+  };
+
+  /** Only for an archived session at rest: its runtime lease was retired with
+   *  the archive, and no later turn can start while it stays archived. */
+  const releaseArchivedExecution = (sessionId: string, cwd: string, options: { sharer?: boolean } = {}): Promise<void> =>
+    withSessionLock(sessionId, async () => {
+      const projection = await store.projection(sessionId);
+      if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (!isArchivedAtRest(projection)) {
+        throw Object.assign(new Error("the session is not at rest in the archive"), { code: "conflict" });
+      }
+      // `shared` releases a whole authority, which a project checkout's other
+      // sessions may be using. Only the isolated checkout being removed qualifies.
+      const project = await projects.get(projection.projectId);
+      if (project && projectRepositories(project).some((row) => resolve(row.path) === resolve(cwd))) {
+        throw Object.assign(new Error("a project checkout is never released as an isolated one"), { code: "invalid-input" });
+      }
+      const released = await proveCheckoutExecutionReleased({
+        projection,
+        runtime: undefined,
+        cwd,
+        operation: "session-archive-workspace-release",
+        shared: true,
+        ...(options.sharer ? { optional: true } : {}),
+      });
+      if (!released) return;
+      try {
+        if (released.harnessId) {
+          await deps.onHarnessTargetReleased?.({ sessionId, projectId: projection.projectId, cwd: released.cwd, harnessId: released.harnessId });
+        }
+        await deps.onSessionReleased?.({ sessionId, projectId: projection.projectId, cwd: released.cwd });
+      } catch {
+        // Volatile provisioning cleanup cannot undo a proven execution release.
+      }
+    });
 
   let serviceDisposed = false;
 
@@ -11614,6 +12008,9 @@ export function createSessionService(deps: {
         await compactionSettled(sessionId);
         proj = (await store.projection(sessionId)) ?? proj;
       }
+      if (input.keepAlive !== true && input.autoResume !== true && !input.command && compactionDueBeforeTurn(sessionId, proj)) {
+        startCompactionBeforeTurn(sessionId, proj);
+      }
       // A compaction is replacing the context: the message waits for the
       // compacted context, then dispatches from the queue.
       if (compactions.has(sessionId) && deps.queue) {
@@ -11704,7 +12101,7 @@ export function createSessionService(deps: {
       if (!proj.harnessTransition && proj.runtimeLeg && proj.status === "idle" && !turnActive(sessionId)
         && (await logFacts(sessionId)).rewind === null
         && !await blockingOperation(sessionId) && proj.runtimeLeg.bootstrap !== "continuity"
-        && proj.runtimeLeg.canonicalThroughSeq !== dialogueThrough(await store.events(sessionId))) {
+        && await runtimeLegIsStale(sessionId, proj.runtimeLeg.canonicalThroughSeq)) {
         proj = await withSessionLock(sessionId, async () => {
           await commitHarnessIntent(sessionId, { harnessTransition: { id: randomUUID(), selection: proj!.harness ?? { mode: "auto" }, targetHarnessId: proj!.resolvedHarnessId!, timing: "after-turn", phase: "requested" } }, "harness/switch-requested", { reason: "native history is stale", targetHarnessId: proj!.resolvedHarnessId! });
           return finishHarnessSwitchUnderLock(sessionId);
@@ -12109,6 +12506,13 @@ export function createSessionService(deps: {
             }
             // A person steering into a keep-alive makes it their turn.
             keepAliveTurns.delete(sessionId);
+            // Someone else's words joining this turn say whose they are, recorded
+            // before delivery like any fact the model sees.
+            const steerSpaceId = proj!.spaceId ?? (await projects.get(proj!.projectId))?.spaceId;
+            const steerPeople = input.author && input.author.userId !== proj!.actor?.userId && steerSpaceId
+              ? steerPeopleLine(steerSpaceId, sessionId, input.author)
+              : undefined;
+            const steerText = steerPeople ? `${steerPeople}\n\n${input.text}` : input.text;
             const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
               sessionId,
               mutationKind: "turn-steer",
@@ -12117,17 +12521,25 @@ export function createSessionService(deps: {
                 data: {
                   text: input.text,
                   delivery: "steer",
+                  ...(input.author ? { author: input.author as unknown as JsonObject } : {}),
                   ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
                 },
               },
             }));
+            if (steerPeople) {
+              await appendAndBroadcast(sessionId, "context/people-prepared", {
+                operationId: prepared.operation.operationId,
+                modelVisibleText: steerPeople,
+                speaker: input.author as unknown as JsonObject,
+              }, { ignorable: true });
+            }
             const outcome = await runPreparedOperation<Record<string, never>, boolean>(
               prepared.operation,
               async (operationId) => {
                 try {
                   const value = await (rt.steerOperation
-                    ? rt.steerOperation(sessionId, input.text, operationId, input.model, input.agent)
-                    : rt.steer!(sessionId, input.text, input.model, input.agent));
+                    ? rt.steerOperation(sessionId, steerText, operationId, input.model, input.agent)
+                    : rt.steer!(sessionId, steerText, input.model, input.agent));
                   if (isMutationOutcome<Record<string, never>>(value)) return value;
                   return value
                     ? { kind: "confirmed" as const, value: {} }
@@ -12953,65 +13365,17 @@ export function createSessionService(deps: {
               projection: proj,
               releaseExecution: async (releaseCwd) => {
                 if (releaseCompleted) return;
-                const persisted = proj.runtimeBinding;
-                if (!persisted) {
-                  if (rt) {
-                    throw Object.assign(new Error("runtime identity is missing; workspace release cannot be proven"), {
-                      code: "outcome-unknown",
-                    });
-                  }
-                  releaseCompleted = true;
-                  return;
+                const released = await proveCheckoutExecutionReleased({
+                  projection: proj,
+                  runtime: rt,
+                  cwd: releaseCwd,
+                  operation: "session-delete-workspace-release",
+                });
+                if (released) {
+                  workspaceExecutionReleased = true;
+                  releasedWorkspaceCwd = released.cwd;
+                  releasedWorkspaceHarnessId = released.harnessId;
                 }
-                const ownedPaths = [persisted.location.directory, proj.isolation?.worktreePath,
-                  ...(proj.workspace?.repositories.map((row) => row.isolation?.worktreePath) ?? [])];
-                if (!ownedPaths.some((path) => path && resolve(path) === resolve(releaseCwd))) {
-                  throw Object.assign(new Error("checkout release is outside the session workspace"), { code: "invalid-input" });
-                }
-                const binding: RuntimeSessionBinding = {
-                  canonicalSessionId: sessionId,
-                  backendSessionId: persisted.backendSessionId,
-                  authorityId: persisted.authorityId,
-                  generation: persisted.generation,
-                  continuity: persisted.continuity,
-                  location: persisted.location,
-                };
-                const operationId = [
-                  "session-delete-workspace-release",
-                  sessionId,
-                  binding.authorityId,
-                  String(binding.generation),
-                  binding.backendSessionId,
-                ].join(":");
-                const exclusive = [proj.isolation, ...(proj.workspace?.repositories.map((row) => row.isolation) ?? [])]
-                  .some((isolation) => isolation?.kind === "git-worktree" && resolve(isolation.worktreePath) === resolve(binding.location.directory))
-                  && (await workspaceDependents(binding.location.directory, sessionId)).length === 0;
-                let outcome = exclusive ? await runtimes.releaseSessionExecution?.(proj, binding, operationId) : undefined;
-                if (outcome?.kind === "rejected"
-                  && (outcome.code === "unsupported" || outcome.code === "not-found")) {
-                  outcome = undefined;
-                }
-                if (!outcome && rt?.releaseExecution) {
-                  outcome = await boundedRuntimeAwait(rt.releaseExecution(binding, operationId), operationId);
-                }
-                if (!outcome) {
-                  throw Object.assign(new Error("the current harness cannot prove workspace release"), {
-                    code: "unsupported",
-                  });
-                }
-                if (outcome.kind !== "confirmed") throw outcomeError(outcome);
-                if (
-                  outcome.value.authorityId !== binding.authorityId
-                  || outcome.value.generation !== binding.generation
-                  || outcome.value.backendSessionId !== binding.backendSessionId
-                ) {
-                  throw Object.assign(new Error("workspace release proof does not match the deleted session"), {
-                    code: "stale-evidence",
-                  });
-                }
-                workspaceExecutionReleased = true;
-                releasedWorkspaceCwd = binding.location.directory;
-                releasedWorkspaceHarnessId = proj.resolvedHarnessId ?? rt?.harnessId;
                 releaseCompleted = true;
               },
             });
@@ -13303,6 +13667,13 @@ export function createSessionService(deps: {
       });
     },
 
+    async releaseArchivedCheckouts(sessionId) {
+      if (!deps.releaseArchivedCheckouts) {
+        throw Object.assign(new Error("isolated workspace cleanup is unavailable"), { code: "unsupported" });
+      }
+      await deps.releaseArchivedCheckouts({ sessionId, releaseExecution: releaseArchivedExecution });
+    },
+
     async patchIsolation(sessionId, isolation) {
       return withSessionLock(sessionId, async () => {
         const current = await store.projection(sessionId);
@@ -13321,16 +13692,16 @@ export function createSessionService(deps: {
           const vanished = await vanishedIsolationRelease(current);
           if (vanished) return commitWorkspaceUnderLock(sessionId, vanished.workspace, vanished.scalar, "vanished-release");
         }
+        // Isolation cleanup may drop the record of an archived session whose
+        // checkout is gone; anything else stays active-only.
+        const archivedRelease = isolation === null && current.status === "archived";
         const workspace = current.workspace && cloneWorkspace(current.workspace);
         if (workspace) {
           workspace.repositories = workspace.repositories.map((row) => row.repositoryId === workspace.executionRepositoryId
             ? { ...row, isolation: isolation ?? undefined }
-            : row);
+            : archivedRelease ? releaseVanishedRow(row) : row);
           workspace.revision = (workspace.revision ?? 0) + 1;
         }
-        // Isolation cleanup may drop the record of an archived session whose
-        // checkout is gone; anything else stays active-only.
-        const archivedRelease = isolation === null && current.status === "archived";
         return commitWorkspaceUnderLock(sessionId, workspace, { isolation }, archivedRelease ? "archived-release" : false);
       });
     },
@@ -13356,7 +13727,12 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("a person message needs an author"), { code: "invalid-input" });
       }
       const text = typeof input?.text === "string" ? input.text.trim() : "";
-      if (!text) throw Object.assign(new Error("message text is required"), { code: "invalid-input" });
+      // An attachment-only message is still a message; text alone is not
+      // required once something travels with it.
+      const carriesAttachments = Array.isArray(input?.attachments) && input.attachments.length > 0;
+      if (!text && !carriesAttachments) {
+        throw Object.assign(new Error("message text or an attachment is required"), { code: "invalid-input" });
+      }
       if (text.length > PERSON_MESSAGE_MAX_CHARS) {
         throw Object.assign(new Error(`message text must be at most ${PERSON_MESSAGE_MAX_CHARS} characters`), { code: "invalid-input" });
       }
@@ -13382,6 +13758,15 @@ export function createSessionService(deps: {
           { code: "invalid-input" },
         );
       }
+      const shareWith = personMessageShares(input.shareWith, author.userId);
+      const requestAccessFor = [...new Set((Array.isArray(input.requestAccessFor) ? input.requestAccessFor : [])
+        .filter((id) => typeof id === "string" && id.trim() && id !== author.userId))];
+      if (shareWith.length > PERSON_MESSAGE_MAX_MENTIONS || requestAccessFor.length > PERSON_MESSAGE_MAX_MENTIONS) {
+        throw Object.assign(
+          new Error(`a message may name at most ${PERSON_MESSAGE_MAX_MENTIONS} people`),
+          { code: "invalid-input" },
+        );
+      }
       const resultFromEvent = (event: SessionEvent): PersonMessageResult => {
         const data = event.data as { mentions?: unknown };
         const mentionIds = Array.isArray(data.mentions)
@@ -13390,7 +13775,8 @@ export function createSessionService(deps: {
               return typeof person?.userId === "string" ? [person.userId] : [];
             })
           : [];
-        return { seq: event.seq, mentions: mentionIds };
+        const requested = personAccessRequestOf(event)?.people.map((person) => person.userId);
+        return { seq: event.seq, mentions: mentionIds, ...(requested ? { requested } : {}) };
       };
       const findPrior = async (): Promise<SessionEvent | undefined> => {
         if (!clientOperationId) return undefined;
@@ -13426,6 +13812,17 @@ export function createSessionService(deps: {
             throw Object.assign(new Error("reply target must be a person message in this session"), { code: "invalid-input" });
           }
         }
+        const attachments = await prepareAttachments(proj, input.attachments, sessionId);
+        // Everything that can refuse the message has run, so a chat never
+        // opens for a message that then fails; and it opens before the mention
+        // is decided, so nobody is told about a chat they cannot open. A
+        // refusal here records nothing.
+        if (shareWith.length > 0) {
+          if (!admission?.openChatTo) {
+            throw Object.assign(new Error("sharing is unavailable"), { code: "unsupported" });
+          }
+          await admission.openChatTo(shareWith);
+        }
         // Only people who can open this session may be mentioned or notified.
         // On a single-person install there is no access decision to make, so
         // mention ids are kept as given (never a foreign-tenant list).
@@ -13442,16 +13839,54 @@ export function createSessionService(deps: {
           const name = nameById.get(userId);
           mentions.push({ userId, ...(name ? { name } : {}) });
         }
+        // A request only stands for people outside the chat, and only when
+        // someone can answer it; anything else is dropped without a trace.
+        let accessRequest: PersonAccessRequest | undefined;
+        if (requestAccessFor.length > 0 && proj.spaceId && canonicalSecurity()) {
+          const outside = new Map(sessionOutsiders(proj.spaceId, sessionId, author.userId).map((person) => [person.userId, person] as const));
+          const people = requestAccessFor.flatMap((id) => {
+            const person = outside.get(id);
+            return person ? [person] : [];
+          });
+          const approver = people.length > 0 ? sessionShareApprover(proj.spaceId, sessionId, author.userId) : undefined;
+          if (approver) accessRequest = { people, approver };
+        }
         const data: JsonObject = {
           text,
+          ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
           author: { ...author },
           mentions: mentions.map((mention) => ({ ...mention })),
           ...(carryToAgent ? { carryToAgent: true } : {}),
           ...(replyToSeq !== undefined ? { replyToSeq } : {}),
+          ...(accessRequest ? { accessRequest: accessRequest as unknown as JsonObject } : {}),
           ...(clientOperationId ? { clientOperationId } : {}),
         };
         const message = await appendAndBroadcast(sessionId, PERSON_MESSAGE_EVENT, data);
-        for (const mention of mentions) {
+        // Written in the same composer as a prompt and consumed the same way:
+        // a reload or another device must not offer the sent words again.
+        try {
+          await consumeAdmittedDraft(sessionId, author, [text]);
+        } catch (error) {
+          console.warn("[polyth] person message draft consume failed", error);
+        }
+        // A chat whose first words went to a person has no prompt to name it. A
+        // conversation with no title of its own reads as its people's names.
+        if (proj.purpose !== SESSION_PURPOSE_CONVERSATION && isPlaceholderTitle(proj.title, sessionId)) {
+          const title = titleFromPrompt(text);
+          if (title && !isPlaceholderTitle(title, sessionId)) {
+            try {
+              await appendAndBroadcast(sessionId, "session/metadata-changed", { title, source: "polyth" }, { ignorable: true });
+              await applyProjection(sessionId, (current) => (isPlaceholderTitle(current.title, sessionId)
+                ? { ...current, title, titleSource: "polyth" as const }
+                : current));
+            } catch (error) {
+              console.warn("[polyth] person message title failed", error);
+            }
+          }
+        }
+        // The approver has something to do here, so the chat wears the same
+        // mark as a mention until they read it.
+        for (const mention of accessRequest ? [...mentions, accessRequest.approver] : mentions) {
           try {
             await personStateStore.setPersonMentionSeq?.(sessionId, mention.userId, message.seq);
           } catch (error) {
@@ -13476,6 +13911,7 @@ export function createSessionService(deps: {
         let messageAudience: SessionPerson[] = [];
         if (proj.purpose === SESSION_PURPOSE_CONVERSATION && audience.length > 0) {
           const mentioned = new Set(mentions.map((mention) => mention.userId));
+          if (accessRequest) mentioned.add(accessRequest.approver.userId);
           messageAudience = audience
             .filter((member) => member.userId !== author.userId && !mentioned.has(member.userId))
             .filter((member) => {
@@ -13489,14 +13925,111 @@ export function createSessionService(deps: {
             sessionId,
             seq: message.seq,
             author: { ...author },
-            text,
-            mentions,
+            // An attachment-only message still says what arrived.
+            text: text || (attachments ?? []).map((attachment) => attachment.name).join(", "),
+            // The approver hears about the message once, as the request.
+            mentions: accessRequest ? mentions.filter((mention) => mention.userId !== accessRequest.approver.userId) : mentions,
             audience: messageAudience,
+            ...(accessRequest ? { accessRequest } : {}),
           });
         } catch (error) {
           console.warn("[polyth] person message notification failed", error);
         }
         return resultFromEvent(message);
+      });
+    },
+
+    async decidePersonAccess(sessionId, messageSeq, input, admission): Promise<PersonAccessDecisionResult> {
+      const by = normalizeSessionPerson(admission?.author);
+      if (!by?.userId) {
+        throw Object.assign(new Error("an answer needs a person"), { code: "invalid-input" });
+      }
+      const decision = input?.decision;
+      if (decision !== "share" && decision !== "decline") {
+        throw Object.assign(new Error("decision must be share or decline"), { code: "invalid-input" });
+      }
+      const access = input.access ?? "view";
+      if (!isSessionAccessLevel(access)) {
+        throw Object.assign(new Error("access must be an access level"), { code: "invalid-input" });
+      }
+      return withSessionLock(sessionId, async () => {
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (proj.status === "archived") {
+          throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
+        }
+        const target = await eventAt(sessionId, messageSeq);
+        const request = target?.type === PERSON_MESSAGE_EVENT ? personAccessRequestOf(target) : undefined;
+        if (!target || !request) {
+          throw Object.assign(new Error("that message asks for no access"), { code: "not-found" });
+        }
+        // Whoever answers first decides; a repeat gets that answer back.
+        const through = await store.latestSeq(sessionId).catch(() => 0);
+        const answers = store.eventsOfTypes
+          ? await store.eventsOfTypes(sessionId, [PERSON_ACCESS_RESOLVED_EVENT], messageSeq, through, 500)
+          : (await store.events(sessionId, messageSeq)).filter((event) => event.type === PERSON_ACCESS_RESOLVED_EVENT);
+        const prior = answers.find((event) => (event.data as { messageSeq?: unknown }).messageSeq === messageSeq);
+        if (prior) {
+          const data = prior.data as unknown as PersonAccessResolvedData;
+          return { outcome: data.outcome, people: data.people.map((person) => person.userId) };
+        }
+        if (decision === "share") {
+          if (!admission?.openChatTo) {
+            throw Object.assign(new Error("sharing is unavailable"), { code: "unsupported" });
+          }
+          await admission.openChatTo(request.people.map((person) => ({ userId: person.userId, access })));
+        }
+        const audience = proj.spaceId && canonicalSecurity() ? sessionAudience(proj.spaceId, sessionId) : [];
+        const people = decision === "share"
+          ? request.people.filter((person) => audience.some((member) => member.userId === person.userId))
+          : request.people;
+        const outcome: PersonAccessOutcome = decision === "share" ? "shared" : "declined";
+        const data: PersonAccessResolvedData = {
+          messageSeq,
+          outcome,
+          by: { ...by },
+          people: people.map((person) => ({ ...person })),
+        };
+        const answer = await appendAndBroadcast(sessionId, PERSON_ACCESS_RESOLVED_EVENT, data as unknown as JsonObject);
+        if (outcome === "shared") {
+          // The mention they missed reaches them now, as if just written.
+          for (const person of people) {
+            try {
+              await personStateStore.setPersonMentionSeq?.(sessionId, person.userId, messageSeq);
+            } catch (error) {
+              console.warn("[polyth] person mention cursor failed", error);
+            }
+          }
+          try {
+            await applyProjection(sessionId, (current) => ({
+              ...current,
+              updatedAt: Math.max(current.updatedAt ?? 0, answer.time),
+            }));
+          } catch (error) {
+            console.warn("[polyth] person message projection refresh failed", error);
+          }
+          const message = target.data as { author?: unknown; text?: unknown; attachments?: unknown };
+          const author = normalizeSessionPerson(message.author);
+          if (author?.userId) {
+            try {
+              deps.notify?.personMessage?.({
+                sessionId,
+                seq: messageSeq,
+                author: { ...author },
+                text: (typeof message.text === "string" && message.text)
+                  || (Array.isArray(message.attachments) ? message.attachments : [])
+                    .map((attachment) => (attachment as { name?: unknown }).name)
+                    .filter((name) => typeof name === "string")
+                    .join(", "),
+                mentions: people,
+                audience: [],
+              });
+            } catch (error) {
+              console.warn("[polyth] person message notification failed", error);
+            }
+          }
+        }
+        return { outcome, people: people.map((person) => person.userId) };
       });
     },
 
@@ -13654,17 +14187,37 @@ export function createSessionService(deps: {
       const events = await store.events(conversationId);
       const bySeq = new Map(events.map((event) => [event.seq, event] as const));
       const messages: Array<{ author: SessionPerson; time: number; text: string }> = [];
+      const selectedAttachments: AttachmentRef[] = [];
       for (const seq of [...wanted].sort((left, right) => left - right)) {
         const event = bySeq.get(seq);
         if (event?.type !== PERSON_MESSAGE_EVENT) {
           throw Object.assign(new Error("selected messages must be conversation messages"), { code: "invalid-input" });
         }
-        const data = event.data as { text?: unknown; author?: unknown };
+        const data = event.data as { text?: unknown; author?: unknown; attachments?: unknown };
         const messageAuthor = normalizeSessionPerson(data.author as SessionPerson | undefined);
         if (!messageAuthor?.userId || typeof data.text !== "string") {
           throw Object.assign(new Error("selected messages must be conversation messages"), { code: "invalid-input" });
         }
         messages.push({ author: messageAuthor, time: event.time, text: data.text });
+        // The new agent chat carries the selected messages' attachments as
+        // prompt attachments, so handing a conversation over delivers what
+        // people sent with it, not only the words.
+        if (Array.isArray(data.attachments)) {
+          for (const raw of data.attachments) {
+            if (typeof raw !== "object" || raw === null) continue;
+            const attachment = raw as Partial<AttachmentRef>;
+            if (typeof attachment.id !== "string" || typeof attachment.name !== "string"
+              || typeof attachment.mime !== "string" || !Number.isSafeInteger(attachment.size)) continue;
+            selectedAttachments.push(attachment as AttachmentRef);
+          }
+        }
+      }
+      const selectedAttachmentInput = mergeAttachmentInputs([], selectedAttachments);
+      if (Array.isArray(selectedAttachmentInput) && selectedAttachmentInput.length > MAX_TURN_ATTACHMENTS) {
+        throw Object.assign(
+          new Error(`the selected messages carry ${selectedAttachmentInput.length} attachments (max ${MAX_TURN_ATTACHMENTS})`),
+          { code: "invalid-input" },
+        );
       }
       const participants: Array<{ userId: string; access: "view" | "collaborate" | "manage" }> = [];
       const seenParticipants = new Set<string>([author.userId]);
@@ -13702,7 +14255,12 @@ export function createSessionService(deps: {
       const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
       const contextPrompt = conversationContextBlock(conversation.title, messages)
         + (prompt ? `\n\n${prompt}` : "");
-      await service.send(created.id, { text: contextPrompt }, { author });
+      await service.send(created.id, {
+        text: contextPrompt,
+        ...(Array.isArray(selectedAttachmentInput) && selectedAttachmentInput.length > 0
+          ? { attachments: selectedAttachmentInput as AttachmentRef[] }
+          : {}),
+      }, { author });
       const data: JsonObject = {
         sessionId: created.id,
         title: (await store.projection(created.id))?.title ?? title,
@@ -14112,6 +14670,7 @@ export function createSessionService(deps: {
       });
     },
 
+    markPersonalContext,
     async autoAcceptGet(sessionId) {
       const proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -14129,6 +14688,11 @@ export function createSessionService(deps: {
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       if (setting !== "on" && setting !== "all" && setting !== "off" && setting !== "inherit") {
         throw Object.assign(new Error("setting must be on, all, off, or inherit"), { code: "invalid-input" });
+      }
+      // Saving a level the Space never applies would leave the switch on
+      // while every request still asks; say why instead.
+      if ((setting === "on" || setting === "all") && deps.guardedSpace?.(proj.spaceId)) {
+        throw Object.assign(new Error(GUARDED_SPACE_AUTO_APPROVE_MESSAGE), { code: "forbidden" });
       }
       await withSessionLock(sessionId, async () => {
         await applyProjection(sessionId, (current) => {
@@ -14177,6 +14741,24 @@ export function createSessionService(deps: {
           return next;
         });
         return { setting: validated ?? {} };
+      });
+    },
+
+    async setCompactionPreference(sessionId, input) {
+      const preference = input === null ? undefined : parseCompactionPreference(input);
+      if (input !== null && !preference) {
+        throw Object.assign(new Error("invalid compaction preference"), { code: "invalid-input" });
+      }
+      return withSessionLock(sessionId, async () => {
+        // A setting, not activity: the chat keeps its place in the recent list.
+        const updated = await applyProjection(sessionId, (projection) => {
+          const { compactionPreference: _previous, ...rest } = projection;
+          return preference ? { ...rest, compactionPreference: preference } : rest;
+        });
+        if (!updated) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const runtime = sessionRuntime.get(sessionId);
+        if (runtime) syncAutoCompaction(sessionId, updated, runtime);
+        return { preference: preference ?? null };
       });
     },
 

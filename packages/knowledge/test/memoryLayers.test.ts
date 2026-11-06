@@ -189,3 +189,112 @@ test("clear, export and import touch only the project's own layer", () => {
   assert.equal(store.get(granted(all), mine.memoryId!)?.lifecycle, "active");
   db.close();
 });
+
+// ---- personal memory in a shared project (Spaces §14.6)
+
+const olia = "user-olia";
+const taras = "user-taras";
+const here = (userId: string): MemoryLayerGrant => ({ layer: "person", userId, projectId: scope.projectId });
+const aboutMe = (userId: string): MemoryLayerGrant => ({ layer: "person", userId });
+const privateChat = (userId: string): MemoryScope => granted([{ layer: "project" }, here(userId), aboutMe(userId)]);
+
+test("a person's notes reach only a scope granted to that person, and a shared chat sees neither", () => {
+  const { store } = autoStore();
+  store.create(privateChat(olia), record("Ferritin 9", "Ferritin 9, retest in three months."), { placement: here(olia) });
+  store.create(privateChat(olia), record("Prefers short replies", "Reply briefly in Ukrainian."), { placement: aboutMe(olia) });
+  store.create(scope, record("Dinner time", "The family has dinner at 19:00."));
+
+  const shared = store.list(scope);
+  assert.deepEqual(shared.items.map((item) => item.title), ["Dinner time"]);
+  assert.equal(store.search(scope, { q: "ferritin" }).total, 0);
+  assert.equal(store.recall(scope, { projectId: scope.projectId, intent: "ferritin retest" }).selected.length, 0);
+
+  // Taras's private chat is just as blind to Olia's notes as a shared one.
+  const tarasChat = privateChat(taras);
+  assert.equal(store.search(tarasChat, { q: "ferritin" }).total, 0);
+  const noted = store.search(privateChat(olia), { q: "ferritin" }).items[0]!;
+  assert.equal(store.get(tarasChat, noted.id), undefined);
+  assert.equal(store.get(scope, noted.id), undefined);
+  assert.throws(() => store.update(tarasChat, { id: noted.id, projectId: scope.projectId, expectedRevision: 1, patch: { title: "x" } }), /not found/);
+  assert.throws(() => store.forget(granted([{ layer: "project" }]), { id: noted.id, projectId: scope.projectId, expectedRevision: 1 }), /not found/);
+
+  // Olia sees all three, and clearing the project leaves her notes alone.
+  assert.equal(store.list(privateChat(olia)).total, 3);
+  store.clear(scope, store.getPolicy(scope).generation);
+  assert.equal(store.list(privateChat(olia)).items.filter((item) => item.lifecycle === "active").length, 2);
+});
+
+test("notes in one project stay out of a person's chats in another project; about-me notes follow them", () => {
+  const { store } = autoStore();
+  store.create(privateChat(olia), record("Only here", "A note bound to project-a."), { placement: here(olia) });
+  store.create(privateChat(olia), record("Everywhere", "A note about Olia."), { placement: aboutMe(olia) });
+  const other: MemoryScope = { ...scope, projectId: "project-b", layers: [{ layer: "project" }, { layer: "person", userId: olia, projectId: "project-b" }, aboutMe(olia)] };
+  assert.deepEqual(store.list(other).items.map((item) => item.title), ["Everywhere"]);
+});
+
+test("recall labels a personal note and who a note is about, and the export never carries personal notes", () => {
+  const { store } = autoStore();
+  store.create(privateChat(olia), { ...record("Ferritin 9", "Ferritin 9, retest in three months."), about: "Оля" }, { placement: here(olia) });
+  store.create(scope, { ...record("Nut allergy", "Marta has a nut allergy, ferritin unrelated."), about: "Марта <b>\n" });
+  const recall = store.recall(privateChat(olia), { projectId: scope.projectId, intent: "ferritin allergy" });
+  assert.match(recall.modelVisibleText ?? "", /· personal · about Оля\]/);
+  assert.match(recall.modelVisibleText ?? "", /· about Марта b\]/);
+  assert.equal(recall.selected.find((item) => item.layer === "person")?.about, "Оля");
+  const exported = store.exportProject(privateChat(olia));
+  assert.deepEqual(exported.records.map((item) => item.title), ["Nut allergy"]);
+});
+
+test("a proposal waits outside recall until its owner settles it, and only that owner can", () => {
+  const { store } = autoStore();
+  const receipt = store.create(privateChat(olia), { ...record("More red meat", "Olia asks for more red meat at dinner."), lifecycle: "candidate" }, { placement: here(olia), shareProposed: true });
+  assert.equal(store.recall(privateChat(olia), { projectId: scope.projectId, intent: "red meat dinner" }).selected.length, 0);
+  assert.equal(store.shareProposals(scope).length, 0);
+  assert.equal(store.shareProposals(privateChat(taras)).length, 0);
+  const [proposal] = store.shareProposals(privateChat(olia));
+  assert.equal(proposal?.id, receipt.memoryId);
+  assert.throws(() => store.settleShareProposal(privateChat(taras), proposal!.id, proposal!.revision, "published"), /not found/);
+  store.settleShareProposal(privateChat(olia), proposal!.id, proposal!.revision, "kept");
+  assert.equal(store.shareProposals(privateChat(olia)).length, 0);
+  assert.equal(store.get(privateChat(olia), proposal!.id)?.lifecycle, "active");
+  assert.equal(store.get(privateChat(olia), proposal!.id)?.shareProposedAt, undefined);
+  assert.throws(() => store.create(scope, record("x"), { shareProposed: true }), /personal note/);
+});
+
+test("moving an old shared note to personal takes it, with history, out of the shared memory", () => {
+  const { store } = autoStore();
+  const receipt = store.create(scope, { ...record("Analysis", "My ferritin is 9."), sources: [{ kind: "session", sessionId: "private-chat" }] });
+  assert.equal(store.sessionSourcedRecords(scope).length, 1);
+  assert.throws(() => store.moveToLayer(scope, receipt.memoryId!, 1, here(olia)), /not granted/);
+  const moved = store.moveToLayer(privateChat(olia), receipt.memoryId!, 1, here(olia));
+  assert.equal(moved.revision, 2);
+  assert.equal(store.get(scope, receipt.memoryId!), undefined);
+  assert.equal(store.search(scope, { q: "ferritin" }).total, 0);
+  assert.equal(store.sessionSourcedRecords(scope).length, 0);
+  assert.equal(store.get(privateChat(olia), receipt.memoryId!)?.layer, "person");
+  assert.equal(store.get(privateChat(olia), receipt.memoryId!)?.ownerId, olia);
+  store.restore(privateChat(olia), receipt.memoryId!, 2, 1);
+  assert.equal(store.get(privateChat(olia), receipt.memoryId!)?.layer, "person", "restoring an older revision never moves it back");
+});
+
+test("a harvest lands in the granted layer and purge removes one person's notes only", () => {
+  const { store } = autoStore();
+  const chat = privateChat(olia);
+  const generation = store.getPolicy(chat).generation;
+  store.enqueueHarvest(chat, { jobKey: "job-1", spaceId: scope.spaceId, projectId: scope.projectId, sessionId: "s1", sourceStartSeq: 1, sourceEndSeq: 2, sourceDigest: "d", policyGeneration: generation, extractorVersion: "v" });
+  assert.ok(store.claimHarvest(chat, "lease", 1_000, 1_000));
+  const input = { title: "Sleep", body: "Olia sleeps badly.", lifecycle: "active" as const, idempotencyKey: "k1", requestFingerprint: "f1" };
+  assert.throws(() => store.commitHarvest(scope, "job-1", "lease", generation, [input], "r", "c", 3, here(olia)), /not granted/);
+  store.commitHarvest(chat, "job-1", "lease", generation, [input], "r", "c", 3, here(olia));
+  assert.equal(store.search(scope, { q: "sleeps" }).total, 0);
+  const found = store.search(chat, { q: "sleeps" }).items[0];
+  assert.equal(found?.layer, "person");
+  assert.equal(found?.authoredBy?.kind, "system");
+
+  store.create(privateChat(taras), record("Taras's note", "Taras keeps this."), { placement: here(taras) });
+  assert.ok(store.personalBytes(chat, olia) > 0);
+  assert.equal(store.purgePerson(chat, olia), 1);
+  assert.equal(store.personalBytes(chat, olia), 0);
+  assert.equal(store.search(chat, { q: "sleeps" }).total, 0);
+  assert.equal(store.get(chat, found!.id), undefined);
+  assert.equal(store.list(privateChat(taras)).items.filter((item) => item.layer === "person").length, 1);
+});

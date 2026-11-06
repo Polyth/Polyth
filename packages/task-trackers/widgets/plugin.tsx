@@ -108,6 +108,7 @@ import {
   hasComposerDraft,
   restoreFieldDraft,
   TaskComposer,
+  TaskStartOptionsFields,
   takeFieldDraft,
   useActiveProjectId,
   useFieldDraft,
@@ -1465,6 +1466,7 @@ function TaskDetail({
                   minRows={3}
                   disabled={busy !== null}
                 />}
+                {preferences.agentHandoff && target === "new" && projectId && <TaskStartOptionsFields projectId={projectId} disabled={busy !== null} />}
                 {preferences.agentHandoff && target === "new" ? (
                   <div className="tt-action-row single">
                     <Button

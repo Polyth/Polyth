@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import {
   roleAtLeast,
   type Project,
+  type ProjectComposition,
   type ProjectPatch,
   type ProjectRemote,
   type ProjectService,
@@ -11,6 +12,13 @@ import {
 } from "@polyth/contracts";
 import type { CanonicalResource } from "@polyth/control-plane/resources";
 import { resolveInside } from "@polyth/tenancy";
+import {
+  discardManagedFolder,
+  managedOperationKey,
+  managedProjectPath,
+  parseManagedProjectInput,
+  type ManagedProjectRequest,
+} from "./managedProjects.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { projectResourceReceipt } from "./resourceReceipts.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -42,6 +50,18 @@ export function personalProjectPath(ctx: Pick<SpaceContext, "storageDir" | "user
   return resolveInside(ctx.storageDir, relative);
 }
 
+/** `<space>/personal/<hash of the person>/rooms/<hash of the project>`: inside
+ *  the person's own folder, so it can be neither probed nor registered by
+ *  anyone else (`reservedForPersonal`). Never client-chosen. */
+export function privateRoomPath(ctx: Pick<SpaceContext, "storageDir" | "userId">, parentProjectId: string): string {
+  const person = createHash("sha256").update(ctx.userId).digest("hex").slice(0, 32);
+  const project = createHash("sha256").update(parentProjectId).digest("hex").slice(0, 32);
+  const relative = join("personal", person, "rooms", project);
+  const dir = resolveInside(ctx.storageDir, relative);
+  mkdirSync(dir, { recursive: true });
+  return resolveInside(ctx.storageDir, relative);
+}
+
 const personalName = (name: string | undefined): string => {
   const trimmed = typeof name === "string" ? name.replace(/\s+/g, " ").trim() : "";
   return trimmed && trimmed.length <= MAX_PERSONAL_NAME ? trimmed : PERSONAL_PROJECT_NAME;
@@ -61,6 +81,34 @@ const personalRefused = (): Error => Object.assign(
   { code: "conflict" },
 );
 
+/** One Polyth-folder create: a resend returns the first project, and a folder
+ *  the provisioning step did not end up using is taken back. */
+async function createManagedProject(
+  ctx: SpaceContext,
+  registry: ProjectRegistry,
+  request: ManagedProjectRequest,
+  provision: (input: { path: string; name: string; composition?: ProjectComposition; managedOperation: string }) => Promise<Project>,
+  settled: (project: Project) => Project = (project) => project,
+): Promise<Project> {
+  const managedOperation = managedOperationKey(ctx.userId, request.clientOperationId);
+  const earlier = registry.managedProject(ctx.spaceId, managedOperation);
+  if (earlier) return settled(earlier);
+  const path = managedProjectPath(ctx, request.name, (candidate) => registry.localPathRegistered(candidate));
+  try {
+    const project = await provision({
+      path,
+      name: request.name,
+      ...(request.composition ? { composition: request.composition } : {}),
+      managedOperation,
+    });
+    if (resolve(project.path) !== resolve(path)) discardManagedFolder(path);
+    return project;
+  } catch (cause) {
+    discardManagedFolder(path);
+    throw cause;
+  }
+}
+
 export function canonicalProjectService(
   ctx: SpaceContext,
   registry: ProjectRegistry,
@@ -70,6 +118,17 @@ export function canonicalProjectService(
   if (!security) {
     return {
       ...base,
+      // One person has nobody to keep a project private from.
+      privateRooms: async () => [],
+      listForShell: () => base.list(),
+      async createManaged(input) {
+        if (!roleAtLeast(ctx.role, "member")) throw forbidden();
+        return createManagedProject(ctx, registry, parseManagedProjectInput(input), (provisioned) => registry.provision({
+          id: randomUUID(),
+          spaceId: ctx.spaceId,
+          ...provisioned,
+        }));
+      },
       async ensurePersonal(name) {
         assertPersonalCaller(ctx);
         const existing = registry.personalProject(ctx.spaceId, ctx.userId);
@@ -230,15 +289,28 @@ export function canonicalProjectService(
     remote?: ProjectRemote;
     /** A personal project: owner-only (`private`) from its first revision. */
     personal?: true;
+    /** The caller's private room in this project: owner-only as well. */
+    roomOf?: string;
+    composition?: ProjectComposition;
+    managedOperation?: string;
   }): Promise<Project> => {
     requireMutation();
     // Before any lookup: a personal folder answers the same whether or not
     // it exists, so its path can be neither probed nor squatted on.
-    if (!input.personal && !input.remote && registry.reservedForPersonal(input.path)) {
+    if (!input.personal && !input.roomOf && !input.remote && registry.reservedForPersonal(input.path)) {
       throw Object.assign(new Error("this folder is reserved for a personal project"), { code: "invalid-path" });
+    }
+    // The same answer whether or not it exists. A parent of the data folder is
+    // fine: the file views don't show what's inside it. A Polyth-folder project
+    // (`managedOperation`) is exempt like personal projects and rooms: the
+    // server picked its folder, which on a server lies in Space storage.
+    if (!input.personal && !input.roomOf && !input.managedOperation && !input.remote && registry.holdsServerData(input.path)) {
+      throw Object.assign(new Error("this folder holds Polyth's own data"), { code: "invalid-path" });
     }
     const existing = input.personal
       ? registry.personalProject(ctx.spaceId, ctx.userId)
+      : input.roomOf
+        ? registry.privateRoom(ctx.spaceId, input.roomOf, ctx.userId)
       : input.remote
         ? await existingRemote(input.path, input.remote)
         : await existingLocal(input.path);
@@ -254,7 +326,7 @@ export function canonicalProjectService(
       spaceId: ctx.spaceId,
       ownerPrincipalId: ctx.userId,
       createdBy: ctx.userId,
-      visibility: input.personal ? "private" : "space",
+      visibility: input.personal || input.roomOf ? "private" : "space",
     });
     let domain: Project | undefined;
     try {
@@ -266,6 +338,9 @@ export function canonicalProjectService(
         ...(input.createDirectory ? { createDirectory: true } : {}),
         ...(input.remote ? { remote: input.remote } : {}),
         ...(input.personal ? { personalOwner: ctx.userId } : {}),
+        ...(input.roomOf ? { room: { owner: ctx.userId, parentId: input.roomOf } } : {}),
+        ...(input.composition ? { composition: input.composition } : {}),
+        ...(input.managedOperation ? { managedOperation: input.managedOperation } : {}),
       });
       if (domain.id !== resourceId) {
         security.resources.abortMissingDomain(operationId, begun.resource.revision);
@@ -333,9 +408,65 @@ export function canonicalProjectService(
     return visible;
   };
 
+  const isTrustedServerWork = ctx.userId.startsWith("system:");
+  /** Active members who can open a project, the reader included. */
+  const audienceOf = (projectId: string): number => security.control.all<{ id: string }>(
+    `SELECT m.principal_id AS id FROM space_memberships m JOIN principals p ON p.id=m.principal_id
+      WHERE m.space_id=? AND m.state='active' AND m.role IN ('owner','admin','member','viewer')
+        AND (m.expires_at_ms IS NULL OR m.expires_at_ms>?) AND p.kind='user' AND p.status='active'`,
+    ctx.spaceId,
+    Date.now(),
+  ).filter((member) => security.resourceAccess.access({
+    resourceId: projectId, principalId: member.id, orgId: org.id, spaceId: ctx.spaceId,
+  }) !== undefined).length;
+
   return {
     ...base,
     list,
+    async privateRooms(parentProjectId) {
+      const rooms = await base.privateRooms!(parentProjectId);
+      const readable: Project[] = [];
+      for (const room of rooms) {
+        const resource = row(room.id);
+        if (!resource) continue;
+        if (!isTrustedServerWork && resource.ownerPrincipalId !== ctx.userId) continue;
+        try { readable.push(ensureActive(room)); }
+        catch (cause) {
+          if ((cause as { code?: unknown } | null)?.code === "not-found") continue;
+          throw cause;
+        }
+      }
+      return readable;
+    },
+    async listForShell() {
+      const projects = await list();
+      const rooms = (await Promise.all(projects.map(async (project) => {
+        const own = registry.privateRoom(ctx.spaceId, project.id, ctx.userId);
+        if (!own) return undefined;
+        try { return ensureActive(own); }
+        catch (cause) {
+          if ((cause as { code?: unknown } | null)?.code === "not-found") return undefined;
+          throw cause;
+        }
+      }))).filter((room): room is Project => room !== undefined);
+      return [...projects.map((project) => {
+        const others = audienceOf(project.id) - 1;
+        return others > 0 ? { ...project, sharedWith: others } : project;
+      }), ...rooms];
+    },
+    async ensurePrivateRoom(parentProjectId) {
+      assertPersonalCaller(ctx);
+      // Unreadable or foreign reads exactly like a missing project.
+      const parent = await base.get(parentProjectId);
+      if (!parent) throw Object.assign(new Error("project not found"), { code: "not-found" });
+      ensureActive(parent);
+      if (parent.parentProjectId || parent.personal) {
+        throw Object.assign(new Error("this project is already private to its owner"), { code: "conflict" });
+      }
+      const existing = registry.privateRoom(ctx.spaceId, parentProjectId, ctx.userId);
+      if (existing) return ensureActive(existing);
+      return provision({ path: privateRoomPath(ctx, parentProjectId), name: parent.name, roomOf: parentProjectId });
+    },
     async get(id) {
       const project = await base.get(id);
       return project ? ensureActive(project) : undefined;
@@ -349,8 +480,27 @@ export function canonicalProjectService(
       if ((await list()).length > 0) throw personalRefused();
       return provision({ path: personalProjectPath(ctx), name: personalName(name), personal: true });
     },
+    ...(base.getPresentationSettings ? {
+      getPresentationSettings: async (id: string) => {
+        const project = await base.get(id);
+        if (project) ensureActive(project);
+        return base.getPresentationSettings!(id);
+      },
+    } : {}),
+    ...(base.putPresentationSettings ? {
+      putPresentationSettings: async (...args: Parameters<NonNullable<ProjectService["putPresentationSettings"]>>) => {
+        requireMutation();
+        const project = await base.get(args[0]);
+        if (project) ensureActive(project);
+        return base.putPresentationSettings!(...args);
+      },
+    } : {}),
     add: (path, name) => provision({ path, ...(name ? { name } : {}) }),
     create: (path, name) => provision({ path, createDirectory: true, ...(name ? { name } : {}) }),
+    async createManaged(input) {
+      requireMutation();
+      return createManagedProject(ctx, registry, parseManagedProjectInput(input), provision, ensureActive);
+    },
     remove,
     ...(base.addRemote ? {
       addRemote: (path: string, remote: ProjectRemote, name?: string) =>

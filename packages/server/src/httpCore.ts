@@ -23,6 +23,7 @@ import {
   type RouteRequest
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
+import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
 import type { RuntimePool } from "./sessions.ts";
 import { parseTurnCommand } from "./turnCommand.ts";
 import {
@@ -54,6 +55,7 @@ import {
 import { TERMINATED_TLS } from "@polyth/identity/http";
 import { guardedCatalog, guardrailsForUser } from "./accountGuardrails.ts";
 import { harnessAllowedFor, limitedCatalog, limitsForUser } from "./accountLimits.ts";
+import { sessionClosedTo } from "./sessionSharing.ts";
 import { privateHarnessCatalog, type HarnessAccess } from "./accountPermissions.ts";
 import { createProxyTrust, type ProxyTrust } from "./trustedProxy.ts";
 import { logHttp500 } from "./httpLog.ts";
@@ -786,7 +788,8 @@ async function dispatchHttp(
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
       }
       if (path === "/api/projects" && method === "GET") {
-        const list = await space().projects.list();
+        const service = space().projects;
+        const list = await (service.listForShell?.() ?? service.list());
         return json(res, 200, url.searchParams.get("iconRefs") === "1" ? list.map(withProjectIconRef) : list);
       }
       if (path === "/api/projects" && method === "POST") {
@@ -1033,6 +1036,13 @@ async function dispatchHttp(
         const rawSetting = body.memory !== undefined ? body.memory : body.setting;
         const setting = memoryNarrowingInput(rawSetting) ?? {};
         return json(res, 200, await memoryPolicySet(m[1]!, setting));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/compaction-preference$/);
+      if (m && method === "PUT") {
+        const setCompactionPreference = space().sessions.setCompactionPreference;
+        if (!setCompactionPreference) throw Object.assign(new Error("compaction preference unavailable"), { code: "not-supported" });
+        const body = await loadBody();
+        return json(res, 200, await setCompactionPreference(m[1]!, (body.preference ?? null) as CompactionPreference | null));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/client-mutations\/([^/]+)$/);
       if (m && method === "GET") {
@@ -1323,6 +1333,28 @@ async function dispatchHttp(
       }
 
       if (deps.routes?.length) {
+        // Package routes look projects and chats up with the server's own rights,
+        // so whether this person may name one is decided here, before any of them
+        // runs: a project or chat they can't open reads as missing, whichever
+        // package serves the route and whether the id is in the query, path or body.
+        const admitNamed = async (projectId: unknown, sessionId: unknown): Promise<void> => {
+          if (!path.startsWith("/api/") || AUTH_PUBLIC.has(path)) return;
+          if (typeof projectId === "string" && projectId) {
+            try { await space().projects.get(projectId); }
+            catch (cause) {
+              // Anything else is for the handler to report as it always has.
+              if ((cause as { code?: unknown } | null)?.code === "not-found") throw cause;
+            }
+          }
+          if (typeof sessionId === "string" && sessionId && sessionClosedTo(space().ctx, sessionId)) {
+            throw Object.assign(new Error("session not found"), { code: "not-found" });
+          }
+        };
+        const inPath = path.match(/\/(projects|sessions)\/([^/]+)/);
+        let namedInPath: string | undefined;
+        try { namedInPath = inPath ? decodeURIComponent(inPath[2]!) : undefined; } catch { /* malformed: no such id */ }
+        await admitNamed(inPath?.[1] === "projects" ? namedInPath : undefined, inPath?.[1] === "sessions" ? namedInPath : undefined);
+        await admitNamed(url.searchParams.get("projectId"), url.searchParams.get("sessionId"));
         const rc: RouteRequest = {
           req, res, url, path, method, ingress, principal,
           // A getter, not a value: contributed routes also see non-/api paths
@@ -1332,7 +1364,11 @@ async function dispatchHttp(
           // that does read it gets the same validated context as core routes.
           get space() { return space().ctx; },
           requireCapability,
-          body: async () => loadBody(),
+          body: async () => {
+            const input = await loadBody();
+            await admitNamed(input.projectId, input.sessionId);
+            return input;
+          },
           json: (code, body) => json(res, code, body),
         };
         for (const route of deps.routes) {

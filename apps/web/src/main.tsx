@@ -12,6 +12,7 @@ import { offerWebUpdate } from "./webUpdateNotice.ts";
 import { isNativeMobile, prepareMobileLaunch } from "@polyth/mobile/runtime";
 import { releaseLaunchCurtain, setLaunchLeaveCover } from "@polyth/mobile/launch";
 import { launchVeil } from "./launchVeil.ts";
+import { desktopBridge } from "./desktopBridge.ts";
 import "./styles.css";
 import "./moduleContent.css";
 import "./composerAdaptive.css";
@@ -35,6 +36,7 @@ import "./macosTheme.css";
 import "./liquidGlassTheme.css";
 // Window layout geometry (shellLayout.ts) composes with every theme style.
 import "./shellLayout.css";
+import "./desktopServerList.css";
 // Interface styles restyle every surface above, so they load last.
 import "./shellLooks.css";
 import "./chatMotion.ts";
@@ -61,7 +63,12 @@ if (isNativeMobile()) {
 setTimeout(() => {
   if (!document.getElementById("root")?.hasChildNodes()) void launchVeil.lift();
 }, 15_000);
-if (mobileLaunch.kind === "connect") {
+if (desktopBridge()?.surface === "hub") {
+  // The desktop app's server list, on its own origin with no server behind it.
+  await ensureLocale(getLocaleSnapshot());
+  const { renderDesktopServerList } = await import("./components/DesktopServerList.tsx");
+  renderDesktopServerList();
+} else if (mobileLaunch.kind === "connect") {
   await ensureLocale(getLocaleSnapshot());
   const { renderMobileConnection } = await import("@polyth/mobile/connection");
   renderMobileConnection(mobileLaunch, { veil: launchVeil });

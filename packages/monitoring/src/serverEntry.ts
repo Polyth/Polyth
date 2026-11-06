@@ -3,12 +3,16 @@ import { localOnlyRemoteAccess, serverServiceKey, SESSION_PURPOSES, type ServerP
 import { SYSTEM_ADMIN_RULES } from "./contracts.ts";
 import { createMonitoringService, monitoringRoutes } from "./service.ts";
 import { createMonitoringAlerts } from "./alerts.ts";
+import { localMetrics } from "./collect.ts";
+import { createHistorySampler } from "./history.ts";
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const service = createMonitoringService(host);
   const alerts = createMonitoringAlerts(host, service);
+  const sampler = createHistorySampler(host, (spaceId, metrics) => service.recordLocal(spaceId, metrics), localMetrics);
   let registrations: Disposable[] = [];
   const dispose = () => {
+    sampler.stop();
     alerts.stop();
     service.disable();
     registrations.toReversed().forEach((item) => item.dispose());
@@ -16,7 +20,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   };
   return {
     remoteAccess: localOnlyRemoteAccess(["monitoring"]),
-    routes: monitoringRoutes(service),
+    routes: monitoringRoutes(service, alerts),
     onEnable() {
       dispose();
       try {
@@ -27,9 +31,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           registrations.push(registry.register("monitoring", {
             descriptor: {
               id: "monitoring.monitoring_read", kind: "tool", owner: "monitoring", scope: "project", revision: "1",
-              name: "monitoring_read", description: "Read the current project's Monitoring policy, host metrics, approved service health or approved log tails (project/host files, system or kernel journal, service journals). Read-only; each diagnostic operation requires its own project policy grant.",
+              name: "monitoring_read", description: "Read the current project's Monitoring policy, host metrics (memory, load, disk, pressure), their recent history, process names with CPU and memory, approved service health or approved log tails (project/host files, system or kernel journal, service journals). Read-only; each diagnostic operation requires its own project policy grant. History needs the metrics grant.",
               inputSchema: { type: "object", additionalProperties: false, required: ["action"], properties: {
-                action: { type: "string", enum: ["policy", "metrics", "services", "logs"] },
+                action: { type: "string", enum: ["policy", "metrics", "history", "processes", "services", "logs"] },
+                range: { type: "string", enum: ["1h", "24h", "7d"], description: "Time range for history. Defaults to 1h." },
                 source: { type: "string", maxLength: 240, description: "An approved log source for logs: project .log path, absolute host file, journal, kernel or journal:<unit>.service. See policy.logPaths/serviceUnits." },
               } }, trust: "workspace", mutating: false,
             },
@@ -42,7 +47,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           }));
         }
         service.enable();
-        if (host.deployment !== "multi-tenant-sandboxed") alerts.start();
+        if (host.deployment !== "multi-tenant-sandboxed") { alerts.start(); sampler.start(); }
       } catch (error) { dispose(); throw error; }
     },
     onDisable: dispose,

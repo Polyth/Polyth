@@ -588,6 +588,63 @@ pub fn run_cli() {
     main();
 }
 
+/// Serves the client over JSON lines on stdin/stdout for the one process that
+/// launched it. Requests run concurrently (a pairing waits minutes for the owner
+/// while its cancel must still get through). End of stdin is the owner leaving,
+/// however it left: the live sessions close and the process exits.
+async fn run_stdio(data_dir: PathBuf, web_dist: Option<PathBuf>) {
+    let client = Arc::new(NativeClient::new(data_dir, web_dist));
+    let (output, mut outgoing) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(line) = outgoing.recv().await {
+            let written = stdout.write_all(line.as_bytes()).await.is_ok()
+                && stdout.write_all(b"\n").await.is_ok()
+                && stdout.flush().await.is_ok();
+            if !written {
+                break;
+            }
+        }
+    });
+    let mut reader = BufReader::new(tokio::io::stdin());
+    let mut buffer = Vec::new();
+    let limit = Limits::v1().control_message_bytes;
+    while let Ok(Some(line)) = read_bounded_line(&mut reader, &mut buffer, limit).await {
+        let client = client.clone();
+        let output = output.clone();
+        tokio::spawn(async move {
+            let response = stdio_response(&client, &line).await;
+            let _ = output.send(response);
+        });
+    }
+    let sessions: Vec<LiveSession> = client
+        .state
+        .lock()
+        .await
+        .sessions
+        .drain()
+        .map(|(_, session)| session)
+        .collect();
+    let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        for session in sessions {
+            close_session(session, b"owner-exit").await;
+        }
+    })
+    .await;
+    std::process::exit(0);
+}
+
+async fn stdio_response(client: &NativeClient, line: &str) -> String {
+    let Ok(request) = serde_json::from_str::<RpcRequest>(line) else {
+        return json!({ "id": 0, "error": { "code": LinkError::PairingInvalid.code() } })
+            .to_string();
+    };
+    match client.invoke(&request.method, request.params, None).await {
+        Ok(result) => json!({ "id": request.id, "result": result }).to_string(),
+        Err(code) => json!({ "id": request.id, "error": { "code": code } }).to_string(),
+    }
+}
+
 fn session_generation_changed(previous: Option<u64>, current: Option<u64>) -> bool {
     current.is_some() && current != previous
 }

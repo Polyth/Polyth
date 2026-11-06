@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { uptime } from "node:os";
@@ -202,31 +202,32 @@ const runJobHelper = (helper: string, args: string[], timeoutMs: number): Promis
     timer.unref?.();
     child.stdout.on("data", (chunk) => { if (stdout.length < 1_024) stdout += String(chunk); });
     child.once("error", (error) => { clearTimeout(timer); reject(error); });
-    child.once("exit", (code) => { clearTimeout(timer); resolve({ code, stdout: stdout.trim() }); });
+    // `close`, not `exit`: the output can still be in the pipe when the process
+    // has exited, and a read without it would call an ended job unverified.
+    child.once("close", (code) => { clearTimeout(timer); resolve({ code, stdout: stdout.trim() }); });
   });
 
-let detectedJobs: WindowsJobController | null | undefined;
-/** Job Object containment, when polyth-job.exe is present and the host lets
- * it enter a job (a self test, run once per process). */
-export const windowsJobContainment = (): WindowsJobController | undefined => {
-  if (process.platform !== "win32") return undefined;
-  if (detectedJobs !== undefined) return detectedJobs ?? undefined;
-  const helper = jobHelperExecutable();
-  const selftest = helper
-    ? spawnSync(helper, ["selftest"], { encoding: "utf8", timeout: 10_000, windowsHide: true, shell: false })
-    : undefined;
-  if (!helper || selftest?.status !== 0 || selftest.stdout.trim() !== "ok") {
-    detectedJobs = null;
-    return undefined;
-  }
-  detectedJobs = {
-    launch: (job, line) => ({ command: helper, args: ["run", job], env: { POLYTH_JOB_COMMAND_LINE: line } }),
-    async release(job) {
-      if (!JOB_NAME_RE.test(job)) return false;
-      const ended = await runJobHelper(helper, ["terminate", job], 15_000).catch(() => undefined);
-      return ended?.code === 0 && (ended.stdout === "absent" || ended.stdout === "empty");
-    },
-  };
+let detectedJobs: Promise<WindowsJobController | undefined> | undefined;
+/** Job Object containment, when polyth-job.exe is present and the host lets it
+ * enter a job (a self test, run once per process). Never synchronous: the server
+ * shares its thread with the desktop window, and a first launch of an unsigned
+ * helper can sit in the virus scanner for seconds. */
+export const windowsJobContainment = (): Promise<WindowsJobController | undefined> => {
+  if (process.platform !== "win32") return Promise.resolve(undefined);
+  detectedJobs ??= (async () => {
+    const helper = jobHelperExecutable();
+    if (!helper) return undefined;
+    const selftest = await runJobHelper(helper, ["selftest"], 10_000).catch(() => undefined);
+    if (selftest?.code !== 0 || selftest.stdout !== "ok") return undefined;
+    return {
+      launch: (job, line) => ({ command: helper, args: ["run", job], env: { POLYTH_JOB_COMMAND_LINE: line } }),
+      async release(job) {
+        if (!JOB_NAME_RE.test(job)) return false;
+        const ended = await runJobHelper(helper, ["terminate", job], 15_000).catch(() => undefined);
+        return ended?.code === 0 && (ended.stdout === "absent" || ended.stdout === "empty");
+      },
+    };
+  })();
   return detectedJobs;
 };
 
@@ -249,8 +250,9 @@ const priorExecutionReleased = async (
 export async function createPortableHarnessAuthority(
   file?: string,
   stable = false,
-  jobs: WindowsJobController | null = windowsJobContainment() ?? null,
+  jobController?: WindowsJobController | null,
 ): Promise<HarnessProcessAuthority> {
+  const jobs = jobController === undefined ? await windowsJobContainment() ?? null : jobController;
   const observedUptime = uptime();
   const prior = readPortableState(file);
   if (prior && !await priorExecutionReleased(prior, observedUptime, jobs)) {
@@ -365,9 +367,10 @@ export async function releaseHarnessProcessExecution(
   file: string,
   binding: RuntimeSessionBinding,
   operationId: string,
-  jobs: WindowsJobController | null = windowsJobContainment() ?? null,
+  jobController?: WindowsJobController | null,
 ): Promise<MutationOutcome<ExecutionReleaseProof>> {
   if (process.platform === "linux") return releaseProcessExecution(file, binding, operationId);
+  const jobs = jobController === undefined ? await windowsJobContainment() ?? null : jobController;
   const backendSessionId = binding.backendSessionId;
   if (!backendSessionId) {
     return { kind: "rejected", code: "binding-mismatch", message: "backend execution identity is missing" };

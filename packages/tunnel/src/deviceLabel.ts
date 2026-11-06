@@ -4,6 +4,9 @@ const PLACEHOLDER_LABELS = new Set(["this phone", "mobile device"]);
 const PLATFORM_LABELS: Record<string, string> = {
   ios: "iPhone",
   android: "Android",
+  macos: "Mac",
+  windows: "Windows PC",
+  linux: "Linux PC",
 };
 
 const key = (label: string): string => label.toLocaleLowerCase();

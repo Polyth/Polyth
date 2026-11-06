@@ -10,7 +10,10 @@ import { browseHost, discoverRepositories, mkdirHost } from "@polyth/files";
 import { AGENT_BETA_READ_ONLY_MESSAGE, agentBetaEnabled } from "@polyth/harness-runtime";
 import type { RouteHandler } from "../http.ts";
 
-export function browseRoutes(): RouteHandler {
+/** `dataDir` holds everyone's private chats and notes, so the picker reads as if
+ *  it weren't there (Spaces §14.5). */
+export function browseRoutes(dataDir: string): RouteHandler {
+  const sealedRoots = [dataDir];
   return async (rc) => {
     const { path, method } = rc;
     if (path !== "/api/browse" && path !== "/api/browse/mkdir") return false;
@@ -26,12 +29,13 @@ export function browseRoutes(): RouteHandler {
       if (rc.url.searchParams.get("repositories") === "true") {
         const selected = rc.url.searchParams.get("path");
         if (!selected) throw Object.assign(new Error("path required"), { code: "invalid-input" });
+        await browseHost(selected, { sealedRoots });
         rc.json(200, await discoverRepositories(selected));
         return true;
       }
       rc.json(200, await browseHost(
         rc.url.searchParams.get("path"),
-        { hidden: rc.url.searchParams.get("hidden") === "true" },
+        { hidden: rc.url.searchParams.get("hidden") === "true", sealedRoots },
       ));
       return true;
     }
@@ -44,7 +48,7 @@ export function browseRoutes(): RouteHandler {
       const b = await rc.body();
       const target = String(b.path ?? "").trim();
       if (!target) throw Object.assign(new Error("path required"), { code: "invalid-input" });
-      rc.json(200, await mkdirHost(target));
+      rc.json(200, await mkdirHost(target, { sealedRoots }));
       return true;
     }
 

@@ -31,21 +31,48 @@ Object.defineProperty(dom, "matchMedia", {
   }),
 });
 const browseUrls: string[] = [];
+const mkdirCalls: string[] = [];
+/** The only path the fake host refuses until it is created. */
+const MISSING = "/Users/demo/missing-target";
 Object.defineProperty(globalThis, "fetch", {
   configurable: true,
-  value: async (input: string | URL | Request) => {
+  value: async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
+    const requested = (() => {
+      try { return new URL(url, "http://127.0.0.1").searchParams.get("path") ?? ""; } catch { return ""; }
+    })();
+    const exists = requested !== MISSING || mkdirCalls.includes(MISSING);
+    if (url.includes("/api/browse/mkdir")) {
+      const target = JSON.parse(String(init?.body ?? "{}")) as { path?: string };
+      const made = target.path ?? "";
+      if (made) mkdirCalls.push(made);
+      return {
+        ok: true, status: 200, statusText: "OK",
+        json: async () => ({ path: made }),
+        text: async () => "",
+      };
+    }
     if (url.includes("/api/browse")) {
       browseUrls.push(url);
+      if (!exists) {
+        return {
+          ok: false,
+          status: 404,
+          statusText: "Not Found",
+          json: async () => ({}),
+          text: async () => JSON.stringify({ error: "not-found", message: `No such directory: ${requested}` }),
+        };
+      }
+      const resolved = requested || "/Users/demo";
       return {
         ok: true,
         status: 200,
         statusText: "OK",
         json: async () => ({
-          path: "/Users/demo",
-          parent: "/Users",
+          path: resolved,
+          parent: resolved.split("/").slice(0, -1).join("/") || "/",
           home: "/Users/demo",
-          entries: [{ name: "polyth", path: "/Users/demo/polyth", hidden: false }],
+          entries: [{ name: "polyth", path: `${resolved}/polyth`, hidden: false }],
         }),
         text: async () => "",
       };
@@ -94,6 +121,18 @@ const key = async (target: Element, init: KeyboardEventInit) => {
 const click = async (target: Element | null) => {
   assert.ok(target, "click target exists");
   await act(async () => { (target as HTMLElement).click(); });
+  await flush();
+};
+const pointerDown = async (target: Element) => {
+  await act(async () => { target.dispatchEvent(new Event("pointerdown", { bubbles: true })); });
+  await flush();
+};
+const type = async (input: HTMLInputElement, value: string) => {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
   await flush();
 };
 
@@ -201,6 +240,63 @@ test("ways to add share the bottom bar with the primary action", async () => {
     const foot = document.body.querySelector(".folder-foot");
     assert.ok(foot?.querySelector(".folder-source-row .folder-new-folder"));
     assert.ok(foot?.querySelector(":scope > .folder-open-btn"));
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("a typed path that does not exist offers to create it instead of opening the previous folder", async () => {
+  let closes = 0;
+  mkdirCalls.length = 0;
+  const view = await mount({ onClose: () => { closes += 1; } });
+  try {
+    await click(document.body.querySelector(".folder-crumbs-edit"));
+    const input = document.body.querySelector<HTMLInputElement>("input.folder-path")!;
+    await type(input, MISSING);
+    await key(input, { key: "Enter" });
+    const notice = document.body.querySelector(".folder-missing");
+    assert.ok(notice, "the missing folder is reported");
+    assert.match(notice.textContent ?? "", /doesn.t exist yet/);
+    assert.match(notice.textContent ?? "", /missing-target/);
+    assert.equal(document.body.querySelector(".folder-error"), null, "a missing folder is not a red error");
+    assert.equal(document.body.querySelectorAll(".folder-row").length, 1, "the picker stays on the last valid folder");
+    const primary = document.body.querySelector<HTMLElement>(".folder-open-btn")!;
+    assert.equal(primary.dataset.action, "create-missing", "the primary action becomes the create offer");
+    assert.match(primary.textContent ?? "", /Create “missing-target”/);
+    assert.equal(closes, 0, "nothing was opened");
+    assert.equal(mkdirCalls.length, 0, "nothing is created without a press");
+
+    // Pressing the offer creates exactly the path that was typed.
+    await click(primary);
+    assert.deepEqual(mkdirCalls, [MISSING]);
+    assert.equal(document.body.querySelector(".folder-missing"), null, "the offer clears once the folder exists");
+    const opened = document.body.querySelector<HTMLElement>(".folder-open-btn")!;
+    assert.equal(opened.dataset.action, "open");
+    assert.match(opened.textContent ?? "", /Open “missing-target”/);
+    assert.ok(browseUrls.some((url) => decodeURIComponent(url).includes(MISSING)), "the new folder is browsed");
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("pressing Open with a missing typed path suggests creating it, not opening the folder on screen", async () => {
+  mkdirCalls.length = 0;
+  const view = await mount({ onClose: () => {} });
+  try {
+    await click(document.body.querySelector(".folder-crumbs-edit"));
+    const input = document.body.querySelector<HTMLInputElement>("input.folder-path")!;
+    await type(input, MISSING);
+    const primary = document.body.querySelector<HTMLElement>(".folder-open-btn")!;
+    // The press blurs (and closes) the field first; the action must still use
+    // the location that was typed.
+    await pointerDown(primary);
+    await click(primary);
+    const notice = document.body.querySelector(".folder-missing");
+    assert.ok(notice, "pressing Open reports the missing folder");
+    assert.equal(document.body.querySelector<HTMLElement>(".folder-open-btn")?.dataset.action, "create-missing");
+    assert.equal(mkdirCalls.length, 0, "the offer does not create anything by itself");
+    // The folder on screen was not opened behind the person's back.
+    assert.equal(document.body.querySelector(".folder-list")?.textContent?.includes("polyth"), true);
   } finally {
     await view.unmount();
   }

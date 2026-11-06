@@ -9,9 +9,29 @@ interface StatusEntry {
   listeners: Set<() => void>;
   inFlight: Promise<GitStatus | null> | null;
   requestGeneration: number;
+  /** Serialized `status`: an unchanged answer keeps the object and stays silent. */
+  statusKey: string;
+  /** Views the person is looking at (Git view, recent changes). */
   polling: number;
-  timer: ReturnType<typeof setInterval> | null;
+  /** Views that only follow a running turn. */
+  following: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** Wall-clock time of the next scheduled read. */
+  nextAt: number;
+  /** How long the last read took, the measure of what this machine can afford. */
+  lastDurationMs: number;
+  lastCompletedAt: number;
 }
+
+/** While a view is open, or while a turn runs and nothing reports activity. */
+export const GIT_STATUS_VIEW_POLL_MS = 2_500;
+export const GIT_STATUS_TURN_POLL_MS = 15_000;
+/** A read that follows reported activity waits for the burst to settle. */
+export const GIT_STATUS_ACTIVITY_DELAY_MS = 1_000;
+/** A slow `git status` (a big tree, a synced folder, a scanned disk) spaces
+ *  itself out instead of keeping the machine busy with one process after another. */
+const SLOW_READ_FACTOR = 10;
+const SLOWEST_POLL_MS = 60_000;
 
 export interface GitSourceControlContext {
   label: string;
@@ -38,7 +58,10 @@ function entry(projectId: string, sessionId?: string | null, repositoryId?: stri
   const key = contextKey(projectId, sessionId, repositoryId);
   let value = entries.get(key);
   if (!value) {
-    value = { status: null, listeners: new Set(), inFlight: null, requestGeneration: 0, polling: 0, timer: null };
+    value = {
+      status: null, listeners: new Set(), inFlight: null, requestGeneration: 0, statusKey: "null",
+      polling: 0, following: 0, timer: null, nextAt: 0, lastDurationMs: 0, lastCompletedAt: 0,
+    };
     entries.set(key, value);
   }
   return value;
@@ -47,6 +70,16 @@ function entry(projectId: string, sessionId?: string | null, repositoryId?: stri
 function notify(value: StatusEntry): void {
   for (const listener of [...value.listeners]) listener();
   for (const listener of [...globalListeners]) listener();
+}
+
+/** Consumers run effects keyed on the status object (one `git diff` per changed
+ *  file among them), so only a real change may produce a new one. */
+function publish(value: StatusEntry, status: GitStatus | null): void {
+  const key = JSON.stringify(status);
+  if (key === value.statusKey) return;
+  value.status = status;
+  value.statusKey = key;
+  notify(value);
 }
 
 export function peekGitStatus(projectId: string, sessionId?: string | null, repositoryId?: string | null): GitStatus | null {
@@ -64,8 +97,11 @@ export function cacheGitStatus(
   sessionId?: string | null,
   repositoryId?: string | null,
 ): void {
+  // Someone changed the repository and says so: tell everyone, even when the
+  // cached value happens to read the same.
   const value = entry(projectId, sessionId, repositoryId);
   value.status = status;
+  value.statusKey = JSON.stringify(status);
   notify(value);
 }
 
@@ -97,43 +133,93 @@ export function refreshGitStatus(projectId: string, sessionId?: string | null, r
   const value = entry(projectId, sessionId, repositoryId);
   if (value.inFlight) return value.inFlight;
   const generation = ++value.requestGeneration;
+  const startedAt = Date.now();
   value.inFlight = api.gitStatus(projectId, sessionId ?? undefined, repositoryId ?? undefined)
     .then((status) => {
-      if (generation === value.requestGeneration) {
-        value.status = status;
-        notify(value);
-      }
+      if (generation === value.requestGeneration) publish(value, status);
       return status;
     })
     .catch(() => {
-      if (generation === value.requestGeneration) {
-        value.status = null;
-        notify(value);
-      }
+      if (generation === value.requestGeneration) publish(value, null);
       return null;
     })
     .finally(() => {
       value.inFlight = null;
+      value.lastCompletedAt = Date.now();
+      value.lastDurationMs = value.lastCompletedAt - startedAt;
     });
   return value.inFlight;
 }
 
-function beginPolling(projectId: string, sessionId?: string | null, repositoryId?: string | null): () => void {
+const documentHidden = (): boolean =>
+  (globalThis as { document?: Document }).document?.visibilityState === "hidden";
+
+/** Time from the end of one read to the start of the next. */
+const pollGap = (value: StatusEntry): number => Math.min(
+  SLOWEST_POLL_MS,
+  Math.max(
+    value.polling > 0 ? GIT_STATUS_VIEW_POLL_MS : GIT_STATUS_TURN_POLL_MS,
+    value.lastDurationMs * SLOW_READ_FACTOR,
+  ),
+);
+
+function clearSchedule(value: StatusEntry): void {
+  if (value.timer) clearTimeout(value.timer);
+  value.timer = null;
+  value.nextAt = 0;
+}
+
+function schedule(value: StatusEntry, delayMs: number, read: () => Promise<unknown>): void {
+  if (value.timer) clearTimeout(value.timer);
+  value.nextAt = Date.now() + delayMs;
+  value.timer = setTimeout(() => {
+    value.timer = null;
+    value.nextAt = 0;
+    const next = () => {
+      if (value.polling + value.following > 0) schedule(value, pollGap(value), read);
+    };
+    // A hidden window reads nothing; it looks again once it could be seen.
+    if (documentHidden()) next();
+    else void read().finally(next);
+  }, delayMs);
+  (value.timer as { unref?: () => void }).unref?.();
+}
+
+function beginPolling(
+  mode: "view" | "turn",
+  projectId: string,
+  sessionId?: string | null,
+  repositoryId?: string | null,
+): () => void {
   const value = entry(projectId, sessionId, repositoryId);
-  value.polling += 1;
-  if (!value.timer) {
-    value.timer = setInterval(() => void refreshGitStatus(projectId, sessionId, repositoryId), 2_500);
+  const read = () => refreshGitStatus(projectId, sessionId, repositoryId);
+  const field = mode === "view" ? "polling" : "following";
+  value[field] += 1;
+  // Opening a view speeds up a schedule a running turn left long.
+  if (!value.timer || (mode === "view" && value.nextAt - Date.now() > pollGap(value))) {
+    schedule(value, pollGap(value), read);
   }
   return () => {
-    value.polling = Math.max(0, value.polling - 1);
-    if (value.polling === 0 && value.timer) {
-      clearInterval(value.timer);
-      value.timer = null;
-    }
+    value[field] = Math.max(0, value[field] - 1);
+    if (value.polling + value.following === 0) clearSchedule(value);
   };
 }
 
-export function useGitStatus(projectId: string | null, poll: boolean, sessionId?: string | null, repositoryId?: string | null, enabled = true): GitStatus | null {
+/** A tool finished in the running turn: its changes are worth reading soon. A
+ *  burst of tools collapses into one read, no sooner than this machine affords. */
+export function noteGitActivity(projectId: string, sessionId?: string | null, repositoryId?: string | null): void {
+  const value = entry(projectId, sessionId, repositoryId);
+  const read = () => refreshGitStatus(projectId, sessionId, repositoryId);
+  const affordableAt = value.lastCompletedAt + Math.min(SLOWEST_POLL_MS, value.lastDurationMs * SLOW_READ_FACTOR);
+  const delay = Math.max(GIT_STATUS_ACTIVITY_DELAY_MS, affordableAt - Date.now());
+  if (value.timer && value.nextAt - Date.now() <= delay) return;
+  schedule(value, delay, read);
+}
+
+/** `poll`: `true` while a view shows the status, `"turn"` while a turn runs (a
+ *  slow fallback for `noteGitActivity`), `false` otherwise. The read when a turn
+ *  ends shows what it left behind. */
+export function useGitStatus(projectId: string | null, poll: boolean | "turn", sessionId?: string | null, repositoryId?: string | null, enabled = true): GitStatus | null {
   const subscribe = useCallback((listener: () => void) => {
     if (!projectId) return () => {};
     const value = entry(projectId, sessionId, repositoryId);
@@ -150,7 +236,11 @@ export function useGitStatus(projectId: string | null, poll: boolean, sessionId?
 
   useEffect(() => {
     if (!projectId || !poll || !enabled) return;
-    return beginPolling(projectId, sessionId, repositoryId);
+    const stop = beginPolling(poll === "turn" ? "turn" : "view", projectId, sessionId, repositoryId);
+    return () => {
+      stop();
+      if (poll === "turn") void refreshGitStatus(projectId, sessionId, repositoryId);
+    };
   }, [enabled, projectId, sessionId, repositoryId, poll]);
 
   return status;

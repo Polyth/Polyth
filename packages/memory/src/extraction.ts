@@ -5,6 +5,8 @@ export interface HarvestCandidate {
   body: string;
   category?: string;
   tags?: string[];
+  /** Who the fact is about, as the transcript names them. */
+  about?: string;
 }
 
 export interface HarvestSourceEvent {
@@ -83,7 +85,8 @@ export function parseHarvestExtraction(value: string): HarvestCandidate[] | unde
     const tags = Array.isArray(item.tags)
       ? item.tags.map(sanitizeHarvestText).filter((tag): tag is string => !!tag).slice(0, 12)
       : undefined;
-    out.push({ title, body, ...(typeof item.category === "string" ? { category: item.category } : {}), ...(tags ? { tags } : {}) });
+    const about = sanitizeHarvestText(item.about);
+    out.push({ title, body, ...(typeof item.category === "string" ? { category: item.category } : {}), ...(tags ? { tags } : {}), ...(about && about.length <= 80 ? { about } : {}) });
   }
   return rows.length > 0 && out.length === 0 ? undefined : out;
 }

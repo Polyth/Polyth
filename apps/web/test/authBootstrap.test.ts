@@ -96,7 +96,7 @@ test('a lost Link proxy session bounces to the connection hub at most once per w
 test('bootstrap error, setup-only restart and revocation paths cannot advance to ready', () => {
   const source = readFileSync(new URL('../src/bootstrap.tsx', import.meta.url), 'utf8');
   // The bounce asks the hub to resume this server at the same path.
-  assert.match(source, /claimLinkSessionBounce\(error, sessionStorage\)\) \{\n\s+await returnToMobileConnectionHub\([^;]*\{ resume: true \},?\s*\);\n\s+return;\n\s+\}\n\s+setPhase\("unavailable"\);/);
+  assert.match(source, /claimLinkSessionBounce\(error, sessionStorage\)\) \{\n\s+await returnToConnectionHub\([^;]*\);\n\s+return;\n\s+\}\n\s+setPhase\("unavailable"\);/);
   assert.match(source, /const onAuthRequired = \(\) => \{ invalidated = true; setLocalOwner\(undefined\); setPhase\("locked"\); \}/);
   assert.match(source, /if \(cancelled \|\| invalidated\) return;/);
   assert.match(source, /if \(phase === "setup"\) return <SetupScreen/);

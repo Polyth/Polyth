@@ -291,6 +291,10 @@ export function createPiProvider(host: ServerPackageHost, account?: ResolvedHarn
         throw error;
       }
     },
+    async completeUtility(request: SmallModelCompletionRequest) {
+      const command = await resolvePiBinary();
+      return createPiSmallModelRunner({ command, cwd: request.cwd, env: await piEnv(command, account) }).complete(request);
+    },
     async releaseExecution(context, binding, operationId) {
       if (!context.space) {
         return { kind: "rejected", code: "unsupported", message: "Local Space context required" };

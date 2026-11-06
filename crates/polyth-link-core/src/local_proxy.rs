@@ -276,9 +276,24 @@ impl OwnedLoopback {
 }
 
 pub async fn bind_owned_loopback() -> Result<(TcpListener, OwnedLoopback), LinkError> {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|_| LinkError::TransportUnavailable)?;
+    bind_owned_loopback_on(None).await
+}
+
+/// Binds `preferred` when it is free, otherwise any free port: a port another
+/// process holds never fails a connection, it only costs the page its origin.
+pub async fn bind_owned_loopback_on(
+    preferred: Option<u16>,
+) -> Result<(TcpListener, OwnedLoopback), LinkError> {
+    let wanted = match preferred {
+        Some(port) => TcpListener::bind(("127.0.0.1", port)).await.ok(),
+        None => None,
+    };
+    let listener = match wanted {
+        Some(listener) => listener,
+        None => TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|_| LinkError::TransportUnavailable)?,
+    };
     let port = listener
         .local_addr()
         .map_err(|_| LinkError::TransportUnavailable)?
@@ -443,5 +458,17 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         let rebound = TcpListener::bind(("127.0.0.1", port)).await;
         assert!(rebound.is_ok(), "proxy port remained bound after close");
+    }
+
+    #[tokio::test]
+    async fn preferred_port_is_kept_only_while_it_is_free() {
+        let (first, handle) = bind_owned_loopback().await.unwrap();
+        let port = handle.port;
+        // Taken: a different free port, not an error.
+        let (_second, other) = bind_owned_loopback_on(Some(port)).await.unwrap();
+        assert_ne!(other.port, port);
+        drop(first);
+        let (_third, again) = bind_owned_loopback_on(Some(port)).await.unwrap();
+        assert_eq!(again.port, port);
     }
 }

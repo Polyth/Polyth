@@ -56,3 +56,33 @@ test("claude utility completion runs a sessionless, tool-free print turn", async
   assert.ok(prompts[0]!.includes("Be terse."));
   assert.ok(prompts[0]!.includes("describe the change"));
 });
+
+test("a refused claude print turn reports the CLI's own reason, not its exit code", async () => {
+  // Measured on Claude Code 2.1.318 over its 5-hour limit: the reason is on
+  // stdout, stderr is empty, and the process exits with code 1.
+  const spawnProcess = (() => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      stdin: { end() {}, once() {} },
+      exitCode: null as number | null,
+      signalCode: null as string | null,
+      kill() {},
+    });
+    setImmediate(() => {
+      child.stdout.emit("data", Buffer.from("You've hit your 5-hour limit · resets 2:50pm (Europe/Kyiv)\n"));
+      child.exitCode = 1;
+      child.emit("close", 1);
+    });
+    return child as never;
+  }) as unknown as Parameters<typeof createClaudeSmallModelRunner>[0]["spawnProcess"];
+  const runner = createClaudeSmallModelRunner({ command: "/usr/bin/claude", cwd: "/repo", spawnProcess });
+  await assert.rejects(
+    () => runner.complete({ cwd: "/repo", prompt: "summarize", model: { providerID: "anthropic", modelID: "opus" } }),
+    (error: Error & { code?: string }) => {
+      assert.equal(error.message, "You've hit your 5-hour limit · resets 2:50pm (Europe/Kyiv)");
+      assert.equal(error.code, "unavailable");
+      return true;
+    },
+  );
+});

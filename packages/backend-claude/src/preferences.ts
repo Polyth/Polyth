@@ -22,6 +22,11 @@ import { DEFAULT_CLAUDE_LAUNCH_PREFERENCES, type ClaudeLaunchPreferences } from 
 
 export const PROMPT_SUGGESTIONS_CONTROL = "prompt-suggestions";
 
+/** On a local single-user Polyth the host's Claude Code skills are the
+ * person's own, so a Space that never chose inherits them (muted ones
+ * excepted). Shared deployments never inherit (`nativeSkillsUnsupported`). */
+export const INHERIT_SKILLS_BY_DEFAULT = true;
+
 export interface ClaudePreferenceFiles {
     /** Directory of this harness's preference files in the request's Space,
      * or undefined when there is no local Space. */
@@ -107,7 +112,7 @@ export function createClaudePreferences(options: {
         async list(context): Promise<HarnessNativeSkillListDto> {
             const unsupported = nativeSkillsUnsupported(context);
             const path = skillsFile(context);
-            const policy = path && !unsupported ? await readNativeSkillPolicy(path) : { inherit: false, muted: [] };
+            const policy = path && !unsupported ? await readNativeSkillPolicy(path, INHERIT_SKILLS_BY_DEFAULT) : { inherit: false, muted: [] };
             return {
                 harnessId: options.harnessId,
                 inherit: policy.inherit,
@@ -123,7 +128,7 @@ export function createClaudePreferences(options: {
             if (unsupported) throw Object.assign(new Error(unsupported), { code: "unsupported" });
             const path = skillsFile(context);
             if (!path) throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
-            await updateNativeSkillPolicy(path, patch);
+            await updateNativeSkillPolicy(path, patch, INHERIT_SKILLS_BY_DEFAULT);
             return skills.list(context);
         },
     };
@@ -148,7 +153,7 @@ export function createClaudePreferences(options: {
         async launch(context: HarnessContext): Promise<ClaudeLaunchPreferences> {
             const unsupported = nativeSkillsUnsupported(context);
             const path = skillsFile(context);
-            const policy = path && !unsupported ? await readNativeSkillPolicy(path) : { inherit: false, muted: [] };
+            const policy = path && !unsupported ? await readNativeSkillPolicy(path, INHERIT_SKILLS_BY_DEFAULT) : { inherit: false, muted: [] };
             return { promptSuggestions: await promptSuggestions(context), inheritSkills: policy.inherit, mutedSkills: policy.muted };
         },
     };

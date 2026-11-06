@@ -24,6 +24,27 @@ test("a starting harness is visible but never execution-runnable", async () => {
     });
 });
 
+test("a sign-in end reaches the snapshot and is dropped once the login is signed out", async () => {
+    const ends = Date.UTC(2026, 10, 26, 8);
+    const registry = createHarnessRegistry();
+    let signedIn = true;
+    registry.register({
+        ...provider("expiring", 0),
+        probe: async () => ({ harnessId: "expiring", installed: true, healthy: true, authenticated: true, authExpiresAt: ends }),
+        discover: async () => signedIn
+            ? { state: "ready" as const, authenticated: true }
+            : { state: "auth-required" as const, authenticated: false, message: "Sign in" },
+    });
+    const [summary] = await registry.snapshots(context, { harnessId: "expiring" });
+    assert.equal(summary?.availability.authExpiresAt, ends);
+    const [ready] = await registry.snapshots(context, { harnessId: "expiring", detail: true, force: true });
+    assert.equal(ready?.availability.authExpiresAt, ends);
+    signedIn = false;
+    const [signedOut] = await registry.snapshots(context, { harnessId: "expiring", detail: true, force: true });
+    assert.equal(signedOut?.availability.state, "auth-required");
+    assert.equal("authExpiresAt" in signedOut!.availability, false, "a signed-out login shows no end date");
+});
+
 test("detail evidence atomically replaces the cheap probe message", async () => {
     const registry = createHarnessRegistry();
     registry.register({

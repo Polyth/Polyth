@@ -129,7 +129,7 @@ export function createSourceControlProfilesStore(storageFor: (space: SpaceContex
 
 const SSH_COMMAND = /^ssh -i ([\w@%+=:,./~-]+) -o IdentitiesOnly=yes$/;
 const git = (root: string, args: string[]) => new Promise<{ code: number; stdout: string }>((done) =>
-  execFile(resolveGitBinary(), ["-C", root, ...args], { timeout: 10_000 }, (err, stdout) => done({ code: err ? Number((err as { code?: number }).code ?? 1) : 0, stdout: String(stdout) })));
+  execFile(resolveGitBinary(), ["-C", root, ...args], { timeout: 10_000, windowsHide: true }, (err, stdout) => done({ code: err ? Number((err as { code?: number }).code ?? 1) : 0, stdout: String(stdout) })));
 
 export async function getSshKey(root: string): Promise<string | null> {
   const r = await git(root, ["config", "--local", "--get", "core.sshCommand"]);
@@ -229,11 +229,11 @@ export const SSH_KEY_PASSPHRASE_MESSAGE = "This key is passphrase-protected and 
 export function testSshKey(path: unknown, host: unknown = "github.com", home = homedir()): Promise<{ ok: boolean; account?: string; message: string }> {
   const key = validateIdentityFile(path, home);
   if (typeof host !== "string" || !/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/i.test(host)) throw bad("Invalid host");
-  return new Promise((done) => execFile(resolveExecutable("ssh"), sshTestArgs(key, host), { timeout: 12_000 }, (err, stdout, stderr) => {
+  return new Promise((done) => execFile(resolveExecutable("ssh"), sshTestArgs(key, host), { timeout: 12_000, windowsHide: true }, (err, stdout, stderr) => {
     const message = `${stdout}${stderr}`.trim().slice(0, 300);
     const account = /Hi ([\w.-]+)!/.exec(message)?.[1] ?? /Welcome to GitLab, @([\w.-]+)!/.exec(message)?.[1];
     if (account || !err) { done({ ok: true, ...(account ? { account } : {}), message: message || "Connected" }); return; }
-    execFile(resolveExecutable("ssh-keygen"), ["-y", "-P", "", "-f", key], { timeout: 5_000 }, (_keyErr, _out, keyStderr) => done({
+    execFile(resolveExecutable("ssh-keygen"), ["-y", "-P", "", "-f", key], { timeout: 5_000, windowsHide: true }, (_keyErr, _out, keyStderr) => done({
       ok: false,
       message: /passphrase/i.test(String(keyStderr)) ? SSH_KEY_PASSPHRASE_MESSAGE : message || err.message,
     }));

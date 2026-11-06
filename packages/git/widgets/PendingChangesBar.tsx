@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { noteGitActivity, useGitStatus, refreshGitStatus } from "./gitStatusStore.ts";
 import { selectPendingChanges, sessionEditedPaths } from "../../../apps/web/src/pendingChanges.ts";
 import {
   isActiveSessionSpawning,
@@ -32,6 +32,9 @@ export interface DiffLineStats {
 }
 
 export const EDITED_FILES_PREVIEW = 3;
+const DIFF_STAT_READERS = 3;
+const DIFF_STAT_SETTLE_MS = 300;
+const DIFF_STAT_TURN_GAP_MS = 5_000;
 
 const EMPTY_STATS: DiffLineStats = { additions: 0, deletions: 0 };
 
@@ -114,16 +117,27 @@ export default function PendingChangesBar() {
   });
   const working = activity.working;
   const awaitingTurn = activity.awaitingTurn;
-  const status = useGitStatus(projectId, working, sessionId);
+  const status = useGitStatus(projectId, working ? "turn" : false, sessionId);
+  // `model.messages` changes with every streamed event; everything below keys
+  // on what it means for Git, or each event would read every file's diff again.
+  const editedKey = sessionEditedPaths(model.messages).join("\0");
+  const finishedTools = model.messages.reduce(
+    (count, message) => count + (message.kind === "tool" && (message.status === "done" || message.status === "error") ? 1 : 0),
+    0,
+  );
+  useEffect(() => {
+    if (projectId && working && finishedTools > 0) noteGitActivity(projectId, sessionId);
+  }, [finishedTools, projectId, sessionId, working]);
   const selected = useMemo(
-    () => selectPendingChanges(status, sessionEditedPaths(model.messages), repoRoot),
-    [status, model.messages, repoRoot],
+    () => selectPendingChanges(status, editedKey ? editedKey.split("\0") : [], repoRoot),
+    [status, editedKey, repoRoot],
   );
   const changeKey = [...selected.paths].sort().join("\0");
   const [diffStats, setDiffStats] = useState<DiffStatsSnapshot | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  const statRound = useRef({ at: 0, tookMs: 0 });
   useEffect(() => {
     setFilesExpanded(false);
   }, [changeKey]);
@@ -144,7 +158,7 @@ export default function PendingChangesBar() {
       return;
     }
 
-    const requests = selected.dirtyPaths.map(async (path) => {
+    const readStats = async (path: string) => {
       const parts: DiffLineStats[] = [];
       if (status.staged.some((file) => file.path === path)) {
         try {
@@ -163,25 +177,46 @@ export default function PendingChangesBar() {
         }
       }
       return [path, totalDiffStats(parts)] as const;
-    });
-
-    void Promise.all(requests).then((entries) => {
-      if (cancelled) return;
-      setDiffStats((prev) => {
-        const files: Record<string, DiffLineStats> = {};
-        for (const path of selected.paths) {
-          const previous = prev?.files[path];
-          if (previous) files[path] = previous;
-        }
-        for (const [path, stats] of entries) {
-          const empty = stats.additions === 0 && stats.deletions === 0;
-          if (!empty || files[path] === undefined) files[path] = stats;
-        }
-        return { changeKey, files };
+    };
+    // Each read starts a Git process on the server. A few at a time, after the
+    // status has settled, and none once this status is out of date.
+    const paths = [...selected.dirtyPaths];
+    const entries: Array<readonly [string, DiffLineStats]> = [];
+    const worker = async () => {
+      for (let path = paths.shift(); path !== undefined && !cancelled; path = paths.shift()) {
+        entries.push(await readStats(path));
+      }
+    };
+    // Line counts can move while a file's status does not, so a finished tool
+    // asks again: once per settled round during a turn, at once outside one.
+    const startRound = () => {
+      const startedAt = Date.now();
+      void Promise.all(Array.from({ length: DIFF_STAT_READERS }, worker)).then(() => {
+        statRound.current = { at: Date.now(), tookMs: Date.now() - startedAt };
+        if (cancelled) return;
+        setDiffStats((prev) => {
+          const files: Record<string, DiffLineStats> = {};
+          for (const path of selected.paths) {
+            const previous = prev?.files[path];
+            if (previous) files[path] = previous;
+          }
+          for (const [path, stats] of entries) {
+            const empty = stats.additions === 0 && stats.deletions === 0;
+            if (!empty || files[path] === undefined) files[path] = stats;
+          }
+          return { changeKey, files };
+        });
       });
-    });
-    return () => { cancelled = true; };
-  }, [changeKey, projectId, selected.dirtyPaths, selected.paths, sessionId, status]);
+    };
+    const round = statRound.current;
+    const gap = Math.max(DIFF_STAT_TURN_GAP_MS, round.tookMs * 10);
+    const wait = working ? Math.max(DIFF_STAT_SETTLE_MS, round.at + gap - Date.now()) : 0;
+    const delay = setTimeout(startRound, wait);
+    return () => {
+      cancelled = true;
+      clearTimeout(delay);
+    };
+  }, [changeKey, finishedTools, projectId, selected.dirtyPaths, selected.paths, sessionId, status, working]);
 
   const count = selected.paths.length;
   const title = count === 1

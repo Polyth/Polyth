@@ -15,6 +15,12 @@ import { createCodexSmallModelRunner } from "./smallModel.ts";
 import { withCodexTitleGeneration } from "./title.ts";
 const exec = promisify(execFile);
 const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+/** Local report commands. A shim left on `cmd.exe` gets its path quoted: the
+ *  shell joins the argv unquoted, so `C:\Users\Jane Doe\…` would split. */
+const execCli = (command: string, args: string[], options: { timeout: number; maxBuffer: number; env: NodeJS.ProcessEnv }) => {
+    const shell = windowsShim(command);
+    return exec(shell ? `"${command}"` : command, args, { ...options, shell, windowsHide: true });
+};
 
 /** Last resolved executable, for the synchronous sign-in command. */
 let knownCodexCommand: string | undefined;
@@ -78,11 +84,10 @@ const codexAccountStatus = async (
     resolved?: { command: string; env: NodeJS.ProcessEnv },
 ): Promise<HarnessAccountStatus> => {
     const command = resolved?.command ?? await resolveCodexBinary();
-    const result = await exec(command, ["login", "status"], {
+    const result = await execCli(command, ["login", "status"], {
         timeout: 10_000,
         maxBuffer: 8192,
         env: resolved?.env ?? await codexEnv(command, account),
-        shell: windowsShim(command),
     }).then(({ stdout, stderr }) => ({ ok: true, text: `${stdout}\n${stderr}` }), (error: { code?: unknown; stdout?: string; stderr?: string }) =>
         ({ ok: false, exit: error.code, text: `${error.stdout ?? ""}\n${error.stderr ?? ""}` }));
     if (result.ok && /logged in/i.test(result.text) && !/not logged in/i.test(result.text)) {
@@ -120,7 +125,7 @@ export function createCodexProvider(host: ServerPackageHost, account?: ResolvedH
             try {
                 const command = await resolveCodexBinary();
                 const env = await codexEnv(command, account);
-                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
+                const version = (await execCli(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env })).stdout.trim();
                 // The cheap probe never starts the App Server. Sign-in is the
                 // CLI's own local report (a file read, ~0.1 s) — the same
                 // evidence detail discovery trusts. With an API key in the
@@ -184,6 +189,10 @@ export function createCodexProvider(host: ServerPackageHost, account?: ResolvedH
             });
             runtime.completeSmallModel = (request: SmallModelCompletionRequest) => smallModel.complete(request);
             return runtime;
+        },
+        async completeUtility(request: SmallModelCompletionRequest) {
+            const command = await resolveCodexBinary();
+            return createCodexSmallModelRunner({ command, cwd: request.cwd, env: await codexEnv(command, account) }).complete(request);
         },
         async releaseExecution(context, binding, operationId) {
             if (!context.space)

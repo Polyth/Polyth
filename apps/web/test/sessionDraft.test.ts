@@ -42,10 +42,12 @@ test("both navigators render the shared draft mark with the canonical accent Bad
 
 test("holding Send parks a new chat through the same creation path as sending it", async () => {
   const composer = await read("../src/components/Composer.tsx");
-  const park = composer.slice(composer.indexOf("} else if (activeProjectId && parkAsDraft) {"), composer.indexOf("} else if (activeProjectId) {"));
+  const park = composer.slice(composer.indexOf("} else if (activeProjectId && parkAsDraft) {"), composer.indexOf("} else if (activeProjectId && firstPeopleMessage) {"));
+  assert.ok(park.length > 0, "the parked branch comes before the new chat's message to people");
   assert.match(park, /createNewChat\(projectId, \(\) => false\)/, "a draft chat is created without being opened");
   assert.match(park, /stageTargetDraft\(created, scope\)/, "text and pills move into the chat's own draft record");
   assert.match(park, /saveDraftToServerNow\(created, scope\)/, "the draft reaches the server at once, so every navigator lists it");
   assert.doesNotMatch(park, /deliver\(|beginSessionSpawn|beginPendingSend/, "parking starts no turn, echo or spawn surface");
-  assert.match(composer, /const echoId = command === null && delivery !== "queue" && !hiddenUserMessage && !parkAsDraft/);
+  assert.match(composer, /const noTurn = parkAsDraft \|\| firstPeopleMessage;/);
+  assert.match(composer, /const echoId = command === null && delivery !== "queue" && !hiddenUserMessage && !noTurn/);
 });

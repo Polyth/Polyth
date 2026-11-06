@@ -184,11 +184,20 @@ export interface PersonMessageMsg {
   id: string;
   eventSeq: number;
   text: string;
+  /** Attachments the author sent with the message, as prepared server-side. */
+  attachments?: AttachmentRef[];
   author?: SessionPerson;
   mentions: SessionPerson[];
   carryToAgent?: boolean;
   /** A carried message a later prompt has already handed to the agent. */
   delivered?: boolean;
+  /** The message asks someone to open the chat to the people it names. */
+  accessRequest?: {
+    people: SessionPerson[];
+    approver: SessionPerson;
+    /** The answer, once there is one. */
+    outcome?: "shared" | "declined";
+  };
   /** Same author as the message just before, within a few minutes: the row
    *  drops its repeated name. */
   continuation?: boolean;
@@ -370,6 +379,9 @@ export interface TurnState {
   profileId?: string;
   reason?: string;
   error?: string;
+  /** The harness refused this turn because the conversation no longer fits;
+   *  cleared by a compaction, since only that lets the chat continue. */
+  contextFull?: true;
   /** Set when `status === "failed"` because the provider is rate-limited. */
   limit?: TurnLimitState;
   /** The stop was a provider limit/refusal. Outlives `limit` (a cancelled
@@ -820,6 +832,17 @@ function markProviderNotice(model: RenderModel, startedAt: number | undefined): 
   touch(last);
 }
 
+/** A `person/message`'s access request, when it carries a well-formed one. */
+function personAccessRequest(value: unknown): PersonMessageMsg["accessRequest"] {
+  const raw = value as { people?: unknown; approver?: unknown } | null | undefined;
+  const approver = normalizeSessionPerson(raw?.approver);
+  const people = (Array.isArray(raw?.people) ? raw.people : []).flatMap((entry) => {
+    const person = normalizeSessionPerson(entry);
+    return person ? [person] : [];
+  });
+  return approver && people.length > 0 ? { people, approver } : undefined;
+}
+
 /** In-place message mutation marker (see UserMsg.rev). */
 function touch(m: RenderMessage): void {
   m.rev = (m.rev ?? 0) + 1;
@@ -1010,7 +1033,18 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         time: ev.time,
       };
       if (author) msg.author = author;
+      // Attachment pills on a person's message: keep only well-formed refs.
+      const attachmentsValue = (d as { attachments?: unknown }).attachments;
+      if (Array.isArray(attachmentsValue)) {
+        const refs = attachmentsValue.filter((attachment): attachment is AttachmentRef =>
+          typeof attachment === "object" && attachment !== null
+          && typeof (attachment as { name?: unknown }).name === "string"
+          && typeof (attachment as { mime?: unknown }).mime === "string");
+        if (refs.length > 0) msg.attachments = refs;
+      }
       if (d.carryToAgent === true) msg.carryToAgent = true;
+      const accessRequest = personAccessRequest((d as { accessRequest?: unknown }).accessRequest);
+      if (accessRequest) msg.accessRequest = accessRequest;
       const replyToSeq = num(d, "replyToSeq");
       if (replyToSeq !== undefined) msg.replyToSeq = replyToSeq;
       const previous = model.messages[model.messages.length - 1];
@@ -1027,6 +1061,31 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         touch(previous);
       }
       model.messages.push(msg);
+      break;
+    }
+    case "person/access-resolved": {
+      // The message may be outside the loaded page; it then reads as it was.
+      const messageSeq = num(d, "messageSeq");
+      const outcome = str(d, "outcome");
+      if (messageSeq === undefined || (outcome !== "shared" && outcome !== "declined")) break;
+      for (let index = model.messages.length - 1; index >= 0; index -= 1) {
+        const message = model.messages[index]!;
+        if (message.kind !== "person-message" || message.eventSeq !== messageSeq) continue;
+        if (!message.accessRequest) break;
+        message.accessRequest = { ...message.accessRequest, outcome };
+        if (outcome === "shared") {
+          // They can read it now, so their name reads as a mention like any other.
+          const peopleValue = (d as { people?: unknown }).people;
+          const people = (Array.isArray(peopleValue) ? peopleValue : []).flatMap((value) => {
+            const person = normalizeSessionPerson(value);
+            return person ? [person] : [];
+          });
+          const named = new Set(message.mentions.map((mention) => mention.userId));
+          message.mentions = [...message.mentions, ...people.filter((person) => !named.has(person.userId))];
+        }
+        touch(message);
+        break;
+      }
       break;
     }
     case "conversation/session-started": {
@@ -1424,6 +1483,12 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    // The runtime no longer holds it: nothing can answer it now.
+    case "permission/expired": {
+      const p = model.permissions.find((x) => x.requestId === str(d, "requestId"));
+      if (p) p.status = "resolved";
+      break;
+    }
     case "question/asked": {
       const requestId = str(d, "requestId") ?? "";
       if (!model.questions.some((q) => q.requestId === requestId)) {
@@ -1505,6 +1570,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       model.contextEstimateAfterSeq = ev.seq;
       model.contextResetAt = ev.time;
       delete model.contextPressureLevel;
+      if (model.turn) delete model.turn.contextFull;
       break;
     }
     case "turn/started": {
@@ -1563,6 +1629,8 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         t.stoppedAt = ev.time;
         const error = str(d, "error");
         if (error !== undefined) t.error = error;
+        if (str(d, "code") === "context-full") t.contextFull = true;
+        else delete t.contextFull;
         if (limit) {
           t.limit = limit;
           t.providerLimited = true;
@@ -1576,6 +1644,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.turn = {
           turnId: str(d, "turnId") ?? "", status, reason, error: str(d, "error"), stoppedAt: ev.time,
           ...(limit ? { limit, providerLimited: true as const } : {}),
+          ...(str(d, "code") === "context-full" ? { contextFull: true as const } : {}),
         };
       }
       finalizeOrphanedTools(model, status, ev.time);

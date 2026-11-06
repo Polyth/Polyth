@@ -153,6 +153,14 @@ export function harnessAvailability(probe: HarnessProbe): HarnessAvailabilitySta
         return "auth-required";
     return probe.authenticated === "unknown" ? "unknown" : "ready";
 }
+/** A sign-in end belongs to a login the CLI reports as signed in; once any
+ *  answer says it is signed out, that date no longer describes anything. */
+const withSignInExpiry = <T extends HarnessProbe>(availability: T): T => {
+    if (availability.authExpiresAt === undefined) return availability;
+    if (availability.authenticated !== false && harnessAvailability(availability) !== "auth-required") return availability;
+    const { authExpiresAt: _ended, ...rest } = availability;
+    return rest as T;
+};
 const runnable = (probe: HarnessProbe): boolean => {
     const state = harnessAvailability(probe);
     return probe.installed && probe.healthy && probe.authenticated !== false
@@ -384,7 +392,7 @@ export function createHarnessRegistry() {
                     const message = discoveryError
                         ? discoveryMessage
                         : discovery?.message ?? (carried ? carried.message : probeMessage);
-                    const availability = {
+                    const availability = withSignInExpiry({
                         ...probeFields,
                         ...(discovery?.authenticated !== undefined
                             ? { authenticated: discovery.authenticated }
@@ -393,7 +401,7 @@ export function createHarnessRegistry() {
                         ...(message ? { message } : {}),
                         state,
                         checkedAt,
-                    };
+                    });
                     const lastGood = lastGoodAtStart;
                     const degraded = discoveryError !== undefined || state === "offline" || state === "degraded";
                     // A cheap probe refresh must not erase metadata previously
@@ -668,7 +676,7 @@ export function createHarnessRegistry() {
                             const checkedAt = Date.now();
                             const refined = {
                                 ...cache.current,
-                                availability: { ...cache.current.availability, ...probe, checkedAt },
+                                availability: withSignInExpiry({ ...cache.current.availability, ...probe, checkedAt }),
                                 context: {
                                     ...cache.current.context,
                                     revision: `${checkedAt}-${++revision}`,

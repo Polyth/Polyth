@@ -92,3 +92,21 @@ test("a replaced dock is a status handover, not a fresh entrance", async () => {
   assert.match(surface, /if \(working\) liveDockSeen\.current = true/);
   assert.match(surface, /!working && !liveDockSeen\.current && \(spawning \|\| awaitingTurn\)/);
 });
+
+test("a repeated first send creates one chat, and a failed one gives the prompt back", async () => {
+  const composer = await read("../src/components/Composer.tsx");
+
+  // The pending latch is marked synchronously on Send; the guard reads it (and
+  // the store's spawn record) directly, so a repeat reaching the same `send`
+  // closure before the re-render is dropped instead of creating a second chat.
+  assert.match(composer, /sendPendingRef\.current = surfacePending\(composerSurfaceRef\.current\);/);
+  assert.match(composer,
+    /if \(creatingSession \|\| sendPending \|\| sendPendingRef\.current \|\| isActiveSessionSpawning\(getState\(\)\) \|\| compactPending\) return;/);
+  const guard = composer.indexOf("sendPendingRef.current || isActiveSessionSpawning(getState())");
+  const spawn = composer.indexOf("const spawnRequestId = beginSessionSpawn(");
+  assert.ok(guard > 0 && guard < spawn, "the latch is checked before a spawn begins");
+  assert.match(composer, /markSendPending\(spawnSurface, true\);/);
+  // Release on every outcome; a failed creation restores the text and pills.
+  assert.match(composer, /finishSessionSpawn\(spawnRequestId\);\s*markSendPending\(spawnSurface, false\);/);
+  assert.match(composer, /startNewSession\(activeProjectId, \{\s*draft: t,/);
+});

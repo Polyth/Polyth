@@ -4,7 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { join, resolve } from "node:path";
 import type { AgentCapabilityContribution, Project, RouteRequest, SpaceContext, SpaceStorage, ToolExecutionContext } from "@polyth/contracts";
 import { createServerServiceRegistry, discoverServerPackages, serverServiceKey, SESSION_PURPOSES, type ServerPackageHost } from "@polyth/plugins";
-import { boundedTail, discoverHostLogs, journalArgs, journalCommand, localHostLogTail, localLogTail, LOG_BYTES, parseRemoteFile, parseRemoteHostLogs, parseRemoteMetrics, parseServices, REMOTE_METRICS_COMMAND, remoteFileCommand, serviceCommand } from "../src/collect.ts";
+import { boundedTail, discoverHostLogs, groupProcesses, journalArgs, journalCommand, localHostLogTail, localLogTail, localMetrics, localProcesses, LOG_BYTES, parseProcStat, parsePressureLine, parseRemoteFile, parseRemoteHostLogs, parseRemoteMetrics, parseRemoteProcesses, parseServices, processLabel, realMounts, REMOTE_METRICS_COMMAND, REMOTE_PROCESSES_COMMAND, remoteFileCommand, serviceCommand } from "../src/collect.ts";
+import { diskPercent, HISTORY_RANGES, worstDisk } from "../src/contracts.ts";
+import { createHistorySampler, historyStore, machineIdOf } from "../src/history.ts";
 import { defaultPolicy, failure, parsePolicy, policyStore } from "../src/policy.ts";
 import { createMonitoringService, monitoringRoutes } from "../src/service.ts";
 import registerPackage from "../src/serverEntry.ts";
@@ -36,6 +38,7 @@ function fixture(t: test.TestContext) {
   services.provide(serverServiceKey("ssh"), { exec: async (id: string, command: string) => { calls.push({ id, command }); return runner(id, command); } });
   const host = {
     pluginId: "monitoring", deployment: "local-trusted", services,
+    projects: { list: async () => projects },
     spaceStorage: (space: SpaceContext) => storage(space.storageDir),
     systemSpaceContext: (id: string) => id === "one" ? one : id === "two" ? two : (() => { throw failure("not-found", "Space not found"); })(),
     forSpace: (space: SpaceContext) => ({
@@ -51,7 +54,7 @@ function fixture(t: test.TestContext) {
 }
 
 test("policy defaults deny every agent operation; malformed permissions and injected sources are rejected", () => {
-  assert.deepEqual(defaultPolicy().agentAccess, { metrics: false, services: false, logs: false });
+  assert.deepEqual(defaultPolicy().agentAccess, { metrics: false, services: false, logs: false, processes: false });
   for (const patch of [
     { agentAccess: { metrics: "true", services: false, logs: false } },
     { serviceUnits: ["nginx.service'; reboot; '"] }, { serviceUnits: ["--help.service"] },
@@ -59,10 +62,25 @@ test("policy defaults deny every agent operation; malformed permissions and inje
     { logPaths: ["/var/log/../../etc/shadow"] }, { logPaths: ["/proc/self/environ.log"] }, { logPaths: ["/var/log/x'; reboot; '.log"] },
     { logPaths: ["journal:$(reboot).service"] }, { logPaths: ["journalctl"] }, { logPaths: Array.from({ length: 25 }, (_, i) => `app-${i}.log`) },
     { logPaths: ["logs\\private.log"] }, { logPaths: ["config.env"] }, { logPaths: ["logs/a\u0000.log"] },
-    { memoryWarningPercent: NaN }, { loadWarningRatio: Infinity },
+    { memoryWarningPercent: NaN }, { loadWarningRatio: Infinity }, { diskWarningPercent: NaN }, { diskWarningPercent: 0 }, { diskWarningPercent: 101 },
+    { agentAccess: { metrics: false, services: false, logs: false, processes: "yes" } },
   ]) assert.throws(() => parsePolicy({ ...defaultPolicy(), ...patch }, 1), { code: "invalid-input" });
   const hostWide = ["journal", "kernel", "journal:nginx.service", "/var/log/syslog", "/var/log/nginx/access.log", "/home/app/.pm2/logs/api.log", "logs/app.log"];
   assert.deepEqual(parsePolicy({ ...defaultPolicy(), logPaths: hostWide }, 1).logPaths, hostWide);
+});
+
+test("a policy written before these fields keeps denying processes and defaults its disk limit", () => {
+  const { diskWarningPercent: _disk, ...older } = defaultPolicy();
+  const parsed = parsePolicy({ ...older, agentAccess: { metrics: true, services: false, logs: false } }, 1);
+  assert.equal(parsed.agentAccess.processes, false);
+  assert.equal(parsed.diskWarningPercent, 90);
+});
+
+test("a writer that predates the disk limit cannot reset one that was set", async (t) => {
+  const f = fixture(t);
+  const saved = await f.service.putPolicy(f.one, f.remote.id, { ...defaultPolicy(), diskWarningPercent: 75 }, 0);
+  const { diskWarningPercent: _disk, ...older } = saved;
+  assert.equal((await f.service.putPolicy(f.one, f.remote.id, older, saved.revision)).diskWarningPercent, 75);
 });
 
 test("policy storage survives reopening, detects conflicts and isolates a known-valid foreign project", async (t) => {
@@ -225,6 +243,91 @@ test("log discovery suggests only approvable project files and never follows sym
   assert.equal(handled, true); assert.equal((body as { items: Array<{ kind: string }> }).items.filter((item) => item.kind === "project").length, 3);
 });
 
+test("process names on the server need the instance owner; on an SSH host they are the Space's", async (t) => {
+  const f = fixture(t);
+  const grant = (project: string, instanceOwner: boolean, processes = true) => async () => f.service.putPolicy(f.one, project, {
+    ...await f.service.policy(f.one, project), agentAccess: { metrics: true, services: false, logs: false, processes },
+  }, (await f.service.policy(f.one, project)).revision, { instanceOwner });
+  await assert.rejects(grant(f.local.id, false)(), { code: "forbidden" });
+  await grant(f.remote.id, false)();
+  await grant(f.local.id, true)();
+  // A Space admin may keep or remove the grant the owner made.
+  await grant(f.local.id, false)();
+  await grant(f.local.id, false, false)();
+  assert.equal((await f.service.policy(f.one, f.local.id)).agentAccess.processes, false);
+  // What the browser may read follows the same line.
+  const hosts = (instanceOwner: boolean) => f.service.hosts(f.one, { instanceOwner });
+  assert.equal((await hosts(true)).find((item) => item.projectId === f.remote.id)!.processesAvailable, true);
+  assert.equal((await hosts(false)).find((item) => item.projectId === f.remote.id)!.processesAvailable, true);
+  assert.equal((await hosts(false)).find((item) => item.projectId === f.local.id)!.processesAvailable, false);
+  await assert.rejects(f.service.processes(f.one, f.local.id, { instanceOwner: false }), { code: "forbidden" });
+  await assert.rejects(f.service.processes(f.one, f.foreign.id, { instanceOwner: true }), { code: "not-found" });
+});
+
+test("agents read process names only with their own grant, and history with the metrics grant", async (t) => {
+  const f = fixture(t);
+  f.run(async (_id, command) => ({ code: 0, stderr: "", stdout: command === REMOTE_PROCESSES_COMMAND
+    ? "100\n4096\n7 100 2560 nginx\n#second\n7 300 2560 nginx\n" : command === REMOTE_METRICS_COMMAND ? remoteSample : "" }));
+  await assert.rejects(f.service.agentRead({ action: "processes" }, context), { code: "forbidden" });
+  await assert.rejects(f.service.agentRead({ action: "history" }, context), { code: "forbidden" });
+  assert.equal(f.calls.length, 0);
+  await f.grant({ metrics: true, services: false, logs: false });
+  await assert.rejects(f.service.agentRead({ action: "processes" }, context), { code: "forbidden" }, "Host metrics does not imply process names");
+  await f.service.agentRead({ action: "metrics" }, context);
+  const history = await f.service.agentRead({ action: "history", range: "24h" }, context) as { range: string; points: unknown[] };
+  assert.equal(history.range, "24h");
+  await assert.rejects(f.service.agentRead({ action: "history", range: "1y" }, context), { code: "invalid-input" });
+  await f.grant({ metrics: true, services: false, logs: false, processes: true } as never);
+  const result = await f.service.agentRead({ action: "processes" }, context) as { groups: Array<{ name: string; cpus: number; memory: number }> };
+  assert.deepEqual(result.groups, [{ name: "nginx", count: 1, cpus: 1, memory: 2560 * 4096 }]);
+  assert.equal(JSON.stringify(result).includes("cmdline"), false);
+});
+
+test("viewers of one machine share a process sample, Spaces and machines never do", async (t) => {
+  const f = fixture(t);
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  f.run(async () => { await waiting; return { code: 0, stderr: "", stdout: "100\n4096\n#second\n" }; });
+  const first = f.service.processes(f.one, f.remote.id, { instanceOwner: false });
+  const second = f.service.processes(f.one, f.remote.id, { instanceOwner: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.calls.length, 1);
+  release();
+  await Promise.all([first, second]);
+  await f.service.processes(f.one, f.remote.id, { instanceOwner: false });
+  assert.equal(f.calls.length, 2, "a finished sample is not reused");
+});
+
+test("a disk over its limit warns, and load warns on the 5-minute average rather than one busy minute", async (t) => {
+  const f = fixture(t);
+  const sample = (load: string, disk: string) => `Linux\nweb-1\n4\n${load} 1/100 40\n8192000\n4096000\n86460.2\n#pressure\ncpu some avg10=1.00 avg60=59.33 avg300=2.00 total=1\nio some avg10=0.00 avg60=0.99 avg300=0.00 total=1\nmemory some avg10=0.00 avg60=0.04 avg300=0.00 total=1\n#disks\nFilesystem 1024-blocks Used Available Capacity Mounted on\n${disk}\n`;
+  const spike = sample("20.00 1.00 1.00", "/dev/sda1 1000 500 500 50% /");
+  f.run(async (_id, command) => ({ code: 0, stderr: "", stdout: command === REMOTE_METRICS_COMMAND ? spike : "active\n" }));
+  assert.deepEqual((await f.service.snapshot(f.one, f.remote.id)).warnings, [], "one busy minute alone is no warning");
+  const sustained = sample("1.00 9.00 9.00", "/dev/sda1 1000 910 90 91% /\n/dev/sdb1 1000 500 500 50% /data");
+  f.run(async (_id, command) => ({ code: 0, stderr: "", stdout: command === REMOTE_METRICS_COMMAND ? sustained : "active\n" }));
+  const result = await f.service.snapshot(f.one, f.remote.id);
+  assert.deepEqual(result.warnings, ["load", "disk"]);
+  assert.deepEqual(result.metrics.disks?.map((disk) => [disk.mount, diskPercent(disk)]), [["/", 91], ["/data", 50]]);
+  assert.deepEqual(result.metrics.pressure, { cpu: 59.33, io: 0.99, memory: 0.04 });
+});
+
+test("readings build a history per machine; a foreign project and an unknown range are refused", async (t) => {
+  const f = fixture(t);
+  await f.service.snapshot(f.one, f.remote.id);
+  const history = await f.service.history(f.one, f.remote.id, "1h");
+  assert.equal(history.stepMs, HISTORY_RANGES["1h"].stepMs);
+  assert.equal(history.points.length, 1);
+  await assert.rejects(f.service.history(f.one, f.remote.id, "1y"), { code: "invalid-input" });
+  await assert.rejects(f.service.history(f.one, f.foreign.id, "1h"), { code: "not-found" });
+  assert.equal((await f.service.history(f.one, f.local.id, "1h")).points.length, 0, "another machine has its own history");
+  // Space two has no reading of this connection, even under the same project id.
+  f.service.disable();
+  const stored = readFileSync(join(f.one.storageDir, "packages/monitoring/history.json"), "utf8");
+  assert.equal(stored.includes("ssh-one"), false, "the connection id is not written down");
+  assert.ok(stored.includes(machineIdOf(f.remote)));
+});
+
 test("only the instance owner newly approves the Polyth server's own host sources", async (t) => {
   const f = fixture(t);
   const put = (patch: Partial<ReturnType<typeof defaultPolicy>>, project = f.local.id, instanceOwner = false) => async () =>
@@ -279,6 +382,9 @@ test("package discovery, lifecycle and partial registration failure clean up cap
   const pkg = registerPackage(f.host);
   assert.deepEqual(pkg.remoteAccess, { routeScopes: ["monitoring"], http: [] });
   await pkg.onEnable!(); assert.equal(contributions.size, 2); assert.equal(purpose, true);
+  const tool = contributions.get("monitoring.monitoring_read")!.descriptor as unknown as { inputSchema: { properties: { action: { enum: string[] } } }; mutating: boolean };
+  assert.deepEqual(tool.inputSchema.properties.action.enum, ["policy", "metrics", "history", "processes", "services", "logs"]);
+  assert.equal(tool.mutating, false);
   await pkg.onDisable!(); assert.equal(contributions.size, 0); assert.equal(purpose, false);
   await pkg.onEnable!(); assert.equal(contributions.size, 2); await pkg.onDisable!();
   const broken = fixture(t); let cleaned = false;
@@ -326,4 +432,96 @@ test("local host file tails reject symlinks resolving outside approvable host lo
   await assert.rejects(localHostLogTail("/etc/shadow"), { code: "invalid-input" });
   for (const item of await discoverHostLogs(root)) assert.equal(item.kind, "host");
   assert.deepEqual((await discoverHostLogs(root)).map((item) => item.path), [join(root, "real.log")]);
+});
+
+test("remote metrics read their optional sections and survive a host without them", () => {
+  const plain = parseRemoteMetrics(remoteSample);
+  assert.equal(plain.disks, undefined); assert.equal(plain.pressure, undefined);
+  const output = `${remoteSample}#pressure\ncpu \nio \nmemory \n#disks\nFilesystem 1024-blocks Used Available Capacity Mounted on\noverlay 1000 800 200 80% /\ntmpfs 1000 1 999 1% /run\n/dev/loop3 10 10 0 100% /snap/core/1\n/dev/sda15 100 90 10 90% /boot/efi\n`;
+  const parsed = parseRemoteMetrics(output);
+  assert.equal(parsed.pressure, undefined, "a kernel without pressure stats");
+  assert.deepEqual(parsed.disks, [{ mount: "/", size: 1000 * 1024, used: 800 * 1024, available: 200 * 1024 }], "a container's overlay root is all it has");
+  const spaced = parseRemoteMetrics(`${remoteSample}#disks\n/dev/sdb1 1000 500 500 50% /mnt/my disk\n/dev/sdb1 1000 500 500 50% /mnt/bind/again\n`);
+  assert.deepEqual(spaced.disks?.map((disk) => disk.mount), ["/mnt/my disk"], "one device, its shortest mount");
+});
+
+test("disk percent matches df and never gains a point from float error", () => {
+  assert.equal(diskPercent({ used: 41, available: 4.3 }), 91);
+  assert.equal(diskPercent({ used: 90, available: 10 }), 90);
+  assert.equal(diskPercent({ used: 0, available: 0 }), 0);
+  assert.equal(worstDisk({ disks: [{ mount: "/a", size: 1, used: 1, available: 9 }, { mount: "/b", size: 1, used: 9, available: 1 }] })?.mount, "/b");
+  assert.equal(worstDisk({}), undefined);
+  assert.deepEqual(realMounts("/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 /mnt/my\\040disk ext4 rw 0 0\noverlay /var/lib/docker/overlay2/x overlay rw 0 0\n/dev/loop1 /snap/x squashfs ro 0 0\n/dev/sda15 /boot/efi vfat rw 0 0\nrclone: /mnt/drive fuse.rclone rw 0 0\n"), ["/", "/mnt/my disk"]);
+  assert.equal(parsePressureLine("some avg10=0.65 avg60=0.99 avg300=2.54 total=1\nfull avg10=0.00 avg60=0.09 avg300=0.62 total=1\n"), 0.99);
+  assert.equal(parsePressureLine("cpu some avg10=1 avg60=52.5 avg300=1 total=1"), 52.5);
+  assert.equal(parsePressureLine(""), undefined);
+});
+
+test("process stat lines parse a name holding spaces and parentheses; groups keep names only", () => {
+  const stat = (pid: number, name: string, ticks: number, pages: number) => `${pid} (${name}) S 1 1 1 0 -1 4194560 0 0 0 0 ${ticks} 0 0 0 20 0 1 0 1 1 ${pages} 1 1 1 1`;
+  assert.deepEqual(parseProcStat(stat(9, "tmux: server (x) y", 42, 7)), { pid: 9, ticks: 42, pages: 7, name: "tmux: server (x) y" });
+  assert.equal(parseProcStat("garbage"), undefined);
+  const before = [{ pid: 1, ticks: 100, pages: 10, name: "node" }, { pid: 2, ticks: 100, pages: 10, name: "node" }, { pid: 3, ticks: 500, pages: 0, name: "kworker/0:1" }, { pid: 4, ticks: 900, pages: 5, name: "gone" }];
+  const after = [{ pid: 1, ticks: 300, pages: 10, name: "node" }, { pid: 2, ticks: 200, pages: 10, name: "node" }, { pid: 3, ticks: 501, pages: 0, name: "kworker/0:1" }, { pid: 5, ticks: 7, pages: 5, name: "2.1.318" }, { pid: 6, ticks: 1, pages: 2, name: "chrome_crashpad" }];
+  assert.deepEqual(groupProcesses(before, after, 2, 100, 4096), [
+    { name: "Node", count: 2, cpus: 1.5, memory: 20 * 4096 },
+    { name: "Claude Code", count: 1, cpus: 0, memory: 5 * 4096 },
+    { name: "Chromium", count: 1, cpus: 0, memory: 2 * 4096 },
+  ], "a quiet kernel is left out; a new process has no earlier sample to compare");
+  assert.equal(processLabel("bad\u0000name\n"), "badname");
+  assert.equal(processLabel(""), "Unknown");
+  assert.throws(() => parseRemoteProcesses("nonsense"), { code: "unsupported" });
+  assert.deepEqual(parseRemoteProcesses("100\n4096\n7 100 2560 two words\n#second\n7 300 2560 two words\n"), [{ name: "two words", count: 1, cpus: 1, memory: 2560 * 4096 }]);
+  assert.equal(/cmdline|environ/.test(REMOTE_PROCESSES_COMMAND), false, "the probe never reads a command line");
+});
+
+test("local readings report this host's disks, and process names by group", { skip: process.platform !== "linux" }, async () => {
+  const metrics = await localMetrics();
+  assert.ok((metrics.disks?.length ?? 0) > 0);
+  for (const disk of metrics.disks!) assert.ok(disk.size > 0 && disk.mount.startsWith("/"));
+  const groups = await localProcesses(50);
+  assert.ok(groups.length > 0 && groups.length <= 8);
+  for (const group of groups) assert.ok(group.count > 0 && group.cpus >= 0 && group.memory >= 0 && group.name.length <= 40);
+});
+
+test("history keeps the highest reading per step, drops old points and survives a damaged file", (t) => {
+  const root = directory(t); const space = storage(root);
+  const metrics = (load: number) => ({ hostname: "h", platform: "linux", cpuCount: 2, load: [load, load, load] as [number, number, number], memoryTotal: 100, memoryAvailable: 40, uptimeSeconds: 1, disks: [{ mount: "/", size: 100, used: 91, available: 9 }] });
+  const store = historyStore(space);
+  const base = 1_000 * 60 * 60 * 24;
+  store.record("local", metrics(2), base);
+  store.record("local", metrics(6), base + 10_000);
+  store.record("local", metrics(4), base + 20_000);
+  store.record("local", metrics(8), base + 61_000);
+  assert.deepEqual(store.read("local", "1h", base + 61_000).points, [[base, 3, 60, 91], [base + 60_000, 4, 60, 91]], "per CPU, highest in each minute");
+  assert.equal(store.read("local", "24h", base + 61_000).points.length, 1, "the same minutes are one step of the day chart");
+  const later = base + 2 * 60 * 60_000;
+  store.record("local", metrics(2), later);
+  assert.equal(store.read("local", "1h", later).points.length, 1, "older than the range is gone");
+  assert.equal(store.read("ssh-0123456789abcdef", "1h", later).points.length, 0);
+  store.flush(later);
+  const reopened = historyStore(space);
+  assert.equal(reopened.read("local", "1h", later).points.length, 1);
+  assert.equal(reopened.read("local", "7d", later).points.length, 2);
+  const path = join(root, "packages/monitoring/history.json");
+  writeFileSync(path, "{ not json");
+  const warnings: unknown[] = []; const warn = console.warn; console.warn = (...args) => { warnings.push(args); };
+  t.after(() => { console.warn = warn; });
+  assert.equal(historyStore(space).read("local", "1h", later).points.length, 0, "a damaged file is an empty chart");
+  assert.equal(warnings.length, 1);
+  writeFileSync(path, JSON.stringify({ v: 1, machines: { "../evil": { "1h": [[1, 1, 1, 1]] }, __proto__x: {}, local: { "1h": [[later, "x", 1, 1], [later, 1, 1, null]] } } }));
+  assert.deepEqual(historyStore(space).read("local", "1h", later).points, [[later, 1, 1, null]], "only valid machines and points load");
+});
+
+test("the sampler reads the server once a minute for each Space with a local project, and never dials SSH", async (t) => {
+  const recorded: string[] = []; let reads = 0;
+  const projects = [{ id: "a", spaceId: "one" }, { id: "b", spaceId: "one" }, { id: "c", spaceId: "two" }, { id: "d", spaceId: "three", remote: { kind: "ssh", connectionId: "x" } }];
+  const sampler = createHistorySampler({ projects: { list: async () => projects } } as never, (spaceId) => recorded.push(spaceId),
+    async () => { reads += 1; return {} as never; });
+  await sampler.tick();
+  assert.deepEqual(recorded, ["one", "two"]);
+  assert.equal(reads, 1, "one reading, however many Spaces");
+  const quiet = createHistorySampler({ projects: { list: async () => [projects[3]!] } } as never, () => assert.fail("nothing to record"), async () => assert.fail("nothing to read"));
+  await quiet.tick();
+  t.after(() => { sampler.stop(); quiet.stop(); });
 });
