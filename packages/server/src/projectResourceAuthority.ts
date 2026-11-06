@@ -22,6 +22,7 @@ import {
 import type { ProjectRegistry } from "./projects.ts";
 import { projectResourceReceipt } from "./resourceReceipts.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
+import { projectPresence } from "./sessionSharing.ts";
 
 const RUNTIME_SYSTEM_PRINCIPAL_ID = "system:polyth-runtime";
 const PACKAGE_WORKSPACE_ID = /^__polyth_pkg_[a-f0-9]{32}$/;
@@ -410,15 +411,15 @@ export function canonicalProjectService(
 
   const isTrustedServerWork = ctx.userId.startsWith("system:");
   /** Active members who can open a project, the reader included. */
-  const audienceOf = (projectId: string): number => security.control.all<{ id: string }>(
+  const audienceOf = (projectId: string): string[] => security.control.all<{ id: string }>(
     `SELECT m.principal_id AS id FROM space_memberships m JOIN principals p ON p.id=m.principal_id
       WHERE m.space_id=? AND m.state='active' AND m.role IN ('owner','admin','member','viewer')
         AND (m.expires_at_ms IS NULL OR m.expires_at_ms>?) AND p.kind='user' AND p.status='active'`,
     ctx.spaceId,
     Date.now(),
-  ).filter((member) => security.resourceAccess.access({
-    resourceId: projectId, principalId: member.id, orgId: org.id, spaceId: ctx.spaceId,
-  }) !== undefined).length;
+  ).map((member) => member.id).filter((id) => security.resourceAccess.access({
+    resourceId: projectId, principalId: id, orgId: org.id, spaceId: ctx.spaceId,
+  }) !== undefined);
 
   return {
     ...base,
@@ -449,9 +450,12 @@ export function canonicalProjectService(
           throw cause;
         }
       }))).filter((room): room is Project => room !== undefined);
+      const presence = projectPresence(ctx.spaceId);
       return [...projects.map((project) => {
-        const others = audienceOf(project.id) - 1;
-        return others > 0 ? { ...project, sharedWith: others } : project;
+        const others = audienceOf(project.id).filter((id) => id !== ctx.userId);
+        if (others.length === 0) return project;
+        const here = presence(project.id);
+        return { ...project, sharedWith: others.length, ...(others.some((id) => here.has(id)) ? { othersHere: true } : {}) };
       }), ...rooms];
     },
     async ensurePrivateRoom(parentProjectId) {

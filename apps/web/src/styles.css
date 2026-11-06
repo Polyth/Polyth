@@ -1511,7 +1511,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    Horizontal rhythm, from the list edge: the highlight pill reaches 4px past
    the row start (mirroring its overhang on the trailing side), the state mark
    sits --session-pill-inset inside it, and the title follows one gap later. */
-.session-org {
+.session-org,
+.private-room-row,
+.private-room-chats {
   --session-lead-size: calc(var(--nav-session-size, 15px) * .94);
   --session-lead-gap: 6px;
   --session-pill-inset: 6px;
@@ -6607,6 +6609,27 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   padding: var(--space-1) var(--space-3);
   font-size: var(--font-meta); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+/* Zoom controls: one glass island, so the level reads between - and +. */
+.attachment-preview-zoom {
+  display: flex; align-items: center; gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-round);
+  background: var(--material-glass-strong);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+}
+.attachment-preview-zoom-level {
+  min-inline-size: 3.2em;
+  color: var(--text-dim);
+  font-size: var(--font-meta); font-variant-numeric: tabular-nums; text-align: center;
+}
+.attachment-preview-dialog .attachment-preview-zoom .ui-icon-btn { width: var(--control-h); height: var(--control-h); border-radius: var(--radius-round); color: var(--text); }
+@media (hover: hover) {
+  .attachment-preview-dialog .attachment-preview-zoom .ui-icon-btn:hover:where(:not(:disabled)) { background: var(--raised); }
+}
+@media (max-width: 520px) {
+  .attachment-preview-zoom-level { display: none; }
+}
 .attachment-preview-dialog :is(.attachment-preview-close, .attachment-preview-nav, .attachment-preview-count) {
   border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-island);
@@ -6623,7 +6646,7 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
 }
 .attachment-preview-dialog :is(.attachment-preview-close, .attachment-preview-nav):active:where(:not(:disabled)) { transform: scale(.96); }
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .attachment-preview-dialog :is(.attachment-preview-close, .attachment-preview-nav, .attachment-preview-count) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .attachment-preview-dialog :is(.attachment-preview-close, .attachment-preview-nav, .attachment-preview-count, .attachment-preview-zoom) {
     background: color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent);
     -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
     backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));

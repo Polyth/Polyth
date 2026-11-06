@@ -52,13 +52,13 @@ language without a renderer shows only the body in the host's code frame.
 
 | View | Row fields | Notes |
 | --- | --- | --- |
-| `cards` | `image \| title \| subtitle \| value \| badge \| link` | grid; a narrow block becomes a swipeable rail; `ratio=1:1` / `16:9` sets the media shape |
-| `list` | same as cards | rows with a thumbnail and trailing value; cards and list can be switched in the header. A value of up to 18 characters sits at the row's end (dropping under the title in a block narrower than 440px); a longer one is running text and wraps under the title; titles wrap whole, never clip; the pick mark is the last cell of every row |
+| `cards` | `image \| title \| subtitle \| value \| badge \| link` | grid; a narrow block becomes a swipeable rail; `ratio=1:1` / `16:9` sets the media shape; the picture's corner control opens the block's gallery |
+| `list` | same as cards | rows with a thumbnail and trailing value (the thumbnail itself opens the gallery); cards and list can be switched in the header. A value of up to 18 characters sits at the row's end (dropping under the title in a block narrower than 440px); a longer one is running text and wraps under the title; titles wrap whole, never clip; the pick mark is the last cell of every row |
 | `table` | first row = headers (or `cols=a,b,c`) | local sort (numeric columns detected), filter from 7 rows, 10 rows then 50 more per click; `` `code` `` and http(s) URLs in cells render as code and links; `sort=-Column`; also accepts a Markdown pipe table without `- ` row markers, skipping a Markdown separator rule. A table wider than the chat pans by mouse drag, keeps native touch scrolling, and scrolls with arrow keys while focused; a drag never fires a header sort click |
 | `stats` | `label \| value \| delta \| 3,5,4,8` | delta sign/arrow sets up/down colour; last field is a sparkline |
 | `choice` | `label \| detail` | single answer by default, `pick=many` for several; Send posts "title — answer" |
 | `chart` | `label \| n1 \| n2 …` | `type=bar` (horizontal bars, default), `line`, `area`, `donut`; a first row of names or `series=A,B` names the series (numeric names need `series=`); `unit=` suffix; line/area axis ends on a round number; pointer and arrow keys move a crosshair with a tooltip; a donut folds slices beyond 7 into "Other" |
-| `compare` | first row `- \| A \| B` names the objects; `- image \| url \| url`; `- Feature ↑ \| … ` | ↑ higher wins, ↓ lower wins (ties win nothing); `pick=one` selects a column for the buttons |
+| `compare` | first row `- \| A \| B` names the objects; `- image \| url \| url`; `- Feature ↑ \| … ` | ↑ higher wins, ↓ lower wins (ties win nothing); `pick=one` selects a column for the buttons; a column picture's corner control opens the gallery without picking |
 | `form` | `name \| Label * \| type \| default \| extra` | types text, textarea, number, select, toggle, date, email, url; `*` = required. `extra` is the options of a select (`a, b` or `S/M/L`), a `min..max` range for number and date (`18..120`, `2026-01-01..`; either side may be empty) or a `/regex/` the whole text must match. Send stays disabled and names the fields that are missing ("Fill in: …") or invalid ("Check: …"); invalid inputs are marked `aria-invalid`. Send posts "title — Label: value; …" |
 | `steps` | `done\|doing\|todo\|fail\|skip \| title \| detail` | read-only timeline, never selectable: filled markers (a number ahead, a glyph once settled) so nothing reads as a checkbox; "In progress" and "Failed" print, other states are screen-reader text; head shows done/total once a step has moved, else the step count; `` `code` `` and URLs in title/detail render as code and links. For options the user should pick, use `choice` |
 | `media` | `image \| caption \| link` | gallery; a tile opens the shared full-screen viewer (arrows, swipe, thumbnails) |
@@ -121,7 +121,9 @@ chart Daily visits · from=_out/visits.csv · type=line · cols=date,visits
 - Images and links pass the Markdown URL policy (`sanitizeImageSrc`,
   `sanitizeLinkHref`); links open in a new tab with `noopener noreferrer`, and
   images load lazily without a referrer. A broken or missing image falls back
-  to a monogram.
+  to a monogram. Every picture in cards, list and compare opens the same
+  full-screen gallery as the `media` view (arrows, swipe, thumbnails, zoom) at
+  the picture that was clicked.
 - While the fence streams, finished rows appear and the unfinished trailing
   line shows a placeholder; buttons appear and `from=` files load only once
   the fence is closed.

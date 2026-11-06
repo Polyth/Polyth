@@ -54,6 +54,8 @@ export interface ChatMemoryAccess {
   personal?: { userId: string; here: MemoryLayerGrant; aboutMe: MemoryLayerGrant };
   /** Other people can open this project, so the project layer is not private. */
   sharedProject: boolean;
+  /** Someone else really works here, so a note can be worth offering to them. */
+  othersHere?: boolean;
 }
 
 export interface MemoryService {
@@ -495,6 +497,7 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
         writeTo: sharedProject ? here : projectGrant,
         personal: { userId: owner, here, aboutMe },
         sharedProject,
+        ...(privacy?.inPrivateRoom === true || privacy?.othersHere === true ? { othersHere: true } : {}),
       };
     },
     async recall(space, input) {
@@ -504,15 +507,18 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
     async remember(input, ctx, supersedes = [], target = "auto") {
       if (!ctx.spaceId || !ctx.projectId) throw error("forbidden", "memory tool requires a scoped project");
       const space = host.systemSpaceContext(ctx.spaceId);
-      const { store, scope, writeTo, personal, sharedProject } = await service.chatAccess(space, ctx.projectId, ctx.sessionId);
+      const { store, scope, writeTo, personal, sharedProject, othersHere } = await service.chatAccess(space, ctx.projectId, ctx.sessionId);
       if (store.getPolicy(scope).mode !== "auto") throw error("blocked", "automatic memory writes require automatic mode");
       if ((target === "personal" || target === "about-me") && !personal) {
         throw error("forbidden", "personal notes are only available in a chat private to one person; others can read this chat");
       }
       // Personal to shared is one way and takes the person's own confirmation:
       // the agent proposes the exact text, and only they can publish it.
-      const proposing = target === "shared" && personal !== undefined && sharedProject;
-      const placement: MemoryLayerGrant = proposing || target === "personal" ? personal!.here
+      // With nobody else working here there is nobody to offer it to and no reason
+      // to interrupt: it stays a working note of theirs, which their chats recall.
+      const staysPersonal = target === "shared" && personal !== undefined && sharedProject;
+      const proposing = staysPersonal && othersHere === true;
+      const placement: MemoryLayerGrant = staysPersonal || target === "personal" ? personal!.here
         : target === "about-me" ? personal!.aboutMe
           : target === "shared" ? { layer: "project" }
             : writeTo;
@@ -551,7 +557,8 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
         store.review(scope, record.id, record.revision, "superseded");
         superseded.push(record.id);
       }
-      return superseded.length ? { ...receipt, superseded } : receipt;
+      const saved = staysPersonal ? { ...receipt, message: "saved to this person's notes, not the shared memory: others could open this project but nobody else works in it yet, so nothing was proposed; their chats here recall it" } : receipt;
+      return superseded.length ? { ...saved, superseded } : saved;
     },
     harvest: undefined as unknown as MemoryHarvestController,
     reflect: undefined as unknown as ReflectController,

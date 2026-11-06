@@ -7,7 +7,7 @@ import type { SessionProjection } from "@polyth/contracts";
 import { tr } from "../../i18n/index.ts";
 import { confirmAlert, promptAlert } from "../../alerts.ts";
 import { deleteSession, forkSession } from "../../init.ts";
-import { continuePrivately } from "../../privateRoom.ts";
+import { chatReadByOthers, continuePrivately } from "../../privateRoom.ts";
 import { archiveSessionWithPolicy, renameSessionTitle, toggleSessionPin } from "../../sessionActions.ts";
 import { canManageSession } from "../../sessionSharing.ts";
 import { setSessionMuted } from "../../sessionPeople.ts";
@@ -149,7 +149,7 @@ export default function MobileSessionMenu({
       icon: ForkIcon,
       onSelect: () => void forkSession(session.id).catch(fail),
     } satisfies MenuEntry] : []),
-    ...(session.sharing?.shared && session.sharing.access !== "view" && session.purpose !== "conversation" ? [{
+    ...(chatReadByOthers(session) && session.sharing?.access !== "view" && session.purpose !== "conversation" ? [{
       id: "continue-private",
       label: tr("privateRoom.continue"),
       icon: LockIcon,

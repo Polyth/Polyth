@@ -1023,15 +1023,29 @@ auto-places (`autoPlacesContribution`); an explicitly included package always
 gets a visible rail. A private room (`Project.parentProjectId`) is never a
 project of its own in any picker, list or rail: `rootProjects` removes it, and
 anything about the project (settings, appearance) resolves through
-`rootProjectId`. Under a project someone else can open (`sharedWith > 0`), the
-Shared / Only me switch (`PrivateRoomSwitch`) moves the person between the
-project and their room, and marks the lane they aren't in when a chat there is
-waiting, since its rows are hidden; someone working alone sees neither it nor My
-notes.
-`ChatAudienceLine`, above the composer of any chat in a Space with several
-people, says who can read it and which memory the agent has, and offers
-Continue privately, which starts a room chat quoting only the title. What was
-already said stays where it was. A person's Personal project (`Project.personal`, §3.3) is
+`rootProjectId`.
+
+A project says nothing about other people until someone else really works in it
+(`Project.othersHere`); `sharedWith` only counts who could open it. Then its ⋮
+menu offers New chat just for me, which starts a chat in the person's room. A room
+with chats shows one row after the project's chat list (`PrivateRoomGroup`), with
+or without anyone else around: Only me, its count, and a dot while it's closed and
+a chat behind it waits. It opens in place, opens itself when the person arrives in
+the room, and goes away with the last chat. There is no switch: shared and private
+chats never hide each other, and search reaches both. A room's waiting chats count
+toward its project on the rail and the phone's project row.
+
+Silence is the norm: a chat only its person reads says nothing, and nothing sits
+above the composer. `othersRead` decides whether a chat speaks: someone else's chat
+or one given to someone by name always does, and one merely open to the whole Space
+does once someone else works in its project. Such a chat gets `ChatAudienceChip` at
+the far end of the composer's model row, which opens its sharing, plus the
+navigator's shared mark and Continue privately in its menu and in that dialog, which
+starts a room chat quoting only the title. What was already said stays where it was.
+Which memory the agent has is one line in the context card
+(`composer.context.details`), only among other people.
+
+A person's Personal project (`Project.personal`, §3.3) is
 the `personal` kind whatever its composition says (`projectKinds(…, { personal })`,
 `RailPlanOptions`): only launchers that list `personal` start on a rail —
 today Files, Agents and Planner on the right rail, the top rail empty — and
@@ -3411,9 +3425,13 @@ host.surfaces.register({
     down moves the item and lifts the dim (`--preview-drag` on its own layer)
     and the chrome, and dismisses from there or springs back. An image zooms
     in the viewer itself (`mediaZoom.ts`; the page never zooms): two fingers
-    pinch around their midpoint, a double tap zooms into the tapped point or
-    back to rest, a zoomed image drags within its bounds (clipped to the stage
-    via `data-zoomed`), and a trackpad pinch (ctrl + wheel) zooms on desktop.
+    pinch around their midpoint, a touch double tap and a mouse click zoom into
+    the tapped point, another click returns to rest, a zoomed image drags
+    within its bounds (clipped to the stage via `data-zoomed`), and the wheel —
+    a mouse wheel or a trackpad pinch (ctrl + wheel) — zooms around the
+    pointer. A single click always does something where the `zoom-in` cursor
+    promises it; the second click of a double click does not undo the first.
+    Images also carry a zoom island in the viewer bar (out, level, in, reset).
     While zoomed, or with two fingers down, paging and the pull stand aside.
     The stage is `touch-action: none`: allowing native `pan-y` let the browser
     scroll or bounce the page behind the fixed viewer before a sideways swipe
@@ -5002,9 +5020,10 @@ The host's cumulative transcript editor (`composer/transcriptSpan.ts`) and
 Markdown image lightbox (`markdown/ImageLightbox.tsx`) are generic primitives,
 independent of the Dictation and Gallery package implementations. The lightbox
 is an adapter over the shared full-screen viewer
-(`components/AttachmentPreview.tsx`), which attachments and tool images also
-use: close button, pinch / double-tap zoom for images, and for several items a
-counter, arrows, swipe, arrow keys and a thumbnail strip.
+(`components/AttachmentPreview.tsx`), which attachments, tool images and chat
+block pictures also use: close button, pinch / click / wheel / button zoom for
+images, and for several items a counter, arrows, swipe, arrow keys and a
+thumbnail strip.
 
 ## 7. Disposal, lifecycle, and failure isolation
 
@@ -5060,8 +5079,9 @@ counter, arrows, swipe, arrow keys and a thumbnail strip.
   `settingsNavigation.test.ts` "phone Settings knows the edge…" (origin, stage
   stack, native Back), `workspaceEditor.test.ts` "the Workspace leads with
   Back…", `attachmentPreviewGestures.test.ts` (media viewer paging,
-  pull-down, and a zoomed image that never pages), `mediaZoom.test.ts` (pinch,
-  double tap, pan bounds, no close click after a drag).
+  pull-down, mouse click/wheel zoom, and a zoomed image that never pages),
+  `mediaZoom.test.ts` (pinch, double tap, pan bounds, no close click after a
+  drag).
 - Rail drag: `railDrag.test.ts` (preview and persist model, the removal
   distance and its hysteresis), `railDragRemove.test.ts` (mounted pointer drag:
   the verdict, put-back near a rail, off screen and on a rail that cannot lose

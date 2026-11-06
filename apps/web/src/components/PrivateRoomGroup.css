@@ -1,0 +1,79 @@
+/* A row of the chat list: its height, its lead column and its title column, in
+   the ink that says it isn't a chat. */
+.private-room-row {
+  display: flex;
+  align-items: center;
+  gap: var(--session-lead-gap);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--nav-row-session);
+  padding-block: 0;
+  padding-inline: var(--nav-indent-session) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  letter-spacing: -0.012em;
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .private-room-row:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--session-blue, var(--accent)) 6%, transparent); color: var(--text-dim); }
+}
+.private-room-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--session-lead-size);
+  height: var(--session-lead-size);
+}
+.private-room-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.private-room-count { flex: none; opacity: .72; font-variant-numeric: tabular-nums; }
+.private-room-end {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline-start: auto;
+}
+.private-room-waiting { width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--accent); }
+.private-room-chevron { opacity: .72; transition: transform var(--motion-fast) var(--motion-ease); }
+.private-room-chevron:dir(rtl) { transform: scaleX(-1); }
+.private-room-row[aria-expanded="true"] .private-room-chevron { transform: rotate(90deg); }
+/* Its chats' state marks sit under its label, as a delegated child's do. */
+.private-room-chats { padding-inline-start: calc(var(--session-lead-size) + var(--session-lead-gap)); }
+
+/* The phone's list has its own columns: the mark under the project's. */
+.mobile-nav-project-body .private-room-row {
+  gap: 0;
+  padding-inline: var(--nav-row-inset) var(--space-3);
+  color: var(--muted);
+  font-size: var(--nav-session-size);
+  font-weight: 500;
+  line-height: var(--nav-session-lh);
+  letter-spacing: -.01em;
+}
+.mobile-nav-project-body .private-room-mark { width: var(--nav-lead-col); height: auto; }
+.mobile-nav-project-body .private-room-label { padding-inline-start: var(--nav-lead-gap); }
+.mobile-nav-project-body .private-room-count { margin-inline-start: var(--space-2); }
+.mobile-nav-project-body .private-room-chats { padding-inline-start: var(--space-4); }
+
+/* Who else reads the chat: the far end of the composer's model row. */
+.composer-audience {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-weight: 400;
+}
+.composer-audience > .ui-icon { flex: none; }
+.composer-audience-label,
+.composer-audience-names { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A phone's row fits the names, which are what matters; the icon says the rest. */
+.composer-audience-names { display: none; }
+.composer-mobile .composer-audience-label:has(+ .composer-audience-names) { display: none; }
+.composer-mobile .composer-audience-names { display: block; }

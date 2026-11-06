@@ -994,7 +994,8 @@ from personal to shared only as text its owner confirmed.
 
 | Seam | Behavior | Owner |
 |---|---|---|
-| Private room | `POST /api/projects/:id/private-room` (`ensurePrivateRoom`): a real project owned by the caller with `private` visibility, in `personal/<person>/rooms/<project>`, created on first use. `list()` never returns it; `GET /api/projects` (`listForShell`) adds the reader's own rooms and `sharedWith`. Appearance and composition follow the parent, and it can't be edited directly. If the project is deleted the room becomes an ordinary private project (`detachedFromProjectId`) | `projects.ts`, `projectResourceAuthority.ts` |
+| Private room | `POST /api/projects/:id/private-room` (`ensurePrivateRoom`): a real project owned by the caller with `private` visibility, in `personal/<person>/rooms/<project>`, created on first use. `list()` never returns it; `GET /api/projects` (`listForShell`) adds the reader's own rooms, `sharedWith` and `othersHere`. Appearance and composition follow the parent, and it can't be edited directly. If the project is deleted the room becomes an ordinary private project (`detachedFromProjectId`) | `projects.ts`, `projectResourceAuthority.ts` |
+| Who is here | `sharedWith` counts who could open a project. `othersHere` says someone else really works in it: they own it, have an active chat or a private room in it, or hold a grant on it. A grant on one chat doesn't count: that chat's `sharing.named` speaks for itself. People interface follows `othersHere` ([UI](../dev/ui.md)). Memory's write target stays on who could open it, so what a person saves alone stays theirs if someone opens the project later | `projectResourceAuthority.ts`, `sessionSharing.ts`, `apps/web/src/privateRoom.ts` |
 | Memory | A room shares its project's memory and policy (`service.scope`). `chatAccess` derives the layers from the chat's real audience (`host.sessionPrivacy`), never from a request or a model argument: a chat private to its owner gets `project` + that person's layers, any other chat gets `project` only | `packages/memory/src/service.ts` |
 | Writing | In a private chat of a project others can open, `memory_remember` and harvest write to the person's notes. Someone working alone keeps writing to the project. `target: "shared"` from such a chat stores a proposal, which only the person publishes, as a copy of exactly that text, so earlier personal revisions stay personal | same |
 | Who is speaking | Every admitted turn in a Space with two or more members persists `context/people-prepared` before delivery: who speaks, who reads, which memory applies. A retry resends the recorded block. A person joining someone else's running turn (steer) gets a one-line version. Names are reduced to letters and ordinary punctuation, so a display name can't close the block or read as a command | `sessionSharing.ts`, `sessions.ts` |
@@ -1020,9 +1021,12 @@ What this promises, and what it doesn't:
 | The model provider | The account a chat runs through | **Not closed**: a shared account stays its owner's |
 
 So the interface says "Administrators can't read them through Polyth", never
-"nobody ever". A new chat is still private by default (§14.1), in the Shared lane
-too: it says so, and an admin who wants a family's chats readable by everyone sets
-the Space's default audience.
+"nobody ever". A new chat is still private by default (§14.1), and an admin who
+wants a family's chats readable by everyone sets the Space's default audience. The
+interface says nothing about a private chat. It also says nothing about a chat
+merely open to the Space in a project nobody else works in, such as one server work
+started, so silence there doesn't mean no member could open it; the share dialog
+and the chat's own sharing stay truthful.
 
 **MCP servers have an owner** (source-inspected and unit/integration-tested;
 not live-verified with a real harness). Owner: `packages/server/src/mcp.ts`;

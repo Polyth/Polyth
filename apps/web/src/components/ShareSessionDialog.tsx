@@ -16,6 +16,7 @@ import {
 } from "@polyth/contracts";
 import { httpStatusOf } from "@polyth/session/web-api";
 import { openSessionSharing, setOverlay, useStore } from "../store.ts";
+import { chatReadByOthers, continuePrivately } from "../privateRoom.ts";
 import { tr } from "../i18n/index.ts";
 import { friendlyError } from "../settings.ts";
 import { announce } from "./a11y/live.tsx";
@@ -130,6 +131,15 @@ export default function ShareSessionDialog() {
 
   if (!sessionId) return null;
   const close = () => setOverlay(null);
+  // Someone else can read this chat: take the next words somewhere they can't.
+  const openChat = useStore((state) => state.sessions.find((candidate) => candidate.id === sessionId));
+  const continueAway = openChat && chatReadByOthers(openChat) && openChat.sharing?.access !== "view" && openChat.purpose !== "conversation"
+    ? (
+      <Button size="sm" className="session-sharing-continue" iconStart={LockIcon} onClick={() => { close(); void continuePrivately(openChat); }}>
+        {tr("privateRoom.continue")}
+      </Button>
+    )
+    : null;
   const editable = !!dto && dto.canShare && !dto.inherited && staysPrivate === null;
   const dirty = !!dto && (visibility !== dto.visibility || (visibility !== "private" && !sameGrants(grants, dto.grants)));
   const levels = SESSION_ACCESS_LEVELS.filter((level) => dto?.maxGrant && sessionAccessAtLeast(dto.maxGrant, level));
@@ -172,10 +182,11 @@ export default function ShareSessionDialog() {
 
   const footer = editable ? (
     <>
+      {continueAway}
       <Button size="sm" onClick={close}>{tr("common.cancel")}</Button>
       <Button size="sm" variant="primary" disabled={!dirty} busy={saving} onClick={() => void save()}>{tr("common.save")}</Button>
     </>
-  ) : <Button size="sm" onClick={close}>{tr("common.close")}</Button>;
+  ) : <>{continueAway}<Button size="sm" onClick={close}>{tr("common.close")}</Button></>;
 
   const audience = () => {
     if (!editable) {

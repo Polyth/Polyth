@@ -200,8 +200,7 @@ body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .pkg-memory
 .memory-mine-group { display: grid; gap: var(--space-2); }
 .memory-mine-group h4 { margin: 0; font-size: var(--font-label); font-weight: 600; }
 .memory-mine-empty { color: var(--muted); font-size: var(--font-meta); }
-.memory-mine-note,
-.memory-proposal {
+.memory-mine-note {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -209,34 +208,152 @@ body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .pkg-memory
   padding-block: var(--space-2);
   border-top: 1px solid var(--border);
 }
-.memory-mine-note-copy,
-.memory-proposal-copy { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
-.memory-mine-note-copy span,
-.memory-proposal-copy span { color: var(--muted); }
+.memory-mine-note-copy { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.memory-mine-note-copy span { color: var(--muted); }
 .memory-mine-note-copy small { color: var(--muted); font-size: var(--font-meta); }
 .memory-mine-editor { display: grid; gap: var(--space-2); }
-.memory-chat-scope { display: block; flex: 0 1 auto; color: var(--muted); font-size: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.memory-chat-scope::before { content: "·"; margin-inline-end: var(--space-1); }
-.memory-proposal-card {
+/* The context card's own inset, under its other notes. */
+.memory-chat-scope {
   display: grid;
-  width: 100%;
-  gap: var(--space-1);
-  /* The text edge of the pending stack it sits in. */
-  padding: var(--space-2) var(--composer-stack-end) var(--space-2) var(--composer-stack-text);
-  color: var(--text);
-  font-size: var(--font-body);
+  justify-items: start;
+  gap: 2px;
+  margin: var(--space-3) var(--space-2) var(--space-2);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--surface-divider);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.45;
 }
-.memory-proposal-from { color: var(--muted); font-size: var(--font-meta); }
-.memory-proposal-card .memory-proposal { border-top: 0; padding-block: 0; }
-.memory-proposal-copy,
+.memory-chat-scope-notes {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
 .memory-mine-note-copy { flex: 1 1 0; }
-.memory-proposal > .memory-actions,
 .memory-mine-note > .memory-actions,
 .memory-mine > .memory-section-head > .memory-actions { flex: none; flex-wrap: nowrap; }
 @media (max-width: 480px) {
-  .memory-proposal,
   .memory-mine-note { flex-direction: column; }
   .memory-mine > .memory-section-head > .memory-actions { flex: 1 1 100%; flex-wrap: wrap; }
-  /* Under who reads the chat. */
-  .memory-chat-scope::before { content: none; }
+}
+
+/* A note the agent suggests sharing: its title, and on demand the exact text
+   beside the person's choice. */
+.memory-proposal { border-top: 1px solid var(--border); }
+.memory-proposal > summary,
+.memory-proposal-card > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  list-style: none;
+  cursor: pointer;
+}
+.memory-proposal > summary::-webkit-details-marker,
+.memory-proposal-card > summary::-webkit-details-marker { display: none; }
+.memory-proposal > summary:focus-visible,
+.memory-proposal-card > summary:focus-visible {
+  border-radius: var(--radius-control);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.memory-proposal > summary { min-height: max(var(--control-h-sm), var(--hit-min)); }
+.memory-proposal > summary > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memory-proposal[open] > summary > strong { color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+.memory-proposal-chevron {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+[open] > summary > .memory-proposal-chevron { transform: rotate(180deg); }
+/* A note keeps its author's line breaks: most of them are lists. */
+.memory-proposal-body {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.memory-proposal-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.memory-proposal > .memory-actions { padding-block-end: var(--space-2); }
+
+/* Above the composer it is one more line of the pending stack, on its grid and
+   with no plate. Open, it stays bounded: the chat and the composer keep the screen. */
+.memory-proposal-card {
+  width: 100%;
+  color: var(--text-dim);
+  font-size: var(--font-composer-stack);
+}
+.memory-proposal-card > summary {
+  min-height: calc(var(--composer-stack-row) + var(--composer-stack-reach));
+  margin-block-start: calc(-1 * var(--composer-stack-reach));
+  padding-block-start: var(--composer-stack-reach);
+  padding-inline: var(--composer-stack-text) var(--composer-stack-end);
+}
+.memory-proposal-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memory-proposal-count {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.memory-proposal-list {
+  max-height: min(50dvh, 26rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--composer-stack-end) var(--space-2) var(--composer-stack-text);
+}
+/* Only the text scrolls, so the choice under it stays in reach. It fades out
+   rather than cutting a line; the padding leaves the last line clear of the fade. */
+.memory-proposal-card .memory-proposal-body {
+  max-height: min(24dvh, 11rem);
+  margin-block-end: 0;
+  padding-block-end: var(--space-4);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  mask-image: linear-gradient(to top, transparent, #000 var(--space-4));
+}
+.memory-proposal-card .memory-proposal { border-top: 0; }
+.memory-proposal-card .memory-proposal > summary { min-height: max(var(--composer-stack-row), var(--hit-min)); }
+.memory-proposal-card .memory-actions { gap: var(--space-3); }
+/* Word actions, as everywhere in the stack: Review's ink for the one that acts. */
+.memory-proposal-card .memory-proposal .memory-button {
+  min-height: max(var(--composer-stack-control), var(--hit-min));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-weight: 500;
+}
+.memory-proposal-card .memory-proposal .memory-button-primary { color: var(--chat-ink-accent, var(--accent)); }
+@media (hover: hover) {
+  .memory-proposal > summary:hover > strong,
+  .memory-proposal-card > summary:hover > .memory-proposal-label,
+  .memory-proposal-card .memory-proposal .memory-button:hover:where(:not(:disabled, .memory-button-primary)) { color: var(--text); }
+  .memory-proposal-card .memory-proposal .memory-button:hover:where(:not(:disabled)) { background: transparent; }
+  .memory-proposal-card .memory-proposal .memory-button-primary:hover:where(:not(:disabled)) { text-decoration: underline; }
 }

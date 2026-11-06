@@ -1,7 +1,8 @@
 // Zoom for the media viewer's image (AttachmentPreview.tsx): two fingers pinch
-// around their midpoint, a double tap zooms into the tapped point (or back
-// out), one finger or the mouse drags a zoomed image, and a trackpad pinch
-// (ctrl + wheel) zooms around the pointer.
+// around their midpoint, a touch double tap and a mouse click zoom into the
+// tapped point (or back out), one finger or the mouse drags a zoomed image, and
+// the wheel (a plain mouse wheel or a trackpad pinch) zooms around the pointer.
+// The viewer's own buttons call `zoomIn`/`zoomOut`/`resetView`.
 //
 // The page itself never zooms (the viewport is fixed at scale 1) and the stage
 // takes no native panning (`touch-action: none`), so every touch arrives here
@@ -73,6 +74,8 @@ export interface MediaZoomOptions {
   surface(): HTMLElement | null;
   /** The zoomable image right now, or null (video, documents, cards). */
   media(): HTMLElement | null;
+  /** The scale changed (for a zoom level readout and its controls). */
+  onScale?(scale: number): void;
 }
 
 export interface MediaZoom {
@@ -80,6 +83,12 @@ export interface MediaZoom {
   engaged(): boolean;
   /** Back to rest at once (the item changed). */
   reset(): void;
+  /** One step in, around the middle of the view. */
+  zoomIn(): void;
+  /** One step out, around the middle of the view. */
+  zoomOut(): void;
+  /** Back to rest, keeping the current item (the viewer's reset control). */
+  resetView(): void;
   detach(): void;
 }
 
@@ -100,7 +109,8 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
   let downAt: { x: number; y: number; t: number; onMedia: boolean } | null = null;
   let lastTap: { x: number; y: number; t: number } | null = null;
   let settleTimer = 0;
-  let lastPointerType = "";
+  /** The scale last reported through `onScale`. */
+  let reported = 1;
 
   const box = (): ZoomBox | null => {
     const media = el;
@@ -137,6 +147,10 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
     if (atRest) media.style.removeProperty("transform");
     else media.style.transform = `translate3d(${next.x}px, ${next.y}px, 0) scale(${next.scale})`;
     surface?.toggleAttribute("data-zoomed", next.scale > 1);
+    if (next.scale !== reported) {
+      reported = next.scale;
+      options.onScale?.(next.scale);
+    }
   };
 
   /** Follow the image the viewer shows now; a new one starts at rest. */
@@ -169,7 +183,6 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
   };
 
   const onPointerDown = (event: PointerEvent): void => {
-    lastPointerType = event.pointerType;
     if (pointers.size === 0) moved = false;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     const target = event.target as Element | null;
@@ -220,17 +233,30 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
     }
   };
 
+  /** Toggle between rest and a close-up of the point that was tapped. */
+  const toggleAt = (point: Pointer, onMedia: boolean): void => {
+    const b = box();
+    if (!b) return;
+    if (view.scale > 1) paint(REST_VIEW, true);
+    else if (onMedia) paint(clampView(zoomAround(view, local(point), MEDIA_ZOOM_DOUBLE_TAP, b), b), true);
+  };
+
   const onTap = (event: PointerEvent, onMedia: boolean): void => {
     const now = event.timeStamp;
     const previous = lastTap;
     lastTap = { x: event.clientX, y: event.clientY, t: now };
-    if (!previous || now - previous.t > DOUBLE_TAP_MS
-      || Math.hypot(event.clientX - previous.x, event.clientY - previous.y) > DOUBLE_TAP_DISTANCE) return;
+    const repeated = Boolean(previous && now - previous.t <= DOUBLE_TAP_MS
+      && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= DOUBLE_TAP_DISTANCE);
+    if (event.pointerType === "mouse") {
+      // A click zooms. The second click of a double click already landed on a
+      // zoomed image and must not undo the first one.
+      if (repeated) return;
+      toggleAt({ x: event.clientX, y: event.clientY }, onMedia);
+      return;
+    }
+    if (!repeated) return;
     lastTap = null;
-    const b = box();
-    if (!b) return;
-    if (view.scale > 1) paint(REST_VIEW, true);
-    else if (onMedia) paint(clampView(zoomAround(view, local({ x: event.clientX, y: event.clientY }), MEDIA_ZOOM_DOUBLE_TAP, b), b), true);
+    toggleAt({ x: event.clientX, y: event.clientY }, onMedia);
   };
 
   const onPointerEnd = (event: PointerEvent): void => {
@@ -259,26 +285,28 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
     event.preventDefault();
   };
 
-  // Trackpad pinches arrive as ctrl + wheel; a plain wheel is left alone.
+  /** A step either way around the middle of the view (the viewer's buttons). */
+  const step = (factor: number): void => {
+    if (!track()) return;
+    const b = box();
+    if (!b) return;
+    const scale = Math.min(MEDIA_ZOOM_MAX, Math.max(1, view.scale * factor));
+    if (scale === view.scale) return;
+    const middle = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    paint(scale <= 1 || scale < REST_SNAP ? REST_VIEW : clampView(zoomAround(view, middle, scale, b), b), true);
+  };
+
+  // The wheel zooms around the pointer: a mouse wheel notches, a trackpad
+  // pinch (ctrl + wheel) or a two-finger scroll on the image zooms smoothly.
   const onWheel = (event: WheelEvent): void => {
-    if (!event.ctrlKey || !track()) return;
+    if (!track()) return;
     const b = box();
     if (!b) return;
     event.preventDefault();
-    const scale = Math.min(MEDIA_ZOOM_MAX, Math.max(1, view.scale * Math.exp(-event.deltaY * 0.01)));
+    const scale = Math.min(MEDIA_ZOOM_MAX, Math.max(1, view.scale * Math.exp(-event.deltaY * 0.0025)));
+    if (scale === view.scale) return;
     const next = scale < REST_SNAP ? REST_VIEW : clampView(zoomAround(view, local({ x: event.clientX, y: event.clientY }), scale, b), b);
     paint(next);
-  };
-
-  const onDoubleClick = (event: MouseEvent): void => {
-    // Touch double taps are handled from their pointers; this is the mouse's.
-    if (lastPointerType !== "mouse" || !track()) return;
-    const b = box();
-    if (!b) return;
-    if (view.scale > 1) paint(REST_VIEW, true);
-    else if (el?.contains(event.target as Node | null)) {
-      paint(clampView(zoomAround(view, local({ x: event.clientX, y: event.clientY }), MEDIA_ZOOM_DOUBLE_TAP, b), b), true);
-    }
   };
 
   const passive = { passive: true } as const;
@@ -288,7 +316,6 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
   surface?.addEventListener("pointercancel", onPointerEnd, passive);
   surface?.addEventListener("click", onClick, { capture: true });
   surface?.addEventListener("wheel", onWheel, { passive: false });
-  surface?.addEventListener("dblclick", onDoubleClick);
 
   return {
     engaged: () => view.scale > 1 || pointers.size >= 2 || pinch !== null,
@@ -303,6 +330,17 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
       el = null;
       surface?.removeAttribute("data-zoomed");
     },
+    zoomIn: () => step(1.5),
+    zoomOut: () => step(1 / 1.5),
+    resetView() {
+      pointers.clear();
+      pinch = null;
+      pan = null;
+      downAt = null;
+      lastTap = null;
+      moved = false;
+      if (el && view.scale !== 1) paint(REST_VIEW, true);
+    },
     detach() {
       surface?.removeEventListener("pointerdown", onPointerDown);
       surface?.removeEventListener("pointermove", onPointerMove);
@@ -310,7 +348,6 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
       surface?.removeEventListener("pointercancel", onPointerEnd);
       surface?.removeEventListener("click", onClick, { capture: true });
       surface?.removeEventListener("wheel", onWheel);
-      surface?.removeEventListener("dblclick", onDoubleClick);
       if (el) (el.ownerDocument.defaultView ?? window).clearTimeout(settleTimer);
     },
   };

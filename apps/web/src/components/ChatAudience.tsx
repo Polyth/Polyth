@@ -1,46 +1,33 @@
-// Who can read the chat on screen, said plainly wherever a Space has more than
-// one person. Names come from the server on open; the row itself says only
-// whether anyone else can read it, so it never guesses.
+// Who else reads the chat on screen, said only when someone does: a quiet label
+// in the composer's model row that opens the chat's sharing. A chat only its
+// person can read says nothing.
 import { useEffect, useState } from "react";
-import type { SessionProjection, SessionPerson } from "@polyth/contracts";
+import type { SessionPerson, SessionProjection } from "@polyth/contracts";
 import { tr } from "../i18n/index.ts";
-import { continuePrivately } from "../privateRoom.ts";
+import { chatReadByOthers } from "../privateRoom.ts";
 import { loadSessionSharing, ownerName } from "../sessionSharing.ts";
-import SlotHost from "./slots/SlotHost.ts";
-import { Button, Icon, LockIcon, SharedIcon } from "./ui/index.ts";
-import "./PrivateRoomSwitch.css";
+import { openSessionSharing } from "../store.ts";
+import { Icon, SharedIcon } from "./ui/index.ts";
 
-export function ChatAudienceLine({ session }: { session: SessionProjection }) {
-  const sharing = session.sharing;
+export function ChatAudienceChip({ session }: { session: SessionProjection }) {
+  const speaks = chatReadByOthers(session);
   const [readers, setReaders] = useState<readonly SessionPerson[] | null>(null);
-  const shouldShow = sharing?.multiPerson === true;
-  const shared = sharing?.shared === true;
   useEffect(() => {
-    if (!shouldShow || !shared) { setReaders(null); return; }
+    if (!speaks) { setReaders(null); return; }
     let live = true;
     void loadSessionSharing(session.id)
       .then((dto) => { if (live) setReaders(dto.readers ?? null); })
       .catch(() => { if (live) setReaders(null); });
     return () => { live = false; };
-  }, [session.id, shared, shouldShow, sharing?.visibility]);
-  if (!shouldShow) return null;
-  const label = !shared
-    ? tr("audience.onlyYou")
-    : readers?.length
-      ? tr("audience.readers", { names: readers.map(ownerName).join(", ") })
-      : tr("audience.shared");
+  }, [session.id, speaks, session.sharing?.visibility]);
+  if (!speaks) return null;
+  const names = readers?.map(ownerName).join(", ");
+  const label = names ? tr("audience.readers", { names }) : tr("audience.shared");
   return (
-    <div className="chat-audience-line" data-chat-audience={shared ? "shared" : "private"}>
-      <Icon icon={shared ? SharedIcon : LockIcon} size="sm" />
-      <div className="chat-audience-copy">
-        <span className="chat-audience-text" title={label}>{label}</span>
-        <SlotHost slot="session.audience.details" context={{ projectId: session.projectId, sessionId: session.id, privateChat: !shared }} />
-      </div>
-      {shared && sharing?.access !== "view" && (
-        <Button size="sm" variant="ghost" className="chat-audience-action" iconStart={LockIcon} aria-label={tr("privateRoom.continue")} onClick={() => void continuePrivately(session)}>
-          <span className="chat-audience-action-label">{tr("privateRoom.continue")}</span>
-        </Button>
-      )}
-    </div>
+    <button type="button" className="config-chip composer-audience" title={label} aria-label={label} onClick={() => openSessionSharing(session.id)}>
+      <Icon icon={SharedIcon} size="sm" />
+      <span className="composer-audience-label">{label}</span>
+      {names && <span className="composer-audience-names">{names}</span>}
+    </button>
   );
 }

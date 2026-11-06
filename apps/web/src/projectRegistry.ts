@@ -144,10 +144,11 @@ export function publishListFailure(
 export function upsertProject(state: ProjectRegistryState, project: Project): ProjectRegistryState {
   const base: Project[] = state.status === "ready" ? state.projects : [];
   const i = base.findIndex((p) => p.id === project.id);
-  // `sharedWith` is per reader and comes only with the list: a rename's answer
-  // lacks it, and losing it would hide the Only me switch until the next refresh.
+  // `sharedWith` and `othersHere` are per reader and come only with the list: a
+  // rename's answer lacks them, and losing them would quiet the people interface
+  // until the next refresh.
   const kept = (p: Project): Project => project.sharedWith === undefined && p.sharedWith !== undefined
-    ? { ...project, sharedWith: p.sharedWith }
+    ? { ...project, sharedWith: p.sharedWith, ...(p.othersHere ? { othersHere: true } : {}) }
     : project;
   const projects = i >= 0 ? base.map((p, j) => (j === i ? kept(p) : p)) : [...base, project];
   return {

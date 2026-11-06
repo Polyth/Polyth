@@ -8,8 +8,19 @@ export default defineWebPackage((host) => () => {
   const slots = [
     host.slots.register({
       id: "memory.chat-scope",
-      slot: "session.audience.details",
-      render: (props) => <ChatMemoryScope privateChat={props.privateChat === true} translate={translate} />,
+      slot: "composer.context.details",
+      order: 20,
+      // Only among other people: alone, there is nothing to tell apart.
+      render: (props) => typeof props.privateChat === "boolean"
+        ? <ChatMemoryScope
+            privateChat={props.privateChat}
+            translate={translate}
+            onOpenNotes={typeof props.projectId === "string" ? () => {
+              if (typeof props.closeCard === "function") props.closeCard();
+              host.projectSettings.open?.(props.projectId as string, "memory");
+            } : undefined}
+          />
+        : null,
     }),
     host.slots.register({
       id: "memory.share-proposals",

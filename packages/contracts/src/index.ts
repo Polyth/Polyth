@@ -1734,6 +1734,8 @@ export interface SessionSharingView {
   owner?: SessionPerson;
   /** Someone other than the reader can open this chat. */
   shared: boolean;
+  /** It was given to someone else by name, whatever its audience. */
+  named?: boolean;
   /** The Space has other members, so who reads a chat is worth saying. */
   multiPerson?: boolean;
 }
@@ -1748,6 +1750,8 @@ export interface SessionPrivacy {
   /** How many people can open the project it lives in; for a private room,
    *  the project the room belongs to. */
   projectAudience: number;
+  /** Someone besides `privateTo` really works in that project (`Project.othersHere`). */
+  othersHere?: boolean;
   /** The chat lives in a person's private room. */
   inPrivateRoom?: boolean;
 }
@@ -1771,7 +1775,7 @@ export interface SessionSharePersonDto {
 export interface SessionSharingDto {
   sessionId: string;
   visibility: SessionVisibility;
-  /** Everyone who can open the chat, in member order. */
+  /** Everyone else who can open the chat, in member order. */
   readers?: SessionPerson[];
   /** A delegated subagent: its sharing follows `parentSessionId`. */
   inherited: boolean;
@@ -5398,6 +5402,10 @@ export interface Project {
   /** How many other people can open this project. Only on the shell's own
    *  list (`GET /api/projects`), which is per reader. */
   sharedWith?: number;
+  /** Someone else really works here: they own it, have a chat or a private
+   *  room in it, or were given it by name. Being able to open it isn't enough;
+   *  the interface says nothing about other people until this is set. */
+  othersHere?: boolean;
 }
 
 const rootProjectLists = new WeakMap<readonly object[], readonly object[]>();
@@ -6187,7 +6195,6 @@ export const UI_SLOTS = [
   "settings.harness.detail",
   "settings.packages.content",
   "session.footer",
-  "session.audience.details",
   "settings.users.invite.notice",
   // Fresh-session widgets (starters, recents, or a plugin replacement). This
   // is deliberately a slot rather than a SessionHero import: idle-screen

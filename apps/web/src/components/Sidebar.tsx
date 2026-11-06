@@ -75,8 +75,8 @@ import {
 import { projectIsolationLevel, type Project, type SessionProjection } from "@polyth/contracts";
 import ProjectGlyph from "./ProjectGlyph.tsx";
 import { soloPersonalProject } from "../personalProject.ts";
-import { rootProjectId, rootProjects } from "../privateRoom.ts";
-import PrivateRoomSwitch from "./PrivateRoomSwitch.tsx";
+import { offersPrivateRoom, privateRoomOf, rootProjectId, rootProjects, startPrivateChat } from "../privateRoom.ts";
+import PrivateRoomGroup, { useRoomChatsListed } from "./PrivateRoomGroup.tsx";
 import { useShellDirection } from "../shellDirection.ts";
 import { listProjectSettings, subscribeProjectSettingsNavigation } from "../projectSettings.ts";
 import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../workspaceArrange.ts";
@@ -148,8 +148,7 @@ export default function Sidebar() {
   const workspaceId = useStore(workspaceProjectId);
   const activeRoom = registry.projects.find((candidate) => candidate.id === workspaceId && candidate.parentProjectId !== undefined);
   const activeProjectId = activeRoom?.parentProjectId ?? workspaceId;
-  /** The lane of a project the person is in: its private room, or itself. */
-  const laneIdOf = (id: string): string => activeRoom?.parentProjectId === id ? activeRoom.id : id;
+  useRoomChatsListed();
   const activeSessionId = useStore((s) => s.activeSessionId);
   const sessionsRaw = useStore((s) => s.sessions);
   const pendingSends = useStore((s) => s.pendingSends);
@@ -242,7 +241,7 @@ export default function Sidebar() {
     const needle = query.trim().toLowerCase();
     return orderedProjects.filter((candidate) => {
       const candidates = sessions.filter((session) =>
-        session.projectId === candidate.id && sessionMatchesDateFilter(session, dateFilter));
+        rootProjectId(registry.projects, session.projectId) === candidate.id && sessionMatchesDateFilter(session, dateFilter));
       if (sessionDateFilterActive(dateFilter) && candidates.length === 0) return false;
       if (attentionOnly && !sessionsNeedAttention(candidates)) return false;
       if (!needle) return true;
@@ -250,7 +249,7 @@ export default function Sidebar() {
       return candidates.some((session) =>
         `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
     });
-  }, [attentionOnly, dateFilter, orderedProjects, query, sessions]);
+  }, [attentionOnly, dateFilter, orderedProjects, query, registry.projects, sessions]);
   // Below the compact seam (COMPACT_MAX_WIDTH) the sidebar is a modal
   // drawer — every portrait tablet and small window included. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
@@ -886,6 +885,11 @@ export default function Sidebar() {
       label: tr("conversation.new"),
       onSelect: () => setConversationProjectId(p.id),
     },
+    ...(offersPrivateRoom(p) ? [{
+      id: "private-chat",
+      label: tr("privateRoom.newChat"),
+      onSelect: () => { void startPrivateChat(p); closeDrawer(); },
+    }] : []),
     {
       id: "select",
       label: selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions"),
@@ -933,6 +937,20 @@ export default function Sidebar() {
     },
   ];
 
+  const roomGroup = (p: Project) => (
+    <PrivateRoomGroup project={p} expanded={(roomId) => expandedTrees.has(roomId)} onToggle={toggleTree}>
+      {(roomId) => (
+        <SessionList
+          projectId={roomId}
+          attentionOnly={attentionOnly}
+          dateFilter={dateFilter}
+          selectMode={selectMode}
+          selectedSessionIds={selectedSessionIds}
+          onToggleSelected={toggleSelectedSession}
+        />
+      )}
+    </PrivateRoomGroup>
+  );
   const renderProjectCard = (p: Project, tools?: ReactNode) => {
     if (renamingProject === p.id) {
       return (
@@ -993,7 +1011,7 @@ export default function Sidebar() {
             aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
             onClick={(event) => {
               event.stopPropagation();
-              startFreshSession(laneIdOf(p.id));
+              startFreshSession(p.id);
               closeDrawer();
             }}
           ><Icon.plus /></button>
@@ -1112,7 +1130,7 @@ export default function Sidebar() {
               data-arranging={railArrange && arrange.draggingId ? "" : undefined}
             >
               {(soloPersonal ? [] : arrangedOrder(orderedProjects)).map((candidate) => {
-                const candidateSessions = sessions.filter((session) => session.projectId === candidate.id);
+                const candidateSessions = sessions.filter((session) => rootProjectId(registry.projects, session.projectId) === candidate.id);
                 const attention = candidateSessions.some((session) => session.status === "waiting"
                   || session.status === "reconciling"
                   || session.status === "unknown"
@@ -1269,7 +1287,7 @@ export default function Sidebar() {
                     icon={ComposeIcon}
                     label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
                     className="sidebar-drawer-tool sidebar-drawer-tool-compose"
-                    onClick={() => { startFreshSession(laneIdOf(project.id)); closeDrawer(); }}
+                    onClick={() => { startFreshSession(project.id); closeDrawer(); }}
                   />
                 )}
                 <Menu
@@ -1391,7 +1409,7 @@ export default function Sidebar() {
               label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
               className="sidebar-new-session"
               onClick={() => {
-                startFreshSession(laneIdOf(project.id));
+                startFreshSession(project.id);
                 closeDrawer();
               }}
             />
@@ -1457,11 +1475,15 @@ export default function Sidebar() {
           {query.trim() !== "" && (
             <div className="sidebar-search-results" aria-label={tr("sidebar.sessionSearchResults")}>
               {visibleProjects.map((p) => {
-                const projectMatches = `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase());
-                return (
+                const needle = query.trim().toLowerCase();
+                const projectMatches = `${p.name} ${p.path}`.toLowerCase().includes(needle);
+                const room = privateRoomOf(registry.projects, p.id);
+                const roomMatches = room && sessions.some((session) => session.projectId === room.id
+                  && (projectMatches || `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle)));
+                const results = (projectId: string, name: string) => (
                   <SessionList
-                    key={p.id}
-                    projectId={laneIdOf(p.id)}
+                    key={projectId}
+                    projectId={projectId}
                     query={projectMatches ? "" : query}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
@@ -1469,9 +1491,13 @@ export default function Sidebar() {
                     selectedSessionIds={selectedSessionIds}
                     onToggleSelected={toggleSelectedSession}
                     searchMode
-                    searchProjectName={p.name || p.path}
+                    searchProjectName={name}
                   />
                 );
+                return [
+                  results(p.id, p.name || p.path),
+                  ...(roomMatches ? [results(room.id, `${p.name || p.path} · ${tr("privateRoom.onlyMe")}`)] : []),
+                ];
               })}
             </div>
           )}
@@ -1481,15 +1507,15 @@ export default function Sidebar() {
             if (effectiveViewMode === "rail") {
               return (
                 <div key={p.id} data-project-id={p.id} className="sidebar-focused-sessions">
-                  <PrivateRoomSwitch project={p} />
                   <SessionList
-                    projectId={laneIdOf(p.id)}
+                    projectId={p.id}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
                     selectedSessionIds={selectedSessionIds}
                     onToggleSelected={toggleSelectedSession}
                   />
+                  {roomGroup(p)}
                 </div>
               );
             }
@@ -1497,7 +1523,7 @@ export default function Sidebar() {
               return (
                 <div key={p.id} data-project-id={p.id} className="sidebar-focused-sessions">
                   <SessionList
-                    projectId={laneIdOf(p.id)}
+                    projectId={p.id}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
@@ -1524,9 +1550,8 @@ export default function Sidebar() {
                 {card}
                 {expandedTrees.has(p.id) && (
                   <div className="project-tree-sessions" data-arrange-control="">
-                    <PrivateRoomSwitch project={p} />
                     <SessionList
-                      projectId={laneIdOf(p.id)}
+                      projectId={p.id}
                       query={projectQuery}
                       attentionOnly={attentionOnly}
                       dateFilter={dateFilter}
@@ -1534,6 +1559,7 @@ export default function Sidebar() {
                       selectedSessionIds={selectedSessionIds}
                       onToggleSelected={toggleSelectedSession}
                     />
+                    {roomGroup(p)}
                   </div>
                 )}
               </div>

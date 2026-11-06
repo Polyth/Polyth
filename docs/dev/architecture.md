@@ -1071,7 +1071,7 @@ the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
 `widget.catalog`, `widget.settings`), and the fine-grained toolbar areas
 (`app.header.leading/center`, `app.statusbar.leading/trailing`,
 `workspace.rail`, `sidebar.toolbar`,
-`composer.meta/pending`, `composer.config`, `composer.context.details`, `session.footer`, `session.audience.details`, `session.empty.widgets`,
+`composer.meta/pending`, `composer.config`, `composer.context.details`, `session.footer`, `session.empty.widgets`,
 `project.create.options`, `settings.users.invite.notice`).
 
 Feature web UI registers through the **web-sdk host**

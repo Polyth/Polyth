@@ -215,6 +215,7 @@ export function createPackageActivation(
     projectSettings: {
       list: host.projectSettings.list,
       subscribe: host.projectSettings.subscribe,
+      ...(host.projectSettings.open ? { open: host.projectSettings.open } : {}),
       register: (contribution) => {
         if (disposed) return reject("projectSettings.register");
         return track(host.projectSettings.register({ ...contribution, ownerPackageId }));

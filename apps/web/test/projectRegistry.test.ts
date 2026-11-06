@@ -180,10 +180,11 @@ test("socket open neither races the boot answer under a remembered list nor give
 });
 
 test("a project keeps its audience through a mutation's answer, which doesn't carry it", () => {
-  const shared = { id: "p", name: "Wellness", path: "/p", createdAt: 0, sharedWith: 2 } as Project;
+  const shared = { id: "p", name: "Wellness", path: "/p", createdAt: 0, sharedWith: 2, othersHere: true } as Project;
   const ready = upsertProject(initialProjectRegistry(), shared);
   const renamed = upsertProject(ready, { id: "p", name: "Здоров'я", path: "/p", createdAt: 0 } as Project);
   assert.equal(renamed.status === "ready" && renamed.projects[0]?.sharedWith, 2);
+  assert.equal(renamed.status === "ready" && renamed.projects[0]?.othersHere, true);
   assert.equal(renamed.status === "ready" && renamed.projects[0]?.name, "Здоров'я");
 });
 

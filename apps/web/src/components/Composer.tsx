@@ -237,7 +237,8 @@ import { projectRepositories } from "@polyth/contracts/workspace";
 import { executionRepositoryOf, normalizeRepositoryScope, primaryRepositoryIdOf } from "../composer/repositoryScope.ts";
 import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
-import { rootProjects } from "../privateRoom.ts";
+import { chatAmongOthers, rootProjects } from "../privateRoom.ts";
+import { ChatAudienceChip } from "./ChatAudience.tsx";
 import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, type MenuEntry } from "./ui/index.ts";
 import { canCollaborateSession, ownerName } from "../sessionSharing.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
@@ -4102,6 +4103,7 @@ function ComposerBody({
         phone={phoneLayout}
         sessionId={session.id}
         projectId={session.projectId}
+        privateChat={chatAmongOthers(session) ? session.sharing?.shared !== true : undefined}
         pressureLevel={model.contextPressureLevel}
         {...(chatMemory ? {
           memory: {
@@ -4146,9 +4148,9 @@ function ComposerBody({
     // widgets that act on the agent's turn (WidgetDef.agentOnly).
     agentless: peopleOnly,
     working,
-    // A chat only its owner reads, in a Space with other people: what a personal
-    // suggestion needs, and it can't exist anywhere else.
-    privateAmongOthers: session?.sharing?.multiPerson === true && session.sharing.shared !== true,
+    // A chat only its owner reads, in a project someone else really works in:
+    // alone, the interface has nobody to mention.
+    privateAmongOthers: !!session && chatAmongOthers(session) && session.sharing?.shared !== true,
     autoApproveOn,
     autoApproveAll,
     setDraftAutoApprove: setNewSessionAutoApprove,
@@ -4622,6 +4624,7 @@ function ComposerBody({
           {effortControl}
           {contextPie}
           <SlotHost slot="composer.config" context={slotContext} />
+          {session && <ChatAudienceChip session={session} />}
           {phoneLayout && <MobileComposerEditEntry editing={mobileRailEditing} onChange={editMobileRail} />}
         </div>
       )}

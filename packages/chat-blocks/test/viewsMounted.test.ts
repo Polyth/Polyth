@@ -241,3 +241,45 @@ test("gallery opens the shared viewer at the clicked image; project images use t
   assert.ok(viewer, "the shared viewer opens");
   assert.match(viewer?.textContent ?? "", /2 \/ 2|2 of 2|Settings/);
 });
+
+const lastViewer = (): Element | null => [...document.body.querySelectorAll('[role="dialog"]')].at(-1) ?? null;
+const closeViewers = async () => {
+  for (const viewer of [...document.body.querySelectorAll('[role="dialog"]')]) {
+    await click(viewer.querySelector(".attachment-preview-close"));
+  }
+  assert.equal(document.body.querySelector('[role="dialog"]') === null, true, "no viewer is left open");
+};
+
+test("card and row pictures open the block's gallery at the picture that was clicked", async () => {
+  await closeViewers();
+  const cards = await mount("cards Homes\n- https://img.example/a.png | A\n- https://img.example/b.png | B");
+  const controls = [...cards.container.querySelectorAll(".chat-block-card .chat-block-zoom")];
+  assert.equal(controls.length, 2, "every card picture has a viewer control");
+  await click(controls[1]);
+  const viewer = lastViewer();
+  assert.ok(viewer, "the full-screen gallery opens");
+  assert.match(viewer?.textContent ?? "", /2 \/ 2/);
+  await closeViewers();
+  await cards.root.unmount();
+
+  const rows = await mount("list Files\n- https://img.example/a.png | a.md\n- https://img.example/b.png | b.md");
+  await click(rows.container.querySelectorAll(".chat-block-row .chat-block-zoom")[0]);
+  const rowViewer = lastViewer();
+  assert.ok(rowViewer, "a row thumbnail opens the same gallery");
+  assert.match(rowViewer?.textContent ?? "", /1 \/ 2/);
+  await closeViewers();
+  await rows.root.unmount();
+});
+
+test("a comparison column picture opens the gallery without selecting the column", async () => {
+  await closeViewers();
+  const { container, calls } = await mount("compare Phones · pick=one\n- | Air | XPS\n- image | https://img.example/air.png | https://img.example/xps.png\n- Battery | 18 h | 12 h");
+  const zoom = container.querySelectorAll(".chat-block-compare th .chat-block-zoom");
+  assert.equal(zoom.length, 2);
+  await click(zoom[1]);
+  const viewer = lastViewer();
+  assert.ok(viewer, "the comparison picture opens the gallery");
+  await closeViewers();
+  assert.equal(container.querySelector(".chat-block-compare th.is-selected") === null, true, "viewing does not pick the column");
+  assert.equal(calls.sent.length, 0);
+});

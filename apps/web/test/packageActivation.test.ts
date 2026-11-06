@@ -13,6 +13,13 @@ const { listSettingsItems, registerSettingsItems } = await import("../src/settin
 const { webPackageHost } = await import("../src/packages/webHost.ts");
 const notifyStore = await import("../src/notify/store.ts");
 
+test("a package can open a project's settings", () => {
+  const activation = createPackageActivation("opener", webPackageHost);
+  assert.equal(activation.host.projectSettings.open, webPackageHost.projectSettings.open);
+  assert.equal(typeof activation.host.projectSettings.open, "function");
+  activation.dispose();
+});
+
 test("activation scope disposes host contributions even if the package forgets an unregister", () => {
   const activation = createPackageActivation("alpha", webPackageHost);
   activation.host.widgets.register("alpha", {

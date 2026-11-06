@@ -40,6 +40,10 @@ function NoteList({ title, hint, notes, translate, onEdit, onRemove, busy }: {
   );
 }
 
+const ProposalChevron = () => (
+  <svg className="memory-proposal-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+);
+
 export function ShareProposalRow({ note, translate, busy, onPublish, onKeep }: {
   note: MemoryDto;
   translate: Translate;
@@ -47,17 +51,20 @@ export function ShareProposalRow({ note, translate, busy, onPublish, onKeep }: {
   onPublish(): void;
   onKeep(): void;
 }) {
+  // The title until asked: the exact text and the choice come together, so a
+  // note is read before it is shared, and one is open at a time.
   return (
-    <div className="memory-proposal" data-memory-proposal={note.id}>
-      <div className="memory-proposal-copy">
+    <details className="memory-proposal" name="memory-share-proposal" data-memory-proposal={note.id}>
+      <summary>
         <strong>{note.title}</strong>
-        <span>{note.body}</span>
-      </div>
+        <ProposalChevron />
+      </summary>
+      <p className="memory-proposal-body" tabIndex={0}>{note.body}</p>
       <div className="memory-actions">
         <button type="button" className="memory-button memory-button-primary" disabled={busy} onClick={onPublish}>{translate("memory.mine.publish")}</button>
         <button type="button" className="memory-button" disabled={busy} onClick={onKeep}>{translate("memory.mine.keep")}</button>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -183,12 +190,18 @@ export default function MyNotes({ projectId, project, translate }: { projectId: 
 }
 
 /** Which memory the agent has in the chat on screen, beside who can read it. */
-export function ChatMemoryScope({ privateChat, translate }: { privateChat: boolean; translate: Translate }) {
-  return <span className="memory-chat-scope">{translate(privateChat ? "memory.scope.personal" : "memory.scope.shared")}</span>;
+export function ChatMemoryScope({ privateChat, translate, onOpenNotes }: { privateChat: boolean; translate: Translate; onOpenNotes?: (() => void) | undefined }) {
+  return (
+    <div className="memory-chat-scope">
+      <span>{translate(privateChat ? "memory.scope.personal" : "memory.scope.shared")}</span>
+      {privateChat && onOpenNotes && <button type="button" className="memory-chat-scope-notes" onClick={onOpenNotes}>{translate("memory.mine.title")}</button>}
+    </div>
+  );
 }
 
-/** The agent's suggestion, above the composer of the private chat it came from:
- *  the exact text, and the person's own choice. Nothing else can publish it. */
+/** The agent's suggestions, one quiet line above the composer of the private
+ *  chat they came from; open, a bounded list that never pushes the chat away.
+ *  Only the person's own choice can publish one. */
 export function ShareProposalCard({ projectId, sessionId, working, translate }: { projectId: string | null; sessionId: string | null; working: boolean; translate: Translate }) {
   const [proposals, setProposals] = useState<MemoryDto[]>([]);
   const [busy, setBusy] = useState(false);
@@ -211,19 +224,25 @@ export function ShareProposalCard({ projectId, sessionId, working, translate }: 
     setBusy(false);
   };
   return (
-    <div className="memory-proposal-card" role="group" aria-label={translate("memory.mine.proposals")}>
-      <span className="memory-proposal-from">{translate("memory.mine.proposals")}</span>
-      {proposals.map((note) => (
-        <ShareProposalRow
-          key={note.id}
-          note={note}
-          translate={translate}
-          busy={busy}
-          onPublish={() => void settle(personalMemoryApi.publish(projectId, note.id, note.revision))}
-          onKeep={() => void settle(personalMemoryApi.keep(projectId, note.id, note.revision))}
-        />
-      ))}
-    </div>
+    <details key={sessionId} className="memory-proposal-card">
+      <summary>
+        <span className="memory-proposal-label">{translate("memory.mine.proposals")}</span>
+        <span className="memory-proposal-count">{proposals.length}</span>
+        <ProposalChevron />
+      </summary>
+      <div className="memory-proposal-list">
+        {proposals.map((note) => (
+          <ShareProposalRow
+            key={note.id}
+            note={note}
+            translate={translate}
+            busy={busy}
+            onPublish={() => void settle(personalMemoryApi.publish(projectId, note.id, note.revision))}
+            onKeep={() => void settle(personalMemoryApi.keep(projectId, note.id, note.revision))}
+          />
+        ))}
+      </div>
+    </details>
   );
 }
 

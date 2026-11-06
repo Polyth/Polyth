@@ -21,8 +21,9 @@ const system = { ...person("system:polyth-runtime", "owner") };
 const readers = (...ids: string[]) => ids.map((userId) => ({ userId, name: userId.slice(4) }));
 const PRIVACY: Record<string, SessionPrivacy> = {
   shared: { audience: readers(OLIA, TARAS), projectAudience: 3 },
-  oliaChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3 },
-  tarasChat: { privateTo: TARAS, audience: readers(TARAS), projectAudience: 3 },
+  oliaChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3, othersHere: true },
+  tarasChat: { privateTo: TARAS, audience: readers(TARAS), projectAudience: 3, othersHere: true },
+  oliaAloneChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3 },
   roomChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3, inPrivateRoom: true },
   soloChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 1 },
 };
@@ -147,6 +148,20 @@ test("a chat in a private room reads the project's memory and saves to the owner
   const recall = await f.runtime.recall({ spaceId: SPACE, projectId: "room", principalId: "session:roomChat" }, { sessionId: "roomChat", intent: "ferritin dinner" });
   assert.equal(recall.selected.length, 2);
   assert.equal(await f.runtime.checkFence({ spaceId: SPACE, projectId: "room", principalId: "session:roomChat" }, { generation: recall.generation, settingsRevision: recall.settingsRevision }), true, "the room shares its project's policy");
+});
+
+test("with nobody else working in the project, a note for the shared memory stays a working personal note", async () => {
+  const f = fixture();
+  const chat = f.inChat("oliaAloneChat");
+  const saved = JSON.parse((await f.tool("memory_remember").execute!({ title: "Dinner time", body: "Dinner moved to 19:30.", target: "shared" }, chat)).output) as { memoryId: string; status: string; message: string };
+  assert.notEqual(saved.status, "skipped");
+  assert.match(saved.message, /nothing was proposed/);
+  // Nothing to decide, others can't read it, and its person's chats recall it.
+  const page = await f.call(person(OLIA), "GET", "/api/memory/personal", undefined, { projectId: "wellness" });
+  assert.deepEqual((page.body as { proposals: unknown[] }).proposals, []);
+  assert.equal(f.store.get(f.shared, saved.memoryId), undefined);
+  const found = JSON.parse((await f.tool("memory_search").execute!({ query: "dinner moved" }, chat)).output) as { items: Array<{ id: string }> };
+  assert.deepEqual(found.items.map((item) => item.id), [saved.memoryId]);
 });
 
 test("publishing is one way and takes the person: the agent only proposes", async () => {

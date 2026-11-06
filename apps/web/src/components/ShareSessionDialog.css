@@ -101,6 +101,7 @@
   padding-block-end: var(--space-2);
 }
 .session-sharing-sheet-foot > .ui-btn { flex: 1; }
+.ui-dialog-foot > .session-sharing-continue { margin-inline-end: auto; }
 
 /* Overview line (session status popover and phone overview). */
 .session-sharing-line {

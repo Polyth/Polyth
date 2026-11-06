@@ -36,8 +36,8 @@ import { Icon } from "../../icons.tsx";
 import { isImeComposing } from "../input/editorCore.ts";
 import ProjectGlyph from "../ProjectGlyph.tsx";
 import { soloPersonalProject } from "../../personalProject.ts";
-import { rootProjectId, rootProjects } from "../../privateRoom.ts";
-import PrivateRoomSwitch from "../PrivateRoomSwitch.tsx";
+import { chatReadByOthers, offersPrivateRoom, privateRoomOf, rootProjectId, rootProjects, startPrivateChat } from "../../privateRoom.ts";
+import PrivateRoomGroup, { useRoomChatsListed } from "../PrivateRoomGroup.tsx";
 import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "../ConversationCreateDialog.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
@@ -386,7 +386,7 @@ function SessionRow({
 
   // Rename, archive and delete need manage access to a shared chat.
   const manage = canManageSession(session);
-  const sharedLabel = conversation ? undefined : sharingMarkerLabel(session.sharing);
+  const sharedLabel = conversation || !chatReadByOthers(session) ? undefined : sharingMarkerLabel(session.sharing);
   const entries: MenuEntry[] = [
     ...(manage ? [{
       id: "rename",
@@ -817,8 +817,7 @@ export default function MobileNavigator() {
   // On screen, a private room is its project; only its chats differ.
   const activeRoom = registry.projects.find((candidate) => candidate.id === workspaceId && candidate.parentProjectId !== undefined);
   const activeProjectId = activeRoom?.parentProjectId ?? workspaceId;
-  /** The lane of a project the person is in: its private room, or itself. */
-  const laneIdOf = (id: string): string => activeRoom?.parentProjectId === id ? activeRoom.id : id;
+  useRoomChatsListed();
   const storeSessionId = useStore((state) => state.activeSessionId);
   // While a package page (an agent) owns the canvas, no chat row is current.
   const pageOpen = useStore((state) => state.activePage !== null);
@@ -1105,7 +1104,8 @@ export default function MobileNavigator() {
   const visibleProjects = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return orderedProjects.filter((project) => {
-      const list = projectSessions.get(project.id) ?? [];
+      const room = privateRoomOf(registry.projects, project.id);
+      const list = [...projectSessions.get(project.id) ?? [], ...(room ? projectSessions.get(room.id) ?? [] : [])];
       const dated = list.filter((session) => sessionMatchesDateFilter(session, dateFilter));
       if (sessionDateFilterActive(dateFilter) && dated.length === 0) return false;
       const hasAttention = dated.some((session) => statusPriority(session) <= 1 || (session.attention?.unread ?? 0) > 0);
@@ -1114,7 +1114,7 @@ export default function MobileNavigator() {
       if (`${project.name} ${project.path}`.toLocaleLowerCase().includes(needle)) return true;
       return dated.some((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle));
     });
-  }, [attentionOnly, dateFilter, orderedProjects, projectSessions, query]);
+  }, [attentionOnly, dateFilter, orderedProjects, projectSessions, query, registry.projects]);
 
   // Projects move by direct manipulation (workspaceArrange.ts, the engine the
   // Workspace editor uses): a still press lifts a project's row, the copy
@@ -1424,7 +1424,9 @@ export default function MobileNavigator() {
             <div className="mobile-nav-empty">{tr("sidebar.noMatchingSessions")}</div>
           )}
           {shownProjects.map((project) => {
-            const all = projectSessions.get(laneIdOf(project.id)) ?? [];
+            const roomSessions = projectSessions.get(privateRoomOf(registry.projects, project.id)?.id ?? "") ?? [];
+            // A search reaches the private chats; otherwise they keep to their row.
+            const all = [...projectSessions.get(project.id) ?? [], ...(searchMode ? roomSessions : [])];
             const needle = query.trim().toLocaleLowerCase();
             const dated = all.filter((session) => sessionMatchesDateFilter(session, dateFilter));
             const projectMatches = `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle);
@@ -1462,7 +1464,7 @@ export default function MobileNavigator() {
               { ancestors: false },
             ));
             const { active: activeCount, waiting: waitingCount, unread: completedCount, failed: failedCount, limited: limitedCount } =
-              projectSessionStatusCounts(matching, now);
+              projectSessionStatusCounts(searchMode ? matching : [...matching, ...roomSessions], now);
             // Counts are shown as status pills, never as concatenated words:
             // "3 active" only reads correctly in English.
             const statusLabel = [
@@ -1491,7 +1493,7 @@ export default function MobileNavigator() {
                     active={node.item.id === activeSessionId}
                     now={now}
                     pinnedSessions={pinnedSessions}
-                    onChanged={() => refreshProject(project.id)}
+                    onChanged={() => refreshProject(node.item.projectId)}
                     treeDepth={depth}
                     childActivity={subagentActivity(node.children, {
                       idOf: (child) => child.item.id,
@@ -1535,6 +1537,11 @@ export default function MobileNavigator() {
                 label: tr("conversation.new"),
                 onSelect: () => setConversationProjectId(project.id),
               },
+              ...(offersPrivateRoom(project) ? [{
+                id: "private-chat",
+                label: tr("privateRoom.newChat"),
+                onSelect: () => { void startPrivateChat(project); setSidebarOpen(false); },
+              }] : []),
               {
                 id: "rename",
                 label: tr("common.rename"),
@@ -1657,7 +1664,7 @@ export default function MobileNavigator() {
                     <button
                       className="mobile-nav-project-action"
                       aria-label={tr("sidebar.newChatInValue", { value: project.name || project.path })}
-                      onClick={() => { startFreshSession(laneIdOf(project.id)); setSidebarOpen(false); }}
+                      onClick={() => { startFreshSession(project.id); setSidebarOpen(false); }}
                     >
                       <UiIcon icon={NewChatIcon} size="lg" />
                     </button>
@@ -1678,7 +1685,6 @@ export default function MobileNavigator() {
 
                 {expanded && (
                   <div className="mobile-nav-project-body">
-                    {!searchMode && !selectMode && <PrivateRoomSwitch project={project} />}
                     {!searchMode && (
                       <SlotHost
                         slot="sidebar.project.leading"
@@ -1697,7 +1703,7 @@ export default function MobileNavigator() {
                             active={node.item.id === activeSessionId}
                             now={now}
                             pinnedSessions={pinnedSessions}
-                            onChanged={() => refreshProject(project.id)}
+                            onChanged={() => refreshProject(node.item.projectId)}
                           />
                         ))}
                       </div>
@@ -1736,6 +1742,11 @@ export default function MobileNavigator() {
                         )}
                         {!searchMode && <MobileArchiveLink projectId={project.id} />}
                       </div>
+                    )}
+                    {!searchMode && !selectMode && (
+                      <PrivateRoomGroup project={project} expanded={(roomId) => expandedProjects.has(roomId)} onToggle={toggleProject}>
+                        {() => renderTreeGroups(roomSessions)}
+                      </PrivateRoomGroup>
                     )}
                   </div>
                 )}
