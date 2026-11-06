@@ -125,7 +125,8 @@ test("chat chrome is component-owned, compact and readable", () => {
   assert.match(actionBar, /chat-action-button--confirmed/);
   assert.match(css, /\.chat-action-button\.ui-icon-btn\.chat-action-button--confirmed[\s\S]*?color:\s*var\(--green\)/s);
   assert.match(css, /@keyframes chat-action-check-pop/);
-  assert.match(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\);/s);
+  assert.match(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*max-width:\s*min/s);
+  assert.doesNotMatch(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\);/s);
   assert.match(footer, /<Popover/);
   assert.doesNotMatch(css, /!important/);
 });
