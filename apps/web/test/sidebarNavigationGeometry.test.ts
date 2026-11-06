@@ -87,6 +87,9 @@ test("sidebar geometry links worktree and session type while density controls ro
   assert.match(css, /\.session-rename-input\s*\{[\s\S]*?margin-inline:\s*calc\(var\(--session-title-start\) - 7px\) 8px;/,
     "renaming keeps the text where the title was");
   assert.match(css, /\.session-pagination\s*\{[\s\S]*?margin-inline-start:\s*var\(--session-title-start, 22px\);/);
+  // A day caption labels the group beneath it: the gap above is density air,
+  // the gap below is a hairline, so a chat cannot read as the next day's.
+  assert.match(css, /\.session-date-divider\s*\{[\s\S]*?padding:\s*calc\(var\(--space-2\) \* var\(--density-scale\)\) var\(--space-2\) 1px;/, "a date heading sits closer to its own day than to the one above");
   assert.match(css, /\.session-row-body\s*\{[\s\S]*?padding-inline:\s*var\(--session-body-start\) 4px;/,
     "row geometry is logical so RTL mirrors it, and rows use their full width at rest");
   // The ⋯ trigger never paints over the title or the subagent disclosure:

@@ -7171,11 +7171,14 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .session-folder-del { background: none; border: 0; color: var(--muted); cursor: pointer; opacity: 0; padding: 2px 8px; }
 .session-pinned { margin-bottom: var(--space-1); padding-bottom: var(--space-1); }
 .session-date-group { display: flex; min-width: 0; flex-direction: column; }
+/* A day heading labels the group below it, so the air sits above the caption
+   and barely below it. Equal or reversed padding made a chat read as part of
+   the next day's list. */
 .session-date-divider {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 1px var(--space-2) calc(var(--space-2) * var(--density-scale));
+  padding: calc(var(--space-2) * var(--density-scale)) var(--space-2) 1px;
   color: var(--faint);
   font-size: max(10px, calc(var(--font-meta) * .85));
   font-weight: 450;

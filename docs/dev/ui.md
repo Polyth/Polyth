@@ -1847,7 +1847,10 @@ choice; selecting one opens its choices in place of the menu, with a Back row
 (`apps/web/src/sidebarPrefs.ts`): None, Date (newest day first; today draws no
 heading) and Type — one type per chat, in this order: needs attention, in
 progress, drafts (only a chat that never ran, so typing a draft never moves a
-chat), shared with others, isolated, shared workspace. Sort: recent activity
+chat), shared with others, isolated, shared workspace. A date heading belongs
+to the group beneath it: its air sits above the caption and only a hairline
+separates caption from its rows, so a chat never reads as the next day's.
+Sort: recent activity
 (the default navigator order), date created, title (natural, case-insensitive)
 or type. `arrangeSessions` groups then sorts before a list is paged, so the
 first page holds the leading groups; pinned chats keep their own section and
