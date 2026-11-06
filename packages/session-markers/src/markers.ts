@@ -114,13 +114,25 @@ const cleanText = (value: unknown, max: number): string | undefined => {
 /** The id a label gets, and the form a marker reference is matched in:
  *  "Needs review", "needs_review" and "NEEDS-REVIEW" all name `needs-review`.
  *  Letters of every script are kept so a Cyrillic label has a real id. */
+const MARKER_ID_CHAR = /^[\p{L}\p{N}]$/u;
+
+/** Runs of other characters become one "-", ends are trimmed. A single linear
+ *  scan, not a regex: a marker label is user input and may be any length. */
+function markerIdSlug(value: string): string {
+  let slug = "";
+  let separated = false;
+  for (const char of value) {
+    if (MARKER_ID_CHAR.test(char)) {
+      if (separated && slug) slug += "-";
+      separated = false;
+      slug += char;
+    } else separated = true;
+  }
+  return slug;
+}
+
 export function markerSlug(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
+  return markerIdSlug(value.normalize("NFKC").toLocaleLowerCase("en-US")).slice(0, 48);
 }
 
 export const isMarkerColor = (value: unknown): value is MarkerColor =>

@@ -49,3 +49,8 @@ test("browser preference keys are isolated by authenticated account", () => {
     else Reflect.deleteProperty(globalThis, "localStorage");
   }
 });
+
+test("account ids collapse long separator runs without a backtracking regex", () => {
+  assert.equal(normalizeAccountId(`${"-".repeat(50_000)}Alice Smith${"_".repeat(50_000)}`), "usr_alice-smith");
+  assert.equal(normalizeAccountId("-".repeat(50_000)), "usr_owner");
+});

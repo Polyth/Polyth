@@ -13,6 +13,9 @@ import {
 test("worktree branch suggestion expands template tokens and sanitizes titles", () => {
   const now = new Date("2026-08-20T06:00:00.000Z");
   assert.equal(worktreeSlug(" Fix déjà-vu / auth! "), "fix-deja-vu-auth");
+  // Long separator runs are trimmed in one linear pass, never a backtracking
+  // regex, and can never leave a trailing "-" on a branch name.
+  assert.equal(worktreeSlug(`${"-".repeat(50_000)}Session${"_".repeat(50_000)}`), "session");
   assert.equal(
     suggestWorktreeBranch("feat/{date}/{slug}", "Fix déjà-vu / auth!", [], now),
     "feat/2026-08-20/fix-deja-vu-auth",

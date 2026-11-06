@@ -280,6 +280,9 @@ test("slugify never produces a directory-hostile name", () => {
     assert.match(slug, /^[a-z0-9][a-z0-9-]*$/, `bad slug for ${JSON.stringify(input)}`);
     assert.ok(slug.length <= 40);
   }
+  // A long separator run is collapsed in one linear pass, not a backtracking regex.
+  assert.equal(slugify(`${"-".repeat(50_000)}Side Project${"_".repeat(50_000)}`), "side-project");
+  assert.equal(slugify("-".repeat(50_000)), "space");
 });
 
 // ---- migration ----------------------------------------------------------------
