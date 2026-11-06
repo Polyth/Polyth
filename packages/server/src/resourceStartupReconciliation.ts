@@ -51,6 +51,8 @@ export interface ResourceStartupReconciliationResult {
   provisioningFinalized: number;
   provisioningAborted: number;
   deletionsFinalized: number;
+  /** Moves to another project the registry had not caught up with. */
+  projectMovesFinished: number;
   lifecycleRolledBack: number;
   archivesFinalized: number;
   restoresFinalized: number;
@@ -71,6 +73,7 @@ export async function reconcileCanonicalResourcesAtBoot(input: {
     provisioningFinalized: 0,
     provisioningAborted: 0,
     deletionsFinalized: 0,
+    projectMovesFinished: 0,
     lifecycleRolledBack: 0,
     archivesFinalized: 0,
     restoresFinalized: 0,
@@ -178,6 +181,21 @@ export async function reconcileCanonicalResourcesAtBoot(input: {
       }
       if (row.lifecycle === "deleted") continue;
       throw recovery();
+    }
+    // A move commits in the session store first; a crash before the registry
+    // followed is finished from the projection's own receipt.
+    const move = projection.projectMove;
+    if (row.kind === "session" && projection.spaceId === row.spaceId && row.parentId && row.parentId !== projection.projectId
+      && move?.fromProjectId === row.parentId && move.toProjectId === projection.projectId) {
+      row = security.resources.moveSession({
+        resourceId: row.id,
+        orgId: row.orgId,
+        spaceId: row.spaceId,
+        fromProjectId: move.fromProjectId,
+        toProjectId: move.toProjectId,
+        actor: ACTOR,
+      });
+      result.projectMovesFinished += 1;
     }
     if (row.kind !== "session" || projection.spaceId !== row.spaceId || row.parentId !== projection.projectId) {
       throw recovery();

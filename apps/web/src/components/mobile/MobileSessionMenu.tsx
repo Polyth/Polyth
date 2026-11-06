@@ -11,7 +11,8 @@ import { continuePrivately } from "../../privateRoom.ts";
 import { archiveSessionWithPolicy, renameSessionTitle, toggleSessionPin } from "../../sessionActions.ts";
 import { canManageSession } from "../../sessionSharing.ts";
 import { setSessionMuted } from "../../sessionPeople.ts";
-import { openSessionSharing, setUiError } from "../../store.ts";
+import { getState, openSessionMove, openSessionSharing, setUiError } from "../../store.ts";
+import { canMoveSession } from "../../sessionMove.ts";
 import { friendlyError } from "../../settings.ts";
 import { copyText } from "../../utils.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
@@ -26,6 +27,7 @@ import {
   CopyIcon,
   DeleteIcon,
   EditIcon,
+  FolderOpenIcon,
   ForkIcon,
   Icon,
   IconButton,
@@ -134,6 +136,12 @@ export default function MobileSessionMenu({
       label: manage ? tr("sharing.share") : tr("sharing.whoHasAccess"),
       icon: SharedIcon,
       onSelect: () => openSessionSharing(session.id),
+    } satisfies MenuEntry] : []),
+    ...(canMoveSession(session, getState().projectRegistry.projects) ? [{
+      id: "move",
+      label: tr("sessionMove.menu"),
+      icon: FolderOpenIcon,
+      onSelect: () => openSessionMove(session.id),
     } satisfies MenuEntry] : []),
     ...(!session.isolation ? [{
       id: "fork",

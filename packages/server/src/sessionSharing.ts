@@ -470,6 +470,14 @@ export function defaultSessionVisibility(ctx: SpaceContext): "private" | "inheri
   return security.sharing.policy(ctx.spaceId).defaultVisibility === "space" ? "inherit" : "private";
 }
 
+/** Whether this person may open a chat to more people under the Space policy.
+ *  Without canonical identity there is one person and nobody to open it to. */
+export function spaceMemberMayWiden(ctx: Pick<SpaceContext, "spaceId" | "role">): boolean {
+  const security = canonicalSecurity();
+  if (!security) return true;
+  return roleAtLeast(ctx.role, "admin") || security.sharing.policy(ctx.spaceId).membersMayShare;
+}
+
 /** How far a change opens a chat up: a wider audience, or people added or
  *  given more access. The Space policy limits only these. */
 function widens(

@@ -7,6 +7,7 @@ import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import ArchivedSessionsDialog from "./components/ArchivedSessionsDialog.tsx";
 import ShareSessionDialog from "./components/ShareSessionDialog.tsx";
+import MoveSessionDialog from "./components/MoveSessionDialog.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
 import ProjectSetupFlowDialog from "./components/ProjectSetupFlowDialog.tsx";
 import ShellIntroTour from "./components/ShellIntroTour.tsx";
@@ -194,6 +195,7 @@ export default function App() {
       {overlay === "search" && <SessionSearch />}
       {overlay === "archived-sessions" && <ArchivedSessionsDialog />}
       {overlay === "session-sharing" && <ShareSessionDialog />}
+      {overlay === "session-move" && <MoveSessionDialog />}
       {overlay === "project-picker" && <ProjectSetupFlowDialog onClose={() => setOverlay(null)} />}
       {overlay === "worktree-session" && <WorktreeSessionDialog />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />

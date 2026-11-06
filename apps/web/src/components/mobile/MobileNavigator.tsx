@@ -10,6 +10,7 @@ import { flushSync } from "react-dom";
 import {
   getState,
   openArchivedSessions,
+  openSessionMove,
   openSessionSharing,
   openWorktreeSessionDialog,
   setOverlay,
@@ -27,6 +28,7 @@ import {
   renameProject,
 } from "../../init.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
+import { canMoveSession } from "../../sessionMove.ts";
 import { draftTitleSource, sessionDraftMark } from "../../sessionDraft.ts";
 import { fullSessionTitle } from "../../format.ts";
 import { projectSessionStatusCounts } from "../../mobileIsland.ts";
@@ -408,6 +410,11 @@ function SessionRow({
       id: "share",
       label: manage ? tr("sharing.share") : tr("sharing.whoHasAccess"),
       onSelect: () => openSessionSharing(session.id),
+    } satisfies MenuEntry] : []),
+    ...(canMoveSession(session, getState().projectRegistry.projects) ? [{
+      id: "move",
+      label: tr("sessionMove.menu"),
+      onSelect: () => openSessionMove(session.id),
     } satisfies MenuEntry] : []),
     ...(session.purpose === "conversation" ? [{
       id: "mute",

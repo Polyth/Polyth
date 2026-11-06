@@ -261,6 +261,11 @@ export function messageMarkdown(m: RenderMessage): string {
     return `### Fixing merge conflicts for pull request #${m.prNumber}\n\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`;
   }
   if (m.kind === "notice") {
+    if (m.topic === "project-moved") {
+      return m.fromProject && m.toProject
+        ? tr("timeline.movedBetweenProjects", { from: m.fromProject, to: m.toProject })
+        : tr("timeline.movedToAnotherProject");
+    }
     return m.topic === "isolation-merged"
       ? tr("timeline.mergedIntoValue", { branch: m.branch ?? "", commit: m.commit ?? "" })
       : m.topic === "isolation-started"
@@ -322,7 +327,7 @@ export function messageJson(m: RenderMessage): string {
   }
   if (m.kind === "notice") {
     return JSON.stringify(
-      { role: "notice", topic: m.topic, branch: m.branch, commit: m.commit, time: m.time },
+      { role: "notice", topic: m.topic, branch: m.branch, commit: m.commit, fromProject: m.fromProject, toProject: m.toProject, time: m.time },
       null,
       2,
     );

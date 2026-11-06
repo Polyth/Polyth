@@ -1113,6 +1113,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .project-tree-node { margin-bottom: 2px; }
 .project-tree-node .project-card-shell { margin-bottom: 0; }
+/* A chat dragged over a project row: this is where it would move to. */
+:is(.project-card-shell, .sidebar-project-rail-item)[data-session-drop-over="true"] {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.project-card-shell[data-session-drop-over="true"] { border-radius: var(--radius-card); }
 /* Moving projects in the tree (workspaceArrange.ts): a press on a project's
    row lifts a copy of the row; the project's own place stays behind as a
    quiet well, its sessions folded, and travels through the list. */

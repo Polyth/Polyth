@@ -139,7 +139,10 @@ export interface NoticeMsg {
   kind: "notice";
   id: string;
   eventSeq: number;
-  topic: "isolation-merged" | "isolation-discarded" | "isolation-started";
+  topic: "isolation-merged" | "isolation-discarded" | "isolation-started" | "project-moved";
+  /** Project moved: names at the time of the move; the log outlives them. */
+  fromProject?: string;
+  toProject?: string;
   branch?: string;
   commit?: string;
   /** Isolation started: uncommitted paths left in the original checkout. */
@@ -938,6 +941,18 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         topic: "isolation-started",
         ...(str(d, "targetBranch") ? { branch: str(d, "targetBranch") } : {}),
         ...(uncommitted !== undefined && Number.isSafeInteger(uncommitted) && uncommitted > 0 ? { uncommitted } : {}),
+        time: ev.time,
+      });
+      break;
+    }
+    case "session/project-moved": {
+      model.messages.push({
+        kind: "notice",
+        id: ev.id,
+        eventSeq: ev.seq,
+        topic: "project-moved",
+        ...(str(d, "fromProjectName") ? { fromProject: str(d, "fromProjectName") } : {}),
+        ...(str(d, "toProjectName") ? { toProject: str(d, "toProjectName") } : {}),
         time: ev.time,
       });
       break;

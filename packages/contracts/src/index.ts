@@ -2399,6 +2399,98 @@ export interface SessionPauseState {
   stopSeq: number;
 }
 
+/** Durable receipt of a chat's latest move to another project, written in the
+ *  same transaction as its `session/project-moved` event. It is the only
+ *  evidence canonical reconciliation accepts for finishing a move whose
+ *  resource registry update was interrupted. */
+export interface SessionProjectMove {
+  fromProjectId: string;
+  toProjectId: string;
+  /** ms epoch of the commit. */
+  at: number;
+  operationId: string;
+}
+
+/** Evidence that the native leg named by `runtimeBinding` executes nothing, so
+ *  the next execution may start a fresh epoch without another proof. `released`
+ *  is the harness's own receipt; `at-rest` means Polyth held no runtime, turn or
+ *  admission for the session when the binding was left behind. It stops
+ *  counting as soon as the binding it names is replaced. */
+export interface SessionReleasedExecution extends ExecutionReleaseProof {
+  proof: "released" | "at-rest";
+}
+
+/** Payload of the ignorable `session/project-moved` marker. */
+export interface SessionProjectMovedData {
+  fromProjectId: string;
+  toProjectId: string;
+  /** Names at the time of the move: the log outlives both projects. */
+  fromProjectName?: string;
+  toProjectName?: string;
+  /** The chat the person moved; a delegated subagent names its top ancestor. */
+  rootSessionId: string;
+  operationId: string;
+}
+
+export const SESSION_PROJECT_MOVED_EVENT = "session/project-moved" as const;
+
+/** Why a chat cannot move right now. Stable identifiers: clients word them. */
+export type SessionMoveBlockReason =
+  | "archived"
+  | "busy"
+  | "delegated"
+  | "isolated"
+  | "other-machine"
+  | "package-owned"
+  | "private"
+  | "queued"
+  | "too-large"
+  | "unsupported"
+  | "widening";
+
+export interface SessionMoveBlock {
+  reason: SessionMoveBlockReason;
+  message: string;
+}
+
+export interface SessionMoveInput {
+  projectId: string;
+  /** Refuses the move when the chat has meanwhile left this project. */
+  expectedProjectId?: string;
+}
+
+/** What a move would do, without doing it. */
+export interface SessionMovePreview {
+  sessionId: string;
+  fromProjectId: string;
+  toProjectId: string;
+  /** Every chat that moves: the chat itself, then its delegated subagents. */
+  sessionIds: string[];
+  /** A running native leg has to be replaced in the target's folder. */
+  restartsAgent: boolean;
+  /** People who can open the chat only after the move, and only before it. */
+  gains: SessionPerson[];
+  loses: SessionPerson[];
+  /** Set when the move would be refused. */
+  blocked?: SessionMoveBlock;
+}
+
+export interface SessionMoveResult {
+  session: SessionProjection;
+  /** Every chat that moved; empty when the chat was already there. */
+  sessionIds: string[];
+  operationId?: string;
+}
+
+/** Server-internal seam between the canonical layer and the domain service.
+ *  Never reachable from a request: routes pass only `SessionMoveInput`. */
+export interface SessionMoveHooks {
+  /** Runs after the domain commit, before any reader hears of the move. */
+  afterCommit?(move: SessionProjectMove, sessionIds: readonly string[]): void;
+  /** Who could open each moved chat before it left. */
+  formerReaders?: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
 export interface SessionProjection {
   /** Complete navigator subset; absent detail fields only invalidate their cache. */
   summary?: true;
@@ -2498,6 +2590,10 @@ export interface SessionProjection {
    *  shows a countdown with cancel / switch-model actions. Cleared when the
    *  resend starts, the user cancels, or any newer turn begins. */
   resume?: SessionResumeState;
+  /** The latest move to another project; see `SessionProjectMove`. */
+  projectMove?: SessionProjectMove;
+  /** See `SessionReleasedExecution`. */
+  releasedExecution?: SessionReleasedExecution;
   /** A person paused the session's turn; the work waits for Continue (or a
    *  Stop that ends it). Its status is idle meanwhile. Agents may not continue
    *  it, and wakes addressed to it wait until the pause ends. */
@@ -2844,6 +2940,16 @@ export interface SessionService {
    *  checkouts their work targeted. Host-only cleanup: no Space or package facade
    *  exposes it, and a caller checks access by archiving the tree first. */
   releaseArchivedCheckouts?(sessionId: string): Promise<void>;
+  /** What moving this chat to another project of its Space would do. Reads
+   *  only: a blocked move is reported, not thrown. */
+  previewMoveToProject?(sessionId: string, input: SessionMoveInput): Promise<SessionMovePreview>;
+  /**
+   * Move this chat and its delegated subagents to another project of the same
+   * Space, atomically: the history and id stay, the event log gains a marker
+   * and the next execution starts a fresh native leg in the target's folder.
+   * Files stay where they are. Moving to the current project is a no-op.
+   */
+  moveToProject?(sessionId: string, input: SessionMoveInput, hooks?: SessionMoveHooks): Promise<SessionMoveResult>;
   /** Persist isolation metadata without changing runtime cwd. */
   patchIsolation?(sessionId: string, isolation: SessionIsolation | null): Promise<SessionProjection>;
   /**
@@ -3067,6 +3173,15 @@ export interface SessionPersistence {
   summaries?(input: SessionSummaryQuery): Promise<SessionSummaryPage>;
   /** Bounded atomic append and optional publication. expectedSeq is a CAS guard. */
   appendBatch?(sessionId: string, events: Array<CanonicalEventInput & { time?: number }>, opts?: { projection?: SessionProjection; expectedSeq?: number; markRead?: boolean }): Promise<SessionEvent[]>;
+  /** All-or-nothing `appendBatch` across several sessions. `patch` runs inside
+   *  the transaction against the latest row, so a projection-only write between
+   *  the caller's read and this commit (a draft, a read cursor) is never lost. */
+  appendBatches?(entries: ReadonlyArray<{
+    sessionId: string;
+    events: Array<CanonicalEventInput & { time?: number }>;
+    expectedSeq: number;
+    patch(current: SessionProjection): SessionProjection;
+  }>): Promise<Array<{ events: SessionEvent[]; projection: SessionProjection }>>;
   append(sessionId: string, type: string, data: JsonObject, opts?: Partial<Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">>): Promise<SessionEvent>;
   events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
   /** Indexed existence check (no full-log scan). Optional so fakes stay valid. */

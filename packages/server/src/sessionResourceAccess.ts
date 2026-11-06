@@ -40,6 +40,7 @@ const METHOD_ACCESS: Readonly<Record<string, SessionAccessLevel>> = {
   rename: "manage", archive: "manage", restore: "manage", delete: "manage", autoAcceptSet: "manage",
   memoryPolicySet: "manage", renameWorktreeBranch: "manage", patchIsolation: "manage",
   rebindWorkspace: "manage", updateWorkspace: "manage", patchWorkspace: "manage", withWorkspaceMutation: "manage",
+  moveToProject: "manage", previewMoveToProject: "manage",
 };
 /**
  * Methods that start, queue or steer a turn, or answer one. While a shared

@@ -1286,7 +1286,8 @@ function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
       && a.answerRewindMarkerSeq === b.answerRewindMarkerSeq && a.answerReplaced === b.answerReplaced;
   }
   if (a.kind === "notice" && b.kind === "notice") {
-    return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit;
+    return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit
+      && a.fromProject === b.fromProject && a.toProject === b.toProject;
   }
   if (a.kind === "person-message" && b.kind === "person-message") {
     return a.text === b.text && a.carryToAgent === b.carryToAgent && a.replyToSeq === b.replyToSeq

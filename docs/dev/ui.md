@@ -484,6 +484,30 @@ projects a filter hides in their slots. Any sort allows a move: one made under
 and switches the sort to *Custom order* (announced). Alt+Shift+↑/↓ on a project row moves it one
 place the same way. Covered by `apps/web/test/projectArrange.test.ts`.
 
+### Moving a chat to another project
+
+Dragging a chat row onto another project moves it: a project's card or anything in
+its open list in the tree, or its tile on the rail. Only that project's card or tile
+lights up (`data-session-drop-over`, `--accent-wash` and `--accent-line`), so the
+source project and private rooms never do. A row carries `SESSION_MOVE_MIME` beside
+the split view's `SESSION_MIME`, because the open chat can move yet can't open beside
+itself. One drop listener on the navigator serves every row
+(`useSessionMoveDropZones`, `apps/web/src/sessionMove.ts`).
+
+The row menu's *Move to project…* is the keyboard and touch way, in both navigators
+and the phone's ⋮ menu: `MoveSessionDialog` lists the projects (a Sheet on the phone).
+Both ways end at the same `requestSessionMove`: it asks for the server's preview
+first, words a refusal from its stable reason, and otherwise confirms with
+`confirmAlert`, which says what can't be seen from the navigator: subagents coming
+along, files staying behind, the agent carrying on in the other folder, and who gains
+or loses the chat. The offer (`canMoveSession`) hides what the server would refuse
+anyway; the server still decides.
+
+The moved chat stays open if it was open, and the workspace follows it
+(`followActiveSessionTo`, on this device and any other), unless the person has already
+gone to another project. The transcript gets a seal, *Moved from A to B*, from the
+names recorded in the event. Mechanics: [architecture](architecture.md#moving-a-chat-to-another-project).
+
 On touch-capable screens (`any-pointer: coarse`) project row actions stay
 hidden at rest, except on the focused project: its new-chat and ⋮ actions stay
 visible because touch tablets have no hover and iPadOS fires no `contextmenu`

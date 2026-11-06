@@ -1009,7 +1009,12 @@ export function createWsGateway(
             continue;
           }
           // Summary rows for other projects keep the rail's status live.
-          if (sub.snapshotScope && sub.snapshotScope !== "*" && p.projectId !== sub.snapshotScope && p.id !== sub.sessionId && !sub.summaryProjections) continue;
+          if (sub.snapshotScope && sub.snapshotScope !== "*" && p.projectId !== sub.snapshotScope && p.id !== sub.sessionId && !sub.summaryProjections) {
+            // A project-scoped list hears nothing about other projects, so a
+            // chat that just left this one has to be taken out of it explicitly.
+            if (p.projectMove?.fromProjectId === sub.snapshotScope) send(ws, { type: "session/removed", sessionId: p.id });
+            continue;
+          }
           if (p.id === sub.sessionId && !flushStreamBuffer(ws, sub)) continue;
           send(ws, { type: "projection", session: sub.summaryProjections && sub.sessionId !== p.id ? sessionSummary(view) : view });
         }

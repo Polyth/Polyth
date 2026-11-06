@@ -3,7 +3,7 @@ import { tr } from "../i18n/index.ts";
 import type { NoticeMsg } from "../reduce.ts";
 import { copyText } from "../utils.ts";
 import Icon from "./ui/Icon.tsx";
-import { BranchIcon, CommitIcon, CopiedIcon, DeleteIcon, MergeIcon, UndoIcon } from "./ui/icons.ts";
+import { BranchIcon, CommitIcon, CopiedIcon, DeleteIcon, FolderOpenIcon, MergeIcon, UndoIcon } from "./ui/icons.ts";
 import "./IsolationNotice.css";
 
 const BRANCH_SLOT = "\u0000";
@@ -21,6 +21,7 @@ export default function IsolationNotice({ notice, entering = false, leaving = fa
   entering?: boolean;
   leaving?: boolean;
 }) {
+  if (notice.topic === "project-moved") return <ProjectMovedNotice notice={notice} entering={entering} leaving={leaving} />;
   const merged = notice.topic === "isolation-merged";
   const started = notice.topic === "isolation-started";
   const tone = merged ? "merged" : started ? "started" : notice.returned ? "returned" : "discarded";
@@ -52,6 +53,28 @@ export default function IsolationNotice({ notice, entering = false, leaving = fa
       </div>
     </div>
   );
+}
+
+/** Same seal, for the one fact about a chat's place that isn't about isolation:
+ *  it changed project here, so what comes before ran in another folder. */
+function ProjectMovedNotice({ notice, entering, leaving }: { notice: NoticeMsg; entering: boolean; leaving: boolean }) {
+  return (
+    <div
+      className={`task-activity isolation-notice isolation-notice--moved${entering ? " timeline-row-enter" : ""}${leaving ? " rewind-leaving" : ""}`}
+      data-msg-id={notice.id}
+    >
+      <div className="isolation-notice-seal">
+        <span className="isolation-notice-mark"><Icon icon={FolderOpenIcon} size="sm" /></span>
+        <span className="isolation-notice-text">{projectMovedLabel(notice)}</span>
+      </div>
+    </div>
+  );
+}
+
+export function projectMovedLabel(notice: Pick<NoticeMsg, "fromProject" | "toProject">): string {
+  return notice.fromProject && notice.toProject
+    ? tr("timeline.movedBetweenProjects", { from: notice.fromProject, to: notice.toProject })
+    : tr("timeline.movedToAnotherProject");
 }
 
 function BranchSentence({ branch, template }: { branch: string; template: "timeline.mergedIntoBranch" | "timeline.isolatedFromBranch" }) {

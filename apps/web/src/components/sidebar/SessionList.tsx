@@ -8,7 +8,7 @@ import {
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api, errorChangesOf, errorCodeOf, type Worktree } from "@polyth/session/web-api";
 import {
-  getState, openArchivedSessions, openSessionSharing, overlaySessionProjection, setSidebarOpen, setUiError, startFreshSession, useStore,
+  getState, openArchivedSessions, openSessionMove, openSessionSharing, overlaySessionProjection, setSidebarOpen, setUiError, startFreshSession, useStore,
 } from "../../store.ts";
 import { canManageSession, sharingMarkerLabel } from "../../sessionSharing.ts";
 import { conversationUnread, hasMentionAttention, setSessionMuted, unreadBadgeText } from "../../sessionPeople.ts";
@@ -61,6 +61,7 @@ import { useShiftArmed } from "../../useShiftArmed.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { openSessionInSplit } from "../../sessionSplit.ts";
 import { setDragSession } from "../../dnd.ts";
+import { beginSessionMoveDrag, canMoveSession, endSessionMoveDrag } from "../../sessionMove.ts";
 import { useInlineRename } from "../input/inlineRename.ts";
 import { useLaneSessions } from "../../workbench/profileNavigation.ts";
 import { childrenByParent, isNavigatorRoot, listedAncestors } from "../../sessionTree.ts";
@@ -204,8 +205,9 @@ function SessionRow({
   // Split view needs room for two chats; the phone shell never offers it.
   const splitAvailable = useShellMode() !== "phone" && s.id !== activeSessionId;
   // Dragging a row is a mouse gesture; touch keeps its long-press menu.
-  const splitDraggable = splitAvailable && !selectMode
+  const rowDragPointer = useShellMode() !== "phone"
     && typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
+  const splitDraggable = splitAvailable && !selectMode && rowDragPointer;
   const conversation = s.purpose === "conversation";
   const unreadMessages = conversationUnread(s);
 
@@ -399,6 +401,9 @@ function SessionRow({
   // Rename, archive, delete and sharing changes need manage access; a chat
   // shared with less offers only what the reader may do.
   const manage = canManageSession(s);
+  const movable = canMoveSession(s, getState().projectRegistry.projects);
+  // Moving works from the open chat's row too, which can't open beside itself.
+  const moveDraggable = movable && !selectMode && rowDragPointer;
   // A conversation is shared by nature; its lead mark already says so.
   const sharedLabel = conversation ? undefined : sharingMarkerLabel(s.sharing);
   const menuEntries: MenuEntry[] = [
@@ -418,6 +423,11 @@ function SessionRow({
       id: "split",
       label: tr("split.openBeside"),
       onSelect: () => { prefetchSessionTail(s.id); openSessionInSplit(s.id); },
+    } satisfies MenuEntry] : []),
+    ...(movable ? [{
+      id: "move",
+      label: tr("sessionMove.menu"),
+      onSelect: () => openSessionMove(s.id),
     } satisfies MenuEntry] : []),
     { id: "copy-id", label: tr("sidebar.sessionlist.copySessionId"), onSelect: () => void copySessionId() },
     {
@@ -539,12 +549,17 @@ function SessionRow({
             }}
             onDoubleClick={() => { if (manage && !selectMode) { setTitle(s.title); setRenaming(true); } }}
             // A row dragged onto the workspace opens beside the open chat.
-            draggable={splitDraggable ? true : undefined}
-            onDragStart={splitDraggable ? (event) => {
-              setDragSession(event.dataTransfer, s.id);
-              event.dataTransfer.effectAllowed = "link";
-              prefetchSessionTail(s.id);
+            // Dragged onto a project row, it moves there.
+            draggable={splitDraggable || moveDraggable ? true : undefined}
+            onDragStart={splitDraggable || moveDraggable ? (event) => {
+              if (splitDraggable) {
+                setDragSession(event.dataTransfer, s.id);
+                prefetchSessionTail(s.id);
+              }
+              if (moveDraggable) beginSessionMoveDrag(event.dataTransfer, s);
+              event.dataTransfer.effectAllowed = splitDraggable && moveDraggable ? "linkMove" : moveDraggable ? "move" : "link";
             } : undefined}
+            onDragEnd={moveDraggable ? endSessionMoveDrag : undefined}
             onTouchStart={startLongPress}
             onTouchEnd={cancelLongPress}
             onTouchCancel={cancelLongPress}

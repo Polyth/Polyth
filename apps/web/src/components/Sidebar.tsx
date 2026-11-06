@@ -26,6 +26,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { ShellColumnAccount, ShellColumnFoot, ShellColumnHead, ShellDock } from "./ShellDock.tsx";
 import { ProjectRailTools } from "./sidebar/ProjectRailTools.tsx";
+import { useSessionMoveDropZones } from "../sessionMove.ts";
 import { SIDEBAR_RAIL_SLOT } from "../railPlacement.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { useUiSettings } from "../uiPrefs.ts";
@@ -139,6 +140,7 @@ export default function Sidebar() {
   // never claim there are no projects.
   const registry = useStore((s) => s.projectRegistry);
   const projects = rootProjects(registry.projects) as typeof registry.projects;
+  const sessionMoveDrops = useSessionMoveDropZones();
   // Only the personal project: chats list flat, with no project row or rail
   // icon, until the person adds a real project.
   const soloPersonal = registry.status === "ready" ? soloPersonalProject(projects) : null;
@@ -945,7 +947,10 @@ export default function Sidebar() {
       );
     }
     return (
-      <div className="project-card-shell">
+      <div
+        className="project-card-shell"
+        data-session-drop-over={sessionMoveDrops.overProjectId === p.id ? "true" : undefined}
+      >
         <button
           className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
           aria-current={p.id === activeProjectId ? "true" : undefined}
@@ -1049,6 +1054,7 @@ export default function Sidebar() {
         }}
         onPointerDownCapture={() => cancelRailCollapse()}
         {...(railCollapsed ? { onPointerEnter: stopLeave, onPointerLeave: schedulePeekClose } : {})}
+        {...sessionMoveDrops.handlers}
       >
         <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
         {fullyCollapsed && (
@@ -1156,6 +1162,8 @@ export default function Sidebar() {
                           aria-label={candidate.name || candidate.path}
                           title=""
                           data-arrange-id={reorderable ? candidate.id : undefined}
+                          data-session-drop-project={candidate.id}
+                          data-session-drop-over={sessionMoveDrops.overProjectId === candidate.id ? "true" : undefined}
                           onPointerDown={reorderable ? arrange.engine.itemProps(candidate.id).onPointerDown : undefined}
                           onClick={(event) => toggleRailProject(candidate.id, event.detail)}
                           onPointerEnter={(event) => {
@@ -1509,6 +1517,7 @@ export default function Sidebar() {
                 key={p.id}
                 data-project-id={p.id}
                 className={`project-tree-node${reorderable ? " is-reorderable" : ""}${arrange.draggingId === p.id ? " is-arrange-held" : ""}`}
+                data-session-drop-project={p.id}
                 // The project's row lifts it; its sessions keep their own gestures.
                 {...(reorderable ? arrange.engine.itemProps(p.id) : {})}
               >

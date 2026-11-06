@@ -84,6 +84,27 @@ export function orgRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+    m = path.match(/^\/api\/sessions\/([^/]+)\/move$/);
+    if (m && method === "POST") {
+      if (!sessions.moveToProject || !sessions.previewMoveToProject) { json(501, { error: "unsupported" }); return true; }
+      const b = await body();
+      if (typeof b.projectId !== "string" || !b.projectId) {
+        json(400, { error: "invalid-input", message: "projectId is required" });
+        return true;
+      }
+      if (b.expectedProjectId !== undefined && typeof b.expectedProjectId !== "string") {
+        json(400, { error: "invalid-input", message: "expectedProjectId must be a string" });
+        return true;
+      }
+      const input = {
+        projectId: b.projectId,
+        ...(typeof b.expectedProjectId === "string" ? { expectedProjectId: b.expectedProjectId } : {}),
+      };
+      json(200, b.dryRun === true
+        ? await sessions.previewMoveToProject(m[1]!, input)
+        : await sessions.moveToProject(m[1]!, input));
+      return true;
+    }
     m = path.match(/^\/api\/sessions\/([^/]+)\/read$/);
     if (m && method === "POST") {
       const b = await body();

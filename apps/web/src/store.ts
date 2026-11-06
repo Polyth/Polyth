@@ -90,6 +90,7 @@ export type Overlay =
   | "worktree-session"
   | "archived-sessions"
   | "session-sharing"
+  | "session-move"
   | null;
 /** Right-rail surface id: a registry id such as "files" or a
  *  plugin-contributed "slot:…" id — no longer a closed union. */
@@ -587,6 +588,8 @@ export interface AppState {
   archivedSessionsProjectId: string | null;
   /** Chat whose audience the "session-sharing" overlay shows. */
   sharingSessionId: string | null;
+  /** Chat the "session-move" overlay picks a project for. */
+  movingSessionId: string | null;
   newSessionIntent: NewSessionIntent | null;
   /** First-send session creation currently waiting for its native agent. */
   sessionSpawn: SessionSpawn | null;
@@ -641,6 +644,7 @@ let state: AppState = {
   worktreeSessionRequest: null,
   archivedSessionsProjectId: null,
   sharingSessionId: null,
+  movingSessionId: null,
   newSessionIntent: null,
   sessionSpawn: null,
   pendingSends: [],
@@ -1207,10 +1211,14 @@ export function setOverlay(overlay: Overlay): void {
     ...(overlay !== "worktree-session" ? { worktreeSessionRequest: null } : {}),
     ...(overlay !== "archived-sessions" ? { archivedSessionsProjectId: null } : {}),
     ...(overlay !== "session-sharing" ? { sharingSessionId: null } : {}),
+    ...(overlay !== "session-move" ? { movingSessionId: null } : {}),
   });
 }
 export function openSessionSharing(sessionId: string): void {
   set({ overlay: "session-sharing", sharingSessionId: sessionId, worktreeSessionRequest: null, archivedSessionsProjectId: null });
+}
+export function openSessionMove(sessionId: string): void {
+  set({ overlay: "session-move", movingSessionId: sessionId, worktreeSessionRequest: null, archivedSessionsProjectId: null, sharingSessionId: null });
 }
 export function openArchivedSessions(projectId: string): void {
   set({ overlay: "archived-sessions", archivedSessionsProjectId: projectId, worktreeSessionRequest: null });
@@ -2152,6 +2160,30 @@ const hasCachedContent = (sessionId: string): boolean =>
 const keepVisible = (sessionId: string): boolean =>
   sessionId === state.activeSessionId || hasCachedContent(sessionId);
 
+/** The project the open chat just moved to, here or on another device. A row
+ *  that merely differs from the active project says nothing: that is ordinary
+ *  mid-navigation state, so only a real change of the row's project counts. */
+function movedActiveSessionProject(rows: readonly SessionProjection[]): string | null {
+  const active = state.activeSessionId;
+  if (!active) return null;
+  const before = state.sessions.find((row) => row.id === active);
+  const after = rows.find((row) => row.id === active);
+  if (!before || !after || before.projectId === after.projectId) return null;
+  return normalizedProjectId(state.activeProjectId) === before.projectId ? after.projectId : null;
+}
+
+/** The workspace goes with the open chat, so the git, files and settings around
+ *  it keep describing the project it is in. */
+function followActiveSessionTo(projectId: string | null): void {
+  if (!projectId) return;
+  bindReliabilityForProject(projectId);
+  set({ activeProjectId: projectId, gitBranch: "", ...projectPanePresentation(projectId) });
+  saveNavigationHint("polyth.activeProjectId", projectId);
+  persistClientNavigation(projectId, state.activeSessionId);
+  setWorkspaceModeProject(projectId);
+  setWorkbenchProject(projectId);
+}
+
 export function upsertSession(p: SessionProjection): void {
   // Drop empty zombie sessions — creation failed before any user turn. A
   // session whose history is already on screen (e.g. a workflow parent that
@@ -2165,7 +2197,9 @@ export function upsertSession(p: SessionProjection): void {
   const cur = i >= 0 ? state.sessions[i] : undefined;
   const incoming = cur ? preserveTitle(cur, p) : p;
   const sessions = i >= 0 ? state.sessions.map((s, j) => (j === i ? incoming : s)) : [...state.sessions, incoming];
+  const movedTo = movedActiveSessionProject([p]);
   set({ sessions: withOptimisticSessionChanges(sessions) });
+  followActiveSessionTo(movedTo);
   reconcileWorkspaceProjectFromSession();
 }
 
@@ -2190,12 +2224,14 @@ export function upsertSessions(list: readonly SessionProjection[]): void {
       return s;
     });
   for (const p of byId.values()) sessions.push(p);
+  const movedTo = movedActiveSessionProject(list);
   if (zombieIds.size) {
     const events = { ...state.events };
     const runtimeFeatures = { ...state.runtimeFeatures };
     for (const id of zombieIds) { delete events[id]; delete runtimeFeatures[id]; activeModelCache.drop(id); }
     set({ sessions: withOptimisticSessionChanges(sessions), events, runtimeFeatures });
   } else set({ sessions: withOptimisticSessionChanges(sessions) });
+  followActiveSessionTo(movedTo);
   reconcileWorkspaceProjectFromSession();
 }
 

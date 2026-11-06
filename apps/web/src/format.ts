@@ -240,11 +240,13 @@ export function modelToMarkdown(model: RenderModel): string {
       lines.push(`### Fixing merge conflicts for pull request #${m.prNumber}`);
       lines.push(`\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`);
     } else if (m.kind === "notice") {
-      lines.push(m.topic === "isolation-merged"
-        ? `Merged into ${m.branch ?? ""} · ${m.commit ?? ""}`
-        : m.topic === "isolation-started"
-          ? `Moved to an isolated workspace from ${m.branch ?? ""}`
-          : "Isolated workspace discarded");
+      lines.push(m.topic === "project-moved"
+        ? `Moved from ${m.fromProject ?? "another project"} to ${m.toProject ?? "another project"}`
+        : m.topic === "isolation-merged"
+          ? `Merged into ${m.branch ?? ""} · ${m.commit ?? ""}`
+          : m.topic === "isolation-started"
+            ? `Moved to an isolated workspace from ${m.branch ?? ""}`
+            : "Isolated workspace discarded");
     } else if (m.kind === "question") {
       lines.push(`### Question\n\n${questionsToMarkdown(normalizeQuestions(m.questions), (m.answers ?? {}) as AnswerMap)}`);
     } else if (m.kind === "person-message") {

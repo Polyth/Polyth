@@ -3083,6 +3083,12 @@ export async function boot(opts: BootOptions = {}) {
       }
     },
     browserArtifacts,
+    sessionMedia: {
+      preserve: async (input) => svc<NonNullable<SessionDeps["sessionMedia"]>>("files.session-media")?.preserve(input),
+      ignored: async (root, paths) => await svc<{
+        checkIgnored(root: string, paths: readonly string[]): Promise<readonly string[]>;
+      }>("git")?.checkIgnored(root, paths) ?? [],
+    },
     ...(commandService ? {
       expand: async (projectId: string, text: string, actorUserId?: string) => {
         const project = await projects.get(projectId);

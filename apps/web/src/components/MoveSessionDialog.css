@@ -1,0 +1,48 @@
+/* Picking the project a chat moves to. One row per project, the same glyph and
+   two lines the navigator's project card shows, so a project reads the same in
+   both places. */
+.session-move-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.session-move-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  min-height: max(var(--hit-min), 44px);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.session-move-row:hover { background: var(--surface-overlay-hover); }
+.session-move-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.session-move-row .project-glyph { flex: none; }
+.session-move-row-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.session-move-row-name,
+.session-move-row-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-move-row-name { font-size: var(--font-label); font-weight: 500; }
+.session-move-row-path { color: var(--muted); font-size: var(--font-meta); }
+.session-move-empty { margin: 0; color: var(--text-dim); }
