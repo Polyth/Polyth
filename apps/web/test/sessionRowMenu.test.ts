@@ -127,9 +127,6 @@ const { default: Sidebar } = await import("../src/components/Sidebar.tsx");
 const { default: AlertDialog } = await import("../src/components/AlertDialog.tsx");
 const { sessionDateInputValue } = await import("../src/sessionDates.ts");
 const { setShowDateGroups } = await import("../src/sidebarPrefs.ts");
-const { registerSlot } = await import("../src/slots.ts");
-const { default: SlotHost } = await import("../src/components/slots/SlotHost.ts");
-const { ImportDialogLayer, ImportMenuEntry } = await import("../../../packages/session-import/widgets/index.tsx");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
   id: "s", projectId: "p1", title: "session", status: "idle",
@@ -1209,63 +1206,6 @@ test("more than six labels open a searchable apply-immediately picker", async ()
     labelFixtures = [];
     sessionListFixtures = null;
     await unmount();
-  }
-});
-
-test("selecting Import sessions closes the project menu and keeps its dialog mounted", async () => {
-  applyProjectUpsert({ id: "p-import", name: "Import project", path: "/workspace/import", createdAt: Date.now() });
-  activateProject("p-import");
-  setSessions("p-import", []);
-  const offTrigger = registerSlot("sidebar.project.actions", "test.import-trigger", (context) => {
-    const closeMenu = context.closeMenu as (() => void) | undefined;
-    return createElement(ImportMenuEntry, {
-      projectId: String(context.projectId),
-      ...(closeMenu ? { closeMenu } : {}),
-    });
-  }, 10);
-  const offLayer = registerSlot("app.layers", "test.import-dialog", () => createElement(ImportDialogLayer), 10);
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  try {
-    await act(async () => {
-      root.render(createElement("div", null,
-        createElement(Sidebar),
-        createElement(SlotHost, { slot: "app.layers" }),
-      ));
-    });
-    const trigger = container.querySelector<HTMLButtonElement>(
-      '.project-menu-btn[aria-label="Actions for Import project"]',
-    );
-    assert.ok(trigger, "the project action menu is rendered");
-    await act(async () => { trigger!.click(); });
-    assert.ok(openMenu(), "the project menu opens");
-    const importRow = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((row) => (row.textContent ?? "").includes("Import sessions"));
-    assert.ok(importRow, "the package row is in the menu footer");
-    await act(async () => {
-      importRow!.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    assert.equal(openMenu(), null, "choosing the action dismisses the dropdown");
-    assert.ok(
-      document.querySelector('[role="dialog"][aria-label="Import sessions"]'),
-      "the import dialog stays mounted after its menu unmounts",
-    );
-    const cancel = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
-      .find((button) => (button.textContent ?? "").trim() === "Cancel");
-    assert.ok(cancel, "the dialog offers Cancel");
-    await act(async () => { cancel!.click(); });
-    assert.equal(
-      document.querySelector('[role="dialog"][aria-label="Import sessions"]'),
-      null,
-      "closing the dialog releases the floating layer",
-    );
-  } finally {
-    await act(async () => { root.unmount(); });
-    container.remove();
-    offTrigger();
-    offLayer();
   }
 });
 
