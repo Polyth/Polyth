@@ -4148,9 +4148,6 @@ function ComposerBody({
     // widgets that act on the agent's turn (WidgetDef.agentOnly).
     agentless: peopleOnly,
     working,
-    // A chat only its owner reads, in a project someone else really works in:
-    // alone, the interface has nobody to mention.
-    privateAmongOthers: !!session && chatAmongOthers(session) && session.sharing?.shared !== true,
     autoApproveOn,
     autoApproveAll,
     setDraftAutoApprove: setNewSessionAutoApprove,

@@ -61,8 +61,10 @@ export const chatReadByOthers = (session: Pick<SessionProjection, "projectId" | 
 /** Whether which memory the agent has is worth a line: alone, there is nothing to tell apart. */
 export const chatAmongOthers = (session: Pick<SessionProjection, "projectId" | "sharing">): boolean => {
   const project = projectOf(session);
+  // A room speaks for its project: someone can have one after the others left.
+  const home = project?.parentProjectId ? getState().projectRegistry.projects.find((candidate) => candidate.id === project.parentProjectId) : project;
   return session.sharing?.multiPerson === true
-    && (project?.parentProjectId !== undefined || project?.othersHere === true || othersRead(session.sharing, project));
+    && (home?.othersHere === true || othersRead(session.sharing, project));
 };
 
 const openRoom = async (parentId: string): Promise<Project | undefined> => {

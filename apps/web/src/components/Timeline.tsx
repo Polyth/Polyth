@@ -18,6 +18,7 @@ import { requestComposerReplace } from "../composerInsert.ts";
 import {
   applyEvent, dismissUiError, focusComposer, getState, oldestSeq, reduceSessionModel, setUiError, usePendingSends, useStore, type PendingSend,
 } from "../store.ts";
+import { chatAmongOthers } from "../privateRoom.ts";
 import { api } from "@polyth/session/web-api";
 import {
   JUMP_TO_LATEST_NAME,
@@ -2020,6 +2021,10 @@ export function timelineAfterSlotContext(input: {
   messageCount: number;
   promptCount: number;
   turnStatus: string | null;
+  /** When the person last wrote, on the server's clock; 0 before they have. */
+  latestPromptAt?: number;
+  /** A chat only its owner reads, in a project someone else really works in. */
+  privateAmongOthers?: boolean;
   permissions: ReadonlyArray<{ status: string }>;
   secrets: ReadonlyArray<{ status: string }>;
 }): {
@@ -2028,6 +2033,8 @@ export function timelineAfterSlotContext(input: {
   messageCount: number;
   promptCount: number;
   turnStatus: string | null;
+  latestPromptAt: number;
+  privateAmongOthers: boolean;
   permissions: Array<{ status: string }>;
   secrets: Array<{ status: string }>;
 } {
@@ -2037,6 +2044,8 @@ export function timelineAfterSlotContext(input: {
     messageCount: input.messageCount,
     promptCount: input.promptCount,
     turnStatus: input.turnStatus,
+    latestPromptAt: input.latestPromptAt ?? 0,
+    privateAmongOthers: input.privateAmongOthers === true,
     permissions: input.permissions.filter((permission) => permission.status === "pending"),
     secrets: input.secrets.filter((secret) => secret.status === "pending"),
   };
@@ -4433,6 +4442,8 @@ export default function Timeline({
     messageCount: model.messages.length,
     promptCount: prompts.length,
     turnStatus: turn?.status ?? null,
+    latestPromptAt: lastUser?.time ?? 0,
+    privateAmongOthers: !!session && chatAmongOthers(session) && session.sharing?.shared !== true,
     permissions: model.permissions,
     secrets: model.secrets,
   });

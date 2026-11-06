@@ -270,6 +270,8 @@ test("timeline after-slot summary keeps only pending permissions and secrets", a
   assert.deepEqual(summary.secrets.map((item) => item.status), ["pending"]);
   assert.equal(summary.sessionId, "s1");
   assert.equal(summary.projectId, "p1");
+  assert.equal(summary.latestPromptAt, 0);
+  assert.equal(summary.privateAmongOthers, false);
   assert.equal(summary.messageCount, 3);
 });
 

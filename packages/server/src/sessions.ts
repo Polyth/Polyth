@@ -10678,7 +10678,7 @@ export function createSessionService(deps: {
       return { reason: "other-machine", message: "A chat can't move to or from a project on another machine" };
     }
     if (source.parentProjectId || target.parentProjectId) {
-      return { reason: "private", message: "A chat in Only me stays there. Publish a note to the shared memory instead." };
+      return { reason: "private", message: "A chat in Only me stays there. Share a note from My notes instead." };
     }
     if (root.status === "archived") return { reason: "archived", message: "Restore this chat before moving it" };
     if (root.parentId && await store.projection(root.parentId) && !await sessionEventExists(root.id, "session/forked")) {

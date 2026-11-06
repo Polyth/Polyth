@@ -694,10 +694,10 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     // is always allowed; a summary can be published instead (Spaces §14.6).
     if (change.audience || change.raised.length > 0) {
       if (deps.isPrivateRoom?.(projection.projectId)) {
-        throw Object.assign(conflict("A chat in Only me stays private. Publish a note to the shared memory instead."), { reason: "private-room" });
+        throw Object.assign(conflict("A chat in Only me stays private. Share a note from My notes instead."), { reason: "private-room" });
       }
       if (projection.personalContext) {
-        throw Object.assign(conflict("The agent has read your personal notes in this chat, so it can't be opened to others. Publish a note to the shared memory instead."), { reason: "personal-context" });
+        throw Object.assign(conflict("The agent has read your personal notes in this chat, so it can't be opened to others. Share a note from My notes instead."), { reason: "personal-context" });
       }
     }
 

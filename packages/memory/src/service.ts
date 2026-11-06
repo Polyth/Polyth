@@ -45,6 +45,9 @@ export type ChatMemoryScope = { spaceId: string; projectId: string; principalId:
 
 /** What one chat may reach and where its notes go. Server-derived from the
  * chat's real audience; never from a request or a model argument. */
+/** An offer is read in full before it is shared, under the reply it came with. */
+const SHARE_OFFER_MAX_CHARS = 600;
+
 export interface ChatMemoryAccess {
   store: MemoryStore;
   scope: ChatMemoryScope;
@@ -497,7 +500,7 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
         writeTo: sharedProject ? here : projectGrant,
         personal: { userId: owner, here, aboutMe },
         sharedProject,
-        ...(privacy?.inPrivateRoom === true || privacy?.othersHere === true ? { othersHere: true } : {}),
+        ...(privacy?.othersHere === true ? { othersHere: true } : {}),
       };
     },
     async recall(space, input) {
@@ -512,12 +515,17 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
       if ((target === "personal" || target === "about-me") && !personal) {
         throw error("forbidden", "personal notes are only available in a chat private to one person; others can read this chat");
       }
-      // Personal to shared is one way and takes the person's own confirmation:
-      // the agent proposes the exact text, and only they can publish it.
-      // With nobody else working here there is nobody to offer it to and no reason
-      // to interrupt: it stays a working note of theirs, which their chats recall.
+      // Personal to shared is one way and takes the person's own act: the agent
+      // can only offer the exact text. Nothing waits on them: the note works as
+      // theirs from the start, and ignoring the offer costs nothing. Offers stay
+      // rare, because each one is something to read.
       const staysPersonal = target === "shared" && personal !== undefined && sharedProject;
-      const proposing = staysPersonal && othersHere === true;
+      const noOffer = !staysPersonal ? undefined
+        : othersHere !== true ? "nobody else works in this project yet"
+          : input.body.length > SHARE_OFFER_MAX_CHARS ? `an offer must fit in ${SHARE_OFFER_MAX_CHARS} characters`
+            : store.shareProposals(scope).some((note) => note.sources.some((source) => source.sessionId === ctx.sessionId)) ? "this chat has already made its offer"
+              : undefined;
+      const proposing = staysPersonal && noOffer === undefined;
       const placement: MemoryLayerGrant = staysPersonal || target === "personal" ? personal!.here
         : target === "about-me" ? personal!.aboutMe
           : target === "shared" ? { layer: "project" }
@@ -539,7 +547,7 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
       const receipt = store.create(scope, {
         ...input,
         projectId: scope.projectId,
-        lifecycle: proposing ? "candidate" : "active",
+        lifecycle: "active",
         evidence: "user-stated",
         userLocked: true,
         sources: [{ kind: "session", sessionId: ctx.sessionId }],
@@ -548,7 +556,6 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
         authoredBy: { kind: "agent", ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}) },
         ...(proposing ? { shareProposed: true } : {}),
       });
-      if (proposing) return { ...receipt, status: "skipped" as const, message: "proposed: the person has been asked to publish this text to the shared memory; it stays personal until they do" };
       const superseded: string[] = [];
       for (const record of replaced) {
         if (record.id === receipt.memoryId) continue;
@@ -557,7 +564,12 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
         store.review(scope, record.id, record.revision, "superseded");
         superseded.push(record.id);
       }
-      const saved = staysPersonal ? { ...receipt, message: "saved to this person's notes, not the shared memory: others could open this project but nobody else works in it yet, so nothing was proposed; their chats here recall it" } : receipt;
+      const saved = staysPersonal ? {
+        ...receipt,
+        message: proposing
+          ? "saved to this person's notes, where their chats here recall it; a line under your reply lets them share it if they want, so don't ask them about it"
+          : `saved to this person's notes, where their chats here recall it; not offered for the shared memory: ${noOffer}. Don't save it again`,
+      } : receipt;
       return superseded.length ? { ...saved, superseded } : saved;
     },
     harvest: undefined as unknown as MemoryHarvestController,
@@ -796,7 +808,7 @@ function personalMemoryRoutes(host: ServerPackageHost, service: MemoryService, w
       }, { placement: input.where === "about-me" ? aboutMe : here, authoredBy: { kind: "person", userId } }));
       return true;
     }
-    const match = path.match(/^\/api\/memory\/personal\/([^/]+)(?:\/(publish|keep|make-personal))?$/);
+    const match = path.match(/^\/api\/memory\/personal\/([^/]+)(?:\/(publish|unpublish|keep|make-personal))?$/);
     if (!match) return false;
     const id = decodeURIComponent(match[1]!);
     const action = match[2];
@@ -847,8 +859,19 @@ function personalMemoryRoutes(host: ServerPackageHost, service: MemoryService, w
         },
         { authoredBy: { kind: "person", userId }, approver: { userId } },
       );
-      if (note.shareProposedAt) store.settleShareProposal(personalScope, id, expected, "published");
+      store.settleShareProposal(personalScope, id, expected, "published");
       rc.json(200, shared);
+      return true;
+    }
+    if (action === "unpublish") {
+      // Undo right after sharing: takes back this person's own copy, only while
+      // it is still exactly what they shared, and their note works again.
+      const sharedScope = { spaceId: scope.spaceId, projectId: scope.projectId, principalId: scope.principalId };
+      const note = store.get(personalScope, id);
+      const copy = store.get(sharedScope, text(input.sharedId));
+      if (!note || !copy || copy.authoredBy?.kind !== "person" || copy.authoredBy.userId !== userId || copy.title !== note.title || copy.body !== note.body) throw error("not-found", "memory record not found");
+      store.forget(sharedScope, { id: copy.id, projectId: scope.projectId, expectedRevision: copy.revision });
+      rc.json(200, store.review(personalScope, id, note.revision, "active"));
       return true;
     }
     // make-personal: an old shared note goes back to the person whose private
@@ -1011,7 +1034,7 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
       },
     },
     {
-      descriptor: descriptor("memory.memory_remember", "memory_remember", "Save one durable fact to Polyth long-term memory, the memory every later session and harness recalls. In Automatic mode it saves without another approval. Save verified decisions, conventions, gotchas, procedures and stated user preferences once they are settled; one fact per record with a specific title and a self-contained body. Never save secrets, credentials or transient progress. When a fact changed, pass the outdated record ids in supersedes so they stop being recalled. In a chat others can read a note goes to the shared project memory. In a chat private to one person it goes to their personal notes in this project; use target about-me for facts about the person that hold everywhere, and target shared to propose the exact text for the shared memory, which only that person can publish.", {
+      descriptor: descriptor("memory.memory_remember", "memory_remember", "Save one durable fact to Polyth long-term memory, the memory every later session and harness recalls. In Automatic mode it saves without another approval. Save verified decisions, conventions, gotchas, procedures and stated user preferences once they are settled; one fact per record with a specific title and a self-contained body. Never save secrets, credentials or transient progress. When a fact changed, pass the outdated record ids in supersedes so they stop being recalled. In a chat others can read a note goes to the shared project memory. In a chat private to one person it goes to their personal notes in this project; use target about-me for facts about the person that hold everywhere, and target shared to offer the exact text for the shared memory, which only that person can share. It works as their note either way, so never ask them about it. Offer only what they asked to share or what others would otherwise get wrong: one short fact, never a task log, a test recipe or a dated design note.", {
         type: "object", additionalProperties: false, required: ["title", "body"], properties: {
           title: { type: "string", minLength: 1, maxLength: 160 }, body: { type: "string", minLength: 1, maxLength: 8192 }, category: { type: "string", enum: ["decision", "convention", "gotcha", "procedure", "observation"] }, tags: { type: "array", items: { type: "string" }, maxItems: 12 },
           target: { type: "string", enum: [...REMEMBER_TARGETS], description: "Where to save. auto (default) follows this chat. personal and about-me work only in a chat private to one person." },

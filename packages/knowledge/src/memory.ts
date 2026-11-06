@@ -135,10 +135,11 @@ export interface MemoryStore {
    * an old shared note personal. Publishing never moves: it copies the exact
    * confirmed text, so a personal note's earlier revisions stay personal. */
   moveToLayer(scope: MemoryScope, id: string, expectedRevision: number, target: MemoryLayerGrant): MemoryReceiptDto;
-  /** Personal notes the agent proposed for the shared memory, oldest first. */
+  /** Personal notes the agent offered for the shared memory, newest first. They
+   * are ordinary active notes; only the person can share one. */
   shareProposals(scope: MemoryScope): MemoryRecordDto[];
-  /** Close a proposal: `kept` makes the note an ordinary active personal note,
-   * `published` archives it because its text now lives in the shared memory. */
+  /** Close an offer: `kept` leaves an ordinary active personal note, `published`
+   * archives any personal note because its text now lives in the shared memory. */
   settleShareProposal(scope: MemoryScope, id: string, expectedRevision: number, outcome: "kept" | "published"): MemoryReceiptDto;
   /** Live project-layer records that came from a chat, newest first, for a
    * person to review which of their old notes should become personal. */
@@ -708,6 +709,9 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
   if (!recordColumns.has("approved_by")) db.exec("ALTER TABLE memory_records ADD COLUMN approved_by TEXT");
   if (!recordColumns.has("about")) db.exec("ALTER TABLE memory_records ADD COLUMN about TEXT");
   if (!recordColumns.has("share_proposed_at")) db.exec("ALTER TABLE memory_records ADD COLUMN share_proposed_at INTEGER");
+  // Offers used to wait out of recall until someone decided. A note works from
+  // the start now, so those still waiting become ordinary personal notes.
+  db.exec("UPDATE memory_records SET lifecycle='active', share_proposed_at=NULL WHERE layer='person' AND lifecycle='candidate' AND share_proposed_at IS NOT NULL");
   db.exec("CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_records(space_id, layer, owner_id, lifecycle, updated_at)");
   db.exec(`CREATE TABLE IF NOT EXISTS memory_utility_reservations (
     reservation_id TEXT PRIMARY KEY,
@@ -1318,7 +1322,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
     shareProposals(scope) {
       assertScope(scope);
       const layers = layerClause(scope);
-      const rows = db.prepare(`SELECT * FROM memory_records WHERE space_id=? AND ${layers.sql} AND layer='person' AND lifecycle='candidate' AND share_proposed_at IS NOT NULL ORDER BY share_proposed_at LIMIT 50`).all(scope.spaceId, ...layers.params) as unknown as MemoryRow[];
+      const rows = db.prepare(`SELECT * FROM memory_records WHERE space_id=? AND ${layers.sql} AND layer='person' AND lifecycle='active' AND share_proposed_at IS NOT NULL ORDER BY share_proposed_at DESC LIMIT 50`).all(scope.spaceId, ...layers.params) as unknown as MemoryRow[];
       return rows.map(itemFrom);
     },
     settleShareProposal(scope, id, expectedRevision, outcome) {
@@ -1326,7 +1330,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       const row = grantedRow(scope, id);
       if (!row) fail("memory record not found", "not-found");
       const loaded = row as MemoryRow;
-      if (loaded.layer !== "person" || loaded.share_proposed_at === null) fail("this note is not waiting for a decision", "conflict");
+      if (loaded.layer !== "person" || (outcome === "kept" && loaded.share_proposed_at === null)) fail("this note is not waiting for a decision", "conflict");
       if (Number(loaded.revision) !== expectedRevision) fail("memory record changed since it was loaded", "conflict");
       return tx(db, () => {
         const t = now(); const lifecycle = outcome === "kept" ? "active" : "archived";

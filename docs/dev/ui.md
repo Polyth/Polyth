@@ -1045,6 +1045,17 @@ starts a room chat quoting only the title. What was already said stays where it 
 Which memory the agent has is one line in the context card
 (`composer.context.details`), only among other people.
 
+A note the agent offers for the shared memory asks nothing (`ShareOffer`). It works
+as the person's note from the start. In a private chat among other people, one line
+under the reply that saved it (`session.timeline.after`) says so and offers Share…,
+which opens the exact text, who will see it and one Share action. That acts at once,
+with Undo in the notification. The next message lets the line go: it only shows while
+the note's `shareProposedAt` is newer than the latest prompt, so ignoring it leaves
+nothing to clean up. A chat makes one offer of at most 600 characters; anything else
+stays a plain note. Project settings → Memory → My notes offers the same Share… in
+place under any note in Only me in this project. Alone in a project there is no line
+and no Share…, and My notes appears only with notes in it (`othersHere`).
+
 A person's Personal project (`Project.personal`, §3.3) is
 the `personal` kind whatever its composition says (`projectKinds(…, { personal })`,
 `RailPlanOptions`): only launchers that list `personal` start on a rail —
