@@ -124,7 +124,7 @@ function AttachmentContent({ attachment, kind }: { attachment: AttachmentRef; ki
   if (!attachment.url || kind === "audio" || kind === "link" || kind === "unsupported") {
     return <FileCard attachment={attachment} kind={kind} />;
   }
-  if (kind === "image") return <img className="attachment-preview-media" src={attachment.url} alt={attachment.name} />;
+  if (kind === "image") return <img className="attachment-preview-media" src={attachment.url} alt={attachment.name} draggable={false} />;
   if (kind === "video") return <video className="attachment-preview-media" src={attachment.url} controls preload="metadata" />;
   if (kind === "pdf") {
     return <div className="attachment-preview-doc"><iframe className="attachment-preview-pdf" src={attachment.url} title={attachment.name} /></div>;

@@ -100,6 +100,29 @@ test("a double tap zooms into the tapped point, a drag pans it within bounds, an
   zoom.detach();
 });
 
+test("a mouse click zooms and a mouse drag pans instead of starting a native image drag", () => {
+  const { dom, img, zoom, pointer, transform } = fixture();
+  // Chromium starts its own image drag on the first mouse move, which cancels
+  // the pointer sequence: the viewer must refuse it so the pan keeps going.
+  let dragPrevented = false;
+  img.addEventListener("dragstart", (event) => { dragPrevented = event.defaultPrevented; });
+  const drag = new dom.Event("dragstart", { bubbles: true, cancelable: true });
+  img.dispatchEvent(drag as unknown as Event);
+  assert.equal(dragPrevented, true, "the stage cancels the browser's image drag");
+  assert.equal(drag.defaultPrevented, true);
+
+  pointer("pointerdown", img, 3, 400, 300, "mouse");
+  pointer("pointerup", img, 3, 400, 300, "mouse");
+  assert.equal(transform(), `translate3d(0px, 0px, 0) scale(${MEDIA_ZOOM_DOUBLE_TAP})`, "a mouse click zooms in");
+
+  pointer("pointerdown", img, 4, 400, 300, "mouse");
+  pointer("pointermove", img, 4, 460, 300, "mouse");
+  assert.equal(transform(), `translate3d(60px, 0px, 0) scale(${MEDIA_ZOOM_DOUBLE_TAP})`, "the mouse drags the zoomed image");
+  pointer("pointerup", img, 4, 460, 300, "mouse");
+  assert.equal(transform(), `translate3d(60px, 0px, 0) scale(${MEDIA_ZOOM_DOUBLE_TAP})`, "the pan stays where it was released");
+  zoom.detach();
+});
+
 test("a drag over the dim does not reach its close click", () => {
   const { dom, stage, img, zoom, pointer } = fixture();
   let clicks = 0;

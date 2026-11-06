@@ -285,6 +285,13 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
     event.preventDefault();
   };
 
+  // A mouse drag pans the image here. Without this the browser starts its own
+  // image drag on the first move: that cancels the pointer sequence, so the pan
+  // stops after a few pixels and a ghost of the picture follows the cursor.
+  const onDragStart = (event: Event): void => {
+    event.preventDefault();
+  };
+
   /** A step either way around the middle of the view (the viewer's buttons). */
   const step = (factor: number): void => {
     if (!track()) return;
@@ -315,6 +322,7 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
   surface?.addEventListener("pointerup", onPointerEnd, passive);
   surface?.addEventListener("pointercancel", onPointerEnd, passive);
   surface?.addEventListener("click", onClick, { capture: true });
+  surface?.addEventListener("dragstart", onDragStart, { capture: true });
   surface?.addEventListener("wheel", onWheel, { passive: false });
 
   return {
@@ -347,6 +355,7 @@ export function attachMediaZoom(options: MediaZoomOptions): MediaZoom {
       surface?.removeEventListener("pointerup", onPointerEnd);
       surface?.removeEventListener("pointercancel", onPointerEnd);
       surface?.removeEventListener("click", onClick, { capture: true });
+      surface?.removeEventListener("dragstart", onDragStart, { capture: true });
       surface?.removeEventListener("wheel", onWheel);
       if (el) (el.ownerDocument.defaultView ?? window).clearTimeout(settleTimer);
     },

@@ -6551,8 +6551,9 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
 }
 /* Zoom (mediaZoom.ts) paints the image's transform; a double tap or a
    released pinch settles on the surface curve, a finger moves it 1:1. */
-img.attachment-preview-media { cursor: zoom-in; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+img.attachment-preview-media { cursor: zoom-in; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-user-drag: none; }
 .attachment-preview-stage[data-zoomed] img.attachment-preview-media { cursor: grab; }
+.attachment-preview-stage[data-zoomed] img.attachment-preview-media:active { cursor: grabbing; }
 img.attachment-preview-media[data-zoom-settling] { transition: transform var(--motion-surface) var(--motion-ease); }
 
 /* text / pdf: a document sheet centred on the scrim. */

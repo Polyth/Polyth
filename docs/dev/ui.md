@@ -3430,10 +3430,15 @@ host.surfaces.register({
     in the viewer itself (`mediaZoom.ts`; the page never zooms): two fingers
     pinch around their midpoint, a touch double tap and a mouse click zoom into
     the tapped point, another click returns to rest, a zoomed image drags
-    within its bounds (clipped to the stage via `data-zoomed`), and the wheel —
+    within its bounds with a finger or the mouse (clipped to the stage via
+    `data-zoomed`), and the wheel —
     a mouse wheel or a trackpad pinch (ctrl + wheel) — zooms around the
     pointer. A single click always does something where the `zoom-in` cursor
     promises it; the second click of a double click does not undo the first.
+    The viewer refuses the browser's own image drag (`draggable={false}`,
+    `-webkit-user-drag: none` and a cancelled `dragstart`): a native image drag
+    cancels the pointer sequence after the first move, so a mouse pan stopped
+    dead and left a ghost of the picture under the cursor.
     Images also carry a zoom island in the viewer bar (out, level, in, reset).
     While zoomed, or with two fingers down, paging and the pull stand aside.
     The stage is `touch-action: none`: allowing native `pan-y` let the browser
@@ -5083,7 +5088,8 @@ thumbnail strip.
   stack, native Back), `workspaceEditor.test.ts` "the Workspace leads with
   Back…", `attachmentPreviewGestures.test.ts` (media viewer paging,
   pull-down, mouse click/wheel zoom, and a zoomed image that never pages),
-  `mediaZoom.test.ts` (pinch, double tap, pan bounds, no close click after a
+  `mediaZoom.test.ts` (pinch, double tap, pan bounds, mouse click/wheel zoom,
+  a mouse pan with the browser's image drag refused, no close click after a
   drag).
 - Rail drag: `railDrag.test.ts` (preview and persist model, the removal
   distance and its hysteresis), `railDragRemove.test.ts` (mounted pointer drag:
