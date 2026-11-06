@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import {
   roleAtLeast,
   type Project,
+  type ProjectComposition,
   type ProjectPatch,
   type ProjectRemote,
   type ProjectService,
@@ -11,6 +12,13 @@ import {
 } from "@polyth/contracts";
 import type { CanonicalResource } from "@polyth/control-plane/resources";
 import { resolveInside } from "@polyth/tenancy";
+import {
+  discardManagedFolder,
+  managedOperationKey,
+  managedProjectPath,
+  parseManagedProjectInput,
+  type ManagedProjectRequest,
+} from "./managedProjects.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { projectResourceReceipt } from "./resourceReceipts.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -73,6 +81,34 @@ const personalRefused = (): Error => Object.assign(
   { code: "conflict" },
 );
 
+/** One Polyth-folder create: a resend returns the first project, and a folder
+ *  the provisioning step did not end up using is taken back. */
+async function createManagedProject(
+  ctx: SpaceContext,
+  registry: ProjectRegistry,
+  request: ManagedProjectRequest,
+  provision: (input: { path: string; name: string; composition?: ProjectComposition; managedOperation: string }) => Promise<Project>,
+  settled: (project: Project) => Project = (project) => project,
+): Promise<Project> {
+  const managedOperation = managedOperationKey(ctx.userId, request.clientOperationId);
+  const earlier = registry.managedProject(ctx.spaceId, managedOperation);
+  if (earlier) return settled(earlier);
+  const path = managedProjectPath(ctx, request.name, (candidate) => registry.localPathRegistered(candidate));
+  try {
+    const project = await provision({
+      path,
+      name: request.name,
+      ...(request.composition ? { composition: request.composition } : {}),
+      managedOperation,
+    });
+    if (resolve(project.path) !== resolve(path)) discardManagedFolder(path);
+    return project;
+  } catch (cause) {
+    discardManagedFolder(path);
+    throw cause;
+  }
+}
+
 export function canonicalProjectService(
   ctx: SpaceContext,
   registry: ProjectRegistry,
@@ -85,6 +121,14 @@ export function canonicalProjectService(
       // One person has nobody to keep a project private from.
       privateRooms: async () => [],
       listForShell: () => base.list(),
+      async createManaged(input) {
+        if (!roleAtLeast(ctx.role, "member")) throw forbidden();
+        return createManagedProject(ctx, registry, parseManagedProjectInput(input), (provisioned) => registry.provision({
+          id: randomUUID(),
+          spaceId: ctx.spaceId,
+          ...provisioned,
+        }));
+      },
       async ensurePersonal(name) {
         assertPersonalCaller(ctx);
         const existing = registry.personalProject(ctx.spaceId, ctx.userId);
@@ -247,6 +291,8 @@ export function canonicalProjectService(
     personal?: true;
     /** The caller's private room in this project: owner-only as well. */
     roomOf?: string;
+    composition?: ProjectComposition;
+    managedOperation?: string;
   }): Promise<Project> => {
     requireMutation();
     // Before any lookup: a personal folder answers the same whether or not
@@ -255,8 +301,10 @@ export function canonicalProjectService(
       throw Object.assign(new Error("this folder is reserved for a personal project"), { code: "invalid-path" });
     }
     // The same answer whether or not it exists. A parent of the data folder is
-    // fine: the file views don't show what's inside it.
-    if (!input.personal && !input.roomOf && !input.remote && registry.holdsServerData(input.path)) {
+    // fine: the file views don't show what's inside it. A Polyth-folder project
+    // (`managedOperation`) is exempt like personal projects and rooms: the
+    // server picked its folder, which on a server lies in Space storage.
+    if (!input.personal && !input.roomOf && !input.managedOperation && !input.remote && registry.holdsServerData(input.path)) {
       throw Object.assign(new Error("this folder holds Polyth's own data"), { code: "invalid-path" });
     }
     const existing = input.personal
@@ -291,6 +339,8 @@ export function canonicalProjectService(
         ...(input.remote ? { remote: input.remote } : {}),
         ...(input.personal ? { personalOwner: ctx.userId } : {}),
         ...(input.roomOf ? { room: { owner: ctx.userId, parentId: input.roomOf } } : {}),
+        ...(input.composition ? { composition: input.composition } : {}),
+        ...(input.managedOperation ? { managedOperation: input.managedOperation } : {}),
       });
       if (domain.id !== resourceId) {
         security.resources.abortMissingDomain(operationId, begun.resource.revision);
@@ -447,6 +497,10 @@ export function canonicalProjectService(
     } : {}),
     add: (path, name) => provision({ path, ...(name ? { name } : {}) }),
     create: (path, name) => provision({ path, createDirectory: true, ...(name ? { name } : {}) }),
+    async createManaged(input) {
+      requireMutation();
+      return createManagedProject(ctx, registry, parseManagedProjectInput(input), provision, ensureActive);
+    },
     remove,
     ...(base.addRemote ? {
       addRemote: (path: string, remote: ProjectRemote, name?: string) =>

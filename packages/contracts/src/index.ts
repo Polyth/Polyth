@@ -5398,6 +5398,16 @@ export interface ProjectCloneInput {
   identity?: { profileId: string };
 }
 
+/** What the new-project flow may offer in this deployment
+ *  (`GET /api/projects/managed`). */
+export interface ManagedProjectLocationDto {
+  /** The host folder picker works here; a sandboxed deployment has none. */
+  canChooseFolder: boolean;
+  /** Display form of the Polyth folder where the person can reach it directly
+   *  (`~/Polyth` on Desktop). Absent when it lives in server storage. */
+  rootLabel?: string;
+}
+
 export interface ProjectService {
   list(): Promise<Project[]>;
   add(path: string, name?: string): Promise<Project>;

@@ -7,6 +7,28 @@ milestones are named after what shipped.
 
 ---
 
+## Unreleased — new projects without choosing a folder
+
+### Added
+
+- A project that isn't about code no longer asks for a folder. Choose what it is
+  for, then name it: files go to the Polyth folder (`~/Polyth/<name>` in Polyth
+  Desktop, the Space's own storage on a server). "Choose another" is one press
+  away, and Engineering still starts with the folder picker.
+- Every new project now gets a window for its name, colour and icon, with defaults
+  that are ready to accept: a colour no other project uses and an icon that fits
+  what the project is for. Fourteen icons per direction ship with the app, so this
+  works offline. For a folder you chose, the window can be skipped.
+
+### Changed
+
+- A General project whose folder isn't a Git repository, such as a new one in the
+  Polyth folder, now suggests everyday starters on a new chat ("Research a
+  question", "Weigh my options") instead of "Explore codebase" and "Find tech
+  debt". Projects with a repository, and Engineering projects, are unchanged.
+
+---
+
 ## Unreleased — isolated chats keep their chat images after merge
 
 ### Fixed

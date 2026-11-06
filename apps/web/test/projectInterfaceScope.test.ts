@@ -163,18 +163,20 @@ test("new projects skip the directions step while the interface is shared", asyn
     await act(async () => { root.render(createElement(ProjectSetupFlowDialog, { onClose() {} })); });
     for (let i = 0; i < 4; i++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     const text = document.body.textContent ?? "";
+    const identity = document.querySelector(".project-identity-dialog") !== null;
     const folderDialog = document.querySelector(".folder-dialog") !== null;
     await act(async () => { root.unmount(); });
     document.body.innerHTML = "";
-    return { text, folderDialog };
+    return { text, identity, folderDialog };
   };
 
   const separate = await mount();
   assert.match(separate.text, /What are you working on\?/);
-  assert.equal(separate.folderDialog, false);
+  assert.equal(separate.identity, false);
 
   scope.setProjectInterfaceMode("shared");
   const shared = await mount();
-  assert.doesNotMatch(shared.text, /What are you working on\?|Step 1 of 2|Step 2 of 2/);
-  assert.equal(shared.folderDialog, true);
+  assert.doesNotMatch(shared.text, /What are you working on\?|Step \d of \d/);
+  assert.equal(shared.identity, true, "the flow starts at the project's name");
+  assert.equal(shared.folderDialog, false, "a folder is one press away, not a required step");
 });

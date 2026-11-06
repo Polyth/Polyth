@@ -33,6 +33,8 @@ type StoredProject = Project & {
   personalOwner?: string;
   /** Principal whose private room this is (`Project.parentProjectId`). */
   roomOwner?: string;
+  /** Retry key of the request that created this project in the Polyth folder. */
+  managedOperation?: string;
   presentation?: StoredProjectPresentationSettings;
   repositoryIdentities?: Record<string, string[]>;
 };
@@ -54,6 +56,9 @@ export interface ProjectProvisionInput {
   personalOwner?: string;
   /** Provision `owner`'s private room in `parentId` (local, directory created). */
   room?: { owner: string; parentId: string };
+  composition?: ProjectComposition;
+  /** A project in the Polyth folder; see `managedOperationKey`. */
+  managedOperation?: string;
 }
 
 /** Project registry with tenancy. `ProjectService` methods on this object are
@@ -87,6 +92,10 @@ export interface ProjectRegistry extends ProjectService {
   /** Whether a local path lies in personal-project storage, which only
    *  `provision({ personalOwner })` may register. Existence never matters. */
   reservedForPersonal(path: string): boolean;
+  /** The project an earlier request with this retry key created in one Space. */
+  managedProject(spaceId: string, managedOperation: string): Project | undefined;
+  /** Whether any project in any Space is registered at this local path. */
+  localPathRegistered(path: string): boolean;
   /** Boot migration: stamp ownerless projects with the default Space. */
   adoptIntoSpace(spaceId: string): number;
   /** Boot migration for renamed packages (`polyth.formerIds`): a project's
@@ -375,6 +384,7 @@ const publicProject = (project: StoredProject): Project => {
     repositoryIdentities: _repositoryIdentities,
     personalOwner: _personalOwner,
     roomOwner: _roomOwner,
+    managedOperation: _managedOperation,
     ...visible
   } = project;
   return structuredClone(visible);
@@ -464,6 +474,7 @@ export function createProjectService(
     id: string = randomUUID(),
     personalOwner?: string,
     room?: { owner: string; parentId: string },
+    managedOperation?: string,
   ): Promise<Project> => {
     const parsedComposition = composition === undefined ? undefined : parseProjectComposition(composition);
     const abs = resolve(path);
@@ -471,6 +482,12 @@ export function createProjectService(
       throw Object.assign(new Error("this folder is reserved for a personal project"), { code: "invalid-path" });
     }
     if (!existsSync(abs)) throw Object.assign(new Error(`path does not exist: ${abs}`), { code: "invalid-path" });
+    // Two resends can both pass the caller's lookup while it awaits; the first
+    // to reach this synchronous write wins and the other gets its project.
+    const retried = managedOperation
+      ? items.find((p) => p.managedOperation === managedOperation && p.spaceId === spaceId)
+      : undefined;
+    if (retried) return publicProject(retried);
     const existing = items.find((p) => !isPackageWorkspace(p) && p.path === abs && p.spaceId === spaceId);
     if (existing) return publicProject(existing);
     if (!CANONICAL_PROJECT_ID.test(id) || items.some((project) => project.id === id)) {
@@ -485,6 +502,7 @@ export function createProjectService(
       ...(spaceId ? { spaceId } : {}),
       ...(personalOwner ? { personal: true as const, personalOwner, icon: PERSONAL_PROJECT_ICON } : {}),
       ...(room ? { roomOwner: room.owner, parentProjectId: room.parentId } : {}),
+      ...(managedOperation ? { managedOperation } : {}),
     };
     persist([...items, project]);
     return presented(project);
@@ -830,7 +848,7 @@ export function createProjectService(
         if (existing) return presented(existing);
       }
       if (input.createDirectory || input.personalOwner || input.room) mkdirSync(path, { recursive: true });
-      return add(path, input.name, input.spaceId, undefined, input.id, input.personalOwner, input.room);
+      return add(path, input.name, input.spaceId, input.composition, input.id, input.personalOwner, input.room, input.managedOperation);
     },
     spaceOfProject: (id) => items.find((p) => p.id === id)?.spaceId,
     holdsServerData: (path) => {
@@ -841,6 +859,14 @@ export function createProjectService(
       }));
     },
     reservedForPersonal: (path) => insidePersonalStorage(resolve(path)),
+    managedProject(spaceId, managedOperation) {
+      const project = items.find((p) => p.managedOperation === managedOperation && p.spaceId === spaceId);
+      return project ? publicProject(project) : undefined;
+    },
+    localPathRegistered(path) {
+      const abs = resolve(path);
+      return items.some((p) => !p.remote && p.path === abs);
+    },
     personalProject(spaceId, ownerId) {
       const project = items.find((p) => p.personalOwner === ownerId && p.spaceId === spaceId);
       return project ? publicProject(project) : undefined;

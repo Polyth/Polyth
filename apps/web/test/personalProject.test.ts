@@ -8,7 +8,16 @@ import {
   resetPersonalProjectAttemptForTest,
   soloPersonalProject,
 } from "../src/personalProject.ts";
-import { EMPTY_STARTER_CONTEXT, contextualStarterIds, starterFitsProject, BUILTIN_STARTERS } from "../src/starters.ts";
+import {
+  BUILTIN_STARTERS,
+  EMPTY_STARTER_CONTEXT,
+  STARTER_PREFS_DEFAULTS,
+  contextualStarterIds,
+  isPlainFolder,
+  starterCategories,
+  starterContextFrom,
+  starterFitsProject,
+} from "../src/starters.ts";
 
 const src = (path: string) => readFile(new URL(`../src/${path}`, import.meta.url), "utf8");
 
@@ -44,6 +53,32 @@ test("the personal project suggests everyday starters, not codebase work", () =>
   const explore = BUILTIN_STARTERS.find((candidate) => candidate.id === "builtin:explore")!;
   assert.equal(starterFitsProject(explore, undefined), true);
   assert.equal(starterFitsProject(explore, undefined, true), false);
+});
+
+test("a General project outside Git suggests the same everyday starters", () => {
+  const notRepo = { isRepo: false, staged: [], unstaged: [], untracked: [], conflicted: [], ahead: 0 };
+  const session = { hasHistory: false, lastTurnFinished: false };
+  const plain = starterContextFrom(notRepo, session);
+  assert.equal(plain.repository, false);
+  assert.deepEqual(contextualStarterIds(plain), contextualStarterIds({ ...EMPTY_STARTER_CONTEXT, personal: true }));
+  // The picker lists every built-in, everyday ones first; code ones stay pinnable below.
+  const builtIn = starterCategories(STARTER_PREFS_DEFAULTS, plain).find((group) => group.starters.length === BUILTIN_STARTERS.length)!;
+  assert.deepEqual(
+    builtIn.starters.slice(0, 4).map((starter) => starter.id).sort(),
+    ["builtin:continue", "builtin:research-question", "builtin:review-result", "builtin:weigh-options"],
+  );
+
+  // A repository, or status not known yet, keeps every built-in.
+  const repo = starterContextFrom({ ...notRepo, isRepo: true }, session);
+  assert.equal(repo.repository, undefined);
+  assert.ok(contextualStarterIds(repo).includes("builtin:explore"));
+  assert.ok(contextualStarterIds(starterContextFrom(null, session)).includes("builtin:explore"));
+
+  // Directions still decide: engineering keeps code work, research its own leads.
+  const engineering = { ...plain, directions: ["engineering"] as const };
+  assert.equal(isPlainFolder(engineering), false);
+  assert.equal(contextualStarterIds(engineering)[0], "builtin:explore");
+  assert.deepEqual(contextualStarterIds({ ...plain, directions: ["research"] }).slice(0, 2), ["builtin:research-question", "builtin:summarize-sources"]);
 });
 
 test("an empty registry starts in the personal project before the folder picker", async () => {

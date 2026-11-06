@@ -129,8 +129,18 @@ or `projects` field. "Forgot to scope this route" is not an available bug.
   derivable, nothing under `spaces/*/personal/` can be added as an ordinary
   project (`reservedForPersonal`, checked before any lookup, so the refusal is
   the same whether the folder exists).
+- `data/spaces/<…>/projects/<uuid>/` — a project in the Polyth folder on a
+  server, created by `POST /api/projects/managed` (`managedProjects.ts`). The
+  server picks the path and ignores any the client sends. Polyth Desktop
+  (`POLYTH_DESKTOP=1`) uses `~/Polyth/<name>` instead: a real folder its owner can
+  open. The name is reduced to one safe path segment, and `mkdir` without
+  `recursive` means an existing folder is never adopted (`Name 2` follows). This is
+  an ordinary `space`-visible project, not a reserved folder, so it can be reopened
+  through the picker after it is closed.
 - `Project.spaceId?` in `projects.json`; a personal project also stores its
-  owner (`personalOwner`, never sent to clients).
+  owner (`personalOwner`, never sent to clients), and a Polyth-folder project a
+  hash of its creator and `clientOperationId` (`managedOperation`, never sent
+  either) so a resend returns the same project without a second folder.
 - `SessionProjection.spaceId?`, plus session-store **migration v10**: a
   generated `space_id` column on `projections` with its own indexes (mirroring
   the existing `project_id` column) so listing and fan-out filter at the index.
@@ -938,7 +948,7 @@ already denied admins, and no grant or transfer can change that.
 | Size | `GET /api/accounts/:id/private-data` → `{ bytes }`: chat history, room and personal-project folders, and what packages report through `SERVER_PERSON_DATA_VOLUME`. Instance owner only. No titles and no counts | `packages/server/src/routes/privateData.ts` |
 | Erase | `POST /api/accounts/:id/erase-private-data`: instance owner, a recent sign-in (`reauth-required` otherwise), and an account already `disabled`. Audited as `identity.private-data-erased`. If anything couldn't go it answers `erase-incomplete`, audited as `identity.private-data-erase-incomplete`, and can be run again. Unlisted in the remote policy, so a paired device is denied | same |
 | Account removal | Removing an account erases the same data: private chats (archived ones and ones that failed at startup too) with the attachments the person sent to them, rooms, personal project and folders first, then delivery routes, connected accounts, and package data through `SERVER_ACCOUNT_REMOVAL_BUS` (memory purges the person's notes, with history). The account is gone by then, so what can't be erased is logged, not retried | `indexCore.ts` `erasePerson` |
-| Data folder | Every person's data sits in the server's data folder, so it can't be opened as a project: `POST /api/projects` refuses a folder inside it (`holdsServerData`, the same answer whether or not it exists). A project at a parent folder is fine and doesn't show it: the file service's `sealedRoots` cover the tree, lists, search, reads, writes and absolute-path external reads, and the folder picker reads as if it weren't there. Only a folder the server made inside it (room, personal project, package workspace) sees its own files. A shell doesn't go through any of this (§14.7) | `packages/files`, `projects.ts`, `routes/browse.ts` |
+| Data folder | Every person's data sits in the server's data folder, so it can't be opened as a project: `POST /api/projects` refuses a folder inside it (`holdsServerData`, the same answer whether or not it exists); a folder the server picks itself (personal project, room, Polyth-folder project from `POST /api/projects/managed`) is exempt. A project at a parent folder is fine and doesn't show it: the file service's `sealedRoots` cover the tree, lists, search, reads, writes and absolute-path external reads, and the folder picker reads as if it weren't there. Only a folder the server made inside it (room, personal project, Polyth-folder project, package workspace) sees its own files. A shell doesn't go through any of this (§14.7) | `packages/files`, `projects.ts`, `routes/browse.ts` |
 | Password reset | `/api/auth/me` carries `adminPasswordResetAt` while someone else's reset is newer than the person's own change, read from the append-only audit log. The shell shows a sticky notice the person can't dismiss, and the reset dialog tells the administrator it will | `identity/accounts.ts`, `PasswordResetNotice.tsx` |
 | Native import | Transcripts sit under the host's one OS account, whoever's chat they were. Only the instance owner may browse them (`ownerOnly` for anyone else), and never one behind a Polyth chat they can't open | `packages/session-import/src/serverEntry.ts` |
 

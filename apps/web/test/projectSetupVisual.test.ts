@@ -43,8 +43,10 @@ test("new-project step 1 pins its primary action and shares step 2's head grid",
   assert.doesNotMatch(setupTsx, /<div className="project-setup-actions">\s*<Button[^>]*onClick=\{cancel\}/);
 
   // The picker is step 2 of the same flow: same head classes, same fixed height.
-  assert.match(setupTsx, /stepLabel: tr\("projectcomposition\.setupStep2"\)/);
-  assert.match(setupTsx, /subtitle: tr\("projectcomposition\.pickerHint"\)/);
+  // The step count is interpolated because Engineering takes three steps and
+  // everything else two; the picker is always the second one.
+  assert.match(setupTsx, /stepLabel: tr\("projectcomposition\.setupStep", \{ step: 2, total: totalSteps \}\)/);
+  assert.match(setupTsx, /subtitle=\{tr\("projectcomposition\.pickerHint"\)\}/);
   assert.match(styles, /\.project-setup-flow-step,\s*\n\s*\.folder-dialog-stepped \{ height:\s*min\(608px, calc\(100dvh - 96px\)\); \}/);
 
   // The expanded Workspace list must not become a nested scroll box here:

@@ -1,7 +1,9 @@
-// The new-project flow is one wizard: step 1 (directions) and step 2 (folder
-// picker) must share a content column and a header grid, so nothing jumps when
-// the flow advances. Geometry a picture can hide is measured here in a real
-// browser against the real components and CSS (docs/dev/ui.md §3.4).
+// The new-project flow is one wizard: on the Engineering path the directions
+// step and the folder picker are steps 1 and 2, and they must share a content
+// column and a header grid, so nothing jumps when the flow advances. (Anything
+// else goes from the directions straight to the naming window.) Geometry a
+// picture can hide is measured here in a real browser against the real
+// components and CSS (docs/dev/ui.md §3.4).
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -135,6 +137,9 @@ async function measure(options: { phone?: boolean; height?: number; rtl?: boolea
     await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
     await page.waitForSelector(".project-setup-flow-dialog");
     const step1 = await page.evaluate(readStage(STEP1_SELECTORS), { selectors: STEP1_SELECTORS });
+    // Engineering is the path whose second step is the folder picker; any other
+    // direction goes straight to the naming window.
+    await page.getByRole("button", { name: /engineering/i }).click();
     await page.getByRole("button", { name: /continue/i }).click();
     await page.waitForSelector(".folder-dialog .folder-list");
     // The picker enters with a surface motion; measure the settled panel, or
@@ -245,6 +250,7 @@ test("Back from the picker returns focus to Continue", { skip: !CHROME }, async 
     await page.goto(`${ORIGIN}/`);
     await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
     await page.waitForSelector(".project-setup-flow-dialog");
+    await page.getByRole("button", { name: /engineering/i }).click();
     await page.getByRole("button", { name: /continue/i }).click();
     await page.waitForSelector(".folder-dialog .folder-list");
     await page.locator(".folder-back").click();

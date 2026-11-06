@@ -41,6 +41,8 @@ import type {
   TrackCreateInput,
   TrackDto,
   Project,
+  ManagedProjectInput,
+  ManagedProjectLocationDto,
   ProjectCloneInput,
   ProjectPatch,
   ProjectPresentationSettingsDto,
@@ -1033,6 +1035,11 @@ export const api = {
   /** The caller's own "Only me" room in a project; the server creates it. */
   ensurePrivateRoom: (projectId: string) =>
     jfetch<Project>(`/api/projects/${encodeURIComponent(projectId)}/private-room`, { method: "POST" }),
+  /** A project in the Polyth folder; the server chooses its folder. */
+  createManagedProject: (input: ManagedProjectInput) =>
+    jfetch<Project>("/api/projects/managed", json("POST", input)),
+  managedProjectLocation: () =>
+    jfetch<ManagedProjectLocationDto>("/api/projects/managed"),
   cloneProject: (input: ProjectCloneInput | string, parentPath?: string) =>
     jfetch<Project>("/api/projects/clone", json("POST", typeof input === "string"
       ? { repository: input, parentPath: parentPath ?? "" }

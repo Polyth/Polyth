@@ -125,7 +125,11 @@ test("embedded Iconify metadata rejects unsupported providers", () => {
 
 test("project appearance dialog stays compact, single-preview, and same-origin", async () => {
   const css = await readFile(new URL("../src/components/ProjectAppearanceDialog.css", import.meta.url), "utf8");
-  const tsx = await readFile(new URL("../src/components/ProjectAppearanceDialogCore.tsx", import.meta.url), "utf8");
+  // The dialog and its icon picker, which the new-project window shares.
+  const tsx = (await Promise.all([
+    readFile(new URL("../src/components/ProjectAppearanceDialogCore.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/ProjectIconPickerField.tsx", import.meta.url), "utf8"),
+  ])).join("\n");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /920px|480px|(?<![\d.])6px|api\.iconify\.design|backdrop-filter|hideHeader|project-appearance-dialog\.dialog-panel|project-icon-upload-row \.muted/);
   assert.match(tsx, /size="sm"/);

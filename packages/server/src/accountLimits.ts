@@ -265,6 +265,10 @@ export function limitedProjectsForActor(
     const ensurePersonal = base.ensurePersonal.bind(base);
     scoped.ensurePersonal = (name) => allowed(() => ensurePersonal(name));
   }
+  if (base.createManaged) {
+    const createManaged = base.createManaged.bind(base);
+    scoped.createManaged = (input) => allowed(() => createManaged(input));
+  }
   return scoped;
 }
 

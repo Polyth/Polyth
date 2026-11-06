@@ -12,7 +12,7 @@ import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./proje
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
 import { projectIsolationLevel } from "@polyth/contracts";
 import { CONNECTION_RESTORED_EVENT, setConnectionGate } from "@polyth/contracts/transport-retry";
-import type { AttachmentRef, HarnessSelection, JsonObject, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, reconcilePushSubscription, registerServiceWorker } from "./push.ts";
 import { alertPersonMessage, installNotify } from "./notify.ts";
@@ -1923,6 +1923,15 @@ export async function addProject(path: string, name?: string): Promise<Project> 
 
 export async function createProject(path: string, name?: string): Promise<Project> {
   const p = await api.createProject(path, name);
+  store.applyProjectAdded(p);
+  void refreshProjects("reconcile");
+  return p;
+}
+
+/** A project in the Polyth folder: same atomic upsert-and-activate transition,
+ *  with the folder chosen by the server. */
+export async function createManagedProject(input: ManagedProjectInput): Promise<Project> {
+  const p = await api.createManagedProject(input);
   store.applyProjectAdded(p);
   void refreshProjects("reconcile");
   return p;

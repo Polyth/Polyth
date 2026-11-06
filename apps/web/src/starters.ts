@@ -233,6 +233,9 @@ export interface StarterContext {
   /** The personal project: a plain private folder, not a codebase, so only
    * the PERSONAL_STARTERS built-ins fit. */
   personal?: boolean;
+  /** `false` once Git reports the project folder is not a repository. Absent
+   * while that is unknown (status not loaded, or unavailable). */
+  repository?: false;
 }
 
 export const EMPTY_STARTER_CONTEXT: StarterContext = {
@@ -248,6 +251,13 @@ export const EMPTY_STARTER_CONTEXT: StarterContext = {
 const PERSONAL_STARTERS: ReadonlySet<string> = new Set([
   "builtin:research-question", "builtin:weigh-options", "builtin:continue", "builtin:review-result",
 ]);
+
+/** A folder of everyday files rather than a codebase: the Personal project,
+ *  or a General project (no directions) whose folder is not a Git repository,
+ *  such as a new project in the Polyth folder. Both get PERSONAL_STARTERS. */
+export function isPlainFolder(context: Pick<StarterContext, "personal" | "repository" | "directions">): boolean {
+  return context.personal === true || (context.repository === false && !context.directions?.length);
+}
 
 /** Whether a starter belongs to a project with these directions. Multiple
  * directions are a union; only built-ins carry direction metadata. */
@@ -283,20 +293,21 @@ export function contextualStarterIds(context: StarterContext): string[] {
   if (context.changedFiles > 0) push("builtin:review-changes", "builtin:fix-tests", "builtin:commit", "builtin:explain-diff");
   if (context.ahead > 0) push("builtin:catch-up");
   if (context.hasHistory) push("builtin:continue");
-  if (context.personal) push("builtin:research-question", "builtin:weigh-options");
+  const plain = isPlainFolder(context);
+  if (plain) push("builtin:research-question", "builtin:weigh-options");
   for (const direction of context.directions ?? []) push(...DIRECTION_LEADS[direction] ?? []);
   push("builtin:explore", "builtin:plan-feature", "builtin:debt", "builtin:architecture", "builtin:weigh-options", "builtin:debug");
   push("builtin:catch-up");
   return ids.filter((id) => {
     const starter = BUILTIN_BY_ID.get(id);
-    return starter !== undefined && starterFitsProject(starter, context.directions, context.personal);
+    return starter !== undefined && starterFitsProject(starter, context.directions, plain);
   });
 }
 
 /** Working-tree counts → starter context. Keeps git shape out of components. */
 export function starterContextFrom(
   status: {
-    staged?: unknown[]; unstaged?: unknown[]; untracked?: unknown[]; conflicted?: unknown[]; ahead?: number;
+    isRepo?: boolean; staged?: unknown[]; unstaged?: unknown[]; untracked?: unknown[]; conflicted?: unknown[]; ahead?: number;
   } | null | undefined,
   session: { hasHistory: boolean; lastTurnFinished: boolean },
 ): StarterContext {
@@ -306,6 +317,7 @@ export function starterContextFrom(
     ahead: status?.ahead ?? 0,
     hasHistory: session.hasHistory,
     lastTurnFinished: session.lastTurnFinished,
+    ...(status?.isRepo === false ? { repository: false as const } : {}),
   };
 }
 
@@ -553,8 +565,8 @@ export function starterCategories(
     { id: tr("starters.suggested"), title: tr("starters.suggestedHere"), starters: resolve(contextualStarterIds(context).slice(0, 4)) },
     // Every built-in stays pinnable; the ones fitting this project come first.
     { id: tr("starters.builtin"), title: tr("starters.builtIn"), starters: [
-      ...BUILTIN_STARTERS.filter((starter) => starterFitsProject(starter, context.directions, context.personal)),
-      ...BUILTIN_STARTERS.filter((starter) => !starterFitsProject(starter, context.directions, context.personal)),
+      ...BUILTIN_STARTERS.filter((starter) => starterFitsProject(starter, context.directions, isPlainFolder(context))),
+      ...BUILTIN_STARTERS.filter((starter) => !starterFitsProject(starter, context.directions, isPlainFolder(context))),
     ] },
     { id: tr("starters.custom"), title: tr("starters.custom2"), starters: prefs.custom.map(customToStarter) },
     { id: tr("starters.skills"), title: tr("starters.skills2"), starters: (input.skills ?? []).map(skillStarter) },

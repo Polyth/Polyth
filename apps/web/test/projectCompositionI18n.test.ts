@@ -30,5 +30,5 @@ test("Project Composition translations preserve interpolation placeholders", () 
 test("Project Composition has first-class Ukrainian product copy", () => {
   assert.equal(projectCompositionLocales.uk["projectcomposition.settingsTitle"], "Налаштування проєкту");
   assert.equal(projectCompositionLocales.uk["projectcomposition.direction.engineering"], "Розробка");
-  assert.equal(projectCompositionLocales.uk["projectcomposition.setupStep"], "Новий проєкт · Крок 1 з 2");
+  assert.equal(projectCompositionLocales.uk["projectcomposition.setupStep"], "Новий проєкт · Крок {step} з {total}");
 });

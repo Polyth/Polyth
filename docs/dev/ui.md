@@ -1155,7 +1155,8 @@ project/checkout bar above it (`SessionContextBar` is not mounted), the tablet
 header titles a fresh chat "New chat" and captions no project, the fresh
 chat greets with `personalproject.greeting` instead of naming the project, and
 starters keep to everyday ones (`StarterContext.personal`,
-`PERSONAL_STARTERS`). Its storage path is never shown as a detail. Adding a
+`PERSONAL_STARTERS`; General projects outside Git share them, §New Chat
+Shortcuts). Its storage path is never shown as a detail. Adding a
 real project turns it into an ordinary project group again, and all of that
 chrome comes back. Its rails stay simple either way: it is the `personal`
 project kind, so it starts with only Files, Agents and Planner on the right
@@ -1164,7 +1165,7 @@ More (§3.2, Default arrangement).
 
 ### 3.4 New project flow and folder picker
 
-Add project opens `ProjectSetupFlowDialog`: step 1 asks "What are you working
+Add project opens `ProjectSetupFlowDialog`. Step 1 asks "What are you working
 on?" with `ProjectCompositionEditor` (`purposeHeading={false}`, since the step
 header asks it). Per-package visibility sits in that editor's collapsed
 Workspace accordion. The accordion lists only enabled, non-core packages that
@@ -1175,11 +1176,38 @@ An earlier override on a package that is no longer listed appears as a
 removable row. Below the step header, the directions scroll on their own
 (`.project-setup-scroll`) with the Continue bar pinned under them; the
 expanded Workspace list never becomes its own scroll box, so a short
-(half-screen) window stays usable. Continue opens step 2,
-`ProjectFolderDialog` with `onBack`. Back keeps the chosen directions.
-Settings reuse the same picker without `onBack`.
+(half-screen) window stays usable.
 
-Both steps are one dialog box and one head grid
+What follows depends on what the project is for. The step labels count the path
+actually taken, and step 1 updates as Engineering is toggled.
+
+| Directions | Path | The project is created |
+| --- | --- | --- |
+| Includes Engineering | Folder picker (`ProjectFolderDialog` with `onBack`), then the window. Three steps | When the folder is opened |
+| Anything else, including General | The window, with files in the Polyth folder. Two steps | When the window is confirmed |
+
+**The window** is `ProjectIdentityStep`: name, colour (`ProjectColorPresets`) and
+icon, all with defaults from `projectIdentity.ts`, so one press is enough: a name
+from the single chosen direction or "New project" (numbered if taken), a colour
+no project uses yet, and the direction's first icon. Fourteen bundled icons per
+direction keep it working offline; "All icons" swaps them for
+`ProjectIconPickerField`, the picker the appearance dialog uses. A phone opens it
+with focus on the heading, never a keyboard; a desktop selects the name.
+
+- **Polyth folder.** A quiet line says where files go, with "Choose another",
+  which detours through the picker (unnumbered, `onBack` returns with every choice
+  intact). Nothing exists until "Create project", because the folder takes its name
+  from the project. `POST /api/projects/managed` carries a `clientOperationId`, so
+  a resend after a lost response finds the first project instead of making another.
+  Escape and Cancel leave no trace. `GET /api/projects/managed` tells the flow
+  whether a folder can be chosen: a `multi-tenant-sandboxed` deployment has no host
+  browsing, so it offers no link and sends Engineering down the same path.
+- **Chosen folder.** The project already exists and its directions are saved. The
+  window shows the path, takes its name from the folder unless one was typed, and
+  has "Skip" and "Done". Skip and Escape write nothing. Opening a folder that is
+  already a project goes straight to it, with no window.
+
+The directions step and the picker are one dialog box and one head grid
 (`apps/web/test/projectFlowLayout.test.ts` measures it in a browser):
 
 - **One box.** On desktop both panels are `min(608px, calc(100dvh - 96px))`
@@ -1194,7 +1222,9 @@ Both steps are one dialog box and one head grid
   nothing moves when Continue is pressed.
 - **Back.** Step 2 leads its footer with Back, not its head; the head has
   exactly one control. X leaves the flow from either step, Back returns to
-  the directions without losing the chosen ones.
+  the directions without losing the chosen ones. The picker opened from the
+  window's "Choose another" is a detour: no step label, and Back returns to
+  the window with every choice intact.
 - **One content column.** 24px gutters on desktop, 12px on phones, shared by
   the head, the cards/list, the toolbar and the footer. The Workspace
   accordion carries a package icon so its text starts on the direction
@@ -1207,15 +1237,15 @@ Both steps are one dialog box and one head grid
   still never becomes its own scroll box.
 - **Focus.** The X is never the opening focus (`initialFocus` is the first
   `.project-direction-card`), so Enter on an open step 1 does not dismiss it.
-  Coming Back from the picker returns focus to Continue. On step 2 the folder
-  list keeps that role. Escape closes every step, except that it first
+  Coming Back from the picker returns focus to Continue. On the picker the
+  folder list keeps that role. Escape closes every step, except that it first
   disarms an open alternative source (SSH, clone) instead of ending the flow.
 
 When the account uses one interface for every project (Settings → Projects →
-Interface across projects, `projectInterfaceScope.ts`), directions shape
-nothing, so the flow opens `ProjectFolderDialog` directly: no step labels, no
-`onBack`, the project is created as General and the shared arrangement is
-never reseeded (`seedInitialProjectWorkspace` is skipped).
+Interface across projects, `projectInterfaceScope.ts`), directions shape nothing,
+so the flow opens the window directly as General: no step labels, Cancel instead of
+Back, and the shared arrangement is never reseeded (`seedInitialProjectWorkspace`
+is skipped). Settings reuse the same picker without `onBack`.
 
 `ProjectFolderDialog` keeps its contract in its header comment. The main rules:
 
@@ -1971,7 +2001,12 @@ package keeps its place in `apps.ids` and reappears when it returns.
 
 **New Chat Shortcuts** (`builtin.hero-starters`, model in `apps/web/src/starters.ts`):
 pinned starters lead, then workspace-state suggestions; the `+` chip opens
-`StarterPicker`. Besides prompts, commands and skills, the picker lists every
+`StarterPicker`. Built-ins follow the project's directions (code work only in
+Engineering). A plain folder (`isPlainFolder`) gets only the everyday ones
+(`PERSONAL_STARTERS`): the Personal project, and a General project (no
+directions) once Git reports its folder is not a repository
+(`StarterContext.repository`). A new project in the Polyth folder is one. Until
+the status loads, General keeps every built-in. Besides prompts, commands and skills, the picker lists every
 package that opens a window (*Package windows*: placeable, available
 capabilities with a registered surface, minus Edit workspace —
 `windowPackages` in `starterPackages.ts`). Their ids are `package:<capabilityId>`;
