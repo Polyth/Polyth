@@ -17,7 +17,7 @@
     "polyth-package": "./src/cli.ts"
   },
   "dependencies": {
-    "semver": "^7.7.3"
+    "semver": "^7.8.6"
   },
   "devDependencies": {
     "@types/semver": "^7.7.0"
