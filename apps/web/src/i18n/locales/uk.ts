@@ -1852,6 +1852,7 @@ export const uk: AppMessages = {
   "settings.pages.uiSansSerif": "Інтерфейсний без засічок",
   "settings.pages.unavailable": "недоступно",
   "settings.pages.uninstall": "Видалити",
+  "settings.pages.ultraWide": "Надширока",
   "settings.pages.updateTo": "Оновити до",
   "settings.pages.usage": "Використання",
   "settings.pages.use": "Використати",

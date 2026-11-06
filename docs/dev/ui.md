@@ -3910,6 +3910,12 @@ which buttons exist, where they sit or their order. Below it, three groups of
 *More options* fold; `CHAT_ROW_ITEMS` and `CHAT_MORE_ITEMS` say which row owns
 each `chat.*` item, and a test holds that to the search registry. A registered
 label is the name the page shows, so search finds what the person reads.
+The *Width* row picks the shared conversation measure: Normal (768px), Wide
+(1180px) or Ultra wide (1600px, a centred column on a 2560 or 3440 px screen
+and a full-width column when the window is narrower). The conversation frame
+reserves the floating launcher strip's lane on the inline end, so the timeline,
+composer, above-composer status and header keep the same right edge in every
+width mode.
 
 The preview (`ChatSettingsPreview.tsx`) is a sample conversation drawn from the
 same preferences, with the looks copied from "Activity block looks" and the

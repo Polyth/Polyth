@@ -1852,6 +1852,7 @@ export const ar: AppMessages = {
   "settings.pages.uiSansSerif": "خط واجهة بلا زوائد",
   "settings.pages.unavailable": "غير متاح",
   "settings.pages.uninstall": "إلغاء التثبيت",
+  "settings.pages.ultraWide": "عريض جدًا",
   "settings.pages.updateTo": "تحديث إلى",
   "settings.pages.usage": "الاستخدام",
   "settings.pages.use": "استخدام",

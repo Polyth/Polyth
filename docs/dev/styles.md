@@ -190,7 +190,7 @@ when the locale switches between LTR and RTL.
 | `--density-scale` | Active interface-density multiplier used by conversation geometry. |
 | `--gutter` | Standard desktop content gutter; aliases `--space-5`. |
 | `--screen-gutter` | Compact/phone screen gutter; aliases `--space-4`. |
-| `--chat-measure` | Shared reading measure for the chat timeline, composer, and inline conversation widgets. |
+| `--chat-measure` | Shared reading measure for the chat timeline, composer, and inline conversation widgets. Settings → Chat → Width picks it: *Normal* 768px, *Wide* 1180px, *Ultra wide* 1600px. A measure wider than the workspace meets the gutters instead of overflowing, and the floating launcher strip's lane is reserved in the frame so the timeline, composer and header keep one right edge. |
 | `--conversation-inset` | Density-scaled conversation gutter. |
 | `--conversation-chrome-inset` | Density-scaled viewport inset for floating conversation chrome. |
 | `--conversation-related-gap` | Gap between tightly related conversation content. |

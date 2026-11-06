@@ -1852,6 +1852,7 @@ export const zhCN: AppMessages = {
   "settings.pages.uiSansSerif": "界面无衬线字体",
   "settings.pages.unavailable": "不可用",
   "settings.pages.uninstall": "卸载",
+  "settings.pages.ultraWide": "超宽",
   "settings.pages.updateTo": "更新至",
   "settings.pages.usage": "用量",
   "settings.pages.use": "使用",

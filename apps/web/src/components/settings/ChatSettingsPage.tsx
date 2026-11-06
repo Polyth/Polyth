@@ -428,6 +428,7 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                     options={[
                       ["normal", tr("settings.pages.normal")],
                       ["wide", tr("settings.pages.wide")],
+                      ["ultrawide", tr("settings.pages.ultraWide")],
                     ]}
                     onChange={(chatWidth) => setUiSettings({ chatWidth })}
                   />

@@ -1852,6 +1852,7 @@ export const bg: AppMessages = {
   "settings.pages.uiSansSerif": "Безсерифни за интерфейса",
   "settings.pages.unavailable": "недостъпен",
   "settings.pages.uninstall": "Деинсталиране",
+  "settings.pages.ultraWide": "Ултра широк",
   "settings.pages.updateTo": "Актуализиране до",
   "settings.pages.usage": "Употреба",
   "settings.pages.use": "Използване",

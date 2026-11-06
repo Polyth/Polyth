@@ -1852,6 +1852,7 @@ export const ptBR: AppMessages = {
   "settings.pages.uiSansSerif": "Sem serifa de interface",
   "settings.pages.unavailable": "indisponível",
   "settings.pages.uninstall": "Desinstalar",
+  "settings.pages.ultraWide": "Ultra largo",
   "settings.pages.updateTo": "Atualização para",
   "settings.pages.usage": "Uso",
   "settings.pages.use": "Usar",

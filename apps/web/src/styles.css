@@ -5568,6 +5568,11 @@ body[data-density="balanced"] .composer textarea { min-height: 44px; }
 body[data-density="compact"] .composer textarea { min-height: 40px; }
 body[data-chatwidth="wide"] { --chat-measure: 1180px; }
 body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, body[data-chatwidth="wide"] .tool-card { max-width: 100%; }
+/* Ultrawide keeps a readable cap instead of going edge to edge: on a 2560 or
+ * 3440 px screen the column is a centred 1600px, and on a narrower window it
+ * meets the gutters like Wide. */
+body[data-chatwidth="ultrawide"] { --chat-measure: 1600px; }
+body[data-chatwidth="ultrawide"] .bubble, body[data-chatwidth="ultrawide"] .reasoning, body[data-chatwidth="ultrawide"] .tool-card { max-width: 100%; }
 
 /* ---------- a11y primitives + IME-safe composer ---------- */
 .sr-only {
@@ -18852,7 +18857,8 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   padding-inline-end: var(--conversation-frame-inline-end);
 }
 /* The transcript's strip lane (the border its scrollbar sits in) is part of
-   that frame. */
+   that frame: the inline-end padding gives the lane's width back, so the
+   reading column keeps its place while the scrollbar stops before the strip. */
 .timeline {
   padding-inline-end: max(0px, calc(var(--conversation-frame-inline-end) - var(--timeline-strip-lane)));
 }
@@ -18966,21 +18972,25 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   .railbar[data-side-strip] > .rail-icon-col.plugin-strip { --side-strip-head: 120px; }
 }
-@container app-shell (min-width: 961px) and (max-width: 1400px) {
+@container app-shell (min-width: 961px) {
   .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
   .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
-    --conversation-frame-inline-end: calc(
-      max(var(--gutter), (100% - var(--chat-measure)) / 2)
-      + var(--control-h-sm) + var(--space-5)
+    /* At least the lane clear of the floating launcher strip, and the centred
+       measure when that is wider: a column that does not fit the workspace
+       must not lose its inline end to the strip lane, so it stays flush with
+       the composer and the header frame below it. */
+    --conversation-frame-inline-end: max(
+      calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
+      calc((100% - var(--chat-measure)) / 2)
     );
   }
   /* A mirrored shell floats the strip at the other edge. Chat's content keeps
      the document direction there, so the lane moves to its inline start. */
   .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
   .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
-    --conversation-frame-inline-start: calc(
-      max(var(--gutter), (100% - var(--chat-measure)) / 2)
-      + var(--control-h-sm) + var(--space-5)
+    --conversation-frame-inline-start: max(
+      calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
+      calc((100% - var(--chat-measure)) / 2)
     );
     --conversation-frame-inline-end: max(var(--gutter), (100% - var(--chat-measure)) / 2);
   }
@@ -19036,25 +19046,27 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
     max-width: var(--chat-measure);
   }
 }
-@media (min-width: 961px) and (max-width: 1400px) {
-  .app > .header {
+/* The floating launcher strip needs the same lane in the header frame at
+   every width, so the title and session status stay over the chat column even
+   when that column meets the gutters (Wide or Ultra wide on a narrower
+   window). With a pane open the strip is in flow and reserves nothing. */
+@media (min-width: 961px) {
+  .app:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .app-shell > .railbar[data-rail-strip="none"])) > .header {
     --conversation-frame-inline-end: calc(
       var(--workspace-pane-inline-size, 0px)
       + max(
-        var(--gutter),
+        calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
         calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
       )
-      + var(--control-h-sm) + var(--space-5)
     );
   }
-  .app[data-shell-mirror="true"] > .header {
+  .app[data-shell-mirror="true"]:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .app-shell > .railbar[data-rail-strip="none"])) > .header {
     --conversation-frame-inline-start: calc(
       var(--workspace-pane-inline-size, 0px)
       + max(
-        var(--gutter),
+        calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
         calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
       )
-      + var(--control-h-sm) + var(--space-5)
     );
     --conversation-frame-inline-end: calc(
       var(--sidebar-inline-size, 0px) + var(--space-2)
@@ -19063,9 +19075,6 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
         calc((100% - var(--sidebar-inline-size, 0px) - var(--space-2) - var(--workspace-pane-inline-size, 0px) - var(--chat-measure)) / 2)
       )
     );
-  }
-  .desktop-session-status {
-    max-width: calc(var(--chat-measure) - var(--control-h-sm) - var(--space-5));
   }
 }
 

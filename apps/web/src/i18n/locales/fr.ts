@@ -1852,6 +1852,7 @@ export const fr: AppMessages = {
   "settings.pages.uiSansSerif": "Sans-serif d’interface",
   "settings.pages.unavailable": "indisponible",
   "settings.pages.uninstall": "Désinstaller",
+  "settings.pages.ultraWide": "Très large",
   "settings.pages.updateTo": "Mise à jour de",
   "settings.pages.usage": "Utilisation",
   "settings.pages.use": "Utiliser",

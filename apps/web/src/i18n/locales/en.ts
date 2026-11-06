@@ -1855,6 +1855,7 @@ export const en = {
   "settings.pages.uiSansSerif": "UI sans-serif",
   "settings.pages.unavailable": "unavailable",
   "settings.pages.uninstall": "Uninstall",
+  "settings.pages.ultraWide": "Ultra wide",
   "settings.pages.updateTo": "Update to",
   "settings.pages.usage": "Usage",
   "settings.pages.use": "Use",
