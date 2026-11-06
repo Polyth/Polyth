@@ -609,4 +609,13 @@ export const it: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Apri la sessione all’avvio",
   "tasktrackers.start.model": "Modello",
   "tasktrackers.start.modelComposer": "Come nel campo di composizione",
+  "tasktrackers.automation.title": "Quando un agente si ferma",
+  "tasktrackers.automation.body": "Una scheda collegata passa a una colonna che indichi tu quando la sua sessione si ferma. Un’attività non viene mai spostata in uno stato Completato né da esso, e ogni turno sposta un’attività al massimo una volta.",
+  "tasktrackers.automation.enabled": "Sposta l’attività quando il suo agente si ferma",
+  "tasktrackers.automation.column": "Colonna di destinazione",
+  "tasktrackers.automation.columnHint": "Riconosciuta per nome nella board dell’attività, senza distinzione tra maiuscole e minuscole. Se la board non ha quella colonna, l’attività resta dov’è.",
+  "tasktrackers.automation.finished": "Termina il turno",
+  "tasktrackers.automation.needsInput": "Attende una risposta",
+  "tasktrackers.automation.error": "Fallisce o viene fermato",
+  "tasktrackers.card.attention": "Da guardare",
 };

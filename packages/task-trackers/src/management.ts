@@ -37,9 +37,13 @@ import {
   mergePreferences,
   normalizeJiraSite,
   normalizePreferences,
+  TASK_TRACKER_AGENT_STOPS,
   TASK_TRACKER_PROVIDERS,
   type JiraConnectInput,
   type LinearConnectInput,
+  type TaskTrackerAgentStopReceipt,
+  type TaskTrackerAgentStop,
+  type TaskTrackerAutomationRefusal,
   type TaskTrackerConnectionDto,
   type TaskTrackerConnectionScope,
   type TaskTrackerManagementDto,
@@ -64,6 +68,11 @@ const text = (value: unknown, field: string, max: number): string => {
   if (clean.length > max) return fail(`${field} is too long`, "invalid-input");
   return clean;
 };
+
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 
 /** A Space service account as stored. `connectedBy` (the Polyth user who
  *  connected it) decides whose "me" that account is; it never leaves the
@@ -207,8 +216,49 @@ const linkOf = (value: unknown): TaskTrackerTaskLinkDto | null => {
     taskKey: typeof item.taskKey === "string" && item.taskKey ? item.taskKey : item.taskId,
     sessionId: item.sessionId,
     linkedAt: item.linkedAt,
+    ...(stopOf(item.agentStop) ? { agentStop: stopOf(item.agentStop)! } : {}),
+    ...(typeof item.seenAt === "number" ? { seenAt: item.seenAt } : {}),
   };
 };
+
+/** An agent-stop receipt as stored; unknown keys and kinds are dropped. */
+const stopOf = (value: unknown): TaskTrackerAgentStopReceipt | null => {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Record<string, unknown>;
+  if (typeof item.at !== "number" || typeof item.kind !== "string") return null;
+  if (!(TASK_TRACKER_AGENT_STOPS as readonly string[]).includes(item.kind)) return null;
+  const moved = record(item.moved);
+  return {
+    at: item.at,
+    kind: item.kind as TaskTrackerAgentStop,
+    ...(typeof item.turnAt === "number" ? { turnAt: item.turnAt } : {}),
+    ...(typeof moved.statusId === "string" && typeof moved.statusName === "string" && typeof moved.column === "string"
+      ? { moved: { statusId: moved.statusId, statusName: moved.statusName, column: moved.column } }
+      : {}),
+    ...(typeof item.refused === "string" ? { refused: item.refused as TaskTrackerAutomationRefusal } : {}),
+  };
+};
+
+function saveLinks(storage: SpaceStorage, links: readonly TaskTrackerTaskLinkDto[]): void {
+  try {
+    mkdirSync(storage.packageDir(PACKAGE_ID), { recursive: true });
+    atomicWriteSync(linksFile(storage), JSON.stringify(links), 0o600);
+  } catch {
+    // The index only decorates the board; session history stays canonical.
+  }
+}
+
+/**
+ * One synchronous read-modify-write of the link index. Callers finish their
+ * awaits first: Node runs this in one tick, so two receipts cannot interleave
+ * and lose each other's keys (there is no async gap inside).
+ */
+function updateLinks(
+  storage: SpaceStorage,
+  update: (links: TaskTrackerTaskLinkDto[]) => TaskTrackerTaskLinkDto[],
+): void {
+  saveLinks(storage, update(loadLinks(storage)).slice(0, MAX_LINKS));
+}
 
 function loadLinks(storage: SpaceStorage): TaskTrackerTaskLinkDto[] {
   try {
@@ -341,6 +391,15 @@ export interface TaskTrackerManagement {
   /** Sessions each task was linked or dispatched to, newest first. */
   links(space: SpaceContext): TaskTrackerTaskLinkDto[];
   recordLink(space: SpaceContext, link: Omit<TaskTrackerTaskLinkDto, "linkedAt">): void;
+  /** Records what the automation did about one agent stop on a link. */
+  recordAgentStop(space: SpaceContext, input: {
+    provider: TaskTrackerProvider;
+    taskId: string;
+    sessionId: string;
+    stop: TaskTrackerAgentStopReceipt;
+  }): void;
+  /** Clears the "not looked at yet" edge on every link of one task. */
+  markSeen(space: SpaceContext, provider: TaskTrackerProvider, taskId: string): number;
 }
 
 const quietly = <T>(read: () => T, fallback: T): T => {
@@ -900,17 +959,30 @@ export function createTaskTrackerManagement(options: TaskTrackerManagementOption
     recordLink(space, link) {
       const storage = options.storage(space);
       const next: TaskTrackerTaskLinkDto = { ...link, linkedAt: Date.now() };
-      const links = [
+      updateLinks(storage, (links) => [
         next,
-        ...loadLinks(storage).filter((item) =>
+        ...links.filter((item) =>
           !(item.provider === link.provider && item.taskId === link.taskId && item.sessionId === link.sessionId)),
-      ].slice(0, MAX_LINKS);
-      try {
-        mkdirSync(storage.packageDir(PACKAGE_ID), { recursive: true });
-        atomicWriteSync(linksFile(storage), JSON.stringify(links), 0o600);
-      } catch {
-        // The index only decorates the board; session history stays canonical.
-      }
+      ].slice(0, MAX_LINKS));
+    },
+
+    recordAgentStop(space, input) {
+      updateLinks(options.storage(space), (links) => links.map((item) =>
+        item.provider === input.provider && item.taskId === input.taskId && item.sessionId === input.sessionId
+          ? { ...item, agentStop: input.stop }
+          : item));
+    },
+
+    markSeen(space, provider, taskId) {
+      const at = Date.now();
+      let marked = 0;
+      updateLinks(options.storage(space), (links) => links.map((item) => {
+        if (item.provider !== provider || item.taskId !== taskId) return item;
+        marked += 1;
+        // A stop at this instant still counts as looked at.
+        return { ...item, seenAt: at };
+      }));
+      return marked;
     },
   };
 }

@@ -127,6 +127,12 @@ export const api = {
     `/api/task-trackers/${provider}/tasks/${encodeURIComponent(taskId)}/link`,
     input,
   ),
+  /** Clears this Space's "not looked at yet" edge on a task; no tracker write. */
+  taskTrackerSeen: (provider: TaskTrackerProvider, taskId: string) =>
+    transport.post<{ ok: true; marked: number }>(
+      `/api/task-trackers/${provider}/tasks/${encodeURIComponent(taskId)}/seen`,
+      {},
+    ),
   taskTrackerUpdateStatus: (
     provider: TaskTrackerProvider,
     taskId: string,

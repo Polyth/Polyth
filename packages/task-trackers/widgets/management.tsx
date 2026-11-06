@@ -6,6 +6,7 @@ import {
   Notice,
   Skeleton,
   Switch,
+  TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { api } from "./api.ts";
 import {
@@ -23,11 +24,13 @@ import { tt } from "./i18n.ts";
 import { ConnectWizard } from "./connect.tsx";
 import { applyManagement, friendly, loadManagement, updatePreferences, useManagement } from "./store.ts";
 import {
+  TASK_TRACKER_AGENT_STOPS,
   TASK_TRACKER_PROVIDERS,
   type TaskTrackerConnectionDto,
   type TaskTrackerConnectionScope,
   type TaskTrackerPersonalConnectionDto,
   type TaskTrackerPreferences,
+  type TaskTrackerPreferencesPatch,
   type TaskTrackerWidgetId,
 } from "../src/types.ts";
 
@@ -87,6 +90,97 @@ export function SettingRow({
       </span>
       <Switch checked={checked} disabled={disabled} labelledBy={id} onChange={onChange} />
     </div>
+  );
+}
+
+/**
+ * Moving a linked card when its agent stops. Off by default; the column is a
+ * name in the task's own board, so one Space setting covers many boards.
+ */
+function AutomationSettings({
+  preferences,
+  disabled,
+  onPatch,
+}: {
+  preferences: TaskTrackerPreferences;
+  disabled: boolean;
+  onPatch: (patch: TaskTrackerPreferencesPatch) => void;
+}) {
+  const automation = preferences.automation;
+  const columnId = useId();
+  const [column, setColumn] = useState(automation.column);
+  // The stored value wins whenever it changes elsewhere (another tab, another
+  // admin), so the field never shows a stale name.
+  const [seenColumn, setSeenColumn] = useState(automation.column);
+  if (automation.column !== seenColumn) {
+    setSeenColumn(automation.column);
+    setColumn(automation.column);
+  }
+  const label = (kind: (typeof TASK_TRACKER_AGENT_STOPS)[number]): string => tt(
+    kind === "finished"
+      ? "tasktrackers.automation.finished"
+      : kind === "needs-input"
+        ? "tasktrackers.automation.needsInput"
+        : "tasktrackers.automation.error",
+  );
+  const toggle = (kind: (typeof TASK_TRACKER_AGENT_STOPS)[number]) =>
+    onPatch({
+      automation: {
+        on: automation.on.includes(kind)
+          ? automation.on.filter((item) => item !== kind)
+          : [...automation.on, kind],
+      },
+    });
+  return (
+    <section className="tt-manage-section" aria-labelledby="tt-manage-automation">
+      <h3 id="tt-manage-automation">{tt("tasktrackers.automation.title")}</h3>
+      <div className="tt-setting-list">
+        <SettingRow
+          title={tt("tasktrackers.automation.enabled")}
+          body={tt("tasktrackers.automation.body")}
+          checked={automation.enabled}
+          disabled={disabled}
+          onChange={(value) => onPatch({ automation: { enabled: value } })}
+        />
+        {automation.enabled && (
+          <div className="tt-automation">
+            <label className="tt-automation-column" htmlFor={columnId}>
+              <span>{tt("tasktrackers.automation.column")}</span>
+              <TextInput
+                id={columnId}
+                uiSize="sm"
+                value={column}
+                maxLength={80}
+                disabled={disabled}
+                onChange={(event) => setColumn(event.target.value)}
+                onBlur={() => {
+                  const next = column.trim();
+                  if (next && next !== automation.column) onPatch({ automation: { column: next } });
+                  else if (!next) setColumn(automation.column);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
+            </label>
+            <small className="tt-automation-hint">{tt("tasktrackers.automation.columnHint")}</small>
+            <div className="tt-automation-kinds" role="group" aria-label={tt("tasktrackers.automation.title")}>
+              {TASK_TRACKER_AGENT_STOPS.map((kind) => (
+                <label className="tt-automation-kind" key={kind}>
+                  <input
+                    type="checkbox"
+                    checked={automation.on.includes(kind)}
+                    disabled={disabled}
+                    onChange={() => toggle(kind)}
+                  />
+                  <span>{label(kind)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -446,6 +540,12 @@ export function TaskTrackerManagement({ intro = true }: { intro?: boolean }) {
         </div>
         {policyError && <p className="tt-inline-message error" role="alert">{policyError}</p>}
       </section>
+
+      <AutomationSettings
+        preferences={preferences}
+        disabled={!canManage}
+        onPatch={(patch) => void updatePreferences(patch)}
+      />
 
       <section className="tt-manage-section" aria-labelledby="tt-manage-widgets" data-settings-item="task-trackers-widgets">
         <h3 id="tt-manage-widgets">{tt("tasktrackers.manage.widgets")}</h3>

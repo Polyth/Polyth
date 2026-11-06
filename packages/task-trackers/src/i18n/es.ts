@@ -609,4 +609,13 @@ export const es: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Abrir la sesión al iniciar",
   "tasktrackers.start.model": "Modelo",
   "tasktrackers.start.modelComposer": "Igual que en el cuadro de redacción",
+  "tasktrackers.automation.title": "Cuando un agente se detiene",
+  "tasktrackers.automation.body": "Una tarjeta vinculada pasa a una columna que usted nombre cuando su sesión se detiene. Una tarea nunca se mueve hacia un estado Hecho ni desde él, y cada turno mueve una tarea como mucho una vez.",
+  "tasktrackers.automation.enabled": "Mover la tarea cuando su agente se detiene",
+  "tasktrackers.automation.column": "Columna de destino",
+  "tasktrackers.automation.columnHint": "Se reconoce por su nombre en el tablero de la tarea, sin distinguir mayúsculas. Si ese tablero no tiene esa columna, la tarea se queda donde está.",
+  "tasktrackers.automation.finished": "Termina su turno",
+  "tasktrackers.automation.needsInput": "Espera una respuesta",
+  "tasktrackers.automation.error": "Falla o se detiene",
+  "tasktrackers.card.attention": "Necesita revisión",
 };

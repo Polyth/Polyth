@@ -611,6 +611,15 @@ export const en = {
   "tasktrackers.start.openSession": "Open the session when it starts",
   "tasktrackers.start.model": "Model",
   "tasktrackers.start.modelComposer": "Same as composer",
+  "tasktrackers.automation.title": "When an agent stops",
+  "tasktrackers.automation.body": "A linked card moves to a column you name when its session stops. A task is never moved into a Done status or out of one, and each turn moves a task at most once.",
+  "tasktrackers.automation.enabled": "Move the task when its agent stops",
+  "tasktrackers.automation.column": "Column to move it to",
+  "tasktrackers.automation.columnHint": "Matched by name in the task’s own board, in any letter case. A task whose board has no such column stays where it is.",
+  "tasktrackers.automation.finished": "Finishes its turn",
+  "tasktrackers.automation.needsInput": "Waits for an answer",
+  "tasktrackers.automation.error": "Fails or is stopped",
+  "tasktrackers.card.attention": "Needs a look",
 } as const;
 
 export type TaskTrackersMessageKey = keyof typeof en;
