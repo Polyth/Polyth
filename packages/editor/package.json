@@ -45,7 +45,7 @@
     "@polyth/contracts": "1.2.0",
     "@polyth/plugins": "0.1.0",
     "@polyth/web-sdk": "0.1.0",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "react": "^19.0.0"
