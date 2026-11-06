@@ -97,9 +97,11 @@ import {
 } from "./people.ts";
 import {
   TASK_TRACKER_PROVIDERS,
+  type TaskTrackerAgentStopReceipt,
   type TaskTrackerTaskLinkDto,
   type TaskTrackerWidgetId,
 } from "../src/types.ts";
+import { byAgentAttention, unseenAgentStop } from "../src/attention.ts";
 import {
   AgentSessions,
   DispatchBar,
@@ -610,6 +612,7 @@ function TaskCard({
   linked,
   selected,
   agents = 0,
+  attention,
   picking = false,
   picked = false,
   index = 0,
@@ -621,6 +624,8 @@ function TaskCard({
   linked: boolean;
   selected: boolean;
   agents?: number;
+  /** An agent stop nobody has looked at yet: the card carries the edge. */
+  attention?: TaskTrackerAgentStopReceipt;
   picking?: boolean;
   picked?: boolean;
   index?: number;
@@ -630,7 +635,7 @@ function TaskCard({
   menu?: TaskCardMenuBinding;
   onOpen: (task: TaskTrackerTaskDto, trigger: HTMLElement) => void;
 }) {
-  const badges = linked || agents > 0 || picking;
+  const badges = linked || agents > 0 || picking || attention !== undefined;
   const { consumeClick, ...menuProps } = menu ?? {};
   const coverImage = coverImageOf(task);
 
@@ -640,7 +645,8 @@ function TaskCard({
       {...menuProps}
       data-task-ref={taskRef(task)}
       style={{ "--tt-i": Math.min(index, 12) } as Record<string, number>}
-      className={`tt-task-card${linked ? " linked" : ""}${selected ? " selected" : ""}${picked ? " picked" : ""}${coverImage ? " has-cover" : ""}`}
+      data-attention={attention ? attention.kind : undefined}
+      className={`tt-task-card${linked ? " linked" : ""}${selected ? " selected" : ""}${picked ? " picked" : ""}${coverImage ? " has-cover" : ""}${attention ? " agent-attention" : ""}`}
       onClick={(event) => {
         if (consumeClick?.()) return;
         onOpen(task, event.currentTarget);
@@ -654,6 +660,12 @@ function TaskCard({
       {(showStatus || badges) && <span className="tt-card-top">
         {showStatus && <StatusPill status={task.status} />}
         {badges && <span className="tt-card-badges">
+          {attention && (
+            <span className="tt-attention-chip" title={tt("tasktrackers.card.attention")}>
+              <span className="tt-attention-dot" aria-hidden="true" />
+              {tt("tasktrackers.card.attention")}
+            </span>
+          )}
           {linked && <span className="tt-linked-chip"><Icon.link /> {tt("tasktrackers.board.linked")}</span>}
           <AgentChip count={agents} />
           {picking && <PickMark picked={picked} />}
@@ -1762,6 +1774,8 @@ function ProjectTaskBoard({
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const [editSelectedOnOpen, setEditSelectedOnOpen] = useState(false);
   const links = useTaskLinks();
+  const agentsFor = (task: TaskTrackerTaskDto) => links.get(`${task.provider}:${task.id}`) ?? [];
+  const attentionFor = (task: TaskTrackerTaskDto) => unseenAgentStop(agentsFor(task));
   const { data: management, preferences } = useManagement();
   const canWrite = management?.canConnect !== false;
   // Only trackers the server reports: an older server knows fewer of them.
@@ -2051,7 +2065,10 @@ function ProjectTaskBoard({
   // board waits for it rather than claiming nothing is yours.
   const waitingForMe = assignees.has(ME) && !me && viewerLoading;
   const lanes = useMemo(() => {
-    const all = kanbanLanes(columns?.columns ?? null, visibleTasks);
+    const all = kanbanLanes(columns?.columns ?? null, visibleTasks)
+      // A card whose agent stopped while nobody looked sorts to the top of its
+      // column, newest first; everything else keeps the tracker's order.
+      .map((lane) => ({ ...lane, tasks: byAgentAttention(lane.tasks, agentsFor) }));
     // A status filter shows only its column; hidden completed tasks take
     // their empty done columns with them.
     return all.filter((lane) => lane.tasks.length > 0 || (
@@ -2059,7 +2076,7 @@ function ProjectTaskBoard({
       && lane.column !== undefined
       && !(!showCompleted && lane.category === "done")
     ));
-  }, [columns, showCompleted, statusFilter, visibleTasks]);
+  }, [columns, showCompleted, statusFilter, visibleTasks, links]);
   const totalOf = (column: TaskTrackerColumnDto) =>
     tasks.filter((task) => column.statusIds.includes(task.status.id)).length;
   const columnFailed = (action: string, cause: unknown) => {
@@ -2191,7 +2208,6 @@ function ProjectTaskBoard({
       });
   };
 
-  const agentsFor = (task: TaskTrackerTaskDto) => links.get(`${task.provider}:${task.id}`) ?? [];
   const togglePick = (task: TaskTrackerTaskDto) => {
     setPicked((current) => {
       const next = new Set(current);
@@ -2212,6 +2228,13 @@ function ProjectTaskBoard({
     setEditSelectedOnOpen(editMode);
     if (trigger) selectedTriggerRef.current = trigger;
     setComposing(false);
+    // Looking at a task clears its "not looked at yet" edge; the tracker is
+    // not written to, so the board refreshes only its own index.
+    if (attentionFor(task)) {
+      void api.taskTrackerSeen(task.provider, task.id)
+        .then(() => changed())
+        .catch(() => undefined);
+    }
     const requestId = ++detailRequestRef.current;
     // A task opened before shows its comments and statuses at once; the
     // card's own fields win, since the board may have changed them since.
@@ -2426,6 +2449,7 @@ function ProjectTaskBoard({
           linked={linkedIds.has(`${task.provider}:${task.id}`)}
           selected={selected?.id === task.id}
           agents={agentsFor(task).length}
+          attention={attentionFor(task)}
           picking={picking}
           picked={picked.has(task.id)}
           showStatus={false}

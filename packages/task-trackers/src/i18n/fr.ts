@@ -609,4 +609,13 @@ export const fr: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Ouvrir la session au démarrage",
   "tasktrackers.start.model": "Modèle",
   "tasktrackers.start.modelComposer": "Comme dans la zone de saisie",
+  "tasktrackers.automation.title": "Quand un agent s’arrête",
+  "tasktrackers.automation.body": "Une carte liée passe dans une colonne que vous nommez lorsque sa session s’arrête. Une tâche n’est jamais déplacée vers un statut Terminé ni depuis celui-ci, et chaque tour déplace une tâche au plus une fois.",
+  "tasktrackers.automation.enabled": "Déplacer la tâche quand son agent s’arrête",
+  "tasktrackers.automation.column": "Colonne de destination",
+  "tasktrackers.automation.columnHint": "Reconnue par son nom dans le tableau de la tâche, sans tenir compte de la casse. Si ce tableau n’a pas une telle colonne, la tâche reste où elle est.",
+  "tasktrackers.automation.finished": "Termine son tour",
+  "tasktrackers.automation.needsInput": "Attend une réponse",
+  "tasktrackers.automation.error": "Échoue ou est arrêté",
+  "tasktrackers.card.attention": "À regarder",
 };

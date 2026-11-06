@@ -609,4 +609,13 @@ export const zhCN: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "启动后打开会话",
   "tasktrackers.start.model": "模型",
   "tasktrackers.start.modelComposer": "与输入框相同",
+  "tasktrackers.automation.title": "代理停止时",
+  "tasktrackers.automation.body": "会话停止时，已关联的卡片会移动到您指定的列。任务绝不会被移入或移出“已完成”状态，且每轮最多移动一次任务。",
+  "tasktrackers.automation.enabled": "代理停止时移动任务",
+  "tasktrackers.automation.column": "移动到哪一列",
+  "tasktrackers.automation.columnHint": "按任务所在看板中的列名匹配，不区分大小写。看板中没有该列时，任务保持原样。",
+  "tasktrackers.automation.finished": "完成本轮",
+  "tasktrackers.automation.needsInput": "等待回答",
+  "tasktrackers.automation.error": "失败或被停止",
+  "tasktrackers.card.attention": "需要查看",
 };

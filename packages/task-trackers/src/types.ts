@@ -20,6 +20,48 @@ export const TASK_TRACKER_WIDGET_IDS = [
 
 export type TaskTrackerWidgetId = (typeof TASK_TRACKER_WIDGET_IDS)[number];
 
+/** The ways a linked agent session can stop. `needs-input` is a stop that left
+ *  a question or a permission request waiting for a person. */
+export const TASK_TRACKER_AGENT_STOPS = ["finished", "needs-input", "error"] as const;
+export type TaskTrackerAgentStop = (typeof TASK_TRACKER_AGENT_STOPS)[number];
+
+/**
+ * Moving a linked task when its agent session stops. Off by default: the board
+ * never writes to a tracker on its own until a Space admin asks it to.
+ *
+ * The column is named, not id'd, because one Space can show many boards whose
+ * column ids differ; it is matched case-insensitively in the task's own board
+ * and a task with no such column is left where it is. A task already in a
+ * `done` status is never moved, and `done` is never a target.
+ */
+export interface TaskTrackerAutomationPreferences {
+  enabled: boolean;
+  /** Column name in the task's board, matched case-insensitively. */
+  column: string;
+  /** Which stops move the task. */
+  on: TaskTrackerAgentStop[];
+}
+
+/** Why the automation left a task alone. Durable, so the board can say so. */
+export type TaskTrackerAutomationRefusal =
+  | "off"
+  | "not-listed"
+  | "done"
+  | "no-column"
+  | "no-target"
+  | "same-status"
+  | "write-refused";
+
+/** What the automation did (or did not do) about one agent stop. */
+export interface TaskTrackerAgentStopReceipt {
+  at: number;
+  kind: TaskTrackerAgentStop;
+  /** The turn this stop ended; the same turn never moves a task twice. */
+  turnAt?: number;
+  moved?: { statusId: string; statusName: string; column: string };
+  refused?: TaskTrackerAutomationRefusal;
+}
+
 export interface TaskTrackerPreferences {
   /** Per-provider on/off. A disabled provider is hidden and its routes refuse work. */
   providers: Record<TaskTrackerProvider, boolean>;
@@ -29,6 +71,8 @@ export interface TaskTrackerPreferences {
   agentHandoff: boolean;
   /** Allow status changes to be written back to the tracker. */
   statusUpdates: boolean;
+  /** Move a linked task when its agent session stops; off by default. */
+  automation: TaskTrackerAutomationPreferences;
   widgets: Record<TaskTrackerWidgetId, boolean>;
 }
 
@@ -37,6 +81,7 @@ export interface TaskTrackerPreferencesPatch {
   demo?: boolean;
   agentHandoff?: boolean;
   statusUpdates?: boolean;
+  automation?: Partial<TaskTrackerAutomationPreferences>;
   widgets?: Partial<Record<TaskTrackerWidgetId, boolean>>;
 }
 
@@ -97,6 +142,11 @@ export interface TaskTrackerTaskLinkDto {
   taskKey: string;
   sessionId: string;
   linkedAt: number;
+  /** The last agent stop on this link, with its outcome; absent until one. */
+  agentStop?: TaskTrackerAgentStopReceipt;
+  /** When someone last opened the task here; an agent stop newer than this is
+   *  "not looked at yet". Space-wide, like the link index itself. */
+  seenAt?: number;
 }
 
 export interface TaskTrackerDispatchResultDto {
@@ -128,6 +178,11 @@ export const DEFAULT_TASK_TRACKER_PREFERENCES: TaskTrackerPreferences = Object.f
   demo: true,
   agentHandoff: true,
   statusUpdates: true,
+  automation: Object.freeze({
+    enabled: false,
+    column: "Review",
+    on: Object.freeze(["finished", "needs-input"]) as TaskTrackerAgentStop[],
+  }),
   widgets: Object.freeze({
     "task-trackers.board": true,
     "task-trackers.linked-task": true,
@@ -137,6 +192,30 @@ export const DEFAULT_TASK_TRACKER_PREFERENCES: TaskTrackerPreferences = Object.f
 
 const flag = (value: unknown, fallback: boolean): boolean =>
   typeof value === "boolean" ? value : fallback;
+
+const isAgentStop = (value: unknown): value is TaskTrackerAgentStop =>
+  typeof value === "string" && (TASK_TRACKER_AGENT_STOPS as readonly string[]).includes(value);
+
+/** A column name as typed: trimmed, one line, bounded. Empty keeps the default. */
+export function normalizeAutomationColumn(value: unknown, fallback: string): string {
+  const clean = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!clean) return fallback;
+  return clean.slice(0, 80);
+}
+
+export function normalizeAutomation(value: unknown): TaskTrackerAutomationPreferences {
+  const input = record(value);
+  const base = DEFAULT_TASK_TRACKER_PREFERENCES.automation;
+  const listed = Array.isArray(input.on) ? input.on : null;
+  const on = listed
+    ? TASK_TRACKER_AGENT_STOPS.filter((kind) => listed.includes(kind))
+    : [...base.on];
+  return {
+    enabled: flag(input.enabled, base.enabled),
+    column: normalizeAutomationColumn(input.column, base.column),
+    on,
+  };
+}
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -155,6 +234,7 @@ export function normalizePreferences(value: unknown): TaskTrackerPreferences {
     demo: flag(input.demo, base.demo),
     agentHandoff: flag(input.agentHandoff, base.agentHandoff),
     statusUpdates: flag(input.statusUpdates, base.statusUpdates),
+    automation: normalizeAutomation(input.automation),
     widgets: Object.fromEntries(TASK_TRACKER_WIDGET_IDS.map((id) =>
       [id, flag(widgets[id], base.widgets[id])])) as Record<TaskTrackerWidgetId, boolean>,
   };
@@ -168,6 +248,7 @@ export function mergePreferences(
     ...current,
     ...patch,
     providers: { ...current.providers, ...record(patch.providers) },
+    automation: { ...current.automation, ...record(patch.automation) },
     widgets: { ...current.widgets, ...record(patch.widgets) },
   });
 }

@@ -24,6 +24,7 @@ import { hasInstanceOwnerAuthority } from "@polyth/contracts/instance-authority"
 import {
   localOnlyRemoteAccess,
   SERVER_SESSION_ISOLATION,
+  SERVER_TURN_STOPPED_BUS,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -49,11 +50,15 @@ import {
   type TaskImageStager,
 } from "./handoffImages.ts";
 import {
+  TASK_TRACKER_AGENT_STOPS,
   TASK_TRACKER_PROVIDERS,
+  type TaskTrackerAgentStop,
+  type TaskTrackerAutomationPreferences,
   type TaskTrackerConnectionScope,
   type TaskTrackerDispatchResultDto,
   type TaskTrackerPreferencesPatch,
 } from "./types.ts";
+import { applyAgentStop } from "./automation.ts";
 
 /** One dispatch starts at most this many agent sessions. */
 export const MAX_DISPATCH = 10;
@@ -87,6 +92,7 @@ const COLUMN = route(`${P}/boards/([^/]+)/columns/([^/]+)`);
 const MOVE = route(`${P}/tasks/([^/]+)/move`);
 const ARCHIVE = route(`${P}/tasks/([^/]+)/archive`);
 const LINK = route(`${P}/tasks/([^/]+)/link`);
+const SEEN = route(`${P}/tasks/([^/]+)/seen`);
 
 const pathPart = (value: string | undefined, field: string): string => {
   if (!value) throw invalid(`${field} is required`, field);
@@ -209,6 +215,19 @@ const patchOf = (input: Record<string, unknown>): TaskTrackerPreferencesPatch =>
   if (widgets) patch.widgets = widgets;
   for (const key of ["demo", "agentHandoff", "statusUpdates"] as const) {
     if (typeof input[key] === "boolean") patch[key] = input[key];
+  }
+  if (input.automation && typeof input.automation === "object" && !Array.isArray(input.automation)) {
+    const automation = input.automation as Record<string, unknown>;
+    const next: Partial<TaskTrackerAutomationPreferences> = {};
+    if (typeof automation.enabled === "boolean") next.enabled = automation.enabled;
+    // The column is normalized with the rest of the preferences; only its type
+    // is checked here so a blank one falls back to the default.
+    if (typeof automation.column === "string") next.column = automation.column;
+    if (Array.isArray(automation.on)) {
+      const listed: unknown[] = automation.on;
+      next.on = TASK_TRACKER_AGENT_STOPS.filter((kind) => listed.includes(kind));
+    }
+    patch.automation = next;
   }
   return patch;
 };
@@ -709,6 +728,16 @@ export function taskTrackerRoutes(deps: TaskTrackerRouteDeps): RouteHandler {
       return true;
     }
 
+    match = path.match(SEEN);
+    if (match && method === "POST") {
+      const provider = providerOf(match[1] ?? null);
+      const taskId = pathPart(match[2], "taskId");
+      // Looking at a card writes nothing to the tracker: it only clears this
+      // Space's "not looked at yet" edge, so a viewer may do it too.
+      const marked = deps.management?.markSeen(request.space, provider, taskId) ?? 0;
+      json(200, { ok: true, marked });
+      return true;
+    }
     match = path.match(LINK);
     if (match && method === "POST") {
       const provider = providerOf(match[1] ?? null);
@@ -835,6 +864,66 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     ),
   });
   let capabilities: Disposable[] = [];
+  let stops: Disposable | undefined;
+
+  /**
+   * One agent stop on a linked session. Bounded and receipted: the kind comes
+   * from the session's own state, the move obeys the Space's automation
+   * setting, and every outcome — including a refusal — is recorded on the
+   * link so the board can show it. Never throws into the bus.
+   */
+  const onAgentStop = async (sessionId: string, reason: "completed" | "aborted" | "error"): Promise<void> => {
+    try {
+      const projection = await host.store.projection(sessionId);
+      const spaceId = projection?.spaceId;
+      // A delegated child's stop belongs to its parent's turn, not to the task.
+      if (!projection || !spaceId || projection.parentId) return;
+      const context = space(spaceId);
+      const links = management.links(context);
+      const link = links.find((item) => item.sessionId === sessionId);
+      if (!link) return;
+      const kind: TaskTrackerAgentStop = projection.status === "waiting"
+        ? "needs-input"
+        : reason === "completed" ? "finished" : "error";
+      const actorUserId = projection.actor?.userId;
+      let trackers: TaskTrackerService | undefined;
+      await applyAgentStop({
+        now: () => Date.now(),
+        automation: () => management.preferences(context).automation,
+        statusUpdates: () => management.preferences(context).statusUpdates,
+        link: (provider, taskId, id) => management.links(context)
+          .find((item) => item.provider === provider && item.taskId === taskId && item.sessionId === id),
+        trackers: () => {
+          trackers ??= management.agentTrackers(context, agentActor(spaceId, actorUserId), link.provider);
+          return trackers;
+        },
+        record: (receipt) => management.recordAgentStop(context, {
+          provider: link.provider,
+          taskId: link.taskId,
+          sessionId,
+          stop: receipt,
+        }),
+        moved: ({ task }) => {
+          void host.events.append(
+            sessionId,
+            "task/status-changed",
+            { ...selectedData(task), automated: true } as JsonObject,
+            { ignorable: true, producerPlugin: host.pluginId },
+          ).catch(() => undefined);
+        },
+      }, {
+        provider: link.provider,
+        taskId: link.taskId,
+        sessionId,
+        kind,
+        ...(projection.lastTurnAt !== undefined ? { turnAt: projection.lastTurnAt } : {}),
+        ...(actorUserId ? { actorUserId } : {}),
+      });
+    } catch {
+      // Automation is decoration around the turn; a failure here changes nothing.
+    }
+  };
+
   return {
     remoteAccess: localOnlyRemoteAccess([TASK_TRACKERS_PACKAGE_ID]),
     routes,
@@ -842,11 +931,17 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const registry = host.services.get(
         serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
       );
-      if (!registry || capabilities.length > 0) return;
-      capabilities = [taskSkill, ...tools].map((contribution) =>
-        registry.register(TASK_TRACKERS_PACKAGE_ID, contribution));
+      if (registry && capabilities.length === 0) {
+        capabilities = [taskSkill, ...tools].map((contribution) =>
+          registry.register(TASK_TRACKERS_PACKAGE_ID, contribution));
+      }
+      stops?.dispose();
+      stops = host.services.get(SERVER_TURN_STOPPED_BUS)?.subscribe((event) =>
+        onAgentStop(event.sessionId, event.reason));
     },
     async onDisable() {
+      stops?.dispose();
+      stops = undefined;
       for (const capability of capabilities.toReversed()) await capability.dispose();
       capabilities = [];
     },

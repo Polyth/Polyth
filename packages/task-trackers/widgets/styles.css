@@ -613,6 +613,31 @@
   border-color: color-mix(in srgb, var(--purple) 32%, var(--border-soft));
 }
 
+/* An agent stopped here and nobody has looked yet. The edge is an inset shadow,
+   not a border colour: "Hide interface borders" clears every border and would
+   take this marker with it. */
+.tt-task-card.agent-attention {
+  --tt-attention: var(--warning);
+  background: color-mix(in srgb, var(--tt-attention) 7%, var(--elevated));
+  box-shadow: inset 3px 0 0 var(--tt-attention), var(--shadow-sm);
+}
+
+.tt-task-card.agent-attention[data-attention="error"] {
+  --tt-attention: var(--danger);
+}
+
+.tt-task-card.agent-attention[data-attention="needs-input"] {
+  --tt-attention: var(--accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tt-task-card.agent-attention:hover:where(:not(:disabled)) {
+    border-color: color-mix(in srgb, var(--tt-attention) 45%, var(--hair-strong));
+    background: color-mix(in srgb, var(--tt-attention) 10%, var(--raised));
+    box-shadow: inset 3px 0 0 var(--tt-attention), var(--shadow-md);
+  }
+}
+
 .tt-task-card.selected,
 .tt-list-row.selected {
   border-color: var(--accent-line);
@@ -684,6 +709,31 @@
   padding: 0 var(--space-2);
   color: var(--purple);
   background: var(--purple-wash);
+}
+
+/* The card's "an agent stopped here" chip, in the same colour as its edge. */
+.tt-attention-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-round);
+  color: var(--tt-attention, var(--warning));
+  background: color-mix(in srgb, var(--tt-attention, var(--warning)) 14%, transparent);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tt-attention-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-round);
+  background: currentColor;
 }
 
 .tt-linked-chip svg {
@@ -2150,6 +2200,52 @@
 
 .tt-setting-row.off .tt-setting-copy strong {
   color: var(--text-dim);
+}
+
+/* ---- Agent automation --------------------------------------------------- */
+
+.tt-automation {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface-overlay);
+}
+
+.tt-automation-column {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 320px;
+  font-size: var(--font-meta);
+  font-weight: 550;
+}
+
+.tt-automation-hint {
+  max-width: 560px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.tt-automation-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-1);
+}
+
+.tt-automation-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+
+.tt-automation-kind input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 /* ---- Connect wizard ----------------------------------------------------- */

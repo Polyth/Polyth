@@ -192,10 +192,18 @@ test("management page toggles services, features, and widgets through the settin
     assert.equal(view.container.querySelector(".tt-service-card.trello .tt-collapse")?.getAttribute("data-open"), "false");
 
     const switches = [...view.container.querySelectorAll<HTMLButtonElement>('.tt-setting-row [role="switch"]')];
-    assert.equal(switches.length, 6, "three features and three widgets");
+    assert.equal(switches.length, 7, "three features, agent automation and three widgets");
     await act(async () => { switches[0]!.click(); });
     await settle();
     assert.deepEqual(patches[1], { agentHandoff: false });
+
+    // Agent automation is off by default: its column and stop kinds stay out of
+    // the way until a Space turns it on.
+    assert.equal(view.container.querySelector(".tt-automation"), null, "automation settings hide while off");
+    await act(async () => { switches[3]!.click(); });
+    await settle();
+    assert.deepEqual(patches[2], { automation: { enabled: true } });
+    assert.ok(view.container.querySelector(".tt-automation"), "turning it on reveals the column and stop kinds");
 
     await act(async () => { buttonByText(view.container, "Disconnect")!.click(); });
     assert.match(view.container.textContent ?? "", /Remove the saved credential\?/, "disconnect asks before removing");
