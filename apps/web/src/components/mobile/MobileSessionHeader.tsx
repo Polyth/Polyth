@@ -994,7 +994,13 @@ export default function MobileSessionHeader() {
       {heroEditing ? <GlassIsland className="mobile-float-actions mobile-float-done">
         <Button variant="ghost" size="sm" onClick={() => setHeroEditing(false)}>{tr("common.done")}</Button>
       </GlassIsland> : <GlassIsland ref={actionsIslandRef} className="mobile-float-actions">
-        {/* The open chat's menu; a new chat has nothing to act on yet. */}
+        <IconButton icon={ComposeIcon} label={tr("mobile.island.newSession")} size="lg" variant="ghost" disabled={!projectId} onClick={() => {
+          hideMobileWorkspaceHome();
+          if (projectId) startFreshSession(projectId);
+        }} />
+        {!(session && sessionStatus) && <IconButton icon={LayersIcon} label={tr("mobile.island.openTools")} size="lg" variant="ghost" data-workspace-trigger="" aria-expanded={workspaceNav.homeOpen} onClick={openWorkspaceNavigation} />}
+        {/* The open chat's menu (last, with the tools launcher inside); a new chat has
+            nothing to act on yet, so it keeps the tools button. */}
         {session && sessionStatus && <MobileSessionMenu
           session={session}
           title={title}
@@ -1010,13 +1016,9 @@ export default function MobileSessionHeader() {
             setSurface("island");
           }}
           onChanged={() => { if (projectId) void refreshSessions(projectId); }}
+          onOpenTools={openWorkspaceNavigation}
           anchorRef={actionsIslandRef}
         />}
-        <IconButton icon={ComposeIcon} label={tr("mobile.island.newSession")} size="lg" variant="ghost" disabled={!projectId} onClick={() => {
-          hideMobileWorkspaceHome();
-          if (projectId) startFreshSession(projectId);
-        }} />
-        <IconButton icon={LayersIcon} label={tr("mobile.island.openTools")} size="lg" variant="ghost" data-workspace-trigger="" aria-expanded={workspaceNav.homeOpen} onClick={openWorkspaceNavigation} />
       </GlassIsland>}
     </div>
     {(overviewOpen || overviewMounted) && (

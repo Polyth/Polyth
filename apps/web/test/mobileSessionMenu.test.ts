@@ -145,9 +145,11 @@ test("island buttons press and stay open as a colour change, with no plate or se
   for (const look of ["paper", "editorial"]) {
     assert.match(looks, new RegExp(`data-shell-look="${look}"\\]:not\\(#\\\\#\\) :is\\(\\.mobile-float-navigation, \\.mobile-float-actions\\) \\.ui-icon-btn:not\\(:active, \\[aria-expanded="true"\\]\\)`));
   }
-  // ⋮ leads the island, then New session and Open tools.
+  // New session leads; in a chat the ⋯ menu ends the island and holds Open tools.
+  // A new chat has no menu, so it keeps the Open tools button after New session.
   const compose = header.indexOf('label={tr("mobile.island.newSession")}');
   const more = header.indexOf("<MobileSessionMenu");
   const tools = header.indexOf('label={tr("mobile.island.openTools")}');
-  assert.ok(more > 0 && more < compose && compose < tools);
+  assert.ok(compose > 0 && compose < tools && tools < more);
+  assert.match(header, /onOpenTools=\{openWorkspaceNavigation\}/);
 });
