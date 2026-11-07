@@ -182,6 +182,8 @@ export interface SessionContextBarProps {
   /** The checkout cannot be chosen (the primary repository is out of scope);
    *  opening the checkout chip shows this reason instead of choices. */
   branchLockedReason?: string;
+  /** The project has no checkout to choose, e.g. a folder without Git. */
+  hideBranch?: boolean;
   branchName: string;
   branchId?: string;
   branches: ContextChoice[];
@@ -214,6 +216,7 @@ export default function SessionContextBar({
   onManageRepositories,
   checkoutRepositoryAlias,
   branchLockedReason,
+  hideBranch,
   branchName,
   branchId,
   branches,
@@ -259,22 +262,24 @@ export default function SessionContextBar({
           {...(onManageRepositories ? { onManage: onManageRepositories } : {})}
         />
       )}
-      <ContextSelector
-        value={branchName}
-        selectedId={branchId}
-        choices={branches}
-        {...(branchLockedReason ? { lockedReason: branchLockedReason } : {})}
-        ariaLabel={branchLockedReason
-          ? `${tr("mobile.sessioncontextbar.repositoryWorktreeCurrentValue", { repository: checkoutRepositoryAlias ?? "", branchName })}. ${branchLockedReason}`
-          : (multiRepository && checkoutRepositoryAlias
-            ? tr("mobile.sessioncontextbar.repositoryWorktreeCurrentValue", { repository: checkoutRepositoryAlias, branchName })
-            : tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName }))}
-        {...(multiRepository && checkoutRepositoryAlias ? { repositoryAlias: checkoutRepositoryAlias } : {})}
-        onPick={onPickBranch}
-        {...(onBranchPickerOpen ? { onOpen: onBranchPickerOpen } : {})}
-        {...(onRefreshBranches ? { onRefresh: onRefreshBranches } : {})}
-        {...(branchRefreshing ? { refreshing: true } : {})}
-      />
+      {!hideBranch && (
+        <ContextSelector
+          value={branchName}
+          selectedId={branchId}
+          choices={branches}
+          {...(branchLockedReason ? { lockedReason: branchLockedReason } : {})}
+          ariaLabel={branchLockedReason
+            ? `${tr("mobile.sessioncontextbar.repositoryWorktreeCurrentValue", { repository: checkoutRepositoryAlias ?? "", branchName })}. ${branchLockedReason}`
+            : (multiRepository && checkoutRepositoryAlias
+              ? tr("mobile.sessioncontextbar.repositoryWorktreeCurrentValue", { repository: checkoutRepositoryAlias, branchName })
+              : tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName }))}
+          {...(multiRepository && checkoutRepositoryAlias ? { repositoryAlias: checkoutRepositoryAlias } : {})}
+          onPick={onPickBranch}
+          {...(onBranchPickerOpen ? { onOpen: onBranchPickerOpen } : {})}
+          {...(onRefreshBranches ? { onRefresh: onRefreshBranches } : {})}
+          {...(branchRefreshing ? { refreshing: true } : {})}
+        />
+      )}
       {onToggleWorkInIsolation && showIsolation && (
         <Tooltip
           content={multiRepository ? tr("mobile.sessioncontextbar.isolateRepositoriesHint") : tr("isolation.workInIsolationHint")}

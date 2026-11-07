@@ -234,7 +234,7 @@ import SessionContextBar, {
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
 import { projectRepositories } from "@polyth/contracts/workspace";
-import { executionRepositoryOf, normalizeRepositoryScope, primaryRepositoryIdOf } from "../composer/repositoryScope.ts";
+import { executionRepositoryOf, locationWithoutGit, normalizeRepositoryScope, primaryRepositoryIdOf } from "../composer/repositoryScope.ts";
 import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
 import { chatAmongOthers, rootProjects } from "../privateRoom.ts";
@@ -585,10 +585,20 @@ function useComposerLocation(session: SessionProjection | null, readLiveText?: (
   const executionBranchLoaded = executionBranch !== null && executionBranch.key === executionBranchKey;
   const lockedBranchName = executionBranchLoaded ? executionBranch.name : "";
 
-  const currentBranchName = worktrees.find((worktree) => worktree.isMain)?.branch
-    || branches.current
-    || branch
-    || "";
+  // Git's answer outranks the store's label, which can still be the one
+  // remembered from an earlier launch.
+  const locationHasNoGit = cachedLocation !== null && locationWithoutGit(worktrees, branches);
+  const currentBranchName = locationHasNoGit
+    ? ""
+    : worktrees.find((worktree) => worktree.isMain)?.branch
+      || branches.current
+      || branch
+      || "";
+  // Nothing to choose: no repository, or none known yet (the chip would flash
+  // a placeholder before leaving). A locked checkout keeps its explanation.
+  const noCheckoutToChoose = !checkoutLocked
+    && !intendedWorktree
+    && (locationHasNoGit || (cachedLocation === null && !branch));
   // The project default never isolates where none can exist (a project
   // without Git), and the control stays hidden there. An explicit choice keeps
   // its no-fallback semantics and stays visible so it can be switched off.
@@ -819,6 +829,7 @@ function useComposerLocation(session: SessionProjection | null, readLiveText?: (
           }),
         } : {}),
       } : {}),
+      ...(noCheckoutToChoose ? { hideBranch: true } : {}),
       branchName,
       branchId: selectedBranchId,
       branches: branchChoices,
