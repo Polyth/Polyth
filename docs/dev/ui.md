@@ -2131,9 +2131,11 @@ desktop keeps the split's open edge. The contour is a state gauge, so
 `contextLiquid.test.ts` measures glyph alignment and tones through the real
 cascade.
 
-**Phone session menu (⋮):** the actions island holds a narrower ⋮,
-✎ New session and ⧉ Open tools (`MobileSessionMenu.tsx`; a new chat has no ⋮).
-⋮ opens a compact popover lined up under the island: a head with the chat
+**Phone session menu (⋯):** in a chat the actions island holds ✎ New session
+and, last (rightmost), the horizontal ⋯ (`MobileSessionMenu.tsx`); ⧉ Open tools
+is the menu's first row, and the ⋯ carries `data-workspace-trigger` so closing a
+tool returns focus to it. A new chat has no ⋯ and keeps ✎ then the ⧉ button.
+⋯ opens a compact popover lined up under the island: a head with the chat
 title and one status · model · context line (a tap opens the session
 overview, which a hidden title would otherwise open; a conversation's head
 only names it), then Rename (shared prompt), Pin, Share/Who has access, Fork
@@ -4392,8 +4394,8 @@ is wider. On the narrowest axis four 44px targets need a wider gap, so the
 toolbar's gaps are all about 20.8px there. The glyphs' ink spans are
 recorded on Lucide's 24-unit grid in `MobileNavigator.css`; Select's box
 and the lens are not symmetric, so their end-side insets swap in RTL. The
-closed search pill and the filter dot follow the lens. Every phone ⋮ is the stroked vertical ellipsis
-(`MoreVerticalIcon`), whose dots stay legible at row size. Their press wash
+closed search pill and the filter dot follow the lens. Every phone row ⋮ is the stroked vertical ellipsis
+(`MoreVerticalIcon`; the session island's menu trigger is the horizontal `MoreIcon`), whose dots stay legible at row size. Their press wash
 is a circle round the glyph and their targets are the full row height. Search's Back and a row's ⋮ keep a 44px target that runs out
 to the edge through a transparent `::after`; press rules set
 `background-color` only.
