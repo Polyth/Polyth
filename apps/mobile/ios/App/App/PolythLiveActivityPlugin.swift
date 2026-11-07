@@ -138,6 +138,21 @@ final class PolythLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         PolythLiveActivityStore.write(snapshot, account: "snapshot")
     }
 
+    @available(iOS 16.2, *)
+    private static func isRunning(_ activity: Activity<PolythActivityAttributes>) -> Bool {
+        activity.activityState == .active || activity.activityState == .stale
+    }
+
+    /// Leaves `kept` as the only card. A finished activity stays listed and on
+    /// the Lock Screen until its dismissal date and can never run again, so
+    /// the next turn's activity would otherwise sit beside it.
+    @available(iOS 16.2, *)
+    private static func dismissAll(except kept: Activity<PolythActivityAttributes>? = nil) async {
+        for activity in Activity<PolythActivityAttributes>.activities where activity.id != kept?.id {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
     /// Hands every push token of `activity` to the page, which registers it
     /// with its server. A new process re-observes the activity it finds.
     @available(iOS 16.2, *)
@@ -215,15 +230,12 @@ final class PolythLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
             enqueue {
                 let content = ActivityContent(state: state, staleDate: staleDate)
                 self.remember(state)
-                let running = Activity<PolythActivityAttributes>.activities
-                    .filter { $0.activityState == .active || $0.activityState == .stale }
-                if let current = running.first {
+                if let current = Activity<PolythActivityAttributes>.activities.first(where: Self.isRunning) {
                     self.observe(current)
                     // Always applied: the page sends only changed content or a
                     // stale date the server confirmed further.
                     await current.update(content)
-                    // A second one can only come from an older process; keep one.
-                    for extra in running.dropFirst() { await extra.end(nil, dismissalPolicy: .immediate) }
+                    await Self.dismissAll(except: current)
                     call.resolve(["active": true])
                     return
                 }
@@ -245,6 +257,7 @@ final class PolythLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
                         activity = try Activity<PolythActivityAttributes>.request(attributes: PolythActivityAttributes(), content: content, pushType: nil)
                     }
                     self.observe(activity)
+                    await Self.dismissAll(except: activity)
                     call.resolve(["active": true])
                 } catch {
                     // Typically: the app is no longer foreground, or the system
@@ -300,16 +313,19 @@ final class PolythLiveActivityPlugin: CAPPlugin, CAPBridgedPlugin {
         if #available(iOS 16.2, *), Self.extensionEmbedded {
             let finalState = Self.content(call.getObject("final"))
             enqueue {
-                for activity in Activity<PolythActivityAttributes>.activities {
-                    if let finalState {
-                        await activity.end(
-                            ActivityContent(state: finalState, staleDate: nil),
-                            dismissalPolicy: .after(Date().addingTimeInterval(Self.finalDismissAfter))
-                        )
-                    } else {
-                        await activity.end(nil, dismissalPolicy: .immediate)
-                    }
+                // The final snapshot goes on one card: the running one, or the
+                // one a push already finished.
+                let activities = Activity<PolythActivityAttributes>.activities
+                let kept: Activity<PolythActivityAttributes>? = finalState == nil
+                    ? nil
+                    : activities.first(where: Self.isRunning) ?? activities.last(where: { $0.activityState == .ended })
+                if let kept, let finalState {
+                    await kept.end(
+                        ActivityContent(state: finalState, staleDate: nil),
+                        dismissalPolicy: .after(Date().addingTimeInterval(Self.finalDismissAfter))
+                    )
                 }
+                await Self.dismissAll(except: kept)
                 call.resolve(["active": false])
             }
             return
