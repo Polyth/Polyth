@@ -1109,6 +1109,12 @@ token SHA-256 hashes only, never tokens or passwords), `auto-accept.json` (F18:
 legacy per-session on/off records imported into canonical session projections),
 `push.json` (F18: VAPID keypair + push subscriptions).
 
+At boot the server adds the data directory to `GIT_CEILING_DIRECTORIES`
+(`gitDiscoveryBoundary.ts`), which its Git children inherit. A project made in the
+Polyth folder therefore never answers for a repository that encloses the data
+directory, as the default `./data` of a checkout would. Its own `git init` or clone
+is still found. In the composer, a project without Git shows no checkout picker.
+
 ## Security posture
 
 Canonical `boot()` binds `127.0.0.1` by default; wildcard/public exposure is

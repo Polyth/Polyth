@@ -91,3 +91,14 @@ export function repositoryPathTail(path: string): string {
   if (parts.length <= 2) return path;
   return `…/${parts.slice(-2).join("/")}`;
 }
+
+/** Whether a finished location read says the project has no repository. The
+ *  server lists no worktree for a folder outside Git. A real repository always
+ *  has a row or a branch left after managed branches are filtered, so a detached
+ *  HEAD or a repository without commits never reads as "no Git". */
+export function locationWithoutGit(
+  worktrees: readonly unknown[],
+  branches: { current?: string | null; branches: readonly unknown[] },
+): boolean {
+  return worktrees.length === 0 && !branches.current && branches.branches.length === 0;
+}

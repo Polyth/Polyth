@@ -82,6 +82,7 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createProjectService } from "./projects.ts";
+import { bindGitDiscoveryToDataDir } from "./gitDiscoveryBoundary.ts";
 import { createPermissionWaitingBus } from "./permissionWaiting.ts";
 import { defaultStallReport, watchEventLoopStalls, type EventLoopStall } from "./eventLoopStall.ts";
 import {
@@ -654,6 +655,7 @@ export async function boot(opts: BootOptions = {}) {
   const requestedDataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const writerLease = await acquireDataDirectoryLease(requestedDataDir);
   const dataDir = writerLease.canonicalDataDir;
+  bindGitDiscoveryToDataDir(dataDir);
   try {
   // Warm the engine identity cache while the rest of boot (sweep, packages,
   // HTTP) runs so the first owned spawn does not wait on `--version`/`db path`
