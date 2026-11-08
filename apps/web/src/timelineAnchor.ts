@@ -2,8 +2,9 @@
 // the topmost visible prompt plus its pixel offset and an at-bottom flag —
 // never a raw global scrollTop. Full-screen/expanded pane transitions keep the
 // live DOM (Chat stays mounted under the layer), so this record only matters
-// for direct reload and session switches, where it is reapplied after event
-// replay and window growth. Presentation state: appends no SessionEvent.
+// for a direct reload or a remount, where it is reapplied after event replay and
+// window growth. A chat switch records the chat being left as following its
+// tail. Presentation state: appends no SessionEvent.
 // sessionStorage scopes it to the tab so parallel tabs don't fight.
 //
 // Capture and restore are relative to the USABLE
