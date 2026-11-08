@@ -6556,7 +6556,7 @@ export function createSessionService(deps: {
         }))).operation;
         if (rt.harnessId && !proj.resolvedHarnessId) await updateProjection(sessionId, { resolvedHarnessId: rt.harnessId });
         if (operation.state === "prepared") {
-          const request = { sessionId, projectId: proj.projectId, title: proj.title, titleSource: proj.titleSource, cwd };
+          const request = { sessionId, projectId: proj.projectId, title: proj.title, titleSource: proj.titleSource, cwd, ...(proj.workspace ? { workspace: proj.workspace } : {}), ...(proj.model ? { model: proj.model } : {}), ...(proj.agent ? { agent: proj.agent } : {}) };
           const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(operation,
             (id) => rt!.createSessionOperation ? rt!.createSessionOperation(request, id) : rt!.ensureSession(request),
             (backendSessionId) => ({ backendSessionId }),
@@ -10146,6 +10146,96 @@ export function createSessionService(deps: {
     return (await store.projection(sessionId)) ?? current;
   }
 
+  /** Fork for a runtime without exact native branching. The child gets the
+   *  exact canonical prefix and no native session yet: like a Snapshot import
+   *  (`session/snapshot-imported`, `mode: "fork"`), its native session is
+   *  created on first use and that leg's first prompt carries the prefix as
+   *  canonical continuity. Nothing is mutated on the source or its runtime,
+   *  so there is no outcome to reconcile. The caller holds the source lock. */
+  async function publishContinuityFork(input: {
+    sessionId: string;
+    proj: SessionProjection;
+    forkId: string;
+    title: string;
+    prefix: readonly SessionEvent[];
+    copiedThroughSeq: number;
+    draft: ForkDraft | undefined;
+    atSeq: number | undefined;
+  }): Promise<ForkResult> {
+    const { sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq } = input;
+    const now = Date.now();
+    // Same ownership rules as a native fork. Everything bound to the source's
+    // native leg or its running work stays behind: the child has none yet.
+    const {
+      draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin,
+      backendSessionId: _backendSessionId, runtimeBinding: _runtimeBinding, runtimeLeg: _runtimeLeg,
+      harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
+      runtimeObservationSeq: _runtimeObservationSeq, contextWindow: _contextWindow,
+      resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
+      autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
+      ...forkable
+    } = proj;
+    const projection: SessionProjection = {
+      ...forkable, id: forkId, parentId: sessionId, title,
+      status: "idle",
+      createdAt: now,
+      updatedAt: now,
+    };
+    const continuity = {
+      type: "session/snapshot-imported",
+      data: { mode: "fork", fromSessionId: sessionId, copiedThroughSeq } as JsonObject,
+      ignorable: true as const,
+    };
+    const markerData: SessionForkedData = {
+      fromSessionId: sessionId,
+      ...(atSeq !== undefined ? { sourceAtSeq: atSeq } : {}),
+      copiedThroughSeq,
+      ...(draft ? { draft } : {}),
+    };
+    let published: ChildSnapshotResult;
+    if (store.publishChildSession) {
+      published = await store.publishChildSession({
+        childSessionId: forkId,
+        events: [
+          ...prefix.map((ev) => ({
+            time: ev.time, type: ev.type, data: ev.data,
+            ...(ev.ignorable ? { ignorable: true as const } : {}),
+            ...(ev.surfaceOp ? { surfaceOp: ev.surfaceOp } : {}),
+            ...(ev.producerPlugin ? { producerPlugin: ev.producerPlugin } : {}),
+            sourceSeq: ev.seq,
+          })),
+          { time: now, ...continuity },
+        ],
+        projection,
+        marker: { type: "session/forked", data: markerData as unknown as JsonObject, ignorable: true },
+      });
+    } else {
+      const copied: SessionEvent[] = [];
+      for (const ev of prefix) {
+        copied.push(await store.append(forkId, ev.type, ev.data, {
+          ...(ev.ignorable ? { ignorable: true } : {}),
+          ...(ev.surfaceOp ? { surfaceOp: ev.surfaceOp } : {}),
+          sourceEventSeqs: [ev.seq],
+        }));
+      }
+      copied.push(await store.append(forkId, continuity.type, continuity.data, { ignorable: true }));
+      await store.upsertProjection(projection);
+      const marker = await store.append(
+        forkId, "session/forked", markerData as unknown as JsonObject, { ignorable: true },
+      );
+      published = { events: copied, marker };
+    }
+    for (const ev of published.events) broadcast.event(ev);
+    broadcast.event(published.marker);
+    publishProjection(projection);
+    return {
+      id: forkId,
+      fromSessionId: sessionId,
+      ...(atSeq !== undefined ? { sourceAtSeq: atSeq } : {}),
+      ...(draft ? { draft } : {}),
+    };
+  }
+
   /** An archived or unknown session that never reached a native session: no
    *  runtime binding, no backend id, no live runtime and no turn. Its checkout
    *  can move without an execution release or a new epoch. An unresolved
@@ -13310,10 +13400,19 @@ export function createSessionService(deps: {
           ...(proj.agent ? { agent: proj.agent } : {}),
         };
         // An empty prefix needs no branch — a fresh backend session already
-        // represents the same (empty) history. Anything else requires exact
-        // branching; approximating with a hidden prompt is forbidden.
-        if (history.length > 0 && !rt.branchSession) {
-          throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
+        // represents the same (empty) history. A runtime that can branch
+        // natively gets an exact native copy. Every other runtime (Claude
+        // Code, Codex, Pi, ACP…) — and a native branch that refuses because
+        // its history no longer matches Polyth's — gets a continuity fork:
+        // the canonical prefix is published exactly, and the child's first
+        // prompt hands it to a fresh native session, as a Snapshot import or
+        // harness switch does. The native session is never told it holds
+        // history it does not.
+        const nativeBranch = history.length > 0
+          && Boolean(rt.branchSession || rt.branchSessionOperation)
+          && (await Promise.resolve(rt.capabilities?.()).catch(() => undefined))?.fork !== false;
+        if (history.length > 0 && !nativeBranch) {
+          return publishContinuityFork({ sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq });
         }
         const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
           sessionId,
@@ -13347,6 +13446,16 @@ export function createSessionService(deps: {
                   })),
           (backendSessionId) => ({ backendSessionId }),
         );
+        // A definitive refusal made no branch, so the continuity fork is
+        // still exact for Polyth's history. An unknown outcome must reconcile
+        // and never triggers a second mutation.
+        if (
+          outcome.kind === "rejected"
+          && history.length > 0
+          && (outcome.code === "history-mismatch" || outcome.code === "unsupported" || outcome.code === "capability-unsupported")
+        ) {
+          return publishContinuityFork({ sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq });
+        }
         if (outcome.kind !== "confirmed") {
           if (outcome.kind === "unknown") {
             await updateProjection(sessionId, { status: "unknown" });
