@@ -2781,6 +2781,8 @@ export const ar: AppMessages = {
   "workspace.panel.addTitle": "أضف الأدوات",
   "workspace.panel.availableValue": "المتاح: {count}",
   "workspace.panel.arrangeHint": "اضغط مطولًا واسحب للنقل. اضغط علامة الطرح للإزالة.",
+  "workspace.panel.holdToEdit": "أو اضغط مطولًا على أي عنصر لإعادة الترتيب",
+  "workspace.panel.dormant": "يظهر عندما يكون لديه ما يعرضه",
   "workspace.panel.keyboardHint": "مفاتيح الأسهم للنقل، وDelete للإزالة.",
   "workspace.panel.arrangementLabel": "عناصر مساحة العمل",
   "workspace.panel.emptyTitle": "مساحة العمل فارغة",

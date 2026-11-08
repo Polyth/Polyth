@@ -827,45 +827,58 @@ package authority or change widget placement rules.
 
 #### Phone Workspace editor
 
-The phone Workspace (`WorkspacePanel.tsx`) customizes in two steps inside its
-one Sheet: add on a full page, then arrange and manage in place. Its header is
-the same row in both modes: Back leads (`dismiss="back"`, where the Back swipe
-takes the layer) and an Edit switch trails (`SheetAction` `kind: "switch"`,
-`role="switch"`); editing is a mode, so Back leaves the Workspace from either
-mode and the content that replaces the other mode settles in
-(`is-mode-switched`). The Back swipe follows the finger while editing too: a
-reorder starts only from a still press or a grip (`touch-action: none`), so a
-moving finger is never one, and once an item is lifted
-(`data-arrange-dragging`) the swipe stands down.
+The phone Workspace (`WorkspacePanel.tsx`) is one live grid that is also its
+own editor, the way an iOS Home Screen is; there is no Edit switch.
 
+- **Entering.** Holding any item still for `ARRANGE_ACTIVATE_MS` (420 ms, any
+  pointer) turns editing on and lifts that item at once, so the same press
+  carries on as a drag (`useArrange` `activate`, which renders editing with
+  `flushSync`; the copy rises from where the item sat under the finger, and
+  whatever the mode change reflows glides there by FLIP). The held item sinks
+  slightly while the hold builds (`data-arrange-pressing`, CSS `scale`). Holding
+  an empty spot does the same without a lift, and the *Edit* button under the
+  grid (with an "or hold any item" tip) is the way in without a long press. A
+  moving finger is always a scroll.
+- **Editing.** The header trades Back for Add (+) and Done (`dismiss="none"`,
+  `headerTrailing`); Done, Escape or a tap on an empty spot ends editing, and
+  the Back swipe is off meanwhile. Every item jiggles — CSS `rotate` only, a
+  stable per-item phase (`--jiggle-phase`), smaller for full-width rows, paused
+  under the Add page, under a package window and on exit, off with reduced
+  motion — and carries its controls: a corner minus removes (the item shrinks
+  away, the rest closes up), a widget's size pill cycles its sizes, headings and
+  labelled dividers are edited in place, arrow keys (Home/End) move a focused
+  item and Delete removes it. Widgets and layout elements get a card drawn just
+  outside their box (`::before`), so nothing moves. A floating dock shows the
+  hint until there is something to undo, then Undo; it is near-opaque, not
+  blurred, so it never re-filters a jiggling grid. Undo walks back every change
+  of the editing session (a burst of typing in one label is one step); *Reset
+  to default* restores the project's default arrangement and is undoable.
+- **Live widgets stay mounted** in both modes; while editing, launchers' and
+  widgets' own content is `inert`, so a press reaches the item. A widget with
+  nothing to show (a session widget with no chat open) is left out of the
+  Workspace and shown dormant while editing, so it can still be moved or
+  removed.
 - **Add page** (`WorkspaceGallery.tsx`, `workspaceGallery.css`): a full-height
   page drawn as the sheet's own top layer, moving with the phone stack grammar —
-  in from the inline-end edge; Back, Done, Escape or a swipe (the editor peeks in
+  in from the inline-end edge; Back, Done, Escape or a swipe (the grid peeks in
   behind) pop it. A large search field needs every word of the query in the
   title, description or package and ranks title hits first, marking them
   (`searchPanelItems`); All / Widgets / Apps / Layout filters carry live counts.
   Without a query the page shows *Suggested for this project* (the kind's
-  default widgets not placed when it opened), every app as a tile grid, each
-  package's widgets A–Z, then the layout elements (`panelGallerySections`);
-  sections longer than their preview (8 apps, 4 widgets) fold behind *Show all*.
-  Apps already placed when the page opened sort last, fixed for the visit.
-  Everything renders metadata only, never a live widget. A tap adds — an app
-  joins the other apps, anything else goes to the end (`insertPanelItem`); a tap
-  on an added single-use item takes it off; repeatable items add another. Back
-  in the editor, the newcomers are marked once and brought into view.
-- **Arrange** (`WorkspaceEditor.tsx`, `workspacePanelEditor.css`): the
-  arrangement drawn as it will look (tiles four to a line — three in narrow and
-  six in wide containers — and widgets and layout elements as full-width rows),
-  every control on the item itself: a corner minus removes, a widget's size pill
-  cycles its sizes, headings and labelled dividers are edited in place. Undo
-  walks back every change of the editing session (a burst of typing in one label
-  is one step); *Reset to default* restores the project's default arrangement and
-  is undoable. Rows show metadata only.
+  default widgets not placed when it opened), every app as a tile grid (three
+  across up to a 420 px page, as the Workspace itself), each package's widgets
+  A–Z, then the layout elements (`panelGallerySections`); sections longer than
+  their preview (9 apps, 4 widgets) fold behind *Show all*. Apps already placed
+  when the page opened sort last, fixed for the visit. Everything renders
+  metadata only, never a live widget. A tap adds — an app joins the other apps,
+  anything else goes to the end (`insertPanelItem`); a tap on an added
+  single-use item takes it off; repeatable items add another. Back on the grid,
+  the newcomers are marked once and brought into view.
 
-Reordering is `workspaceArrange.ts`. A touch lifts an item after a 220 ms press
-without moving (a swipe still scrolls); a row's grip lifts at once
-(`touch-action: none`); a mouse or pen drags after 4 px; arrow keys (Home/End)
-on a tile or grip move it and Delete removes it. A pointer move only transforms
+Reordering is `workspaceArrange.ts`. While editing, a touch lifts an item after
+a 220 ms press without moving (a swipe still scrolls); a grip (`gripProps`, for
+a list that wants one) lifts at once (`touch-action: none`); a mouse or pen
+drags after 4 px. A pointer move only transforms
 the lifted copy (drawn inside the sheet) and re-aims; React renders only when
 the hole moves. Aiming reads the resting geometry measured after that render,
 in the scroller's content coordinates: an item counts as passed once the held

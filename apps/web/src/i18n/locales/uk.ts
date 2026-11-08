@@ -2781,6 +2781,8 @@ export const uk: AppMessages = {
   "workspace.panel.addTitle": "Додати віджети",
   "workspace.panel.availableValue": "Доступно: {count}",
   "workspace.panel.arrangeHint": "Утримуйте й перетягуйте, щоб переставити. Мінус — щоб вилучити.",
+  "workspace.panel.holdToEdit": "Або утримуйте будь-який елемент, щоб переставити",
+  "workspace.panel.dormant": "З’явиться, коли матиме що показати",
   "workspace.panel.keyboardHint": "Стрілки переміщують, Delete вилучає.",
   "workspace.panel.arrangementLabel": "Елементи робочого простору",
   "workspace.panel.emptyTitle": "Робочий простір порожній",

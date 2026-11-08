@@ -2781,6 +2781,8 @@ export const de: AppMessages = {
   "workspace.panel.addTitle": "Widgets hinzufügen",
   "workspace.panel.availableValue": "Verfügbar: {count}",
   "workspace.panel.arrangeHint": "Halten und ziehen zum Verschieben. Auf das Minus tippen zum Entfernen.",
+  "workspace.panel.holdToEdit": "Oder ein Element gedrückt halten, um es zu verschieben",
+  "workspace.panel.dormant": "Erscheint, sobald es etwas anzuzeigen gibt",
   "workspace.panel.keyboardHint": "Pfeiltasten verschieben, Entf entfernt.",
   "workspace.panel.arrangementLabel": "Elemente im Arbeitsbereich",
   "workspace.panel.emptyTitle": "Der Arbeitsbereich ist leer",

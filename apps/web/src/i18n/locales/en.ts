@@ -2784,6 +2784,8 @@ export const en = {
   "workspace.panel.addTitle": "Add widgets",
   "workspace.panel.availableValue": "Available: {count}",
   "workspace.panel.arrangeHint": "Hold and drag to move. Tap the minus to remove.",
+  "workspace.panel.holdToEdit": "Or hold any item to rearrange",
+  "workspace.panel.dormant": "Appears when it has something to show",
   "workspace.panel.keyboardHint": "Arrow keys move it, Delete removes it.",
   "workspace.panel.arrangementLabel": "Workspace items",
   "workspace.panel.emptyTitle": "Your Workspace is empty",
