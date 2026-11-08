@@ -2532,8 +2532,10 @@ new send, session switch or explicit Jump to latest clears the hold. A newly ope
 events (`INITIAL_EVENT_WINDOW` in `init.ts`; streamed answers and thoughts are
 many chunk events, so the newest 40 were often one answer and the first frame
 showed a row or two at the top of the screen). The first frame lands at rest
-on the tail (or the saved reading position): apart from the surface's one
-reveal, no lift, entrance or fade for rows already in the log. The background
+on the tail: a chat the reader switches back to shows its newest messages, and
+only a reload or remount restores a saved reading position (`timelineAnchor.ts`;
+if that row is gone, the tail). Apart from the surface's one reveal, no lift,
+entrance or fade for rows already in the log. The background
 backfill (2,000-event pages up to 4,000) then lands above without changing what is rendered: the suffix window
 keeps its first row (`heldWindowStart`, located again by its first rows' ids
 when history merges into it, `locateWindowHead` in `timelineWindow.ts`), so

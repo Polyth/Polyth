@@ -2358,11 +2358,13 @@ export default function Timeline({
       window.removeEventListener("pointercancel", releaseScrollbar);
     };
   }, []);
-  // Stable anchor: session switches adjust during render so the
-  // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
-  // the incoming one is ready before the first paint of the new session.
-  // Pane dock/expand/full-screen transitions never remount this tree, so the
-  // live scroll position carries itself; this record covers reload + switch.
+  // Stable anchor: session switches adjust during render so the incoming
+  // position is ready before the first paint of the new session. A chat the
+  // reader leaves is recorded as following its tail (the cleanup below): coming
+  // back to it shows its newest messages. Pane dock/expand/full-screen
+  // transitions never remount this tree, so the live scroll position carries
+  // itself; a recorded reading position only covers a reload or a remount of
+  // the chat that stays open.
   const restoreRef = useRef<TimelineAnchor | null>(null);
   const [anchorSession, setAnchorSession] = useState<string | null | undefined>(undefined);
   if (anchorSession !== sessionId) {
@@ -2383,9 +2385,6 @@ export default function Timeline({
     if (turnEndTimer.current !== null) {
       clearTimeout(turnEndTimer.current);
       turnEndTimer.current = null;
-    }
-    if (anchorSession !== undefined && anchorSession !== null && el !== null) {
-      saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
     }
     setAnchorSession(sessionId);
     setLimit(initialLimit);
@@ -3532,7 +3531,11 @@ export default function Timeline({
     touchEndCleanup.current = null;
   }, [sessionId]);
 
-  // Debounce safety: reload and unmount flush the stable anchor immediately.
+  // Debounce safety: a reload flushes the stable anchor immediately. The
+  // cleanup must not capture: on a switch it runs after the commit, when the
+  // scroller and the follow state already belong to the next chat. A chat that
+  // is no longer the open one was left, whether this tree stayed mounted or a
+  // new-chat or loading surface replaced it.
   useEffect(() => {
     if (sessionId === null) return;
     const flush = () => {
@@ -3544,7 +3547,11 @@ export default function Timeline({
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
-      flush();
+      if (saveTimer.current !== null) clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      if (getState().activeSessionId !== sessionId) {
+        saveTimelineAnchor(sessionId, { id: null, offset: 0, atBottom: true });
+      }
     };
   }, [sessionId]);
 
@@ -4123,8 +4130,16 @@ export default function Timeline({
       }
       // Initial hydration is a newest-first window. An older saved anchor can
       // be absent until background backfill lands, so retain it while the
-      // server still advertises earlier canonical events.
-      if (rows.length > 0 && !canLoadOlder) restoreRef.current = null;
+      // server still advertises earlier canonical events. Once its row is
+      // known to be gone there is no reading position left: the chat rests on
+      // its newest messages instead of wherever the scroller happened to be.
+      if (rows.length > 0 && !canLoadOlder) {
+        restoreRef.current = null;
+        readerDetached.current = false;
+        atBottom.current = true;
+        setShowJump(false);
+        scrollToTail();
+      }
       return;
     }
     restoreRef.current = null;
