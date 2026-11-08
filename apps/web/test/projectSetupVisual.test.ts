@@ -54,3 +54,16 @@ test("new-project step 1 pins its primary action and shares step 2's head grid",
   assert.match(setupCss, /\.project-setup-scroll \.project-package-list \{[^}]*max-height:\s*none;[^}]*overflow:\s*visible;/s);
   assert.doesNotMatch(setupCss, /\.project-setup-flow-dialog > \.project-composition-editor/);
 });
+
+test("the new-project window uses the flow's own head and keeps its footer pinned", async () => {
+  const [identity, setupCss] = await Promise.all([
+    readFile(new URL("../src/components/ProjectIdentityStep.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/ProjectSetupFlowDialog.css", import.meta.url), "utf8"),
+  ]);
+  // No head of its own: a markup class without styles once put the title under
+  // the iPhone status bar, flush with the panel's edges.
+  assert.match(identity, /<div className="project-setup-head">[\s\S]*?className="project-setup-title project-identity-heading"[\s\S]*?className="project-setup-hint"/);
+  assert.doesNotMatch(identity + setupCss, /project-setup-intro/);
+  // The footer is a sibling of the scroll region, as on every other step.
+  assert.match(identity, /<\/div>\s*<\/div>\s*\{\/\*[^]*?\*\/\}\s*<div className="project-setup-actions project-identity-actions">/);
+});

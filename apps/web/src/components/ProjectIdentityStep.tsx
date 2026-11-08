@@ -15,7 +15,7 @@ import Dialog from "./a11y/Dialog.tsx";
 import { isImeComposing } from "./input/editorCore.ts";
 import ProjectColorPresets from "./ProjectColorPresets.tsx";
 import ProjectIconPickerField, { IconArt } from "./ProjectIconPickerField.tsx";
-import { Button, FolderIcon, Icon, TextInput, type LucideIcon } from "./ui/index.ts";
+import { Button, CloseIcon, FolderIcon, Icon, IconButton, TextInput, type LucideIcon } from "./ui/index.ts";
 import "./ProjectSetupFlowDialog.css";
 
 const NAME_INPUT = ".project-identity-name input";
@@ -90,10 +90,17 @@ export default function ProjectIdentityStep({
       initialFocus={initialFocus}
       className="project-setup-flow-dialog project-setup-flow-dialog-compact project-identity-dialog"
     >
-      <div className="project-setup-intro">
-        {stepLabel && <span className="project-setup-step">{stepLabel}</span>}
-        <h2 className="project-identity-heading" tabIndex={-1}>{tr("projectcomposition.identityHeading")}</h2>
-        <p>{hint}</p>
+      {/* The head the other steps use, so the flow label, the X and the title stay
+          put. Opened on its own there is no flow to leave: Cancel is the way out. */}
+      <div className="project-setup-head">
+        {stepLabel && (
+          <div className="project-setup-head-top">
+            <span className="project-setup-step">{stepLabel}</span>
+            <IconButton icon={CloseIcon} label={tr("common.close")} onClick={onClose} />
+          </div>
+        )}
+        <h2 className="project-setup-title project-identity-heading" tabIndex={-1}>{tr("projectcomposition.identityHeading")}</h2>
+        <p className="project-setup-hint">{hint}</p>
       </div>
       <div className="project-setup-scroll">
         <div className="project-appearance-body project-identity-body" style={style}>
@@ -157,11 +164,12 @@ export default function ProjectIdentityStep({
 
           {error && <div className="project-setup-error project-identity-error" role="alert">{error}</div>}
         </div>
-
-        <div className="project-setup-actions project-identity-actions">
-          <Button variant="ghost" {...(secondaryIcon ? { iconStart: secondaryIcon } : {})} onClick={onSecondary}>{secondaryLabel}</Button>
-          <Button variant="primary" disabled={!canSubmit} onClick={onPrimary}>{primaryLabel}</Button>
-        </div>
+      </div>
+      {/* Pinned like every other step's footer: a keyboard, a short window or the
+          full icon library must not push the primary action out of reach. */}
+      <div className="project-setup-actions project-identity-actions">
+        <Button variant="ghost" {...(secondaryIcon ? { iconStart: secondaryIcon } : {})} onClick={onSecondary}>{secondaryLabel}</Button>
+        <Button variant="primary" disabled={!canSubmit} onClick={onPrimary}>{primaryLabel}</Button>
       </div>
     </Dialog>
   );

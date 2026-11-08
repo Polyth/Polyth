@@ -27,6 +27,13 @@ milestones are named after what shipped.
   question", "Weigh my options") instead of "Explore codebase" and "Find tech
   debt". Projects with a repository, and Engineering projects, are unchanged.
 
+### Fixed
+
+- The window that names a new project no longer sits under the iPhone status bar
+  or against the edges of its panel. Its Create button stays in reach above a
+  keyboard, on a phone held sideways and in a short window, and colours and icons
+  line up on phones and tablets. The folder step fits a phone's narrowest screens.
+
 ---
 
 ## Unreleased — isolated chats keep their chat images after merge
