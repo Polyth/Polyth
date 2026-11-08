@@ -10,6 +10,15 @@
   overflow: hidden;
 }
 
+/* A keyboard shrinks the visible band, which `vh` never hears about: the panel
+   stays inside the backdrop's own box rather than sliding off both its ends. */
+@media (min-width: 701px) {
+  .project-setup-flow-dialog.dialog-panel,
+  .folder-dialog.dialog-panel {
+    max-height: min(86vh, 100%);
+  }
+}
+
 .project-setup-flow-dialog-compact {
   width: min(520px, calc(100vw - 48px));
 }
@@ -66,6 +75,9 @@
   overflow-wrap: anywhere;
 }
 
+/* The window opened on its own has no label line above its title. */
+.project-setup-title:first-child { margin-top: 0; }
+
 .project-setup-hint {
   max-width: 62ch;
   margin: 4px 0 0;
@@ -84,9 +96,9 @@
   letter-spacing: .01em;
 }
 
-/* The directions, the Workspace accordion and the actions share one scroll
-   region, so a short (half-screen) window scrolls the whole step instead of
-   a nested box inside the expanded Workspace list. */
+/* A step's content shares one scroll region under the head and above the pinned
+   footer, so a short (half-screen) window scrolls the whole step instead of a
+   nested box inside the expanded Workspace list or icon library. */
 .project-setup-scroll {
   display: flex;
   flex: 1 1 auto;
@@ -102,8 +114,6 @@
      span of the fixed dialog, and one extra 8px row would flash a scrollbar. */
   padding: var(--space-4) var(--space-5) var(--space-4);
 }
-
-.project-setup-scroll > .project-setup-actions { margin-top: auto; }
 
 .project-setup-scroll .project-package-list {
   max-height: none;
@@ -157,14 +167,28 @@
   padding-top: var(--space-4);
 }
 
-/* The new-project window: name, colour, icon. */
+/* The new-project window: name, colour, icon. Colours and icons share one set
+   of column edges wherever a finger is the pointer, so the two grids read as
+   one. The track counts are the only thing a window shape has to change. */
+.project-identity-dialog .project-setup-head { min-height: 0; }
+
 .project-setup-scroll > .project-identity-body {
+  --identity-color-columns: 13;
+  --identity-icon-columns: 7;
+  --identity-swatch: var(--control-h-sm);
+  --identity-icon-track: 1fr;
+  --identity-icon-height: var(--control-h);
   flex: none;
   gap: var(--space-5);
   padding: var(--space-4) var(--space-5) var(--space-5);
 }
 
-.project-identity-heading:focus { outline: none; }
+/* Focus lands here only so a phone opens with no keyboard and a reader starts at
+   the title. It is not a control, so no theme's focus ring belongs on it. */
+.project-setup-flow-dialog .project-identity-heading:is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
 
 .project-identity-name {
   display: flex;
@@ -206,11 +230,22 @@
   min-height: var(--control-h-sm);
 }
 
-/* A selected swatch needs a ring that shows on its own colour; the wrapped row
-   needs no sideways scroll to reach the last colours. */
+/* Every colour is in view with no sideways scroll, edge to edge on the content
+   column. A selected swatch needs a ring that shows on its own colour. */
 .project-identity-body .project-color-presets {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(var(--identity-color-columns), minmax(0, var(--identity-swatch)));
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-1);
   overflow: visible;
+}
+
+.project-identity-body .project-color-presets > button,
+.project-identity-body .project-color-custom {
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  aspect-ratio: 1;
 }
 
 .project-identity-body .project-color-presets > button.selected {
@@ -218,12 +253,28 @@
   box-shadow: 0 0 0 2px var(--elevated), 0 0 0 4px var(--swatch-color);
 }
 
+.project-identity-body .project-color-custom.selected {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--elevated), 0 0 0 4px var(--text-dim);
+}
+
 .project-identity-body .project-icon-options.project-identity-starters {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--identity-icon-columns), minmax(0, var(--identity-icon-track)));
+  justify-content: space-between;
   gap: var(--space-1);
   max-height: none;
   overflow: visible;
   padding: 0;
+}
+
+.project-identity-body .project-identity-starters > button {
+  height: var(--identity-icon-height);
+}
+
+/* The whole library scrolls with the step, not in a box of its own. */
+.project-identity-body .project-icon-picker .project-icon-options {
+  max-height: none;
+  overflow: visible;
 }
 
 .project-identity-body .project-identity-starters > button {
@@ -256,27 +307,69 @@
 
 .project-identity-folder > .ui-icon { flex: none; }
 
+/* Wrapped, never cut off: a phone has no hover to reveal the rest of a path. */
 .project-identity-folder > span:not(.ui-icon) {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+/* A quiet action's label ends on the content column, like everything around it. */
+.project-identity-section-head > .ui-btn,
+.project-identity-folder > .ui-btn {
+  flex: none;
+  margin-inline-end: calc(var(--control-pad-x-sm) * -1);
 }
 
 .project-identity-body .project-identity-error { margin: 0; }
 
 .project-identity-actions.project-setup-actions {
   justify-content: space-between;
-  margin-top: auto;
+  border-top: 1px solid var(--hair);
+  padding-top: var(--space-3);
+}
+
+/* Finger-sized, in the seven columns that fourteen icons fill exactly and that
+   fit the narrowest phone. The narrowest swatches give up a little painted size
+   but keep their reach. */
+@media (pointer: coarse), (max-width: 700px) {
+  .project-setup-scroll > .project-identity-body {
+    --identity-color-columns: 7;
+    --identity-swatch: var(--tap);
+    --identity-icon-track: var(--tap);
+    --identity-icon-height: var(--tap);
+  }
+
+  .project-identity-body .project-color-presets > button::after {
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    content: "";
+  }
+
+  /* "All icons" keeps the columns the starters had, on one line of finger-sized
+     filters and categories. */
+  .project-identity-body .project-icon-picker .project-icon-options {
+    grid-template-columns: repeat(var(--identity-icon-columns), minmax(0, 1fr));
+    gap: var(--space-1);
+    padding: 0;
+  }
+
+  .project-identity-body .project-icon-picker .project-icon-options > button {
+    height: var(--identity-icon-height);
+  }
+
+  .project-identity-body .project-icon-picker :is(.chip, .picker-chip) {
+    min-height: calc(var(--tap) - var(--space-1));
+  }
 }
 
 @media (pointer: coarse) {
-  .project-identity-body .project-color-presets > button,
-  .project-identity-body .project-color-custom {
-    width: var(--tap);
-    height: var(--tap);
-    min-width: var(--tap);
+  .folder-dialog .folder-crumbs { height: var(--tap); }
+  .folder-dialog .folder-crumb {
+    min-width: var(--control-h-sm);
+    min-height: calc(var(--tap) - 2px);
+    padding-block: 0;
   }
 }
 
@@ -377,14 +470,6 @@ body[data-desktop-low-resource="true"] :is(
       max(var(--space-3), var(--safe-left));
   }
 
-  .project-identity-body .project-icon-options.project-identity-starters {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .project-identity-dialog .project-setup-intro h2 {
-    max-width: none;
-  }
-
   .project-setup-actions {
     gap: var(--space-2);
     padding:
@@ -401,9 +486,35 @@ body[data-desktop-low-resource="true"] :is(
     flex: 1;
   }
 
+  /* One flexible primary action, as on the picker's footer. */
+  .project-identity-actions.project-setup-actions {
+    padding-top: var(--space-2);
+  }
+
+  .project-identity-actions.project-setup-actions > .ui-btn--ghost {
+    flex: none;
+  }
+
   .project-setup-error {
     margin-inline-start: max(var(--space-3), var(--safe-left));
     margin-inline-end: max(var(--space-3), var(--safe-right));
+  }
+
+  /* "Setting up" and its recovery fill the same full-screen sheet as the window
+     before them, so they keep clear of the status bar and hold the footer at
+     the bottom edge too. */
+  .project-setup-progress {
+    flex: 1;
+    justify-content: center;
+    padding-block: max(var(--space-5), var(--safe-top)) max(var(--space-5), var(--safe-bottom));
+  }
+
+  .project-setup-flow-dialog-compact > .project-setup-error {
+    margin-top: max(var(--space-5), calc(var(--safe-top) + var(--space-2)));
+  }
+
+  .project-setup-flow-dialog-compact > .project-setup-actions {
+    margin-top: auto;
   }
 
   .folder-dialog-head {
@@ -428,5 +539,109 @@ body[data-desktop-low-resource="true"] :is(
     padding-inline:
       max(var(--space-3), var(--safe-left))
       max(var(--space-3), var(--safe-right));
+  }
+}
+
+/* Clone and SSH join New folder on a phone's one-row footer: too many labels to
+   read beside the primary action, so they become icons. Each keeps its name for
+   assistive tech, and an open source shows them all again. */
+@container (max-width: 520px) {
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-source-row:has(> .folder-source-chip ~ .folder-source-chip) {
+    overflow: visible;
+  }
+
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-source-row:has(> .folder-source-chip ~ .folder-source-chip) > .folder-source-chip {
+    width: var(--tap);
+    min-width: var(--tap);
+    padding: 0;
+    justify-content: center;
+  }
+
+  .folder-dialog-body-stepped:not([data-source-armed]) .folder-source-row:has(> .folder-source-chip ~ .folder-source-chip) > .folder-source-chip .ui-btn-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* The home indicator sits behind the keyboard while it is open. */
+body[data-keyboard="open"] :is(.project-setup-actions, .folder-foot) {
+  padding-bottom: var(--space-2);
+}
+
+/* A phone on its side and a short desktop window: the head gives its height to
+   the content, and colours and icons each keep to one row. Width keeps a portrait
+   phone with its keyboard open out of this. */
+@media (min-width: 560px) and (max-height: 560px) {
+  .project-setup-flow-dialog .project-setup-head,
+  .folder-dialog .folder-dialog-head-stepped {
+    min-height: 0;
+  }
+
+  .project-setup-flow-dialog .project-setup-hint,
+  .folder-dialog .folder-dialog-head-stepped .folder-dialog-subtitle {
+    display: none;
+  }
+
+  .project-setup-scroll > .project-composition-editor,
+  .project-setup-scroll > .project-identity-body {
+    padding-block: var(--space-3);
+  }
+
+  .project-setup-scroll > .project-identity-body {
+    --identity-color-columns: 13;
+    --identity-icon-columns: 14;
+    gap: var(--space-3);
+  }
+}
+
+/* The same shape as a floating window: it takes the whole band. */
+@media (min-width: 701px) and (max-height: 560px) {
+  :is(
+    .dialog-backdrop:has(.project-setup-flow-dialog),
+    .dialog-backdrop:has(.folder-dialog)
+  ) {
+    padding:
+      max(var(--space-2), var(--safe-top))
+      max(var(--space-2), var(--safe-right))
+      max(var(--space-2), var(--safe-bottom))
+      max(var(--space-2), var(--safe-left));
+  }
+
+  .project-setup-flow-dialog.dialog-panel,
+  .folder-dialog.dialog-panel {
+    max-height: 100%;
+  }
+
+  .project-setup-flow-step.dialog-panel,
+  .folder-dialog-stepped.dialog-panel {
+    height: 100%;
+  }
+
+  .project-identity-dialog.dialog-panel {
+    width: min(720px, calc(100vw - 48px));
+  }
+
+  .project-setup-flow-dialog .project-setup-head,
+  .folder-dialog .folder-dialog-head-stepped {
+    flex: none;
+    padding-block: var(--space-3) var(--space-2);
+  }
+
+  /* An open source owns the height, as on a phone: its fields and confirm action
+     scroll together, under a short destination list. */
+  .folder-dialog-body[data-source-armed] .folder-foot {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .folder-dialog-body[data-source-armed] .folder-list {
+    flex: none;
+    height: 96px;
   }
 }

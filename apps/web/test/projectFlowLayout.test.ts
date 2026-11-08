@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBuildOptions, uiFontScalePlugin } from "../buildConfig.ts";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type Page } from "playwright-core";
 import { findChromium } from "./chromium.ts";
 
 const CHROME = await findChromium();
@@ -47,8 +47,11 @@ async function fixture(): Promise<string> {
     import ProjectSetupFlowDialog from "./components/ProjectSetupFlowDialog.tsx";
     import * as store from "./store.ts";
     api.packagesList = async () => ({ packages: [] });
+    // Nothing here creates a project; a press on Create stays on "setting up".
+    api.createManagedProject = () => new Promise(() => {});
     api.browseHost = async (path) => ({
-      path: path || "/home/u", parent: "/home", home: "/home/u",
+      // A long name: the picker's primary action carries it.
+      path: path || "/home/u/my-website-redesign-final", parent: "/home/u", home: "/home/u",
       entries: [
         { name: "code", path: "/home/u/code", modifiedAt: Date.now() - 3600e3, hidden: false },
         { name: "documents", path: "/home/u/documents", modifiedAt: Date.now() - 86400e3, hidden: false },
@@ -277,4 +280,192 @@ test("RTL: the head mirrors without moving the content column", { skip: !CHROME 
   close(eyebrow1.r, eyebrow2.r, "flow labels keep one edge in RTL");
   close(step1[".project-direction-card"]!.l, step2[".folder-list"]!.l, "content keeps its column in RTL");
   assert.equal(overflow, false, "RTL does not overflow");
+});
+
+interface WindowOptions {
+  width: number;
+  height: number;
+  touch?: boolean;
+  /** The status bar and home indicator a native shell reports. */
+  safeTop?: number;
+  safeBottom?: number;
+  /** A visible band smaller than the viewport: an open keyboard. */
+  band?: number;
+}
+
+/** Opens a page of the flow in a given window shape, reporting safe-area insets
+ *  and the visible band the way the native shell and mobileViewport.ts do. */
+async function withFlow<T>(options: WindowOptions, run: (page: Page) => Promise<T>): Promise<T> {
+  assert.ok(browser, "Chromium is available");
+  const { width, height, touch = true, safeTop = 0, safeBottom = 0, band } = options;
+  const context = await browser.newContext({
+    viewport: { width, height },
+    deviceScaleFactor: 2,
+    reducedMotion: "reduce",
+    ...(touch ? { isMobile: true, hasTouch: true } : {}),
+  });
+  try {
+    await context.route(`${ORIGIN}/**`, (route) => route.fulfill({ contentType: "text/html", body: html }));
+    const page = await context.newPage();
+    await page.goto(`${ORIGIN}/`);
+    await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
+    await page.evaluate(({ safeTop, safeBottom, band }) => {
+      const root = document.documentElement;
+      root.style.setProperty("--safe-area-inset-top", `${safeTop}px`);
+      root.style.setProperty("--safe-area-inset-bottom", `${safeBottom}px`);
+      if (band) root.style.setProperty("--visual-vh", `${band}px`);
+    }, { safeTop, safeBottom, band: band ?? 0 });
+    await page.waitForSelector(".project-setup-flow-dialog");
+    return await run(page);
+  } finally {
+    await context.close();
+  }
+}
+
+const openWindow = async (page: Page) => {
+  await page.locator(".project-setup-actions .ui-btn").click();
+  await page.waitForSelector(".project-identity-dialog");
+};
+
+const boxOf = (page: Page, selector: string) => page.locator(selector).first().evaluate((element) => {
+  const rect = element.getBoundingClientRect();
+  return { l: rect.left, r: rect.right, t: rect.top, b: rect.bottom };
+});
+
+const boxesOf = (page: Page, selector: string) => page.locator(selector).evaluateAll((elements) => elements.map((element) => {
+  const rect = element.getBoundingClientRect();
+  return { l: rect.left, r: rect.right, t: rect.top, b: rect.bottom };
+}));
+
+const SWATCHES = ".project-color-presets > button, .project-color-custom";
+const STARTERS = ".project-identity-starters > button";
+const IDENTITY_PRIMARY = ".project-identity-actions .ui-btn--primary";
+
+for (const { width, height } of [{ width: 430, height: 932 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
+  test(`phone window ${width}px: clear of the status bar, on one column, with its action in reach`, { skip: !CHROME }, async () => {
+    await withFlow({ width, height, safeTop: 59, safeBottom: 34 }, async (page) => {
+      await openWindow(page);
+      const head = await boxOf(page, ".project-identity-dialog .project-setup-head");
+      const label = await boxOf(page, ".project-identity-dialog .project-setup-step");
+      const close = await boxOf(page, ".project-identity-dialog .project-setup-head-top .ui-icon-btn");
+      const title = await boxOf(page, ".project-identity-heading");
+      const glyph = await boxOf(page, ".project-identity-glyph");
+      const input = await boxOf(page, ".project-identity-name input");
+      const swatches = await boxesOf(page, SWATCHES);
+      const starters = await boxesOf(page, STARTERS);
+      const primary = await boxOf(page, IDENTITY_PRIMARY);
+
+      assert.ok(label.t >= 59, `the flow label clears the status bar (${label.t})`);
+      const ring = await page.locator(".project-identity-heading").evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { focused: document.activeElement === element, outline: style.outlineStyle, shadow: style.boxShadow };
+      });
+      assert.deepEqual(ring, { focused: true, outline: "none", shadow: "none" }, "the focused title shows no ring");
+      assert.equal(head.l, 0, "the head spans the sheet");
+      assert.ok(close.r <= width - 11, "the X keeps the gutter");
+      for (const [name, box] of [["title", title], ["glyph", glyph], ["first swatch", swatches[0]!], ["first icon", starters[0]!]] as const) {
+        assert.ok(Math.abs(box.l - 12) <= 1, `${name} starts on the 12px column (${box.l})`);
+      }
+      assert.ok(Math.abs(input.r - (width - 12)) <= 1, `the name ends on the column (${input.r})`);
+
+      // Thirteen colours and fourteen icons on one set of seven columns.
+      assert.equal(swatches.length, 13);
+      assert.equal(starters.length, 14);
+      for (let index = 0; index < 7; index += 1) {
+        assert.ok(Math.abs(swatches[index]!.t - swatches[0]!.t) <= 1, `swatch ${index} is on the first row`);
+        assert.ok(Math.abs(swatches[index]!.l - starters[index]!.l) <= 1, `column ${index} is shared by colours and icons`);
+        assert.ok(Math.abs(swatches[index]!.l - swatches[index + 7 < 13 ? index + 7 : index]!.l) <= 1, `column ${index} holds between rows`);
+        assert.ok(starters[index + 7]!.t > starters[index]!.b, `icon row 2 sits under row 1 at ${index}`);
+      }
+      assert.ok(Math.abs(swatches[6]!.r - (width - 12)) <= 1, "the colour row ends on the column");
+      assert.ok(swatches[7]!.t > swatches[0]!.b, "the remaining colours take the second row");
+      for (const icon of starters) assert.ok(icon.b - icon.t >= 44, "icons keep a full touch height");
+
+      assert.ok(primary.b <= height - 34 + 0.5, `the primary action clears the home indicator (${primary.b})`);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+      assert.equal(overflow, false, "nothing overflows sideways");
+    });
+  });
+}
+
+test("phone window: the primary action stays pinned above a keyboard and over the full library", { skip: !CHROME }, async () => {
+  await withFlow({ width: 390, height: 844, safeTop: 59, safeBottom: 34, band: 420 }, async (page) => {
+    await openWindow(page);
+    const primary = await boxOf(page, IDENTITY_PRIMARY);
+    const panel = await boxOf(page, ".project-identity-dialog");
+    assert.ok(Math.abs(panel.b - 420) <= 1, `the sheet ends at the band (${panel.b})`);
+    assert.ok(primary.b <= 420, `the action is above the keyboard (${primary.b})`);
+    const scroller = page.locator(".project-identity-dialog .project-setup-scroll");
+    assert.equal(await page.locator(".project-setup-scroll .project-identity-actions").count(), 0, "the footer is outside the scroll region");
+    assert.ok(await scroller.evaluate((element) => element.scrollHeight > element.clientHeight), "the content scrolls under it");
+  });
+});
+
+test("phone: setting up and its recovery clear the status bar", { skip: !CHROME }, async () => {
+  await withFlow({ width: 390, height: 844, safeTop: 59, safeBottom: 34 }, async (page) => {
+    await openWindow(page);
+    await page.locator(IDENTITY_PRIMARY).click();
+    await page.waitForSelector(".project-setup-progress");
+    const text = await boxOf(page, ".project-setup-progress strong");
+    assert.ok(text.t >= 59, `the progress text clears the status bar (${text.t})`);
+    assert.ok(Math.abs((text.t + text.b) / 2 - 422) <= 80, `it sits mid-sheet rather than at the top (${text.t})`);
+  });
+});
+
+test("desktop window: the head keeps the gutter and the colours keep to one row", { skip: !CHROME }, async () => {
+  await withFlow({ width: 1100, height: 760, touch: false }, async (page) => {
+    await openWindow(page);
+    const panel = await boxOf(page, ".project-identity-dialog");
+    const title = await boxOf(page, ".project-identity-heading");
+    const label = await boxOf(page, ".project-identity-dialog .project-setup-step");
+    const swatches = await boxesOf(page, SWATCHES);
+    assert.ok(Math.abs(title.l - panel.l - 24) <= 1, `the title is inset 24px (${title.l - panel.l})`);
+    assert.ok(label.t - panel.t >= 16, `the head is inset from the top (${label.t - panel.t})`);
+    assert.ok(swatches.every((swatch) => Math.abs(swatch.t - swatches[0]!.t) <= 1), "every colour is on one row");
+    assert.ok(Math.abs(swatches[12]!.r - (panel.r - 24)) <= 1, "the row ends on the column");
+  });
+});
+
+for (const { width, height } of [{ width: 932, height: 430 }, { width: 667, height: 375 }]) {
+  test(`phone on its side ${width}x${height}: every step keeps its action in reach`, { skip: !CHROME }, async () => {
+    await withFlow({ width, height }, async (page) => {
+      const step1 = await boxOf(page, ".project-setup-actions .ui-btn");
+      assert.ok(step1.b <= height, `Continue is in view (${step1.b})`);
+      const cards = await page.locator(".project-setup-scroll").evaluate((element) => element.clientHeight);
+      assert.ok(cards >= 150, `the directions keep room to scroll (${cards}px)`);
+
+      await page.getByRole("button", { name: /engineering/i }).click();
+      await page.locator(".project-setup-actions .ui-btn").click();
+      await page.waitForSelector(".folder-dialog .folder-list");
+      const open = await boxOf(page, ".folder-open-btn");
+      const list = await boxOf(page, ".folder-list");
+      const title = await boxOf(page, ".folder-dialog-title");
+      assert.ok(open.b <= height, `Open is in view (${open.b})`);
+      assert.ok(list.b - list.t >= 72, `the list keeps room (${list.b - list.t}px)`);
+      assert.ok(list.t >= title.b, "the head is not squeezed into the list");
+      await page.locator(".folder-back").click();
+      await page.waitForSelector(".project-setup-flow-step");
+      await page.getByRole("button", { name: /engineering/i }).click();
+
+      await openWindow(page);
+      const primary = await boxOf(page, IDENTITY_PRIMARY);
+      const swatches = await boxesOf(page, SWATCHES);
+      assert.ok(primary.b <= height, `Create is in view (${primary.b})`);
+      assert.ok(swatches.every((swatch) => Math.abs(swatch.t - swatches[0]!.t) <= 1), "the colours keep to one row");
+    });
+  });
+}
+
+test("phone picker footer: Back, the ways to add and Open share one row with nothing cut off", { skip: !CHROME }, async () => {
+  await withFlow({ width: 320, height: 568, safeTop: 20 }, async (page) => {
+    await page.getByRole("button", { name: /engineering/i }).click();
+    await page.locator(".project-setup-actions .ui-btn").click();
+    await page.waitForSelector(".folder-dialog .folder-list");
+    const row = page.locator(".folder-source-row");
+    assert.ok(await row.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), "New folder is not clipped");
+    const back = await boxOf(page, ".folder-back");
+    const open = await boxOf(page, ".folder-open-btn");
+    assert.ok(Math.abs(back.t - open.t) <= 1, "one row");
+    assert.ok(open.r - open.l >= 96, `Open keeps a readable width (${open.r - open.l})`);
+  });
 });

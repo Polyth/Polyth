@@ -1243,6 +1243,14 @@ direction keep it working offline; "All icons" swaps them for
 `ProjectIconPickerField`, the picker the appearance dialog uses. A phone opens it
 with focus on the heading, never a keyboard; a desktop selects the name.
 
+It shares the flow's head and footer: a flow label with the X when it is a numbered
+step, the title and hint (opened on its own there is no label line, and Cancel is
+the way out), and a footer pinned outside the scroll region, so a keyboard or the
+full icon library never hides the primary action. With a touch pointer or at phone
+width, colours and icons sit in the same seven finger-sized columns, edge to edge
+on the content column (thirteen colours, fourteen icons); on a wide fine pointer the
+colours keep to one row.
+
 - **Polyth folder.** A quiet line says where files go, with "Choose another",
   which detours through the picker (unnumbered, `onBack` returns with every choice
   intact). Nothing exists until "Create project", because the folder takes its name
@@ -1282,13 +1290,20 @@ The directions step and the picker are one dialog box and one head grid
   one primary action: step 1's compact Continue matches the picker's Open.
   On phones the flow's picker footer is one row too — Back (icon-only, named
   for assistive tech), New folder, then the flexible Open — so the bar keeps
-  step 1's height. Only the directions scroll; the expanded Workspace list
+  step 1's height. When clone or SSH join New folder and the picker is 520px wide
+  or less, the ways to add become named icons; opening one shows the labels again. Only the directions scroll; the expanded Workspace list
   still never becomes its own scroll box.
 - **Focus.** The X is never the opening focus (`initialFocus` is the first
   `.project-direction-card`), so Enter on an open step 1 does not dismiss it.
   Coming Back from the picker returns focus to Continue. On the picker the
   folder list keeps that role. Escape closes every step, except that it first
   disarms an open alternative source (SSH, clone) instead of ending the flow.
+- **Short windows.** Full-screen panels clear the status bar and home indicator,
+  "setting up" included, and the footer drops the home-indicator space while a
+  keyboard is open. A floating panel stays inside the visible band. At 560px
+  tall or less (a phone on its side, from 560px wide) the head loses its fixed
+  frame and hint, a floating panel takes the whole band, and colours and icons each
+  keep to one row.
 
 When the account uses one interface for every project (Settings → Projects →
 Interface across projects, `projectInterfaceScope.ts`), directions shape nothing,
