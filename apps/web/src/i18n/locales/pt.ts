@@ -2781,6 +2781,8 @@ export const pt: AppMessages = {
   "workspace.panel.addTitle": "Adicionar widgets",
   "workspace.panel.availableValue": "Disponíveis: {count}",
   "workspace.panel.arrangeHint": "Mantenha premido e arraste para mover. Toque no menos para remover.",
+  "workspace.panel.holdToEdit": "Ou mantenha premido um elemento para reorganizar",
+  "workspace.panel.dormant": "Aparece quando tiver algo para mostrar",
   "workspace.panel.keyboardHint": "As setas movem, Delete remove.",
   "workspace.panel.arrangementLabel": "Itens do espaço de trabalho",
   "workspace.panel.emptyTitle": "O espaço de trabalho está vazio",

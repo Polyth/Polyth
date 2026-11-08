@@ -1324,8 +1324,8 @@ glass, `--hair-solid` edge and top highlight instead. Package frames reserve
 content box, so the rail tuck does not steal content width. Catalog pickers use
 the shared `workspaceCatalog.css` surface; one to four choices collapse to a
 compact action grid, while larger catalogs retain their controls and category
-headers. The phone Workspace editor and its full-page Add page own
-`workspacePanelEditor.css` and `workspaceGallery.css` (see
+headers. The phone Workspace's in-place editing (jiggle, corner minus, dock) and its
+full-page Add page own `workspacePanelEditor.css` and `workspaceGallery.css` (see
 [UI](ui.md#phone-workspace-editor)). Rail and zone Customize editors use `railEditor.css` (fixed header and
 footer, only the body scrolls; see [UI](ui.md#32-rail-and-zone-editor)). On desktop the Canvas grid, its add trigger, and its add-widget panel
 reserve the idle launcher lane. Dialog, Sheet, and Settings backdrops use a

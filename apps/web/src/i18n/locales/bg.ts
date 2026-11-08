@@ -2781,6 +2781,8 @@ export const bg: AppMessages = {
   "workspace.panel.addTitle": "Добавяне на уиджети",
   "workspace.panel.availableValue": "Налични: {count}",
   "workspace.panel.arrangeHint": "Задръжте и плъзнете, за да преместите. Докоснете минуса, за да премахнете.",
+  "workspace.panel.holdToEdit": "Или задръжте който и да е елемент, за да пренаредите",
+  "workspace.panel.dormant": "Появява се, когато има какво да покаже",
   "workspace.panel.keyboardHint": "Стрелките местят, Delete премахва.",
   "workspace.panel.arrangementLabel": "Елементи на работното пространство",
   "workspace.panel.emptyTitle": "Работното пространство е празно",

@@ -667,9 +667,9 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-pro
     backdrop-filter: var(--look-phone-layer-blur) !important;
   }
 
-  /* Edit draws the same tiles (workspacePanelEditor.css); its travelling
-     hole and lifted copy keep their own drag states. */
-  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet :is(.workspace-panel-launcher, .workspace-editor-item--launcher:not(.is-hole, .workspace-arrange-ghost-body.is-lifted > *)) {
+  /* Editing happens on these same tiles (workspacePanelEditor.css); the
+     lifted copy is a clone of one, so it keeps the look too. */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-panel-launcher {
     border-color: transparent;
     border-radius: var(--look-tile-radius);
     color: var(--look-ink-dim);
@@ -677,12 +677,8 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-pro
     box-shadow: var(--look-tile-edge);
   }
 
-  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet :is(:is(.workspace-panel-launcher, .workspace-panel-widget-head) > svg:not(.workspace-panel-disclosure), .workspace-editor-tile-icon) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet :is(.workspace-panel-launcher, .workspace-panel-widget-head) > svg:not(.workspace-panel-disclosure) {
     color: var(--look-tile-ink);
-  }
-
-  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-editor-tile-label {
-    color: var(--look-ink-dim);
   }
 
   body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .workspace-panel-sheet .workspace-panel-launcher:not(:disabled):active {

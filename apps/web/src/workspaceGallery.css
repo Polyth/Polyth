@@ -706,8 +706,10 @@ html[dir="rtl"] .workspace-gallery-back .ui-icon { transform: scaleX(-1); }
   }
 }
 
-/* Narrow phones: three app tiles to a line. */
-@container workspace-gallery (max-width: 340px) {
+/* Three app tiles to a line wherever the Workspace itself shows three
+   (workspacePanelPremium.css): four across a 344–412px page leave a label
+   ~70px, so "Notifications" broke into "Notification / s". */
+@container workspace-gallery (max-width: 420px) {
   .workspace-gallery-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 

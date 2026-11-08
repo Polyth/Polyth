@@ -2781,6 +2781,8 @@ export const zhCN: AppMessages = {
   "workspace.panel.addTitle": "添加小部件",
   "workspace.panel.availableValue": "可用：{count}",
   "workspace.panel.arrangeHint": "按住并拖动可移动，点按减号可移除。",
+  "workspace.panel.holdToEdit": "或长按任意项目来重新排列",
+  "workspace.panel.dormant": "有内容时才会显示",
   "workspace.panel.keyboardHint": "方向键移动，Delete 键移除。",
   "workspace.panel.arrangementLabel": "工作区项目",
   "workspace.panel.emptyTitle": "工作区是空的",

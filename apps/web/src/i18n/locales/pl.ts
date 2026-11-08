@@ -2781,6 +2781,8 @@ export const pl: AppMessages = {
   "workspace.panel.addTitle": "Dodaj widżety",
   "workspace.panel.availableValue": "Dostępne: {count}",
   "workspace.panel.arrangeHint": "Przytrzymaj i przeciągnij, aby przenieść. Stuknij minus, aby usunąć.",
+  "workspace.panel.holdToEdit": "Albo przytrzymaj dowolny element, aby zmienić układ",
+  "workspace.panel.dormant": "Pojawi się, gdy będzie co pokazać",
   "workspace.panel.keyboardHint": "Strzałki przenoszą, Delete usuwa.",
   "workspace.panel.arrangementLabel": "Elementy obszaru roboczego",
   "workspace.panel.emptyTitle": "Obszar roboczy jest pusty",

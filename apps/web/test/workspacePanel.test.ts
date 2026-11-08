@@ -258,43 +258,44 @@ test("a saved item with no definition and no valid type is dropped", () => {
   assert.deepEqual(parseWorkspacePanelLayout(raw, catalog).items.map((item) => item.id), ["launcher:files"]);
 });
 
-test("adding is a full page of the same Sheet; arranging edits in place; neither opens settings", async () => {
+test("the live grid is its own editor; adding is a full page of the same Sheet; neither opens settings", async () => {
   const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
-  const [panel, editor, gallery, oldTools] = await Promise.all([
+  const [panel, gallery, oldTools] = await Promise.all([
     read("../src/components/mobile/WorkspacePanel.tsx"),
-    read("../src/components/mobile/WorkspaceEditor.tsx"),
     read("../src/components/mobile/WorkspaceGallery.tsx"),
     read("../src/components/mobile/MobileSessionHeader.tsx"),
   ]);
   assert.equal((panel.match(/<Sheet/g) ?? []).length, 1);
   assert.match(panel, /title=\{editing \? tr\("workspace\.panel\.editTitle"\) : tr\("workspace\.panel\.title"\)\}/);
-  assert.match(panel, /<WorkspaceEditor/);
   assert.match(panel, /<WorkspaceGallery/);
   assert.match(panel, /insertPanelItem/);
   assert.match(panel, /removePanelItem/);
-  assert.match(editor, /permutePanelItems/);
+  assert.match(panel, /permutePanelItems/);
   // The page is drawn as the sheet's own top layer, not as a second sheet.
   assert.match(gallery, /createPortal\(page, host\)/);
   assert.doesNotMatch(gallery, /<Sheet/);
   assert.match(panel, /capabilityId === "workspace-edit"[\s\S]*?toggleCapability\(capabilityId, capability\.open\)/);
-  // A full-screen destination: Back leads; Edit is a mode switch, not a place.
-  assert.match(panel, /dismiss="back"/);
-  assert.match(panel, /action=\{\{ kind: "switch", label: tr\("common\.edit"\), pressed: editing/);
-  for (const source of [panel, editor, gallery]) assert.doesNotMatch(source, /WidgetLibraryPanel|setOverlay\("settings"\)/);
+  // Back leads; editing is entered by holding an item (iOS-style), never by a
+  // switch, and trades Back for Add and Done.
+  assert.match(panel, /dismiss=\{editing \? "none" : "back"\}/);
+  assert.match(panel, /activate: \(\) => \{[\s\S]*?flushSync\(\(\) => startEditing\(false\)\)/);
+  assert.doesNotMatch(panel, /kind: "switch"/);
+  for (const source of [panel, gallery]) assert.doesNotMatch(source, /WidgetLibraryPanel|setOverlay\("settings"\)/);
   assert.doesNotMatch(oldTools, /Customize tools|\["Workspace"|\["Agent"|\["System"/);
 });
 
-test("edit mode and the Add page draw metadata only; live widgets render in the plain Workspace", async () => {
+test("live widgets stay mounted while editing; the Add page draws metadata only", async () => {
   const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
-  const [panel, editor, gallery] = await Promise.all([
+  const [panel, gallery] = await Promise.all([
     read("../src/components/mobile/WorkspacePanel.tsx"),
-    read("../src/components/mobile/WorkspaceEditor.tsx"),
     read("../src/components/mobile/WorkspaceGallery.tsx"),
   ]);
-  assert.match(panel, /widget\.render\(\{ projectId, sessionId, editing: false/);
-  assert.match(panel, /widget\.render\(\{[^}]*panelSize: item\.size \}\)/, "the widget learns the size the person chose");
-  for (const source of [editor, gallery]) assert.doesNotMatch(source, /\.render\(/);
-  assert.doesNotMatch(editor, /<MoveControls|workspace-panel-edit-controls|selection-bar|application\/x-polyth/);
+  assert.match(panel, /widget\.render\(\{\s*projectId,\s*sessionId,\s*editing: false,/);
+  assert.match(panel, /panelSize: item\.size,\s*\}\)/, "the widget learns the size the person chose");
+  // Editing never swaps widgets for stand-ins: their content turns inert instead.
+  assert.match(panel, /className="workspace-panel-widget-body" inert=\{still\}/);
+  assert.doesNotMatch(gallery, /\.render\(/);
+  assert.doesNotMatch(panel, /<MoveControls|workspace-panel-edit-controls|selection-bar|application\/x-polyth/);
 });
 
 test("phone Workspace owns full-width navigation geometry with bidirectional motion", async () => {
@@ -315,7 +316,7 @@ test("phone Workspace owns full-width navigation geometry with bidirectional mot
   assert.match(sheet, /dismiss === "close"[\s\S]*className="sheet-close"/);
 });
 
-test("Workspace editor and Add page CSS load after the widget fixes and keep the Workspace's tile grid", async () => {
+test("Workspace editing and Add page CSS load after the widget fixes; editing motion stays on the compositor", async () => {
   const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
   const [main, editor, gallery] = await Promise.all([
     read("../src/main.tsx"),
@@ -324,21 +325,26 @@ test("Workspace editor and Add page CSS load after the widget fixes and keep the
   ]);
   assert.ok(main.indexOf("workspacePanelEditor.css") > main.indexOf("workspacePanelWidgetFixes.css"));
   assert.ok(main.indexOf("workspaceGallery.css") > main.indexOf("workspacePanelEditor.css"));
-  // The arrangement is drawn as it will look: four tiles to a line (three narrow, six wide),
-  // with the same narrow threshold as the Workspace itself.
-  assert.match(editor, /\.workspace-editor-grid\s*\{[^}]*repeat\(4,/s);
-  assert.match(editor, /@container workspace-panel \(max-width: 420px\)\s*\{\s*\.workspace-panel-sheet \.workspace-editor-grid\s*\{\s*grid-template-columns:\s*repeat\(3,/);
   const view = await read("../src/workspacePanelPremium.css");
   assert.match(view, /@container workspace-panel \(max-width: 420px\)\s*\{\s*\.workspace-panel-sheet \.workspace-panel-items\s*\{\s*grid-template-columns:\s*repeat\(3,/);
-  assert.match(editor, /@container workspace-panel \(min-width: 560px\)[\s\S]*?repeat\(6,/);
-  // A grip picks up at once; anywhere else a vertical swipe still scrolls.
-  assert.match(editor, /\.workspace-editor-grip\s*\{[^}]*touch-action:\s*none/s);
-  assert.match(editor, /\.workspace-editor-item\s*\{[^}]*touch-action:\s*pan-y/s);
+  // The jiggle animates `rotate` only and a hold `scale` only: neither fights
+  // the FLIP `transform` glides, and none of them repaints.
+  const jiggle = editor.match(/@keyframes workspace-jiggle-tile\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(jiggle, /rotate:/);
+  assert.doesNotMatch(jiggle, /transform/);
+  assert.match(editor, /\.workspace-panel-item\[data-arrange-pressing\]\s*\{[^}]*scale:/s);
+  // Nothing jiggles while nobody can see the grid.
+  assert.match(editor, /:is\(\.is-gallery-open, \.is-closing\) \.workspace-panel-item[\s\S]*?animation-play-state:\s*paused/);
+  // A vertical swipe still scrolls while editing; a still touch lifts.
+  assert.match(editor, /\.is-editing \.workspace-panel-item\s*\{[^}]*touch-action:\s*pan-y/s);
   // Every per-item control keeps a full touch target.
-  assert.match(editor, /\.workspace-editor-remove::after\s*\{[^}]*inset:\s*calc\(\(var\(--icon-xl\) - var\(--tap\)\) \/ 2\)/s);
-  assert.match(editor, /\.workspace-editor-grip\s*\{[^}]*width:\s*var\(--tap\)/s);
+  assert.match(editor, /\.workspace-panel-remove::after\s*\{[^}]*inset:\s*calc\(\(var\(--icon-xl\) - var\(--tap\)\) \/ 2\)/s);
+  // Borders are hidden by default (data-hide-borders), so edges are shadows or outlines.
+  assert.doesNotMatch(editor, /\bborder:\s*(?!0)[^;]*solid/);
+  // No backdrop blur over a jiggling grid.
+  assert.doesNotMatch(editor, /backdrop-filter/);
   // Glides stay compositor-only during a drag; the drag style is scoped to the sheet.
-  assert.match(editor, /\[data-arranging\] \.workspace-editor-item\s*\{\s*will-change:\s*transform;/);
+  assert.match(editor, /\[data-arranging\] \.workspace-panel-item\s*\{\s*will-change:\s*transform;/);
   assert.match(editor, /\.workspace-panel-sheet\[data-arrange-dragging="true"\] \*/);
   assert.doesNotMatch(editor, /body\[data-arrange-dragging/);
   // The Add page travels with the phone stack grammar and hands a swipe release over.
