@@ -400,7 +400,7 @@ The accepted [owned-runtime recovery ADR](./owned-runtime-recovery.md) records t
 
 ## Exactly what continuity transfers
 
-Epoch recovery, first Snapshot continuation and harness switching reuse the existing session recovery builder. Its limits remain 40 dialogue messages and 16,000 characters, with deterministic section budgets. Workspace collection is outside the pure builder.
+Epoch recovery, first Snapshot continuation, the first prompt of a continuity fork and harness switching reuse the existing session recovery builder. Its limits remain 40 dialogue messages and 16,000 characters, with deterministic section budgets. Workspace collection is outside the pure builder.
 
 Only an epoch's first confirmed prompt carries the recovery, while the marker stays in the log for good. `runtimeEpochRecoveryPending` answers that before anything is copied, redacted or asked of Git, so later sends pay nothing for it. Redaction runs inside the builder on the selected input (`sanitize`), before any text is clipped, not over the whole log.
 
@@ -522,6 +522,17 @@ A stable request ID and source fingerprint make publication idempotent. Complete
 The first continuation creates a fresh native leg, persists its binding, and supplies canonical imported history. Source deletion cannot erase that history. The tests exercise both source-independent publication and an actual SessionService turn after import.
 
 Attach, Sync, source-advanced and source-diverged are intentionally absent. Reintroducing them requires durable source revisions/checkpoints, verified target tails, append-only proof, idempotent append, crash recovery and divergence handling. Snapshot followed by ordinary native execution needs none of that permanent synchronization machinery.
+
+## Fork
+
+`SessionService.fork(sessionId, atSeq?)` (`sessions.ts`) works on every harness. A per-message fork copies the canonical prefix that ends strictly before the chosen `user/message` and returns that prompt as an editable draft; a whole-session fork copies the full effective history. The child always gets the exact canonical events (with `sourceEventSeqs` provenance) and one ignorable `session/forked` lineage marker, published in one store transaction (`publishChildSession`).
+
+How the child's native session gets that history depends on the runtime:
+
+- **Native branch.** When the runtime offers `branchSession`/`branchSessionOperation` and does not report `capabilities().fork === false` (today OpenCode), Polyth runs a durable `session-fork` operation on the source and the child binds to the verified native copy (`historyBaseline: "copied"`).
+- **Continuity fork.** Every other runtime (Claude Code, Codex, Pi, ACP, Antigravity, Cursor, DeepSeek…), and a native branch that definitively refuses with `history-mismatch`, `unsupported` or `capability-unsupported`, gets a continuity fork. The prefix is followed by an ignorable `session/snapshot-imported` marker with `{ mode: "fork", fromSessionId, copiedThroughSeq }` and the child has no native session, binding or leg yet. Like a Snapshot import, its first use creates a fresh native session (`session-create`), the leg starts with `bootstrap: "continuity"`, and the first confirmed prompt carries the prefix through the recovery builder with a fork note (reason `fork`). So the continuity limits above apply: the native model sees a bounded recovery bundle, not a full native transcript. Nothing is mutated on the source or its runtime, so there is no outcome to reconcile. An `unknown` native-branch outcome still reconciles and never falls back.
+
+A fork of the first prompt has an empty prefix and simply gets a fresh native session. Isolated sessions, active rewinds, running turns and open requests are refused as before.
 
 ## Harness matrix
 

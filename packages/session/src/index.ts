@@ -5560,7 +5560,7 @@ export function planRuntimeEpochRecovery(
   const built = buildRuntimeEpochRecoveryContext({
     epoch,
     markerSeq: marker.seq,
-    ...(snapshot ? { reason: "snapshot" as const, workspace: input.workspace } : compaction ? { reason: "compaction" as const, workspace: input.workspace } : marker.data.reason === "harness-switch" ? { reason: "harness-switch" as const, workspace: input.workspace } : {}),
+    ...(snapshot ? { reason: marker.data.mode === "fork" ? "fork" as const : "snapshot" as const, workspace: input.workspace } : compaction ? { reason: "compaction" as const, workspace: input.workspace } : marker.data.reason === "harness-switch" ? { reason: "harness-switch" as const, workspace: input.workspace } : {}),
     dialogue: dialogueFromMessages(deriveMessages(safeEvents)),
     ...(objective ? { objective } : {}),
     pinned,
