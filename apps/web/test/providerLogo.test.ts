@@ -158,6 +158,7 @@ test("registered harness identities reuse the shared provider marks", async () =
     { providerID: "cursor", providerName: "Cursor", provider: "cursor" },
     { providerID: "antigravity", providerName: "Antigravity", provider: "antigravity" },
     { providerID: "pi", providerName: "Pi", provider: "pi" },
+    { providerID: "grok", providerName: "Grok Build", provider: "xai" },
   ];
   for (const { provider, ...props } of harnesses) {
     const html = await render(props);
@@ -267,6 +268,23 @@ test("DeepSeek uses the official whale mark", async () => {
   assert.doesNotMatch(html, /#(?:[\da-f]{3,8})\b/i);
 });
 
+test("Grok Build uses the official Grok swirl mark", async () => {
+  const html = await render({ providerID: "xai", providerName: "Grok", harnessId: "grok" });
+  assert.match(html, /data-provider="xai"/);
+  assert.match(html, /provider-xai/);
+  assert.match(html, /viewBox="0 0 35 33"/);
+  assert.match(html, /fill="currentColor"/);
+  assert.match(html, /M13\.2371 21\.0407L24\.3186 12\.8506/);
+  assert.match(html, /M10\.9503 23\.0313C7\.07343 19\.3235/);
+  assert.doesNotMatch(html, /M6\.469 8\.776/);
+  assert.doesNotMatch(html, /m4\.5 4\.5 15 15/);
+  assert.doesNotMatch(html, /#(?:[\da-f]{3,8})\b/i);
+
+  const alias = await render({ providerID: "grok", providerName: "Grok Build" });
+  assert.match(alias, /data-provider="xai"/);
+  assert.match(alias, /M13\.2371 21\.0407L24\.3186/);
+});
+
 test("Pi harness keeps its own monochrome brand mark", async () => {
   const html = await render({ providerID: "pi", providerName: "Pi", harnessId: "pi" });
   assert.match(html, /data-provider="pi"/);
@@ -286,11 +304,11 @@ test("Pi harness keeps its own monochrome brand mark", async () => {
 
 test("only canonical provider keys are brand marks for package tiles", async () => {
   const { isProviderMarkKey } = await providerModule;
-  for (const key of ["cursor", "antigravity", "pi", "opencode", "claude", "commandcode", "gemini"]) {
+  for (const key of ["cursor", "antigravity", "pi", "opencode", "claude", "commandcode", "gemini", "xai", "deepseek"]) {
     assert.equal(isProviderMarkKey(key), true, `${key} is a canonical brand key`);
   }
   // Aliases and semantic package icons must not be mistaken for brand keys.
-  for (const value of ["github", "google", "codex", "files", "pointer", "sparkles", "", undefined]) {
+  for (const value of ["github", "google", "codex", "grok", "files", "pointer", "sparkles", "", undefined]) {
     assert.equal(isProviderMarkKey(value), false, `${String(value)} is not a canonical brand key`);
   }
 });

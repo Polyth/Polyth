@@ -19,7 +19,7 @@
       "core": false,
       "enabled": false,
       "maturity": "in-progress",
-      "icon": "assist",
+      "icon": "xai",
       "hasSettings": false,
       "category": "system",
       "projectAffinity": {}
