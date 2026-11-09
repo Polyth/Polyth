@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "apps/web/icon-512.png": "ba25fe606c3fed03272db18822bc26552c3e15ab9b9cf54bae336a5b1a86ec53",
+    "apps/desktop/scripts/prepare-icon.mjs": "d206919ca4867fd99d54b7fe77cf10ee8896f5402b81a1c1b434931845dc7cd4"
+  }
+}

@@ -1,6 +1,41 @@
-import type { CapacitorConfig } from "@capacitor/cli";
 import { KeyboardResize } from "@capacitor/keyboard";
 import { SystemBarsStyle } from "@capacitor-community/safe-area";
+
+/** The Capacitor config fields this app uses. Declared here so the app does
+ * not need `@capacitor/cli` (a release-only tool, tools/release) to typecheck;
+ * `cap` itself validates the file at sync time. */
+export interface CapacitorConfig {
+  appId: string;
+  appName: string;
+  webDir: string;
+  backgroundColor: string;
+  ios: { contentInset: "automatic" | "scrollableAxes" | "never" | "always" };
+  server: {
+    hostname: string;
+    androidScheme: string;
+    iosScheme: string;
+    allowNavigation: string[];
+  };
+  plugins: {
+    App: { disableBackButtonHandler: boolean };
+    CapacitorHttp: { enabled: boolean };
+    Keyboard: { resize: KeyboardResize; resizeOnFullScreen: boolean };
+    SplashScreen: {
+      launchAutoHide: boolean;
+      launchShowDuration: number;
+      backgroundColor: string;
+      showSpinner: boolean;
+      androidSplashResourceName: string;
+    };
+    SystemBars: { insetsHandling: "css" | "disable" };
+    SafeArea: {
+      statusBarStyle: SystemBarsStyle;
+      navigationBarStyle: SystemBarsStyle;
+      initialViewportFitCover: boolean;
+    };
+    LocalNotifications: { smallIcon: string; iconColor: string };
+  };
+}
 
 const config: CapacitorConfig = {
   appId: "com.polyth.mobile",

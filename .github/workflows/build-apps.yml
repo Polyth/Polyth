@@ -91,6 +91,9 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
+
       - name: Build web bundle and sync Android
         run: npm run build:mobile
 
@@ -132,6 +135,9 @@ jobs:
 
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
 
       - name: Build web bundle and sync iOS
         run: npm run build:mobile
@@ -231,6 +237,9 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
+
       - name: Install Chromium for macOS x64
         run: npx playwright-core install chromium
         env:
@@ -282,7 +291,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish never
+        run: node ../../tools/release/node_modules/electron-builder/cli.js --mac dmg --${{ matrix.arch }} --publish never
 
       - name: Build ad-hoc signed DMG
         if: steps.mac_signing.outputs.signed != 'true'
@@ -295,7 +304,7 @@ jobs:
               exit 1
             fi
           done
-          npx electron-builder --mac dmg --${{ matrix.arch }} --publish never \
+          node ../../tools/release/node_modules/electron-builder/cli.js --mac dmg --${{ matrix.arch }} --publish never \
             --config.mac.identity=- \
             --config.mac.notarize=false
 
@@ -381,6 +390,9 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
+
       - name: Install pinned Chromium
         run: npx playwright-core install chromium
         env:
@@ -404,7 +416,7 @@ jobs:
 
       - name: Build NSIS installer
         working-directory: apps/desktop
-        run: npx electron-builder --win nsis --${{ matrix.arch }} --publish never
+        run: node ../../tools/release/node_modules/electron-builder/cli.js --win nsis --${{ matrix.arch }} --publish never
 
       - name: Smoke-test packaged Windows app
         continue-on-error: true
@@ -450,6 +462,9 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
+
       - name: Install pinned Chromium
         run: npx playwright-core install chromium
         env:
@@ -473,7 +488,7 @@ jobs:
 
       - name: Build AppImage
         working-directory: apps/desktop
-        run: npx electron-builder --linux AppImage --${{ matrix.arch }} --publish never
+        run: node ../../tools/release/node_modules/electron-builder/cli.js --linux AppImage --${{ matrix.arch }} --publish never
 
       - name: Smoke-test packaged AppImage
         continue-on-error: true

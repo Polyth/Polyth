@@ -215,8 +215,14 @@ function npmCi() {
   run(npm, ["ci", "--no-audit", "--no-fund"]);
 }
 
-function buildAndroid() {
+/** Release-only tools (electron-builder, Capacitor CLI, sharp) live in tools/release. */
+function releaseToolsCi() {
   npmCi();
+  run(npm, ["run", "release-tools:install"]);
+}
+
+function buildAndroid() {
+  releaseToolsCi();
   run(npm, ["run", "build:mobile"]);
   const versions = collectReleaseVersions("android-version-env");
   run("./gradlew", [
@@ -428,7 +434,7 @@ function buildSignedIpa() {
 }
 
 function buildIos() {
-  npmCi();
+  releaseToolsCi();
   run(npm, ["run", "build:mobile"]);
   run(npm, ["--workspace", "@polyth/mobile", "run", "native:ios"]);
   if (SIGNED_IOS) {
@@ -476,7 +482,7 @@ function buildMac({ legacy = false } = {}) {
   }
   const architectures = legacy ? [MAC_LEGACY_ARCH] : getMacArchitectures();
   const outputDir = (arch) => legacy ? `mac-legacy-${arch}` : `mac-${arch}`;
-  npmCi();
+  releaseToolsCi();
   const browserPath = (arch) => join(TMP, `playwright-mac-${arch}`);
   const hostPlatform = (arch) => arch === "arm64" ? "mac14-arm64" : "mac14";
 
@@ -516,8 +522,8 @@ function buildMac({ legacy = false } = {}) {
     run(npm, ["run", "desktop:download-opencode"], {
       env: { POLYTH_TARGET_PLATFORM: "darwin", POLYTH_TARGET_ARCH: arch },
     });
-    run(npx, [
-      "electron-builder", "--mac", "dmg", "zip", `--${arch}`, "--publish", "never",
+    run(process.execPath, [
+      join(ROOT, "tools/release/node_modules/electron-builder/cli.js"), "--mac", "dmg", "zip", `--${arch}`, "--publish", "never",
       // Signed builds notarize through mac-notarize.mjs, which tolerates an
       // unreachable ticket CDN during stapling; see that file.
       "--config.mac.notarize=false",
@@ -588,28 +594,28 @@ function buildMac({ legacy = false } = {}) {
 }
 
 function buildWindows() {
-  npmCi();
+  releaseToolsCi();
   run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
   run(npm, ["run", "build:desktop"]);
   run(npm, ["run", "desktop:stage-chromium"], {
     env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" },
   });
   run(npm, ["run", "desktop:download-opencode"], { env: { POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" } });
-  run(npx, ["electron-builder", "--win", "nsis", "--x64", "--publish", "never", ...FEED_ARGS], { cwd: join(ROOT, "apps/desktop") });
+  run(process.execPath, [join(ROOT, "tools/release/node_modules/electron-builder/cli.js"), "--win", "nsis", "--x64", "--publish", "never", ...FEED_ARGS], { cwd: join(ROOT, "apps/desktop") });
   run(process.execPath, ["apps/desktop/test/startup-smoke.mjs", "apps/desktop/release/win-unpacked/Polyth.exe"]);
   copyFiles(directFiles(join(ROOT, "apps/desktop/release"))
     .filter((p) => p.endsWith(".exe") || p.endsWith(".blockmap") || basename(p) === "latest.yml"));
 }
 
 function buildLinux() {
-  npmCi();
+  releaseToolsCi();
   run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
   run(npm, ["run", "build:desktop"]);
   run(npm, ["run", "desktop:stage-chromium"], {
     env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" },
   });
   run(npm, ["run", "desktop:download-opencode"], { env: { POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" } });
-  run(npx, ["electron-builder", "--linux", "AppImage", "--x64", "--publish", "never", ...FEED_ARGS], { cwd: join(ROOT, "apps/desktop") });
+  run(process.execPath, [join(ROOT, "tools/release/node_modules/electron-builder/cli.js"), "--linux", "AppImage", "--x64", "--publish", "never", ...FEED_ARGS], { cwd: join(ROOT, "apps/desktop") });
 
   const appImage = walk(join(ROOT, "apps/desktop/release")).find((p) => p.endsWith(".AppImage"));
   if (!appImage) fail("AppImage was not produced");

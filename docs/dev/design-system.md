@@ -156,8 +156,15 @@ caused by the window rather than the person does not animate at all (`ui.md`
 
 - UI action icons come from **Lucide** through the curated map
   `components/ui/icons.ts` (semantic names: `CloseIcon`, `MoreIcon`,
-  `DeleteIcon`, …). Import from that file, never from `lucide-react` directly,
-  so one action keeps one glyph app-wide.
+  `DeleteIcon`, …). Import from that file only, so one action keeps one glyph
+  app-wide.
+- The glyph data is vendored, not installed: `components/ui/iconNodes.ts` holds
+  one `IconNode` per glyph, `components/ui/iconBase.tsx` is the small React
+  runtime (identical markup to lucide-react), and `components/ui/LUCIDE-LICENSE`
+  carries the ISC licence. Add or refresh a glyph with
+  `node scripts/icons/lucide.mjs add <Name>` (pinned Lucide release, sorted
+  insert) and wire it into `icons.ts`; `node scripts/icons/lucide.mjs check`
+  verifies the file and that every node is used.
 - Sizes are tokens via the `Icon` wrapper: `sm` 16 (dense rows, compact
   buttons), `md` 18 (standard controls), `lg` 20 (prominent/mobile controls),
   `xl` 24 (mobile emphasis, empty-state marks). Stroke width 1.75.

@@ -4,7 +4,6 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { desktopServerPackagesPlugin } from "./serverPackageInventory.ts";
-import { prepareAppIcons } from "./scripts/prepare-icon.mjs";
 import { writeThirdPartyNotices } from "../../scripts/third-party-notices.mjs";
 
 const here = import.meta.dirname;
@@ -14,7 +13,6 @@ const lock = JSON.parse(await readFile(join(here, "opencode.json"), "utf8")) as 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await mkdir(join(here, "build"), { recursive: true });
-await prepareAppIcons({ buildDir: join(here, "build") });
 await copyFile(join(here, "src", "bootstrap.cjs"), join(dist, "bootstrap.cjs"));
 
 const supervisorResources = join(here, "resources", "runtime-supervisor");

@@ -1,11 +1,31 @@
 #!/usr/bin/env node
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import sharp from "sharp";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+
+// sharp is a release-only tool: it lives in tools/release, not the root
+// install. The generated assets are committed; run `npm run assets` (after
+// `npm run release-tools:install`) only when a source changes.
+let sharpModule;
+function loadSharp() {
+  if (sharpModule) return sharpModule;
+  try {
+    sharpModule = createRequire(resolve(scriptDirectory, "../../../tools/release/package.json"))("sharp");
+    return sharpModule;
+  } catch (error) {
+    throw new Error(
+      "sharp is not installed. Run `npm run release-tools:install` at the repository root first " +
+        `(${error instanceof Error ? error.message.split("\n")[0] : error}).`,
+    );
+  }
+}
+/** Lazy, so importing this module's constants never needs the release tools. */
+const sharp = (...args) => loadSharp()(...args);
 const defaultAppRoot = resolve(scriptDirectory, "..");
 
 const androidDensities = [
@@ -270,6 +290,12 @@ export async function generateAssets({ appRoot = defaultAppRoot } = {}) {
     generateAndroid(appPaths, sources),
     generateIos(appPaths, sources),
   ]);
+  // Freshness stamp: sha256 of every source read, checked by assets.test.ts.
+  const stamped = {};
+  for (const file of [sources.icon, sources.iconBackground, fileURLToPath(import.meta.url)]) {
+    stamped[relative(defaultAppRoot, file).split(sep).join("/")] = createHash("sha256").update(await readFile(file)).digest("hex");
+  }
+  await writeJson(safePath(appPaths.resources, "assets.stamp.json"), { sources: stamped });
   return { android, ios };
 }
 

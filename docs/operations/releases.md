@@ -112,6 +112,12 @@ Pull requests from forks run with a read-only token and no secrets. The
 repository variable `CI_DISABLED=1` stops both jobs before a runner starts.
 Release packaging remains separate so ordinary pushes do not spend macOS/Windows/ARM runner time.
 
+## Release tools
+
+`electron-builder`, the Capacitor CLI (`cap`) and `sharp` are release-only tools. They are not in the root `package.json`: `tools/release/` is a separate private npm tree with its own lockfile (Dependabot watches it, and it carries the root `overrides` that patch their transitive advisories). Ordinary `npm ci`, the Docker image and CI tests never install them.
+
+Every release job runs `npm ci` and then `npm run release-tools:install`, and invokes `node ../../tools/release/node_modules/electron-builder/cli.js` from `apps/desktop` (the same pattern is used by `scripts/ci/remote-build.mjs` and the `dist*` scripts; `cap` is run from `tools/release/node_modules/@capacitor/cli/bin/capacitor` by the `apps/mobile` scripts). App icons and Android/iOS branding are generated once by `npm --workspace @polyth/desktop run icons` and `npm --workspace @polyth/mobile run assets` (they need sharp) and committed; builds do not regenerate them, and the `appIcon` / `assets` tests fail when a source changed without regenerating.
+
 ## Manual application builds
 
 Use **Actions → Build apps → Run workflow**.
