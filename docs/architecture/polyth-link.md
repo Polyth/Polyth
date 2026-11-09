@@ -26,7 +26,8 @@ or unauthenticated share link.
    (the old one is deleted); an active device of another account is still
    refused.
 4. **Ingress.** Tunnel requests do not enter the public HTTP listener.
-   They use a unix-domain internal listener plus a per-boot secret. Loopback
+   They use a unix-domain internal listener plus a per-boot secret (on
+   Windows a named pipe, see *Local IPC on Windows* below). Loopback
    is not an identity. `RequestIngress.kind = "polyth-link"` is built by
    the server, never by headers. Canonical `/ws`, terminal, and package WS
    channels attach to this ingress as well as the public listener.
@@ -112,8 +113,21 @@ or unauthenticated share link.
   take up to `response_head_timeout_ms` (120 s); only a browser's request head
   keeps the 10 s `header_read_timeout_ms`. On Linux it arms `PR_SET_PDEATHSIG` before binding the control
   socket, so a hard-killed owner cannot leave an orphan holding a socket path
-  that a later host unlinks and replaces. Normal shutdown still closes the
-  child explicitly.
+  that a later host unlinks and replaces. On Windows, which has no such
+  signal, the owner spawns the host with a stdin pipe and the host exits when
+  it closes. Normal shutdown still closes the child explicitly.
+  - **Local IPC on Windows** (`src/local_ipc.rs`,
+    `packages/tunnel/src/localIpc.ts`). The control channel and the server
+    ingress are named pipes, `\\.\pipe\polyth-link-<random>-host` and
+    `…-ingress`, with a fresh 128-bit name per server start instead of the
+    0700 tunnel directory. The host creates the control pipe as the first
+    instance (a process already holding the name makes startup fail rather
+    than receive the owner's RPC), rejects remote clients and sets a DACL of
+    SYSTEM + the pipe owner only. The ingress pipe is Node's own listener
+    (libuv, first instance, default pipe DACL, which also gives Everyone
+    read-only access; every request still needs the per-boot secret, which a
+    read-only handle cannot send). The host opens it with
+    `SECURITY_IDENTIFICATION`, so the server cannot impersonate it.
 - `crates/polyth-link-client` — shared client state machine for pairing,
   reconnect, revocation handling and the authenticated loopback proxy.
   A live session outlives its QUIC connection: when the control stream ends

@@ -565,13 +565,18 @@ export function createTunnelIngress(opts: {
     return resolution.principal.kind === "paired-device" ? resolution.principal : null;
   };
   let closed = false;
+  // Windows: a `\\.\pipe\…` name (random per start, created as the first
+  // instance by libuv). It has no directory and disappears with its handle.
+  const pipe = /^\\\\[.?]\\pipe\\/i.test(opts.socketPath);
   return {
     secret: opts.secret,
     socketPath: opts.socketPath,
     server,
     async listen() {
-      mkdirSync(dirname(opts.socketPath), { recursive: true });
-      try { unlinkSync(opts.socketPath); } catch { /* first boot or stale socket */ }
+      if (!pipe) {
+        mkdirSync(dirname(opts.socketPath), { recursive: true });
+        try { unlinkSync(opts.socketPath); } catch { /* first boot or stale socket */ }
+      }
       await new Promise<void>((resolve, reject) => {
         const onError = (error: Error) => reject(error);
         server.once("error", onError);
@@ -604,7 +609,9 @@ export function createTunnelIngress(opts: {
           resolve();
         });
       });
-      try { unlinkSync(opts.socketPath); } catch { /* already removed */ }
+      if (!pipe) {
+        try { unlinkSync(opts.socketPath); } catch { /* already removed */ }
+      }
     },
   };
 }

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -19,8 +19,7 @@ use polyth_link_core::wire::{
 use polyth_link_core::PROTOCOL_VERSION;
 use rand::RngCore;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::time::timeout;
 
 struct HostProc(Child);
@@ -36,7 +35,7 @@ fn host_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_polyth-link-host"))
 }
 
-async fn rpc(stream: &mut BufReader<UnixStream>, id: u64, method: &str, params: Value) -> Value {
+async fn rpc(stream: &mut BufReader<Control>, id: u64, method: &str, params: Value) -> Value {
     let line = json!({"id": id, "method": method, "params": params});
     stream
         .get_mut()
@@ -66,12 +65,7 @@ async fn rpc(stream: &mut BufReader<UnixStream>, id: u64, method: &str, params: 
     }
 }
 
-async fn rpc_try(
-    stream: &mut BufReader<UnixStream>,
-    id: u64,
-    method: &str,
-    params: Value,
-) -> Value {
+async fn rpc_try(stream: &mut BufReader<Control>, id: u64, method: &str, params: Value) -> Value {
     let line = json!({"id": id, "method": method, "params": params});
     stream
         .get_mut()
@@ -98,72 +92,137 @@ async fn rpc_try(
     }
 }
 
-async fn serve_ingress(socket: PathBuf) {
-    let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).unwrap();
-    loop {
-        let Ok((mut stream, _)) = listener.accept().await else {
-            break;
-        };
-        tokio::spawn(async move {
-            let mut buf = vec![0u8; 16 * 1024];
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            if n == 0 {
-                return;
-            }
-            // Answer like the real ingress (Node's default HTTP server) with a
-            // handler that awaits I/O: a client that half-closes before the
-            // answer counts as gone and gets nothing.
-            let mut probe = [0u8; 1];
-            if let Ok(Ok(0)) = timeout(Duration::from_millis(50), stream.read(&mut probe)).await {
-                return;
-            }
-            let body = br#"{"ok":true,"via":"polyth-link"}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(response.as_bytes()).await;
-            let _ = stream.write_all(body).await;
-        });
+// The host's local IPC: Unix sockets, or named pipes on Windows (the same
+// shapes the Node owner uses, see packages/tunnel/src/localIpc.ts).
+#[cfg(unix)]
+type Control = tokio::net::UnixStream;
+#[cfg(windows)]
+type Control = tokio::net::windows::named_pipe::NamedPipeClient;
+
+#[cfg(unix)]
+fn ipc_paths(dir: &Path) -> (PathBuf, PathBuf) {
+    (dir.join("host.sock"), dir.join("ingress.sock"))
+}
+
+#[cfg(windows)]
+fn ipc_paths(_dir: &Path) -> (PathBuf, PathBuf) {
+    let mut nonce = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let nonce = hex::encode(nonce);
+    (
+        PathBuf::from(format!(r"\\.\pipe\polyth-link-test-{nonce}-host")),
+        PathBuf::from(format!(r"\\.\pipe\polyth-link-test-{nonce}-ingress")),
+    )
+}
+
+#[cfg(unix)]
+async fn connect_control(path: &Path) -> Control {
+    let started = std::time::Instant::now();
+    while !path.exists() {
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "host socket missing"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    tokio::net::UnixStream::connect(path).await.unwrap()
+}
+
+#[cfg(windows)]
+async fn connect_control(path: &Path) -> Control {
+    let started = std::time::Instant::now();
+    loop {
+        match tokio::net::windows::named_pipe::ClientOptions::new().open(path.as_os_str()) {
+            Ok(client) => return client,
+            // Not created yet, or every instance momentarily busy.
+            Err(error) if matches!(error.raw_os_error(), Some(2) | Some(231)) => {
+                assert!(
+                    started.elapsed() < Duration::from_secs(8),
+                    "host pipe missing"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(error) => panic!("host pipe: {error}"),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn serve_ingress(socket: PathBuf) {
+    let _ = std::fs::remove_file(&socket);
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(answer_ingress(stream));
+        }
+    });
+}
+
+#[cfg(windows)]
+fn serve_ingress(socket: PathBuf) {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    let mut next = ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(socket.as_os_str())
+        .unwrap();
+    tokio::spawn(async move {
+        while next.connect().await.is_ok() {
+            let Ok(fresh) = ServerOptions::new().create(socket.as_os_str()) else {
+                break;
+            };
+            tokio::spawn(answer_ingress(std::mem::replace(&mut next, fresh)));
+        }
+    });
+}
+
+async fn answer_ingress<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S) {
+    let mut buf = vec![0u8; 16 * 1024];
+    let n = stream.read(&mut buf).await.unwrap_or(0);
+    if n == 0 {
+        return;
+    }
+    // Answer like the real ingress (Node's default HTTP server) with a
+    // handler that awaits I/O: a client that half-closes before the
+    // answer counts as gone and gets nothing.
+    let mut probe = [0u8; 1];
+    if let Ok(Ok(0)) = timeout(Duration::from_millis(50), stream.read(&mut probe)).await {
+        return;
+    }
+    let body = br#"{"ok":true,"via":"polyth-link"}"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.write_all(body).await;
 }
 
 struct LinkHost {
     _proc: HostProc,
-    rpc: BufReader<UnixStream>,
+    rpc: BufReader<Control>,
     _dir: tempfile::TempDir,
 }
 
 /// A host with a bound endpoint and a configured ingress.
 async fn start_host() -> LinkHost {
     let dir = tempfile::tempdir().unwrap();
-    let control = dir.path().join("host.sock");
-    let ingress = dir.path().join("ingress.sock");
+    let (control, ingress) = ipc_paths(dir.path());
     let data = dir.path().join("data");
     std::fs::create_dir_all(&data).unwrap();
 
     let child = Command::new(host_bin())
         .args(["serve", data.to_str().unwrap(), control.to_str().unwrap()])
-        .stdin(Stdio::null())
+        // The host's owner keeps stdin open; on Windows its end is the
+        // owner's death signal.
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn host");
     let proc = HostProc(child);
 
-    let started = std::time::Instant::now();
-    while !control.exists() {
-        if started.elapsed() > Duration::from_secs(8) {
-            panic!("host socket missing");
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-
-    tokio::spawn(serve_ingress(ingress.clone()));
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let rpc_socket = UnixStream::connect(&control).await.unwrap();
+    let rpc_socket = connect_control(&control).await;
+    serve_ingress(ingress.clone());
     let mut rpc_stream = BufReader::new(rpc_socket);
     let identity = rpc(&mut rpc_stream, 1, "identity.status", json!({})).await;
     assert!(
@@ -194,7 +253,7 @@ async fn start_host() -> LinkHost {
     }
 }
 
-async fn create_invitation(rpc_stream: &mut BufReader<UnixStream>) -> (PairingTicket, String) {
+async fn create_invitation(rpc_stream: &mut BufReader<Control>) -> (PairingTicket, String) {
     let created = rpc(
         rpc_stream,
         4,
@@ -311,7 +370,7 @@ async fn pair_device(
 
 /// The server's side of a pairing, as the tunnel package drives it: approve,
 /// store the device's trust, then finish.
-async fn commit_pairing(rpc_stream: &mut BufReader<UnixStream>, pairing_id: &str, device_id: &str) {
+async fn commit_pairing(rpc_stream: &mut BufReader<Control>, pairing_id: &str, device_id: &str) {
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
     let mut approved = false;
     let mut finished = false;
