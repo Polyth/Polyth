@@ -382,6 +382,17 @@ each device token and each sender address. Only a server the phone registered
 with knows the token. `POLYTH_NATIVE_PUSH_RELAY_ORIGIN` points a server at
 another deployment of the same service; `off` turns it off.
 
+A server sends to all of a person's devices at once. A send the service
+provably never received is tried once more after a second. That covers a
+DNS failure, a refused or unreachable connection, a connect timeout, and the
+service's own `503`, which it answers before calling any provider. A reset,
+a response timeout or any other answer may have reached the phone already,
+so the server never repeats those and does not send a second notification.
+Each change in the service's health is logged once (`[native-push] push
+service … is not delivering: …` and later `… delivers again`). The log line
+names the cause, for example a network code or a missing APNs/FCM
+credential, and never a token or payload.
+
 ### Own APNs key
 
 The team that owns the app's bundle id (`com.polyth.mobile`) may also place

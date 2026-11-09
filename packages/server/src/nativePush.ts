@@ -238,32 +238,90 @@ const relayOrigin = (raw: string | undefined): URL | undefined => {
 /** Polyth's hosted push service, the default for every server. */
 export const PUSH_SERVICE_ORIGIN = "https://push.polyth.app";
 
+/** Connection failures that prove the request never reached the push service,
+ *  so sending it again cannot show the phone a second notification. A reset or
+ *  a timeout may come after the service accepted it and is never retried. */
+const UNSENT_CODES: ReadonlySet<string> = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+const RETRY_DELAY_MS = 1_000;
+
+const errorCode = (error: unknown): string | undefined => {
+  for (let current = error, depth = 0; current && typeof current === "object" && depth < 4; current = (current as { cause?: unknown }).cause, depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && /^[A-Z_]{2,40}$/.test(code)) return code;
+  }
+  return undefined;
+};
+
+export interface RelaySenderOptions {
+  /** One line when the service's health changes; never a token or payload. */
+  log?: (line: string) => void;
+  /** Pause before the single retry of a send that provably never arrived. */
+  retryDelayMs?: number;
+}
+
 /** The hosted push service (`packages/push-relay`): it receives the device
  *  token and a payload of enums, counts, times and device-sealed text. Unset
  *  means Polyth's own; `off` (or any value that is not an https origin) sends
  *  no push through a service. */
-export function relaySender(origin: string | undefined, fetchFn: typeof fetch = fetch): PushSender | undefined {
+export function relaySender(origin: string | undefined, fetchFn: typeof fetch = fetch, options: RelaySenderOptions = {}): PushSender | undefined {
   const url = relayOrigin(origin || PUSH_SERVICE_ORIGIN);
   if (!url) return undefined;
-  const post = async (body: unknown): Promise<ProviderClass> => {
+  const log = options.log ?? ((line: string) => console.warn(line));
+  const retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
+  // A failing push service is otherwise silent: every alert just vanishes.
+  // Report each change of its health once, not every send.
+  let health = "ok";
+  const report = (next: string) => {
+    if (next === health) return;
+    const previous = health;
+    health = next;
+    log(next === "ok"
+      ? `[native-push] push service ${url.host} delivers again (was: ${previous})`
+      : `[native-push] push service ${url.host} is not delivering: ${next}`);
+  };
+  type Attempt = { result: ProviderClass; unsent: boolean; problem?: string };
+  const attempt = async (body: string, platform: Platform): Promise<Attempt> => {
+    let response: Response;
     try {
-      const response = await fetchFn(new URL("/v1/send", url), {
+      response = await fetchFn(new URL("/v1/send", url), {
         method: "POST", signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error",
-        headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body),
+        headers: { accept: "application/json", "content-type": "application/json" }, body,
       });
-      if (response.status === 429) return "rate";
-      if (response.status === 400) return "invalid";
-      const result = response.ok ? (await response.json() as { result?: unknown }).result : undefined;
-      return typeof result === "string" && PROVIDER_CLASSES.has(result) ? result as ProviderClass : "transient";
-    } catch { return "transient"; }
+    } catch (error) {
+      const code = errorCode(error);
+      return { result: "transient", unsent: Boolean(code && UNSENT_CODES.has(code)), problem: code ? `network ${code}` : "network error" };
+    }
+    if (response.status === 429) return { result: "rate", unsent: false, problem: "rate limited" };
+    if (response.status === 400) return { result: "invalid", unsent: false };
+    // The service answers 503 only when it refused before calling a provider.
+    if (response.status === 503) return { result: "transient", unsent: true, problem: "overloaded (503)" };
+    let result: unknown;
+    try { result = response.ok ? (await response.json() as { result?: unknown }).result : undefined; } catch { result = undefined; }
+    if (typeof result !== "string" || !PROVIDER_CLASSES.has(result)) return { result: "transient", unsent: false, problem: `answer ${response.status}` };
+    const classified = result as ProviderClass;
+    if (classified === "config") return { result: classified, unsent: false, problem: `no ${platform === "ios" ? "APNs" : "FCM"} credential` };
+    if (classified === "auth") return { result: classified, unsent: false, problem: `${platform === "ios" ? "APNs" : "FCM"} rejected its credential` };
+    return { result: classified, unsent: false };
+  };
+  const post = async (payload: unknown, platform: Platform): Promise<ProviderClass> => {
+    const body = JSON.stringify(payload);
+    let outcome = await attempt(body, platform);
+    if (outcome.unsent) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      outcome = await attempt(body, platform);
+    }
+    // A dead token or a bad request is about that one phone, not the service.
+    if (outcome.problem) report(outcome.problem);
+    else if (outcome.result === "success" || outcome.result === "permanent") report("ok");
+    return outcome.result;
   };
   const to = (destination: Destination) => ({
     platform: destination.platform, token: destination.providerToken,
     ...(destination.platform === "ios" ? { environment: destination.environment } : {}),
   });
   return {
-    deliver: (destination, alert) => post({ to: to(destination), alert }),
-    deliverActivity: (destination, activity) => post({ to: to(destination), activity }),
+    deliver: (destination, alert) => post({ to: to(destination), alert }, destination.platform),
+    deliverActivity: (destination, activity) => post({ to: to(destination), activity }, destination.platform),
   };
 }
 
@@ -493,11 +551,12 @@ export function createNativePushService(opts: {
     },
     async send(input) {
       let sent = 0;
-      for (const entry of state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId)) {
+      // Every device at once: a slow or unreachable phone must not delay the others.
+      await Promise.all(state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId).map(async (entry) => {
         const hostEndpointId = await verify(entry);
         const destination = destinationOf(entry);
         const sender = senderFor(destination.platform);
-        if (!sender || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) continue;
+        if (!sender || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) return;
         let sealed: string | undefined;
         if (entry.contentKey && typeof input.title === "string" && typeof input.body === "string") {
           try { sealed = sealNativeContent(entry.contentKey, input.title, input.body); } catch { /* generic text */ }
@@ -513,7 +572,7 @@ export function createNativePushService(opts: {
           state.subscriptions = state.subscriptions.filter((row) => row !== entry);
           save();
         }
-      }
+      }));
       return { sent };
     },
     async activityStatus(input) {
