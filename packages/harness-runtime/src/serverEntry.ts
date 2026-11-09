@@ -41,6 +41,7 @@ import { createHarnessInstallJobs, createInstallContainment, installMachineOs, i
 import { forgetRemoteHarnessProbes, resolveRemoteHarnessHost } from "./remoteHost.ts";
 import { browserOnServer, localSetupEnv, openSetupTerminal, previewSetupTerminal, readSetupAction, REMOTE_SETUP_PATH, requireSetupAuthority, setupCommand, setupTarget, type HarnessSetupTerminals } from "./setupTerminal.ts";
 import { createHarnessUpdateChecker, harnessUpdateStatus } from "./updates.ts";
+import { editionUnavailable, workstationEdition } from "./edition.ts";
 import { pruneHarnessVersions, type HarnessVersionPrune } from "./versionStore.ts";
 
 const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
@@ -123,6 +124,28 @@ async function writePreferences(file: string, preferences: StoredHarnessPreferen
 const UPDATE_TIMEOUT_MS = 10 * 60_000;
 const UPDATE_OUTPUT_TAIL = 4_000;
 type HarnessRuntimeRestart = (space: HarnessContext["space"], harnessId: string) => Promise<{ restarted: number; failed: number }>;
+type HarnessRuntimeReleaseIdle = (harnessId: string) => Promise<{ released: number; busy: number }>;
+
+/** Windows cannot replace an executable that a running process has open, so
+ *  a CLI's updater or installer fails while any chat still runs it (Grok's
+ *  `grok.exe`, an npm shim's native program). Before replacing it, release
+ *  this harness's idle chats (their next turn starts the new build) and refuse
+ *  while one is still working, rather than run an updater bound to fail.
+ *  Other systems replace a running file safely, so nothing is released there. */
+export async function freeHarnessExecutable(
+    host: Pick<ServerPackageHost, "services">,
+    descriptor: Pick<HarnessDescriptor, "id" | "name">,
+    platform: NodeJS.Platform = process.platform,
+): Promise<{ released: number }> {
+    if (platform !== "win32") return { released: 0 };
+    const release = host.services.get(serverServiceKey<HarnessRuntimeReleaseIdle>("harness.runtime.releaseIdle"));
+    if (!release) return { released: 0 };
+    const { released, busy } = await release(descriptor.id);
+    if (busy > 0) {
+        throw harnessError("conflict", `${descriptor.name} is still working in ${busy === 1 ? "a chat" : `${busy} chats`}. Windows cannot replace a program while it runs; update once they finish.`);
+    }
+    return { released };
+}
 export type HarnessUpdateResult = { ok: boolean; exitCode: number | null; output: string; versions?: HarnessVersionPrune };
 
 /** Run a harness CLI's own self-update argv: resolved like the harness
@@ -140,6 +163,20 @@ export async function runHarnessUpdate(command: readonly string[], versionStore?
     const removed = versions.pruned && versions.removed.length ? `\nRemoved old versions: ${versions.removed.join(", ")}` : "";
     return { ...result, output: `${result.output}${removed}`.slice(-UPDATE_OUTPUT_TAIL), versions };
 }
+/** Windows reports a crashed program as an NTSTATUS exit code, not a signal. */
+const WINDOWS_CRASH_STATUS: Readonly<Record<number, string>> = {
+    0xC000001D: "STATUS_ILLEGAL_INSTRUCTION",
+    0xC0000005: "STATUS_ACCESS_VIOLATION",
+    0xC0000135: "STATUS_DLL_NOT_FOUND",
+    0xC0000409: "STATUS_STACK_BUFFER_OVERRUN",
+};
+/** The crash an update run's exit names, if it was one: a POSIX signal, or a
+ *  Windows NTSTATUS such as an old build hitting an illegal instruction. */
+export const updateCrashName = (signal: unknown, exitCode: number | null): string | undefined => {
+    if (typeof signal === "string" && signal) return signal;
+    const status = exitCode === null ? undefined : WINDOWS_CRASH_STATUS[exitCode >>> 0];
+    return status ? `${status} (0x${(exitCode! >>> 0).toString(16).toUpperCase()})` : undefined;
+};
 async function runUpdateCommand(command: readonly string[]): Promise<HarnessUpdateResult> {
     const [binary, ...args] = command;
     if (!binary)
@@ -159,7 +196,11 @@ async function runUpdateCommand(command: readonly string[]): Promise<HarnessUpda
                 const output = `${stdout}${stderr}`.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim().slice(-UPDATE_OUTPUT_TAIL);
                 const code = (error as { code?: unknown } | null)?.code;
                 const exitCode = !error ? 0 : typeof code === "number" ? code : null;
-                resolve({ ok: !error, exitCode, output: output || (error ? error.message : "") });
+                // A CLI that crashed (an old build hitting SIGILL on this CPU)
+                // prints nothing; name the crash so the failure is legible.
+                const crash = error ? updateCrashName((error as { signal?: unknown }).signal, exitCode) : undefined;
+                const crashed = crash ? `${binary} stopped with ${crash}` : "";
+                resolve({ ok: !error, exitCode, output: [output || (error && !crashed ? error.message : ""), crashed].filter(Boolean).join("\n") });
             });
             child.stdin?.end();
         }
@@ -585,6 +626,11 @@ export function harnessRoutes(
             if (!provider || !visible(provider.descriptor))
                 throw harnessError("not-found", "harness not found");
             const descriptor = provider.descriptor;
+            // The workstation edition starts no installer: no Node.js download
+            // from nodejs.org and no npm tarball. The preview (GET) still names
+            // the exact command so a person can run it themselves.
+            if (request.method === "POST" && workstationEdition())
+                throw editionUnavailable(`${descriptor.name} installation`);
             const input = request.method === "POST" ? await request.body() : {};
             const projectId = request.method === "POST" ? input.projectId : request.url.searchParams.get("projectId");
             const project = typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined;
@@ -627,6 +673,8 @@ export function harnessRoutes(
             const context: HarnessContext = remote && project
                 ? { space: request.space, spaceId: request.space.spaceId, projectId: project.id, cwd: project.path, remote: true }
                 : { space: request.space, spaceId: request.space.spaceId, projectId: "__default__", cwd: homedir(), remote: false };
+            // A reinstall over a CLI that chats still run is the same file swap.
+            if (!remote) await freeHarnessExecutable(host, descriptor);
             const launch: InstallLauncher = remote ? remoteInstallLauncher(remote.host!, REMOTE_SETUP_PATH) : localLauncher;
             request.json(200, installs.start({
                 key,
@@ -662,6 +710,10 @@ export function harnessRoutes(
             if (projectId && !project)
                 throw harnessError("not-found", "project not found");
             requireSetupAuthority(request, provider.descriptor, action);
+            // A sign-in terminal stays; an install terminal would run the same
+            // download this edition refuses, so only its preview is offered.
+            if (action === "install" && workstationEdition())
+                throw editionUnavailable(`${provider.descriptor.name} installation in a terminal`);
             if (request.method === "GET") {
                 request.json(200, await previewSetupTerminal({ descriptor: provider.descriptor, action, project, localBrowser: browserOnServer(request) }));
                 return true;
@@ -711,8 +763,11 @@ export function harnessRoutes(
                 request.json(200, result);
                 return true;
             }
+            if (maintenance[2] === "update" && workstationEdition())
+                throw editionUnavailable(`Updating ${provider.descriptor.name}`);
             if (!provider.descriptor.updateCommand?.length)
                 throw harnessError("unsupported", "this harness has no update command");
+            await freeHarnessExecutable(host, provider.descriptor);
             const result = await runHarnessUpdate(provider.descriptor.updateCommand, provider.versionStore);
             invalidateModels();
             if (result.ok && provider.descriptor.releaseSource)

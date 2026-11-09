@@ -24,15 +24,31 @@ const TEMPORARY_CODENAMES = [
 ] as const;
 const TEMPORARY_CODENAME_SET = new Set<string>(TEMPORARY_CODENAMES);
 
+/** Runs of characters outside a-z0-9 become one "-", ends are trimmed.
+ *  A single linear scan, not a regex: the value is a model/user-supplied title. */
+function separatorSlug(value: string): string {
+  let slug = "";
+  let separated = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if ((char >= "a" && char <= "z") || (char >= "0" && char <= "9")) {
+      if (separated && slug) slug += "-";
+      separated = false;
+      slug += char;
+    } else separated = true;
+  }
+  return slug;
+}
+
+const withoutTrailingSeparator = (value: string): string => {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "-") end -= 1;
+  return value.slice(0, end);
+};
+
 export function worktreeSlug(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48)
-    .replace(/-+$/g, "") || "session";
+  const slug = separatorSlug(value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
+  return withoutTrailingSeparator(slug.slice(0, 48)) || "session";
 }
 
 const normalizedBranches = (taken: readonly string[]): Set<string> =>

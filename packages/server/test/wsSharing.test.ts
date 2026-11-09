@@ -118,3 +118,53 @@ test("sockets hear only about chats their person can open, and losing access rem
   assert.equal(member.ws.readyState, WebSocket.OPEN);
   for (const client of [owner, member, other]) client.ws.close();
 });
+
+test("a chat that moved leaves a project-scoped list; a summary list just follows it", async (t) => {
+  const f = sharingFixture(t);
+  const chat = await f.sessionsFor(f.ctx("usr_owner")).create({ projectId: "prj_one" });
+  const spaces = {
+    resolve: (principal: { testUser: string }) => f.ctx(principal.testUser),
+    services: (ctx: SpaceContext) => ({ sessions: f.sessionsFor(ctx) }),
+    spaceOfSession: (id: string) => f.projections.get(id)?.spaceId,
+    cookieName: "polyth_space",
+    guard: { assertProject() {}, assertSession() {} },
+  };
+  const gateway = createWsGateway(f.sessionsFor(f.system()), undefined, undefined, spaces as never);
+  const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
+  gateway.attach(server, {
+    identity: (req) => ({
+      authenticated: true,
+      principal: { kind: "local-user", trustedLoopback: true, testUser: String(req.headers["x-test-user"]) } as never,
+    }),
+  });
+  server.listen(0);
+  await once(server, "listening");
+  t.after(() => { gateway.close(); server.close(); });
+  const port = (server.address() as { port: number }).port;
+
+  const scoped = await connect(port, "usr_owner");
+  const elsewhere = await connect(port, "usr_owner");
+  const summaries = await connect(port, "usr_owner");
+  scoped.ws.send(JSON.stringify({ type: "subscribe", sessionId: null, projectId: "prj_one" }));
+  elsewhere.ws.send(JSON.stringify({ type: "subscribe", sessionId: null, projectId: "prj_other" }));
+  summaries.ws.send(JSON.stringify({ type: "subscribe", sessionId: null, projectId: "prj_one", summaryProjections: true }));
+  await until(() => rowsIn(scoped, chat.id).length > 0, "the initial list");
+  await quietPeriod();
+  const removals = (client: Client) => client.messages.filter((m) => m.type === "session/removed" && m.sessionId === chat.id).length;
+  const summaryRowsBefore = rowsIn(summaries, chat.id).length;
+
+  gateway.sessionAccessChanged([{
+    ...f.projections.get(chat.id)!,
+    projectId: "prj_two",
+    projectMove: { fromProjectId: "prj_one", toProjectId: "prj_two", at: 1, operationId: "op" },
+  }]);
+
+  await until(() => removals(scoped) === 1, "the removal from the old project's list");
+  await until(() => rowsIn(summaries, chat.id).length === summaryRowsBefore + 1, "the summary row");
+  await quietPeriod();
+  assert.equal(rowsIn(summaries, chat.id).at(-1)!.projectId, "prj_two");
+  assert.equal(removals(summaries), 0, "a summary list keeps the row and regroups it");
+  assert.equal(removals(elsewhere), 0, "a list that never held it hears nothing");
+  assert.equal(rowsIn(elsewhere, chat.id).length, 0);
+  for (const client of [scoped, elsewhere, summaries]) client.ws.close();
+});

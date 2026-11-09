@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import type { HarnessUpdateStatus } from "@polyth/contracts";
+import type { HarnessInstallDto, HarnessUpdateStatus } from "@polyth/contracts";
 import { createApiTransport } from "@polyth/web-sdk";
 import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
+import { installIsActive } from "./installPresentation.ts";
 
 const api = createApiTransport();
 
@@ -12,7 +13,9 @@ const CLIENT_TTL_MS = 10 * 60_000;
 export type HarnessUpdateRun =
   | { state: "running"; startedAt: number }
   | { state: "done"; at: number; output: string; from?: string; to?: string }
-  | { state: "failed"; at: number; output: string; exitCode: number | null; message?: string };
+  /** `busy`: Windows chats still run the CLI, so its file could not be replaced
+   *  and the updater did not run. */
+  | { state: "failed"; at: number; output: string; exitCode: number | null; message?: string; busy?: true };
 
 type ProjectEntry = { statuses: ReadonlyMap<string, HarnessUpdateStatus>; loadedAt?: number; loading?: Promise<void> };
 type Snapshot = { projects: ReadonlyMap<string, ProjectEntry>; runs: ReadonlyMap<string, HarnessUpdateRun> };
@@ -62,10 +65,12 @@ export async function runHarnessUpdate(harnessId: string, projectId?: string | n
   setRun({ state: "running", startedAt: Date.now() });
   let result: { ok: boolean; exitCode: number | null; output: string } | undefined;
   let message: string | undefined;
+  let busy = false;
   try {
     result = await api.post<{ ok: boolean; exitCode: number | null; output: string }>(`/api/harnesses/${encodeURIComponent(harnessId)}/update`, {});
   } catch (cause) {
     message = cause instanceof Error ? cause.message : String(cause);
+    busy = (cause as { status?: unknown } | null)?.status === 409;
   }
   // The server dropped this harness's snapshot and model caches. Re-read the
   // installed version before reporting: an updater may follow its own release
@@ -75,7 +80,7 @@ export async function runHarnessUpdate(harnessId: string, projectId?: string | n
   const after = snapshot.projects.get(projectKey(projectId))?.statuses.get(harnessId);
   const run: HarnessUpdateRun = result?.ok
     ? { state: "done", at: Date.now(), output: result.output, ...(before?.current ? { from: before.current } : {}), ...(after?.current ? { to: after.current } : {}) }
-    : { state: "failed", at: Date.now(), output: result?.output ?? "", exitCode: result?.exitCode ?? null, ...(message ? { message } : {}) };
+    : { state: "failed", at: Date.now(), output: result?.output ?? "", exitCode: result?.exitCode ?? null, ...(message ? { message } : {}), ...(busy ? { busy: true as const } : {}) };
   setRun(run);
   return run;
 }
@@ -99,6 +104,36 @@ export function useHarnessUpdates(projectId?: string | null) {
     runs: current.runs,
     refresh,
   };
+}
+
+export type ReinstallOffer =
+  | { kind: "none" }
+  | { kind: "offer"; command: string }
+  | { kind: "running"; job: HarnessInstallDto }
+  | { kind: "done"; job: HarnessInstallDto }
+  | { kind: "failed"; job: HarnessInstallDto };
+
+/** A CLI whose own updater failed (an old build that crashes on this CPU, a
+ *  broken self-update) is put right by its installer, which always fetches
+ *  the newest release. Offered only after a failed update run, to someone
+ *  who may update, when the harness has an installer here; `startedId` is the
+ *  install this page started, so an older install never reads as its outcome. */
+export function reinstallOffer(input: {
+  run: HarnessUpdateRun | undefined;
+  installCommand: string | undefined;
+  mayUpdate: boolean;
+  job: HarnessInstallDto | undefined;
+  startedId: string | undefined;
+}): ReinstallOffer {
+  const ours = input.startedId && input.job?.id === input.startedId ? input.job : undefined;
+  if (ours) {
+    if (installIsActive(ours)) return { kind: "running", job: ours };
+    if (ours.phase === "succeeded") return { kind: "done", job: ours };
+    if (ours.phase !== "cancelled") return { kind: "failed", job: ours };
+  }
+  // A busy refusal ran no updater: an installer would hit the same running file.
+  if (input.run?.state !== "failed" || input.run.busy || !input.installCommand || !input.mayUpdate) return { kind: "none" };
+  return { kind: "offer", command: input.installCommand };
 }
 
 /** A newer release the caller may install from Settings right now. */

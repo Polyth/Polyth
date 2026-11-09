@@ -16,6 +16,7 @@
     "@polyth/backend-codex": "0.1.0"
   },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/serverEntry.ts",
     "descriptor": {
       "name": "Claude Code harness",

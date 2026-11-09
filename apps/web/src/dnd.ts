@@ -15,6 +15,9 @@ export const WIDGET_MIME = "application/x-polyth-widget";
 export const CAPABILITY_MIME = "application/x-polyth-capability";
 /** A navigator chat row dragged onto the workspace opens it in split view. */
 export const SESSION_MIME = "application/x-polyth-session";
+/** A navigator chat row dragged onto a project row moves it there. Its own type:
+ *  the open chat can move, yet can't open beside itself. */
+export const SESSION_MOVE_MIME = "application/x-polyth-session-move";
 
 interface DataLike {
   setData(type: string, value: string): void;
@@ -42,6 +45,16 @@ export function hasDragSession(dt: { types: readonly string[] }): boolean {
 /** Drag data is untrusted: only an id-shaped value is a chat to open. */
 export function getDragSession(dt: Pick<DataLike, "getData">): string | null {
   const raw = dt.getData(SESSION_MIME).trim();
+  return raw && raw.length <= 128 && /^[A-Za-z0-9_.:-]+$/.test(raw) ? raw : null;
+}
+
+export function setDragSessionMove(dt: DataLike, sessionId: string): void {
+  dt.setData(SESSION_MOVE_MIME, sessionId);
+}
+
+/** Drag data is untrusted: only an id-shaped value can name a chat. */
+export function getDragSessionMove(dt: Pick<DataLike, "getData">): string | null {
+  const raw = dt.getData(SESSION_MOVE_MIME).trim();
   return raw && raw.length <= 128 && /^[A-Za-z0-9_.:-]+$/.test(raw) ? raw : null;
 }
 
@@ -194,6 +207,8 @@ export async function dropIntoSession(
   projectId: string,
   sessionId: string | null,
   onError?: (reason: string) => void,
+  /** Takes the desktop files, when the caller has its own way to attach them. */
+  attachFiles?: (files: File[]) => void,
 ): Promise<void> {
   if (dt.getData(RESOURCE_MIME)) {
     const ref = getDragResource(dt);
@@ -257,6 +272,10 @@ export async function dropIntoSession(
   if (p) {
     const r = await attachProjectFile(projectId, sessionId, p);
     if (!r.ok) onError?.(r.reason);
+    return;
+  }
+  if (attachFiles) {
+    attachFiles(Array.from(dt.files));
     return;
   }
   for (const f of Array.from(dt.files)) {

@@ -11,9 +11,31 @@ export { SPACE_SLUG, type TenancyFile } from "./legacyTenancy.ts";
 const error = (code: string, message: string): Error => Object.assign(new Error(message), { code });
 export const noSuchSpace = (): Error => error("not-found", "space not found");
 const recovery = (): Error => error("recovery-required", "Tenancy persistence requires operator recovery");
+/** Runs of characters outside a-z0-9 become one "-", ends are trimmed.
+ *  A single linear scan, not a regex: the input is a user-supplied space name. */
+function separatorSlug(value: string): string {
+  let slug = "";
+  let separated = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if ((char >= "a" && char <= "z") || (char >= "0" && char <= "9")) {
+      if (separated && slug) slug += "-";
+      separated = false;
+      slug += char;
+    } else separated = true;
+  }
+  return slug;
+}
+
+const withoutTrailingSeparator = (value: string): string => {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "-") end -= 1;
+  return value.slice(0, end);
+};
+
 export function slugify(name: string): string {
-  return name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "") || "space";
+  const slug = separatorSlug(name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
+  return withoutTrailingSeparator(slug.slice(0, 40)) || "space";
 }
 function atomicWrite(file: string, data: string): void {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });

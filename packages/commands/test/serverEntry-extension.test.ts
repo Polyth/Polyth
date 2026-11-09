@@ -31,6 +31,7 @@ const skills = {
     instructions: "Run repository checks.",
     scope: "project",
   }],
+  agentInstructions: (_space: SpaceContext, skill: { instructions: string }) => skill.instructions,
 } as unknown as SkillService;
 const space = { spaceId: "space-a" } as SpaceContext;
 const extension: SlashCommand = {

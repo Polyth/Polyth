@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -15,7 +16,8 @@ import { createPiRuntime, PI_CAPABILITIES } from "./runtime.ts";
 import { createPiTitleRunner, withPiTitleGeneration } from "./title.ts";
 import { createPiSmallModelRunner } from "./smallModel.ts";
 import { createPiCapabilitySync } from "./capabilitySync.ts";
-import { createPiNativePlugins } from "./nativePlugins.ts";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
+import { createPiNativePlugins, piAgentDir, piProjectTrusted } from "./nativePlugins.ts";
 import { createPiProvisioner, piOverlays } from "./provisioner.ts";
 import { PI_BOOTSTRAP_SOURCE } from "./bootstrapSource.ts";
 import { PI_WORKER_SOURCE } from "./workerSource.ts";
@@ -47,7 +49,7 @@ const piEnv = async (command: string, account?: ResolvedHarnessAccount): Promise
 /** `pi --list-models` offline is a local catalog report; it runs no turn. */
 const piAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
   const command = await resolvePiBinary();
-  const { text, ok } = await exec(command, ["--list-models"], {
+  const { text, ok } = await exec(windowsShim(command) ? `"${command}"` : command, ["--list-models"], {
     timeout: 30_000,
     maxBuffer: 512 * 1024,
     env: { ...await piEnv(command, account), PI_OFFLINE: "1" },
@@ -193,7 +195,7 @@ export function createPiProvider(host: ServerPackageHost, account?: ResolvedHarn
       try {
         const command = await resolvePiBinary();
         const env = await piEnv(command, account);
-        const version = await exec(command, ["--version"], {
+        const version = await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], {
           timeout: 5_000,
           maxBuffer: 4_096,
           env,
@@ -310,6 +312,21 @@ export function createPiProvider(host: ServerPackageHost, account?: ResolvedHarn
       resolveBinary: async () => {
         const command = await resolvePiBinary();
         return { command, env: await piEnv(command, account) };
+      },
+    }),
+    // Pi loads a project's own skills only once the project is trusted.
+    skills: createFolderSkillManager({
+      harnessId,
+      harnessName: "Pi",
+      folders: async (context) => {
+        const env = { ...process.env, ...accountEnv(account) };
+        const home = env.HOME?.trim() || homedir();
+        const piDir = piAgentDir(env);
+        const trusted = await piProjectTrusted({ agentDir: piDir, cwd: context.cwd, home }).catch(() => false);
+        return nativeSkillFolders(context, {
+          ...(trusted ? { project: [join(".pi", "skills"), join(".agents", "skills")] } : {}),
+          user: [join(piDir, "skills"), join(home, ".agents", "skills")],
+        });
       },
     }),
     source: {

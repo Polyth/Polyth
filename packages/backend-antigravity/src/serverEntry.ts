@@ -14,6 +14,7 @@ import { vendorScriptInstallCommand } from "@polyth/harness-runtime/installers";
 import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { createHarnessAccountFamily, harnessCommandLine, linkAccountOverlay, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { readAgySkills } from "./commands.ts";
 import { createAntigravityPermissionBridge } from "./permissions.ts";
 import { createAntigravityNativePlugins } from "./nativePlugins.ts";
@@ -57,20 +58,23 @@ const resolveAgyBinary = async () => {
 /** An extra account's private home: its own `.gemini`, the rest linked back. */
 const accountEnv = (account?: ResolvedHarnessAccount): Record<string, string> =>
   account ? { HOME: account.dir, ...(process.platform === "win32" ? { USERPROFILE: account.dir } : {}) } : {};
+const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+/** cmd.exe needs a shim path quoted: Node joins a shell command line unquoted. */
+const cliPath = (command: string) => windowsShim(command) ? `"${command}"` : command;
 const metadata = async (binary: { command: string; env: NodeJS.ProcessEnv }, arg: "--version" | "models", cwd: string) =>
-  (await exec(binary.command, [arg], { cwd, env: binary.env, timeout: 10_000, maxBuffer: 256 * 1024,
-    shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(binary.command), windowsHide: true,
+  (await exec(cliPath(binary.command), [arg], { cwd, env: binary.env, timeout: 10_000, maxBuffer: 256 * 1024,
+    shell: windowsShim(binary.command), windowsHide: true,
   })).stdout;
 
 /** `agy models` is a free local report: it lists the catalog only when the
  *  home's Google login is valid and never runs a model turn. */
 const antigravityAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
   const binary = await resolveAgyBinary();
-  const output = await exec(binary.command, ["models"], {
+  const output = await exec(cliPath(binary.command), ["models"], {
     env: { ...binary.env, ...accountEnv(account) },
     timeout: 60_000,
     maxBuffer: 256 * 1024,
-    shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(binary.command),
+    shell: windowsShim(binary.command),
     windowsHide: true,
   }).then(({ stdout, stderr }) => ({ text: `${stdout}\n${stderr}`, ok: true }), (error: { stdout?: string; stderr?: string }) =>
     ({ text: `${error.stdout ?? ""}\n${error.stderr ?? ""}`, ok: false }));
@@ -362,6 +366,16 @@ export function createAntigravityPackage(
       },
       provisioner: createAntigravityProvisioner(harnessId),
       plugins: createAntigravityNativePlugins({ harnessId, resolveBinary }),
+      // The private runtime home links `~/.gemini/config/skills` back, so the CLI
+      // reads the same folder this lists.
+      skills: createFolderSkillManager({
+        harnessId,
+        harnessName: "Antigravity",
+        folders: (context) => nativeSkillFolders(context, {
+          project: [join(".agents", "skills"), join("_agents", "skills")],
+          user: [join(geminiHome(process.env), ".gemini", "config", "skills")],
+        }),
+      }),
     };
   };
   const accounts = createHarnessAccountFamily({

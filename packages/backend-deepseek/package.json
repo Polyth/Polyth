@@ -12,6 +12,7 @@
     "@polyth/plugins": "0.1.0"
   },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/serverEntry.ts",
     "descriptor": {
       "name": "DeepSeek harness",

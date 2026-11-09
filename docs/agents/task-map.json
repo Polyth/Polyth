@@ -215,6 +215,8 @@
         "docs/agents/known-drift.md"
       ],
       "testHints": [
+        "packages/commands/test/skillLibrary.test.ts",
+        "packages/harness-runtime/test/nativeSkills.test.ts",
         "packages/harness-runtime/test/registry.test.ts",
         "packages/harness-runtime/test/rpc.test.ts",
         "packages/server/test/harnessSwitch.test.ts",
@@ -349,10 +351,13 @@
         ".github/workflows/release.yml"
       ],
       "references": [
-        "docs/agents/verification.md"
+        "docs/agents/verification.md",
+        "docs/security/workstation-edition.md"
       ],
       "testHints": [
         "apps/desktop/test/configuration.test.ts",
+        "apps/desktop/test/edition.test.ts",
+        "scripts/test/workstationEdition.test.ts",
         "apps/desktop/test/serverPackages.test.ts",
         "apps/desktop/test/windowSurface.test.ts",
         "apps/web/test/desktopServerList.test.ts"

@@ -112,6 +112,12 @@ Pull requests from forks run with a read-only token and no secrets. The
 repository variable `CI_DISABLED=1` stops both jobs before a runner starts.
 Release packaging remains separate so ordinary pushes do not spend macOS/Windows/ARM runner time.
 
+## Release tools
+
+`electron-builder`, the Capacitor CLI (`cap`) and `sharp` are release-only tools. They are not in the root `package.json`: `tools/release/` is a separate private npm tree with its own lockfile (Dependabot watches it, and it carries the root `overrides` that patch their transitive advisories). Ordinary `npm ci`, the Docker image and CI tests never install them.
+
+Every release job runs `npm ci` and then `npm run release-tools:install`, and invokes `node ../../tools/release/node_modules/electron-builder/cli.js` from `apps/desktop` (the same pattern is used by `scripts/ci/remote-build.mjs` and the `dist*` scripts; `cap` is run from `tools/release/node_modules/@capacitor/cli/bin/capacitor` by the `apps/mobile` scripts). App icons and Android/iOS branding are generated once by `npm --workspace @polyth/desktop run icons` and `npm --workspace @polyth/mobile run assets` (they need sharp) and committed; builds do not regenerate them, and the `appIcon` / `assets` tests fail when a source changed without regenerating.
+
 ## Manual application builds
 
 Use **Actions → Build apps → Run workflow**.
@@ -323,6 +329,10 @@ The running server also reads `POLYTH_UPDATE_REPOSITORY` (runtime environment, n
 After a full (`target=all`) build, the builder's `publish` job runs `node scripts/ci/update-feed.mjs assemble <products> <feed>`. That command merges the two macOS partials into one `latest-mac.yml`, copies only the files the metadata references (plus their blockmaps) and the Android debug APK as `Polyth-<version>-android.apk` (left out, without blocking, when the Android job failed), adds the channel copies of the metadata (below), adds the [macOS 12 build](../dev/desktop.md#macos-12-build)'s `legacy-mac.yml` and its files when the `mac-dmg-legacy` job produced them (no channel copies; a missing one is a workflow warning, never a blocker, and macOS 12 clients then wait for a later stable release), and refuses an incomplete desktop set, mismatched versions, or a version that does not belong to the run's channel. The job writes the [release notes](#release-notes), uploads into a draft release, publishes it, and keeps the three newest releases **of each channel**. A failed non-desktop target (Android/iOS/npm) does not block publication. A missing desktop platform does block it.
 
 The plan job resolves the source ref to one commit (`git ls-remote` with the deploy key; a 40-character SHA is used as is) and every job builds that commit, so a moving branch cannot mix sources within a run.
+
+### Workstation edition assets
+
+Every **stable** release also carries the [workstation edition](../security/workstation-edition.md) as extra assets: `Polyth-<version>-{win-x64, mac-arm64, mac-x64, linux-x86_64}-workstation.{exe, dmg, AppImage}` (built by the `*-workstation` targets, matrix entries marked `stable_only`), their `.zip`/blockmaps, a CycloneDX SBOM per platform (`Polyth-<version>-workstation-sbom-<os>-<arch>.cdx.json`), `SHA256SUMS-workstation.txt` and its own feed `workstation.yml`, `workstation-mac.yml`, `workstation-linux.yml` (updater channel `workstation`, stable only). `update-feed.mjs` never writes workstation files into `latest*`, `beta*` or `nightly*`, refuses workstation products on a non-stable channel, and treats a missing or incomplete workstation build as a `::warning::`, never a blocker. The edition suffix comes after `<os>-<arch>`, so no filter written for standard names (`-win-x64.exe$` on polyth.app, `classifyReleasesAsset` of any server version) matches a workstation asset; the current server also rejects `-workstation` names outright. Build details: [Desktop](../dev/desktop.md#workstation-edition-build).
 
 ### Release channels
 

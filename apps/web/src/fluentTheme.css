@@ -200,13 +200,6 @@ html[data-theme-style="fluent"] .menu-kbd {
   color: var(--text-dim); font: 400 var(--font-meta)/1 var(--ui-font-family);
 }
 
-html[data-theme-style="fluent"] .ui-tooltip {
-  padding: 5px 8px 7px;
-  border-color: var(--fluent-stroke-surface);
-  border-radius: var(--radius-control);
-  box-shadow: var(--shadow-md);
-  color: var(--text);
-}
 
 html[data-theme-style="fluent"] .dialog-panel {
   border-color: var(--fluent-stroke-surface);

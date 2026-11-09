@@ -74,8 +74,8 @@ export const personalMemoryApi = {
   publish(projectId: string, id: string, expectedRevision: number) {
     return api.post<MemoryReceiptDto>(personalPath(id, "publish"), { projectId, expectedRevision });
   },
-  keep(projectId: string, id: string, expectedRevision: number) {
-    return api.post<MemoryReceiptDto>(personalPath(id, "keep"), { projectId, expectedRevision });
+  unpublish(projectId: string, id: string, sharedId: string) {
+    return api.post<MemoryReceiptDto>(personalPath(id, "unpublish"), { projectId, sharedId });
   },
   makePersonal(projectId: string, id: string, expectedRevision: number) {
     return api.post<MemoryReceiptDto>(personalPath(id, "make-personal"), { projectId, expectedRevision });

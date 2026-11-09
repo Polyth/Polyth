@@ -233,7 +233,7 @@
 
 .peak-pricing-tip-state {
   font-weight: 650;
-  color: var(--text);
+  color: #fff;
 }
 
 .peak-pricing-tip-state[data-phase="off-peak"] {

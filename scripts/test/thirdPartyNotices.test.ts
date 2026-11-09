@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { bundledPackages, packageRootOf, writeThirdPartyNotices } from "../third-party-notices.mjs";
+import { bundledPackages, packageRootOf, VENDORED, writeThirdPartyNotices } from "../third-party-notices.mjs";
 
 const fakePackage = (root: string, dir: string, manifest: Record<string, unknown>, files: Record<string, string> = {}): void => {
   const pkg = join(root, "node_modules", dir);
@@ -54,5 +54,16 @@ test("a bundled package without any license information fails the build", async 
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("vendored third-party code carries its notice when bundled", () => {
+  const repo = resolve(import.meta.dirname, "../..");
+  const metafile = { inputs: { [join(repo, "apps/web/src/components/ui/iconNodes.ts")]: {}, [join(repo, "apps/web/src/components/ui/icons.ts")]: {} } };
+  const packages = bundledPackages([metafile], repo);
+  assert.deepEqual(packages.map((pkg) => pkg.id), ["lucide (vendored icon data)@1.61.0"]);
+  assert.match(packages[0].files[0].text, /^ISC License/);
+  for (const entry of VENDORED) {
+    for (const file of [...entry.sources, entry.licenseFile]) assert.ok(readFileSync(join(repo, file), "utf8").length > 0, `${file} exists`);
   }
 });

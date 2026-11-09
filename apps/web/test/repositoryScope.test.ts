@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ALL_REPOSITORIES,
   executionRepositoryOf,
+  locationWithoutGit,
   normalizeRepositoryScope,
   primaryRepositoryIdOf,
   repositoryPathTail,
@@ -56,4 +57,13 @@ test("picker values and chip summaries describe the scope", () => {
   assert.equal(repositoryScopeAliases([...repositories, { id: "ops", alias: "ops", path: "/ops" }], ["web", "api", "docs", "ops"]), "web, api +2");
   assert.equal(repositoryPathTail("/home/me/src/web"), "…/src/web");
   assert.equal(repositoryPathTail("/web"), "/web");
+});
+
+test("only an empty location read means the project has no Git", () => {
+  assert.equal(locationWithoutGit([], { current: null, branches: [] }), true);
+  assert.equal(locationWithoutGit([], { current: "", branches: [] }), true);
+  assert.equal(locationWithoutGit([{ isMain: true }], { current: null, branches: [] }), false, "detached HEAD");
+  assert.equal(locationWithoutGit([{ isMain: true, branch: "main" }], { current: null, branches: [] }), false, "no commits yet");
+  assert.equal(locationWithoutGit([], { current: null, branches: [{ name: "main" }] }), false, "main checkout on a filtered managed branch");
+  assert.equal(locationWithoutGit([], { current: "main", branches: [] }), false);
 });

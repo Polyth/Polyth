@@ -13,7 +13,7 @@ import {
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { deltaDirection, numericValue, type ChatBlockDoc, type ChatBlockItem } from "../src/parse.ts";
-import { BlockHead, InlineText, Mark, Media, imageUrl, isCompactValue, mediaRatio, safeLink, usePaging } from "./shared.tsx";
+import { BlockHead, InlineText, Mark, Media, imageUrl, isCompactValue, mediaRatio, safeLink, useBlockGallery, usePaging } from "./shared.tsx";
 import { fill, type ChatBlockStrings } from "./strings.ts";
 
 const TABLE_PREVIEW_ROWS = 10;
@@ -62,6 +62,7 @@ export function CardsView({ doc, items: all, selected, toggle, t, context, strea
   const paging = usePaging(all.length, COLLECTION_PREVIEW, COLLECTION_STEP);
   const items = all.slice(0, paging.visible);
   const ratio = mediaRatio(doc.options.ratio);
+  const gallery = useBlockGallery(items.map((item) => ({ src: imageUrl(item.image, context), title: item.title })));
   // One card with an image gives every card a media area, so the grid stays even.
   const withMedia = Boolean(ratio) || items.some((item) => item.image);
   return (
@@ -70,9 +71,16 @@ export function CardsView({ doc, items: all, selected, toggle, t, context, strea
       {items.map((item) => {
         const href = safeLink(item.link);
         const isSelected = selected.has(item.index);
+        const src = imageUrl(item.image, context);
         return (
           <li key={item.index} className={`chat-block-card${isSelected ? " is-selected" : ""}${streaming ? " chat-block-enter" : ""}`}>
-            {withMedia && <Media src={imageUrl(item.image, context)} title={item.title} />}
+            {withMedia && (
+              <Media
+                src={src}
+                title={item.title}
+                {...(src ? { onOpen: () => gallery.open(src), openLabel: fill(t.view, { title: item.title }) } : {})}
+              />
+            )}
             {doc.pick !== "none" ? (
               <>
                 <button
@@ -110,6 +118,7 @@ export function CardsView({ doc, items: all, selected, toggle, t, context, strea
       {doc.pending && <li className="chat-block-card chat-block-pending" aria-hidden="true" />}
     </ul>
     <MoreButton paging={paging} t={t} />
+    {gallery.gallery}
     </>
   );
 }
@@ -118,18 +127,28 @@ export function ListView({ doc, items: all, selected, toggle, t, context, stream
   const paging = usePaging(all.length, COLLECTION_PREVIEW, COLLECTION_STEP);
   const items = all.slice(0, paging.visible);
   const anyImage = items.some((item) => item.image);
+  const gallery = useBlockGallery(items.map((item) => ({ src: imageUrl(item.image, context), title: item.title })));
   return (
     <>
     <ul className="chat-block-list">
       {items.map((item) => {
         const href = safeLink(item.link);
         const isSelected = selected.has(item.index);
+        const src = imageUrl(item.image, context);
         // A short value sits at the row's end; running text reads in the body
         // under the title, so it can never squeeze the title column.
         const compact = item.value ? isCompactValue(item.value) : false;
         return (
           <li key={item.index} className={`chat-block-row${isSelected ? " is-selected" : ""}${streaming ? " chat-block-enter" : ""}`}>
-            {anyImage && <Media src={imageUrl(item.image, context)} title={item.title} className="chat-block-thumb" />}
+            {anyImage && (
+              <Media
+                src={src}
+                title={item.title}
+                className="chat-block-thumb"
+                openMode="cover"
+                {...(src ? { onOpen: () => gallery.open(src), openLabel: fill(t.view, { title: item.title }) } : {})}
+              />
+            )}
             <div className="chat-block-row-main">
               {href
                 ? <a className="chat-block-link chat-block-row-title" href={href} target="_blank" rel="noopener noreferrer">{item.title}</a>
@@ -161,6 +180,7 @@ export function ListView({ doc, items: all, selected, toggle, t, context, stream
       {doc.pending && <li className="chat-block-row chat-block-pending" aria-hidden="true" />}
     </ul>
     <MoreButton paging={paging} t={t} />
+    {gallery.gallery}
     </>
   );
 }

@@ -18,6 +18,7 @@ import { requestComposerReplace } from "../composerInsert.ts";
 import {
   applyEvent, dismissUiError, focusComposer, getState, oldestSeq, reduceSessionModel, setUiError, usePendingSends, useStore, type PendingSend,
 } from "../store.ts";
+import { chatAmongOthers } from "../privateRoom.ts";
 import { api } from "@polyth/session/web-api";
 import {
   JUMP_TO_LATEST_NAME,
@@ -78,7 +79,8 @@ import {
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import { useTimelineCompanion, useTimelineSessionId } from "../timelineSession.ts";
 import { publishPromptVisibility } from "../promptVisibility.ts";
-import { registerConversationReveal, type ConversationRevealRequest } from "../conversationReveal.ts";
+import { landOnPassage, readingPositionIn } from "../conversationPassage.ts";
+import { answerRowNode, registerConversationReveal, type ConversationRevealRequest, type RevealableRow } from "../conversationReveal.ts";
 import {
   fillDownScrollTop,
   focusLineScrollTop,
@@ -148,6 +150,7 @@ import MessageQuickActions from "./MessageQuickActions.tsx";
 import QuestionPrompt from "./QuestionCards.tsx";
 import QuestionRecord from "./QuestionRecord.tsx";
 import PromptBookmark, { type PromptBookmarkTarget } from "./PromptBookmark.tsx";
+import { usePromptTabContent } from "./promptTabs.ts";
 
 const EMPTY_SESSION_EVENTS: SessionEvent[] = [];
 
@@ -176,6 +179,14 @@ function promptBookmarkPreview(text: string): string {
   return normalized.length > BOOKMARK_PREVIEW_LIMIT
     ? `${normalized.slice(0, BOOKMARK_PREVIEW_LIMIT - 1)}…`
     : normalized;
+}
+
+function conversationRowNode(
+  timeline: HTMLElement | null,
+  rows: readonly RevealableRow[],
+  id: string,
+): HTMLElement | null {
+  return promptRowNode(timeline, id) ?? (timeline ? answerRowNode<HTMLElement>(timeline, rows, id) : null);
 }
 
 function promptRowNode(timeline: HTMLElement | null, id: string): HTMLElement | null {
@@ -1286,7 +1297,8 @@ function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
       && a.answerRewindMarkerSeq === b.answerRewindMarkerSeq && a.answerReplaced === b.answerReplaced;
   }
   if (a.kind === "notice" && b.kind === "notice") {
-    return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit;
+    return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit
+      && a.fromProject === b.fromProject && a.toProject === b.toProject;
   }
   if (a.kind === "person-message" && b.kind === "person-message") {
     return a.text === b.text && a.carryToAgent === b.carryToAgent && a.replyToSeq === b.replyToSeq
@@ -2019,6 +2031,10 @@ export function timelineAfterSlotContext(input: {
   messageCount: number;
   promptCount: number;
   turnStatus: string | null;
+  /** When the person last wrote, on the server's clock; 0 before they have. */
+  latestPromptAt?: number;
+  /** A chat only its owner reads, in a project someone else really works in. */
+  privateAmongOthers?: boolean;
   permissions: ReadonlyArray<{ status: string }>;
   secrets: ReadonlyArray<{ status: string }>;
 }): {
@@ -2027,6 +2043,8 @@ export function timelineAfterSlotContext(input: {
   messageCount: number;
   promptCount: number;
   turnStatus: string | null;
+  latestPromptAt: number;
+  privateAmongOthers: boolean;
   permissions: Array<{ status: string }>;
   secrets: Array<{ status: string }>;
 } {
@@ -2036,6 +2054,8 @@ export function timelineAfterSlotContext(input: {
     messageCount: input.messageCount,
     promptCount: input.promptCount,
     turnStatus: input.turnStatus,
+    latestPromptAt: input.latestPromptAt ?? 0,
+    privateAmongOthers: input.privateAmongOthers === true,
     permissions: input.permissions.filter((permission) => permission.status === "pending"),
     secrets: input.secrets.filter((secret) => secret.status === "pending"),
   };
@@ -2348,11 +2368,13 @@ export default function Timeline({
       window.removeEventListener("pointercancel", releaseScrollbar);
     };
   }, []);
-  // Stable anchor: session switches adjust during render so the
-  // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
-  // the incoming one is ready before the first paint of the new session.
-  // Pane dock/expand/full-screen transitions never remount this tree, so the
-  // live scroll position carries itself; this record covers reload + switch.
+  // Stable anchor: session switches adjust during render so the incoming
+  // position is ready before the first paint of the new session. A chat the
+  // reader leaves is recorded as following its tail (the cleanup below): coming
+  // back to it shows its newest messages. Pane dock/expand/full-screen
+  // transitions never remount this tree, so the live scroll position carries
+  // itself; a recorded reading position only covers a reload or a remount of
+  // the chat that stays open.
   const restoreRef = useRef<TimelineAnchor | null>(null);
   const [anchorSession, setAnchorSession] = useState<string | null | undefined>(undefined);
   if (anchorSession !== sessionId) {
@@ -2373,9 +2395,6 @@ export default function Timeline({
     if (turnEndTimer.current !== null) {
       clearTimeout(turnEndTimer.current);
       turnEndTimer.current = null;
-    }
-    if (anchorSession !== undefined && anchorSession !== null && el !== null) {
-      saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
     }
     setAnchorSession(sessionId);
     setLimit(initialLimit);
@@ -3522,7 +3541,11 @@ export default function Timeline({
     touchEndCleanup.current = null;
   }, [sessionId]);
 
-  // Debounce safety: reload and unmount flush the stable anchor immediately.
+  // Debounce safety: a reload flushes the stable anchor immediately. The
+  // cleanup must not capture: on a switch it runs after the commit, when the
+  // scroller and the follow state already belong to the next chat. A chat that
+  // is no longer the open one was left, whether this tree stayed mounted or a
+  // new-chat or loading surface replaced it.
   useEffect(() => {
     if (sessionId === null) return;
     const flush = () => {
@@ -3534,7 +3557,11 @@ export default function Timeline({
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
-      flush();
+      if (saveTimer.current !== null) clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      if (getState().activeSessionId !== sessionId) {
+        saveTimelineAnchor(sessionId, { id: null, offset: 0, atBottom: true });
+      }
     };
   }, [sessionId]);
 
@@ -3756,7 +3783,9 @@ export default function Timeline({
   // initial event page when fewer than three prompts are cached.
   // When the bookmark is on for narrow windows only, the rail is its wide-window
   // form, so it keeps that history reachable there even before the third prompt.
-  const showBookmark = prefs.pinLatestPrompt || prefs.promptBookmarkDesktop;
+  // A package tab with content for this chat shows the icon though its setting is off.
+  const promptTabsHaveContent = usePromptTabContent(sessionId ?? null) !== "";
+  const showBookmark = prefs.pinLatestPrompt || prefs.promptBookmarkDesktop || promptTabsHaveContent;
   const showNav = prefs.promptNavigator === "on"
     || (prefs.promptNavigator === "auto" && (prompts.length >= 3 || canLoadOlder
       || (prefs.pinLatestPrompt && !prefs.promptBookmarkDesktop && prompts.length > 0)));
@@ -4026,7 +4055,7 @@ export default function Timeline({
     pendingJump.current = null;
     pendingJumpSmooth.current = false;
     if (target) {
-      const node = promptRowNode(el, target);
+      const node = conversationRowNode(el, rows, target);
       node?.scrollIntoView({
         block: "center",
         behavior: smooth && !timelineLiftMotionDisabled() ? "smooth" : "auto",
@@ -4113,8 +4142,16 @@ export default function Timeline({
       }
       // Initial hydration is a newest-first window. An older saved anchor can
       // be absent until background backfill lands, so retain it while the
-      // server still advertises earlier canonical events.
-      if (rows.length > 0 && !canLoadOlder) restoreRef.current = null;
+      // server still advertises earlier canonical events. Once its row is
+      // known to be gone there is no reading position left: the chat rests on
+      // its newest messages instead of wherever the scroller happened to be.
+      if (rows.length > 0 && !canLoadOlder) {
+        restoreRef.current = null;
+        readerDetached.current = false;
+        atBottom.current = true;
+        setShowJump(false);
+        scrollToTail();
+      }
       return;
     }
     restoreRef.current = null;
@@ -4132,7 +4169,7 @@ export default function Timeline({
       growWindow(next);
       return;
     }
-    const node = promptRowNode(ref.current, id);
+    const node = conversationRowNode(ref.current, rows, id);
     node?.scrollIntoView({
       block: "center",
       behavior: opts?.smooth === true && !timelineLiftMotionDisabled() ? "smooth" : "auto",
@@ -4147,6 +4184,9 @@ export default function Timeline({
   jumpRef.current = jump;
   const revealTargetIndex = externalReveal === null ? -1 : rows.findIndex((row) =>
     row.kind !== "activity" && row.eventSeq === externalReveal.eventSeq);
+  // A chat just opened has no events yet: that is not "the message is gone". The
+  // request's own timeout ends the wait if its history never arrives.
+  const revealHistoryLoaded = useStore((s) => sessionId !== null && s.events[sessionId] !== undefined);
   useLayoutEffect(() => {
     const request = externalReveal;
     if (!request) return;
@@ -4156,20 +4196,21 @@ export default function Timeline({
       return;
     }
     if (revealTargetIndex < 0) {
-      if (!canLoadOlder) { request.finish(false); setExternalReveal(null); }
+      if (revealHistoryLoaded && !canLoadOlder) { request.finish(false); setExternalReveal(null); }
       return;
     }
     const next = limitToInclude(rows.length, windowLimit, revealTargetIndex);
     if (next !== windowLimit) { growWindow(next); return; }
     const target = rows[revealTargetIndex]!;
-    const node = promptRowNode(ref.current, target.id);
+    const node = conversationRowNode(ref.current, rows, target.id);
     if (!node) { request.finish(false); setExternalReveal(null); return; }
     jumpRef.current?.(target.id, { focus: request.focus });
+    if (request.passage) landOnPassage(node, request.passage);
     request.finish(true);
     setExternalReveal(null);
     // growWindow reads this render's window; the deps above change with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [externalReveal, revealTargetIndex, canLoadOlder, sessionId, rows.length, windowLimit]);
+  }, [externalReveal, revealTargetIndex, canLoadOlder, revealHistoryLoaded, sessionId, rows.length, windowLimit]);
   useEffect(() => {
     const request = externalReveal;
     if (!request || !request.current() || request.sessionId !== sessionId
@@ -4432,6 +4473,8 @@ export default function Timeline({
     messageCount: model.messages.length,
     promptCount: prompts.length,
     turnStatus: turn?.status ?? null,
+    latestPromptAt: lastUser?.time ?? 0,
+    privateAmongOthers: !!session && chatAmongOthers(session) && session.sharing?.shared !== true,
     permissions: model.permissions,
     secrets: model.secrets,
   });
@@ -4654,9 +4697,10 @@ export default function Timeline({
           spaceId={spaceId}
           revision={`${latestPromptId ?? "none"}:${model.rewind?.markerSeq ?? "none"}`}
           prompt={latestPrompt}
-          narrow={prefs.pinLatestPrompt}
-          wide={prefs.promptBookmarkDesktop}
+          narrow={prefs.pinLatestPrompt || promptTabsHaveContent}
+          wide={prefs.promptBookmarkDesktop || promptTabsHaveContent}
           onJump={requestBookmarkJump}
+          readingPosition={() => (ref.current ? readingPositionIn(ref.current, timelineVisibleArea(ref.current)) : null)}
           onCancelJump={() => {
             bookmarkJumpGeneration.current += 1;
             bookmarkRequest.current?.reject(new Error("Prompt navigation cancelled"));

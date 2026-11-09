@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -9,6 +11,7 @@ import { probeRemoteHarness, remoteHarnessLaunch, resolveRemoteHarnessHost, type
 import { createHarnessAccountFamily, harnessCommandLine, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { createCodexNativePlugins } from "./nativePlugins.ts";
 import { createCodexProvisioner } from "./provisioner.ts";
 import { createCodexSmallModelRunner } from "./smallModel.ts";
@@ -204,6 +207,20 @@ export function createCodexProvider(host: ServerPackageHost, account?: ResolvedH
         },
         provisioner: createCodexProvisioner(harnessId),
         plugins: createCodexNativePlugins({ harnessId, connect: (context) => connectCodex(context, undefined, account) }),
+        // Read by Codex itself (`skills/list` reports the same roots). The bundled
+        // `.system` skills are its own and ship with every install.
+        skills: createFolderSkillManager({
+            harnessId,
+            harnessName: "Codex",
+            folders: (context) => {
+                const codexHome = account?.dir ?? (process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"));
+                return nativeSkillFolders(context, {
+                    project: [join(".agents", "skills")],
+                    user: [join(codexHome, "skills"), join(homedir(), ".agents", "skills")],
+                    bundled: [join(codexHome, "skills", ".system")],
+                });
+            },
+        }),
         source: {
             async list(context) {
                 const rpc = await connectCodex(context, undefined, account, await remoteHost(context));

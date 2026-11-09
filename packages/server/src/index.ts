@@ -12,6 +12,7 @@ import {
 } from "./runtimeSecurity.ts";
 import { createSetupServer } from "./setupServer.ts";
 import { createProxyTrust } from "./trustedProxy.ts";
+import { assertWorkstationListener } from "./workstationPolicy.ts";
 import {
   acquireDataDirectoryLease,
   boot as bootCore,
@@ -89,6 +90,7 @@ export async function boot(opts: BootOptions = {}) {
   const agentBeta = process.env.POLYTH_AGENT_BETA === "1";
   const debugAgentAccess = agentBeta || process.env.POLYTH_DEBUG_AGENT_ACCESS === "1";
   const deploymentProfile = process.env.POLYTH_DEPLOYMENT_PROFILE ?? "local-trusted";
+  assertWorkstationListener({ hostname, publicOrigin, env: process.env });
   const unsafeLocalAgentExposure =
     Boolean(publicOrigin) || !isLoopbackListenerHost(hostname) || deploymentProfile !== "local-trusted";
   if (agentBeta && unsafeLocalAgentExposure) {

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { HarnessRegistry, HarnessVersionStore } from "@polyth/contracts";
 import { createAcpProvider } from "@polyth/backend-acp";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/backend-acp/executable-discovery";
 import type { RegisteredAcpProfile } from "@polyth/backend-acp/profile";
 import { createHarnessAccountFamily, harnessCommandLine, linkAccountOverlay, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
@@ -110,7 +111,7 @@ const resolveCursorBinary = async () => {
         const command = report.hit.executablePath;
         const env = await harnessExecutableChildEnv(command);
         try {
-            const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
+            const version = (await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
             if (!configured && binary === "agent"
                 && !/cursor-agent/i.test(command)
                 && !/^\d{4}\.\d{2}\.\d{2}(?:-|$)/.test(version)) continue;
@@ -160,7 +161,7 @@ const accountSessionsDir = (account?: ResolvedHarnessAccount) =>
 /** `agent status --format json` is the CLI's local sign-in report. */
 const cursorAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
     const { command, env } = await resolveCursorBinary();
-    const { stdout } = await exec(command, ["status", "--format", "json"], {
+    const { stdout } = await exec(windowsShim(command) ? `"${command}"` : command, ["status", "--format", "json"], {
         timeout: 20_000,
         maxBuffer: 64 * 1024,
         env: { ...env, ...accountEnv(account) },
@@ -257,7 +258,20 @@ export default function registerPackage(host: ServerPackageHost) {
         storageDir: host.storageDir,
         deployment: host.deployment,
         registry: () => host.services.require(serverServiceKey<HarnessRegistry>("harnesses")),
-        createProvider: (account) => createAcpProvider(host, createCursorProfile(account)),
+        createProvider: (account) => {
+            const provider = createAcpProvider(host, createCursorProfile(account));
+            // Paths from the CLI's own skill list. `skills-cursor` ships with it.
+            provider.skills = createFolderSkillManager({
+                harnessId: provider.descriptor.id,
+                harnessName: "Cursor",
+                folders: (context) => nativeSkillFolders(context, {
+                    project: [join(".cursor", "skills"), join(".agents", "skills"), join(".claude", "skills"), join(".codex", "skills")],
+                    user: [join(homedir(), ".cursor", "skills"), join(homedir(), ".agents", "skills"), join(homedir(), ".claude", "skills"), join(homedir(), ".codex", "skills")],
+                    bundled: [join(homedir(), ".cursor", "skills-cursor")],
+                }),
+            });
+            return provider;
+        },
         status: cursorAccountStatus,
         signInCommand: (account) => harnessCommandLine([knownCursorCommand ?? "agent", "login"], accountEnv(account)),
         prepare: prepareCursorAccount,

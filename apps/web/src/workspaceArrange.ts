@@ -1,6 +1,7 @@
-// Direct manipulation for ordered lists: the phone Workspace editor
-// (WorkspaceEditor.tsx), a grid that mixes launcher tiles, which flow several to
-// a line, with full-width rows (widgets, headings, dividers), and the project
+// Direct manipulation for ordered lists: the phone Workspace
+// (WorkspacePanel.tsx), a grid that mixes launcher tiles, which flow several to
+// a line, with full-width rows (widgets, headings, dividers) — where holding any
+// item also turns editing on (`activate`), iOS-style — and the project
 // lists of both navigators (MobileNavigator.tsx, Sidebar.tsx). Reordering lifts
 // a copy of the item that follows the finger; the item's own slot stays behind
 // as a hole that travels through the list while the neighbours glide aside.
@@ -60,6 +61,10 @@ export const ARRANGE_TOUCH_LIFT_MS = 220;
  *  navigators' projects): a tap still opens the row, and a pause before a
  *  scroll does not pick it up. */
 export const ARRANGE_LIST_LIFT_MS = 340;
+/** A still press on a list that is not arranging yet turns arranging on after
+ *  this long (iOS's "hold to edit"): longer than a lift, so a tap or a pause
+ *  before a scroll never does. */
+export const ARRANGE_ACTIVATE_MS = 420;
 /** How far past a neighbour's midpoint the finger travels before it passes it. */
 export const ARRANGE_HYSTERESIS_PX = 10;
 /** Finger travel that turns a pending long press into a scroll. */
@@ -217,6 +222,20 @@ function makeGhost(source: HTMLElement, origin: DOMRect, host: HTMLElement): { g
     field.value = sourceFields[index]?.value ?? field.value;
     field.disabled = true;
   });
+  // A live widget may draw into a canvas, which a clone copies blank: paint
+  // each one over once (a single bitmap copy, never per frame).
+  const sourceCanvases = source.querySelectorAll<HTMLCanvasElement>("canvas");
+  if (sourceCanvases.length > 0) {
+    clone.querySelectorAll<HTMLCanvasElement>("canvas").forEach((canvas, index) => {
+      const from = sourceCanvases[index];
+      if (!from || from.width === 0 || from.height === 0) return;
+      try {
+        canvas.width = from.width;
+        canvas.height = from.height;
+        canvas.getContext("2d")?.drawImage(from, 0, 0);
+      } catch { /* a tainted or lost context: the copy stays blank */ }
+    });
+  }
   body.append(clone);
   ghost.append(body);
   host.append(ghost);
@@ -255,6 +274,17 @@ export interface UseArrangeOptions {
    *  list whose held item folds while it is up (the navigator's project, which
    *  hides its chats) lifts only its header. */
   ghostSource?(item: HTMLElement): HTMLElement | null;
+  /**
+   * Turn arranging on from a long press while `enabled` is false (the phone
+   * Workspace's iOS-style edit mode). A still press of any pointer held for
+   * `activateLiftMs` calls this; it must render the enabled list synchronously
+   * (`flushSync`) and return true, and the pressed item is then lifted at once,
+   * so the same press carries on as a drag. Without it a disabled list ignores
+   * presses.
+   */
+  activate?(id: string): boolean;
+  /** How long a still press waits before `activate` (default `ARRANGE_ACTIVATE_MS`). */
+  activateLiftMs?: number;
 }
 
 /** Handlers with a stable identity for the life of the list, so memoized items keep skipping renders mid-drag. */
@@ -513,7 +543,10 @@ function createArrangeEngine(
     window.setTimeout(once, duration + 120);
   };
 
-  const lift = (source: HTMLElement, id: string, pointerId: number, x: number, y: number, touch: boolean): void => {
+  /** `grabFrom` is where the item sat under the finger before the press changed
+   *  the layout (turning arranging on can reflow the list): the copy starts
+   *  there, under the finger, and lands in the hole wherever that now is. */
+  const lift = (source: HTMLElement, id: string, pointerId: number, x: number, y: number, touch: boolean, grabFrom?: DOMRect): void => {
     const scroller = latest.current.scroller();
     const host = latest.current.ghostHost();
     const items = latest.current.items;
@@ -521,6 +554,7 @@ function createArrangeEngine(
     if (!list || !scroller || !host || startIndex < 0 || session) return;
     const shown = latest.current.ghostSource?.(source) ?? source;
     const origin = shown.getBoundingClientRect();
+    const grab = grabFrom ?? origin;
     const { ghost, body } = makeGhost(shown, origin, host);
     const onMove = (event: PointerEvent) => { if (event.pointerId === pointerId) track(event.clientX, event.clientY); };
     const onUp = (event: PointerEvent) => {
@@ -562,8 +596,8 @@ function createArrangeEngine(
       ghost,
       body,
       origin,
-      grabX: x - origin.left,
-      grabY: y - origin.top,
+      grabX: x - grab.left,
+      grabY: y - grab.top,
       pointer: { x, y },
       startIndex,
       index: startIndex,
@@ -587,6 +621,8 @@ function createArrangeEngine(
       },
     };
     session = live;
+    // Drawn under the finger from the first frame, before any move arrives.
+    paint(live);
     host.dataset.arrangeDragging = "true";
     // Auto-scroll sets scrollTop every frame; a smooth-scrolling page would fight
     // it. Scroll anchoring would shift the list each time the hole passes the
@@ -605,7 +641,10 @@ function createArrangeEngine(
   };
 
   const press = (event: ReactPointerEvent<HTMLElement>, id: string, grip: boolean): void => {
-    if (!latest.current.enabled || session || pendingPress) return;
+    // A list that is not arranging yet may still be turned on by holding an item.
+    const activating = !latest.current.enabled;
+    if (activating && !latest.current.activate) return;
+    if (session || pendingPress) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target as Element;
@@ -619,6 +658,10 @@ function createArrangeEngine(
     let lastX = startX;
     let lastY = startY;
     let timer = 0;
+    // Only a still hold lifts: from a touch anywhere on an item, and from any
+    // pointer while the list is not arranging yet (a mouse drag there selects
+    // text or does nothing, as it would without this engine).
+    const holds = activating || (touch && !grip);
     // An image or link in the item would otherwise start the browser's own
     // drag on the first move, before this press can become one.
     const noNativeDrag = (drag: Event): void => { drag.preventDefault(); };
@@ -628,12 +671,29 @@ function createArrangeEngine(
       window.removeEventListener("pointerup", onEnd);
       window.removeEventListener("pointercancel", onEnd);
       window.removeEventListener("dragstart", noNativeDrag);
+      delete source.dataset.arrangePressing;
       if (pendingPress === cancel) pendingPress = null;
     };
     const begin = (): void => {
       cancel();
-      if (!source.isConnected || session || !latest.current.enabled) return;
-      lift(source, id, pointerId, startX, startY, touch);
+      if (!source.isConnected || session) return;
+      let grabFrom: DOMRect | undefined;
+      if (!latest.current.enabled) {
+        if (!activating) return;
+        // Turning arranging on can reflow the list (edit-only rows appear):
+        // remember where the item was so the copy rises from under the finger,
+        // and let everything else glide to its new place.
+        grabFrom = (latest.current.ghostSource?.(source) ?? source).getBoundingClientRect();
+        snapshot();
+        if (!latest.current.activate?.(id) || !latest.current.enabled) {
+          flipFrom = null;
+          return;
+        }
+      }
+      // The activation render may have replaced the element.
+      const lifted = source.isConnected ? source : list ? arrangeElement(list, id) : null;
+      if (!lifted) return;
+      lift(lifted, id, pointerId, startX, startY, touch, grabFrom);
       track(lastX, lastY);
     };
     const onMove = (move: PointerEvent): void => {
@@ -641,8 +701,8 @@ function createArrangeEngine(
       lastX = move.clientX;
       lastY = move.clientY;
       const distance = Math.hypot(lastX - startX, lastY - startY);
-      // Away from a grip a moving finger is scrolling the page.
-      if (touch && !grip) {
+      // Before a hold lifts, a moving finger is scrolling the page.
+      if (holds) {
         if (distance > TOUCH_SLOP_PX) cancel();
         return;
       }
@@ -653,7 +713,14 @@ function createArrangeEngine(
     window.addEventListener("pointerup", onEnd);
     window.addEventListener("pointercancel", onEnd);
     window.addEventListener("dragstart", noNativeDrag);
-    if (touch) timer = window.setTimeout(begin, latest.current.touchLiftMs ?? ARRANGE_TOUCH_LIFT_MS);
+    if (holds) {
+      // The item sinks a little while it is held (CSS reads the attribute), so
+      // the hold reads as building up to something before it lifts.
+      source.dataset.arrangePressing = activating ? "activate" : "lift";
+      timer = window.setTimeout(begin, activating
+        ? latest.current.activateLiftMs ?? ARRANGE_ACTIVATE_MS
+        : latest.current.touchLiftMs ?? ARRANGE_TOUCH_LIFT_MS);
+    }
     pendingPress = cancel;
   };
 

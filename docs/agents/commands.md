@@ -19,7 +19,8 @@ Observed at the evidence baseline. Inspect current manifests before execution. T
 | `node scripts/ci/select-tests.mjs ci` | Print generic CI-owned tests | Selection only, does not execute tests |
 | `node scripts/ci/select-tests.mjs polyth-link` | Print Link-owned tests | Selection only; the shared CI quality contract runs this set |
 | `npm run build:desktop` | Web + Electron build | Not signing, packaging or launched-app smoke |
-| `npm run mobile:sync` / `npm run build:mobile` | Web build + Capacitor sync | Writes native generated files; not a native production build |
+| `npm run release-tools:install` | `npm ci` of `tools/release` (electron-builder, Capacitor CLI, sharp) | Network install into `tools/release/node_modules`; needed only for installers, mobile sync and regenerating icons |
+| `npm run mobile:sync` / `npm run build:mobile` | Web build + Capacitor sync | Needs the release tools installed. Writes native generated files; not a native production build |
 | `npm run mobile:build:android` | Web, sync and Android build command | Requires Android toolchain and current signing/config requirements |
 | `npm run mobile:open:ios` / `mobile:open:android` | Open native project | Requires platform tooling; not a test |
 | `npm run build:link` | Build declared Link Rust executables | Requires pinned Rust toolchain; not a native mobile adapter test |

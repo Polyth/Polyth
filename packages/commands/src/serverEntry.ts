@@ -8,8 +8,11 @@ import type {
   RouteHandler,
   SpaceContext,
 } from "@polyth/contracts";
+import { harnessUsableByUser, type HarnessProvider, type HarnessRegistry } from "@polyth/contracts";
+import { allowedHarnessesFor, hasInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import type {
   CapabilityInstallationScope,
+  SkillCatalogInstallInput,
   SkillInstallationInput,
 } from "@polyth/contracts/capability-installations";
 import {
@@ -31,6 +34,9 @@ import {
   skillInvocationCommands,
   type SkillService,
 } from "./skills.ts";
+import { createSkillCatalog, type SkillCatalog } from "./skillCatalog.ts";
+import { createSkillLibrary, type HarnessVisibility, type SkillLibrary } from "./skillLibrary.ts";
+import { createSkillTools } from "./skillTools.ts";
 
 type ContextualContribution = AgentCapabilityContribution & {
   resolveCapabilities(context: HarnessContext): readonly AgentCapabilityDescriptor[];
@@ -63,7 +69,11 @@ export function withSkillInvocations(
       // of expanding again so a user-authored !shell line can never execute twice.
       const expandedInvocation = resolveSkillInvocation(regular.text, effective);
       return {
-        text: renderSkillInvocation(invocation, expandedInvocation?.args ?? invocation.args),
+        text: renderSkillInvocation(
+          invocation,
+          expandedInvocation?.args ?? invocation.args,
+          skills.agentInstructions(ctx.space, invocation.skill),
+        ),
         raw: text,
         usedCommand: invocation.skill.name,
       };
@@ -97,6 +107,116 @@ function extensionCommandsForSpace(
     }
   }
   return out;
+}
+
+const scopeFrom = (value: unknown): CapabilityInstallationScope => {
+  if (value === "project" || value === "space") return value;
+  throw Object.assign(new Error("scope must be project or space"), { code: "invalid-input" });
+};
+const required = (value: unknown, name: string): string => {
+  if (typeof value === "string" && value) return value;
+  throw Object.assign(new Error(`${name} is required`), { code: "invalid-input" });
+};
+
+/** The catalog and library routes. Every read and write goes through the
+ * gateway-validated Space; the services apply the role checks. */
+export function skillRoutes(deps: {
+  catalog: SkillCatalog;
+  library: SkillLibrary;
+  space: SpaceContext;
+  visible: HarnessVisibility;
+}): RouteHandler {
+  const { catalog, library, space, visible } = deps;
+  return async (request) => {
+    const { path, method, url, body, json } = request;
+    const query = (name: string): string | undefined => url.searchParams.get(name) || undefined;
+    if (method === "GET") {
+      if (path === "/api/skills/catalog") {
+        json(200, await catalog.list(space, query("projectId")));
+        return true;
+      }
+      if (path === "/api/skills/catalog/skill") {
+        json(200, await catalog.detail(space, required(query("id"), "id"), query("projectId")));
+        return true;
+      }
+      if (path === "/api/skills/catalog/file") {
+        json(200, await catalog.file(space, required(query("id"), "id"), required(query("path"), "path")));
+        return true;
+      }
+      if (path === "/api/skills/library") {
+        const fresh = query("fresh");
+        const list = await library.list(space, query("projectId"), visible, fresh ? { fresh: fresh === "all" ? true : fresh } : {});
+        json(200, { ...list, access: { ...list.access, nativePolicy: hasInstanceOwnerAuthority(request) } });
+        return true;
+      }
+      if (path === "/api/skills/library/skill") {
+        json(200, await library.detail(space, query("projectId"), required(query("name"), "name"), visible));
+        return true;
+      }
+      if (path === "/api/skills/library/file") {
+        json(200, await library.file(space, query("projectId"), required(query("name"), "name"), required(query("path"), "path"), visible));
+        return true;
+      }
+      return false;
+    }
+    if (method === "DELETE" && path === "/api/skills/catalog/sources") {
+      const input = await body();
+      json(200, { ok: await catalog.removeSource(space, required(input.id, "id")) });
+      return true;
+    }
+    if (method !== "POST") return false;
+    const input = await body();
+    const projectId = typeof input.projectId === "string" && input.projectId ? input.projectId : undefined;
+    const owner = projectId ? { projectId } : {};
+    if (path === "/api/skills/catalog/install") {
+      const install: SkillCatalogInstallInput = {
+        id: required(input.id, "id"),
+        contentHash: required(input.contentHash, "contentHash"),
+        scope: scopeFrom(input.scope),
+        ...owner,
+        ...(input.replace === true ? { replace: true } : {}),
+      };
+      json(200, await catalog.install(space, install));
+      return true;
+    }
+    if (path === "/api/skills/catalog/sources") {
+      json(200, await catalog.addSource(space, required(input.url, "url")));
+      return true;
+    }
+    if (path === "/api/skills/catalog/refresh") {
+      await catalog.refresh(space, typeof input.id === "string" && input.id ? input.id : undefined);
+      json(200, { ok: true });
+      return true;
+    }
+    if (path === "/api/skills/library/adopt") {
+      json(200, await library.adopt(space, {
+        harnessId: required(input.harnessId, "harnessId"),
+        name: required(input.name, "name"),
+        scope: scopeFrom(input.scope),
+        ...owner,
+        ...(input.replace === true ? { replace: true } : {}),
+      }, visible));
+      return true;
+    }
+    if (path === "/api/skills/library/availability") {
+      if (typeof input.enabled !== "boolean") {
+        throw Object.assign(new Error("enabled must be true or false"), { code: "invalid-input" });
+      }
+      json(200, await library.setAvailability(space, {
+        name: required(input.name, "name"),
+        scope: scopeFrom(input.scope),
+        harnessId: required(input.harnessId, "harnessId"),
+        enabled: input.enabled,
+        ...owner,
+      }));
+      return true;
+    }
+    if (path === "/api/skills/library/update") {
+      json(200, await library.update(space, scopeFrom(input.scope), required(input.name, "name"), projectId, visible));
+      return true;
+    }
+    return false;
+  };
 }
 
 export function snippetRoutes(deps: {
@@ -246,7 +366,25 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<CommandService>("commands"), commands);
   host.services.provide(serverServiceKey<SkillService>("skills"), skills);
 
+  const catalog = createSkillCatalog({ storage: (space) => host.spaceStorage(space), skills });
+  const library = createSkillLibrary({
+    skills,
+    catalog,
+    projects: (space) => host.forSpace(space).projects,
+    registry: () => host.services.get(serverServiceKey<HarnessRegistry>("harnesses")),
+  });
+  // Another person's private account harness does not exist for this caller.
+  const visibleTo = (space: SpaceContext) => (provider: HarnessProvider): boolean =>
+    harnessUsableByUser(provider.descriptor, space.userId, allowedHarnessesFor({ space }), space.spaceId);
+  // Single-person installs mint no person contexts: theirs is the system one.
+  const personSpace = (ctx: { spaceId?: string; actorUserId?: string }): SpaceContext | undefined => {
+    if (!ctx.spaceId || !ctx.actorUserId || ctx.actorUserId.startsWith("system:")) return undefined;
+    const system = host.systemSpaceContext(ctx.spaceId);
+    return host.personSpaceContext?.(ctx.actorUserId, ctx.spaceId) ?? (system.userId === ctx.actorUserId ? system : undefined);
+  };
+
   let capabilityRegistration: Disposable | undefined;
+  let toolRegistrations: Disposable[] = [];
   return {
     remoteAccess: localOnlyRemoteAccess(["commands"]),
     onEnable() {
@@ -266,12 +404,28 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         },
         resolveCapabilities: (context: HarnessContext) => skills.managedCapabilities(context),
       } as ContextualContribution);
+      toolRegistrations = createSkillTools({
+        skills,
+        catalog,
+        library,
+        personSpace,
+        readerSpace: (ctx) => {
+          if (!ctx.spaceId) throw Object.assign(new Error("Skills need a Polyth Space"), { code: "forbidden" });
+          return personSpace(ctx) ?? host.systemSpaceContext(ctx.spaceId);
+        },
+        visibleTo,
+      }).map((tool) => registry.register("commands", tool));
     },
     async onDisable() {
       await capabilityRegistration?.dispose();
       capabilityRegistration = undefined;
+      for (const registration of toolRegistrations) await registration.dispose();
+      toolRegistrations = [];
     },
     routes: async (request) => {
+      if (request.path.startsWith("/api/skills/")) {
+        return skillRoutes({ catalog, library, space: request.space, visible: visibleTo(request.space) })(request);
+      }
       if (request.path !== "/api/commands" && request.path !== "/api/snippets" && request.path !== "/api/skills") {
         return false;
       }

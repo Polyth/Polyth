@@ -1,4 +1,4 @@
-// The phone actions island's ⋮: the open session's menu, anchored under the
+// The phone actions island's ⋯: the open session's menu, anchored under the
 // island. It runs the same routes as the Navigator row menu (rename through the
 // shared prompt, since the island has no inline title field) and mounts the
 // `sidebar.session.actions` slot, so package actions appear here too.
@@ -7,11 +7,12 @@ import type { SessionProjection } from "@polyth/contracts";
 import { tr } from "../../i18n/index.ts";
 import { confirmAlert, promptAlert } from "../../alerts.ts";
 import { deleteSession, forkSession } from "../../init.ts";
-import { continuePrivately } from "../../privateRoom.ts";
+import { chatReadByOthers, continuePrivately } from "../../privateRoom.ts";
 import { archiveSessionWithPolicy, renameSessionTitle, toggleSessionPin } from "../../sessionActions.ts";
 import { canManageSession } from "../../sessionSharing.ts";
 import { setSessionMuted } from "../../sessionPeople.ts";
-import { openSessionSharing, setUiError } from "../../store.ts";
+import { getState, openSessionMove, openSessionSharing, setUiError } from "../../store.ts";
+import { canMoveSession } from "../../sessionMove.ts";
 import { friendlyError } from "../../settings.ts";
 import { copyText } from "../../utils.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
@@ -26,11 +27,13 @@ import {
   CopyIcon,
   DeleteIcon,
   EditIcon,
+  FolderOpenIcon,
   ForkIcon,
   Icon,
   IconButton,
+  LayersIcon,
   Menu,
-  MoreVerticalIcon,
+  MoreIcon,
   PinIcon,
   SharedIcon,
   type MenuEntry,
@@ -49,12 +52,14 @@ export interface MobileSessionMenuProps {
   /** Opens the session overview; absent for a conversation, which has none. */
   onOpenOverview?: () => void;
   onChanged: () => void;
+  /** Opens the tools Workspace; the menu lists it first when given. */
+  onOpenTools?: () => void;
   /** The island the menu lines up under; defaults to the ⋮ itself. */
   anchorRef?: RefObject<HTMLElement | null>;
 }
 
 export default function MobileSessionMenu({
-  session, title, status, meta, pinnedSessions, onOpenOverview, onChanged, anchorRef,
+  session, title, status, meta, pinnedSessions, onOpenOverview, onChanged, onOpenTools, anchorRef,
 }: MobileSessionMenuProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -122,6 +127,10 @@ export default function MobileSessionMenu({
   // Rename, archive, delete and sharing changes need manage access.
   const manage = canManageSession(session);
   const entries: MenuEntry[] = [
+    ...(onOpenTools ? [
+      { id: "tools", label: tr("mobile.island.openTools"), icon: LayersIcon, onSelect: onOpenTools } satisfies MenuEntry,
+      "separator" as const,
+    ] : []),
     ...(manage ? [{ id: "rename", label: tr("common.rename"), icon: EditIcon, onSelect: () => void rename() } satisfies MenuEntry] : []),
     {
       id: "pin",
@@ -135,13 +144,19 @@ export default function MobileSessionMenu({
       icon: SharedIcon,
       onSelect: () => openSessionSharing(session.id),
     } satisfies MenuEntry] : []),
+    ...(canMoveSession(session, getState().projectRegistry.projects) ? [{
+      id: "move",
+      label: tr("sessionMove.menu"),
+      icon: FolderOpenIcon,
+      onSelect: () => openSessionMove(session.id),
+    } satisfies MenuEntry] : []),
     ...(!session.isolation ? [{
       id: "fork",
       label: tr("sidebar.sessionlist.fork"),
       icon: ForkIcon,
       onSelect: () => void forkSession(session.id).catch(fail),
     } satisfies MenuEntry] : []),
-    ...(session.sharing?.shared && session.sharing.access !== "view" && session.purpose !== "conversation" ? [{
+    ...(chatReadByOthers(session) && session.sharing?.access !== "view" && session.purpose !== "conversation" ? [{
       id: "continue-private",
       label: tr("privateRoom.continue"),
       icon: LockIcon,
@@ -228,11 +243,13 @@ export default function MobileSessionMenu({
             if (typeof ref === "function") ref(node);
             else if (ref && typeof ref === "object") (ref as { current: HTMLButtonElement | null }).current = node;
           }}
-          icon={MoreVerticalIcon}
+          icon={MoreIcon}
           label={tr("mobile.sessionmenu.sessionActions")}
           size="lg"
           variant="ghost"
           className="mobile-session-menu-trigger"
+          // Closing a tool returns focus here: the menu now hosts its launcher.
+          data-workspace-trigger=""
           onClick={() => {
             tapFeedback();
             trigger.onClick();

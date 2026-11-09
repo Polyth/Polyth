@@ -133,8 +133,24 @@ export function parseComputerInput(input: JsonObject): ComputerRequest {
   return request;
 }
 
+/** Runs of characters outside a-z0-9 become one "-", ends are trimmed.
+ *  A single linear scan, not a regex: the label is model-supplied input. */
+function separatorSlug(value: string): string {
+  let slug = "";
+  let separated = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if ((char >= "a" && char <= "z") || (char >= "0" && char <= "9")) {
+      if (separated && slug) slug += "-";
+      separated = false;
+      slug += char;
+    } else separated = true;
+  }
+  return slug;
+}
+
 const slug = (value: string | undefined): string =>
-  (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "computer";
+  separatorSlug((value ?? "").toLowerCase()).slice(0, 40) || "computer";
 
 const stamp = (now: Date): string => now.toISOString().replace(/[:.]/g, "-").replace(/Z$/, "");
 

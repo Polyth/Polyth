@@ -27,7 +27,8 @@ after(() => rm(dir, { recursive: true, force: true }));
 test("the list's document allows only this build's scripts", () => {
   const policy = hubContentSecurityPolicy(INDEX);
   const hash = createHash("sha256").update(INLINE).digest("base64");
-  assert.match(policy, new RegExp(`script-src 'self' 'sha256-${hash.replace(/[+/]/g, "\\$&")}'`));
+  const pattern = hash.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(policy, new RegExp(`script-src 'self' 'sha256-${pattern}'`));
   assert.match(policy, /connect-src 'self'(;|$)/);
   assert.match(policy, /object-src 'none'/);
   assert.match(policy, /base-uri 'none'/);

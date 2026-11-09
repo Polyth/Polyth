@@ -36,6 +36,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const runtimeRejected = (message) => Object.assign(new Error(message), { code: "runtime-rejected" });
 const outcomeUnknown = (message) => Object.assign(new Error(message), { code: "outcome-unknown" });
 const windowsShim = (value) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(value);
+// cmd.exe runs a .cmd/.bat shim and Node joins that command line unquoted,
+// so a path with a space would split. Quote each word the way the program
+// behind the shim parses it back (the MSVC rules libuv also uses).
+const windowsQuote = (value) => {
+  if (value === "") return '""';
+  if (!/[ \t"]/.test(value)) return value;
+  return '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1') + '"';
+};
 
 const readTurnAdmission = async (path, operationId, mutationKind = "turn-submit") => {
   try {
@@ -450,7 +458,7 @@ const startTurn = async (message) => {
     POLYTH_COMMANDCODE_CONTROL_TOKEN: controlToken,
     POLYTH_COMMANDCODE_CONTROL_ACTION: compactControl ? "compact" : "",
   };
-  const child = spawn(command, args, {
+  const child = spawn(windowsShim(command) ? windowsQuote(command) : command, windowsShim(command) ? args.map(windowsQuote) : args, {
     cwd: message.cwd,
     env,
     windowsHide: true,

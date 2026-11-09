@@ -1,4 +1,4 @@
-import { satisfies as semverSatisfies, valid as validSemver } from "semver";
+import { satisfies as semverSatisfies, valid as validSemver } from "./semver.ts";
 import {
   isPackageCapabilityName,
   type CapabilityConstraints,
@@ -620,3 +620,4 @@ export {
 } from "./classify.ts";
 export { assertSafePackagePath, isHttpsOrigin, isHttpsUrl, isSafePackagePath } from "./paths.ts";
 export { packDirectory } from "./pack.ts";
+export { compare, gt, satisfies, valid } from "./semver.ts";

@@ -609,4 +609,13 @@ export const ptBR: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Abrir a sessão ao iniciar",
   "tasktrackers.start.model": "Modelo",
   "tasktrackers.start.modelComposer": "Igual à caixa de mensagem",
+  "tasktrackers.automation.title": "Quando um agente para",
+  "tasktrackers.automation.body": "Um cartão vinculado passa para uma coluna que você nomear quando a sessão dele parar. Uma tarefa nunca é movida para um status Concluído nem a partir dele, e cada turno move uma tarefa no máximo uma vez.",
+  "tasktrackers.automation.enabled": "Mover a tarefa quando o agente parar",
+  "tasktrackers.automation.column": "Coluna de destino",
+  "tasktrackers.automation.columnHint": "Reconhecida pelo nome no quadro da própria tarefa, sem diferenciar maiúsculas. Se o quadro não tiver essa coluna, a tarefa fica onde está.",
+  "tasktrackers.automation.finished": "Termina o turno",
+  "tasktrackers.automation.needsInput": "Aguarda uma resposta",
+  "tasktrackers.automation.error": "Falha ou é interrompido",
+  "tasktrackers.card.attention": "Precisa de atenção",
 };

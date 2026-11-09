@@ -13,7 +13,7 @@ harness id is `deepseek`; extra logins register as `deepseek-<account>`.
 - Sign in: dsh has no login command. Its official route reads
   `DEEPSEEK_API_KEY` from the launch environment, then its own credential
   store (`$DSH_HOME/.credentials.yaml`, written by `dsh web` → Models), then
-  `$DSH_HOME/.env`. Polyth's sign-in command runs `bin/sign-in.mjs` in a
+  `$DSH_HOME/.env`. Polyth's sign-in command runs `assets/sign-in.mjs` in a
   terminal: it reads the key with hidden input, checks it against DeepSeek's
   free `GET /user/balance` (skipped for a custom `DEEPSEEK_BASE_URL`), and
   writes `$DSH_HOME/.env` with mode 0600. It never prints the key. A key in

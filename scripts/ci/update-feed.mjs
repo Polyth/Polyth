@@ -14,6 +14,10 @@
 // channel copies electron-updater looks for, and writes `version=…` and
 // `prerelease=true|false` to $GITHUB_OUTPUT when set. The macOS 12 package's
 // legacy-mac.yml (scripts/ci/mac-legacy.mjs) joins the set when it was built.
+// On a stable release the workstation edition (scripts/ci/workstation.mjs) adds
+// workstation.yml, workstation-mac.yml and workstation-linux.yml with their
+// installers, per-platform SBOMs and SHA256SUMS-workstation.txt; never any
+// latest*/beta*/nightly* file.
 //
 // POLYTH_RELEASE_CHANNEL picks the release channel (stable | test | nightly,
 // default stable). Test and nightly versions carry a semver prerelease id
@@ -23,6 +27,9 @@ import { appendFileSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, w
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MAC_LEGACY_METADATA } from "./mac-legacy.mjs";
+import {
+  WORKSTATION_ASSET_INFIX, WORKSTATION_METADATA, WORKSTATION_SUMS_NAME, sha256Sums, workstationMacPartialName,
+} from "./workstation.mjs";
 
 const REPOSITORY = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100})$/;
 const STABLE_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
@@ -171,6 +178,61 @@ function filesIn(dir) {
   });
 }
 
+const WORKSTATION_SBOM = /-workstation-sbom-[a-z0-9]+-[a-z0-9_]+\.cdx\.json$/;
+
+/**
+ * The workstation edition's share of the feed: its own metadata files plus the
+ * SBOMs, or null when there is nothing to publish. Refuses any workstation
+ * product on a non-stable channel. A missing, mismatching or incomplete
+ * platform is skipped with a warning; the standard feed is never blocked.
+ */
+function workstationFeed(byName, version, channel, warnings) {
+  const partials = MAC_ARCHITECTURES.map((arch) => [arch, workstationMacPartialName(arch)]);
+  const sboms = [...byName.keys()].filter((name) => WORKSTATION_SBOM.test(name));
+  const present = [WORKSTATION_METADATA.windows, WORKSTATION_METADATA.linux, ...partials.map(([, name]) => name), ...sboms]
+    .filter((name) => byName.has(name));
+  const installers = [...byName.keys()].filter((name) => name.includes(WORKSTATION_ASSET_INFIX) && !WORKSTATION_SBOM.test(name));
+  if (channel !== "stable") {
+    if (present.length > 0 || installers.length > 0) {
+      throw new Error(`Workstation products (${[...present, ...installers].join(", ")}) are published on stable releases only, not ${channel}`);
+    }
+    return null;
+  }
+  if (present.length === 0) {
+    warnings.push("The workstation edition is missing; this release has no workstation feed");
+    return null;
+  }
+  const metadata = new Map();
+  const usable = (name, text) => {
+    if (metadataVersion(text) !== version) {
+      warnings.push(`${name} is version ${metadataVersion(text)}, the release is ${version}; workstation ${name} skipped`);
+      return false;
+    }
+    const missing = metadataUrls(text).filter((url) => url.includes("/") || url.includes("\\") || !byName.has(url));
+    if (missing.length > 0) {
+      warnings.push(`${name} references ${missing.join(", ")}, which no builder product provides; workstation ${name} skipped`);
+      return false;
+    }
+    return true;
+  };
+  for (const platform of ["windows", "linux"]) {
+    const name = WORKSTATION_METADATA[platform];
+    const file = byName.get(name);
+    if (!file) warnings.push(`The workstation ${platform} build is missing; this release has no ${name}`);
+    else if (usable(name, readFileSync(file, "utf8"))) metadata.set(name, readFileSync(file, "utf8"));
+  }
+  const macTexts = [];
+  for (const [arch, partial] of partials) {
+    const file = byName.get(partial);
+    if (!file) warnings.push(`The workstation macOS ${arch} build is missing; ${WORKSTATION_METADATA.mac} will not list it`);
+    else if (usable(partial, readFileSync(file, "utf8"))) macTexts.push(readFileSync(file, "utf8"));
+  }
+  if (macTexts.length > 0) metadata.set(WORKSTATION_METADATA.mac, mergeMacMetadata(macTexts));
+  const keep = sboms.filter((name) => name.startsWith(`Polyth-${version}-`));
+  for (const name of sboms) if (!keep.includes(name)) warnings.push(`${name} is not version ${version}; skipped`);
+  return { metadata, sboms: keep };
+}
+
 /**
  * Builds the release asset set from every builder product directory. Only the
  * platform metadata and the files it references (plus their blockmaps) are
@@ -183,6 +245,10 @@ function filesIn(dir) {
  * copies: that build follows stable releases only. Its absence never blocks a
  * release either; it is reported in `warnings`, and macOS 12 clients then find
  * no update until a later stable release carries it.
+ *
+ * The workstation edition follows the same rule (see `workstationFeed`): stable
+ * releases only, absent or incomplete products are warnings, never an error
+ * for the standard feed, and its metadata never joins latest*.yml.
  */
 export function assembleFeed(productsDir, feedDir, channel = "stable") {
   const releaseChannel = resolveReleaseChannel(channel);
@@ -219,6 +285,8 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
     throw new Error(`${MAC_LEGACY_METADATA} is version ${metadataVersion(legacy)}, the release is ${version}`);
   }
 
+  const workstation = workstationFeed(byName, version, releaseChannel, warnings);
+
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const writeMetadata = (name, text) => {
@@ -236,6 +304,20 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
     for (const alias of channelMetadataAliases(releaseChannel)) writeFileSync(join(out, name.replace(/^latest/, alias)), text);
   }
   if (legacy !== null) writeMetadata(MAC_LEGACY_METADATA, legacy);
+  if (workstation) {
+    const published = [];
+    for (const [name, text] of workstation.metadata) {
+      writeMetadata(name, text);
+      published.push(name, ...metadataUrls(text), ...metadataUrls(text).filter((url) => byName.has(`${url}.blockmap`)).map((url) => `${url}.blockmap`));
+    }
+    for (const name of workstation.sboms) {
+      cpSync(byName.get(name), join(out, name));
+      published.push(name);
+    }
+    if (published.length > 0) {
+      writeFileSync(join(out, WORKSTATION_SUMS_NAME), sha256Sums([...new Set(published)].map((name) => join(out, name))));
+    }
+  }
   const apks = [...byName.values()].filter((file) => file.endsWith(".apk"));
   if (apks.length > 1) throw new Error(`Builder products hold more than one APK: ${apks.map((file) => basename(file)).join(", ")}`);
   if (apks.length === 1) cpSync(apks[0], join(out, `Polyth-${version}-android.apk`));

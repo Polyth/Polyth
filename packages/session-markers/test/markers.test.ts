@@ -20,6 +20,8 @@ test("marker references forgive case, spaces and punctuation in every script", (
   assert.equal(markerSlug("  NEEDS_review!! "), "needs-review");
   assert.equal(markerSlug("Чекаю клієнта"), "чекаю-клієнта");
   assert.equal(markerSlug("!!!"), "");
+  // Long separator runs collapse in one linear pass, not a backtracking regex.
+  assert.equal(markerSlug(`${"-".repeat(50_000)}Needs review${"_".repeat(50_000)}`), "needs-review");
   const definitions = allDefinitions(emptyMarkerDocument());
   assert.equal(resolveMarker(definitions, "needs review")?.id, "needs-review");
   assert.equal(resolveMarker(definitions, "Reply later")?.id, "reply-later");

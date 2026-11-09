@@ -8,7 +8,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createPortableHarnessAuthority,
+  nodeModeSpawnOptions,
   quoteWindowsArgument,
+  windowsShimInvocation,
   releaseHarnessProcessExecution,
   windowsJobContainment,
   type WindowsJobController,
@@ -209,4 +211,29 @@ test("the helper refuses job names that are not Polyth's", windowsOnly, () => {
   const helper = join(import.meta.dirname, "..", "native", "bin", "win32", "polyth-job.exe");
   const refused = spawnSync(helper, ["terminate", "Local\\someone-else"], { encoding: "utf8" });
   assert.equal(refused.status, 64);
+});
+
+test("a worker launched as the Desktop app binary runs it in Node mode", () => {
+  const desktop = { electron: "38.0.0", execPath: "C:\\Program Files\\Polyth\\Polyth.exe" };
+  const options = { cwd: "C:\\work", env: { PATH: "C:\\bin" } };
+  assert.deepEqual(nodeModeSpawnOptions(desktop.execPath, options, desktop), {
+    cwd: "C:\\work",
+    env: { PATH: "C:\\bin", ELECTRON_RUN_AS_NODE: "1" },
+  });
+  assert.equal(options.env.PATH, "C:\\bin");
+  assert.equal("ELECTRON_RUN_AS_NODE" in options.env, false);
+  // Any other executable, and every launch outside Electron, is untouched.
+  assert.equal(nodeModeSpawnOptions("C:\\tools\\agy.exe", options, desktop), options);
+  assert.equal(nodeModeSpawnOptions("/usr/bin/node", options, { execPath: "/usr/bin/node" }), options);
+});
+
+test("a .cmd shim keeps every argument with a space whole", () => {
+  assert.deepEqual(windowsShimInvocation("C:\\Users\\Max Smith\\AppData\\Roaming\\npm\\dsh.cmd", [
+    "--profile", "acp", "--patch", "C:\\Program Files\\Polyth\\resources\\packages\\backend-deepseek\\assets\\acp.patch.yml",
+  ]), {
+    command: '"C:\\Users\\Max Smith\\AppData\\Roaming\\npm\\dsh.cmd"',
+    args: ["--profile", "acp", "--patch", '"C:\\Program Files\\Polyth\\resources\\packages\\backend-deepseek\\assets\\acp.patch.yml"'],
+  });
+  // A folder argument ending in a backslash must not escape its closing quote.
+  assert.deepEqual(windowsShimInvocation("C:\\npm\\cmd.cmd", ["--skill", "C:\\My Projects\\app\\"]).args, ["--skill", '"C:\\My Projects\\app\\\\"']);
 });

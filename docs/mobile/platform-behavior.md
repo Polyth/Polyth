@@ -286,6 +286,11 @@ and Android. It accepts documents and images, converts the selected native URLs
 to browser `File` objects, then reuses the existing `_inbox` upload and
 attachment-pill path.
 
+- A photo that may be reduced ([Photo size](../dev/ui.md)) is read into memory
+  and its staged copy freed before the question appears, because a staged file
+  no draft refers to would count against staging permanently. Such a photo is
+  not recoverable across an app restart and is picked again; every other file
+  keeps the staged path.
 - Cancellation is silent and preserves the draft.
 - A denied or unreadable selection shows a bounded existing UI error.
 - The picker grants only scoped access to user-selected files; Polyth requests
@@ -440,7 +445,10 @@ extension (shared `PolythActivityAttributes.swift`).
   subscribe contract), so a chat that ended in another project while the phone
   slept no longer keeps the activity on "Working" or "Reply needed".
   When nothing is live any more the activity ends with a final Done/Failed
-  snapshot that stays ten minutes; a chat that vanished ends it at once. The
+  snapshot that stays ten minutes; a chat that vanished ends it at once. A
+  finished activity stays listed and on the Lock Screen until that date and
+  cannot run again, so the next one requested replaces it, and only one card
+  ever takes the final snapshot: the Lock Screen never shows two. The
   first evaluation after a page load always reaches native, so an activity left
   by a previous process or server is replaced or ended.
 - **Push while suspended.** The server keeps the activity current while the

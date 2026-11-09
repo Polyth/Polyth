@@ -215,6 +215,26 @@ test("routes expose settings and enforce agent handoff and status-update switche
   assert.equal((off.payload as { preferences: { agentHandoff: boolean; providers: { jira: boolean } } }).preferences.agentHandoff, false);
   assert.equal((off.payload as { preferences: { providers: { jira: boolean } } }).preferences.providers.jira, true, "non-boolean flags are ignored");
 
+  // Agent automation is a nested setting: a column is one trimmed line and
+  // only stop kinds the board knows survive a round trip.
+  const on = await call("PATCH", "/api/task-trackers/settings", {
+    automation: { enabled: true, column: "  In   Review ", on: ["finished", "bogus", 3] },
+  });
+  const automation = (on.payload as {
+    preferences: { automation: { enabled: boolean; column: string; on: string[] } };
+  }).preferences.automation;
+  assert.equal(automation.enabled, true);
+  assert.equal(automation.column, "In Review");
+  assert.deepEqual(automation.on, ["finished"]);
+  const ignored = await call("PATCH", "/api/task-trackers/settings", { automation: { enabled: "yes" } });
+  assert.equal((ignored.payload as { preferences: { automation: { enabled: boolean } } }).preferences.automation.enabled, true,
+    "a non-boolean flag leaves the stored value alone");
+
+  // A sighting only touches Polyth's own link index, so a viewer may record it.
+  const seen = await call("POST", "/api/task-trackers/jira/tasks/POL-101/seen", {}, "viewer");
+  assert.equal(seen.status, 200);
+  assert.deepEqual(seen.payload, { ok: true, marked: 0 }, "nothing is linked to that task in this fixture");
+
   const start = await call("POST", "/api/task-trackers/jira/tasks/POL-101/link", { sessionId: "s1" });
   assert.match(start.error?.message ?? "", /Agent handoff is turned off/);
   const linkOnly = await call("POST", "/api/task-trackers/jira/tasks/POL-101/link", { sessionId: "s1", startAgent: false });

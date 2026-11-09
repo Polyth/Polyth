@@ -1,290 +1,225 @@
-/* Phone Workspace edit mode (WorkspaceEditor.tsx + workspaceArrange.ts).
- * The arrangement is drawn as it will look: app tiles flow four to a line,
- * widgets and layout elements are full-width rows. Every item carries its own
- * controls (corner minus, size pill, grip) so managing never needs a separate
- * selection mode. Motion is FLIP/Web Animations in workspaceArrange.ts; these
- * rules only paint states. Shell-owned: package widget internals never render
- * in here. z-index values are local to the sheet's own stacking context. */
+/* Phone Workspace editing (WorkspacePanel.tsx + workspaceArrange.ts).
+ * The live grid is its own editor, as a Home Screen is: holding an item turns
+ * editing on, everything jiggles, a corner minus removes, a widget's size pill
+ * cycles its sizes, and items are dragged where they belong. Motion here is
+ * compositor-only — `rotate` for the jiggle, `scale` for a press, `transform`
+ * for the FLIP glides the engine plays — so the three never fight over one
+ * property and nothing repaints per frame. Borders are hidden by default
+ * (`body[data-hide-borders]`), so every edge in here is a box-shadow or an
+ * outline. z-index values are local to the sheet's own stacking context. */
 
-/* ---- header -------------------------------------------------------------
-   Edit mode keeps the Workspace header row (Back · Edit switch,
-   workspacePanelPremium.css), so turning the switch never moves the page. */
+/* ---- the header while editing: Add leads, Done trails -------------------- */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-  /* Room under the last row for the floating Undo control. */
+  .workspace-panel-sheet .workspace-edit-bar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: var(--tap);
+  }
+
+  .workspace-panel-sheet .workspace-edit-add {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: var(--control-h);
+    height: var(--control-h);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-circle);
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 9%, transparent);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: scale var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+  }
+
+  .workspace-panel-sheet .workspace-edit-add::after {
+    content: "";
+    position: absolute;
+    inset: calc((var(--control-h) - var(--tap)) / 2);
+  }
+
+  .workspace-panel-sheet .workspace-edit-done {
+    position: relative;
+    min-width: calc(var(--tap) + var(--space-4));
+    min-height: var(--control-h-sm);
+    padding: 0 var(--space-4);
+    border: 0;
+    border-radius: var(--radius-round);
+    color: var(--accent-ink);
+    background: var(--accent);
+    box-shadow: 0 6px 16px -10px var(--accent);
+    font-size: var(--font-label);
+    font-weight: 650;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: scale var(--motion-fast) var(--motion-ease);
+  }
+
+  .workspace-panel-sheet .workspace-edit-done::after {
+    content: "";
+    position: absolute;
+    inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
+  }
+
+  .workspace-panel-sheet :is(.workspace-edit-add, .workspace-edit-done):active { scale: .92; }
+
+  /* What a mode switch brings into the header settles in; Back included. */
+  .workspace-panel-sheet .workspace-edit-bar > *,
+  .workspace-panel-sheet.is-mode-switched:not(.is-editing) .sheet-back {
+    animation: workspace-head-in var(--motion-normal) cubic-bezier(.3, 1.4, .6, 1) both;
+  }
+
+  /* Room under the last item for the floating dock. */
   .workspace-panel-sheet.is-editing .sheet-body {
-    padding:
-      0
-      max(var(--screen-gutter), var(--safe-right))
-      max(calc(var(--tap) + var(--space-6)), calc(var(--safe-bottom) + var(--tap) + var(--space-4)))
-      max(var(--screen-gutter), var(--safe-left));
+    padding-block-end: max(calc(var(--tap) + var(--space-6)), calc(var(--safe-bottom) + var(--tap) + var(--space-5)));
   }
 }
 
-/* ---- the Add card -------------------------------------------------------- */
-.workspace-panel-sheet .workspace-editor-add {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-3);
-  width: 100%;
-  min-height: calc(var(--control-h-lg) + var(--space-4));
-  margin: var(--space-1) 0 var(--space-3);
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
-  border: 1px solid var(--accent-line);
-  border-radius: var(--radius-surface);
-  color: var(--text);
-  background:
-    linear-gradient(135deg,
-      color-mix(in srgb, var(--accent) 18%, var(--surface-activity)),
-      color-mix(in srgb, var(--accent) 5%, var(--surface-activity)));
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
-  text-align: start;
-  cursor: pointer;
-  transition: transform var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+@keyframes workspace-head-in {
+  from { opacity: 0; scale: .7; }
+  to { opacity: 1; scale: 1; }
 }
 
-@media (hover: hover) {
-  .workspace-panel-sheet .workspace-editor-add:hover:where(:not(:disabled)) { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
-}
-.workspace-panel-sheet .workspace-editor-add:active:where(:not(:disabled)) { transform: scale(.985); }
-
-.workspace-editor-add-icon {
-  display: grid;
-  place-items: center;
-  width: var(--tap);
-  height: var(--tap);
-  border-radius: var(--radius-circle);
-  color: var(--accent-ink);
-  background: var(--accent);
-  box-shadow: 0 8px 18px -10px var(--accent);
-}
-
-.workspace-editor-add-copy {
+/* ---- the canvas -------------------------------------------------------------
+   Fills the page, so an empty spot below the last item is still a spot to
+   hold (edit) or tap (Done). The grid keeps a little room at its top in both
+   modes for the corner minus, so editing never moves it. */
+.workspace-panel-sheet .workspace-panel-canvas {
   display: flex;
-  min-width: 0;
+  min-height: 100%;
   flex-direction: column;
-  gap: 2px;
 }
 
-.workspace-editor-add-copy strong {
-  overflow: hidden;
-  font-size: var(--font-label);
-  font-weight: 650;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.workspace-panel-sheet .workspace-panel-items {
+  padding-block-start: var(--space-2);
+  /* A long press belongs to this grid, not to the system's callout. */
+  -webkit-touch-callout: none;
 }
 
-.workspace-editor-add-copy small {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.workspace-panel-sheet .workspace-panel-launcher {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-.workspace-panel-sheet .workspace-editor-add-chevron {
-  width: var(--icon-lg);
-  height: var(--icon-lg);
-  color: var(--accent);
+/* A held item sinks a little while the hold builds up (the engine sets the
+   attribute for the hold, and lifts a copy when it completes). */
+.workspace-panel-sheet .workspace-panel-item {
+  transition: scale 200ms var(--motion-ease);
 }
 
-.workspace-editor-hint {
-  margin: 0 var(--space-1) var(--space-1);
-  color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
+.workspace-panel-sheet .workspace-panel-item[data-arrange-pressing] {
+  scale: .955;
+  transition: scale 300ms cubic-bezier(.2, .8, .3, 1) 70ms;
 }
 
-/* ---- empty states (editor and the plain Workspace) ------------------------ */
-.workspace-editor-empty,
-.workspace-panel-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-5) var(--space-4) var(--space-4);
-  color: var(--muted);
-  text-align: center;
-}
-
-.workspace-panel-empty { padding-top: var(--space-6); }
-
-.workspace-editor-empty-icon,
-.workspace-panel-empty-icon {
-  display: grid;
-  place-items: center;
-  width: calc(var(--tap) + var(--space-3));
-  height: calc(var(--tap) + var(--space-3));
-  margin-bottom: var(--space-1);
-  border-radius: var(--radius-circle);
-  color: var(--accent);
-  background: var(--accent-wash);
-}
-
-.workspace-editor-empty strong,
-.workspace-panel-empty strong {
-  color: var(--text);
-  font-size: var(--font-label);
-  font-weight: 650;
-}
-
-.workspace-editor-empty p,
-.workspace-panel-empty p {
-  max-width: 32ch;
-  margin: 0 0 var(--space-2);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
-
-/* ---- the arrangement ----------------------------------------------------- */
-.workspace-panel-sheet .workspace-editor-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-2);
-  margin: 0;
-  /* The corner minus overhangs each item: keep it inside the scroller. */
-  padding: var(--space-2) var(--space-1) 0;
-  list-style: none;
-}
-
-.workspace-panel-sheet .workspace-editor-item {
-  position: relative;
-  min-width: 0;
-  border: 1px solid var(--material-glass-border);
-  border-radius: var(--radius-surface);
-  color: var(--text-dim);
-  background: var(--surface-activity);
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+/* ---- items while editing --------------------------------------------------- */
+.workspace-panel-sheet.is-editing .workspace-panel-item {
+  isolation: isolate;
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
-  -webkit-touch-callout: none;
-  /* Vertical swipes still scroll; a long press lifts (workspaceArrange.ts). */
+  /* Vertical swipes still scroll; a still touch lifts (workspaceArrange.ts). */
   touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
-  transition:
-    border-color var(--motion-fast) var(--motion-ease),
-    background var(--motion-fast) var(--motion-ease);
+  animation: workspace-jiggle-tile 270ms linear infinite;
+  animation-delay: calc(var(--jiggle-phase, 0) * -39ms);
 }
 
-.workspace-panel-sheet .workspace-editor-item:focus-visible {
+/* A full-width row sways far less: the same angle would swing its far edge
+   several pixels. */
+.workspace-panel-sheet.is-editing .workspace-panel-item:not(.workspace-panel-item--launcher) {
+  animation-name: workspace-jiggle-row;
+  animation-duration: 330ms;
+  animation-delay: calc(var(--jiggle-phase, 0) * -47ms);
+}
+
+@keyframes workspace-jiggle-tile {
+  0%, 100% { rotate: -1.4deg; }
+  50% { rotate: 1.4deg; }
+}
+
+@keyframes workspace-jiggle-row {
+  0%, 100% { rotate: -.32deg; }
+  50% { rotate: .32deg; }
+}
+
+/* Nothing jiggles under the Add page, under a package window or on the way
+   out: the compositor stops ticking for a grid nobody sees. */
+.workspace-panel-sheet:is(.is-gallery-open, .is-closing) .workspace-panel-item,
+.sheet-backdrop[data-stack="covered"] > .workspace-panel-sheet .workspace-panel-item {
+  animation-play-state: paused;
+}
+
+.workspace-panel-sheet.is-editing .workspace-panel-item:focus-visible {
   outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
-/* App tiles: the launcher as it looks on the Workspace. */
-.workspace-panel-sheet .workspace-editor-item--launcher {
-  display: flex;
-  min-height: calc((2 * var(--control-h)) + var(--space-3));
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-1) var(--space-2);
-  text-align: center;
+/* Widgets and layout elements become objects you can pick up: a card drawn
+   behind them, just outside their own box, so their content never moves. */
+.workspace-panel-sheet.is-editing .workspace-panel-item:not(.workspace-panel-item--launcher)::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: calc(-1 * var(--space-1));
+  border-radius: calc(var(--radius-surface) + var(--space-1));
+  background: var(--surface-activity);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text) 7%, transparent),
+    var(--material-glass-highlight),
+    var(--shadow-sm);
+  animation: workspace-card-in var(--motion-normal) var(--motion-ease) both;
+  pointer-events: none;
 }
 
-.workspace-editor-tile-icon {
-  display: grid;
-  place-items: center;
-  color: var(--accent);
+/* The corner minus sits over a row's first letters: while editing, a row's
+   content starts clear of it. */
+.workspace-panel-sheet.is-editing .workspace-panel-item--widget > .workspace-panel-widget-head {
+  padding-inline-start: var(--space-4);
 }
 
-.workspace-panel-sheet .workspace-editor-tile-icon svg {
-  width: var(--icon-xl);
-  height: var(--icon-xl);
-  stroke-width: 1.75;
+.workspace-panel-sheet.is-editing .workspace-panel-label--heading {
+  padding-inline-start: var(--space-5);
 }
 
-.workspace-editor-tile-label {
-  display: -webkit-box;
-  max-width: 100%;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  color: var(--text-dim);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  overflow-wrap: anywhere;
-  text-wrap: balance;
-}
-
-/* Widget rows: mark, name and purpose, size, grip. */
-.workspace-panel-sheet .workspace-editor-item--widget {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: calc(var(--icon-xl) + var(--space-3)) minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: calc(var(--control-h-lg) + var(--space-4));
-  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3);
-}
-
-.workspace-editor-row-icon {
-  display: grid;
-  place-items: center;
-  width: calc(var(--icon-xl) + var(--space-3));
-  height: calc(var(--icon-xl) + var(--space-3));
-  border-radius: var(--radius-card);
-  color: var(--accent);
-  background: var(--accent-wash);
-}
-
-.workspace-panel-sheet .workspace-editor-row-icon svg {
-  width: var(--icon-lg);
-  height: var(--icon-lg);
-}
-
-.workspace-editor-row-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.workspace-editor-row-copy strong,
-.workspace-editor-row-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-editor-row-copy strong {
-  color: var(--text);
-  font-size: var(--font-label);
-  font-weight: 640;
-  line-height: 1.3;
-}
-
-.workspace-editor-row-copy small {
-  color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
-
-/* Layout elements: quiet dashed rows, edited in place. */
-.workspace-panel-sheet :is(.workspace-editor-item--header, .workspace-editor-item--divider, .workspace-editor-item--labeled-divider) {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: calc(var(--tap) + var(--space-2));
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  border-style: dashed;
-  border-color: var(--hair-strong);
-  background: color-mix(in srgb, var(--surface-overlay) 55%, transparent);
+/* Layout elements are scaffolding: a quiet dashed frame instead of a card. */
+.workspace-panel-sheet.is-editing :is(.workspace-panel-item--header, .workspace-panel-item--divider, .workspace-panel-item--labeled-divider)::before {
+  background: color-mix(in srgb, var(--surface-overlay) 50%, transparent);
   box-shadow: none;
+  outline: 1.5px dashed var(--hair-strong);
+  outline-offset: -1.5px;
 }
 
-.workspace-panel-sheet .workspace-editor-label {
+@keyframes workspace-card-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* A plain divider is invisible outside editing; editing shows its line. */
+.workspace-panel-sheet.is-editing .workspace-panel-item--divider {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-h);
+  padding-inline: var(--space-5) var(--space-3);
+}
+
+.workspace-panel-sheet.is-editing .workspace-panel-divider {
+  height: 1px;
+  flex: 1;
+  margin: 0;
+  background: var(--hair-strong);
+}
+
+/* Headings and labelled dividers are edited where they sit. */
+.workspace-panel-sheet .workspace-panel-label {
   width: 100%;
   min-width: 0;
   min-height: var(--control-h);
   padding: 0 var(--space-2);
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--radius-control);
   color: var(--text);
   background: transparent;
@@ -296,47 +231,41 @@
   user-select: text;
 }
 
-.workspace-panel-sheet .workspace-editor-label--heading {
+.workspace-panel-sheet .workspace-panel-label--heading {
   font-size: max(var(--font-heading), var(--font-input));
   font-weight: 650;
   letter-spacing: -.01em;
 }
 
-.workspace-panel-sheet .workspace-editor-label::placeholder {
-  color: var(--faint);
-}
+.workspace-panel-sheet .workspace-panel-label::placeholder { color: var(--faint); }
 
-.workspace-panel-sheet .workspace-editor-label:focus {
-  border-color: var(--accent-line);
+.workspace-panel-sheet .workspace-panel-label:focus {
   background: var(--input-bg);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
   outline: none;
 }
 
-.workspace-editor-rule {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--faint);
-  font-size: var(--font-meta);
-}
-
-.workspace-editor-rule > i {
-  height: 1px;
-  flex: 1;
-  background: var(--hair-strong);
-}
-
-.workspace-panel-sheet .workspace-editor-rule > .workspace-editor-label {
-  width: min(60%, 16rem);
-  flex: none;
+.workspace-panel-sheet.is-editing .workspace-panel-labeled-divider > .workspace-panel-label {
+  width: min(70%, 18rem);
   text-align: center;
 }
 
-/* ---- per-item controls --------------------------------------------------- */
-.workspace-panel-sheet .workspace-editor-remove {
+/* A widget with nothing to show right now (a session widget with no chat
+   open) is left out of the Workspace; while editing it is shown, dormant. */
+.workspace-panel-sheet .workspace-panel-widget-dormant {
+  margin: 0;
+  padding: var(--space-1) var(--space-1) var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.workspace-panel-sheet .workspace-panel-item.is-dormant > .workspace-panel-widget-head { opacity: .72; }
+
+/* ---- per-item controls ------------------------------------------------------ */
+.workspace-panel-sheet .workspace-panel-remove {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   inset-block-start: calc(-1 * var(--space-2));
   inset-inline-start: calc(-1 * var(--space-2));
   display: grid;
@@ -344,111 +273,119 @@
   width: var(--icon-xl);
   height: var(--icon-xl);
   padding: 0;
-  border: 2px solid var(--material-glass-strong);
+  border: 0;
   border-radius: var(--radius-circle);
-  color: var(--red-ink);
-  background: var(--red);
-  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 16%, var(--panel));
+  box-shadow:
+    0 0 0 .5px color-mix(in srgb, var(--text) 22%, transparent),
+    0 2px 6px -1px rgb(0 0 0 / .32);
   cursor: pointer;
-  transition: transform var(--motion-fast) var(--motion-ease);
+  -webkit-tap-highlight-color: transparent;
+  animation: workspace-badge-in var(--motion-normal) cubic-bezier(.3, 1.5, .55, 1) both;
+  transition: scale var(--motion-fast) var(--motion-ease);
 }
 
 /* A 24px mark with a full touch target around it. */
-.workspace-panel-sheet .workspace-editor-remove::after {
+.workspace-panel-sheet .workspace-panel-remove::after {
   content: "";
   position: absolute;
   inset: calc((var(--icon-xl) - var(--tap)) / 2);
 }
 
-.workspace-panel-sheet .workspace-editor-remove:active:where(:not(:disabled)) { transform: scale(.88); }
-.workspace-panel-sheet .workspace-editor-remove .ui-icon { stroke-width: 3; }
+.workspace-panel-sheet .workspace-panel-remove:active { scale: .82; }
+.workspace-panel-sheet .workspace-panel-remove .ui-icon { stroke-width: 3; }
 
-.workspace-panel-sheet .workspace-editor-grip {
-  display: grid;
-  place-items: center;
-  align-self: stretch;
-  width: var(--tap);
-  min-height: var(--tap);
-  margin-block: calc(-1 * var(--space-1));
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  color: var(--faint);
-  background: transparent;
-  /* The grip picks up at once: the finger never scrolls the page from here. */
-  touch-action: none;
-  cursor: grab;
+@keyframes workspace-badge-in {
+  from { opacity: 0; scale: .2; }
+  to { opacity: 1; scale: 1; }
 }
 
-@media (hover: hover) {
-  .workspace-panel-sheet .workspace-editor-grip:hover:where(:not(:disabled)) { color: var(--text-dim); }
-}
-
-.workspace-panel-sheet .workspace-editor-size {
-  position: relative;
+/* A widget's size, on its header row where the disclosure chevron sat. */
+.workspace-panel-sheet .workspace-panel-size {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: calc((var(--tap) + var(--space-1) - var(--control-h-sm)) / 2);
+  inset-inline-end: var(--space-1);
   min-width: calc(var(--control-h) + var(--space-5));
   min-height: var(--control-h-sm);
   padding: 0 var(--space-3);
-  border: 1px solid var(--material-glass-border);
+  border: 0;
   border-radius: var(--radius-round);
   color: var(--text-dim);
-  background: var(--surface-overlay);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   font-size: var(--font-meta);
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  animation: workspace-badge-in var(--motion-normal) cubic-bezier(.3, 1.5, .55, 1) both;
 }
 
-.workspace-panel-sheet .workspace-editor-size::after {
+.workspace-panel-sheet .workspace-panel-size::after {
   content: "";
   position: absolute;
   inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
 }
 
-.workspace-panel-sheet .workspace-editor-size:active:where(:not(:disabled)) { background: var(--surface-overlay-strong); }
+.workspace-panel-sheet .workspace-panel-size:active { background: color-mix(in srgb, var(--text) 14%, transparent); }
 
-.workspace-editor-size > span {
+.workspace-panel-size > span {
   display: inline-block;
-  animation: workspace-editor-size-in var(--motion-normal) var(--motion-ease) both;
+  animation: workspace-size-in var(--motion-normal) var(--motion-ease) both;
 }
 
-@keyframes workspace-editor-size-in {
+@keyframes workspace-size-in {
   from { opacity: 0; transform: translateY(35%); }
   to { opacity: 1; transform: none; }
 }
 
-/* ---- drag states ---------------------------------------------------------- */
-/* The lifted item's own slot: a quiet outline that travels as a hole. */
-.workspace-panel-sheet .workspace-editor-item.is-hole {
-  border: 2px dashed var(--accent-line);
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-  box-shadow: none;
+/* The size pill takes the header's end: keep the title clear of it. */
+.workspace-panel-sheet.is-editing .workspace-panel-item:has(> .workspace-panel-size) > .workspace-panel-widget-head {
+  padding-inline-end: calc(var(--control-h) + var(--space-6));
 }
 
-.workspace-panel-sheet .workspace-editor-item.is-hole > * { visibility: hidden; }
-.workspace-panel-sheet .workspace-editor-item[data-leaving] { pointer-events: none; }
+/* ---- drag states ------------------------------------------------------------- */
+/* The lifted item's own slot: a faint outline that travels as a hole. */
+.workspace-panel-sheet .workspace-panel-item.is-hole {
+  animation: none;
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--accent-line);
+}
+
+.workspace-panel-sheet .workspace-panel-item.is-hole > *,
+.workspace-panel-sheet .workspace-panel-item.is-hole::before { visibility: hidden; }
+.workspace-panel-sheet .workspace-panel-item[data-leaving] { pointer-events: none; }
 
 /* While a drag is on, every item keeps its own layer, so the neighbours'
    glides are pure compositing: nothing is promoted and repainted per move. */
-.workspace-panel-sheet .workspace-editor-grid[data-arranging] .workspace-editor-item {
+.workspace-panel-sheet .workspace-panel-items[data-arranging] .workspace-panel-item {
   will-change: transform;
 }
 
-/* Back from the Add page: what just arrived glows once. */
-@keyframes workspace-editor-fresh {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent), var(--shadow-sm); }
-  35% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent), var(--shadow-sm); }
-  100% { box-shadow: 0 0 0 0 transparent, var(--shadow-sm); }
+/* Back from the Add page: what just arrived glows once (beside its jiggle). */
+.workspace-panel-sheet.is-editing .workspace-panel-item.is-fresh {
+  animation:
+    workspace-jiggle-tile 270ms linear calc(var(--jiggle-phase, 0) * -39ms) infinite,
+    workspace-fresh calc(var(--motion-surface) * 6) var(--motion-ease) both;
 }
 
-.workspace-panel-sheet .workspace-editor-item.is-fresh {
-  border-color: var(--accent-line);
-  animation: workspace-editor-fresh calc(var(--motion-surface) * 6) var(--motion-ease) both;
+.workspace-panel-sheet.is-editing .workspace-panel-item.is-fresh:not(.workspace-panel-item--launcher) {
+  animation:
+    workspace-jiggle-row 330ms linear calc(var(--jiggle-phase, 0) * -47ms) infinite,
+    workspace-fresh calc(var(--motion-surface) * 6) var(--motion-ease) both;
 }
 
-/* The lifted copy (workspaceArrange.ts), drawn inside the sheet over the list. */
-/* One transform per frame (position, plus a tile's lean) on the copy itself;
-   the lift itself (scale and shadow) changes only when it is picked up or set down. */
+@keyframes workspace-fresh {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+  35% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* The lifted copy (workspaceArrange.ts), drawn inside the sheet over the list.
+   One transform per frame (position, plus a tile's lean) on the copy itself;
+   the lift (scale and shadow) changes only when it is picked up or set down. */
 .workspace-arrange-ghost {
   position: absolute;
   z-index: 20;
@@ -460,27 +397,28 @@
 .workspace-arrange-ghost-body {
   width: 100%;
   height: 100%;
-  transition: transform var(--motion-normal) cubic-bezier(0.34, 1.4, 0.5, 1);
+  transition: transform var(--motion-normal) cubic-bezier(.34, 1.4, .5, 1);
 }
 
-.workspace-arrange-ghost-body.is-lifted {
-  transform: scale(1.045);
-}
+.workspace-arrange-ghost-body.is-lifted { transform: scale(1.07); }
 
-.workspace-panel-sheet .workspace-arrange-ghost-body > .workspace-editor-item {
+.workspace-panel-sheet .workspace-arrange-ghost-body > .workspace-panel-item {
   width: 100%;
   height: 100%;
   margin: 0;
-  transition: box-shadow var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
+  border-radius: var(--radius-surface);
+  /* Held still: the copy does not jiggle, and it drops its badges. */
+  animation: none;
+  rotate: none;
+  scale: none;
+  transition: box-shadow var(--motion-normal) var(--motion-ease);
 }
 
-.workspace-panel-sheet .workspace-arrange-ghost-body.is-lifted > .workspace-editor-item {
-  border-color: var(--accent-line);
-  background: var(--material-glass-chrome);
-  box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-md);
+.workspace-panel-sheet .workspace-arrange-ghost-body.is-lifted > .workspace-panel-item {
+  box-shadow: 0 18px 40px -16px rgb(0 0 0 / .5), 0 4px 12px -6px rgb(0 0 0 / .35);
 }
 
-.workspace-arrange-ghost .workspace-editor-remove { opacity: 0; }
+.workspace-arrange-ghost :is(.workspace-panel-remove, .workspace-panel-size) { display: none; }
 
 /* Scoped to the sheet: restyling the whole document (the chat behind it)
    at the moment of lift would cost a visible hitch. */
@@ -491,108 +429,158 @@
   user-select: none !important;
 }
 
-/* ---- footer and Undo ----------------------------------------------------- */
-.workspace-editor-footer {
+/* ---- after the last item ------------------------------------------------------ */
+.workspace-panel-sheet .workspace-panel-foot {
   display: flex;
-  justify-content: center;
-  padding: var(--space-5) 0 var(--space-2);
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) 0 var(--space-3);
 }
 
-.workspace-panel-sheet .workspace-editor-undo {
-  position: absolute;
-  z-index: 6;
-  bottom: max(var(--space-4), calc(var(--safe-bottom) + var(--space-2)));
-  left: 50%;
+.workspace-panel-sheet .workspace-panel-edit-entry {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--control-h);
+  min-height: var(--control-h-sm);
   padding: 0 var(--space-4);
-  border: 1px solid var(--material-glass-border);
+  border: 0;
   border-radius: var(--radius-round);
   color: var(--text);
-  background: var(--material-glass-chrome);
-  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   font-size: var(--font-label);
-  font-weight: 620;
-  transform: translateX(-50%);
-  animation: workspace-editor-undo-in var(--motion-surface) var(--motion-ease) both;
+  font-weight: 600;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: scale var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 
-.workspace-panel-sheet .workspace-editor-undo::after {
+.workspace-panel-sheet .workspace-panel-edit-entry::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
+}
+
+.workspace-panel-sheet .workspace-panel-edit-entry:active {
+  scale: .95;
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+}
+
+.workspace-panel-sheet .workspace-panel-edit-tip {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+}
+
+/* ---- the dock: the hint, then Undo ----------------------------------------------
+   Floats over the bottom edge while editing; nearly opaque instead of blurred,
+   since a backdrop blur over a jiggling grid would re-filter every frame. */
+.workspace-panel-sheet .workspace-edit-dock {
+  position: absolute;
+  z-index: 6;
+  inset-inline: max(var(--screen-gutter, var(--space-4)), var(--safe-left)) max(var(--screen-gutter, var(--space-4)), var(--safe-right));
+  bottom: max(var(--space-4), calc(var(--safe-bottom) + var(--space-2)));
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.workspace-panel-sheet .workspace-edit-hint,
+.workspace-panel-sheet .workspace-edit-undo {
+  min-height: var(--control-h);
+  margin: 0;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow:
+    0 0 0 .5px color-mix(in srgb, var(--text) 14%, transparent),
+    0 10px 28px -14px rgb(0 0 0 / .5);
+  animation: workspace-dock-in var(--motion-surface) cubic-bezier(.3, 1.3, .6, 1) both;
+}
+
+/* Information only: a tap through it lands on the grid (an empty spot = Done). */
+.workspace-panel-sheet .workspace-edit-hint {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-4);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+  text-wrap: balance;
+}
+
+.workspace-panel-sheet .workspace-edit-undo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  border: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 620;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.workspace-panel-sheet .workspace-edit-undo::after {
   content: "";
   position: absolute;
   inset: calc((var(--control-h) - var(--tap)) / 2) 0;
 }
 
-.workspace-panel-sheet .workspace-editor-undo:active:where(:not(:disabled)) { background: var(--raised); }
+.workspace-panel-sheet .workspace-edit-undo:active { scale: .96; }
 
-@keyframes workspace-editor-undo-in {
-  from { opacity: 0; transform: translate(-50%, 40%) scale(.96); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+@keyframes workspace-dock-in {
+  from { opacity: 0; transform: translateY(40%) scale(.96); }
+  to { opacity: 1; transform: none; }
 }
 
-/* Three tiles to a line wherever the Workspace itself shows three
-   (workspacePanelPremium.css), so editing never reflows the grid. */
-@container workspace-panel (max-width: 420px) {
-  .workspace-panel-sheet .workspace-editor-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+/* ---- empty state ---------------------------------------------------------------- */
+.workspace-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-7, calc(var(--space-6) + var(--space-3))) var(--space-4) var(--space-4);
+  color: var(--muted);
+  text-align: center;
+  animation: workspace-card-in var(--motion-surface) var(--motion-ease) both;
 }
 
-/* Narrow phones: a widget row gives its name the whole width and puts the
-   size pill on a second line in place of the purpose. */
-@container workspace-panel (max-width: 340px) {
-  .workspace-panel-sheet .workspace-editor-item--widget {
-    grid-template-columns: calc(var(--icon-xl) + var(--space-3)) minmax(0, 1fr) auto;
-    row-gap: var(--space-1);
-  }
-
-  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-row-icon { grid-row: 1 / span 2; }
-  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-row-copy { grid-column: 2; grid-row: 1; }
-  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-grip { grid-column: 3; grid-row: 1 / span 2; }
-
-  .workspace-panel-sheet .workspace-editor-item--widget > .workspace-editor-size {
-    grid-column: 2;
-    grid-row: 2;
-    justify-self: start;
-    min-width: 0;
-    padding: 0 var(--space-2);
-  }
-
-  .workspace-panel-sheet .workspace-editor-item--widget:has(> .workspace-editor-size) .workspace-editor-row-copy small {
-    display: none;
-  }
+.workspace-panel-empty-icon {
+  display: grid;
+  place-items: center;
+  width: calc(var(--tap) + var(--space-4));
+  height: calc(var(--tap) + var(--space-4));
+  margin-bottom: var(--space-1);
+  border-radius: calc(var(--radius-surface) + var(--space-1));
+  color: var(--accent);
+  background: var(--accent-wash);
 }
 
-/* Landscape and large phones: more tiles to a line, as the Workspace shows them. */
-@container workspace-panel (min-width: 560px) {
-  .workspace-panel-sheet .workspace-editor-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
+.workspace-panel-empty strong {
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.workspace-panel-empty p {
+  max-width: 30ch;
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workspace-panel-sheet .workspace-editor-item,
-  .workspace-panel-sheet .workspace-editor-add,
+  .workspace-panel-sheet .workspace-panel-item,
   .workspace-arrange-ghost-body,
-  .workspace-panel-sheet .workspace-arrange-ghost-body > .workspace-editor-item {
+  .workspace-panel-sheet .workspace-arrange-ghost-body > .workspace-panel-item {
     transition: none;
   }
-}
-
-/* ---- switching modes ------------------------------------------------------
-   Turning Edit on or off replaces the page's content in place; the content
-   that arrives settles in instead of popping (backwards fill: nothing is
-   held once it has arrived, so drags and FLIP glides stay authoritative). */
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-  .workspace-panel-sheet.is-mode-switched > .sheet-body > :is(.workspace-editor, .workspace-panel-items, .workspace-panel-empty) {
-    animation: workspace-mode-in var(--motion-normal) var(--motion-ease) backwards;
-  }
-}
-
-@keyframes workspace-mode-in {
-  from { opacity: 0; transform: translate3d(0, var(--space-2), 0); }
-  to { opacity: 1; transform: none; }
 }

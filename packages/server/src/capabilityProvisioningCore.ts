@@ -194,6 +194,7 @@ const rankId = (id: string): string => {
 };
 
 const targetsHarness = (descriptor: AgentCapabilityDescriptor, harnessId: string): boolean => {
+  if (descriptor.excludedHarnessIds?.includes(harnessId)) return false;
   const target = (descriptor as AgentCapabilityDescriptor & { targetHarnessId?: unknown }).targetHarnessId;
   return target === undefined || target === harnessId;
 };

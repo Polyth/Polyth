@@ -609,4 +609,13 @@ export const bg: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Отвори сесията след старта",
   "tasktrackers.start.model": "Модел",
   "tasktrackers.start.modelComposer": "Като в полето за съобщение",
+  "tasktrackers.automation.title": "Когато агентът спре",
+  "tasktrackers.automation.body": "Свързана карта се премества в колона, която посочите, когато сесията ѝ спре. Задача никога не се мести в статус „готово“ или от него, и всеки ход мести задача най-много веднъж.",
+  "tasktrackers.automation.enabled": "Премествай задачата, когато агентът спре",
+  "tasktrackers.automation.column": "Колона за преместване",
+  "tasktrackers.automation.columnHint": "Съпоставя се по име в дъската на самата задача, без значение от регистъра. Ако дъската няма такава колона, задачата остава на мястото си.",
+  "tasktrackers.automation.finished": "Завършва хода си",
+  "tasktrackers.automation.needsInput": "Чака отговор",
+  "tasktrackers.automation.error": "Не успява или е спрян",
+  "tasktrackers.card.attention": "Нуждае се от поглед",
 };

@@ -609,4 +609,13 @@ export const de: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Sitzung nach dem Start öffnen",
   "tasktrackers.start.model": "Modell",
   "tasktrackers.start.modelComposer": "Wie im Eingabefeld",
+  "tasktrackers.automation.title": "Wenn ein Agent anhält",
+  "tasktrackers.automation.body": "Eine verknüpfte Karte wechselt in eine von Ihnen benannte Spalte, wenn ihre Sitzung anhält. Eine Aufgabe wird nie in einen Erledigt-Status oder daraus verschoben, und jeder Zug verschiebt eine Aufgabe höchstens einmal.",
+  "tasktrackers.automation.enabled": "Aufgabe verschieben, wenn der Agent anhält",
+  "tasktrackers.automation.column": "Zielspalte",
+  "tasktrackers.automation.columnHint": "Wird über den Namen im Board der Aufgabe erkannt, unabhängig von Groß- und Kleinschreibung. Hat das Board keine solche Spalte, bleibt die Aufgabe, wo sie ist.",
+  "tasktrackers.automation.finished": "Beendet seinen Zug",
+  "tasktrackers.automation.needsInput": "Wartet auf eine Antwort",
+  "tasktrackers.automation.error": "Schlägt fehl oder wird gestoppt",
+  "tasktrackers.card.attention": "Braucht einen Blick",
 };

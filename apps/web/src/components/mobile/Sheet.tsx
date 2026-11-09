@@ -84,8 +84,11 @@ export interface SheetProps {
   origin?: "bottom" | "top";
   /** Presentation-only exit state; the owner unmounts after the motion ends. */
   closing?: boolean;
-  /** Full-screen navigation destinations use Back; transient sheets use Close. */
-  dismiss?: "close" | "back";
+  /** Full-screen navigation destinations use Back; transient sheets use Close.
+   *  `none` draws neither, for a mode that owns its own way out in the header
+   *  (the phone Workspace while editing shows Add and Done there); Escape still
+   *  calls `onClose`. */
+  dismiss?: "close" | "back" | "none";
   /** A Back destination that follows a finger from the edge, as a package window
    *  does (the layer's own CSS plays the rest, reading `--stack-from`). */
   swipeBack?: boolean;

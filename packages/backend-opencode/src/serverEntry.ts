@@ -1,9 +1,12 @@
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { deriveProviderStatus, type AgentRuntime, type HarnessConfigurationMetadata, type HarnessContext, type HarnessProvider, type HarnessProvisioningQuery, type HarnessRegistry, type ModelDescriptor, type RouteHandler, type RouteRequest, type SpaceContext } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
   type ServerPackageHost,
 } from "@polyth/plugins";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { configureOpenCodeCapabilityDelivery } from "./capabilityDelivery.ts";
 import { createOpenCodeHarness } from "./harness.ts";
 import { FREE_PICK_PROVIDER_ID } from "./freeModelPicks.ts";
@@ -212,6 +215,31 @@ export default function registerPackage(host: ServerPackageHost) {
         && typeof applier.removePlugin === "function") {
         harness.plugins = createOpenCodeNativePlugins({ harnessId: harness.descriptor.id, config: applier });
       }
+      harness.skills = createFolderSkillManager({
+        harnessId: harness.descriptor.id,
+        harnessName: "OpenCode",
+        folders: (context) => {
+          // OpenCode's own switches for skills it would otherwise read from
+          // the other agents' folders.
+          const external = !process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS;
+          const claude = external && !process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS;
+          const config = process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
+          return nativeSkillFolders(context, {
+            project: [
+              join(".opencode", "skills"),
+              join(".opencode", "skill"),
+              ...(claude ? [join(".claude", "skills")] : []),
+              ...(external ? [join(".agents", "skills")] : []),
+            ],
+            user: [
+              join(config, "opencode", "skills"),
+              join(config, "opencode", "skill"),
+              ...(claude ? [join(homedir(), ".claude", "skills")] : []),
+              ...(external ? [join(homedir(), ".agents", "skills")] : []),
+            ],
+          });
+        },
+      });
       const auth = createProviderAuthController({
         runtime: runtimeForSpace,
         invalidateModels: () => resolvedAdmin.catalog?.invalidateModels(),

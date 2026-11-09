@@ -21,8 +21,10 @@ const system = { ...person("system:polyth-runtime", "owner") };
 const readers = (...ids: string[]) => ids.map((userId) => ({ userId, name: userId.slice(4) }));
 const PRIVACY: Record<string, SessionPrivacy> = {
   shared: { audience: readers(OLIA, TARAS), projectAudience: 3 },
-  oliaChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3 },
-  tarasChat: { privateTo: TARAS, audience: readers(TARAS), projectAudience: 3 },
+  oliaChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3, othersHere: true },
+  tarasChat: { privateTo: TARAS, audience: readers(TARAS), projectAudience: 3, othersHere: true },
+  oliaChat2: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3, othersHere: true },
+  oliaAloneChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3 },
   roomChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 3, inPrivateRoom: true },
   soloChat: { privateTo: OLIA, audience: readers(OLIA), projectAudience: 1 },
 };
@@ -149,12 +151,25 @@ test("a chat in a private room reads the project's memory and saves to the owner
   assert.equal(await f.runtime.checkFence({ spaceId: SPACE, projectId: "room", principalId: "session:roomChat" }, { generation: recall.generation, settingsRevision: recall.settingsRevision }), true, "the room shares its project's policy");
 });
 
+test("with nobody else working in the project, a note for the shared memory stays a working personal note", async () => {
+  const f = fixture();
+  const chat = f.inChat("oliaAloneChat");
+  const saved = JSON.parse((await f.tool("memory_remember").execute!({ title: "Dinner time", body: "Dinner moved to 19:30.", target: "shared" }, chat)).output) as { memoryId: string; status: string; message: string };
+  assert.notEqual(saved.status, "skipped");
+  assert.match(saved.message, /not offered.*nobody else works/);
+  // Nothing to decide, others can't read it, and its person's chats recall it.
+  const page = await f.call(person(OLIA), "GET", "/api/memory/personal", undefined, { projectId: "wellness" });
+  assert.deepEqual((page.body as { proposals: unknown[] }).proposals, []);
+  assert.equal(f.store.get(f.shared, saved.memoryId), undefined);
+  const found = JSON.parse((await f.tool("memory_search").execute!({ query: "dinner moved" }, chat)).output) as { items: Array<{ id: string }> };
+  assert.deepEqual(found.items.map((item) => item.id), [saved.memoryId]);
+});
+
 test("publishing is one way and takes the person: the agent only proposes", async () => {
   const f = fixture();
   const chat = f.inChat("oliaChat");
   const proposed = JSON.parse((await f.tool("memory_remember").execute!({ title: "More red meat", body: "Olia asks for more red meat at dinner.", target: "shared" }, chat)).output) as { memoryId: string; status: string; message: string };
-  assert.equal(proposed.status, "skipped");
-  assert.match(proposed.message, /proposed/);
+  assert.match(proposed.message, /lets them share it/);
   assert.equal(f.store.get(f.shared, proposed.memoryId), undefined);
   assert.deepEqual(JSON.parse((await f.tool("memory_search").execute!({ query: "red meat" }, f.inChat("shared"))).output).items, []);
 
@@ -177,6 +192,55 @@ test("publishing is one way and takes the person: the agent only proposes", asyn
   assert.equal(((await f.call(person(OLIA), "GET", "/api/memory/personal", undefined, { projectId: "wellness" })).body as { proposals: unknown[] }).proposals.length, 0);
   // Publishing copies: the personal note is not the shared one.
   assert.notEqual(copy.id, proposal!.id);
+});
+
+test("an offer costs nothing to ignore: the note works at once, and a chat makes one short offer", async () => {
+  const f = fixture();
+  const chat = f.inChat("oliaChat");
+  const offers = async () => ((await f.call(person(OLIA), "GET", "/api/memory/personal", undefined, { projectId: "wellness" })).body as { proposals: Array<{ title: string }>; here: Array<{ title: string }> });
+  const first = JSON.parse((await f.tool("memory_remember").execute!({ title: "Dinner time", body: "Dinner moved to 19:30.", target: "shared" }, chat)).output) as { message: string };
+  assert.match(first.message, /lets them share it/);
+  const found = JSON.parse((await f.tool("memory_search").execute!({ query: "dinner moved" }, chat)).output) as { items: unknown[] };
+  assert.equal(found.items.length, 1, "their own agent recalls it without any decision");
+
+  const second = JSON.parse((await f.tool("memory_remember").execute!({ title: "Breakfast", body: "Breakfast moved to 8:00.", target: "shared" }, chat)).output) as { message: string };
+  assert.match(second.message, /not offered.*already made its offer/);
+  const long = JSON.parse((await f.tool("memory_remember").execute!({ title: "Everything", body: "x ".repeat(301), target: "shared" }, f.inChat("oliaChat2"))).output) as { message: string };
+  assert.match(long.message, /not offered.*600/);
+
+  const page = await offers();
+  assert.deepEqual(page.proposals.map((note) => note.title), ["Dinner time"]);
+  assert.deepEqual(page.here.map((note) => note.title).sort(), ["Breakfast", "Dinner time", "Everything"]);
+});
+
+test("in a private room with nobody else in the project, nothing is offered", async () => {
+  const f = fixture();
+  const saved = JSON.parse((await f.tool("memory_remember").execute!({ title: "Dinner time", body: "Dinner moved to 19:30.", target: "shared" }, f.inChat("roomChat", "room"))).output) as { message: string };
+  assert.match(saved.message, /not offered.*nobody else works/);
+  const page = await f.call(person(OLIA), "GET", "/api/memory/personal", undefined, { projectId: "room" });
+  assert.deepEqual((page.body as { proposals: unknown[] }).proposals, []);
+});
+
+test("Undo takes back the person's own copy while it is still what they shared", async () => {
+  const f = fixture();
+  const chat = f.inChat("oliaChat");
+  const { memoryId } = JSON.parse((await f.tool("memory_remember").execute!({ title: "Dinner time", body: "Dinner moved to 19:30.", target: "shared" }, chat)).output) as { memoryId: string };
+  const publish = await f.call(person(OLIA), "POST", `/api/memory/personal/${memoryId}/publish`, { projectId: "wellness", expectedRevision: 1 });
+  const sharedId = (publish.body as { memoryId: string }).memoryId;
+  const here = async () => ((await f.call(person(OLIA), "GET", "/api/memory/personal", undefined, { projectId: "wellness" })).body as { here: Array<{ id: string }> }).here.map((note) => note.id);
+  assert.deepEqual(await here(), [], "shared notes leave Only me");
+
+  // Someone else can't, and neither can they once the copy has changed.
+  await assert.rejects(f.call(person(TARAS), "POST", `/api/memory/personal/${memoryId}/unpublish`, { projectId: "wellness", sharedId }), /not found/);
+  const copy = f.store.get(f.shared, sharedId)!;
+  const edited = f.store.update(f.shared, { id: sharedId, projectId: "wellness", expectedRevision: copy.revision, patch: { body: "Dinner moved to 20:00." } });
+  await assert.rejects(f.call(person(OLIA), "POST", `/api/memory/personal/${memoryId}/unpublish`, { projectId: "wellness", sharedId }), /not found/);
+  f.store.update(f.shared, { id: sharedId, projectId: "wellness", expectedRevision: edited.revision!, patch: { body: "Dinner moved to 19:30." } });
+
+  await f.call(person(OLIA), "POST", `/api/memory/personal/${memoryId}/unpublish`, { projectId: "wellness", sharedId });
+  assert.equal(f.store.get(f.shared, sharedId)?.lifecycle ?? "forgotten", "forgotten");
+  assert.deepEqual(await here(), [memoryId], "it works as their note again");
+  assert.deepEqual(((await f.call(person(OLIA), "GET", "/api/memory/personal", undefined, { projectId: "wellness" })).body as { proposals: unknown[] }).proposals, [], "and isn't offered again");
 });
 
 test("no route gives an admin another person's notes", async () => {

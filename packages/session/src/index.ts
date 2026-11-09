@@ -2574,6 +2574,28 @@ export function createStore(dbPath: string): Store {
       appendInTransaction(sessionId, type, data, opts)));
   }
 
+  function appendBatchInTransaction(
+    sessionId: string,
+    inputs: Array<CanonicalEventInput & { time?: number }>,
+    expectedSeq: number | undefined,
+  ): { events: SessionEvent[]; latestBefore: number } {
+    const row = prep("SELECT COALESCE(MAX(seq), 0) AS seq FROM events WHERE session_id = ?")
+      .get(sessionId) as { seq: number };
+    if (expectedSeq !== undefined && Number(row.seq) !== expectedSeq) {
+      throw Object.assign(new Error("session changed during publication"), { code: "conflict" });
+    }
+    const events = inputs.map((input) => {
+      const event = appendInputInTransaction(sessionId, input);
+      if (input.time !== undefined && Number.isFinite(input.time)) {
+        event.time = input.time;
+        prep("UPDATE events SET time = ? WHERE session_id = ? AND seq = ?")
+          .run(event.time, sessionId, event.seq);
+      }
+      return event;
+    });
+    return { events, latestBefore: Number(row.seq) };
+  }
+
   async function appendBatch(
     sessionId: string,
     inputs: Array<CanonicalEventInput & { time?: number }>,
@@ -2583,29 +2605,42 @@ export function createStore(dbPath: string): Store {
       throw Object.assign(new Error("invalid event batch"), { code: "invalid-input" });
     }
     return Promise.resolve(transaction(() => {
-      const row = prep("SELECT COALESCE(MAX(seq), 0) AS seq FROM events WHERE session_id = ?")
-        .get(sessionId) as { seq: number };
-      if (opts.expectedSeq !== undefined && Number(row.seq) !== opts.expectedSeq) {
-        throw Object.assign(new Error("session changed during publication"), { code: "conflict" });
-      }
-      const events = inputs.map((input) => {
-        const event = appendInputInTransaction(sessionId, input);
-        if (input.time !== undefined && Number.isFinite(input.time)) {
-          event.time = input.time;
-          prep("UPDATE events SET time = ? WHERE session_id = ? AND seq = ?")
-            .run(event.time, sessionId, event.seq);
-        }
-        return event;
-      });
+      const { events, latestBefore } = appendBatchInTransaction(sessionId, inputs, opts.expectedSeq);
       if (opts.projection) {
         upsertProjectionRow(opts.projection);
       }
       if (opts.markRead) {
         prep("INSERT INTO session_read (session_id, seq) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET seq = MAX(session_read.seq, excluded.seq)")
-          .run(sessionId, events.at(-1)?.seq ?? row.seq);
+          .run(sessionId, events.at(-1)?.seq ?? latestBefore);
       }
       return events;
     }));
+  }
+
+  async function appendBatches(
+    entries: ReadonlyArray<{
+      sessionId: string;
+      events: Array<CanonicalEventInput & { time?: number }>;
+      expectedSeq: number;
+      patch(current: SessionProjection): SessionProjection;
+    }>,
+  ): Promise<Array<{ events: SessionEvent[]; projection: SessionProjection }>> {
+    if (entries.length > 2_000 || new Set(entries.map((entry) => entry.sessionId)).size !== entries.length
+      || entries.some((entry) => entry.events.length > 2_000)) {
+      throw Object.assign(new Error("invalid event batch"), { code: "invalid-input" });
+    }
+    return Promise.resolve(transaction(() => entries.map((entry) => {
+      const row = prep("SELECT data FROM projections WHERE session_id = ?")
+        .get(entry.sessionId) as { data: string } | undefined;
+      if (!row) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const { events } = appendBatchInTransaction(entry.sessionId, entry.events, entry.expectedSeq);
+      const projection = entry.patch(JSON.parse(row.data) as SessionProjection);
+      if (projection.id !== entry.sessionId) {
+        throw Object.assign(new Error("invalid event batch"), { code: "invalid-input" });
+      }
+      upsertProjectionRow(projection);
+      return { events, projection };
+    })));
   }
 
   // ------------------------------------------------------------- reads
@@ -4982,6 +5017,7 @@ export function createStore(dbPath: string): Store {
   return {
     append,
     appendBatch,
+    appendBatches,
     events,
     hasEventOfType,
     lastTurnEventType,
@@ -5524,7 +5560,7 @@ export function planRuntimeEpochRecovery(
   const built = buildRuntimeEpochRecoveryContext({
     epoch,
     markerSeq: marker.seq,
-    ...(snapshot ? { reason: "snapshot" as const, workspace: input.workspace } : compaction ? { reason: "compaction" as const, workspace: input.workspace } : marker.data.reason === "harness-switch" ? { reason: "harness-switch" as const, workspace: input.workspace } : {}),
+    ...(snapshot ? { reason: marker.data.mode === "fork" ? "fork" as const : "snapshot" as const, workspace: input.workspace } : compaction ? { reason: "compaction" as const, workspace: input.workspace } : marker.data.reason === "harness-switch" ? { reason: "harness-switch" as const, workspace: input.workspace } : {}),
     dialogue: dialogueFromMessages(deriveMessages(safeEvents)),
     ...(objective ? { objective } : {}),
     pinned,

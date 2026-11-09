@@ -36,8 +36,9 @@ test("view, collaborate and manage gate reading, working and administering a cha
 
   const seen = await member.snapshot(chat.id);
   assert.deepEqual(seen.sharing, {
-    visibility: "restricted", access: "view", owner: { userId: "usr_owner", name: "Olena" }, shared: true, multiPerson: true,
+    visibility: "restricted", access: "view", owner: { userId: "usr_owner", name: "Olena" }, shared: true, named: true, multiPerson: true,
   });
+  assert.deepEqual(f.sharing.state(f.ctx("usr_owner"), chat.id).readers?.map((reader) => reader.userId), ["usr_member", "usr_other"], "everyone else");
   await member.markRead!(chat.id, 1);
   await assert.rejects(member.send(chat.id, { text: "hi" }), { code: "forbidden" });
   await assert.rejects(member.rename!(chat.id, "mine"), { code: "forbidden" });
@@ -217,7 +218,7 @@ test("privacy comes from the chat's real audience, and a chat can't be shared on
   assert.match(opened.text, /Speaking now: "Оля"/);
   assert.match(opened.text, /This chat is read by: .*"Marta"/);
   assert.match(opened.text, /shared project memory only/);
-  assert.equal(f.sharing.state(f.ctx("usr_member"), chat.id).readers?.length, 2);
+  assert.equal(f.sharing.state(f.ctx("usr_member"), chat.id).readers?.length, 1, "the owner, not the reader");
   await f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "private" });
 
   // The agent has read personal notes: narrowing stays possible, widening doesn't.

@@ -21,7 +21,7 @@ const SESSION_METHODS = new Set<PropertyKey>([
   "switchHarness", "cancelHarnessSwitch", "restartRuntime", "debug",
 ]);
 const BLOCKED_STORE_MUTATIONS = new Set<PropertyKey>([
-  "appendBatch", "copyTo", "upsertProjection", "publishChildSession", "deleteSession",
+  "appendBatch", "appendBatches", "copyTo", "upsertProjection", "publishChildSession", "deleteSession",
   "setReadCursor", "close", "prepareOperation", "operations", "claimOperation", "settleOperation",
 ]);
 const PROFILE_STORE_METHODS = new Set<PropertyKey>([

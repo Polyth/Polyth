@@ -1,4 +1,5 @@
 import "./commands-settings.css";
+import "./skill-catalog.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import CommandsPage from "./CommandsPage.tsx";
 import SkillsPage from "./SkillsPage.tsx";
@@ -27,6 +28,7 @@ export default defineWebPackage((host) => () => {
     component: SkillsPage,
     settingsItems: [
       { id: "skills.catalog", pageId: "skills", label: t("settings.commandsindex.agentSkillsLabel"), description: t("settings.commandsindex.skillsDescription"), keywords: ["skill", "slash", "action", "instruction", "project", "space", "agent"], focusTarget: "skills.catalog" },
+      { id: "skills.browse", pageId: "skills", label: t("settings.commandsindex.skillCatalogLabel"), description: t("settings.commandsindex.skillCatalogDescription"), keywords: ["catalog", "marketplace", "install", "browse", "repository", "github", "source", "harness"], focusTarget: "skills.browse" },
     ],
   });
   return () => { skills(); commands(); };

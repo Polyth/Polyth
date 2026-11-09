@@ -9,7 +9,7 @@ import {
   type MemoryListItem,
   type MemoryPolicy,
 } from "../src/client.ts";
-import MyNotes from "./MyNotes.tsx";
+import MyNotes, { type Notify } from "./MyNotes.tsx";
 import ReflectPanel from "./ReflectPanel.tsx";
 import { reflectStrings } from "./reflectStrings.ts";
 import { englishTranslate, enumLabel, type Translate } from "./i18n.ts";
@@ -22,6 +22,7 @@ type Context = {
   locale?: string;
   /** Host translation lookup; omitted by tests and older hosts (English). */
   translate?: Translate;
+  notify?: Notify;
   onBack(): void;
   onClose(): void;
 };
@@ -90,7 +91,7 @@ function WithProject({ template, name }: { template: string; name: string }) {
   return <>{parts.map((part, index) => index === 0 ? part : <Fragment key={index}><strong>{name}</strong>{part}</Fragment>)}</>;
 }
 
-export default function MemorySettings({ projectId, project, mobile, locale, translate, onBack, onClose }: Context) {
+export default function MemorySettings({ projectId, project, mobile, locale, translate, notify, onBack, onClose }: Context) {
   const [items, setItems] = useState<MemoryListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -450,7 +451,7 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
 
       {!writesBlocked && <ReflectPanel projectId={projectId} project={project} strings={reflectStrings(locale)} memoryOff={policy?.mode === "off"} onMemoryChanged={() => void load(offset)} />}
 
-      <MyNotes projectId={projectId} project={project} translate={t} />
+      <MyNotes projectId={projectId} project={project} translate={t} notify={notify} />
 
       <section className="memory-section" aria-labelledby="memory-records-heading">
         <div className="memory-section-head">

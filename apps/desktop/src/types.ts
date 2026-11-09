@@ -84,6 +84,11 @@ export interface DesktopInfo {
   softwareRendering: boolean;
   /** The macOS 12 build on macOS 12: updates come from stable releases only. */
   macLegacyUpdates: boolean;
+  /** The build follows one stable-only feed and offers no channel choice
+   *  (the macOS 12 build on macOS 12, the workstation edition). */
+  stableOnlyUpdates: boolean;
+  /** "workstation": a local-only shell; no other servers, no Polyth Link. */
+  edition: "standard" | "workstation";
   server: DesktopServerInfo;
 }
 
@@ -171,7 +176,8 @@ export interface PolythDesktopApi {
   /** Read once per page: the main process answers from the page's own origin. */
   surface: DesktopWindowSurface | null;
   linkProxy: boolean;
-  servers: PolythDesktopServersApi;
+  /** Absent in the workstation edition: it shows this computer's server only. */
+  servers?: PolythDesktopServersApi;
   getInfo(): Promise<DesktopInfo>;
   requestSetupClaim(request?: DesktopSetupClaimRequest): Promise<DesktopSetupClaim>;
   restartAfterSetup(): Promise<void>;

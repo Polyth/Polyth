@@ -884,6 +884,13 @@ export function createHarnessPool(options: {
                 .filter((entry) => entry.sessionId && !entry.releasing && entry.spaceId === spaceId && entry.harnessId === harnessId)
                 .map((entry) => entry.sessionId))];
         },
+        /** Canonical sessions holding a live lease on `harnessId` in any Space:
+         * a running CLI locks its executable machine-wide on Windows. */
+        liveSessionIdsForHarness(harnessId: string): string[] {
+            return [...new Set([...cached.values()]
+                .filter((entry) => entry.sessionId && !entry.releasing && entry.harnessId === harnessId)
+                .map((entry) => entry.sessionId))];
+        },
         /** Metadata for the first acquisition of this exact canonical lease. */
         acquisitionInfo(runtime: AgentRuntime, sessionId: string): RuntimeAcquisitionInfo | undefined {
             const location = runtimeLocations.get(runtime);

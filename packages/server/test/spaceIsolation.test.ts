@@ -14,6 +14,7 @@ import { createStore } from "@polyth/session";
 import type {
   AgentRuntime,
   RuntimeEvent,
+  RuntimeSessionBinding,
   SessionProjection,
   SpaceContext,
 } from "@polyth/contracts";
@@ -39,6 +40,10 @@ function fakeRuntime(): AgentRuntime {
     agents: async () => [],
     ensureSession: async (c) => `be_${c.sessionId}`,
     resetSession: async () => "fresh",
+    releaseExecution: async (binding: RuntimeSessionBinding) => ({
+      kind: "confirmed",
+      value: { authorityId: binding.authorityId, generation: binding.generation, backendSessionId: binding.backendSessionId! },
+    }),
     sessions: async () => [],
     history: async () => [],
     startTurn: async () => {},
@@ -226,6 +231,47 @@ test("isolation lifecycle methods survive Space scoping and refuse foreign ids",
   const cleared = await workServices.sessions.patchIsolation!(inWork.sessionId, null);
   assert.equal(cleared.isolation ?? null, null);
   assert.equal(cleared.id, inWork.sessionId);
+});
+
+test("a chat moves only between projects of its own Space, and the refusal names nothing", async () => {
+  const h = await harness();
+  const inHome = await h.seed(h.home, "home");
+  const inWork = await h.seed(h.work, "work");
+  const homeServices = h.gateway.services(h.home);
+  const workServices = h.gateway.services(h.work);
+  const second = await homeServices.projects.add(mkdtempSync(join(tmpdir(), "polyth-home-second-")), "second");
+
+  const refusal = async (attempt: () => Promise<unknown>): Promise<string> => {
+    try {
+      await attempt();
+    } catch (error) {
+      return `${(error as { code?: string }).code}: ${(error as Error).message}`;
+    }
+    return "allowed";
+  };
+  // Out of the Space: a real project of the other Space reads exactly like an
+  // id that doesn't exist, for the move and for its preview.
+  const unknownProject = await refusal(() => homeServices.sessions.moveToProject!(inHome.sessionId, { projectId: "no-such-project" }));
+  assert.match(unknownProject, /^not-found/);
+  for (const attempt of [
+    () => homeServices.sessions.moveToProject!(inHome.sessionId, { projectId: inWork.projectId }),
+    () => homeServices.sessions.previewMoveToProject!(inHome.sessionId, { projectId: inWork.projectId }),
+  ]) assert.equal(await refusal(attempt), unknownProject);
+  // Into the Space: another Space's chat can't be reached to be moved, even to
+  // a project this facade owns.
+  for (const attempt of [
+    () => homeServices.sessions.moveToProject!(inWork.sessionId, { projectId: second.id }),
+    () => homeServices.sessions.previewMoveToProject!(inWork.sessionId, { projectId: second.id }),
+  ]) assert.match(await refusal(attempt), /^not-found/);
+  assert.equal((await workServices.sessions.snapshot(inWork.sessionId)).projectId, inWork.projectId);
+  assert.equal((await homeServices.sessions.snapshot(inHome.sessionId)).projectId, inHome.projectId);
+
+  // Inside the Space the same facade does the real thing.
+  const moved = await homeServices.sessions.moveToProject!(inHome.sessionId, { projectId: second.id });
+  assert.deepEqual(moved.sessionIds, [inHome.sessionId]);
+  assert.equal((await homeServices.sessions.snapshot(inHome.sessionId)).projectId, second.id);
+  assert.deepEqual((await homeServices.sessions.list(inHome.projectId)).map((row) => row.id), []);
+  assert.deepEqual((await homeServices.sessions.list(second.id)).map((row) => row.id), [inHome.sessionId]);
 });
 
 test("a session created in a Space is stamped with it, and a fork stays inside it", async () => {

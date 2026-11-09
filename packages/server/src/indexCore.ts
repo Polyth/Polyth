@@ -82,6 +82,7 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createProjectService } from "./projects.ts";
+import { bindGitDiscoveryToDataDir } from "./gitDiscoveryBoundary.ts";
 import { createPermissionWaitingBus } from "./permissionWaiting.ts";
 import { defaultStallReport, watchEventLoopStalls, type EventLoopStall } from "./eventLoopStall.ts";
 import {
@@ -133,6 +134,7 @@ import { createNotificationStore, type NotificationAccount } from "./notificatio
 import { resolveSessionAccount } from "./sessionAccount.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
+import { workstationPushDisabled } from "./workstationPolicy.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
@@ -654,6 +656,7 @@ export async function boot(opts: BootOptions = {}) {
   const requestedDataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const writerLease = await acquireDataDirectoryLease(requestedDataDir);
   const dataDir = writerLease.canonicalDataDir;
+  bindGitDiscoveryToDataDir(dataDir);
   try {
   // Warm the engine identity cache while the rest of boot (sweep, packages,
   // HTTP) runs so the first owned spawn does not wait on `--version`/`db path`
@@ -2341,8 +2344,9 @@ export async function boot(opts: BootOptions = {}) {
     file: `${dataDir}/native-push.json`,
     // Phones register over Polyth Link; pushes go out through Polyth's push
     // service, or straight to APNs when this server's owner placed the app's key.
-    relay: relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
-    apns: apnsFromDir(`${dataDir}/native-push`),
+    // The workstation edition sends none (workstationPolicy.ts).
+    relay: workstationPushDisabled(process.env) ? undefined : relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
+    apns: workstationPushDisabled(process.env) ? () => undefined : apnsFromDir(`${dataDir}/native-push`),
     authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
     // A Live Activity only ever reflects chats this person could open in the
     // navigator: same Space, visible project, readable row (as the WS fan-out).
@@ -3083,6 +3087,12 @@ export async function boot(opts: BootOptions = {}) {
       }
     },
     browserArtifacts,
+    sessionMedia: {
+      preserve: async (input) => svc<NonNullable<SessionDeps["sessionMedia"]>>("files.session-media")?.preserve(input),
+      ignored: async (root, paths) => await svc<{
+        checkIgnored(root: string, paths: readonly string[]): Promise<readonly string[]>;
+      }>("git")?.checkIgnored(root, paths) ?? [],
+    },
     ...(commandService ? {
       expand: async (projectId: string, text: string, actorUserId?: string) => {
         const project = await projects.get(projectId);
@@ -3192,6 +3202,23 @@ export async function boot(opts: BootOptions = {}) {
     const failed = results.filter((result) => result.status === "rejected");
     for (const result of failed) console.warn("[polyth] harness runtime restart failed", (result as PromiseRejectedResult).reason);
     return { restarted: results.length - failed.length, failed: failed.length };
+  });
+  // Windows cannot replace an executable a running process has open, so a
+  // harness update or reinstall first releases this harness's idle chats
+  // through the safe idle-release gate (their next turn relaunches the new
+  // build) and reports the chats it had to leave running. The lock is
+  // machine-wide, so every Space's leases count; only the instance owner can
+  // ask. A shared workspace runtime is not released here.
+  provideService("harness.runtime.releaseIdle", async (
+    harnessId: string,
+  ): Promise<{ released: number; busy: number }> => {
+    const provider = harnesses.get(harnessId);
+    if (!provider || provider.runtimeLifetime === "workspace") return { released: 0, busy: 0 };
+    const results = await Promise.allSettled(
+      harnessPool.liveSessionIdsForHarness(harnessId).map((id) => sessions.releaseRuntimeIfIdle?.(id) ?? Promise.resolve({ released: false })),
+    );
+    const released = results.filter((result) => result.status === "fulfilled" && result.value.released).length;
+    return { released, busy: results.length - released };
   });
   reconcileRuntimeForConfigRestart = (sessionId, runtime, expected) =>
     sessions.reconcileForRuntimeRestart(sessionId, runtime, expected);

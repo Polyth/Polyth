@@ -1,0 +1,37 @@
+{
+  "name": "@polyth/bookmarks",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "editions": ["workstation"],
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Bookmarks",
+      "description": "Save answers and passages from a chat with their links, walk through them, and export them as Markdown. Personal, outside git, on all your devices.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "bookmark",
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {
+        "recommended": true
+      }
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

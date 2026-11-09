@@ -1,20 +1,24 @@
 import { build } from "esbuild";
-import { copyFile, cp, mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { desktopServerPackagesPlugin } from "./serverPackageInventory.ts";
-import { prepareAppIcons } from "./scripts/prepare-icon.mjs";
+import { desktopEdition } from "./src/edition.ts";
 import { writeThirdPartyNotices } from "../../scripts/third-party-notices.mjs";
 
 const here = import.meta.dirname;
+const flavor = process.env.POLYTH_DESKTOP_FLAVOR ?? "";
+// The workstation build (scripts/ci/workstation.mjs, docs/security/workstation-edition.md)
+// ships no Polyth Link binaries, no Chromium and only the packages that opt in.
+const edition = desktopEdition(flavor);
+const workstation = edition === "workstation";
 const dist = join(here, "dist");
 const lock = JSON.parse(await readFile(join(here, "opencode.json"), "utf8")) as { version: string };
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await mkdir(join(here, "build"), { recursive: true });
-await prepareAppIcons({ buildDir: join(here, "build") });
 await copyFile(join(here, "src", "bootstrap.cjs"), join(dist, "bootstrap.cjs"));
 
 const supervisorResources = join(here, "resources", "runtime-supervisor");
@@ -47,50 +51,60 @@ const repoRoot = join(here, "..", "..");
 const linkDir = join(here, "resources", "polyth-link");
 const linkHostName = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
 const linkClientName = process.platform === "win32" ? "polyth-link-client.exe" : "polyth-link-client";
-await mkdir(linkDir, { recursive: true });
+// A binary left over from an earlier build in this checkout must not ship.
+await rm(linkDir, { recursive: true, force: true });
+if (workstation) {
+  await mkdir(linkDir, { recursive: true });
+  await rm(join(here, "resources", "chromium"), { recursive: true, force: true });
+  console.log("Workstation edition: Polyth Link and Chromium are not packaged.");
+} else {
+  await buildLinkBinaries();
+}
 
-if (process.platform === "win32") {
-  // The client talks over stdio on every platform. The host still needs a Unix
-  // socket for the server's ingress, so a Windows app connects to other servers
-  // but cannot yet be reached through Link itself.
-  console.warn("The Polyth Link host is not packaged on Windows: it needs the server's Unix-socket ingress.");
-  const cargo = spawnSync("cargo", ["build", "--release", "-p", "polyth-link-client"], { cwd: repoRoot, stdio: "inherit" });
-  if (cargo.status !== 0) throw new Error("failed to build polyth-link-client");
-  await copyFile(join(repoRoot, "target", "release", linkClientName), join(linkDir, linkClientName));
-} else if (process.platform === "darwin" && process.env.POLYTH_MAC_MULTI_ARCH === "1") {
-  for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
-    const added = spawnSync("rustup", ["target", "add", target], { cwd: repoRoot, stdio: "inherit" });
-    if (added.status !== 0) throw new Error(`failed to add Rust target ${target}`);
+async function buildLinkBinaries(): Promise<void> {
+  await mkdir(linkDir, { recursive: true });
+  if (process.platform === "win32") {
+    // The client talks over stdio on every platform. The host still needs a Unix
+    // socket for the server's ingress, so a Windows app connects to other servers
+    // but cannot yet be reached through Link itself.
+    console.warn("The Polyth Link host is not packaged on Windows: it needs the server's Unix-socket ingress.");
+    const cargo = spawnSync("cargo", ["build", "--release", "-p", "polyth-link-client"], { cwd: repoRoot, stdio: "inherit" });
+    if (cargo.status !== 0) throw new Error("failed to build polyth-link-client");
+    await copyFile(join(repoRoot, "target", "release", linkClientName), join(linkDir, linkClientName));
+  } else if (process.platform === "darwin" && process.env.POLYTH_MAC_MULTI_ARCH === "1") {
+    for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+      const added = spawnSync("rustup", ["target", "add", target], { cwd: repoRoot, stdio: "inherit" });
+      if (added.status !== 0) throw new Error(`failed to add Rust target ${target}`);
+      for (const pkg of ["polyth-link-host", "polyth-link-client"]) {
+        const cargo = spawnSync("cargo", ["build", "--release", "-p", pkg, "--target", target], {
+          cwd: repoRoot,
+          stdio: "inherit",
+        });
+        if (cargo.status !== 0) throw new Error(`failed to build ${pkg} for ${target}`);
+      }
+    }
+    for (const name of [linkHostName, linkClientName]) {
+      const arm = join(repoRoot, "target", "aarch64-apple-darwin", "release", name);
+      const intel = join(repoRoot, "target", "x86_64-apple-darwin", "release", name);
+      if (!existsSync(arm) || !existsSync(intel)) throw new Error(`universal Polyth Link binary missing: ${name}`);
+      const lipo = spawnSync("lipo", ["-create", arm, intel, "-output", join(linkDir, name)], { stdio: "inherit" });
+      if (lipo.status !== 0) throw new Error(`failed to create universal Polyth Link binary: ${name}`);
+    }
+  } else {
     for (const pkg of ["polyth-link-host", "polyth-link-client"]) {
-      const cargo = spawnSync("cargo", ["build", "--release", "-p", pkg, "--target", target], {
+      const cargo = spawnSync("cargo", ["build", "--release", "-p", pkg], {
         cwd: repoRoot,
         stdio: "inherit",
       });
-      if (cargo.status !== 0) throw new Error(`failed to build ${pkg} for ${target}`);
+      if (cargo.status !== 0) throw new Error(`failed to build ${pkg}`);
     }
+    await copyFile(join(repoRoot, "target", "release", linkHostName), join(linkDir, linkHostName));
+    await copyFile(join(repoRoot, "target", "release", linkClientName), join(linkDir, linkClientName));
   }
-  for (const name of [linkHostName, linkClientName]) {
-    const arm = join(repoRoot, "target", "aarch64-apple-darwin", "release", name);
-    const intel = join(repoRoot, "target", "x86_64-apple-darwin", "release", name);
-    if (!existsSync(arm) || !existsSync(intel)) throw new Error(`universal Polyth Link binary missing: ${name}`);
-    const lipo = spawnSync("lipo", ["-create", arm, intel, "-output", join(linkDir, name)], { stdio: "inherit" });
-    if (lipo.status !== 0) throw new Error(`failed to create universal Polyth Link binary: ${name}`);
-  }
-} else {
-  for (const pkg of ["polyth-link-host", "polyth-link-client"]) {
-    const cargo = spawnSync("cargo", ["build", "--release", "-p", pkg], {
-      cwd: repoRoot,
-      stdio: "inherit",
-    });
-    if (cargo.status !== 0) throw new Error(`failed to build ${pkg}`);
-  }
-  await copyFile(join(repoRoot, "target", "release", linkHostName), join(linkDir, linkHostName));
-  await copyFile(join(repoRoot, "target", "release", linkClientName), join(linkDir, linkClientName));
-}
-
-for (const name of process.platform === "win32" ? [linkClientName] : [linkHostName, linkClientName]) {
-  if (!existsSync(join(linkDir, name))) {
-    throw new Error(`Polyth Link binary missing from package resources: ${join(linkDir, name)}`);
+  for (const name of process.platform === "win32" ? [linkClientName] : [linkHostName, linkClientName]) {
+    if (!existsSync(join(linkDir, name))) {
+      throw new Error(`Polyth Link binary missing from package resources: ${join(linkDir, name)}`);
+    }
   }
 }
 
@@ -120,7 +134,7 @@ const bundles = await Promise.all([
     target: "node22",
     sourcemap: true,
     packages: "bundle",
-    plugins: [desktopServerPackagesPlugin(repoRoot)],
+    plugins: [desktopServerPackagesPlugin(repoRoot, edition)],
     // Playwright uses a generated internal require map that static bundlers
     // cannot resolve. Keep its published package intact in app.asar.
     external: ["electron", "electron-updater", "esbuild", "playwright-core", "typescript"],
@@ -131,11 +145,12 @@ const bundles = await Promise.all([
     },
     define: {
       __POLYTH_OPENCODE_VERSION__: JSON.stringify(lock.version),
-      // "mac-legacy" for the macOS 12 build (scripts/ci/mac-legacy.mjs); empty otherwise.
-      __POLYTH_DESKTOP_FLAVOR__: JSON.stringify(process.env.POLYTH_DESKTOP_FLAVOR ?? ""),
-      // Polyth's own Google app (packages/google): only release builds have it.
+      // "mac-legacy" for the macOS 12 build (scripts/ci/mac-legacy.mjs),
+      // "workstation" for the workstation edition; empty otherwise.
+      __POLYTH_DESKTOP_FLAVOR__: JSON.stringify(flavor),
+      // Polyth's own Google app (packages/google): only standard release builds have it.
       ...Object.fromEntries(["POLYTH_GOOGLE_BUILTIN_CLIENT_ID", "POLYTH_GOOGLE_BUILTIN_CLIENT_SECRET"]
-        .filter((name) => process.env[name])
+        .filter((name) => !workstation && process.env[name])
         .map((name) => [`process.env.${name}`, JSON.stringify(process.env[name])])),
     },
     // Dependency notices ship in THIRD_PARTY_NOTICES.txt, written from the metafiles below.
@@ -164,6 +179,7 @@ const bundles = await Promise.all([
     format: "cjs",
     target: "node22",
     external: ["electron"],
+    define: { __POLYTH_DESKTOP_FLAVOR__: JSON.stringify(flavor) },
     legalComments: "none",
     metafile: true,
     logLevel: "info",
@@ -201,3 +217,12 @@ await writeThirdPartyNotices(
   bundles.map((result) => result.metafile),
   { product: "The Polyth desktop app", workingDir: process.cwd() },
 );
+
+// What went into the bundles, kept outside the package: release checks prove a
+// workstation build holds no excluded package and derive its SBOM from this
+// (scripts/ci/workstation.mjs).
+const buildMeta = join(here, "build-meta");
+await rm(buildMeta, { recursive: true, force: true });
+await mkdir(buildMeta, { recursive: true });
+await writeFile(join(buildMeta, "edition.json"), `${JSON.stringify({ flavor, edition }, null, 2)}\n`);
+await writeFile(join(buildMeta, "main.metafile.json"), JSON.stringify(bundles[0].metafile));

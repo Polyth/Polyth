@@ -1,4 +1,5 @@
 import type { HarnessDescriptor, HarnessReleaseSource, HarnessSnapshot, HarnessUpdateStatus } from "@polyth/contracts";
+import { workstationEdition } from "./edition.ts";
 
 /** A version split into its numeric core and an optional `-suffix`. */
 export type HarnessVersion = { text: string; core: number[]; suffix?: string };
@@ -155,6 +156,10 @@ export function createHarnessUpdateChecker(options: { fetch?: typeof globalThis.
 
     return {
         latest(source, { force = false } = {}) {
+            // The workstation edition never asks a registry or a release page
+            // for a harness version: an unreachable release, not a request.
+            if (workstationEdition())
+                return Promise.resolve({ checkedAt: now(), error: "harness update checks are not available in the workstation edition" });
             const key = releaseSourceKey(source);
             const cached = cache.get(key);
             if (cached) {
@@ -211,7 +216,9 @@ export async function harnessUpdateStatus(input: {
         ...(installedText ? { installed: installedText } : {}),
         ...(current ? { current: current.text } : {}),
         available: false,
-        canUpdate: Boolean(descriptor.updateCommand?.length) && input.owner && !remote && installed,
+        // An update runs the CLI's own updater, which downloads: the workstation
+        // edition offers no update action at all.
+        canUpdate: Boolean(descriptor.updateCommand?.length) && input.owner && !remote && installed && !workstationEdition(),
     };
     if (remote)
         return { ...base, reason: "remote" };

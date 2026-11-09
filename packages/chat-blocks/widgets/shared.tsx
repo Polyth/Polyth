@@ -3,9 +3,10 @@
 // URL policy.
 import { createContext, useContext, useState, type ReactNode } from "react";
 import type { MarkdownFenceContext, WebPackageHost } from "@polyth/web-sdk";
-import { Button, CheckIcon, CodeIcon, IconButton, RefreshIcon, WarningIcon } from "../../../apps/web/src/components/ui/index.ts";
+import { Button, CheckIcon, CodeIcon, Icon, IconButton, RefreshIcon, WarningIcon, ZoomInIcon } from "../../../apps/web/src/components/ui/index.ts";
 import type { ChatBlockProblem } from "../src/parse.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
+import ImageLightbox, { type MarkdownImage } from "../../../apps/web/src/markdown/ImageLightbox.tsx";
 import { sanitizeImageSrc, sanitizeLinkHref } from "../../../apps/web/src/markdown.tsx";
 import { fill, type ChatBlockStrings } from "./strings.ts";
 
@@ -102,8 +103,19 @@ function initials(title: string): string {
   return letters.join("").toUpperCase();
 }
 
-export function Media({ src, title, className }: { src: string | null; title: string; className?: string }) {
+export function Media({ src, title, className, onOpen, openLabel, openMode = "corner" }: {
+  src: string | null;
+  title: string;
+  className?: string;
+  /** Opens the block's gallery at this image; absent = a plain picture. */
+  onOpen?: (() => void) | undefined;
+  openLabel?: string;
+  /** "corner" keeps a small button; "cover" makes the whole picture the
+   *  button (thumbnails, where a corner button would crowd the frame). */
+  openMode?: "corner" | "cover";
+}) {
   const [state, setState] = useState<"loading" | "loaded" | "failed">("loading");
+  const openable = Boolean(src) && Boolean(onOpen);
   return (
     <div className={`chat-block-media${className ? ` ${className}` : ""}`}>
       {src && state !== "failed" && (
@@ -119,8 +131,43 @@ export function Media({ src, title, className }: { src: string | null; title: st
         />
       )}
       <span className="chat-block-monogram" aria-hidden="true">{initials(title)}</span>
+      {openable && onOpen && (
+        <button
+          type="button"
+          className={`chat-block-zoom${openMode === "cover" ? " is-cover" : ""}`}
+          aria-label={openLabel ?? title}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpen();
+          }}
+        >
+          <Icon icon={ZoomInIcon} size="sm" />
+        </button>
+      )}
     </div>
   );
+}
+
+/** A block's pictures in view order plus the full-screen viewer over them.
+ *  `open(src)` shows that picture from the gallery. */
+export function useBlockGallery(images: ReadonlyArray<{ src: string | null; title: string }>) {
+  const [at, setAt] = useState<number | null>(null);
+  const viewable = images.filter((image): image is { src: string; title: string } => image.src !== null);
+  const open = (src: string): void => {
+    const index = viewable.findIndex((image) => image.src === src);
+    if (index >= 0) setAt(index);
+  };
+  const gallery: ReactNode = at !== null && viewable.length > 0
+    ? (
+      <ImageLightbox
+        images={viewable.map((image): MarkdownImage => ({ src: image.src, alt: image.title }))}
+        start={at}
+        onClose={() => setAt(null)}
+      />
+    )
+    : null;
+  return { open, gallery };
 }
 
 export function mediaRatio(value: string | undefined): string | null {

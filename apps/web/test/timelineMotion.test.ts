@@ -315,6 +315,26 @@ async function mountTimeline(options: {
     reserve: () => cssPx(timeline(), "--timeline-turn-sheet-space"),
     floor: () => cssPx(timeline(), "--timeline-extent-floor"),
     maxScrollTop: () => timeline().scrollHeight - timeline().clientHeight,
+    /** Show another chat in this same mounted Timeline, as a chat switch does. */
+    async show(id: string) {
+      await act(async () => {
+        activateSession(id);
+        root.render(createElement(Timeline, { model: reduceSessionModel(id, getState().events[id] ?? []) }));
+      });
+    },
+    /** Replace the Timeline with another surface; the open chat stays as it is. */
+    async hide() {
+      await act(async () => root.render(null));
+    },
+    async scrollUpTo(top: number) {
+      const el = timeline();
+      await act(async () => {
+        el.dispatchEvent(new dom.WheelEvent("wheel", { deltaY: -120, bubbles: true }) as unknown as Event);
+        el.scrollTop = top;
+        el.dispatchEvent(new dom.Event("scroll") as unknown as Event);
+        await sleep(260);
+      });
+    },
     async wait(ms: number) {
       await act(async () => { await sleep(ms); });
     },
@@ -1543,6 +1563,101 @@ test("Jump to latest only shows while something is hidden below a detached reade
     await t.wait(60);
     assert.equal(el.scrollTop, top, "the detached reader did not move");
     assert.equal(jump(), true, "a row below the composer edge brings the control back");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+/** A second finished chat, in the store and ready to switch to. */
+async function seedOtherChat(t: Awaited<ReturnType<typeof mountTimeline>>, anchor?: (id: string) => object) {
+  const id = `${t.sessionId}-other`;
+  const events = [1, 2, 3, 4, 5, 6].map((seq) => ({
+    id: `${id}-${seq}`, sessionId: id, seq, time: seq, v: 1,
+    type: seq % 2 ? "user/message" : "assistant/message",
+    data: seq % 2 ? { text: `Other chat prompt ${seq}.` } : { partId: `${id}-p${seq}`, text: LONG },
+  } as SessionEvent));
+  if (anchor) sessionStorage.setItem(`polyth.timelineAnchor.${id}`, JSON.stringify(anchor(id)));
+  await act(async () => {
+    setSessions(PROJECT, [
+      { id: t.sessionId, projectId: PROJECT, title: "Motion", status: "idle", createdAt: 1, updatedAt: 1 },
+      { id, projectId: PROJECT, title: "Other", status: "idle", createdAt: 1, updatedAt: 1 },
+    ]);
+    for (const event of events) applyEvent(event);
+  });
+  return id;
+}
+
+const FOUR_TURNS = ({ turn }: SeedTools) => [
+  ...turn(1, "Return prompt one."), ...turn(2, "Return prompt two."),
+  ...turn(3, "Return prompt three."), ...turn(4, "Return prompt four."),
+];
+
+test("a chat switch never records the next chat's position as the chat being left", async () => {
+  const t = await mountTimeline({ seed: FOUR_TURNS });
+  try {
+    assert.equal(t.timeline().scrollTop, t.maxScrollTop(), "the chat opened on its newest messages");
+    // The next chat was left scrolled up: its row and its detached flag are
+    // what the scroller holds once it has committed.
+    const other = await seedOtherChat(t, (id) => ({ id: `${id}-3`, offset: 0, atBottom: false }));
+    await t.show(other);
+    const record = JSON.parse(sessionStorage.getItem(`polyth.timelineAnchor.${t.sessionId}`) ?? "null") as { id: string | null; atBottom: boolean } | null;
+    assert.notEqual(record?.id?.startsWith(other) ?? false, true, `kept the other chat's row: ${JSON.stringify(record)}`);
+    assert.equal(record?.atBottom, true, "the chat was left following its tail");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("returning to a recently left chat opens on its newest messages", async () => {
+  const t = await mountTimeline({ seed: FOUR_TURNS });
+  try {
+    const other = await seedOtherChat(t, (id) => ({ id: `${id}-3`, offset: 0, atBottom: false }));
+    await t.show(other);
+    await t.show(t.sessionId);
+    assert.equal(t.timeline().scrollTop, t.maxScrollTop(), "back on the newest messages");
+    assert.equal(t.timeline().parentElement?.querySelector(".jump-latest") ?? null, null, "and nothing to jump to");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("leaving a chat scrolled up through a surface that replaces the transcript still returns to its newest messages", async () => {
+  const t = await mountTimeline({ seed: FOUR_TURNS });
+  try {
+    await t.scrollUpTo(120);
+    const left = () => JSON.parse(sessionStorage.getItem(`polyth.timelineAnchor.${t.sessionId}`) ?? "null") as { atBottom: boolean } | null;
+    assert.equal(left()?.atBottom, false, "reading mid-chat is recorded while it lasts");
+    // New chat, or a slow open's placeholder: the Timeline unmounts.
+    await act(async () => activateSession(null));
+    await t.hide();
+    assert.equal(left()?.atBottom, true);
+    await t.show(t.sessionId);
+    assert.equal(t.timeline().scrollTop, t.maxScrollTop(), "back on the newest messages");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("a remount of the chat that stays open keeps the reading position", async () => {
+  const t = await mountTimeline({ seed: FOUR_TURNS });
+  try {
+    await t.scrollUpTo(120);
+    await t.hide();
+    await t.show(t.sessionId);
+    assert.equal(t.timeline().parentElement?.querySelector(".jump-latest") !== null, true, "still detached from the tail");
+    assert.notEqual(t.timeline().scrollTop, t.maxScrollTop());
+  } finally {
+    await t.cleanup();
+  }
+});
+
+test("a saved position whose row no longer exists falls back to the newest messages", async () => {
+  const t = await mountTimeline({
+    seed: FOUR_TURNS,
+    anchor: () => ({ id: "a-row-that-is-gone", offset: 0, atBottom: false }),
+  });
+  try {
+    assert.equal(t.timeline().scrollTop, t.maxScrollTop(), "no stranded, detached first frame");
   } finally {
     await t.cleanup();
   }

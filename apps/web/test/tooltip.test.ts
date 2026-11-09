@@ -11,7 +11,7 @@ test(".ui-tooltip styling meets high-visibility specification", async () => {
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const tooltipRule = styles.match(/(?:^|\n)\.ui-tooltip\s*\{([^}]+)\}/);
   assert.ok(tooltipRule, ".ui-tooltip rule exists in styles.css");
-  const body = tooltipRule[1];
+  const body = tooltipRule[1]!;
 
   assert.match(body, /background:\s*#1a1a1a/);
   assert.match(body, /border-radius:\s*(?:8px|var\(--radius-control\))/);
@@ -27,4 +27,28 @@ test("SessionContextBar uses Tooltip component on the isolation switch instead o
   assert.match(barSrc, /import Tooltip from "\.\.\/ui\/Tooltip\.tsx";/);
   assert.match(barSrc, /<Tooltip\s+content=\{multiRepository\s*\?\s*tr\("mobile\.sessioncontextbar\.isolateRepositoriesHint"\)\s*:\s*tr\("isolation\.workInIsolationHint"\)\}/);
   assert.doesNotMatch(barSrc, /className="context-isolation-control"[^>]*title=/);
+});
+
+test("all tooltips across chat actions, themes, and rail surfaces inherit high-visibility specification", async () => {
+  const chatChromeCss = await readFile(new URL("../src/components/ChatChrome.css", import.meta.url), "utf8");
+  assert.doesNotMatch(chatChromeCss, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\)/);
+  assert.doesNotMatch(chatChromeCss, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*color:\s*var\(--text\)/);
+
+  const fluentCss = await readFile(new URL("../src/fluentTheme.css", import.meta.url), "utf8");
+  assert.doesNotMatch(fluentCss, /html\[data-theme-style="fluent"\]\s+\.ui-tooltip\s*\{/);
+
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const msgActionTooltip = styles.match(/(?:^|\n)\.msg-action-btn::after\s*\{([^}]+)\}/);
+  assert.ok(msgActionTooltip, ".msg-action-btn::after exists in styles.css");
+  const msgBody = msgActionTooltip[1]!;
+  assert.match(msgBody, /background:\s*#1a1a1a/);
+  assert.match(msgBody, /color:\s*#fff/);
+  assert.match(msgBody, /padding:\s*7px\s+11px/);
+  assert.match(msgBody, /box-shadow:\s*0\s+4px\s+8px\s+rgba\(67,\s*78,\s*92,\s*0\.16\),\s*0\s+8px\s+16px\s+rgba\(55,\s*67,\s*82,\s*0\.14\)/);
+
+  const railTooltip = styles.match(/(?:^|\n)\.sidebar-project-rail-tooltip\.ui-tooltip\s*\{([^}]+)\}/);
+  assert.ok(railTooltip, ".sidebar-project-rail-tooltip.ui-tooltip exists in styles.css");
+  const railBody = railTooltip[1]!;
+  assert.match(railBody, /color:\s*#fff/);
+  assert.match(railBody, /box-shadow:\s*0\s+4px\s+8px\s+rgba\(67,\s*78,\s*92,\s*0\.16\),\s*0\s+8px\s+16px\s+rgba\(55,\s*67,\s*82,\s*0\.14\)/);
 });

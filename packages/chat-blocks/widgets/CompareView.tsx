@@ -3,7 +3,8 @@
 // header selects that object for the block's buttons.
 import type { MarkdownFenceContext } from "@polyth/web-sdk";
 import { bestIndex, type ChatBlockDoc } from "../src/parse.ts";
-import { BlockHead, Mark, Media, imageUrl } from "./shared.tsx";
+import { Icon, ZoomInIcon } from "../../../apps/web/src/components/ui/index.ts";
+import { BlockHead, Mark, Media, imageUrl, useBlockGallery } from "./shared.tsx";
 import { fill, type ChatBlockStrings } from "./strings.ts";
 
 export default function CompareView({ doc, t, context, selected, toggle, locked }: {
@@ -16,6 +17,8 @@ export default function CompareView({ doc, t, context, selected, toggle, locked 
 }) {
   const withImages = doc.columnImages.some(Boolean);
   const picking = doc.pick !== "none";
+  const images = doc.columns.map((name, col) => ({ src: imageUrl(doc.columnImages[col], context), title: name }));
+  const gallery = useBlockGallery(images);
   return (
     <>
       <BlockHead title={doc.title} count={doc.columns.length > 1 ? String(doc.columns.length) : undefined} />
@@ -26,9 +29,10 @@ export default function CompareView({ doc, t, context, selected, toggle, locked 
               <td className="chat-block-compare-corner" />
               {doc.columns.map((name, col) => {
                 const isSelected = selected.has(col);
+                const src = images[col]?.src ?? null;
                 const head = (
                   <>
-                    {withImages && <Media src={imageUrl(doc.columnImages[col], context)} title={name} className="chat-block-compare-media" />}
+                    {withImages && <Media src={src} title={name} className="chat-block-compare-media" />}
                     <span className="chat-block-compare-name">{name}</span>
                     {picking && <Mark />}
                   </>
@@ -48,6 +52,20 @@ export default function CompareView({ doc, t, context, selected, toggle, locked 
                         {head}
                       </button>
                     ) : <div className="chat-block-compare-head">{head}</div>}
+                    {src && (
+                      <button
+                        type="button"
+                        className="chat-block-zoom is-corner"
+                        aria-label={fill(t.view, { title: name })}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          gallery.open(src);
+                        }}
+                      >
+                        <Icon icon={ZoomInIcon} size="sm" />
+                      </button>
+                    )}
                   </th>
                 );
               })}
@@ -71,6 +89,7 @@ export default function CompareView({ doc, t, context, selected, toggle, locked 
           </tbody>
         </table>
       </div>
+      {gallery.gallery}
     </>
   );
 }

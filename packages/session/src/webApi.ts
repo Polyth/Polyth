@@ -61,6 +61,9 @@ import type {
   SessionDeleteOptions,
   SessionEvent,
   SessionFolderDto,
+  SessionMoveInput,
+  SessionMovePreview,
+  SessionMoveResult,
   SessionProjection,
   SessionRef,
   ShellTurnResult,
@@ -1184,6 +1187,11 @@ export const api = {
   ),
 
   // ---- organization ----------------------------------------------------------
+  /** What moving this chat to another project would do; refusals come back as `blocked`. */
+  previewSessionMove: (id: string, input: SessionMoveInput) =>
+    jfetch<SessionMovePreview>(`/api/sessions/${encodeURIComponent(id)}/move`, json("POST", { ...input, dryRun: true })),
+  moveSession: (id: string, input: SessionMoveInput) =>
+    jfetch<SessionMoveResult>(`/api/sessions/${encodeURIComponent(id)}/move`, json("POST", input)),
   organizeSession: (id: string, patch: { folderId?: string | null; labelIds?: string[]; pinned?: { position: number } | null }) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/organize`, json("PATCH", patch)),
   bulkSessions: (op: "archive" | "restore", ids: string[]) =>

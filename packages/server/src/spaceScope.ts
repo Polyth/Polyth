@@ -429,6 +429,23 @@ function scopeSessions(
     scoped.withWorkspaceMutation = <T>(sessionId: string, expectedRevision: number, mutate: (scope: WorkspaceMutationScope) => Promise<T>): Promise<T> =>
       guarded(() => mutateWorkspace(g(sessionId), expectedRevision, mutate));
   }
+  if (base.moveToProject) {
+    const moveToProject = base.moveToProject.bind(base);
+    // The session and its destination both have to be this Space's. Hooks are
+    // the canonical layer's own and never come from a caller of this surface.
+    scoped.moveToProject = (sessionId, input) => guarded(async () => {
+      guard.assertProject(ctx, input.projectId);
+      const result = await moveToProject(g(sessionId), input);
+      return { ...result, session: mineOne(result.session) };
+    });
+  }
+  if (base.previewMoveToProject) {
+    const previewMoveToProject = base.previewMoveToProject.bind(base);
+    scoped.previewMoveToProject = (sessionId, input) => guarded(async () => {
+      guard.assertProject(ctx, input.projectId);
+      return previewMoveToProject(g(sessionId), input);
+    });
+  }
   assign("markWorktreeMissing", byProject(base.markWorktreeMissing));
   assign("backendSessions", byProject(base.backendSessions));
   assign("importBackendSessions", byProject(base.importBackendSessions));

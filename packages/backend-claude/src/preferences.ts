@@ -13,6 +13,7 @@ import type {
 } from "@polyth/contracts/capability-installations";
 import {
     applyNativeSkillPolicy,
+    locateNativeSkill,
     readNativeSkillPolicy,
     scanSkillFolder,
     updateNativeSkillPolicy,
@@ -71,7 +72,7 @@ export function createClaudePreferences(options: {
     files: ClaudePreferenceFiles;
     /** The account's Claude configuration directory. */
     configDir(): string;
-    plugins: HarnessNativePluginManager;
+    plugins: HarnessNativePluginManager & { pluginRoot?(pluginId: string): string | undefined };
 }) {
     const file = (context: HarnessContext, name: string): string | undefined => {
         const dir = options.files.dir(context);
@@ -96,9 +97,17 @@ export function createClaudePreferences(options: {
             const list = await options.plugins.list(context);
             for (const row of list.plugins) {
                 if (row.enabled !== true) continue;
+                // Read from the plugin's own folder when Polyth knows it, which
+                // gives each skill its description and lets it be copied.
+                const root = options.plugins.pluginRoot?.(row.id);
+                const scanned = root
+                    ? await scanSkillFolder(join(root, "skills"), "plugin", { prefix: `${row.name}:`, plugin: row.id })
+                    : [];
+                const known = new Set(scanned.map((skill) => skill.name));
+                plugin.push(...scanned);
                 const skills = row.components?.find((component) => component.kind === "skill");
                 for (const name of skills?.names ?? []) {
-                    plugin.push({ name: `${row.name}:${name}`, source: "plugin", plugin: row.id });
+                    if (!known.has(`${row.name}:${name}`)) plugin.push({ name: `${row.name}:${name}`, source: "plugin", plugin: row.id, noFolder: true });
                 }
             }
         }
@@ -109,6 +118,22 @@ export function createClaudePreferences(options: {
     };
 
     const skills: HarnessNativeSkillManager = {
+        async locate(context, name) {
+            if (nativeSkillsUnsupported(context)) return undefined;
+            const split = name.indexOf(":");
+            if (split > 0) {
+                const list = await options.plugins.list(context).catch(() => undefined);
+                const row = list?.plugins.find((candidate) => candidate.name === name.slice(0, split) && candidate.enabled === true);
+                const root = row ? options.plugins.pluginRoot?.(row.id) : undefined;
+                return root ? locateNativeSkill([{ root: join(root, "skills"), source: "plugin" }], name.slice(split + 1)) : undefined;
+            }
+            return locateNativeSkill([
+                ...(context.projectId && context.projectId !== "__default__"
+                    ? [{ root: join(context.cwd, ".claude", "skills"), source: "project" as const }]
+                    : []),
+                { root: join(options.configDir(), "skills"), source: "user" as const },
+            ], name);
+        },
         async list(context): Promise<HarnessNativeSkillListDto> {
             const unsupported = nativeSkillsUnsupported(context);
             const path = skillsFile(context);

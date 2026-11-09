@@ -205,6 +205,23 @@ test("the activity turns stale when the page's confirmation runs out, and stale 
   }
 });
 
+test("the Lock Screen keeps one card: a finished activity never sits beside the next one", async () => {
+  const plugin = await readFile(join(iosApp, "App/PolythLiveActivityPlugin.swift"), "utf8");
+  const between = (from: string, to: string) => plugin.slice(plugin.indexOf(from), plugin.indexOf(to, plugin.indexOf(from)));
+  const update = between("@objc func update", "@objc func setContext");
+  const end = between("@objc func end", "\n}\n");
+  // A finished card stays listed and visible for ten minutes, and it cannot be
+  // revived: only a running one is updated, and whichever card stays replaces the rest.
+  assert.match(update, /activities\.first\(where: Self\.isRunning\)/);
+  assert.match(update, /await current\.update\(content\)\s+await Self\.dismissAll\(except: current\)/);
+  assert.match(update, /self\.observe\(activity\)\s+await Self\.dismissAll\(except: activity\)/);
+  // The final snapshot goes on one card, not on every card still listed.
+  assert.doesNotMatch(end, /for activity in/);
+  assert.match(end, /kept\.end\(\s*ActivityContent\(state: finalState, staleDate: nil\)/);
+  assert.match(end, /await Self\.dismissAll\(except: kept\)/);
+  assert.match(plugin, /private static func dismissAll\(except kept: Activity<PolythActivityAttributes>\? = nil\) async \{[\s\S]*?where activity\.id != kept\?\.id \{\s+await activity\.end\(nil, dismissalPolicy: \.immediate\)/);
+});
+
 test("a pushed update carries no words: the widget draws them from the App's shared Keychain copy", async () => {
   const attributes = await readFile(join(iosApp, "App/PolythActivityAttributes.swift"), "utf8");
   // A push brings only these; every other field must decode as absent.

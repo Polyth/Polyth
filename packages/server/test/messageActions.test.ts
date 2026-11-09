@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createStore, deriveMessages } from "@polyth/session";
+import { createStore, deriveMessages, planRuntimeEpochRecovery, runtimeEpochRecoveryPending } from "@polyth/session";
 import type {
   AgentRuntime, ForkDraft, ModelMessage, Project, ProjectService, RuntimeBranchRequest, RuntimeEvent,
   SessionPersistence,
@@ -16,7 +16,7 @@ import type { PermissionService } from "@polyth/permissions";
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
-function fakeRuntime(opts: { branchError?: string } = {}) {
+function fakeRuntime(opts: { branchError?: string; fork?: boolean } = {}) {
   const listeners = new Set<Emit>();
   const startedTexts: string[] = [];
   const branchRequests: Array<{ sourceSessionId: string; targetSessionId: string; history: ModelMessage[] }> = [];
@@ -26,9 +26,12 @@ function fakeRuntime(opts: { branchError?: string } = {}) {
     for (const l of listeners) l(sessionId, ev);
   };
   const rt: AgentRuntime = {
+    // A harness without native fork (Claude Code, Codex, Pi…) reports its id.
+    ...(opts.fork === false ? { harnessId: "claude" } : {}),
     capabilities: async () => ({
       streaming: true, permissions: true, questions: true, compaction: false, subagents: false, steering: false,
       attachments: { modalities: { file: "native" } },
+      ...(opts.fork !== undefined ? { fork: opts.fork } : {}),
     }),
     models: async () => [],
     agents: async () => [],
@@ -228,7 +231,74 @@ test("fork of the first prompt has an empty prefix and a fresh backend", async (
   await store.close();
 });
 
-test("backend branch failure creates no canonical child and keeps the source intact", async () => {
+/** A continuity fork: the exact canonical prefix, then the continuity marker
+ *  and the lineage marker; no native session until the child is used. */
+const assertContinuityChild = async (
+  store: ReturnType<typeof makeService>["store"],
+  sourceId: string,
+  childId: string,
+  second: { seq: number },
+): Promise<void> => {
+  const sourceEvents = await store.events(sourceId);
+  const childEvents = await store.events(childId);
+  const prefix = sourceEvents.filter((e) => e.seq < second.seq);
+  assert.deepEqual(childEvents.slice(0, prefix.length).map((e) => [e.type, e.time]), prefix.map((e) => [e.type, e.time]));
+  assert.deepEqual(childEvents.slice(prefix.length).map((e) => e.type), ["session/snapshot-imported", "session/forked"]);
+  assert.deepEqual(childEvents[prefix.length]!.data, { mode: "fork", fromSessionId: sourceId, copiedThroughSeq: second.seq - 1 });
+  assert.equal(childEvents.slice(prefix.length).every((e) => e.ignorable === true), true);
+  const childProj = await store.projection(childId);
+  assert.equal(childProj?.parentId, sourceId);
+  assert.equal(childProj?.status, "idle");
+  assert.equal(childProj?.backendSessionId, undefined);
+  assert.equal(childProj?.runtimeBinding, undefined);
+  assert.equal(childProj?.runtimeLeg, undefined);
+  assert.deepEqual(deriveMessages(childEvents), [
+    { role: "user", parts: [{ type: "text", text: "first" }] },
+    { role: "assistant", parts: [{ type: "text", text: "one" }] },
+  ]);
+};
+
+test("a runtime without native fork gets a continuity fork whose first prompt carries the prefix", async () => {
+  const fake = fakeRuntime({ fork: false });
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await seedTwoTurns(fake, sessions, id);
+  const before = await store.events(id);
+  const second = before.filter((e) => e.type === "user/message")[1]!;
+
+  const result = await sessions.fork(id, second.seq);
+  assert.equal(result.fromSessionId, id);
+  assert.equal(result.sourceAtSeq, second.seq);
+  assert.equal(result.draft?.text, "second");
+  // Nothing native was asked for, and the source log is untouched.
+  assert.equal(fake.branchRequests.length, 0);
+  assert.deepEqual(fake.ensured.filter((s) => s === result.id), []);
+  assert.deepEqual(await store.events(id), before);
+  await assertContinuityChild(store, id, result.id, second);
+
+  // The child's first use creates its native session as a continuity leg,
+  // and that leg's first prompt carries exactly the forked dialogue.
+  await sessions.send(result.id, { text: "second, edited" });
+  await flush();
+  assert.ok(fake.ensured.includes(result.id));
+  const materialized = await store.projection(result.id);
+  assert.equal(materialized?.backendSessionId, `be_${result.id}`);
+  assert.equal(materialized?.runtimeLeg?.bootstrap, "continuity");
+  assert.equal(materialized?.runtimeLeg?.canonicalThroughSeq, 0);
+  const childEvents = await store.events(result.id);
+  const operations = await store.operations(result.id);
+  assert.equal(runtimeEpochRecoveryPending(childEvents, operations), true);
+  const plan = planRuntimeEpochRecovery({ events: childEvents, operations, heldQueueIds: new Set() });
+  assert.ok(plan);
+  assert.match(plan.recoveryContext, /forked from an earlier point of another chat/);
+  assert.match(plan.recoveryContext, /\bfirst\b/);
+  assert.match(plan.recoveryContext, /\bone\b/);
+  assert.doesNotMatch(plan.recoveryContext, /\btwo\b/);
+  assert.doesNotMatch(plan.recoveryContext, /imported as a Snapshot/);
+  await store.close();
+});
+
+test("a native branch that refuses on history mismatch falls back to a continuity fork", async () => {
   const fake = fakeRuntime({ branchError: "history-mismatch" });
   const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
@@ -236,14 +306,25 @@ test("backend branch failure creates no canonical child and keeps the source int
   const before = await store.events(id);
   const second = before.filter((e) => e.type === "user/message")[1]!;
 
-  await assert.rejects(() => sessions.fork(id, second.seq), (err: Error & { code?: string }) => {
-    assert.equal(err.code, "history-mismatch");
-    return true;
-  });
+  const result = await sessions.fork(id, second.seq);
+  // The refused native attempt stays on the source as a rejected operation.
   assertForkOperationTail(before, await store.events(id), "mutation/rejected");
+  await assertContinuityChild(store, id, result.id, second);
+  assert.deepEqual(fake.discarded, []); // nothing to discard: backend was never created
+  await store.close();
+});
+
+test("an unclassified backend branch failure creates no canonical child", async () => {
+  const fake = fakeRuntime({ branchError: "boom" });
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await seedTwoTurns(fake, sessions, id);
+  const second = (await store.events(id)).filter((e) => e.type === "user/message")[1]!;
+
+  await assert.rejects(() => sessions.fork(id, second.seq));
   const others = (await store.projections("p1")).filter((p) => p.id !== id);
   assert.deepEqual(others, []);
-  assert.deepEqual(fake.discarded, []); // nothing to discard: backend was never created
+  assert.deepEqual(fake.discarded, []);
   await store.close();
 });
 

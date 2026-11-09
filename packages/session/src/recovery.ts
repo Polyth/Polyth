@@ -85,7 +85,7 @@ export interface RuntimeEpochRecoveryWork {
 }
 
 export interface RuntimeEpochRecoveryInput {
-  reason?: "harness-switch" | "snapshot" | "compaction";
+  reason?: "harness-switch" | "snapshot" | "fork" | "compaction";
   workspace?: ContinuityWorkspace;
   epoch: number;
   markerSeq: number;
@@ -479,6 +479,8 @@ export function buildRuntimeEpochRecoveryContext(
   ].join("\n");
   const note = ["Recovery note:", ...(input.reason === "snapshot"
     ? ["This conversation was imported as a Snapshot. Polyth owns its future history.", "Only confirmed canonical dialogue was transferred."]
+    : input.reason === "fork"
+      ? ["This conversation was forked from an earlier point of another chat. Polyth owns its history from here on.", "Only confirmed canonical dialogue up to the fork point was transferred; anything later in the original chat did not happen here."]
     : input.reason === "compaction" ? COMPACTION_RECOVERY_NOTE_LINES : EPOCH_RECOVERY_NOTE_LINES),
     ...(input.reason === "harness-switch" ? [HARNESS_SWITCH_NOTE] : []),
     ...(input.reason ? [WORKSPACE_AUTHORITY_NOTE] : []),

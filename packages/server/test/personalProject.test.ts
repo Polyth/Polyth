@@ -8,7 +8,7 @@ import { createCanonicalSecurity } from "../src/canonicalSecurity.ts";
 import { bindCanonicalSecurity } from "../src/runtimeSecurity.ts";
 import { createProjectService } from "../src/projects.ts";
 import { canonicalProjectService } from "../src/projectResourceAuthority.ts";
-import { limitedProjectsForActor } from "../src/accountLimits.ts";
+import { limitedProjectsForActor, setPrivateRoomParentLookup } from "../src/accountLimits.ts";
 
 function fixture(t: test.TestContext, opts: { canonical?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "polyth-personal-project-"));
@@ -38,6 +38,7 @@ function fixture(t: test.TestContext, opts: { canonical?: boolean } = {}) {
   // After the security bootstrap: it refuses to initialize over existing state.
   mkdirSync(storageDir, { recursive: true });
   const registry = createProjectService(root);
+  setPrivateRoomParentLookup((id) => registry.parentOfRoom(id));
   const ctx = (userId: string, role: SpaceContext["role"] = "member"): SpaceContext => ({
     spaceId: "spc_home",
     spaceSlug: "home",
@@ -210,9 +211,67 @@ test("a private room belongs to one person: its folder, list and resource keep e
   // The shell's own list carries the room for its owner, and who else is here.
   const shell = await member.listForShell!();
   assert.equal(shell.find((project) => project.id === shared.id)?.sharedWith, 2);
+  assert.equal(shell.find((project) => project.id === shared.id)?.othersHere, true, "its owner is here");
   assert.ok(shell.some((project) => project.id === room.id));
   assert.ok(!(await viewer.listForShell!()).some((project) => project.parentProjectId));
   void security;
+});
+
+test("being able to open a project isn't being in it: only a chat, a room or a grant says someone is", async (t) => {
+  const { registry, ctx } = fixture(t);
+  const owner = canonicalProjectService(ctx("usr_owner", "owner"), registry);
+  const member = canonicalProjectService(ctx("usr_member"), registry);
+  const shared = await owner.create(join(mkdtempSync(join(tmpdir(), "polyth-here-")), "alone"), "Alone");
+  const entry = async () => (await owner.listForShell!()).find((project) => project.id === shared.id)!;
+
+  // Others can open it, nobody else works in it: the owner is alone.
+  assert.equal((await entry()).sharedWith, 2);
+  assert.equal((await entry()).othersHere, undefined);
+
+  // A room of someone else's counts, and says nothing more than that.
+  const room = await member.ensurePrivateRoom!(shared.id);
+  assert.equal((await entry()).othersHere, true);
+  assert.ok(!(await owner.listForShell!()).some((project) => project.id === room.id));
+});
+
+test("someone's own chat puts them in a project", async (t) => {
+  const { registry, ctx, security } = fixture(t);
+  const owner = canonicalProjectService(ctx("usr_owner", "owner"), registry);
+  const shared = await owner.create(join(mkdtempSync(join(tmpdir(), "polyth-here-")), "chat"), "Chat");
+  const entry = async () => (await owner.listForShell!()).find((project) => project.id === shared.id)!;
+  assert.equal((await entry()).othersHere, undefined);
+  const insert = (id: string, person: string, lifecycle: string) => security!.control.transaction(() => security!.control.run(
+    `INSERT INTO resources(id,kind,org_id,space_id,parent_id,owner_principal_id,created_by,visibility,lifecycle,created_at_ms,updated_at_ms)
+     VALUES(?, 'session', 'org_home', 'spc_home', ?, ?, ?, 'private', ?, 1, 1)`,
+    id, shared.id, person, person, lifecycle,
+  ));
+  const grant = (resourceId: string, person: string) => security!.control.transaction(() => security!.control.run(
+    `INSERT INTO resource_grants(resource_id,principal_id,access,granted_by,created_at_ms,updated_at_ms)
+     VALUES(?, ?, 'view', 'usr_owner', 1, 1)`,
+    resourceId, person,
+  ));
+  insert("chat-own", "usr_owner", "active");
+  assert.equal((await entry()).othersHere, undefined, "the reader's own chats don't count");
+  grant("chat-own", "usr_member");
+  assert.equal((await entry()).othersHere, undefined, "one chat given to someone doesn't put them in the project");
+  insert("chat-gone", "usr_member", "deleted");
+  assert.equal((await entry()).othersHere, undefined, "a deleted chat is nobody's presence");
+  insert("chat-member", "usr_member", "active");
+  assert.equal((await entry()).othersHere, true);
+  const member = canonicalProjectService(ctx("usr_member"), registry);
+  assert.equal((await member.listForShell!()).find((project) => project.id === shared.id)?.othersHere, true, "for them, the owner is");
+});
+
+test("a project given to someone by name has them in it", async (t) => {
+  const { registry, ctx, security } = fixture(t);
+  const owner = canonicalProjectService(ctx("usr_owner", "owner"), registry);
+  const shared = await owner.create(join(mkdtempSync(join(tmpdir(), "polyth-here-")), "given"), "Given");
+  security!.control.transaction(() => security!.control.run(
+    `INSERT INTO resource_grants(resource_id,principal_id,access,granted_by,created_at_ms,updated_at_ms)
+     VALUES(?, 'usr_viewer', 'view', 'usr_owner', 1, 1)`,
+    shared.id,
+  ));
+  assert.equal((await owner.listForShell!()).find((project) => project.id === shared.id)?.othersHere, true);
 });
 
 test("a room's appearance follows its project, and it survives the project as a private project", async (t) => {

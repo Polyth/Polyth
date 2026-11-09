@@ -4,6 +4,7 @@
 // locale ships as its own chunk.
 import { ptBR as app } from "../locales/pt-BR.ts";
 import { ptBR as p_agents } from "@polyth/agents/i18n/pt-BR";
+import { ptBR as p_bookmarks } from "@polyth/bookmarks/i18n/pt-BR";
 import { ptBR as p_browser } from "@polyth/browser/i18n/pt-BR";
 import { ptBR as p_commands } from "@polyth/commands/i18n/pt-BR";
 import { ptBR as p_custom_action } from "@polyth/custom-action/i18n/pt-BR";
@@ -43,6 +44,7 @@ import { ptBR as p_walkthrough } from "@polyth/walkthrough/i18n/pt-BR";
 
 const parts: Array<Record<string, string>> = [app,
   p_agents,
+  p_bookmarks,
   p_browser,
   p_commands,
   p_custom_action,

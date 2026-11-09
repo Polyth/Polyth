@@ -1,0 +1,814 @@
+/* Settings → Skills: library, catalog and a skill's page. The host owns the
+   settings shell and the Section, ItemList and Dialog primitives; everything
+   here is that page's own content, on canonical tokens. Designed borderless
+   first, because `hideBorders` is the default. */
+
+.skills-page { min-width: 0; }
+.skills-page [hidden] { display: none !important; }
+
+.skills-catalog,
+.skills-library {
+  display: grid;
+  /* Without a floor of zero, a strip that scrolls sideways widens the page. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  min-width: 0;
+  container: skills / inline-size;
+}
+/* The page's grid gap spaces its sections; drop their stacked-page margin. */
+.skills-catalog > .settings-section,
+.skills-library > .settings-section { margin-block: var(--space-1) 0; }
+
+/* ---------- Search ---------- */
+
+/* The catalog's first question is "what do you need?", so its search leads the
+   page and stays in reach on a long list. */
+.skills-search-bar {
+  position: sticky;
+  /* Sticks at the scroller's padding edge, not its content edge. */
+  top: calc(-1 * var(--space-3));
+  z-index: 3;
+  isolation: isolate;
+  padding-block: var(--space-2);
+  margin-block: calc(-1 * var(--space-2));
+}
+.skills-search-bar::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0 calc(-1 * var(--space-6));
+  background: var(--bg);
+  content: "";
+}
+.skills-search {
+  position: relative;
+  display: flex;
+  flex: 1 1 260px;
+  align-items: center;
+  min-width: 0;
+}
+.skills-search > .ui-icon {
+  position: absolute;
+  inset-inline-start: var(--control-pad-x);
+  color: var(--faint);
+  pointer-events: none;
+}
+.skills-search .ui-input {
+  width: 100%;
+  min-height: var(--control-h-lg);
+  padding-inline-start: calc(var(--control-pad-x) + var(--icon-md) + var(--space-2));
+  padding-inline-end: calc(var(--control-h-sm) + var(--space-2));
+  border-radius: var(--radius-card);
+  font-size: var(--font-label);
+}
+.skills-search .ui-input::-webkit-search-cancel-button { display: none; }
+.skills-search > .ui-icon-btn {
+  position: absolute;
+  inset-inline-end: var(--space-2);
+}
+.skills-search.is-compact > .ui-icon { inset-inline-start: var(--control-pad-x-sm); }
+.skills-search.is-compact .ui-input {
+  min-height: var(--control-h-sm);
+  padding-inline-start: calc(var(--control-pad-x-sm) + var(--icon-sm) + var(--space-2));
+  border-radius: var(--radius-control);
+  font-size: inherit;
+}
+.skills-search.is-compact > .ui-icon-btn { inset-inline-end: 2px; }
+
+/* ---------- Marks ---------- */
+
+.skills-mark {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+.settings-list-tile:has(> .skills-mark) { overflow: hidden; }
+
+/* ---------- Sources ---------- */
+
+.skills-sources-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-block-end: calc(-1 * var(--space-2));
+}
+.skills-sources-actions {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+.skills-sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: var(--space-2);
+  min-width: 0;
+}
+.skills-source {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  min-height: 60px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  /* A wash, not a surface step: `--elevated` is white on a white canvas. */
+  background: var(--surface-overlay);
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .skills-source:hover { background: var(--surface-overlay-hover); }
+}
+.skills-source:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.skills-source.is-selected {
+  background: var(--surface-overlay-hover);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.skills-source.is-empty { opacity: 0.55; }
+.skills-source-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  overflow: hidden;
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--text-dim);
+}
+.skills-source-text {
+  display: grid;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+}
+.skills-source-text > strong {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-source-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  align-items: center;
+  min-height: var(--font-meta-lh);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-meta-lh);
+}
+.skills-stars {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.skills-stars > .ui-icon {
+  width: 12px;
+  height: 12px;
+  color: var(--faint);
+}
+
+/* A chosen source tells its own story here rather than behind another page. */
+.skills-masthead {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+  animation: skills-enter var(--motion-normal) var(--motion-ease);
+}
+.skills-masthead-text {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.skills-masthead-repo {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  justify-self: start;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.skills-masthead-repo > .ui-icon { flex: none; color: var(--faint); }
+@media (hover: hover) {
+  .skills-masthead-repo:hover { color: var(--accent-text); }
+}
+.skills-masthead-desc {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  line-height: 1.45;
+}
+.skills-masthead-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-meta-lh);
+}
+.skills-masthead-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-masthead-actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+/* ---------- Start here ---------- */
+
+.skills-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: var(--space-2);
+  margin-block-start: var(--space-3);
+}
+.skills-card {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .skills-card:hover {
+    background: var(--surface-overlay-hover);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+  }
+}
+.skills-card:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.skills-card-head {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+.skills-card-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: var(--raised);
+  color: var(--text-dim);
+}
+.skills-card-titles {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.skills-card-titles > strong {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skills-card-titles > small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-card-check { flex: none; color: var(--green); }
+.skills-card-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---------- Lists ---------- */
+
+.skills-catalog .settings-list-desc,
+.skills-library .settings-list-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.skills-installed {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  color: var(--green-on-wash, var(--green));
+  font-size: var(--font-meta);
+  font-weight: 550;
+  white-space: nowrap;
+  animation: skills-settle var(--motion-normal) var(--motion-ease);
+}
+.skills-row-note {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.skills-more {
+  display: flex;
+  justify-content: center;
+  margin-block-start: var(--space-3);
+}
+.skills-agent-hint {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  justify-content: flex-end;
+}
+.skills-chip {
+  min-height: 26px;
+  padding-inline: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .skills-chip:hover { background: var(--surface-overlay); }
+}
+.skills-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.skills-chip[aria-pressed="true"] {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.skills-collection-select { min-width: 148px; }
+.skills-library-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* Every harness you added, at a glance: the page's other question after "what
+   do I have" is "where does it work". */
+.skills-harness-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.skills-harness-chip {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 30px;
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .skills-harness-chip:hover { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.skills-harness-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.skills-harness-chip[aria-pressed="true"] {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.skills-harness-count {
+  color: var(--faint);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+.skills-harness-chip[aria-pressed="true"] .skills-harness-count { color: inherit; }
+
+/* A row's copy action appears for the row in question; touch has no hover, so
+   it stays visible there. */
+@media (hover: hover) {
+  .skills-row-reveal { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+  .settings-list-row:hover .skills-row-reveal,
+  .settings-list-row:focus-within .skills-row-reveal,
+  .skills-row-reveal:disabled,
+  .skills-row-reveal[aria-busy="true"] { opacity: 1; }
+}
+
+.skills-skeleton {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+}
+.skills-skeleton-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.skills-skeleton-row + .skills-skeleton-row { border-top: 1px solid var(--border-soft); }
+.skills-skeleton-row > div {
+  display: grid;
+  gap: var(--space-2);
+  align-content: center;
+}
+
+/* ---------- A skill's page ---------- */
+
+.skills-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  min-width: 0;
+  container: skills-detail / inline-size;
+  animation: skills-enter var(--motion-normal) var(--motion-ease);
+}
+.skills-detail-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  min-width: 0;
+}
+.skills-back {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  justify-self: start;
+  min-height: var(--control-h-sm);
+  margin-inline-start: calc(-1 * var(--space-2));
+  padding-inline: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .skills-back:hover { background: var(--surface-overlay); color: var(--text); }
+}
+.skills-back:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
+
+.skills-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+}
+.skills-detail-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: var(--radius-surface);
+  background: var(--raised);
+  box-shadow: var(--inset-hi);
+  color: var(--text-dim);
+}
+.skills-detail-titles {
+  display: grid;
+  flex: 1 1 200px;
+  gap: 2px;
+  min-width: 0;
+}
+.skills-detail-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.skills-detail-by {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-detail-actions,
+.skills-actions-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.skills-scope { min-width: 148px; }
+.skills-detail-desc {
+  max-width: 65ch;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-body);
+  line-height: 1.5;
+}
+
+.skills-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3) var(--space-5);
+  margin: 0;
+}
+/* A list of harness names needs the whole line to read as one. */
+.skills-fact.is-wide { grid-column: 1 / -1; }
+.skills-fact {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  min-width: 0;
+}
+.skills-fact > dt {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-fact > dd {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.skills-fact > dd > small {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-1);
+  align-items: center;
+  color: var(--text);
+  text-decoration: none;
+}
+.skills-link > .ui-icon { color: var(--faint); }
+@media (hover: hover) {
+  .skills-link:hover { color: var(--accent-text); }
+}
+.skills-trust {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  max-width: 65ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-trust > .ui-icon { flex: none; margin-block-start: 1px; color: var(--faint); }
+
+/* Which harness has it, in one list, because that is the question this page
+   answers that no single harness can. */
+.skills-harnesses {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  list-style: none;
+}
+.skills-harness {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto var(--control-h-lg);
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  min-height: var(--control-h-lg);
+  padding: var(--space-1) var(--space-3);
+}
+.skills-harness + .skills-harness { border-top: 1px solid var(--border-soft); }
+.skills-harness-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  background: var(--skills-harness-color);
+}
+.skills-harness-name {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.skills-harness-state {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: end;
+}
+.skills-harness-control {
+  display: flex;
+  justify-content: flex-end;
+}
+.skills-harness-locked {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.skills-harness.is-quiet .skills-harness-name { color: var(--muted); font-weight: 400; }
+.skills-harness.is-quiet .skills-harness-dot { opacity: 0.45; }
+.skills-harness.is-absent {
+  display: block;
+  min-height: 0;
+  padding-block: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.skills-tab-hint {
+  max-width: 65ch;
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.skills-reading {
+  max-width: 72ch;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--font-body);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.skills-reading pre { max-width: 100%; overflow-x: auto; }
+
+.skills-files {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--elevated);
+  list-style: none;
+}
+.skills-file + .skills-file { border-top: 1px solid var(--border-soft); }
+.skills-file-head {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  min-height: var(--control-h);
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .skills-file-head:hover { background: var(--raised); }
+}
+.skills-file-head:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.skills-file-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  overflow-wrap: anywhere;
+}
+.skills-file-size {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+.skills-file-body {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  background: var(--sunken);
+}
+.skills-file-text {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  line-height: 1.5;
+  white-space: pre;
+}
+.skills-file-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+@keyframes skills-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes skills-settle {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- Narrow windows and phones ---------- */
+
+/* On a narrow list it would crowd out the name it belongs to, and the skill's
+   own page offers it as the main action. */
+@container settings-list (max-width: 520px) {
+  .skills-row-reveal { display: none; }
+}
+
+/* Tiles keep their reading width and scroll sideways rather than shrinking. */
+@container skills (max-width: 520px) {
+  .skills-sources {
+    grid-auto-columns: minmax(168px, 62%);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    margin-inline: calc(-1 * var(--space-5));
+    padding-inline: var(--space-5);
+    overflow-x: auto;
+    scroll-padding-inline: var(--space-5);
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .skills-sources::-webkit-scrollbar { display: none; }
+  .skills-source { scroll-snap-align: start; }
+  .skills-shelf {
+    grid-auto-columns: minmax(232px, 82%);
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    margin-inline: calc(-1 * var(--space-5));
+    padding-inline: var(--space-5);
+    overflow-x: auto;
+    scroll-padding-inline: var(--space-5);
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .skills-shelf::-webkit-scrollbar { display: none; }
+  .skills-card { scroll-snap-align: start; }
+  .skills-harness-chips {
+    flex-wrap: nowrap;
+    margin-inline: calc(-1 * var(--space-5));
+    padding-inline: var(--space-5);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .skills-harness-chips::-webkit-scrollbar { display: none; }
+  .skills-masthead { flex-direction: column; }
+}
+@container skills-detail (max-width: 520px) {
+  .skills-detail-actions { flex: 1 1 100%; }
+  .skills-detail-actions .skills-scope { flex: 1; }
+  .skills-detail-actions .ui-btn--primary { flex: 1; }
+  .skills-harness {
+    grid-template-columns: minmax(0, 1fr) var(--control-h-lg);
+    padding-block: var(--space-2);
+  }
+  .skills-harness-state { grid-column: 1; grid-row: 2; text-align: start; }
+  .skills-harness-control { grid-column: 2; grid-row: 1 / span 2; }
+}

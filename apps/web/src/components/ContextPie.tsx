@@ -68,11 +68,14 @@ export function ContextPieGlyph({ gauge }: { gauge: ContextGauge }) {
  *  the agent was asked to delegate (`pressureLevel`), hosts package details
  *  such as cache warmth (`composer.context.details`) and offers compaction
  *  when the harness supports it. */
-export default function ContextPie({ gauge, phone = false, sessionId, projectId, pressureLevel, compact, memory }: {
+export default function ContextPie({ gauge, phone = false, sessionId, projectId, privateChat, pressureLevel, compact, memory }: {
   gauge: ContextGaugeDisplay | null;
   phone?: boolean;
   sessionId?: string;
   projectId?: string;
+  /** Among other people, whether only this person reads the chat: it decides
+   *  which memory the agent has. Undefined when there is nobody else to mention. */
+  privateChat?: boolean | undefined;
   pressureLevel?: number | undefined;
   compact?: { pending: boolean; disabled: boolean; run: () => void };
   /** The chat's "Chat memory" choice. Without one the card only reports usage. */
@@ -131,7 +134,7 @@ export default function ContextPie({ gauge, phone = false, sessionId, projectId,
               {tr("context.delegationHint", { percent: `${Math.round(pressureLevel * 100)}%` })}
             </p>
           )}
-          <SlotHost slot="composer.context.details" context={{ sessionId: sessionId ?? null, projectId: projectId ?? null }} />
+          <SlotHost slot="composer.context.details" context={{ sessionId: sessionId ?? null, projectId: projectId ?? null, closeCard: () => setOpen(false), ...(privateChat === undefined ? {} : { privateChat }) }} />
           {compact && !(memory && sessionId) && (
             <Button
               type="button"

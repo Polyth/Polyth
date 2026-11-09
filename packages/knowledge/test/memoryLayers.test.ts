@@ -244,10 +244,12 @@ test("recall labels a personal note and who a note is about, and the export neve
   assert.deepEqual(exported.records.map((item) => item.title), ["Nut allergy"]);
 });
 
-test("a proposal waits outside recall until its owner settles it, and only that owner can", () => {
+test("an offer works as its owner's note from the start, and only that owner can settle it", () => {
   const { store } = autoStore();
-  const receipt = store.create(privateChat(olia), { ...record("More red meat", "Olia asks for more red meat at dinner."), lifecycle: "candidate" }, { placement: here(olia), shareProposed: true });
-  assert.equal(store.recall(privateChat(olia), { projectId: scope.projectId, intent: "red meat dinner" }).selected.length, 0);
+  const receipt = store.create(privateChat(olia), record("More red meat", "Olia asks for more red meat at dinner."), { placement: here(olia), shareProposed: true });
+  const dinner = { projectId: scope.projectId, intent: "red meat dinner" };
+  assert.equal(store.recall(privateChat(olia), dinner).selected.length, 1);
+  assert.equal(store.recall(privateChat(taras), dinner).selected.length, 0);
   assert.equal(store.shareProposals(scope).length, 0);
   assert.equal(store.shareProposals(privateChat(taras)).length, 0);
   const [proposal] = store.shareProposals(privateChat(olia));
@@ -258,6 +260,20 @@ test("a proposal waits outside recall until its owner settles it, and only that 
   assert.equal(store.get(privateChat(olia), proposal!.id)?.lifecycle, "active");
   assert.equal(store.get(privateChat(olia), proposal!.id)?.shareProposedAt, undefined);
   assert.throws(() => store.create(scope, record("x"), { shareProposed: true }), /personal note/);
+});
+
+test("offers an older version left waiting become working notes when the store opens", () => {
+  const db = new DatabaseSync(":memory:");
+  const dinner = { projectId: scope.projectId, intent: "red meat dinner" };
+  const { store } = autoStore(db);
+  const { memoryId } = store.create(privateChat(olia), { ...record("More red meat", "Olia asks for more red meat at dinner."), lifecycle: "candidate" }, { placement: here(olia), shareProposed: true });
+  assert.equal(store.recall(privateChat(olia), dinner).selected.length, 0);
+  const { store: reopened } = autoStore(db);
+  const note = reopened.get(privateChat(olia), memoryId!);
+  assert.equal(note?.lifecycle, "active");
+  assert.equal(note?.shareProposedAt, undefined);
+  assert.equal(reopened.recall(privateChat(olia), dinner).selected.length, 1);
+  assert.equal(reopened.recall(privateChat(taras), dinner).selected.length, 0);
 });
 
 test("moving an old shared note to personal takes it, with history, out of the shared memory", () => {

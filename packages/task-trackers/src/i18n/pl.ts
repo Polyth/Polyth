@@ -609,4 +609,13 @@ export const pl: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Otwórz sesję po starcie",
   "tasktrackers.start.model": "Model",
   "tasktrackers.start.modelComposer": "Jak w polu edycji",
+  "tasktrackers.automation.title": "Gdy agent się zatrzyma",
+  "tasktrackers.automation.body": "Powiązana karta przenosi się do wskazanej kolumny, gdy jej sesja się zatrzyma. Zadanie nigdy nie jest przenoszone do statusu Ukończone ani z niego, a jedna tura przenosi zadanie najwyżej raz.",
+  "tasktrackers.automation.enabled": "Przenoś zadanie, gdy agent się zatrzyma",
+  "tasktrackers.automation.column": "Kolumna docelowa",
+  "tasktrackers.automation.columnHint": "Dopasowywana po nazwie w tablicy zadania, bez względu na wielkość liter. Jeśli tablica nie ma takiej kolumny, zadanie zostaje na miejscu.",
+  "tasktrackers.automation.finished": "Kończy turę",
+  "tasktrackers.automation.needsInput": "Czeka na odpowiedź",
+  "tasktrackers.automation.error": "Kończy się błędem lub zostaje zatrzymany",
+  "tasktrackers.card.attention": "Wymaga spojrzenia",
 };

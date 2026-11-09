@@ -24,6 +24,8 @@ export interface MessageActionContribution extends PackageMessageActionSlot {
   /** Whether this message can offer the action (menu entries only: a bar
    *  contribution decides for itself by rendering nothing). */
   available: (context: Readonly<Record<string, unknown>>) => boolean;
+  /** The "More" menu row for one message; `label` when the package has none. */
+  menuLabel?: (context: Readonly<Record<string, unknown>>) => string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -56,6 +58,7 @@ export function messageActionContribution(item: SlotItem, role: MessageActionRol
       : {}),
     ...(Array.isArray(meta?.replaces) ? { replaces: meta.replaces.filter((id): id is string => typeof id === "string") } : {}),
     available: typeof meta?.available === "function" ? meta.available : () => true,
+    ...(typeof meta?.menuLabel === "function" ? { menuLabel: meta.menuLabel } : {}),
   };
 }
 

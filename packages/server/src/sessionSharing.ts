@@ -186,6 +186,36 @@ export function projectAudience(spaceId: string, projectId: string): SessionPers
   return out;
 }
 
+/** Who really works in each project of a Space: they own it, have an active
+ *  chat or a private room in it, or were given it by name. Being able to open
+ *  it isn't being in it. */
+export function projectPresence(spaceId: string): (projectId: string) => Set<string> {
+  const security = canonicalSecurity();
+  if (!security) return () => new Set();
+  const people = new Map<string, Set<string>>();
+  const add = (projectId: string | undefined, person: string | null): void => {
+    if (projectId && person) people.set(projectId, (people.get(projectId) ?? new Set<string>()).add(person));
+  };
+  for (const { project, person } of security.control.all<{ project: string; person: string }>(
+    `SELECT parent_id AS project, owner_principal_id AS person FROM resources
+      WHERE space_id=? AND kind='session' AND lifecycle='active' AND parent_id IS NOT NULL
+      GROUP BY parent_id, owner_principal_id`,
+    spaceId,
+  )) add(project, person);
+  for (const { id, person } of security.control.all<{ id: string; person: string | null }>(
+    "SELECT id, owner_principal_id AS person FROM resources WHERE space_id=? AND kind='project' AND lifecycle='active'",
+    spaceId,
+  )) {
+    add(id, person);
+    add(privateRoomParent(id), person);
+  }
+  return (projectId) => {
+    const here = new Set(people.get(projectId));
+    for (const grant of security.sharing.grants(projectId)) here.add(grant.principalId);
+    return here;
+  };
+}
+
 /** Per-call memo for decorating many rows of one Space. */
 function viewer(spaceId: string, readerId: string) {
   let others: boolean | undefined;
@@ -211,12 +241,14 @@ function viewer(spaceId: string, readerId: string) {
       const owner = root.ownerPrincipalId === readerId ? undefined : ownerOf(root.ownerPrincipalId);
       let shared = owner !== undefined;
       if (!shared && visibility === "space") shared = otherMembers();
-      if (!shared && visibility === "restricted") {
+      let named = false;
+      if (visibility !== "private") {
         members ??= memberIds();
-        shared = canonicalSecurity()!.sharing.grants(root.id)
+        named = canonicalSecurity()!.sharing.grants(root.id)
           .some((grant) => grant.principalId !== readerId && members!.has(grant.principalId));
       }
-      return { visibility, ...(inherited ? { inherited: true } : {}), access: level, ...(owner ? { owner } : {}), shared, ...(otherMembers() ? { multiPerson: true } : {}) };
+      if (!shared && visibility === "restricted") shared = named;
+      return { visibility, ...(inherited ? { inherited: true } : {}), access: level, ...(owner ? { owner } : {}), shared, ...(named ? { named: true } : {}), ...(otherMembers() ? { multiPerson: true } : {}) };
     },
   };
 }
@@ -372,10 +404,14 @@ export function sessionPrivacy(spaceId: string, sessionId: string): SessionPriva
   const privateTo = privateSessionOwner(spaceId, sessionId);
   const project = projectRowOf(row);
   const roomParent = project ? privateRoomParent(project.id) : undefined;
+  const home = roomParent ?? project?.id;
+  const canOpen = home ? projectAudience(spaceId, home) : [];
+  const here = privateTo && home && canOpen.length > 1 ? projectPresence(spaceId)(home) : undefined;
   return {
     ...(privateTo ? { privateTo } : {}),
     audience: sessionAudience(spaceId, sessionId).map(({ userId, name }) => ({ userId, ...(name ? { name } : {}) })),
-    projectAudience: project ? projectAudience(spaceId, roomParent ?? project.id).length : 0,
+    projectAudience: canOpen.length,
+    ...(here && canOpen.some(({ userId }) => userId !== privateTo && here.has(userId)) ? { othersHere: true } : {}),
     ...(roomParent ? { inPrivateRoom: true } : {}),
   };
 }
@@ -468,6 +504,14 @@ export function defaultSessionVisibility(ctx: SpaceContext): "private" | "inheri
   const security = canonicalSecurity();
   if (!security || !ctx.userId || isSystemContext(ctx)) return "inherit";
   return security.sharing.policy(ctx.spaceId).defaultVisibility === "space" ? "inherit" : "private";
+}
+
+/** Whether this person may open a chat to more people under the Space policy.
+ *  Without canonical identity there is one person and nobody to open it to. */
+export function spaceMemberMayWiden(ctx: Pick<SpaceContext, "spaceId" | "role">): boolean {
+  const security = canonicalSecurity();
+  if (!security) return true;
+  return roleAtLeast(ctx.role, "admin") || security.sharing.policy(ctx.spaceId).membersMayShare;
 }
 
 /** How far a change opens a chat up: a wider audience, or people added or
@@ -583,7 +627,9 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     return {
       sessionId: row.id,
       visibility: effectiveVisibility(row),
-      readers: sessionAudience(ctx.spaceId, root.id).map(({ userId, name }) => ({ userId, ...(name ? { name } : {}) })),
+      readers: sessionAudience(ctx.spaceId, root.id)
+        .filter(({ userId }) => userId !== ctx.userId)
+        .map(({ userId, name }) => ({ userId, ...(name ? { name } : {}) })),
       inherited: rules.inherited,
       ...(rules.inherited && row.accessParentId ? { parentSessionId: row.accessParentId } : {}),
       ...(owner ? { owner } : {}),
@@ -648,10 +694,10 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     // is always allowed; a summary can be published instead (Spaces §14.6).
     if (change.audience || change.raised.length > 0) {
       if (deps.isPrivateRoom?.(projection.projectId)) {
-        throw Object.assign(conflict("A chat in Only me stays private. Publish a note to the shared memory instead."), { reason: "private-room" });
+        throw Object.assign(conflict("A chat in Only me stays private. Share a note from My notes instead."), { reason: "private-room" });
       }
       if (projection.personalContext) {
-        throw Object.assign(conflict("The agent has read your personal notes in this chat, so it can't be opened to others. Publish a note to the shared memory instead."), { reason: "personal-context" });
+        throw Object.assign(conflict("The agent has read your personal notes in this chat, so it can't be opened to others. Share a note from My notes instead."), { reason: "personal-context" });
       }
     }
 

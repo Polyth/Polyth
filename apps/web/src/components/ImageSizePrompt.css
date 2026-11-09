@@ -1,0 +1,118 @@
+/* The size question in a composer card, above the editor. */
+.image-size-prompt {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: var(--space-3) var(--space-3) 0;
+  container: image-size-prompt / inline-size;
+}
+
+.image-size-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.image-size-prompt-thumb {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  object-fit: cover;
+}
+
+.image-size-prompt-copy {
+  display: grid;
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.image-size-prompt-copy strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.image-size-prompt-summary {
+  overflow: hidden;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-size-prompt-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+
+/* Two by two on a phone, with an odd last choice across the row. */
+.image-size-prompt-option:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+@container image-size-prompt (min-width: 440px) {
+  .image-size-prompt-options {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+  .image-size-prompt-option:last-child:nth-child(odd) { grid-column: auto; }
+}
+
+.ui-btn.image-size-prompt-option {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0;
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  padding: var(--space-1) var(--space-2);
+  text-align: center;
+}
+
+.image-size-prompt-option .ui-btn-label {
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  white-space: normal;
+}
+
+.image-size-prompt-option-name {
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+
+.image-size-prompt-option-detail {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  line-height: var(--font-meta-lh);
+}
+
+.ui-btn--primary .image-size-prompt-option-detail { color: inherit; }
+
+/* A finger's reach on touch; --hit-min is 0 on a fine pointer. */
+.image-size-prompt-head .ui-icon-btn {
+  flex: 0 0 auto;
+  min-width: var(--hit-min);
+  min-height: var(--hit-min);
+}
+
+.ui-checkbox.image-size-prompt-remember {
+  align-items: center;
+  min-height: var(--hit-min);
+}
+
+.image-size-prompt-remember .ui-checkbox-label {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}

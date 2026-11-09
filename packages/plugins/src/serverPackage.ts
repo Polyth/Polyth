@@ -9,6 +9,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cap } from "@polyth/contracts";
+import { OPTIONAL_EDITIONS } from "@polyth/contracts/edition";
 import type {
   AgentCapabilityContributionRegistry,
   AgentRuntime,
@@ -851,6 +852,9 @@ export interface DiscoveredServerPackage {
    *  host moves their data directories to `id` once (server packageRename).
    *  Absent = none. */
   formerIds?: string[];
+  /** Editions beyond standard the package ships in (`polyth.editions`).
+   *  The workstation edition bundles only packages that list it. */
+  editions?: string[];
 }
 
 const FORMER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -863,6 +867,16 @@ function formerIdsOf(id: string, value: unknown): string[] {
   if (!Array.isArray(value) || value.length > MAX_FORMER_IDS
     || value.some((item) => typeof item !== "string" || !FORMER_ID.test(item) || item === id)) {
     throw err("invalid-input", `package "${id}" polyth.formerIds must list at most ${MAX_FORMER_IDS} other package ids`);
+  }
+  return [...new Set(value as string[])];
+}
+
+/** Validated `polyth.editions`: known optional editions only. A malformed or
+ *  unknown entry refuses the package, so a typo cannot silently drop it. */
+function editionsOf(id: string, value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !OPTIONAL_EDITIONS.includes(item as never))) {
+    throw err("invalid-input", `package "${id}" polyth.editions may list only ${OPTIONAL_EDITIONS.join(", ")}`);
   }
   return [...new Set(value as string[])];
 }
@@ -958,7 +972,7 @@ export async function discoverServerPackages(
     }
     const pkg = parsed as {
       name?: unknown;
-      polyth?: { serverEntry?: unknown; descriptor?: unknown; formerIds?: unknown };
+      polyth?: { serverEntry?: unknown; descriptor?: unknown; formerIds?: unknown; editions?: unknown };
     } | null;
     const entryPath = pkg?.polyth?.serverEntry;
     if (entryPath === undefined) continue;
@@ -981,6 +995,7 @@ export async function discoverServerPackages(
       entryPath,
       descriptor: packageDescriptor(entry.name, pkg?.polyth?.descriptor),
       formerIds: formerIdsOf(entry.name, pkg?.polyth?.formerIds),
+      editions: editionsOf(entry.name, pkg?.polyth?.editions),
     });
   }
   // A former id that names a package present now is that package's own id:

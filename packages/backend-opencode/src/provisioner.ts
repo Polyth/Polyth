@@ -213,7 +213,15 @@ const writeSecretFile = (
   const dir = runtimeRoot(context, "revisions", revisionToken(revision), "secrets");
   if (!dir) return undefined;
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const path = join(dir, filename.replace(/[^A-Za-z0-9._-]+/g, "_"));
+  // Secret values are not part of the capability revision: the agent-tools
+  // token lives in server memory, so the same revision directory sees a new
+  // value after every restart and on some later reconciles in the same
+  // process. Each value gets its own file, so a path
+  // still never changes content. Files of superseded values stay until the
+  // revision retires, because a runtime launched from this revision resolves
+  // its `{file:}` refs when OpenCode loads the config, which may be later.
+  const digest = createHash("sha256").update(filename).update("\0").update(value).digest("hex").slice(0, 16);
+  const path = join(dir, `${filename.replace(/[^A-Za-z0-9._-]+/g, "_")}-${digest}`);
   writeRevisionFile(path, value);
   return path;
 };

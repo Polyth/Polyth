@@ -322,16 +322,19 @@ supported shell area or Workspace panel. Choosing Chat or Canvas explicitly
 switches surfaces and exits Edit.
 
 The phone Workspace panel is a full-screen destination: Back leads its header
-(on the inline-start side, the way the Back swipe takes it) and an Edit
-switch trails it. Editing is a mode, not a place — turning the switch off
-returns to the panel in place, and Back (the button, the swipe or native Back)
-leaves the whole panel through its exit in either mode; the header row is the
-same in both, so the switch never moves the page. Edit opens the
-arrangement with its controls on every item; its *Add widgets* card opens the
-full-page Add page, and an empty Workspace offers that page directly (see
-[UI architecture](ui.md#phone-workspace-editor)). Layout changes are saved as
-they happen — a drag saves once, when the item lands — and Undo walks back the
-editing session. The layout is one project record shared by every device
+(on the inline-start side, the way the Back swipe takes it). It is edited in
+place, the way an iOS Home Screen is — there is no Edit switch: holding any
+item (or an empty spot) turns editing on, and the held item lifts at once so
+the same press carries on as a drag; an *Edit* button under the grid does the
+same without a long press. While editing, the header trades Back for Add (+)
+and Done, every item jiggles and carries its own controls, and Done, Escape or
+a tap on an empty spot ends it; Back (the button, the swipe or native Back)
+leaves the whole panel only outside editing. Live widgets stay mounted
+throughout — editing makes their content inert rather than swapping them for
+stand-ins. Add opens the full-page Add page, and an empty Workspace offers that
+page directly (see [UI architecture](ui.md#phone-workspace-editor)). Layout
+changes are saved as they happen — a drag saves once, when the item lands — and
+Undo walks back the editing session. The layout is one project record shared by every device
 (`workspacePanel`), so a device that lacks an item's definition — its package
 is still loading, disabled, or unavailable there — keeps the saved item, skips
 it while rendering and while arranging, and saves it back in its slot on its

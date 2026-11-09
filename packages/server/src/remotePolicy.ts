@@ -166,6 +166,7 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/sessions/:id/compact", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/archive", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/restore", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
+    { methods: ["POST"], path: "/api/sessions/:id/move", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/resume/cancel", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/resume/now", capability: REMOTE_CAPABILITY.coreSessionsControl, mutation: true },
     { methods: ["POST"], path: "/api/sessions/:id/fork", capability: REMOTE_CAPABILITY.coreSessionsCreate, mutation: true },

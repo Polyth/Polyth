@@ -112,7 +112,7 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   stable facade), broadcast box, goal service wiring, multirun/fusion runners, schedule
   runner (visible sessions per target mode), walkthrough/review/review-flow jobs,
   usage service, browser/dictation services, the `routes` array, HTTP+WS attach, shutdown.
-- `sessions.ts` — canonical session service: create/fork/archive/restore/rename/organize
+- `sessions.ts` — canonical session service: create/fork/archive/restore/rename/organize/move to project
   (folder/labels plus projection-only pin positions),
   authoritative worktree-path validation + branch/state projection metadata,
   send with **delivery admission** (`normal` | `steer` | `queue` | `interrupt`,
@@ -608,7 +608,8 @@ a high-risk request is never resolved this way), `permission/delegated`
 
 Session lifecycle: `session/created`, `session/forked`, `session/archived`,
 `session/restored`, `session/metadata-changed`, `session/imported`,
-`session/history-imported`, `session/rewound`, `session/rewind-cleared`. Rewind
+`session/history-imported`, `session/rewound`, `session/rewind-cleared`,
+`session/project-moved` (see [Moving a chat](#moving-a-chat-to-another-project)). Rewind
 markers soft-splice model history in `deriveMessages`; replacement sends reset
 the backend session before appending a new tail. A rewind targets a visible
 `user/message` or a non-declined `question/answered` of the session's own
@@ -616,6 +617,38 @@ question (never a subagent mirror); the latter keeps the question and cuts from
 the answer onward. A runtime that branches natively (OpenCode) may keep the
 original answer inside the cut question's tool call; the edited reply then
 arrives as the next message (source-inspected, not live-verified).
+
+### Moving a chat to another project
+
+`POST /api/sessions/:id/move` (`SessionService.moveToProject`, `{ projectId,
+expectedProjectId? }`; `dryRun: true` answers `SessionMovePreview`, where a refusal
+is `blocked`, not an error) moves a chat within its Space. The canonical id and the
+event log stay: nothing is rewritten, because events are keyed by session, and every
+project-scoped read (listing, search, prompt history) joins the projection. A later
+`session/project-moved` outranks the historical `projectId` inside `session/created`.
+
+| Step | What happens | Evidence |
+| --- | --- | --- |
+| Refuse | `sessionMoveBlock`: a working, waiting, unknown, paused or auto-resuming chat, queued messages, isolation, a delegated subagent on its own (its chat moves it), a package-owned or automation-started chat, a chat that ran a workflow, a private room, another machine | `SessionMoveBlock.reason` |
+| Family | The chat and its delegated descendants; a fork has a parent but is its own chat, with its own owner, and stays | `sessionMoveFamily` |
+| Release | A wired native leg proves it stopped through `releaseExecution`. A chat with no runtime, turn or admission here is recorded `at-rest` and starts no process just to prove that | `SessionProjection.releasedExecution`, `session/workspace-execution-released` |
+| Commit | `store.appendBatches`: one SQLite transaction appends the marker and rewrites every projection in the family: project, a fresh workspace snapshot of the target, no folder, worktree or branch, `status: epoch-pending` | `session/project-moved`, `SessionProjection.projectMove` |
+| Registry | `resources.parent_id` follows (`ResourceRegistry.moveSession`, control-plane migration v14: only a session row, only to an active project of its Space) | audit `resource.moved` |
+| Next use | Recovery sees `releasedExecution` still naming the binding and replaces the leg through the `session-execution-released` path, on any endpoint, without another proof. The first prompt carries a persisted note that earlier paths describe the previous project | `runtime/epoch-replaced`, `user/message.recoveryContext` |
+
+The session store and the control plane are two databases, so the domain commit is
+the truth and the registry follows it. A crash in between leaves `projectMove`
+naming both ends; `reconcileReadable` and boot reconciliation finish the move from
+exactly that receipt, and any other mismatch stays `recovery-required`. A release
+is durable on its own, so a move that fails after releasing a subagent leaves a chat
+that recovers where it still is.
+
+Files stay in the old folder. So chat images keep working, `_inbox/*` and media the
+target's Git ignores are copied to the same relative path (`sessionMedia`, without
+overwriting); other referenced media isn't, because a move must not leave untracked
+files in someone's repository, and those images stop showing. An open terminal keeps
+its old directory. Who may move what is [Spaces §14.3](../architecture/spaces-and-tenancy.md);
+the UI is [Moving a chat in the navigator](ui.md#moving-a-chat-to-another-project).
 
 Runtime status: `context/updated`, `session/compacted`. Compaction markers are
 ignorable canonical facts: the harness package renders them in the timeline.
@@ -1038,7 +1071,7 @@ the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
 `widget.catalog`, `widget.settings`), and the fine-grained toolbar areas
 (`app.header.leading/center`, `app.statusbar.leading/trailing`,
 `workspace.rail`, `sidebar.toolbar`,
-`composer.meta/pending`, `composer.config`, `composer.context.details`, `session.footer`, `session.audience.details`, `session.empty.widgets`,
+`composer.meta/pending`, `composer.config`, `composer.context.details`, `session.footer`, `session.empty.widgets`,
 `project.create.options`, `settings.users.invite.notice`).
 
 Feature web UI registers through the **web-sdk host**
@@ -1075,6 +1108,12 @@ files a package once wrote at the root are moved there on first start by
 token SHA-256 hashes only, never tokens or passwords), `auto-accept.json` (F18:
 legacy per-session on/off records imported into canonical session projections),
 `push.json` (F18: VAPID keypair + push subscriptions).
+
+At boot the server adds the data directory to `GIT_CEILING_DIRECTORIES`
+(`gitDiscoveryBoundary.ts`), which its Git children inherit. A project made in the
+Polyth folder therefore never answers for a repository that encloses the data
+directory, as the default `./data` of a checkout would. Its own `git init` or clone
+is still found. In the composer, a project without Git shows no checkout picker.
 
 ## Security posture
 

@@ -19,6 +19,10 @@
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 
+// Scripted scenario delays come from the prompt text; clamp them so a stray
+// value cannot schedule a timer far into the future.
+const scheduleAfter = (ms, fn) => setTimeout(fn, Math.min(Math.max(0, Math.round(ms) || 0), 60_000));
+
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
   process.stdout.write("1.18.18-msgact-fake\n");
@@ -165,7 +169,7 @@ const runTurn = (sess, promptText) => {
     const n = ++counter;
     const asId = `as_${n}`;
     const started = Date.now();
-    const at = (ms, fn) => setTimeout(fn, ms);
+    const at = scheduleAfter;
     const reasonId = `prt_rsn_${n}`;
     const thought = (i) =>
       `Considering step ${i} for "${promptText.slice(0, 32)}": the live tail preview should always show this newest line.\n\n`;
@@ -237,7 +241,7 @@ const runTurn = (sess, promptText) => {
     const n = ++counter;
     const asId = `as_${n}`;
     const started = Date.now();
-    const at = (ms, fn) => setTimeout(fn, ms);
+    const at = scheduleAfter;
     const topics = ["the device names", "the host handshake", "the mobile tests", "the server logic", "the docs", "rustfmt and clippy"];
     let t = 0;
     for (let c = 1; c <= cycles; c++) {
@@ -282,7 +286,7 @@ const runTurn = (sess, promptText) => {
     const n = ++counter;
     const asId = `as_${n}`;
     const started = Date.now();
-    const at = (ms, fn) => setTimeout(fn, ms);
+    const at = scheduleAfter;
     const tool = (i, command, startMs, runMs) => {
       const part = (status, extra = {}) => ({
         part: {

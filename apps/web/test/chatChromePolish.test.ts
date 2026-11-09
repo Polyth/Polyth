@@ -73,9 +73,9 @@ test("prompt bookmark opens bounded conversation history using the desktop promp
   assert.match(settings, /itemId="chat\.promptBookmarkDesktop"/);
   assert.match(settings, /itemId="chat\.promptNavigator"/);
   assert.match(settings, /setUiSettings\(\{ promptNavigator: on \? "auto" : "off" \}\)/);
-  assert.match(timeline, /const showBookmark = prefs\.pinLatestPrompt \|\| prefs\.promptBookmarkDesktop;/);
+  assert.match(timeline, /const showBookmark = prefs\.pinLatestPrompt \|\| prefs\.promptBookmarkDesktop \|\| promptTabsHaveContent;/);
   assert.match(timeline, /showBookmark && sessionId && \(latestPrompt \|\| canLoadOlder\)/);
-  assert.match(timeline, /narrow=\{prefs\.pinLatestPrompt\}\s*wide=\{prefs\.promptBookmarkDesktop\}/);
+  assert.match(timeline, /narrow=\{prefs\.pinLatestPrompt \|\| promptTabsHaveContent\}\s*wide=\{prefs\.promptBookmarkDesktop \|\| promptTabsHaveContent\}/);
   assert.match(bookmark, /data-narrow=\{narrow \? undefined : "off"\}/);
   assert.match(bookmark, /data-wide=\{wide \? undefined : "off"\}/);
   assert.match(timeline, /<PromptBookmark/);
@@ -125,7 +125,8 @@ test("chat chrome is component-owned, compact and readable", () => {
   assert.match(actionBar, /chat-action-button--confirmed/);
   assert.match(css, /\.chat-action-button\.ui-icon-btn\.chat-action-button--confirmed[\s\S]*?color:\s*var\(--green\)/s);
   assert.match(css, /@keyframes chat-action-check-pop/);
-  assert.match(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\);/s);
+  assert.match(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*max-width:\s*min/s);
+  assert.doesNotMatch(css, /\.ui-tooltip\.chat-action-tooltip\s*\{[^}]*background:\s*var\(--elevated\);/s);
   assert.match(footer, /<Popover/);
   assert.doesNotMatch(css, /!important/);
 });

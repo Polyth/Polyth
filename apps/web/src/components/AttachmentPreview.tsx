@@ -14,13 +14,23 @@
 import { useEffect, useRef, useState } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import A11yDialog from "./a11y/Dialog.tsx";
-import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, DownloadIcon, ExternalLinkIcon, IconButton } from "./ui/index.ts";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  CollapseIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  IconButton,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from "./ui/index.ts";
 import { buttonClassName } from "./ui/buttonClassName.ts";
 import { tr } from "../i18n/index.ts";
 import { attachSwipeSurface } from "../swipeSurface.ts";
 import { attachSheetDrag } from "../sheetDrag.ts";
 import { leaveExitGhost } from "../exitGhost.ts";
-import { attachMediaZoom, type MediaZoom } from "../mediaZoom.ts";
+import { MEDIA_ZOOM_MAX, attachMediaZoom, type MediaZoom } from "../mediaZoom.ts";
 import type { InlineDirection } from "../mobileGestures.ts";
 
 const TEXT_EXTENSIONS = /\.(?:c|cc|cpp|css|csv|go|h|hpp|html?|java|js|jsx|json|log|md|mjs|py|rb|rs|scss|sh|sql|svg|toml|ts|tsx|txt|vue|xml|yaml|yml)$/i;
@@ -114,7 +124,7 @@ function AttachmentContent({ attachment, kind }: { attachment: AttachmentRef; ki
   if (!attachment.url || kind === "audio" || kind === "link" || kind === "unsupported") {
     return <FileCard attachment={attachment} kind={kind} />;
   }
-  if (kind === "image") return <img className="attachment-preview-media" src={attachment.url} alt={attachment.name} />;
+  if (kind === "image") return <img className="attachment-preview-media" src={attachment.url} alt={attachment.name} draggable={false} />;
   if (kind === "video") return <video className="attachment-preview-media" src={attachment.url} controls preload="metadata" />;
   if (kind === "pdf") {
     return <div className="attachment-preview-doc"><iframe className="attachment-preview-pdf" src={attachment.url} title={attachment.name} /></div>;
@@ -135,6 +145,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
   const stageRef = useRef<HTMLDivElement>(null);
   const slideRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<MediaZoom | null>(null);
+  const [scale, setScale] = useState(1);
   const count = attachments.length;
 
   useEffect(() => {
@@ -158,6 +169,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
     const zoom = attachMediaZoom({
       surface: () => stageRef.current,
       media: () => slideRef.current?.querySelector<HTMLElement>("img.attachment-preview-media") ?? null,
+      onScale: setScale,
     });
     zoomRef.current = zoom;
     return () => {
@@ -167,7 +179,10 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
   }, []);
 
   // Every item opens at rest.
-  useEffect(() => { zoomRef.current?.reset(); }, [index]);
+  useEffect(() => {
+    zoomRef.current?.reset();
+    setScale(1);
+  }, [index]);
 
   // Pull down to dismiss, following the finger; the dim behind lifts with it.
   useEffect(() => attachSheetDrag({
@@ -278,6 +293,32 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
 
         <div className="attachment-preview-bar">
           {hasNavigation && <span className="attachment-preview-count">{index + 1} / {count}</span>}
+          {kind === "image" && attachment.url && (
+            <div className="attachment-preview-zoom">
+              <IconButton
+                icon={ZoomOutIcon}
+                label={tr("attachmentpills.zoomOut")}
+                size="sm"
+                disabled={scale <= 1.001}
+                onClick={() => zoomRef.current?.zoomOut()}
+              />
+              <span className="attachment-preview-zoom-level" aria-hidden="true">{Math.round(scale * 100)}%</span>
+              <IconButton
+                icon={ZoomInIcon}
+                label={tr("attachmentpills.zoomIn")}
+                size="sm"
+                disabled={scale >= MEDIA_ZOOM_MAX - 0.001}
+                onClick={() => zoomRef.current?.zoomIn()}
+              />
+              <IconButton
+                icon={CollapseIcon}
+                label={tr("attachmentpills.zoomReset")}
+                size="sm"
+                disabled={scale <= 1.001}
+                onClick={() => zoomRef.current?.resetView()}
+              />
+            </div>
+          )}
           <IconButton icon={CloseIcon} label={tr("common.close")} size="lg" className="attachment-preview-close" onClick={onClose} />
         </div>
 

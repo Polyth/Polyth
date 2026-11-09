@@ -3,6 +3,7 @@ import ProviderLogo, { isProviderMarkKey } from "../../../../../packages/models/
 import {
   AssistIcon,
   BellIcon,
+  BookmarkIcon,
   BotIcon,
   BrainIcon,
   BranchIcon,
@@ -78,6 +79,7 @@ const PACKAGE_ICONS: Readonly<Record<string, LucideIcon>> = {
   activity: MonitoringIcon,
   assist: AssistIcon,
   bell: BellIcon,
+  bookmark: BookmarkIcon,
   bot: BotIcon,
   brain: BrainIcon,
   braces: JsonIcon,

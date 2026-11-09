@@ -28,6 +28,14 @@ let stopTimer;
 let killTimer;
 
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
+// cmd.exe runs a .cmd/.bat shim and Node joins that command line unquoted,
+// so a path with a space would split. Quote each word the way the program
+// behind the shim parses it back (the MSVC rules libuv also uses).
+const windowsQuote = (value) => {
+  if (value === "") return '""';
+  if (!/[ \t"]/.test(value)) return value;
+  return '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1') + '"';
+};
 const fail = (message) => send({ event: "polyth_error", polyth_error: { message } });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const groupAlive = (pid) => {
@@ -195,10 +203,11 @@ const spawnNative = (args, nextMode, reinitializing, deliverPending = false) => 
   probeInit = undefined;
   cancelProbe();
   probeLeg = false;
-  const child = spawn(command, args, {
+  const shim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+  const child = spawn(shim ? windowsQuote(command) : command, shim ? args.map(windowsQuote) : args, {
     cwd: process.cwd(),
     env: process.env,
-    shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+    shell: shim,
     detached: process.platform !== "win32",
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],

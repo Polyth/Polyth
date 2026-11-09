@@ -48,6 +48,15 @@ export interface BeginResourceProvisioning {
   visibility: ResourceVisibility;
 }
 
+export interface MoveSessionResource {
+  resourceId: string;
+  orgId: string;
+  spaceId: string;
+  fromProjectId: string;
+  toProjectId: string;
+  actor: string;
+}
+
 export interface ResourceRegistry {
   begin(input: BeginResourceProvisioning): { resource: CanonicalResource; provisioning: ResourceProvisioning; replayed: boolean };
   resource(resourceId: string): CanonicalResource | undefined;
@@ -58,6 +67,10 @@ export interface ResourceRegistry {
   activate(operationId: string, expectedResourceRevision: number): CanonicalResource;
   abortMissingDomain(operationId: string, expectedResourceRevision: number): CanonicalResource;
   quarantineUnknown(operationId: string, expectedResourceRevision: number): CanonicalResource;
+  /** Re-parent a session onto another active project of its Space. Repeating a
+   *  finished move returns the row; anything else that no longer matches is a
+   *  conflict. Access follows, so every cached grant is invalidated. */
+  moveSession(input: MoveSessionResource): CanonicalResource;
 }
 
 type ResourceRow = {
@@ -232,6 +245,37 @@ export function createResourceRegistry(control: ControlPlane, opts: { now?: () =
            FROM resources WHERE id=? AND org_id=? AND space_id=? AND lifecycle='active'`,
         id, orgId, spaceId,
       ));
+    },
+    moveSession(raw) {
+      const resourceId = identity(raw.resourceId, 'resource ID');
+      const orgId = identity(raw.orgId, 'organization ID');
+      const spaceId = identity(raw.spaceId, 'Space ID');
+      const fromProjectId = identity(raw.fromProjectId, 'source project ID');
+      const toProjectId = identity(raw.toProjectId, 'target project ID');
+      const actor = identity(raw.actor, 'actor');
+      return control.transaction(() => {
+        const row = resourceRow(resourceId);
+        if (!row || row.org_id !== orgId || row.space_id !== spaceId) {
+          throw controlError('not-found', 'Resource not found');
+        }
+        if (row.kind !== 'session') throw controlError('invalid-input', 'Only a session can move between projects');
+        if (row.parent_id === toProjectId) return resource(row)!;
+        if (row.parent_id !== fromProjectId) throw controlError('conflict', 'Session is no longer in the source project');
+        if (row.lifecycle !== 'active' && row.lifecycle !== 'archived') {
+          throw controlError('conflict', 'Session cannot move in its current lifecycle');
+        }
+        if (!control.get(
+          "SELECT 1 FROM resources WHERE id=? AND org_id=? AND space_id=? AND kind='project' AND lifecycle='active'",
+          toProjectId, orgId, spaceId,
+        )) throw controlError('not-found', 'Target project is not active in this Space');
+        changed(control.run(
+          `UPDATE resources SET parent_id=?,access_revision=access_revision+1,revision=revision+1,updated_at_ms=?
+            WHERE id=? AND revision=? AND parent_id=?`,
+          toProjectId, now(), resourceId, row.revision, fromProjectId,
+        ).changes);
+        control.audit(actor, 'resource.moved', resourceId);
+        return resource(resourceRow(resourceId))!;
+      });
     },
     provisioning(operationId) {
       return provisioning(provisioningRow(identity(operationId, 'operation ID')));

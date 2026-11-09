@@ -128,7 +128,7 @@ Timeout, abort acknowledgement, disconnected stream or missing PID is **not exec
 
 ## Dependencies
 
-Keep third-party dependencies to a minimum; every package and its transitive tree is attack surface. Before adding one, use a Node/browser built-in, an existing dependency or a few lines of owned code. Add a package only for real, hard-to-own complexity (untrusted-format parsers, crypto, native/platform bindings, renderers), with exact or bounded versions and few transitive dependencies, and say why in the change. Removing a dependency in favor of small owned code is a welcome change.
+Keep third-party dependencies to a minimum; every package and its transitive tree is attack surface. Before adding one, use a Node/browser built-in, an existing dependency or a few lines of owned code. Add a package only for real, hard-to-own complexity (untrusted-format parsers, crypto, native/platform bindings, renderers), with exact or bounded versions and few transitive dependencies, and say why in the change. Every direct npm/Cargo dependency, its users, its exposure (shipped, build or release), the allowed install scripts and the lockfile budgets are listed in `scripts/dependency-policy.json` and enforced by `scripts/test/dependencyPolicy.test.ts`; lower a budget whenever a change shrinks a lockfile. Removing a dependency in favor of small owned code is a welcome change.
 
 Treat Dependabot, `npm audit` and `cargo` advisories as defects: upgrade, pin a patched transitive version through root `package.json` `overrides`, or replace the package. An advisory without an upstream fix stays open and is reported with its exposure (shipped runtime vs build-only tooling) until the dependency is gone.
 

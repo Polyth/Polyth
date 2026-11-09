@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   roleAtLeast,
+  sessionAccessAtLeast,
   type CreateConversationInput,
   type ForkResult,
   type ProjectService,
+  type SessionMoveHooks,
+  type SessionMoveInput,
+  type SessionMovePreview,
+  type SessionMoveResult,
+  type SessionPerson,
   type SessionProjection,
   type SessionRef,
   type SessionService,
@@ -14,7 +20,7 @@ import {
 } from "@polyth/contracts";
 import type { CanonicalResource } from "@polyth/control-plane/resources";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
-import { defaultSessionVisibility } from "./sessionSharing.ts";
+import { defaultSessionVisibility, projectAudience, sessionAudience, spaceMemberMayWiden } from "./sessionSharing.ts";
 
 const recovery = (): Error => Object.assign(
   new Error("Session domain state does not match the canonical resource authority"),
@@ -100,9 +106,27 @@ export function canonicalSessionService(
     return security.resources.activate(saga.operationId, current.revision);
   };
 
+  /** The domain commit of a move is the truth; the registry follows it. A crash
+   *  between the two is finished here from the projection's own durable receipt,
+   *  the only evidence that can change a row's project outside a move. */
+  const followProjectMove = (row: CanonicalResource, projection: SessionProjection): CanonicalResource => {
+    const move = projection.projectMove;
+    if (row.parentId === projection.projectId || !row.parentId || !move
+      || move.toProjectId !== projection.projectId || move.fromProjectId !== row.parentId) return row;
+    return security.resources.moveSession({
+      resourceId: row.id,
+      orgId: org.id,
+      spaceId: ctx.spaceId,
+      fromProjectId: move.fromProjectId,
+      toProjectId: move.toProjectId,
+      actor: "system:resource-reconciler",
+    });
+  };
+
   const reconcileReadable = (projection: SessionProjection): CanonicalResource => {
     let row = resource(projection.id);
     if (!row) throw recovery();
+    row = followProjectMove(row, projection);
     assertScope(row, projection);
     if (row.lifecycle === "provisioning" || row.lifecycle === "quarantined") {
       row = finalizeProvisioning(projection, row);
@@ -274,6 +298,95 @@ export function canonicalSessionService(
       }
       throw cause;
     }
+  };
+
+  /** Who gains and who loses this chat with the move. Only a chat that follows
+   *  its project changes audience; a private or restricted one names its people
+   *  itself. A person who can't open the target loses it either way, through
+   *  their own project list, which is theirs to manage. */
+  const moveAudience = (
+    projection: SessionProjection,
+    row: CanonicalResource,
+    targetId: string,
+  ): { gains: SessionPerson[]; loses: SessionPerson[]; readers: Set<string> } => {
+    const before = sessionAudience(ctx.spaceId, projection.id);
+    const readers = new Set(before.map((reader) => reader.userId));
+    if (row.visibility !== "inherit" || row.accessParentId) return { gains: [], loses: [], readers };
+    const after = projectAudience(ctx.spaceId, targetId);
+    const afterIds = new Set(after.map((reader) => reader.userId));
+    afterIds.add(row.ownerPrincipalId);
+    return {
+      gains: after.filter((reader) => !readers.has(reader.userId)),
+      loses: before.filter((reader) => !afterIds.has(reader.userId))
+        .map(({ userId, name }) => ({ userId, ...(name ? { name } : {}) })),
+      readers,
+    };
+  };
+
+  /** The sharing rules a move must obey, whichever way it was asked for: moving
+   *  a chat must not open it wider than sharing it could. */
+  const moveTarget = async (sessionId: string, input: SessionMoveInput) => {
+    requireMutation();
+    const projection = await requireActive(sessionId);
+    const row = reconcileReadable(projection);
+    const projectId = typeof input?.projectId === "string" ? input.projectId : "";
+    const target = projectId ? await projects.get(projectId) : undefined;
+    const targetAccess = target && security.resources.active(target.id, scope)
+      ? security.resourceAccess.access({ resourceId: target.id, principalId: ctx.userId, orgId: org.id, spaceId: ctx.spaceId })
+      : undefined;
+    // Unknown, another Space's and closed to this person all read the same.
+    if (!target || !targetAccess) throw Object.assign(new Error("project not found"), { code: "not-found" });
+    if (!sessionAccessAtLeast(targetAccess.level, "collaborate")) {
+      throw Object.assign(new Error("You can view that project but not work in it"), { code: "forbidden" });
+    }
+    const audience = moveAudience(projection, row, target.id);
+    if (audience.gains.length > 0) {
+      if (projection.personalContext) {
+        return { projection, row, target, audience, block: {
+          reason: "private" as const,
+          message: "The agent has read your personal notes in this chat, so it can't move where others could read it.",
+        } };
+      }
+      if (!spaceMemberMayWiden(ctx)) {
+        return { projection, row, target, audience, block: {
+          reason: "widening" as const,
+          message: "Only Space admins can move this chat where more people could open it",
+        } };
+      }
+    }
+    return { projection, row, target, audience };
+  };
+
+  const previewMoveToProject = async (sessionId: string, input: SessionMoveInput): Promise<SessionMovePreview> => {
+    const { target, audience, block } = await moveTarget(sessionId, input);
+    const preview = await base.previewMoveToProject!(sessionId, { ...input, projectId: target.id });
+    return {
+      ...preview,
+      gains: audience.gains,
+      loses: audience.loses,
+      ...(!preview.blocked && block ? { blocked: block } : {}),
+    };
+  };
+
+  const moveToProject = async (sessionId: string, input: SessionMoveInput): Promise<SessionMoveResult> => {
+    const { target, audience, block } = await moveTarget(sessionId, input);
+    if (block) throw Object.assign(new Error(block.message), { code: "conflict", reason: block.reason });
+    const hooks: SessionMoveHooks = {
+      formerReaders: new Map([[sessionId, audience.readers]]),
+      afterCommit(move, sessionIds) {
+        for (const id of sessionIds) {
+          security.resources.moveSession({
+            resourceId: id,
+            orgId: org.id,
+            spaceId: ctx.spaceId,
+            fromProjectId: move.fromProjectId,
+            toProjectId: move.toProjectId,
+            actor: ctx.userId,
+          });
+        }
+      },
+    };
+    return base.moveToProject!(sessionId, { ...input, projectId: target.id }, hooks);
   };
 
   const conversationBase = base as SessionService & {
@@ -606,6 +719,8 @@ export function canonicalSessionService(
       if (property === "archive") return archive;
       if (property === "restore") return restore;
       if (property === "delete") return remove;
+      if (property === "moveToProject") return target.moveToProject ? moveToProject : undefined;
+      if (property === "previewMoveToProject") return target.previewMoveToProject ? previewMoveToProject : undefined;
       if (property === "snapshot") return readProjection;
       if (property === "events") {
         return async (sessionId: string, ...rest: unknown[]) => {

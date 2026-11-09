@@ -152,3 +152,60 @@ test("a zoomed image pans instead of paging; back at rest the swipe pages again"
     await view.unmount();
   }
 });
+
+test("a mouse click zooms into the point, a second click returns, and the wheel zooms", async () => {
+  const view = await mount();
+  try {
+    const img = doc.querySelector<HTMLElement>("img.attachment-preview-media")!;
+    const slide = doc.querySelector<HTMLElement>(".attachment-preview-slide")!;
+    for (const [key, value] of Object.entries({ offsetParent: slide, offsetLeft: 200, offsetTop: 150, offsetWidth: 400, offsetHeight: 300 })) {
+      Object.defineProperty(img, key, { configurable: true, value });
+    }
+    Object.defineProperty(slide, "clientWidth", { configurable: true, value: 800 });
+    Object.defineProperty(slide, "clientHeight", { configurable: true, value: 600 });
+
+    let at = 5000;
+    const mouse = async (type: "pointerdown" | "pointerup" | "click", ms = 0) => {
+      at += ms;
+      await act(async () => {
+        const event = new dom.PointerEvent(type === "click" ? "click" : type, { pointerId: 7, pointerType: "mouse", button: 0, clientX: 400, clientY: 300, bubbles: true }) as unknown as Event;
+        Object.defineProperty(event, "timeStamp", { value: at });
+        img.dispatchEvent(event);
+      });
+    };
+    const tap = async (gapMs = 0) => {
+      await mouse("pointerdown", gapMs);
+      await mouse("pointerup");
+    };
+
+    await tap();
+    assert.match(img.style.transform, /scale\(2\.5\)/, "one click enlarges the picture");
+
+    await tap(500);
+    assert.equal(img.style.transform, "", "a later click returns to rest");
+
+    // A double click is two clicks: the second one must not undo the first.
+    await tap(500);
+    await tap(60);
+    await act(async () => { img.dispatchEvent(new dom.MouseEvent("dblclick", { bubbles: true, clientX: 400, clientY: 300 }) as unknown as Event); });
+    assert.match(img.style.transform, /scale\(2\.5\)/, "a double click stays zoomed");
+
+    const wheel = async (deltaY: number) => {
+      await act(async () => {
+        const event = new dom.WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true }) as unknown as Event;
+        Object.defineProperties(event, { clientX: { value: 400 }, clientY: { value: 300 } });
+        img.dispatchEvent(event);
+      });
+    };
+    await wheel(400);
+    await wheel(400);
+    assert.equal(img.style.transform, "", "a wheel zoom-out returns to rest");
+    await wheel(-400);
+    assert.match(img.style.transform, /scale\(2\./, "a wheel zoom-in enlarges the picture");
+
+    await act(async () => { doc.querySelector<HTMLButtonElement>('[aria-label="Reset zoom"]')!.click(); });
+    assert.equal(img.style.transform, "", "the reset control returns to rest");
+  } finally {
+    await view.unmount();
+  }
+});

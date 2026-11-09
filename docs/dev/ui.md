@@ -389,6 +389,16 @@ counted twice. The scroller itself is observed too, because a scrollbar
 appearing or disappearing changes its content box without resizing the rail's
 viewport.
 
+Packages add tabs beside the prompt list through `session.prompt.tabs`
+(`meta.promptTab`, `PromptTabSlotMeta` in `@polyth/web-sdk`; host side in
+`components/promptTabs.ts`). The tab strip appears only when a tab has content
+for the chat (`hasContent`); until then each contribution renders once with
+`promptTabPlacement: "footer"` under the list, one quiet row or nothing. Content
+also fills the icon and shows it in that chat though both settings are off. The
+last tab used is remembered per device. With no contribution the popover is the
+plain prompt list. The context's `promptReadingPosition()` names the answer being
+read and the heading above the reading line.
+
 The rail's hover panel and the bookmark peek share `.prompt-nav-row`: text two
 pixels above `--font-meta`, clamped to two lines, with no leading mark (the tape
 ticks carry the active and pointed-at state). Both
@@ -483,6 +493,30 @@ projects a filter hides in their slots. Any sort allows a move: one made under
 *Recent activity*, *Frequently used* or *Project name* keeps the order on screen
 and switches the sort to *Custom order* (announced). Alt+Shift+↑/↓ on a project row moves it one
 place the same way. Covered by `apps/web/test/projectArrange.test.ts`.
+
+### Moving a chat to another project
+
+Dragging a chat row onto another project moves it: a project's card or anything in
+its open list in the tree, or its tile on the rail. Only that project's card or tile
+lights up (`data-session-drop-over`, `--accent-wash` and `--accent-line`), so the
+source project and private rooms never do. A row carries `SESSION_MOVE_MIME` beside
+the split view's `SESSION_MIME`, because the open chat can move yet can't open beside
+itself. One drop listener on the navigator serves every row
+(`useSessionMoveDropZones`, `apps/web/src/sessionMove.ts`).
+
+The row menu's *Move to project…* is the keyboard and touch way, in both navigators
+and the phone's ⋮ menu: `MoveSessionDialog` lists the projects (a Sheet on the phone).
+Both ways end at the same `requestSessionMove`: it asks for the server's preview
+first, words a refusal from its stable reason, and otherwise confirms with
+`confirmAlert`, which says what can't be seen from the navigator: subagents coming
+along, files staying behind, the agent carrying on in the other folder, and who gains
+or loses the chat. The offer (`canMoveSession`) hides what the server would refuse
+anyway; the server still decides.
+
+The moved chat stays open if it was open, and the workspace follows it
+(`followActiveSessionTo`, on this device and any other), unless the person has already
+gone to another project. The transcript gets a seal, *Moved from A to B*, from the
+names recorded in the event. Mechanics: [architecture](architecture.md#moving-a-chat-to-another-project).
 
 On touch-capable screens (`any-pointer: coarse`) project row actions stay
 hidden at rest, except on the focused project: its new-chat and ⋮ actions stay
@@ -803,45 +837,58 @@ package authority or change widget placement rules.
 
 #### Phone Workspace editor
 
-The phone Workspace (`WorkspacePanel.tsx`) customizes in two steps inside its
-one Sheet: add on a full page, then arrange and manage in place. Its header is
-the same row in both modes: Back leads (`dismiss="back"`, where the Back swipe
-takes the layer) and an Edit switch trails (`SheetAction` `kind: "switch"`,
-`role="switch"`); editing is a mode, so Back leaves the Workspace from either
-mode and the content that replaces the other mode settles in
-(`is-mode-switched`). The Back swipe follows the finger while editing too: a
-reorder starts only from a still press or a grip (`touch-action: none`), so a
-moving finger is never one, and once an item is lifted
-(`data-arrange-dragging`) the swipe stands down.
+The phone Workspace (`WorkspacePanel.tsx`) is one live grid that is also its
+own editor, the way an iOS Home Screen is; there is no Edit switch.
 
+- **Entering.** Holding any item still for `ARRANGE_ACTIVATE_MS` (420 ms, any
+  pointer) turns editing on and lifts that item at once, so the same press
+  carries on as a drag (`useArrange` `activate`, which renders editing with
+  `flushSync`; the copy rises from where the item sat under the finger, and
+  whatever the mode change reflows glides there by FLIP). The held item sinks
+  slightly while the hold builds (`data-arrange-pressing`, CSS `scale`). Holding
+  an empty spot does the same without a lift, and the *Edit* button under the
+  grid (with an "or hold any item" tip) is the way in without a long press. A
+  moving finger is always a scroll.
+- **Editing.** The header trades Back for Add (+) and Done (`dismiss="none"`,
+  `headerTrailing`); Done, Escape or a tap on an empty spot ends editing, and
+  the Back swipe is off meanwhile. Every item jiggles — CSS `rotate` only, a
+  stable per-item phase (`--jiggle-phase`), smaller for full-width rows, paused
+  under the Add page, under a package window and on exit, off with reduced
+  motion — and carries its controls: a corner minus removes (the item shrinks
+  away, the rest closes up), a widget's size pill cycles its sizes, headings and
+  labelled dividers are edited in place, arrow keys (Home/End) move a focused
+  item and Delete removes it. Widgets and layout elements get a card drawn just
+  outside their box (`::before`), so nothing moves. A floating dock shows the
+  hint until there is something to undo, then Undo; it is near-opaque, not
+  blurred, so it never re-filters a jiggling grid. Undo walks back every change
+  of the editing session (a burst of typing in one label is one step); *Reset
+  to default* restores the project's default arrangement and is undoable.
+- **Live widgets stay mounted** in both modes; while editing, launchers' and
+  widgets' own content is `inert`, so a press reaches the item. A widget with
+  nothing to show (a session widget with no chat open) is left out of the
+  Workspace and shown dormant while editing, so it can still be moved or
+  removed.
 - **Add page** (`WorkspaceGallery.tsx`, `workspaceGallery.css`): a full-height
   page drawn as the sheet's own top layer, moving with the phone stack grammar —
-  in from the inline-end edge; Back, Done, Escape or a swipe (the editor peeks in
+  in from the inline-end edge; Back, Done, Escape or a swipe (the grid peeks in
   behind) pop it. A large search field needs every word of the query in the
   title, description or package and ranks title hits first, marking them
   (`searchPanelItems`); All / Widgets / Apps / Layout filters carry live counts.
   Without a query the page shows *Suggested for this project* (the kind's
-  default widgets not placed when it opened), every app as a tile grid, each
-  package's widgets A–Z, then the layout elements (`panelGallerySections`);
-  sections longer than their preview (8 apps, 4 widgets) fold behind *Show all*.
-  Apps already placed when the page opened sort last, fixed for the visit.
-  Everything renders metadata only, never a live widget. A tap adds — an app
-  joins the other apps, anything else goes to the end (`insertPanelItem`); a tap
-  on an added single-use item takes it off; repeatable items add another. Back
-  in the editor, the newcomers are marked once and brought into view.
-- **Arrange** (`WorkspaceEditor.tsx`, `workspacePanelEditor.css`): the
-  arrangement drawn as it will look (tiles four to a line — three in narrow and
-  six in wide containers — and widgets and layout elements as full-width rows),
-  every control on the item itself: a corner minus removes, a widget's size pill
-  cycles its sizes, headings and labelled dividers are edited in place. Undo
-  walks back every change of the editing session (a burst of typing in one label
-  is one step); *Reset to default* restores the project's default arrangement and
-  is undoable. Rows show metadata only.
+  default widgets not placed when it opened), every app as a tile grid (three
+  across up to a 420 px page, as the Workspace itself), each package's widgets
+  A–Z, then the layout elements (`panelGallerySections`); sections longer than
+  their preview (9 apps, 4 widgets) fold behind *Show all*. Apps already placed
+  when the page opened sort last, fixed for the visit. Everything renders
+  metadata only, never a live widget. A tap adds — an app joins the other apps,
+  anything else goes to the end (`insertPanelItem`); a tap on an added
+  single-use item takes it off; repeatable items add another. Back on the grid,
+  the newcomers are marked once and brought into view.
 
-Reordering is `workspaceArrange.ts`. A touch lifts an item after a 220 ms press
-without moving (a swipe still scrolls); a row's grip lifts at once
-(`touch-action: none`); a mouse or pen drags after 4 px; arrow keys (Home/End)
-on a tile or grip move it and Delete removes it. A pointer move only transforms
+Reordering is `workspaceArrange.ts`. While editing, a touch lifts an item after
+a 220 ms press without moving (a swipe still scrolls); a grip (`gripProps`, for
+a list that wants one) lifts at once (`touch-action: none`); a mouse or pen
+drags after 4 px. A pointer move only transforms
 the lifted copy (drawn inside the sheet) and re-aims; React renders only when
 the hole moves. Aiming reads the resting geometry measured after that render,
 in the scroller's content coordinates: an item counts as passed once the held
@@ -999,15 +1046,40 @@ auto-places (`autoPlacesContribution`); an explicitly included package always
 gets a visible rail. A private room (`Project.parentProjectId`) is never a
 project of its own in any picker, list or rail: `rootProjects` removes it, and
 anything about the project (settings, appearance) resolves through
-`rootProjectId`. Under a project someone else can open (`sharedWith > 0`), the
-Shared / Only me switch (`PrivateRoomSwitch`) moves the person between the
-project and their room, and marks the lane they aren't in when a chat there is
-waiting, since its rows are hidden; someone working alone sees neither it nor My
-notes.
-`ChatAudienceLine`, above the composer of any chat in a Space with several
-people, says who can read it and which memory the agent has, and offers
-Continue privately, which starts a room chat quoting only the title. What was
-already said stays where it was. A person's Personal project (`Project.personal`, §3.3) is
+`rootProjectId`.
+
+A project says nothing about other people until someone else really works in it
+(`Project.othersHere`); `sharedWith` only counts who could open it. Then its ⋮
+menu offers New chat just for me, which starts a chat in the person's room. A room
+with chats shows one row after the project's chat list (`PrivateRoomGroup`), with
+or without anyone else around: Only me, its count, and a dot while it's closed and
+a chat behind it waits. It opens in place, opens itself when the person arrives in
+the room, and goes away with the last chat. There is no switch: shared and private
+chats never hide each other, and search reaches both. A room's waiting chats count
+toward its project on the rail and the phone's project row.
+
+Silence is the norm: a chat only its person reads says nothing, and nothing sits
+above the composer. `othersRead` decides whether a chat speaks: someone else's chat
+or one given to someone by name always does, and one merely open to the whole Space
+does once someone else works in its project. Such a chat gets `ChatAudienceChip` at
+the far end of the composer's model row, which opens its sharing, plus the
+navigator's shared mark and Continue privately in its menu and in that dialog, which
+starts a room chat quoting only the title. What was already said stays where it was.
+Which memory the agent has is one line in the context card
+(`composer.context.details`), only among other people.
+
+A note the agent offers for the shared memory asks nothing (`ShareOffer`). It works
+as the person's note from the start. In a private chat among other people, one line
+under the reply that saved it (`session.timeline.after`) says so and offers Share…,
+which opens the exact text, who will see it and one Share action. That acts at once,
+with Undo in the notification. The next message lets the line go: it only shows while
+the note's `shareProposedAt` is newer than the latest prompt, so ignoring it leaves
+nothing to clean up. A chat makes one offer of at most 600 characters; anything else
+stays a plain note. Project settings → Memory → My notes offers the same Share… in
+place under any note in Only me in this project. Alone in a project there is no line
+and no Share…, and My notes appears only with notes in it (`othersHere`).
+
+A person's Personal project (`Project.personal`, §3.3) is
 the `personal` kind whatever its composition says (`projectKinds(…, { personal })`,
 `RailPlanOptions`): only launchers that list `personal` start on a rail —
 today Files, Agents and Planner on the right rail, the top rail empty — and
@@ -1194,6 +1266,14 @@ direction keep it working offline; "All icons" swaps them for
 `ProjectIconPickerField`, the picker the appearance dialog uses. A phone opens it
 with focus on the heading, never a keyboard; a desktop selects the name.
 
+It shares the flow's head and footer: a flow label with the X when it is a numbered
+step, the title and hint (opened on its own there is no label line, and Cancel is
+the way out), and a footer pinned outside the scroll region, so a keyboard or the
+full icon library never hides the primary action. With a touch pointer or at phone
+width, colours and icons sit in the same seven finger-sized columns, edge to edge
+on the content column (thirteen colours, fourteen icons); on a wide fine pointer the
+colours keep to one row.
+
 - **Polyth folder.** A quiet line says where files go, with "Choose another",
   which detours through the picker (unnumbered, `onBack` returns with every choice
   intact). Nothing exists until "Create project", because the folder takes its name
@@ -1233,13 +1313,20 @@ The directions step and the picker are one dialog box and one head grid
   one primary action: step 1's compact Continue matches the picker's Open.
   On phones the flow's picker footer is one row too — Back (icon-only, named
   for assistive tech), New folder, then the flexible Open — so the bar keeps
-  step 1's height. Only the directions scroll; the expanded Workspace list
+  step 1's height. When clone or SSH join New folder and the picker is 520px wide
+  or less, the ways to add become named icons; opening one shows the labels again. Only the directions scroll; the expanded Workspace list
   still never becomes its own scroll box.
 - **Focus.** The X is never the opening focus (`initialFocus` is the first
   `.project-direction-card`), so Enter on an open step 1 does not dismiss it.
   Coming Back from the picker returns focus to Continue. On the picker the
   folder list keeps that role. Escape closes every step, except that it first
   disarms an open alternative source (SSH, clone) instead of ending the flow.
+- **Short windows.** Full-screen panels clear the status bar and home indicator,
+  "setting up" included, and the footer drops the home-indicator space while a
+  keyboard is open. A floating panel stays inside the visible band. At 560px
+  tall or less (a phone on its side, from 560px wide) the head loses its fixed
+  frame and hint, a floating panel takes the whole band, and colours and icons each
+  keep to one row.
 
 When the account uses one interface for every project (Settings → Projects →
 Interface across projects, `projectInterfaceScope.ts`), directions shape nothing,
@@ -1809,7 +1896,10 @@ choice; selecting one opens its choices in place of the menu, with a Back row
 (`apps/web/src/sidebarPrefs.ts`): None, Date (newest day first; today draws no
 heading) and Type — one type per chat, in this order: needs attention, in
 progress, drafts (only a chat that never ran, so typing a draft never moves a
-chat), shared with others, isolated, shared workspace. Sort: recent activity
+chat), shared with others, isolated, shared workspace. A date heading belongs
+to the group beneath it: its air sits above the caption and only a hairline
+separates caption from its rows, so a chat never reads as the next day's.
+Sort: recent activity
 (the default navigator order), date created, title (natural, case-insensitive)
 or type. `arrangeSessions` groups then sorts before a list is paged, so the
 first page holds the leading groups; pinned chats keep their own section and
@@ -1823,6 +1913,18 @@ subscribe? })` — pure functions of a session and the package's own state; the
 host draws headings and rows. A stored package grouping waits for its package
 to register and reads as None meanwhile. Chat markers add "Marker".
 
+`session.selection.actions` adds an action to a transcript selection, beside
+Quote and Copy in the floating toolbar and the touch dock. It is data only
+(`meta.selectionAction`, `SelectionActionSlotMeta`): the host draws the button,
+runs it on its own copy of the selection (`text`, `markdown`, `eventSeq`,
+`messageRole`, `sessionId`, `projectId`, from `selectionSnapshot.ts`), then clears
+the selection. The contribution's `render` is never mounted.
+
+`host.conversation.revealEvent` takes an optional `passage`: text inside the
+message to land on and light for a moment with the CSS Custom Highlight API,
+without touching the message's DOM (`conversationPassage.ts`). The message alone
+is shown when the text is no longer in it.
+
 `session.message.actions` supplies `sessionId`, `projectId`, `spaceId`,
 `kind` and `messageRole` (`user`/`assistant`), `messageId`, `messageText`, and
 `eventSeq`; user messages also supply their attachment references. These are
@@ -1830,7 +1932,9 @@ presentation inputs, not server authorization. The host renders these
 contributions inside the role's quick-action layout (`MessageActionBar`), so
 the user orders them and places each on the bar, in the More menu or off.
 Describe the button with `meta.messageAction` (`MessageActionSlotMeta` in
-`@polyth/web-sdk`: label, description, icon, `roles`, `menu`, `available`);
+`@polyth/web-sdk`: label, description, icon, `roles`, `menu`, `available`,
+and `menuLabel`, the More row for one message when it should say what a press
+would do, read each time the menu opens);
 without it the button is listed by its id and stays on the bar. A contribution
 that sets `menu: true` must honour `MessageActionSlotContext`: with
 `messageActionPlacement: "menu"` it renders no trigger, stays mounted, and acts
@@ -2079,9 +2183,11 @@ desktop keeps the split's open edge. The contour is a state gauge, so
 `contextLiquid.test.ts` measures glyph alignment and tones through the real
 cascade.
 
-**Phone session menu (⋮):** the actions island holds a narrower ⋮,
-✎ New session and ⧉ Open tools (`MobileSessionMenu.tsx`; a new chat has no ⋮).
-⋮ opens a compact popover lined up under the island: a head with the chat
+**Phone session menu (⋯):** in a chat the actions island holds ✎ New session
+and, last (rightmost), the horizontal ⋯ (`MobileSessionMenu.tsx`); ⧉ Open tools
+is the menu's first row, and the ⋯ carries `data-workspace-trigger` so closing a
+tool returns focus to it. A new chat has no ⋯ and keeps ✎ then the ⧉ button.
+⋯ opens a compact popover lined up under the island: a head with the chat
 title and one status · model · context line (a tap opens the session
 overview, which a hidden title would otherwise open; a conversation's head
 only names it), then Rename (shared prompt), Pin, Share/Who has access, Fork
@@ -2091,6 +2197,15 @@ the `sidebar.session.actions` contributions. Every island button presses and
 stays open as an accent glyph colour only ([design system](design-system.md),
 "Press composes"). `apps/web/test/mobileSessionMenu.test.ts` covers the menu
 and the press/open rule.
+
+**Photo size:** a composer given a photo over 1 MB asks how large it goes up
+before anything leaves the device (`ImageSizePrompt`, `imageUploadSize.ts`;
+Chat and an agent's page alike, by picker, camera, paste or drop). Small, Medium
+and Large are 1024, 1600 and 2560 px on the long edge, each showing its real
+encoded size; Original sends the file untouched. Other files in the batch do not
+wait, and a size that would change nothing is not offered. **Settings → Chat →
+Photo size** (`imageUploadSize`) keeps a standing answer. A reduced copy is a
+canvas re-encode, so it carries no EXIF, and only that copy is uploaded.
 
 **Composer attachments:** the next message's files are one row of the card —
 the *attachment tray* — between the model line and the editor, in a new chat
@@ -2478,8 +2593,10 @@ new send, session switch or explicit Jump to latest clears the hold. A newly ope
 events (`INITIAL_EVENT_WINDOW` in `init.ts`; streamed answers and thoughts are
 many chunk events, so the newest 40 were often one answer and the first frame
 showed a row or two at the top of the screen). The first frame lands at rest
-on the tail (or the saved reading position): apart from the surface's one
-reveal, no lift, entrance or fade for rows already in the log. The background
+on the tail: a chat the reader switches back to shows its newest messages, and
+only a reload or remount restores a saved reading position (`timelineAnchor.ts`;
+if that row is gone, the tail). Apart from the surface's one reveal, no lift,
+entrance or fade for rows already in the log. The background
 backfill (2,000-event pages up to 4,000) then lands above without changing what is rendered: the suffix window
 keeps its first row (`heldWindowStart`, located again by its first rows' ids
 when history merges into it, `locateWindowHead` in `timelineWindow.ts`), so
@@ -3387,9 +3504,18 @@ host.surfaces.register({
     down moves the item and lifts the dim (`--preview-drag` on its own layer)
     and the chrome, and dismisses from there or springs back. An image zooms
     in the viewer itself (`mediaZoom.ts`; the page never zooms): two fingers
-    pinch around their midpoint, a double tap zooms into the tapped point or
-    back to rest, a zoomed image drags within its bounds (clipped to the stage
-    via `data-zoomed`), and a trackpad pinch (ctrl + wheel) zooms on desktop.
+    pinch around their midpoint, a touch double tap and a mouse click zoom into
+    the tapped point, another click returns to rest, a zoomed image drags
+    within its bounds with a finger or the mouse (clipped to the stage via
+    `data-zoomed`), and the wheel —
+    a mouse wheel or a trackpad pinch (ctrl + wheel) — zooms around the
+    pointer. A single click always does something where the `zoom-in` cursor
+    promises it; the second click of a double click does not undo the first.
+    The viewer refuses the browser's own image drag (`draggable={false}`,
+    `-webkit-user-drag: none` and a cancelled `dragstart`): a native image drag
+    cancels the pointer sequence after the first move, so a mouse pan stopped
+    dead and left a ghost of the picture under the cursor.
+    Images also carry a zoom island in the viewer bar (out, level, in, reset).
     While zoomed, or with two fingers down, paging and the pull stand aside.
     The stage is `touch-action: none`: allowing native `pan-y` let the browser
     scroll or bounce the page behind the fixed viewer before a sideways swipe
@@ -4026,6 +4152,46 @@ remove another person's provider. The same file is the migration seed for
 accounts that predate the section, so existing host-global curation carries over
 into each account's list on first read.
 
+### Skills page (`skills` settings page)
+
+`packages/commands/widgets`. Two tabs that stay mounted behind an open skill, so
+its Back returns to the same search, filter and scroll position (`SkillsPage`).
+Search targets are `skills.catalog` (Library) and `skills.browse` (Catalog). The
+catalog is requested only when its tab opens, because it reads repositories.
+
+**Library** answers "what do I have, and where does it work". A row of harness
+chips with faceted counts filters it, so every added harness is visible without
+opening anything. Groups are *In every harness* (Polyth's copies, with an
+invitation to the catalog when empty), *Only in some harnesses*, and *Built into
+your harnesses*, collapsed because it is the least likely reason to come here.
+"Use in all harnesses" appears for the hovered or focused row, always on touch, and
+leaves narrow lists to the skill's own page.
+
+**Catalog** leads with search, focused on opening where there is a real pointer
+(↑↓ walk the rows; Esc clears; `/` stays with Settings' own search). Source
+tiles show their count and stars, and while searching, how many matches each holds.
+Choosing one filters in place and opens its masthead rather than a second page. A
+source's shelves are chips up to seven, and a `Select` past that. *Start here* shows
+only on the calm, unfiltered list. A row installs in one click to the open project;
+anything a person must weigh first (invisible characters, a taken name) opens the
+review page instead.
+
+**A skill's page** takes the page over, Esc steps back out of it rather than
+closing Settings, and Back returns focus to the row it came from. A catalog skill opens on its instructions,
+since it is being read before use; a library skill opens on *Harnesses*, since that
+is what only this page can answer. Facts are plain type, not pills. Every harness
+row states how the skill reaches it: *Native skill*, *Read when needed*, or the
+harness's own copy, and harnesses without it collapse to one line. Switches appear
+only where Polyth can truly act; a harness that loads its own skills says *Always
+on*. The page says what installing does and does not do, and warns only for
+invisible characters.
+
+Source pictures come through the server as checked data URLs, never from the
+client, and a source without one shows the page glyph, never initials. Tiles and
+cards use `--surface-overlay`, because `--elevated` is white on a white canvas. The
+page's grids need a `minmax(0, 1fr)` track: a strip that scrolls sideways otherwise
+widens the whole page on a phone.
+
 ### Package library surface (`packages` settings page)
 
 The host's `packages` settings page is one surface for built-in packages and
@@ -4331,8 +4497,8 @@ is wider. On the narrowest axis four 44px targets need a wider gap, so the
 toolbar's gaps are all about 20.8px there. The glyphs' ink spans are
 recorded on Lucide's 24-unit grid in `MobileNavigator.css`; Select's box
 and the lens are not symmetric, so their end-side insets swap in RTL. The
-closed search pill and the filter dot follow the lens. Every phone ⋮ is the stroked vertical ellipsis
-(`MoreVerticalIcon`), whose dots stay legible at row size. Their press wash
+closed search pill and the filter dot follow the lens. Every phone row ⋮ is the stroked vertical ellipsis
+(`MoreVerticalIcon`; the session island's menu trigger is the horizontal `MoreIcon`), whose dots stay legible at row size. Their press wash
 is a circle round the glyph and their targets are the full row height. Search's Back and a row's ⋮ keep a 44px target that runs out
 to the edge through a transparent `::after`; press rules set
 `background-color` only.
@@ -4978,9 +5144,10 @@ The host's cumulative transcript editor (`composer/transcriptSpan.ts`) and
 Markdown image lightbox (`markdown/ImageLightbox.tsx`) are generic primitives,
 independent of the Dictation and Gallery package implementations. The lightbox
 is an adapter over the shared full-screen viewer
-(`components/AttachmentPreview.tsx`), which attachments and tool images also
-use: close button, pinch / double-tap zoom for images, and for several items a
-counter, arrows, swipe, arrow keys and a thumbnail strip.
+(`components/AttachmentPreview.tsx`), which attachments, tool images and chat
+block pictures also use: close button, pinch / click / wheel / button zoom for
+images, and for several items a counter, arrows, swipe, arrow keys and a
+thumbnail strip.
 
 ## 7. Disposal, lifecycle, and failure isolation
 
@@ -5036,8 +5203,10 @@ counter, arrows, swipe, arrow keys and a thumbnail strip.
   `settingsNavigation.test.ts` "phone Settings knows the edge…" (origin, stage
   stack, native Back), `workspaceEditor.test.ts` "the Workspace leads with
   Back…", `attachmentPreviewGestures.test.ts` (media viewer paging,
-  pull-down, and a zoomed image that never pages), `mediaZoom.test.ts` (pinch,
-  double tap, pan bounds, no close click after a drag).
+  pull-down, mouse click/wheel zoom, and a zoomed image that never pages),
+  `mediaZoom.test.ts` (pinch, double tap, pan bounds, mouse click/wheel zoom,
+  a mouse pan with the browser's image drag refused, no close click after a
+  drag).
 - Rail drag: `railDrag.test.ts` (preview and persist model, the removal
   distance and its hysteresis), `railDragRemove.test.ts` (mounted pointer drag:
   the verdict, put-back near a rail, off screen and on a rail that cannot lose

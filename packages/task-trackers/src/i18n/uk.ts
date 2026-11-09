@@ -609,4 +609,13 @@ export const uk: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "Перейти в сесію після старту",
   "tasktrackers.start.model": "Модель",
   "tasktrackers.start.modelComposer": "Як у полі повідомлення",
+  "tasktrackers.automation.title": "Коли агент зупиняється",
+  "tasktrackers.automation.body": "Пов’язана картка переходить у вказаний вами стовпець, коли її сеанс зупиняється. Задачу ніколи не переносить у статус «виконано» чи з нього, і кожен хід переносить задачу щонайбільше один раз.",
+  "tasktrackers.automation.enabled": "Переносити задачу, коли агент зупиняється",
+  "tasktrackers.automation.column": "Стовпець для перенесення",
+  "tasktrackers.automation.columnHint": "Зіставляється за назвою в дошці самої задачі, без урахування регістру. Задача, чия дошка не має такого стовпця, лишається на місці.",
+  "tasktrackers.automation.finished": "Завершує свій хід",
+  "tasktrackers.automation.needsInput": "Чекає на відповідь",
+  "tasktrackers.automation.error": "Зазнає помилки або зупинений",
+  "tasktrackers.card.attention": "Потрібен погляд",
 };

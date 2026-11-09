@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { gt as semverGt, valid as validSemver } from "semver";
+import { gt as semverGt, valid as validSemver } from "@polyth/package-sdk/manifest";
 import { createContext, type KernelContext } from "@polyth/kernel";
 import {
   type Disposable,

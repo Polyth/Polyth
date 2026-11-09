@@ -33,9 +33,10 @@
 
   .workspace-panel-sheet .sheet-grabber { display: none; }
 
-  /* Back leads (the way a swipe takes the layer) and the Edit switch trails.
-     The row is the same in both modes (the title stays visually hidden,
-     workspacePanelWidgetFixes.css), so turning Edit on never moves it. */
+  /* Back leads (the way a swipe takes the layer); while editing, Add and Done
+     take the row instead (workspacePanelEditor.css). The row keeps one height
+     in both modes (the title stays visually hidden,
+     workspacePanelWidgetFixes.css), so editing never moves the grid. */
   .workspace-panel-sheet .sheet-head {
     min-height: 0;
     display: grid;
@@ -82,12 +83,6 @@
   .workspace-panel-sheet .sheet-back .ui-icon {
     width: var(--icon-lg);
     height: var(--icon-lg);
-  }
-
-  .workspace-panel-sheet .sheet-head-switch {
-    grid-column: 3;
-    grid-row: 1;
-    justify-self: end;
   }
 
   .workspace-panel-sheet .sheet-back:hover:where(:not(:disabled)),

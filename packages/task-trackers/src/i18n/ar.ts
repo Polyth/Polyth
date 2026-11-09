@@ -609,4 +609,13 @@ export const ar: TaskTrackersMessages = {
   "tasktrackers.start.openSession": "فتح الجلسة عند بدئها",
   "tasktrackers.start.model": "النموذج",
   "tasktrackers.start.modelComposer": "كما في مربع الكتابة",
+  "tasktrackers.automation.title": "عندما يتوقف الوكيل",
+  "tasktrackers.automation.body": "تنتقل البطاقة المرتبطة إلى عمود تسميه عندما تتوقف جلستها. لا تُنقل المهمة أبدًا إلى حالة منجَز أو منها، وكل دور ينقل المهمة مرة واحدة على الأكثر.",
+  "tasktrackers.automation.enabled": "انقل المهمة عندما يتوقف وكيلها",
+  "tasktrackers.automation.column": "العمود الذي تُنقل إليه",
+  "tasktrackers.automation.columnHint": "يُطابَق بالاسم في لوحة المهمة نفسها دون تمييز لحالة الأحرف. وإذا لم يكن للوحة هذا العمود، تبقى المهمة مكانها.",
+  "tasktrackers.automation.finished": "ينهي دوره",
+  "tasktrackers.automation.needsInput": "ينتظر إجابة",
+  "tasktrackers.automation.error": "يفشل أو يتوقف",
+  "tasktrackers.card.attention": "يحتاج نظرة",
 };

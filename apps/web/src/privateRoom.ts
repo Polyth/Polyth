@@ -1,4 +1,4 @@
-// "Only me" inside a shared project: a person's private room (Project.parentProjectId),
+// "Only me" inside a project: a person's private room (Project.parentProjectId),
 // a real project with its own folder and chats that the shell shows under its
 // parent rather than beside it. The registry holds it so a chat in it finds its
 // project; pickers and lists read `rootProjects`.
@@ -23,19 +23,49 @@ export const rootProjectId = (projects: readonly Project[], id: string | null): 
 export const privateRoomOf = (projects: readonly Project[], parentId: string): Project | undefined =>
   projects.find((candidate) => candidate.parentProjectId === parentId);
 
-/** The switch appears once a project has someone to be private from. */
-export const offersPrivateRoom = (project: Pick<Project, "sharedWith" | "personal" | "parentProjectId">): boolean =>
-  (project.sharedWith ?? 0) > 0 && !project.personal && !project.parentProjectId;
+/** Starting a private chat is offered once someone else really works in a
+ *  project; being able to open it isn't enough (`othersHere`). */
+export const offersPrivateRoom = (project: Pick<Project, "othersHere" | "personal" | "parentProjectId">): boolean =>
+  project.othersHere === true && !project.personal && !project.parentProjectId;
 
-/** Whether a chat in this lane is waiting for its person: the lane is hidden
- *  while they're in the other one, so its rows can't say so themselves. */
-export const laneWaiting = (sessions: readonly Pick<SessionProjection, "projectId" | "status" | "attention">[], laneId: string | undefined): boolean =>
-  laneId !== undefined && sessions.some((session) => session.projectId === laneId && session.status !== "archived"
+type RoomSession = Pick<SessionProjection, "projectId" | "status" | "attention" | "parentId">;
+
+/** A room's own chats: what its row counts. Delegated children ride inside them. */
+export const roomChatCount = (sessions: readonly RoomSession[], roomId: string | undefined): number =>
+  roomId === undefined ? 0 : sessions.filter((session) => session.projectId === roomId && session.status !== "archived" && !session.parentId).length;
+
+/** Whether a chat in a room is waiting for its person, for when its row is closed. */
+export const roomWaiting = (sessions: readonly RoomSession[], roomId: string | undefined): boolean =>
+  roomId !== undefined && sessions.some((session) => session.projectId === roomId && session.status !== "archived"
     && ((session.attention?.questions ?? 0) > 0 || (session.attention?.permissions ?? 0) > 0 || (session.attention?.unread ?? 0) > 0));
 
-/** Which lane of `parent` the person is in, given the project on screen. */
-export const inPrivateLane = (parent: Pick<Project, "id">, activeProject: Pick<Project, "parentProjectId"> | undefined): boolean =>
-  activeProject?.parentProjectId === parent.id;
+/** Whether the interface should say that others read a chat. Silence is the
+ *  norm: someone else's chat or one given to someone by name always speaks,
+ *  while a chat merely open to the Space speaks once someone else really works
+ *  in its project. An unknown project errs on the side of saying so. */
+export const othersRead = (
+  sharing: SessionProjection["sharing"],
+  project: Pick<Project, "othersHere"> | undefined,
+): boolean => {
+  if (!sharing?.shared) return false;
+  if (sharing.owner || sharing.named || sharing.visibility === "restricted") return true;
+  return !project || project.othersHere === true;
+};
+
+const projectOf = (session: Pick<SessionProjection, "projectId">): Project | undefined =>
+  getState().projectRegistry.projects.find((project) => project.id === session.projectId);
+
+export const chatReadByOthers = (session: Pick<SessionProjection, "projectId" | "sharing">): boolean =>
+  othersRead(session.sharing, projectOf(session));
+
+/** Whether which memory the agent has is worth a line: alone, there is nothing to tell apart. */
+export const chatAmongOthers = (session: Pick<SessionProjection, "projectId" | "sharing">): boolean => {
+  const project = projectOf(session);
+  // A room speaks for its project: someone can have one after the others left.
+  const home = project?.parentProjectId ? getState().projectRegistry.projects.find((candidate) => candidate.id === project.parentProjectId) : project;
+  return session.sharing?.multiPerson === true
+    && (home?.othersHere === true || othersRead(session.sharing, project));
+};
 
 const openRoom = async (parentId: string): Promise<Project | undefined> => {
   try {
@@ -48,14 +78,10 @@ const openRoom = async (parentId: string): Promise<Project | undefined> => {
   }
 };
 
-/** Turn to "Only me": the person's room, created the first time. */
-export async function openPrivateLane(parent: Pick<Project, "id">): Promise<void> {
+/** A new chat in the person's room, which is created the first time. */
+export async function startPrivateChat(parent: Pick<Project, "id">): Promise<void> {
   const room = await openRoom(parent.id);
   if (room) startFreshSession(room.id);
-}
-
-export function openSharedLane(parent: Pick<Project, "id">): void {
-  startFreshSession(parent.id);
 }
 
 /** A new private chat that quotes where this one was. What was already said in

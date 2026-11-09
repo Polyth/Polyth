@@ -11,6 +11,7 @@
     "./people": "./src/personConnections.ts"
   },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/serverEntry.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {
@@ -34,7 +35,6 @@
     "@polyth/tenancy": "0.1.0",
     "@polyth/web-sdk": "0.1.0",
     "esbuild": "^0.28.2",
-    "semver": "^7.7.3",
     "yauzl": "^3.4.0"
   },
   "peerDependencies": {

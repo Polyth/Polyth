@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { HarnessSnapshot, HarnessUpdateStatus } from "@polyth/contracts";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import { formatRelativeTime } from "@polyth/web/i18n";
@@ -6,7 +6,9 @@ import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
 import { Button, DownloadIcon, Notice, RefreshIcon } from "../../../apps/web/src/components/ui/index.ts";
 import { ReadonlyRow, Row, Section } from "../../../apps/web/src/components/settings/parts.tsx";
 import { displayVersion } from "./presentation.ts";
-import { runHarnessUpdate, useHarnessUpdates } from "./updates.ts";
+import { failureCopy, machineWords } from "./installPresentation.ts";
+import { onHarnessInstallSettled, startHarnessInstall, useHarnessInstalls } from "./installs.ts";
+import { dismissHarnessUpdateRun, loadHarnessUpdates, reinstallOffer, runHarnessUpdate, useHarnessUpdates } from "./updates.ts";
 
 const api = createApiTransport();
 
@@ -72,6 +74,28 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
   // The server decides who may run an updater (the instance owner, on this
   // machine); without its answer the attempt is allowed and it explains.
   const mayUpdate = status ? status.canUpdate : Boolean(updateCommand);
+  const installs = useHarnessInstalls(projectId, host);
+  const [reinstallId, setReinstallId] = useState<string>();
+  const [reinstallError, setReinstallError] = useState("");
+  const reinstall = reinstallOffer({ run, installCommand: snapshot?.setup?.installCommand, mayUpdate, job: installs.jobs.get(harnessId), startedId: reinstallId });
+  const tInstall: Translate = (key, values) => host.ui.locale.translate(`harnessruntime.install.${key}`, values);
+  // A finished reinstall changed the installed version: ask again, and drop
+  // the failed updater's log it replaced.
+  useEffect(() => onHarnessInstallSettled((job) => {
+    if (job.harnessId !== harnessId || job.id !== reinstallId) return;
+    if (job.phase === "succeeded") dismissHarnessUpdateRun(harnessId);
+    void loadHarnessUpdates(projectId, { force: true });
+  }), [harnessId, projectId, reinstallId]);
+  const startReinstall = async () => {
+    setReinstallError("");
+    try {
+      setReinstallId((await startHarnessInstall(harnessId, projectId)).id);
+    } catch (cause) {
+      setReinstallError((cause as { status?: unknown } | null)?.status === 409
+        ? t("busy", { name })
+        : cause instanceof Error ? cause.message : t("reinstallFailed"));
+    }
+  };
 
   const act = async (action: Action) => {
     setBusy(action);
@@ -109,8 +133,24 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
         <Button size="sm" iconStart={DownloadIcon} busy={running} disabled={!mayUpdate || running}
           onClick={() => void runHarnessUpdate(harnessId, projectId)}>{running ? t("updating") : status?.available ? t("update") : t("runUpdater")}</Button>
       </Row>}
+      {run?.state === "failed" && run.busy && <Notice tone="warning" role="status">{t("busy", { name })}</Notice>}
       {run?.state === "failed" && run.output && <details className="pkg-harnesses-update-log" open><summary>{t("updaterOutput")}</summary><pre>{run.output}</pre></details>}
       {run?.state === "done" && run.output && <details className="pkg-harnesses-update-log"><summary>{t("updaterOutput")}</summary><pre>{run.output}</pre></details>}
+      {(reinstall.kind === "offer" || reinstall.kind === "running" || reinstall.kind === "failed") && <Row label={t("reinstall")}
+        hint={reinstall.kind === "running" && reinstall.job.activity
+          ? reinstall.job.activity
+          : withCommand(t("reinstallHint", { command: MARK }), reinstall.kind === "offer" ? reinstall.command : reinstall.job.command)}>
+        <Button size="sm" iconStart={DownloadIcon} busy={reinstall.kind === "running"} disabled={reinstall.kind === "running" || running}
+          onClick={() => void startReinstall()}>{reinstall.kind === "running" ? t("reinstalling") : t("reinstallAction")}</Button>
+      </Row>}
+      {reinstall.kind === "done" && <Notice tone="success" role="status">
+        {reinstall.job.result?.version ? t("reinstalled", { version: displayVersion(reinstall.job.result.version) ?? reinstall.job.result.version }) : t("reinstalledNoVersion")}
+      </Notice>}
+      {reinstall.kind === "failed" && <>
+        <Notice tone="error" role="alert">{failureCopy(reinstall.job, machineWords(reinstall.job, tInstall), tInstall).summary}</Notice>
+        {reinstall.job.output && <details className="pkg-harnesses-update-log" open><summary>{t("installerOutput")}</summary><pre>{reinstall.job.output}</pre></details>}
+      </>}
+      {reinstallError ? <Notice tone="error" role="alert">{reinstallError}</Notice> : null}
     </Section>
     <Section title={t("runtime")} hint={t("runtimeHint")}>
       <Row label={t("restartLabel")} hint={canManage ? t("restartHint") : t("restartOwnerOnly")}>

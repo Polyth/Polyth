@@ -135,14 +135,6 @@
 
 .ui-tooltip.chat-action-tooltip {
   max-width: min(32ch, calc(100vw - (2 * var(--screen-gutter))));
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--elevated);
-  color: var(--text);
-  box-shadow: var(--shadow-md);
-  font-size: var(--font-response-meta);
-  line-height: var(--font-response-meta-lh);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }

@@ -192,8 +192,9 @@ function GalleryAppTile({ definition, added, onAdd, onRemove }: {
   );
 }
 
-/** Large sections open with a preview; the rest is one tap away. */
-const SECTION_PREVIEW = { app: 8, widget: 4, layout: 3 } as const;
+/** Large sections open with a preview; the rest is one tap away. Nine apps
+ *  fill three lines of the three-across tiles most phones show. */
+const SECTION_PREVIEW = { app: 9, widget: 4, layout: 3 } as const;
 
 function GallerySection({ section, icon, counts, query, showPackage, collapsible, onAdd, onRemove }: {
   section: PanelGallerySection;

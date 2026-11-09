@@ -189,6 +189,8 @@ import {
 } from "@polyth/models/web-prefs";
 import { hiddenModelMatcher } from "@polyth/models";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { isResizableImage, shouldAskImageSize } from "../imageUploadSize.ts";
+import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import { useSpaces } from "../spaces.ts";
 import { useProjectInterfaceMode } from "../projectInterfaceScope.ts";
@@ -234,10 +236,11 @@ import SessionContextBar, {
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
 import { projectRepositories } from "@polyth/contracts/workspace";
-import { executionRepositoryOf, normalizeRepositoryScope, primaryRepositoryIdOf } from "../composer/repositoryScope.ts";
+import { executionRepositoryOf, locationWithoutGit, normalizeRepositoryScope, primaryRepositoryIdOf } from "../composer/repositoryScope.ts";
 import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
-import { rootProjects } from "../privateRoom.ts";
+import { chatAmongOthers, rootProjects } from "../privateRoom.ts";
+import { ChatAudienceChip } from "./ChatAudience.tsx";
 import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, type MenuEntry } from "./ui/index.ts";
 import { canCollaborateSession, ownerName } from "../sessionSharing.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
@@ -584,10 +587,20 @@ function useComposerLocation(session: SessionProjection | null, readLiveText?: (
   const executionBranchLoaded = executionBranch !== null && executionBranch.key === executionBranchKey;
   const lockedBranchName = executionBranchLoaded ? executionBranch.name : "";
 
-  const currentBranchName = worktrees.find((worktree) => worktree.isMain)?.branch
-    || branches.current
-    || branch
-    || "";
+  // Git's answer outranks the store's label, which can still be the one
+  // remembered from an earlier launch.
+  const locationHasNoGit = cachedLocation !== null && locationWithoutGit(worktrees, branches);
+  const currentBranchName = locationHasNoGit
+    ? ""
+    : worktrees.find((worktree) => worktree.isMain)?.branch
+      || branches.current
+      || branch
+      || "";
+  // Nothing to choose: no repository, or none known yet (the chip would flash
+  // a placeholder before leaving). A locked checkout keeps its explanation.
+  const noCheckoutToChoose = !checkoutLocked
+    && !intendedWorktree
+    && (locationHasNoGit || (cachedLocation === null && !branch));
   // The project default never isolates where none can exist (a project
   // without Git), and the control stays hidden there. An explicit choice keeps
   // its no-fallback semantics and stays visible so it can be switched off.
@@ -818,6 +831,7 @@ function useComposerLocation(session: SessionProjection | null, readLiveText?: (
           }),
         } : {}),
       } : {}),
+      ...(noCheckoutToChoose ? { hideBranch: true } : {}),
       branchName,
       branchId: selectedBranchId,
       branches: branchChoices,
@@ -866,6 +880,15 @@ const ComposerFileInput = memo(function ComposerFileInput({ inputRef, onFiles, a
     />
   );
 });
+
+/** A picked photo that may be reduced is read now rather than uploaded from
+ *  staging, which can only send the exact bytes it holds. */
+function shouldReadStagedPhoto(metadata: { mimeType: string; size: number }): boolean {
+  const photo = { type: metadata.mimeType, size: metadata.size };
+  const preference = getUiSettings().imageUploadSize;
+  if (preference === "original") return false;
+  return preference === "ask" ? shouldAskImageSize(photo) : isResizableImage(photo);
+}
 
 const EMPTY_MENTION_LEVELS: readonly SessionAccessLevel[] = [];
 const EMPTY_MENTION_CANDIDATES: SessionMentionCandidateDto[] = [];
@@ -1997,22 +2020,29 @@ function ComposerBody({
       if (failed && !failed.ok) setUiError(failed.reason);
     });
   }, [activeProjectId, session?.id]);
-  const attachFiles = useCallback((files: File[]) => {
-    const projectId = getState().activeProjectId;
-    if (!projectId || files.length === 0) return;
-    const target = sessionIdRef.current;
+  const imageChoice = useImageSizeChoice({
+    scopeKey: scopedDraftCacheKey(session?.id ?? null),
+    onScopeChanged: () => setUiError(tr("composer.attachmentContextChanged")),
+  });
+  const offerImages = imageChoice.offer;
+  const attachFilesTo = useCallback((projectId: string, target: string | null, files: File[]) => {
     if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
-    for (const f of files) {
-      void attachUpload(projectId, target, f).then((r) => {
+    offerImages(files.map((f) => ({
+      file: f,
+      commit: (chosen) => attachUpload(projectId, target, chosen).then((r) => {
         if (!r.ok) {
           setUiError(tr("composer.couldNotAttachValue", {
             name: f.name || tr("composer.discovery.file"),
             reason: r.reason,
           }));
         }
-      });
-    }
-  }, []);
+      }),
+    })));
+  }, [offerImages]);
+  const attachFiles = useCallback((files: File[]) => {
+    const projectId = getState().activeProjectId;
+    if (projectId && files.length > 0) attachFilesTo(projectId, sessionIdRef.current, files);
+  }, [attachFilesTo]);
   const attachPastedText = useCallback((pasted: string, projectId: string, sessionId: string | null) => {
     if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
     void attachText(projectId, sessionId, pasted).then((r) => {
@@ -2057,6 +2087,20 @@ function ComposerBody({
           return;
         }
         for (const metadata of result.metadata) {
+          // The question can outlast this process, and a staged file nothing
+          // refers to would count against staging for good: bring its bytes
+          // here and free the staged copy before asking. Failed reads fall
+          // through to the staged path, which reports them.
+          const photo = shouldReadStagedPhoto(metadata);
+          if (photo) {
+            const file = await readNativeStagedFile(metadata).catch(() => null);
+            if (file) {
+              await removeNativeStagedFile(metadata).catch(() => undefined);
+              if (sessionIdRef.current === target) attachFilesTo(projectId, target, [file]);
+              else setUiError(tr("composer.attachmentContextChanged"));
+              continue;
+            }
+          }
           const attached = await attachNativeStagedUpload(projectId, target, metadata, {
             read: readNativeStagedFile,
             remove: removeNativeStagedFile,
@@ -2070,7 +2114,7 @@ function ComposerBody({
       else if (result.status === "denied" || result.status === "failed") setUiError(result.message);
       // Native cancellation is a normal no-op and keeps the draft untouched.
     });
-  }, []);
+  }, [attachFilesTo]);
 
   const onPaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
     const projectId = getState().activeProjectId;
@@ -4102,6 +4146,7 @@ function ComposerBody({
         phone={phoneLayout}
         sessionId={session.id}
         projectId={session.projectId}
+        privateChat={chatAmongOthers(session) ? session.sharing?.shared !== true : undefined}
         pressureLevel={model.contextPressureLevel}
         {...(chatMemory ? {
           memory: {
@@ -4146,9 +4191,6 @@ function ComposerBody({
     // widgets that act on the agent's turn (WidgetDef.agentOnly).
     agentless: peopleOnly,
     working,
-    // A chat only its owner reads, in a Space with other people: what a personal
-    // suggestion needs, and it can't exist anywhere else.
-    privateAmongOthers: session?.sharing?.multiPerson === true && session.sharing.shared !== true,
     autoApproveOn,
     autoApproveAll,
     setDraftAutoApprove: setNewSessionAutoApprove,
@@ -4186,7 +4228,7 @@ function ComposerBody({
     || borrowedEpochPending
     || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
-  const hasDraft = liveText.trim() !== "" || attachments.length > 0;
+  const hasDraft = liveText.trim() !== "" || attachments.length > 0 || imageChoice.pending.length > 0;
   const peopleSendDisabled = peopleSending || (liveText.trim() === "" && attachments.length === 0);
   const runningHasSend = !sendDisabled;
   const runningPrimaryLabel = queueEdit
@@ -4577,7 +4619,7 @@ function ComposerBody({
           if (!k || !activeProjectId) return;
           e.preventDefault();
           void dropIntoSession(e.dataTransfer, activeProjectId, sessionIdRef.current,
-            (reason) => setUiError(tr("composer.couldNotAttach", { reason })));
+            (reason) => setUiError(tr("composer.couldNotAttach", { reason })), attachFiles);
         }}
       >
       {dropHint && (
@@ -4592,6 +4634,7 @@ function ComposerBody({
           {tr("composer.largePasteBanner")}
         </Notice>
       )}
+      <ImageSizePrompt choice={imageChoice} />
       {!conversation && showModelWarning && !hostOnlyCommandReady && (
         <div className="composer-note composer-runtime-unavailable" role="status">
           <span>
@@ -4622,6 +4665,7 @@ function ComposerBody({
           {effortControl}
           {contextPie}
           <SlotHost slot="composer.config" context={slotContext} />
+          {session && <ChatAudienceChip session={session} />}
           {phoneLayout && <MobileComposerEditEntry editing={mobileRailEditing} onChange={editMobileRail} />}
         </div>
       )}
