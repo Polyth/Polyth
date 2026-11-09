@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import type { HarnessUpdateStatus } from "@polyth/contracts";
+import type { HarnessInstallDto, HarnessUpdateStatus } from "@polyth/contracts";
 import { createApiTransport } from "@polyth/web-sdk";
 import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
+import { installIsActive } from "./installPresentation.ts";
 
 const api = createApiTransport();
 
@@ -99,6 +100,35 @@ export function useHarnessUpdates(projectId?: string | null) {
     runs: current.runs,
     refresh,
   };
+}
+
+export type ReinstallOffer =
+  | { kind: "none" }
+  | { kind: "offer"; command: string }
+  | { kind: "running"; job: HarnessInstallDto }
+  | { kind: "done"; job: HarnessInstallDto }
+  | { kind: "failed"; job: HarnessInstallDto };
+
+/** A CLI whose own updater failed (an old build that crashes on this CPU, a
+ *  broken self-update) is put right by its installer, which always fetches
+ *  the newest release. Offered only after a failed update run, to someone
+ *  who may update, when the harness has an installer here; `startedId` is the
+ *  install this page started, so an older install never reads as its outcome. */
+export function reinstallOffer(input: {
+  run: HarnessUpdateRun | undefined;
+  installCommand: string | undefined;
+  mayUpdate: boolean;
+  job: HarnessInstallDto | undefined;
+  startedId: string | undefined;
+}): ReinstallOffer {
+  const ours = input.startedId && input.job?.id === input.startedId ? input.job : undefined;
+  if (ours) {
+    if (installIsActive(ours)) return { kind: "running", job: ours };
+    if (ours.phase === "succeeded") return { kind: "done", job: ours };
+    if (ours.phase !== "cancelled") return { kind: "failed", job: ours };
+  }
+  if (input.run?.state !== "failed" || !input.installCommand || !input.mayUpdate) return { kind: "none" };
+  return { kind: "offer", command: input.installCommand };
 }
 
 /** A newer release the caller may install from Settings right now. */

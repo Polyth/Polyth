@@ -159,7 +159,11 @@ async function runUpdateCommand(command: readonly string[]): Promise<HarnessUpda
                 const output = `${stdout}${stderr}`.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim().slice(-UPDATE_OUTPUT_TAIL);
                 const code = (error as { code?: unknown } | null)?.code;
                 const exitCode = !error ? 0 : typeof code === "number" ? code : null;
-                resolve({ ok: !error, exitCode, output: output || (error ? error.message : "") });
+                // A CLI that crashed (an old build hitting SIGILL on this CPU)
+                // prints nothing; name the signal so the failure is legible.
+                const signal = (error as { signal?: unknown } | null)?.signal;
+                const crashed = typeof signal === "string" && signal ? `${binary} stopped with ${signal}` : "";
+                resolve({ ok: !error, exitCode, output: [output || (error && !crashed ? error.message : ""), crashed].filter(Boolean).join("\n") });
             });
             child.stdin?.end();
         }
