@@ -111,7 +111,7 @@ const resolveCursorBinary = async () => {
         const command = report.hit.executablePath;
         const env = await harnessExecutableChildEnv(command);
         try {
-            const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
+            const version = (await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
             if (!configured && binary === "agent"
                 && !/cursor-agent/i.test(command)
                 && !/^\d{4}\.\d{2}\.\d{2}(?:-|$)/.test(version)) continue;
@@ -161,7 +161,7 @@ const accountSessionsDir = (account?: ResolvedHarnessAccount) =>
 /** `agent status --format json` is the CLI's local sign-in report. */
 const cursorAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
     const { command, env } = await resolveCursorBinary();
-    const { stdout } = await exec(command, ["status", "--format", "json"], {
+    const { stdout } = await exec(windowsShim(command) ? `"${command}"` : command, ["status", "--format", "json"], {
         timeout: 20_000,
         maxBuffer: 64 * 1024,
         env: { ...env, ...accountEnv(account) },

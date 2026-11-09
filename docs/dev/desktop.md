@@ -166,6 +166,28 @@ control socket in the desktop data folder. `polyth open` relaunches the app with
 `--polyth-open=/p/…/s/…`; the single-instance handoff validates the path
 (`cliInstall.ts`) and loads it in the existing window. See [CLI](cli.md).
 
+## Node workers inside the app
+
+The server runs in Electron's main process, so `process.execPath` is the app
+binary, not Node. A script launched as `process.execPath <file>` without
+`ELECTRON_RUN_AS_NODE=1` starts a second app instance that the single-instance
+lock closes at once. Harness workers (Antigravity, Pi, Command Code) launched
+through `createHarnessProcessAuthority` get the flag automatically
+(`nodeModeSpawnOptions` in `packages/harness-runtime/src/processAuthority.ts`),
+and their descendants inherit it. Any other `process.execPath` spawn must set it
+itself, as `packages/server/src/agentTools.ts` does.
+
+The server code is bundled into `app.asar`, so `new URL("../x", import.meta.url)`
+points at a file that is not there and that no outside program could read. A
+package's `assets/` folder ships to `resources/packages/<folder>/assets`; resolve
+it through `POLYTH_RESOURCES_DIR` when the module-relative file is missing (see
+`assetPath` in `packages/backend-deepseek/src/serverEntry.ts`).
+
+On Windows a harness CLI installed by npm is a `.cmd` shim, which only starts
+through `cmd.exe`, and Node joins that command line unquoted. Quote the shim path
+and every argument (`windowsShimInvocation` in the process authority; probes quote
+the path) or a path with a space splits.
+
 ## Local builds
 
 Use Node 22.16 or newer (matching `scripts/check-node.mjs` and `.nvmrc`).

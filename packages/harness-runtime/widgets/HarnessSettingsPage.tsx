@@ -154,7 +154,7 @@ function UpdateOutcome({ t, name, run, onRetry, onRestart, onDismiss }: {
   }
   return <Notice tone="error" role="alert" heading={t("outcome.failed", { name })}
     actions={<>{onRetry && <Button size="sm" variant="ghost" onClick={onRetry}>{t("outcome.tryAgain")}</Button>}<Button size="sm" variant="ghost" onClick={onDismiss}>{t("outcome.dismiss")}</Button></>}>
-    {run.message ?? (run.exitCode === null ? t("outcome.notFinished") : t("outcome.exitCode", { code: run.exitCode }))}
+    {run.busy ? t("outcome.busy", { name }) : run.message ?? (run.exitCode === null ? t("outcome.notFinished") : t("outcome.exitCode", { code: run.exitCode }))}
     {run.output && <details className="pkg-harnesses-update-log"><summary>{t("outcome.output")}</summary><pre>{run.output}</pre></details>}
   </Notice>;
 }

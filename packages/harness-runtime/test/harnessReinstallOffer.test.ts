@@ -34,3 +34,8 @@ test("only the install this page started reports progress and outcome", () => {
   // Stopped by the person: back to the plain offer.
   assert.equal(reinstallOffer({ ...base, run: failedRun, job: job("new", "cancelled"), startedId: "new" }).kind, "offer");
 });
+
+test("a refusal because Windows chats still run the CLI offers no reinstall", () => {
+  // The installer would hit the same running file the updater could not replace.
+  assert.equal(reinstallOffer({ ...base, run: { ...failedRun, output: "", busy: true } }).kind, "none");
+});

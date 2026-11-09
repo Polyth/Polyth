@@ -70,7 +70,8 @@
         "from": "../../packages",
         "to": "packages",
         "filter": [
-          "*/dist/web/**/*"
+          "*/dist/web/**/*",
+          "*/assets/**/*"
         ]
       },
       {

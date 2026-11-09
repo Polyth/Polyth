@@ -172,12 +172,21 @@ export const quoteWindowsArgument = (argument: string): string => {
   return `${quoted}${"\\".repeat(backslashes * 2)}"`;
 };
 
+/** A `.cmd`/`.bat` shim (npm installs every CLI as one) starts only through
+ * cmd.exe, and Node joins a `shell` command line unquoted, so a path with a
+ * space (a project folder, the user's profile, Program Files) split into
+ * several arguments. Quote each word for the program the shim runs; cmd.exe
+ * keeps quoted words whole and the shim's `%*` hands them on unchanged. */
+export const windowsShimInvocation = (command: string, args: readonly string[]): { command: string; args: string[] } =>
+  ({ command: quoteWindowsArgument(command), args: args.map(quoteWindowsArgument) });
+
 /** The command line Node itself would run for `spawn(command, args, { shell })`. */
 const windowsCommandLine = (command: string, args: readonly string[], shell: SpawnOptions["shell"]): string => {
   if (!windowsCommandShim(command) && !shell) return [command, ...args].map(quoteWindowsArgument).join(" ");
   // Node joins a shell command unquoted and hands it to cmd.exe /d /s /c.
   const interpreter = typeof shell === "string" ? shell : process.env.ComSpec ?? "cmd.exe";
-  return `${quoteWindowsArgument(interpreter)} /d /s /c "${[command, ...args].join(" ")}"`;
+  const words = shell ? [command, ...args] : [command, ...args].map(quoteWindowsArgument);
+  return `${quoteWindowsArgument(interpreter)} /d /s /c "${words.join(" ")}"`;
 };
 
 /** The packaged helper, else the one `npm run build:supervisor` built. Both are
@@ -302,12 +311,14 @@ export async function createPortableHarnessAuthority(
             windowsHide: true,
           });
         } else {
-          child = spawn(command, args, {
+          // Windows npm shims are .cmd/.bat files and require cmd.exe. The
+          // executable itself was already resolved by Polyth; prompts and
+          // project text never become part of this command line.
+          const shim = windowsCommandShim(command) && !options.shell;
+          const invocation = shim ? windowsShimInvocation(command, args) : { command, args };
+          child = spawn(invocation.command, invocation.args, {
             ...spawnOptions,
-            // Windows npm shims are .cmd/.bat files and require cmd.exe. The
-            // executable itself was already resolved by Polyth; prompts and
-            // project text never become part of this command line.
-            shell: windowsCommandShim(command) || options.shell || false,
+            shell: shim || options.shell || false,
             // A dedicated POSIX process group lets explicit disposal terminate
             // the normal descendant tree. Windows uses taskkill /T instead.
             detached: process.platform !== "win32",
@@ -351,13 +362,35 @@ export async function createPortableHarnessAuthority(
  * generation; an unclean crash cannot silently duplicate execution, and
  * `durable:false` keeps cross-harness switching blocked.
  */
+/** The Desktop app hosts the Polyth server in Electron's main process, so
+ * `process.execPath` there is the app binary, which runs a script as Node only
+ * with ELECTRON_RUN_AS_NODE. Without it a worker launched as
+ * `process.execPath <worker.mjs>` starts a second app instance that the
+ * single-instance lock closes at once, and the runtime never initializes (a new
+ * chat then ends as "not confirmed"). Descendants inherit the flag, which is
+ * what a worker's own `process.execPath` children (hooks, bootstraps) need. */
+export const nodeModeSpawnOptions = (
+  command: string,
+  options: SpawnOptions,
+  runtime: { electron?: string; execPath: string } = { electron: process.versions.electron, execPath: process.execPath },
+): SpawnOptions => {
+  if (!runtime.electron || command !== runtime.execPath) return options;
+  return { ...options, env: { ...(options.env ?? process.env), ELECTRON_RUN_AS_NODE: "1" } };
+};
+
+const withNodeMode = <T extends HarnessProcessAuthority>(authority: T): T => {
+  const spawnProcess = authority.spawn.bind(authority);
+  authority.spawn = (command, args, options = {}) => spawnProcess(command, args, nodeModeSpawnOptions(command, options));
+  return authority;
+};
+
 export async function createHarnessProcessAuthority(
   file?: string,
   stable = false,
 ): Promise<HarnessProcessAuthority> {
-  if (process.platform !== "linux") return createPortableHarnessAuthority(file, stable);
+  if (process.platform !== "linux") return withNodeMode(await createPortableHarnessAuthority(file, stable));
   const authority = await createProcessAuthority(file, stable);
-  return Object.assign(authority, { durable: true as const });
+  return withNodeMode(Object.assign(authority, { durable: true as const }));
 }
 
 /** Fence the exact authority a binding names, without constructing a runtime.

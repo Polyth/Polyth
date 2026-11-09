@@ -91,7 +91,9 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
     try {
       setReinstallId((await startHarnessInstall(harnessId, projectId)).id);
     } catch (cause) {
-      setReinstallError(cause instanceof Error ? cause.message : t("reinstallFailed"));
+      setReinstallError((cause as { status?: unknown } | null)?.status === 409
+        ? t("busy", { name })
+        : cause instanceof Error ? cause.message : t("reinstallFailed"));
     }
   };
 
@@ -131,6 +133,7 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
         <Button size="sm" iconStart={DownloadIcon} busy={running} disabled={!mayUpdate || running}
           onClick={() => void runHarnessUpdate(harnessId, projectId)}>{running ? t("updating") : status?.available ? t("update") : t("runUpdater")}</Button>
       </Row>}
+      {run?.state === "failed" && run.busy && <Notice tone="warning" role="status">{t("busy", { name })}</Notice>}
       {run?.state === "failed" && run.output && <details className="pkg-harnesses-update-log" open><summary>{t("updaterOutput")}</summary><pre>{run.output}</pre></details>}
       {run?.state === "done" && run.output && <details className="pkg-harnesses-update-log"><summary>{t("updaterOutput")}</summary><pre>{run.output}</pre></details>}
       {(reinstall.kind === "offer" || reinstall.kind === "running" || reinstall.kind === "failed") && <Row label={t("reinstall")}

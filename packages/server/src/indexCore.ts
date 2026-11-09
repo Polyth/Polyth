@@ -3201,6 +3201,23 @@ export async function boot(opts: BootOptions = {}) {
     for (const result of failed) console.warn("[polyth] harness runtime restart failed", (result as PromiseRejectedResult).reason);
     return { restarted: results.length - failed.length, failed: failed.length };
   });
+  // Windows cannot replace an executable a running process has open, so a
+  // harness update or reinstall first releases this harness's idle chats
+  // through the safe idle-release gate (their next turn relaunches the new
+  // build) and reports the chats it had to leave running. The lock is
+  // machine-wide, so every Space's leases count; only the instance owner can
+  // ask. A shared workspace runtime is not released here.
+  provideService("harness.runtime.releaseIdle", async (
+    harnessId: string,
+  ): Promise<{ released: number; busy: number }> => {
+    const provider = harnesses.get(harnessId);
+    if (!provider || provider.runtimeLifetime === "workspace") return { released: 0, busy: 0 };
+    const results = await Promise.allSettled(
+      harnessPool.liveSessionIdsForHarness(harnessId).map((id) => sessions.releaseRuntimeIfIdle?.(id) ?? Promise.resolve({ released: false })),
+    );
+    const released = results.filter((result) => result.status === "fulfilled" && result.value.released).length;
+    return { released, busy: results.length - released };
+  });
   reconcileRuntimeForConfigRestart = (sessionId, runtime, expected) =>
     sessions.reconcileForRuntimeRestart(sessionId, runtime, expected);
   canEvictRuntime = (runtime, inspectionRuntime, expected, liveStreamSessionIds) =>

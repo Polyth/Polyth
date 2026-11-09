@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { HarnessRegistry, RuntimeEvent } from "@polyth/contracts";
@@ -14,10 +16,19 @@ import { latestPromptUsage, listNativeSessions, promptRecordedSince, readNativeD
 const exec = promisify(execFile);
 
 const NPM_PACKAGE = "@deepseek-ai/dsh";
+/** A file in this package's `assets/` folder. The Desktop app bundles the
+ *  server into app.asar, where a module-relative path does not exist and no
+ *  outside program could read it anyway; it ships every package's `assets/`
+ *  to `resources/packages/<folder>/assets` instead. */
+const assetPath = (name: string): string => {
+  const local = fileURLToPath(new URL(`../assets/${name}`, import.meta.url));
+  const resources = process.env.POLYTH_RESOURCES_DIR;
+  return existsSync(local) || !resources ? local : join(resources, "packages", "backend-deepseek", "assets", name);
+};
 /** Polyth's `--patch` overlay: native subagents off (see the file). */
-export const ACP_PATCH = fileURLToPath(new URL("../assets/acp.patch.yml", import.meta.url));
+export const ACP_PATCH = assetPath("acp.patch.yml");
 /** The sign-in helper Polyth offers as the DeepSeek sign-in command. */
-export const SIGN_IN_SCRIPT = fileURLToPath(new URL("../bin/sign-in.mjs", import.meta.url));
+export const SIGN_IN_SCRIPT = assetPath("sign-in.mjs");
 /** `dsh --version` prints a bare semver; other `dsh` binaries (the Debian
  *  distributed shell, node-dsh) do not, nor do they describe DeepSeek. */
 const DSH_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
@@ -33,10 +44,10 @@ export const resolveDshBinary = async (): Promise<{ command: string; version: st
     if (!report.hit) throw Object.assign(new Error("DeepSeek Harness (dsh) was not found"), { code: "not-installed" });
     const command = report.hit.executablePath;
     const env = await harnessExecutableChildEnv(command);
-    const version = (await exec(command, ["--version"], { timeout: 10_000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
+    const version = (await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], { timeout: 10_000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
     if (!DSH_VERSION.test(version)) throw Object.assign(new Error(`${command} is not DeepSeek Harness`), { code: "not-installed" });
     if (verified.get(command) !== version) {
-        const help = await exec(command, ["--help"], { timeout: 10_000, maxBuffer: 64 * 1024, env, shell: windowsShim(command) })
+        const help = await exec(windowsShim(command) ? `"${command}"` : command, ["--help"], { timeout: 10_000, maxBuffer: 64 * 1024, env, shell: windowsShim(command) })
             .then(({ stdout, stderr }) => `${stdout}\n${stderr}`, () => "");
         if (!/DeepSeek Harness/i.test(help)) throw Object.assign(new Error(`${command} is not DeepSeek Harness`), { code: "not-installed" });
         verified.set(command, version);

@@ -66,7 +66,7 @@ export function parseGrokModelsStatus(output: { stdout: string; stderr: string; 
 
 /** `grok models` never runs a model turn; a launch failure is never "signed out". */
 const readGrokModelsStatus = async (command: string, env: NodeJS.ProcessEnv): Promise<HarnessAccountStatus> =>
-    exec(command, ["models"], {
+    exec(windowsShim(command) ? `"${command}"` : command, ["models"], {
         timeout: 20_000,
         maxBuffer: 64 * 1024,
         env,
@@ -113,7 +113,7 @@ export function createGrokProfile(account?: ResolvedHarnessAccount): RegisteredA
                 // fresh login (or an expired one) is seen without waiting for
                 // the 60 s/5 min discovery lifetimes.
                 const [version, status] = await Promise.all([
-                    exec(command, ["version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
+                    exec(windowsShim(command) ? `"${command}"` : command, ["version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
                         .then(({ stdout, stderr }) => (stdout || stderr).trim())
                         .catch(() => undefined),
                     readGrokModelsStatus(command, env),

@@ -49,7 +49,7 @@ const piEnv = async (command: string, account?: ResolvedHarnessAccount): Promise
 /** `pi --list-models` offline is a local catalog report; it runs no turn. */
 const piAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
   const command = await resolvePiBinary();
-  const { text, ok } = await exec(command, ["--list-models"], {
+  const { text, ok } = await exec(windowsShim(command) ? `"${command}"` : command, ["--list-models"], {
     timeout: 30_000,
     maxBuffer: 512 * 1024,
     env: { ...await piEnv(command, account), PI_OFFLINE: "1" },
@@ -195,7 +195,7 @@ export function createPiProvider(host: ServerPackageHost, account?: ResolvedHarn
       try {
         const command = await resolvePiBinary();
         const env = await piEnv(command, account);
-        const version = await exec(command, ["--version"], {
+        const version = await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], {
           timeout: 5_000,
           maxBuffer: 4_096,
           env,

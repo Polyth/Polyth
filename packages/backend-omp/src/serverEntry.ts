@@ -37,7 +37,7 @@ const accountEnv = (account?: ResolvedHarnessAccount): Record<string, string> =>
 /** `omp models` lists the configured catalog locally; it runs no model turn. */
 const ompAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
     const { command, env } = await resolveOmpBinary();
-    const { text, ok } = await exec(command, ["models"], {
+    const { text, ok } = await exec(windowsShim(command) ? `"${command}"` : command, ["models"], {
         timeout: 30_000,
         maxBuffer: 256 * 1024,
         env: { ...env, ...accountEnv(account) },
@@ -76,7 +76,7 @@ export function createOmpProfile(account?: ResolvedHarnessAccount): RegisteredAc
                 const env = { ...baseEnv, ...accountEnv(account) };
                 profile.command = command;
                 profile.env = env;
-                const version = await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
+                const version = await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
                     .then(({ stdout, stderr }) => (stdout || stderr).trim())
                     .catch(() => undefined);
                 return {
