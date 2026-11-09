@@ -152,10 +152,10 @@ test("island buttons press and stay open as a colour change, with no plate or se
   const tools = header.indexOf('label={tr("mobile.island.openTools")}');
   assert.ok(compose > 0 && compose < tools && tools < more);
   assert.match(header, /onOpenTools=\{openWorkspaceNavigation\}/);
-  // The narrower ⋯ is last, so its padding sits on the end side: the glyph
-  // keeps the same inset from the pill's right end as ✎ has from its left.
-  const trigger = css.match(/\.mobile-float-actions > \.ui-icon-btn\.mobile-session-menu-trigger \{([^}]*)\}/);
-  assert.ok(trigger, "the ⋯ trigger has its own width rule");
-  assert.match(trigger![1]!, /padding-inline: 0 var\(--space-2\)/);
-  assert.doesNotMatch(trigger![1]!, /padding-inline-start/);
+  // ⋯ is a full-width button like ✎, and the island pads both rounded ends
+  // alike, so the glyphs keep equal insets from either end of the pill.
+  assert.doesNotMatch(css, /\.mobile-session-menu-trigger \{/, "⋯ has no width or padding of its own");
+  const island = css.match(/\.mobile-float-actions:not\(\.mobile-float-done\) \{([^}]*)\}/);
+  assert.ok(island, "the icon actions island pads its ends");
+  assert.match(island![1]!, /padding-inline: var\(--space-1\);/);
 });

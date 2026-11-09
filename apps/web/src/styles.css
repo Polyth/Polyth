@@ -19152,17 +19152,12 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   .mobile-session-title-island .mobile-session-selector:active:where(:not(:disabled, [data-conversation])) {
     transition: none;
   }
-  /* ⋯ closes the island after ✎ as a narrower control. Its end padding
-     puts the glyph on the rounded end's centre, where a full 44px
-     button's would sit, so both ends of the pill have the same inset; the
-     narrower width only closes the gap to ✎. Its hit box is its own
-     width: the shared 44px ::after would reach under its neighbours. */
-  .mobile-float-actions > .ui-icon-btn.mobile-session-menu-trigger {
-    width: calc(var(--tap) - var(--space-2));
-    padding-inline: 0 var(--space-2);
-  }
-  .mobile-float-actions > .mobile-session-menu-trigger::after {
-    width: 100%;
+  /* The icon actions island holds full 44px buttons (✎ then ⋯ in a chat,
+     ✎ then ⧉ in a new chat) with a little room inside both rounded ends,
+     so the glyphs sit 44px apart and the same distance from either end.
+     The text Done keeps its own padding. */
+  .mobile-float-actions:not(.mobile-float-done) {
+    padding-inline: var(--space-1);
   }
 
   body:not([data-shift-held]) .mobile-float-navigation > .ui-icon-btn:focus-visible,
