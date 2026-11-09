@@ -216,6 +216,8 @@
         "docs/agents/known-drift.md"
       ],
       "testHints": [
+        "packages/commands/test/skillLibrary.test.ts",
+        "packages/harness-runtime/test/nativeSkills.test.ts",
         "packages/harness-runtime/test/registry.test.ts",
         "packages/harness-runtime/test/rpc.test.ts",
         "packages/server/test/harnessSwitch.test.ts",

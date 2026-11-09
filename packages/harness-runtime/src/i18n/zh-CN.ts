@@ -784,6 +784,8 @@ export const zhCN: HarnessRuntimeMessages = {
   "harnessruntime.skills.source.project": "此项目",
   "harnessruntime.skills.source.user": "你的技能",
   "harnessruntime.skills.source.plugin": "来自插件",
+  "harnessruntime.skills.source.bundled": "内置",
+  "harnessruntime.skills.lockedHint": "{name} 会自行加载这些技能，因此 Polyth 无法关闭它们；如需关闭，请从其文件夹中移除。若要在其他运行框架中使用，请在“设置 → 技能”中打开。",
   "harnessruntime.skills.changeAction": "更改 {name} 的技能",
   "harnessruntime.skills.loadTitle": "无法读取 {name} 的技能",
   "harnessruntime.skills.reading": "正在读取技能…",

@@ -7,10 +7,11 @@ import { EmptyState, ErrorState, Row, Section } from "../../../apps/web/src/comp
 
 const api = createApiTransport();
 
-const SOURCE_ORDER: HarnessNativeSkillDto["source"][] = ["project", "user", "plugin"];
+const SOURCE_ORDER: HarnessNativeSkillDto["source"][] = ["project", "user", "plugin", "bundled"];
 
 /** The harness's own skills: inherit them into Polyth conversations, then mute
- *  any one of them. Polyth never edits the harness's skill folders. */
+ *  any one of them. A harness that loads its skills by itself offers neither, so
+ *  they list read-only. Polyth never edits the harness's skill folders. */
 export default function HarnessSkills({ host, harnessId, snapshot, projectId }: {
   host: WebPackageHost;
   harnessId: string;
@@ -75,16 +76,20 @@ export default function HarnessSkills({ host, harnessId, snapshot, projectId }: 
   }
 
   const locked = Boolean(busy) || !canManage || !list.supported;
+  // Absent means the policy: older managers have no other kind.
+  const controlled = list.control !== "none";
   const active = list.skills.filter((skill) => skill.enabled).length;
   return <div className="pkg-harnesses-skills" data-settings-item={`harness.${harnessId}.skills`}>
     {failure && <Notice tone="error" role="alert">{failure}</Notice>}
     {!list.supported && list.unsupportedReason && <Notice>{list.unsupportedReason}</Notice>}
-    {list.supported && !canManage && <Notice>{t("ownerOnly", { name })}</Notice>}
-    <Section title={t("title", { name })} hint={t("hint", { name })}
+    {list.supported && controlled && !canManage && <Notice>{t("ownerOnly", { name })}</Notice>}
+    <Section title={t("title", { name })} hint={controlled ? t("hint", { name }) : t("lockedHint", { name })}
       action={<Button size="sm" variant="ghost" iconStart={RefreshIcon} busy={busy === "reload"} disabled={Boolean(busy)} onClick={() => { setBusy("reload"); void load().finally(() => setBusy("")); }}>{t("checkAgain")}</Button>}>
-      <Row label={t("inheritLabel", { name })} hint={list.inherit ? t("inheritOn", { active, total: list.skills.length }) : t("inheritOff")}>
-        <Switch label={t("inheritLabel", { name })} checked={list.inherit} disabled={locked} onChange={(inherit) => void update("inherit", { inherit })} />
-      </Row>
+      {controlled && (
+        <Row label={t("inheritLabel", { name })} hint={list.inherit ? t("inheritOn", { active, total: list.skills.length }) : t("inheritOff")}>
+          <Switch label={t("inheritLabel", { name })} checked={list.inherit} disabled={locked} onChange={(inherit) => void update("inherit", { inherit })} />
+        </Row>
+      )}
     </Section>
     {list.skills.length === 0
       ? <EmptyState compact title={t("emptyTitle", { name })} body={t("emptyBody", { name })} />
@@ -99,12 +104,14 @@ export default function HarnessSkills({ host, harnessId, snapshot, projectId }: 
                   <span className="pkg-harnesses-skill-name"><code>/{skill.name}</code>{list.inherit && !skill.enabled && <Badge>{t("muted")}</Badge>}</span>
                   {skill.description && <small>{skill.description}</small>}
                 </span>
-                <Switch
-                  label={t(skill.enabled ? "mute" : "use", { skill: skill.name })}
-                  checked={skill.enabled}
-                  disabled={locked || !list.inherit}
-                  onChange={(enabled) => void update(`skill:${skill.name}`, { skill: { name: skill.name, enabled } })}
-                />
+                {controlled && !skill.locked && (
+                  <Switch
+                    label={t(skill.enabled ? "mute" : "use", { skill: skill.name })}
+                    checked={skill.enabled}
+                    disabled={locked || !list.inherit}
+                    onChange={(enabled) => void update(`skill:${skill.name}`, { skill: { name: skill.name, enabled } })}
+                  />
+                )}
               </li>)}
             </ul>
           </section>)}

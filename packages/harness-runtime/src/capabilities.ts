@@ -79,6 +79,8 @@ export const semanticCapabilityRevision = (descriptor: AgentCapabilityDescriptor
       descriptor.description,
       descriptor.instructions,
       JSON.stringify(descriptor.disallowedTools ?? []),
+      // Only when set, so a skill without files keeps its revision.
+      ...(descriptor.bundleDir ? [descriptor.bundleDir] : []),
     );
   }
   if (descriptor.kind === "context") {

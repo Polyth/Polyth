@@ -98,6 +98,233 @@ export interface SkillInstallationDto {
   /** Native discoveries are read-only. Copy one into a managed scope to edit it. */
   readOnly?: boolean;
   revision?: number;
+  /** Where a managed copy came from. Absent for a skill written in Polyth. */
+  origin?: SkillOrigin;
+  /** Supporting files stored with this skill. Absent for instructions only. */
+  bundle?: { files: number; bytes: number };
+  /** The instructions were edited after this copy was taken. */
+  modified?: boolean;
+  /** Harnesses this skill is withheld from. Any other harness, including one
+   * added later, receives it. */
+  offHarnesses?: string[];
+}
+
+/** Provenance of a managed copy. `contentHash` covers every file of the copy,
+ * so a changed source can be told from an unchanged one. */
+export type SkillOrigin =
+  | {
+    kind: "catalog";
+    sourceId: string;
+    sourceLabel: string;
+    repository: string;
+    path: string;
+    url?: string;
+    commit?: string;
+    contentHash: string;
+    installedAt: number;
+  }
+  | {
+    kind: "harness";
+    harnessId: string;
+    harnessName: string;
+    nativeName: string;
+    contentHash: string;
+    installedAt: number;
+  };
+
+/** What the caller may change. Mirrors the server's write checks so the UI
+ * never offers a refused action; the server still enforces each one. */
+export interface SkillAccessDto {
+  project: boolean;
+  space: boolean;
+  /** Add and remove catalog sources for the whole Space. */
+  sources: boolean;
+  /** Change which of a harness's own skills it inherits (instance owner). */
+  nativePolicy: boolean;
+}
+
+/** A repository the catalog reads skills from. */
+export interface SkillCatalogSourceDto {
+  id: string;
+  label: string;
+  /** `owner/repo`, or the group path on GitLab. */
+  repository: string;
+  url: string;
+  /** Curated by Polyth; cannot be removed. */
+  builtin: boolean;
+  description?: string;
+  stars?: number;
+  license?: string;
+  /** Owner picture as a data URL, fetched and checked by the server. */
+  avatar?: string;
+  /** Last change in the repository. */
+  updatedAt?: number;
+  /** When this server last read the repository. */
+  syncedAt?: number;
+  commit?: string;
+  skillCount: number;
+  sync: "idle" | "syncing" | "error";
+  /** Why the last read failed. Earlier skills stay listed. */
+  error?: string;
+}
+
+/** A catalog skill's install state in one scope. */
+export interface SkillCatalogInstalledDto {
+  scope: CapabilityInstallationScope;
+  state: "current" | "outdated" | "modified";
+}
+
+export interface SkillCatalogSkillDto {
+  /** `<sourceId>:<path>`. */
+  id: string;
+  sourceId: string;
+  name: string;
+  /** Readable form of the name. */
+  title: string;
+  description: string;
+  /** Group inside the repository (`engineering`, a plugin name). */
+  collection?: string;
+  path: string;
+  /** SHA-256 of every file. Install names the hash that was reviewed. */
+  contentHash: string;
+  files: number;
+  bytes: number;
+  /** Files an agent can run. */
+  scripts: number;
+  license?: string;
+  /** Invisible Unicode in the instructions, which can hide text from a reader. */
+  hiddenText?: boolean;
+  /** Over the install limits; listed so a search still explains the miss. */
+  tooLarge?: boolean;
+  /** On the "Start here" shelf. */
+  featured?: boolean;
+  installed?: SkillCatalogInstalledDto[];
+  /** A different skill holds this name in the listed scopes. */
+  nameTakenIn?: CapabilityInstallationScope[];
+}
+
+export interface SkillCatalogDto {
+  sources: SkillCatalogSourceDto[];
+  skills: SkillCatalogSkillDto[];
+  access: SkillAccessDto;
+}
+
+export type SkillFileKind = "text" | "script" | "binary";
+
+export interface SkillFileDto {
+  path: string;
+  bytes: number;
+  kind: SkillFileKind;
+}
+
+/** Everything a person reviews before installing. */
+export interface SkillCatalogDetailDto {
+  skill: SkillCatalogSkillDto;
+  source: SkillCatalogSourceDto;
+  instructions: string;
+  files: SkillFileDto[];
+  url?: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+}
+
+export interface SkillFilePreviewDto {
+  path: string;
+  kind: SkillFileKind;
+  bytes: number;
+  /** Absent for a binary file. */
+  text?: string;
+  truncated?: boolean;
+}
+
+export interface SkillCatalogInstallInput {
+  id: string;
+  /** The hash the person reviewed; a newer copy is refused, not installed. */
+  contentHash: string;
+  scope: CapabilityInstallationScope;
+  projectId?: string;
+  /** Replace a different skill that already holds the name. */
+  replace?: boolean;
+}
+
+/** How Polyth's own skills reach one harness. */
+export type SkillDelivery = "native" | "prompt" | "none";
+
+/** One harness added to this Polyth, as the skill surfaces show it. */
+export interface SkillHarnessDto {
+  id: string;
+  name: string;
+  /** `#rrggbb`. */
+  color?: string;
+  delivery: SkillDelivery;
+  /** It can enforce a skill's blocked tools, so such a skill reaches it. */
+  enforcesBlockedTools: boolean;
+  /** Whether Polyth can read this harness's own skills, and switch them. */
+  nativeSkills: "controlled" | "listed" | "none";
+  /** This harness's own skills reach its model at all. Off, none can be switched on one by one. */
+  inherits: boolean;
+}
+
+/** A skill as one harness has it of its own. */
+export interface SkillLibraryNativeDto {
+  harnessId: string;
+  source: HarnessNativeSkillSource;
+  enabled: boolean;
+  /** Polyth cannot switch this off: the harness loads it by itself. */
+  locked: boolean;
+  /** Polyth can read this skill's folder and copy it to every harness. */
+  importable: boolean;
+  /** The name that harness matches (`plugin:skill` for a plugin's skill). */
+  nativeName: string;
+}
+
+/** One row of the library: one skill name across Polyth and every harness. */
+export interface SkillLibraryEntryDto {
+  name: string;
+  /** Readable form of the name. */
+  title: string;
+  description: string;
+  /** The Polyth-managed copy, without its instructions. */
+  managed?: Omit<SkillInstallationDto, "instructions">;
+  natives: SkillLibraryNativeDto[];
+  /** Read-only folder Polyth found outside every harness's own list. */
+  discoveredIn?: SkillScope;
+  /** The source now differs from the managed copy. */
+  updateAvailable?: boolean;
+  /** Catalog id of the managed copy's source skill. */
+  catalogId?: string;
+  /** Picture of the managed copy's catalog source. */
+  avatar?: string;
+}
+
+export interface SkillLibraryDto {
+  harnesses: SkillHarnessDto[];
+  skills: SkillLibraryEntryDto[];
+  access: SkillAccessDto;
+}
+
+export interface SkillLibraryDetailDto {
+  entry: SkillLibraryEntryDto;
+  instructions: string;
+  files: SkillFileDto[];
+  url?: string;
+}
+
+export interface SkillAdoptInput {
+  harnessId: string;
+  /** The name that harness matches. */
+  name: string;
+  scope: CapabilityInstallationScope;
+  projectId?: string;
+  replace?: boolean;
+}
+
+export interface SkillAvailabilityInput {
+  name: string;
+  scope: CapabilityInstallationScope;
+  projectId?: string;
+  harnessId: string;
+  enabled: boolean;
 }
 
 export interface SkillInstallationInput {
@@ -221,7 +448,8 @@ export interface HarnessNativePluginManager {
 
 /** Where a harness-native skill was found. `plugin` skills come from a native
  * plugin that is installed and enabled in the harness itself. */
-export type HarnessNativeSkillSource = "user" | "project" | "plugin";
+/** `bundled` ships with the harness itself (Codex `.system`, Cursor `skills-cursor`). */
+export type HarnessNativeSkillSource = "user" | "project" | "plugin" | "bundled";
 
 export interface HarnessNativeSkillDto {
   /** The name the harness matches, `plugin:skill` for plugin skills. */
@@ -232,6 +460,10 @@ export interface HarnessNativeSkillDto {
   plugin?: string;
   /** Polyth offers this skill to the harness's model. */
   enabled: boolean;
+  /** The harness loads this by itself; Polyth cannot switch it off. */
+  locked?: boolean;
+  /** Polyth knows its name but not its folder, so it cannot be read or copied. */
+  noFolder?: boolean;
 }
 
 /** Polyth-owned policy for one harness's own skills. Polyth starts native
@@ -246,6 +478,9 @@ export interface HarnessNativeSkillListDto {
   unsupportedReason?: string;
   applies: "next-session";
   checkedAt: number;
+  /** `policy`: the inherit switch and per-skill mute work. `none`: the harness
+   * loads these by itself, so Polyth lists them read-only. Absent means `policy`. */
+  control?: "policy" | "none";
 }
 
 export interface HarnessNativeSkillPolicyPatch {
@@ -259,4 +494,8 @@ export interface HarnessNativeSkillPolicyPatch {
 export interface HarnessNativeSkillManager {
   list(context: HarnessContext): Promise<HarnessNativeSkillListDto>;
   update(context: HarnessContext, patch: HarnessNativeSkillPolicyPatch): Promise<HarnessNativeSkillListDto>;
+  /** The folder holding one skill's `SKILL.md`, for reading or copying it into
+   * Polyth. Undefined when it has none on this host (a plugin's skill, or a
+   * name this harness does not have). Never returned to a client. */
+  locate?(context: HarnessContext, name: string): Promise<string | undefined>;
 }

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { HarnessRegistry, HarnessVersionStore } from "@polyth/contracts";
 import { createAcpProvider } from "@polyth/backend-acp";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/backend-acp/executable-discovery";
 import type { RegisteredAcpProfile } from "@polyth/backend-acp/profile";
 import { createHarnessAccountFamily, harnessCommandLine, linkAccountOverlay, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
@@ -257,7 +258,20 @@ export default function registerPackage(host: ServerPackageHost) {
         storageDir: host.storageDir,
         deployment: host.deployment,
         registry: () => host.services.require(serverServiceKey<HarnessRegistry>("harnesses")),
-        createProvider: (account) => createAcpProvider(host, createCursorProfile(account)),
+        createProvider: (account) => {
+            const provider = createAcpProvider(host, createCursorProfile(account));
+            // Paths from the CLI's own skill list. `skills-cursor` ships with it.
+            provider.skills = createFolderSkillManager({
+                harnessId: provider.descriptor.id,
+                harnessName: "Cursor",
+                folders: (context) => nativeSkillFolders(context, {
+                    project: [join(".cursor", "skills"), join(".agents", "skills"), join(".claude", "skills"), join(".codex", "skills")],
+                    user: [join(homedir(), ".cursor", "skills"), join(homedir(), ".agents", "skills"), join(homedir(), ".claude", "skills"), join(homedir(), ".codex", "skills")],
+                    bundled: [join(homedir(), ".cursor", "skills-cursor")],
+                }),
+            });
+            return provider;
+        },
         status: cursorAccountStatus,
         signInCommand: (account) => harnessCommandLine([knownCursorCommand ?? "agent", "login"], accountEnv(account)),
         prepare: prepareCursorAccount,

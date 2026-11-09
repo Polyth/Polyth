@@ -145,4 +145,6 @@ export {
   type BackgroundWorkTransition,
 } from "./backgroundWork.ts";
 export { atomicWrite, atomicWriteSync } from "./atomicWrite.ts";
+export { openZipArchive, type ZipArchive, type ZipArchiveEntry } from "./zipArchive.ts";
+export { downloadPublicHttps, fetchPublicHttps } from "./networkBroker.ts";
 export { readSpaceEnabled, writeSpaceEnabled } from "./spaceEnabled.ts";

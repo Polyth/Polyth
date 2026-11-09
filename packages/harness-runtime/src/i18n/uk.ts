@@ -784,6 +784,8 @@ export const uk: HarnessRuntimeMessages = {
   "harnessruntime.skills.source.project": "Цей проєкт",
   "harnessruntime.skills.source.user": "Ваші навички",
   "harnessruntime.skills.source.plugin": "З плагінів",
+  "harnessruntime.skills.source.bundled": "Вбудована",
+  "harnessruntime.skills.lockedHint": "{name} завантажує ці навички самостійно, тому Polyth не може їх вимкнути; для цього видаліть навичку з відповідної папки. Щоб використовувати її в інших харнесах, відкрийте її в Налаштування → Навички.",
   "harnessruntime.skills.changeAction": "Зміна навичок {name}",
   "harnessruntime.skills.loadTitle": "Не вдалося прочитати навички {name}",
   "harnessruntime.skills.reading": "Читання навичок…",

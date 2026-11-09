@@ -784,6 +784,8 @@ export const ar: HarnessRuntimeMessages = {
   "harnessruntime.skills.source.project": "هذا المشروع",
   "harnessruntime.skills.source.user": "مهاراتك",
   "harnessruntime.skills.source.plugin": "من الإضافات",
+  "harnessruntime.skills.source.bundled": "مدمجة",
+  "harnessruntime.skills.lockedHint": "تحمّل {name} هذه المهارات بنفسها، لذا لا يستطيع Polyth إيقاف تشغيلها؛ أزِل إحداها من مجلدها للقيام بذلك. لاستخدام إحداها في بيئات التشغيل الأخرى، افتحها في الإعدادات ← المهارات.",
   "harnessruntime.skills.changeAction": "تغيير مهارات {name}",
   "harnessruntime.skills.loadTitle": "تعذّرت قراءة مهارات {name}",
   "harnessruntime.skills.reading": "جارٍ قراءة المهارات…",

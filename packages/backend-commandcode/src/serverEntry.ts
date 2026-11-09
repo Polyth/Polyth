@@ -38,6 +38,7 @@ import {
   writeCommandCodeExecutionMode,
 } from "./executionMode.ts";
 import { createCommandCodeCapabilitySync } from "./capabilitySync.ts";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { createCommandCodeProvisioner } from "./provisioner.ts";
 import { createCommandCodeRpc } from "./rpc.ts";
 import { COMMANDCODE_CAPABILITIES, createCommandCodeRuntime, type CommandCodeBindingIo } from "./runtime.ts";
@@ -164,7 +165,17 @@ export function createCommandCodeProvider(host: ServerPackageHost, account?: Res
   const executionMode = async (context: HarnessContext) =>
     context.space ? readCommandCodeExecutionMode(paths(context).executionMode) : "follow-polyth" as const;
 
+  const home = account?.dir ?? homedir();
+  const skills = createFolderSkillManager({
+    harnessId,
+    harnessName: "Command Code",
+    folders: (context) => nativeSkillFolders(context, {
+      project: [join(".commandcode", "skills"), join(".agents", "skills")],
+      user: [join(home, ".commandcode", "skills"), join(home, ".agents", "skills")],
+    }),
+  });
   return {
+    skills,
     descriptor: {
       id: harnessId,
       name: "Command Code",

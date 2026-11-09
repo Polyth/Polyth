@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { HarnessProvisioningPlan } from "@polyth/contracts";
 
 /** Render the canonical, already-scoped plan without discovering native files.
@@ -14,10 +15,14 @@ export function renderCapabilityText(plan: HarnessProvisioningPlan): string | un
         break;
       case "skill":
         if (item.mode !== "prompt") continue;
+        // A skill stored with its files is read on demand, as a native harness
+        // would: a long catalog skill must not weigh on every prompt.
         sections.push([
           `## Skill: ${capability.title}`,
           capability.description,
-          capability.instructions,
+          capability.bundleDir
+            ? `Before using this skill, read \`${join(capability.bundleDir, "SKILL.md")}\` and follow it. Paths in it are relative to that folder.`
+            : capability.instructions,
         ].filter((part) => part.trim()).join("\n\n"));
         break;
       case "context":

@@ -45,6 +45,9 @@ test("agent beta route guard blocks direct filesystem writers without blocking p
   assert.equal(agentBetaBlocksPackageRoute("commands", { method: "POST", path: "/api/commands" }, true), true);
   assert.equal(agentBetaBlocksPackageRoute("commands", { method: "DELETE", path: "/api/snippets" }, true), true);
   assert.equal(agentBetaBlocksPackageRoute("commands", { method: "POST", path: "/api/skills" }, true), true);
+  assert.equal(agentBetaBlocksPackageRoute("commands", { method: "POST", path: "/api/skills/catalog/install" }, true), true);
+  assert.equal(agentBetaBlocksPackageRoute("commands", { method: "DELETE", path: "/api/skills/catalog/sources" }, true), true);
+  assert.equal(agentBetaBlocksPackageRoute("commands", { method: "GET", path: "/api/skills/catalog" }, true), false);
   assert.equal(agentBetaBlocksPackageRoute("editor", { method: "POST", path: "/api/editor/language/rename-apply" }, true), true);
 
   assert.equal(agentBetaBlocksPackageRoute("files", { method: "POST", path: "/api/files/write" }, true), false);

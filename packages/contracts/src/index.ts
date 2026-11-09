@@ -4643,6 +4643,8 @@ export interface AgentCapabilityBase {
   revision: string;
   spaceId?: string;
   projectId?: string;
+  /** Harnesses that must not receive this capability. */
+  excludedHarnessIds?: string[];
 }
 
 /** Serializable desired-state descriptor. Executors and secret values never appear. */
@@ -4675,6 +4677,10 @@ export type AgentCapabilityDescriptor =
       instructions: string;
       /** Tools the harness must remove while this skill is active. */
       disallowedTools?: string[];
+      /** Host folder holding this skill's `SKILL.md` and supporting files. A
+       * prompt-delivered harness then reads the skill on demand instead of
+       * carrying its whole text in every prompt. */
+      bundleDir?: string;
     })
   | (AgentCapabilityBase & {
       kind: "context";

@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -15,7 +16,8 @@ import { createPiRuntime, PI_CAPABILITIES } from "./runtime.ts";
 import { createPiTitleRunner, withPiTitleGeneration } from "./title.ts";
 import { createPiSmallModelRunner } from "./smallModel.ts";
 import { createPiCapabilitySync } from "./capabilitySync.ts";
-import { createPiNativePlugins } from "./nativePlugins.ts";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
+import { createPiNativePlugins, piAgentDir, piProjectTrusted } from "./nativePlugins.ts";
 import { createPiProvisioner, piOverlays } from "./provisioner.ts";
 import { PI_BOOTSTRAP_SOURCE } from "./bootstrapSource.ts";
 import { PI_WORKER_SOURCE } from "./workerSource.ts";
@@ -310,6 +312,21 @@ export function createPiProvider(host: ServerPackageHost, account?: ResolvedHarn
       resolveBinary: async () => {
         const command = await resolvePiBinary();
         return { command, env: await piEnv(command, account) };
+      },
+    }),
+    // Pi loads a project's own skills only once the project is trusted.
+    skills: createFolderSkillManager({
+      harnessId,
+      harnessName: "Pi",
+      folders: async (context) => {
+        const env = { ...process.env, ...accountEnv(account) };
+        const home = env.HOME?.trim() || homedir();
+        const piDir = piAgentDir(env);
+        const trusted = await piProjectTrusted({ agentDir: piDir, cwd: context.cwd, home }).catch(() => false);
+        return nativeSkillFolders(context, {
+          ...(trusted ? { project: [join(".pi", "skills"), join(".agents", "skills")] } : {}),
+          user: [join(piDir, "skills"), join(home, ".agents", "skills")],
+        });
       },
     }),
     source: {

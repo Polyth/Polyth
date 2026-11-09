@@ -784,6 +784,8 @@ export const ptBR: HarnessRuntimeMessages = {
   "harnessruntime.skills.source.project": "Este projeto",
   "harnessruntime.skills.source.user": "Suas skills",
   "harnessruntime.skills.source.plugin": "De plugins",
+  "harnessruntime.skills.source.bundled": "Integrado",
+  "harnessruntime.skills.lockedHint": "O {name} carrega esses skills por conta própria, portanto o Polyth não pode desativá-los; remova um da pasta dele para isso. Para usar um em seus outros harnesses, abra-o em Configurações → Skills.",
   "harnessruntime.skills.changeAction": "Alterar as skills do {name}",
   "harnessruntime.skills.loadTitle": "Não foi possível ler as skills do {name}",
   "harnessruntime.skills.reading": "Lendo skills…",

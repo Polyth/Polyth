@@ -784,6 +784,8 @@ export const bg: HarnessRuntimeMessages = {
   "harnessruntime.skills.source.project": "Този проект",
   "harnessruntime.skills.source.user": "Вашите умения",
   "harnessruntime.skills.source.plugin": "От плъгини",
+  "harnessruntime.skills.source.bundled": "Вградено",
+  "harnessruntime.skills.lockedHint": "{name} зарежда тези умения самостоятелно, така че Polyth не може да ги изключи; за да направите това, премахнете ги от папката им. За да ползвате някое в останалите си харнеси, отворете го в Настройки → Умения.",
   "harnessruntime.skills.changeAction": "Промяна на уменията на {name}",
   "harnessruntime.skills.loadTitle": "Уменията на {name} не можаха да се прочетат",
   "harnessruntime.skills.reading": "Четене на уменията…",
