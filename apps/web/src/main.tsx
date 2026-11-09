@@ -73,6 +73,13 @@ if (desktopBridge()?.surface === "hub") {
   const { renderMobileConnection } = await import("@polyth/mobile/connection");
   renderMobileConnection(mobileLaunch, { veil: launchVeil });
 } else if (mobileLaunch.kind !== "navigating") {
+  // The phone app's shell is served by its local Link proxy, which has no auth
+  // status to inline, so reading it costs a full tunnel round trip. The proxy
+  // serves this page only to a paired device with a valid session, so the
+  // socket is dialed in parallel with that read. If the installation turns
+  // out not to be ready, the server refuses the upgrade or nobody adopts the
+  // socket, and init() dials afresh (adoptPreconnectedSync drops a failed one).
+  if (isNativeMobile()) preconnectSync(syncSocketUrl());
   const authStatus = prefetchAuthStatus();
   // A ready, authorized installation dials /ws now, while the app graph below
   // still loads and evaluates; init() adopts the socket (syncPreconnect.ts).
