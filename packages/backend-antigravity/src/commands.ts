@@ -59,10 +59,12 @@ export function readAgySkills(options: {
   prefixArgs?: string[];
 }): Promise<RuntimeCommandDescriptor[]> {
   return new Promise((resolveReport, rejectReport) => {
-    const child = spawn(options.command, [...(options.prefixArgs ?? []), "-p", "/skills", "--output-format", "json"], {
+    const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(options.command);
+    // cmd.exe needs the shim path quoted: Node joins a shell command line unquoted.
+    const child = spawn(shim ? `"${options.command}"` : options.command, [...(options.prefixArgs ?? []), "-p", "/skills", "--output-format", "json"], {
       cwd: options.cwd, env: options.env ?? process.env, stdio: ["ignore", "pipe", "ignore"], windowsHide: true,
       detached: process.platform !== "win32",
-      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(options.command),
+      shell: shim,
     });
     let output = "";
     let settled = false;

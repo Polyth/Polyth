@@ -230,6 +230,14 @@ shim goes through `cmd.exe` with its path quoted; the argv is fixed descriptor w
 stdin closed, a 10-minute timeout and a 4 KB output tail. A launch Node refuses up
 front is a failed run (`exitCode: null`), not a 500. It ignores per-harness binary overrides such as
 `POLYTH_GROK_BIN`, and running runtimes keep the old binary until restarted.
+On Windows a running program's file cannot be replaced, so before the updater
+(and before a local install, which a reinstall is) the server releases every idle
+chat of that harness in every Space through `releaseRuntimeIfIdle`
+(`harness.runtime.releaseIdle` service; `freeHarnessExecutable` in
+`harness-runtime/src/serverEntry.ts`); their next turn starts the new build. While
+any chat is still working it answers 409 `conflict` without running anything, and
+the Version section says so instead of offering a reinstall that would hit the
+same lock. A shared workspace runtime (OpenCode) is not released by this path.
 After a successful update of a provider with a `versionStore` (Claude Code's
 `…/claude/versions/<version>`, Cursor's `…/cursor-agent/versions/<release>/`,
 both left by side-by-side self-updaters that keep old versions), the server
@@ -1315,7 +1323,8 @@ fetches the newest release. A self-updater cannot repair a CLI too old or too
 broken to run it: Grok Build 1.0.30 dies with `SIGILL` on `grok update` (and on
 `grok agent stdio`) on a Neoverse-N1 aarch64 host, while the 1.0.77 installer
 fixes it. An updater killed by a signal reports `<binary> stopped with <SIGNAL>`
-instead of an empty output. Only the install this page started is shown as the
+instead of an empty output; on Windows the same crash is an NTSTATUS exit code,
+reported by name (`STATUS_ILLEGAL_INSTRUCTION (0xC000001D)`, `updateCrashName`). Only the install this page started is shown as the
 reinstall's outcome (`reinstallOffer`, `packages/harness-runtime/widgets/updates.ts`);
 a success re-reads the version and drops the failed updater's log.
 

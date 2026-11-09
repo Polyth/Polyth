@@ -13,7 +13,9 @@ const CLIENT_TTL_MS = 10 * 60_000;
 export type HarnessUpdateRun =
   | { state: "running"; startedAt: number }
   | { state: "done"; at: number; output: string; from?: string; to?: string }
-  | { state: "failed"; at: number; output: string; exitCode: number | null; message?: string };
+  /** `busy`: Windows chats still run the CLI, so its file could not be replaced
+   *  and the updater did not run. */
+  | { state: "failed"; at: number; output: string; exitCode: number | null; message?: string; busy?: true };
 
 type ProjectEntry = { statuses: ReadonlyMap<string, HarnessUpdateStatus>; loadedAt?: number; loading?: Promise<void> };
 type Snapshot = { projects: ReadonlyMap<string, ProjectEntry>; runs: ReadonlyMap<string, HarnessUpdateRun> };
@@ -63,10 +65,12 @@ export async function runHarnessUpdate(harnessId: string, projectId?: string | n
   setRun({ state: "running", startedAt: Date.now() });
   let result: { ok: boolean; exitCode: number | null; output: string } | undefined;
   let message: string | undefined;
+  let busy = false;
   try {
     result = await api.post<{ ok: boolean; exitCode: number | null; output: string }>(`/api/harnesses/${encodeURIComponent(harnessId)}/update`, {});
   } catch (cause) {
     message = cause instanceof Error ? cause.message : String(cause);
+    busy = (cause as { status?: unknown } | null)?.status === 409;
   }
   // The server dropped this harness's snapshot and model caches. Re-read the
   // installed version before reporting: an updater may follow its own release
@@ -76,7 +80,7 @@ export async function runHarnessUpdate(harnessId: string, projectId?: string | n
   const after = snapshot.projects.get(projectKey(projectId))?.statuses.get(harnessId);
   const run: HarnessUpdateRun = result?.ok
     ? { state: "done", at: Date.now(), output: result.output, ...(before?.current ? { from: before.current } : {}), ...(after?.current ? { to: after.current } : {}) }
-    : { state: "failed", at: Date.now(), output: result?.output ?? "", exitCode: result?.exitCode ?? null, ...(message ? { message } : {}) };
+    : { state: "failed", at: Date.now(), output: result?.output ?? "", exitCode: result?.exitCode ?? null, ...(message ? { message } : {}), ...(busy ? { busy: true as const } : {}) };
   setRun(run);
   return run;
 }
@@ -127,7 +131,8 @@ export function reinstallOffer(input: {
     if (ours.phase === "succeeded") return { kind: "done", job: ours };
     if (ours.phase !== "cancelled") return { kind: "failed", job: ours };
   }
-  if (input.run?.state !== "failed" || !input.installCommand || !input.mayUpdate) return { kind: "none" };
+  // A busy refusal ran no updater: an installer would hit the same running file.
+  if (input.run?.state !== "failed" || input.run.busy || !input.installCommand || !input.mayUpdate) return { kind: "none" };
   return { kind: "offer", command: input.installCommand };
 }
 

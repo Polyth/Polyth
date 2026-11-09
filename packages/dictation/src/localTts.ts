@@ -141,6 +141,8 @@ export function createLocalTts(options: {
     stdio: ["ignore", "ignore", "pipe", "ipc"],
     serialization: "advanced",
     windowsHide: true,
+    // In the Desktop app process.execPath is Electron, which runs -e only in Node mode.
+    env: process.versions.electron ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env,
   }));
   let child: ChildProcess | null = null;
   let ready: Promise<ChildProcess> | null = null;

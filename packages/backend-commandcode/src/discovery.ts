@@ -65,13 +65,15 @@ export interface CommandCodeCli {
 const run = async (command: string | CommandCodeCli, args: string[], cwd?: string, timeout = 10_000, accountEnv?: Readonly<Record<string, string>>): Promise<string> => {
   if (typeof command !== "string") return command.run(args, cwd, timeout);
   const env = { ...await harnessExecutableChildEnv(command), ...accountEnv };
-  const { stdout, stderr } = await exec(command, args, {
+  const shim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+  // cmd.exe needs the shim path quoted: Node joins a shell command line unquoted.
+  const { stdout, stderr } = await exec(shim ? `"${command}"` : command, args, {
     cwd,
     env,
     timeout,
     maxBuffer: 4 * 1024 * 1024,
     windowsHide: true,
-    shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+    shell: shim,
   });
   return String(stdout || stderr || "").trim();
 };

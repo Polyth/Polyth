@@ -41,7 +41,7 @@ export default function registerPackage(host: ServerPackageHost) {
                 const { command, env } = await resolveFxBinary();
                 profile.command = command;
                 profile.env = env;
-                const version = (await exec(command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
+                const version = (await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })).stdout.trim();
                 // Installation alone is not proof of authentication. The profile is
                 // offered for explicit selection but excluded from automatic routing
                 // until a native auth/status contract is verified.
