@@ -86,6 +86,13 @@ const LIVENESS_TIMEOUT: Duration = Duration::from_secs(5);
 /// which reaches seconds during a photo download; the bound keeps a wedged
 /// control stream from passing as healthy forever.
 const LIVENESS_BUSY_LIMIT: Duration = Duration::from_secs(30);
+/// How long a probed link may stay completely silent (no Pong, no stream
+/// data) before a spare connection is dialed next to it. A link that died
+/// while the app was suspended then comes back after this plus one handshake
+/// instead of `LIVENESS_TIMEOUT` plus one handshake. A host keeps two
+/// connections per device, so the spare never displaces the old link, and a
+/// late Pong or arriving data drops the spare instead.
+const LIVENESS_HEDGE_AFTER: Duration = Duration::from_millis(1_500);
 
 struct ProxyHandle {
     origin: String,
@@ -1594,6 +1601,65 @@ struct PendingProbe {
     give_up_at: tokio::time::Instant,
     /// STREAM frames received when the deadline was last set.
     stream_frames: u64,
+    /// When a still silent link gets a spare connection dialed next to it.
+    hedge_at: tokio::time::Instant,
+    hedged: bool,
+}
+
+/// The outcome of one reconnect handshake.
+type Dialed = Result<(Connection, SendStream, RecvStream), ReconnectFailure>;
+
+/// A spare connection dialed while the current link was being probed.
+#[derive(Default)]
+struct SpareLink {
+    dialing: Option<tokio::task::JoinHandle<Dialed>>,
+    ready: Option<Dialed>,
+}
+
+impl SpareLink {
+    fn abort(&mut self) {
+        if let Some(handle) = self.dialing.take() {
+            handle.abort();
+        }
+        if let Some(Ok((connection, _, _))) = self.ready.take() {
+            connection.close(0u32.into(), b"closed");
+        }
+    }
+
+    /// The spare's handshake, once it has settled (bounded by its own timeout).
+    async fn take(&mut self) -> Option<Dialed> {
+        if let Some(ready) = self.ready.take() {
+            return Some(ready);
+        }
+        let handle = self.dialing.take()?;
+        Some(handle.await.unwrap_or(Err(ReconnectFailure::Transient)))
+    }
+}
+
+/// Resolves when a dialing spare settles; never while there is none.
+async fn spare_settled(dialing: &mut Option<tokio::task::JoinHandle<Dialed>>) -> Dialed {
+    match dialing {
+        Some(handle) => handle.await.unwrap_or(Err(ReconnectFailure::Transient)),
+        None => std::future::pending().await,
+    }
+}
+
+/// Where a spare connection is dialed.
+struct HedgeTarget<'a> {
+    endpoint: &'a iroh::Endpoint,
+    addr: &'a iroh::EndpointAddr,
+    host_id: &'a str,
+}
+
+impl HedgeTarget<'_> {
+    fn dial(&self) -> tokio::task::JoinHandle<Dialed> {
+        let (endpoint, addr, host_id) = (self.endpoint.clone(), self.addr.clone(), self.host_id.to_string());
+        tokio::spawn(async move {
+            tokio::time::timeout(RECONNECT_ATTEMPT_TIMEOUT, reconnect_link(&endpoint, addr, &host_id))
+                .await
+                .unwrap_or(Err(ReconnectFailure::Transient))
+        })
+    }
 }
 
 async fn serve_control(
@@ -1601,14 +1667,52 @@ async fn serve_control(
     recv: &mut RecvStream,
     probe: &Notify,
     connection: &Connection,
+    hedge: &HedgeTarget<'_>,
+    spare: &mut SpareLink,
 ) -> ControlEnd {
     // `ControlReader` keeps a partial frame across the select below.
     let mut reader = ControlReader::new(recv);
     let mut pending: Option<PendingProbe> = None;
     loop {
         let deadline = pending.map(|pending| pending.deadline);
+        let hedge_at = pending
+            .filter(|waiting| !waiting.hedged && spare.dialing.is_none())
+            .map(|waiting| waiting.hedge_at);
+        let dialing = spare.dialing.is_some();
         let message = tokio::select! {
             message = reader.read() => message,
+            _ = tokio::time::sleep_until(hedge_at.unwrap_or_else(tokio::time::Instant::now)),
+                if hedge_at.is_some() => {
+                // Only a link that has said nothing since the Ping gets a spare:
+                // one still delivering data is alive, just queued behind it.
+                if let Some(waiting) = pending.as_mut() {
+                    waiting.hedged = true;
+                    if connection.stats().frame_rx.stream == waiting.stream_frames {
+                        spare.dialing = Some(hedge.dial());
+                    }
+                }
+                continue;
+            }
+            dialed = spare_settled(&mut spare.dialing), if dialing => {
+                spare.dialing = None;
+                let silent = pending.is_some_and(|waiting| connection.stats().frame_rx.stream == waiting.stream_frames);
+                match dialed {
+                    // Still nothing from the old link: move to the spare now.
+                    Ok(link) if silent => {
+                        spare.ready = Some(Ok(link));
+                        return ControlEnd::Lost;
+                    }
+                    // The old link spoke meanwhile: keep it.
+                    Ok((link, _, _)) => link.close(0u32.into(), b"closed"),
+                    Err(rejected @ ReconnectFailure::Rejected { .. }) => {
+                        spare.ready = Some(Err(rejected));
+                        return ControlEnd::Lost;
+                    }
+                    // The deadline below still decides about the old link.
+                    Err(ReconnectFailure::Transient) => {}
+                }
+                continue;
+            }
             _ = probe.notified(), if pending.is_none() => {
                 let mut nonce = [0u8; 16];
                 rand::thread_rng().fill_bytes(&mut nonce);
@@ -1621,6 +1725,8 @@ async fn serve_control(
                     deadline: now + LIVENESS_TIMEOUT,
                     give_up_at: now + LIVENESS_BUSY_LIMIT,
                     stream_frames: connection.stats().frame_rx.stream,
+                    hedge_at: now + LIVENESS_HEDGE_AFTER,
+                    hedged: false,
                 });
                 continue;
             }
@@ -1645,6 +1751,8 @@ async fn serve_control(
             Ok(ControlMessage::Pong { nonce }) => {
                 if pending.is_some_and(|waiting| waiting.nonce == nonce) {
                     pending = None;
+                    // The link answered: a spare dialed meanwhile is not needed.
+                    spare.abort();
                 }
             }
             Ok(ControlMessage::Ping { nonce }) => {
@@ -1810,8 +1918,13 @@ fn spawn_control_loop(
     probe: Arc<Notify>,
 ) {
     tokio::spawn(async move {
+        let mut spare = SpareLink::default();
         loop {
-            if serve_control(&mut send, &mut recv, &probe, &connection).await == ControlEnd::Revoked {
+            let hedge = HedgeTarget { endpoint: &endpoint, addr: &addr, host_id: &connection_id };
+            if serve_control(&mut send, &mut recv, &probe, &connection, &hedge, &mut spare).await
+                == ControlEnd::Revoked
+            {
+                spare.abort();
                 proxy_listener.close();
                 connection.close(0u32.into(), b"revoked");
                 finish_session(state, &connection_id, generation, true).await;
@@ -1824,7 +1937,28 @@ fn spawn_control_loop(
             // reconnect on the same endpoint so the page never sees a dead
             // origin. Only an authoritative host answer ends the session.
             if !publish_link(&state, &connection_id, generation, None).await {
+                spare.abort();
                 return;
+            }
+            // A spare dialed while the old link was silent is already (or
+            // nearly) through its handshake: use it before dialing again.
+            match spare.take().await {
+                Some(Ok((next, next_send, next_recv))) => {
+                    if !publish_link(&state, &connection_id, generation, Some(next.clone())).await {
+                        next.close(0u32.into(), b"closed");
+                        return;
+                    }
+                    connection = next;
+                    send = next_send;
+                    recv = next_recv;
+                    continue;
+                }
+                Some(Err(ReconnectFailure::Rejected { revoked })) => {
+                    proxy_listener.close();
+                    finish_session(state, &connection_id, generation, revoked).await;
+                    return;
+                }
+                Some(Err(ReconnectFailure::Transient)) | None => {}
             }
             let mut attempt = 0usize;
             loop {
@@ -2975,6 +3109,17 @@ mod tests {
         // The foreground status read probes the link; the muted host never
         // answers, so the client replaces it instead of waiting for QUIC's
         // idle timeout.
+        let link_of = |state: Arc<Mutex<ClientState>>, id: String| async move {
+            state
+                .lock()
+                .await
+                .sessions
+                .get(&id)
+                .and_then(|session| session.link.borrow().clone())
+                .map(|connection| connection.stable_id())
+        };
+        let first = link_of(fixture.state.clone(), fixture.host_id.clone()).await;
+        let probed_at = tokio::time::Instant::now();
         dispatch(
             fixture.state.clone(),
             "status",
@@ -2986,6 +3131,26 @@ mod tests {
             .await
             .expect("a silent link was not replaced")
             .unwrap();
+        // The spare is dialed after `LIVENESS_HEDGE_AFTER` of silence, not
+        // after the full Pong deadline.
+        assert!(
+            probed_at.elapsed() < LIVENESS_TIMEOUT,
+            "the replacement waited for the full liveness timeout: {:?}",
+            probed_at.elapsed()
+        );
+        // The host accepts the spare before the client moves to it; a request
+        // sent in between would still ride the silent link.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let now = link_of(fixture.state.clone(), fixture.host_id.clone()).await;
+                if now.is_some() && now != first {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the client never moved to the spare");
         let response = tokio::time::timeout(
             Duration::from_secs(20),
             proxied_get(fixture.port, &fixture.cookie),

@@ -156,6 +156,16 @@ or unauthenticated share link.
   behind everything already on its way to the phone, and replacing a link that
   is delivering would cut those very transfers. ACKs do not count, because a
   host whose application has stopped still sends them.
+  The client does not wait out those 5 s on a silent link. If 1.5 s pass
+  (`LIVENESS_HEDGE_AFTER`) with neither a `Pong` nor any stream data, it dials
+  a spare connection next to the old one. A host keeps two connections per
+  device, so the spare does not displace the old link. If the spare
+  completes while the old link is still silent, the client moves to it at
+  once. If a `Pong` or data arrives first, the client drops the spare. If the
+  deadline passes first, the reconnect uses the spare instead of dialing again.
+  A link that died during suspension is therefore back after about 1.5 s plus
+  one handshake, not 5 s plus one handshake. A rejection the spare receives
+  (for example, a revoked device) ends the session as usual.
   `status` and `connect` first prove the origin is served: a loopback probe
   must be *accepted by this proxy's accept loop* (a reclaimed iOS listener
   can fail silently, and a bare TCP connect could reach another local

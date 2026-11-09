@@ -107,7 +107,12 @@ catch-up (`apps/web/src/sync.ts`, `syncPreconnect.ts`, `init.ts`):
 
 - **Early dial.** As soon as the inlined auth status says the installation is
   ready and authorized, `main.tsx` opens `/ws` while the app graph still loads
-  and evaluates; `init()`'s `SyncClient` adopts that socket. Nothing is sent on
+  and evaluates; `init()`'s `SyncClient` adopts that socket. The phone app's
+  shell comes from its local Link proxy, which has no auth status to inline, so
+  there the socket is opened in parallel with the auth status read instead of
+  after that tunnel round trip. The proxy serves the page only to a paired
+  device. If the installation is not ready, the server refuses the upgrade or
+  nobody adopts the socket. Nothing is sent on
   it before adoption, and frames that arrived early are replayed to the
   client's handlers in order. A failed early socket is never handed over, so
   the client dials at once instead of starting on a backoff. The gateway
