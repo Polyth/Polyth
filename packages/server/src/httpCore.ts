@@ -1527,6 +1527,9 @@ async function dispatchHttp(
         ...(e.code === "invalid-input" && typeof e.field === "string" ? { field: e.field } : {}),
         ...(typeof e.code === "string" && e.code.startsWith("AUTH_") && typeof e.field === "string" ? { field: e.field } : {}),
         ...(typeof e.code === "string" && e.code.startsWith("AUTH_") && typeof e.details === "string" ? { details: e.details } : {}),
+        // The redacted harness reason of an unconfirmed operation (sessions.ts
+        // outcomeError), for the client's "Copy error" report.
+        ...(e.code === "outcome-unknown" && typeof e.details === "string" ? { details: e.details } : {}),
         ...(e.code === "worktree-dirty" && typeof e.changes === "number" ? { changes: e.changes } : {}),
       });
     }

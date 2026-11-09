@@ -66,6 +66,7 @@ import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
+import { redactSecrets } from "@polyth/plugins";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
   projectRepositories,
@@ -1648,11 +1649,16 @@ export function createSessionService(deps: {
         retryability: "never",
       });
     }
+    // The harness's own words ("Claude Code did not confirm the operation
+    // (…)") travel as `details` for the person's "Copy error" report; the
+    // message stays the stable contract. Redacted and capped like a log line.
+    const details = outcome.message ? redactSecrets(outcome.message).slice(0, 600) : "";
     return Object.assign(new Error("upstream outcome is unknown; reconciliation is required"), {
       code: "outcome-unknown",
       operationId: outcome.operationId,
       mutationOutcome: "unknown",
       retryability: "never",
+      ...(details ? { details } : {}),
     });
   };
 

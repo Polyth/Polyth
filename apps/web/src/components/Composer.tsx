@@ -100,6 +100,11 @@ import {
 } from "../composer/transcriptSpan.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
 import { isTransportFailure } from "../errorPresentation.ts";
+import { copyErrorAction, errorReportText } from "../errorReport.ts";
+
+/** A new-chat failure keeps its short notice; "Copy error" carries the rest. */
+const setNewChatError = (message: string, error: unknown): void =>
+  setUiError(message, copyErrorAction(errorReportText(error, { action: "Start a new chat", shown: message })));
 import { useRecentlyActiveProjects } from "../projectRecency.ts";
 import { retryAfterReconnect } from "../retryAfterReconnect.ts";
 import { composerLayoutState } from "../composerLayout.ts";
@@ -3038,9 +3043,9 @@ function ComposerBody({
         .catch((error) => {
           const transport = isTransportFailure(error);
           if (transport) reconnectSync();
-          setUiError(transport || isMutationOutcomeUnknown(error)
+          setNewChatError(transport || isMutationOutcomeUnknown(error)
             ? `${tr("composer.newChatNotConfirmed")}: ${tr("composer.newChatOutcomeUnknown")}`
-            : friendlyError(tr("composer.couldNotSaveDraft"), error));
+            : friendlyError(tr("composer.couldNotSaveDraft"), error), error);
           // Hand the message back to the new chat it was taken from, unless
           // the person has moved on or typed something new there.
           const current = getState();
@@ -3117,9 +3122,9 @@ function ComposerBody({
           const transport = isTransportFailure(error);
           if (transport) reconnectSync();
           if (!created) {
-            setUiError(transport || isMutationOutcomeUnknown(error)
+            setNewChatError(transport || isMutationOutcomeUnknown(error)
               ? `${tr("composer.newChatNotConfirmed")}: ${tr("composer.newChatOutcomeUnknown")}`
-              : friendlyError(tr("composer.people.sendFailed"), error));
+              : friendlyError(tr("composer.people.sendFailed"), error), error);
             return;
           }
           syncDraftToServer(created, t, { ...reliabilityScopeAtSend, projectId, sessionId: created });
@@ -3215,9 +3220,9 @@ function ComposerBody({
           // the chat may exist, and the typed text is restored below.
           const transport = isTransportFailure(error);
           if (transport) reconnectSync();
-          setUiError(transport || isMutationOutcomeUnknown(error)
+          setNewChatError(transport || isMutationOutcomeUnknown(error)
             ? `${tr("composer.newChatNotConfirmed")}: ${tr("composer.newChatOutcomeUnknown")}`
-            : friendlyError(tr("common.error"), error));
+            : friendlyError(tr("common.error"), error), error);
           if (echoId) endPendingSend(echoId);
           // The draft was cleared optimistically below; a failed worktree or
           // session creation must never lose the typed prompt or its pills.

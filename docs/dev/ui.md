@@ -4841,6 +4841,17 @@ its revealed chats.
   `ConnectionFeedback` is mounted the notification's pausable countdown is the
   error's only lifetime (`claimUiErrorLifetime`); without a presenter the
   store's 7 s fallback timer still clears it.
+- **Copy error.** A notice stays short and written for people; the facts go
+  behind its action. `errorReportText(error, { action, shown })` and
+  `copyErrorAction(report)` (`apps/web/src/errorReport.ts`) build a plain-text
+  report (time, action, shown text, web build, the error's name and message,
+  HTTP status, typed diagnostics, request id, `details`, cause) and an action
+  that copies it and says "Error details copied". It carries no device, path or
+  account fields of its own. The new-chat failures in `Composer.tsx` use it.
+  The server fills `details` for an `outcome-unknown` error with the harness's
+  redacted reason (`outcomeError` in `packages/server/src/sessions.ts`); for
+  Claude Code that reason includes the last stderr lines of a process that
+  failed to start (`claudeStartFailureReason`, `packages/backend-claude`).
 
 <a id="notifications"></a>**Notifications — the single transient standard
 (`host.notifications`).** Every passing message — an error, a finished run,
