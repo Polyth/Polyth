@@ -19152,13 +19152,14 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   .mobile-session-title-island .mobile-session-selector:active:where(:not(:disabled, [data-conversation])) {
     transition: none;
   }
-  /* ⋮ leads ✎ and ⧉ as a narrower control. Its start padding puts the
-     glyph on the rounded end's centre, where a full 44px button's would
-     sit; the narrower width only closes the gap to ✎. Its hit box is its
-     own width: the shared 44px ::after would reach under its neighbours. */
+  /* ⋯ closes the island after ✎ as a narrower control. Its end padding
+     puts the glyph on the rounded end's centre, where a full 44px
+     button's would sit, so both ends of the pill have the same inset; the
+     narrower width only closes the gap to ✎. Its hit box is its own
+     width: the shared 44px ::after would reach under its neighbours. */
   .mobile-float-actions > .ui-icon-btn.mobile-session-menu-trigger {
     width: calc(var(--tap) - var(--space-2));
-    padding-inline-start: var(--space-2);
+    padding-inline: 0 var(--space-2);
   }
   .mobile-float-actions > .mobile-session-menu-trigger::after {
     width: 100%;
