@@ -76,8 +76,8 @@ all. There are two ways to reach a server.
 
 - **Polyth Link.** On the other computer: Polyth Link → Pair device → *Copy pairing
   link*, because a computer cannot scan its own screen. The same invitation as the
-  QR code, with the same safety words and approval. It needs that server to have a
-  Link host, which Windows does not ship yet. The connection works across networks
+  QR code, with the same safety words and approval. Every desktop build ships the
+  Link host, Windows included (named-pipe IPC). The connection works across networks
   and keeps its device grants.
 - **By address.** Any server already open in a browser, such as an HTTPS origin.
   The page is that server's own code, and it signs in like any browser.
@@ -150,8 +150,11 @@ other's session cookie. This computer's session stays out of that, in both direc
 
 Live-tested only on Linux arm64 with debug binaries in an unpackaged Electron: pairing,
 Link and address sessions, restart, connect-only launch, client crash, revocation and
-blocked requests. `polyth-link-client` is type-checked for `x86_64-pc-windows-gnu`, not
-linked or run. No package, macOS or Windows window has run this. The `arm64` Windows
+blocked requests. `polyth-link-client` and `polyth-link-host` are type-checked for
+`x86_64-pc-windows-gnu`, not linked or run here; the `link-client-windows` CI job runs
+the client's stdio test and the host's named-pipe tests on a Windows runner. No
+package, macOS or Windows window has run this, and no phone has paired with a Windows
+host yet. The `arm64` Windows
 release carries the x64 client under emulation because that job builds on an x64 runner.
 
 ## Command-line tool

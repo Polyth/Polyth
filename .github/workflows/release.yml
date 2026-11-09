@@ -333,8 +333,9 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # The build compiles polyth-link-client for this runner, so the arm64
-      # package carries the x64 client and runs it under Windows emulation.
+      # The build compiles polyth-link-host and polyth-link-client for this
+      # runner, so the arm64 package carries the x64 binaries and runs them
+      # under Windows emulation.
       - uses: dtolnay/rust-toolchain@f00cc37de62c899691b45db1cc585604520c95a7 # 1.91.0
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

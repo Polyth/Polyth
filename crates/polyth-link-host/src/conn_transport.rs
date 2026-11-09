@@ -26,7 +26,6 @@ use polyth_link_core::PROTOCOL_VERSION;
 use rand::RngCore;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
-use tokio::net::UnixStream;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::{HostState, LiveConnection, TrustedDevice};
@@ -540,7 +539,7 @@ async fn proxy_http_stream(
     };
     let mut unix = tokio::time::timeout(
         Duration::from_millis(Limits::v1().header_read_timeout_ms),
-        UnixStream::connect(&socket_path),
+        crate::local_ipc::connect(&socket_path),
     )
     .await
     .map_err(|_| LinkError::TransportUnavailable)?
@@ -617,7 +616,7 @@ async fn proxy_ws_stream(
     };
     let mut unix = tokio::time::timeout(
         Duration::from_millis(Limits::v1().header_read_timeout_ms),
-        UnixStream::connect(&socket_path),
+        crate::local_ipc::connect(&socket_path),
     )
     .await
     .map_err(|_| LinkError::TransportUnavailable)?

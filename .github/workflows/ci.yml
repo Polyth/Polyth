@@ -147,3 +147,7 @@ jobs:
 
       - name: Test the client's stdio transport
         run: cargo test -p polyth-link-client --test stdio
+
+      # The host's control channel and server ingress are named pipes here.
+      - name: Test the host over named pipes
+        run: cargo test -p polyth-link-host

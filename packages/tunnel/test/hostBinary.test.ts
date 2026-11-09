@@ -47,20 +47,31 @@ test("dev builds prefer release then debug binaries", () => {
   }), { ok: true, path: debug, source: "dev-debug" });
 });
 
-test("Windows is fail-closed and does not search Unix paths", () => {
+test("Windows resolves the .exe host and never a Unix binary", () => {
   const unix = join("/repo", "target", "release", "polyth-link-host");
+  const exe = join("/repo", "target", "release", "polyth-link-host.exe");
   const resolved = resolveHostBinary({
     platform: "win32",
     env: {},
     repoRoot: "/repo",
-    resourcesDir: "/resources",
-    exists: (path) => path === unix || path.endsWith("polyth-link-host.exe"),
+    exists: (path) => path === unix || path === exe,
   });
-  assert.deepEqual(resolved, { ok: false, reason: "unsupported-platform" });
+  assert.deepEqual(resolved, { ok: true, path: exe, source: "dev-release" });
   assert.equal(hostExecutableName("win32"), "polyth-link-host.exe");
 });
 
-test("Windows remains unavailable even with POLYTH_LINK_HOST set", () => {
+test("Windows packaged builds use the bundled .exe", () => {
+  const packaged = join("/resources", "polyth-link", "polyth-link-host.exe");
+  assert.deepEqual(resolveHostBinary({
+    platform: "win32",
+    env: {},
+    repoRoot: "/repo",
+    resourcesDir: "/resources",
+    exists: (path) => path === packaged,
+  }), { ok: true, path: packaged, source: "packaged" });
+});
+
+test("Windows honours POLYTH_LINK_HOST", () => {
   const override = "C:\\polyth\\polyth-link-host.exe";
   const resolved = resolveHostBinary({
     platform: "win32",
@@ -68,7 +79,7 @@ test("Windows remains unavailable even with POLYTH_LINK_HOST set", () => {
     exists: (path) => path === override,
     repoRoot: "/repo",
   });
-  assert.deepEqual(resolved, { ok: false, reason: "unsupported-platform" });
+  assert.deepEqual(resolved, { ok: true, path: override, source: "env" });
 });
 
 test("missing host binary is reported as missing, not ready", () => {
