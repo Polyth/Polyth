@@ -317,6 +317,7 @@ export const bg: AppMessages = {
   "composer.discovery.valueAvailable": "{value} налични",
   "composer.dismiss": "отхвърляне",
   "composer.dropToAttach": "Пуснете, за да прикачите",
+  "composer.dropAnyFormat": "Всякакъв формат · до {count} файла",
   "composer.editProfile": "Редактиране на профил",
   "composer.editProfileValue": "Редактиране на профил {name}",
   "composer.editingQueuedMessageValueInComposer": "Редактиране на съобщение {position} от опашката в полето за съобщение.",

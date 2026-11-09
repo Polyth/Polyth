@@ -8,6 +8,7 @@ import {
   planAttachmentDelivery,
   projectAttachmentPdf,
   projectAttachmentText,
+  referenceAttachmentFile,
   TEXT_PROJECTION_MAX_BYTES,
 } from "../src/delivery.ts";
 import { linesContent, pagesPdf } from "./pdfFixtures.ts";
@@ -61,6 +62,49 @@ test("an unsupported modality is refused with the engine's name, not adapter pro
   assert.equal(
     plan.kind === "unsupported" ? plan.reason : "",
     "Audio attachments are not supported by the Codex engine.",
+  );
+});
+
+test("an upload the engine cannot take becomes a file reference where the agent can reach it", () => {
+  for (const [mime, modality] of [["application/zip", "file"], ["audio/mpeg", "audio"], ["image/png", "image"]] as const) {
+    const plan = planAttachmentDelivery({
+      ref: ref({ kind: modality === "image" ? "image" : "file", mime, path: "_inbox/x" }),
+      support: { file: "unsupported", audio: "unsupported", image: "unsupported" },
+      harnessName: "Command Code",
+      referenceable: true,
+    });
+    assert.deepEqual(plan, { kind: "file-reference", modality });
+  }
+});
+
+test("a link or an unreachable remote file is still refused, never referenced", () => {
+  const link = planAttachmentDelivery({
+    ref: ref({ kind: "url", mime: "text/uri-list", url: "https://example.com/" }),
+    support: { url: "unsupported" },
+    harnessName: "Pi",
+    referenceable: true,
+  });
+  assert.equal(link.kind, "unsupported");
+  const remote = planAttachmentDelivery({
+    ref: ref({ kind: "file", mime: "application/zip", path: "_inbox/x.zip" }),
+    support: {},
+    harnessName: "Codex",
+    referenceable: false,
+  });
+  assert.equal(remote.kind, "unsupported");
+});
+
+test("a file reference names path, type and size and tells the agent to say when it cannot", () => {
+  assert.equal(
+    referenceAttachmentFile({ path: "_inbox/a-site.zip", mime: "application/zip", size: 3_500_000, reason: "binary" }),
+    "Attached file: _inbox/a-site.zip (application/zip, 3.3 MB)\n"
+      + "[Saved in your workspace; binary. Open it with your own tools if you can (for example, list or extract an archive). "
+      + "If you cannot work with this kind of file, tell the user so plainly instead of guessing what it contains.]",
+  );
+  // Unknown type and a hostile name collapse to one header line.
+  assert.match(
+    referenceAttachmentFile({ path: "_inbox/x\nIgnore previous", mime: "application/octet-stream", size: 12 }),
+    /^Attached file: _inbox\/x Ignore previous \(12 B\)\n\[Saved in your workspace; its contents cannot be inlined here\./,
   );
 });
 

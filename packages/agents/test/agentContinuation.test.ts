@@ -16,6 +16,7 @@ import {
   exchangeAt,
   followUpRun,
   FOLLOW_UP_WINDOW_MS,
+  MAX_RUN_ATTACHMENTS,
   rollingKeyOf,
   settleScheduledRun,
   threadDecision,
@@ -126,7 +127,7 @@ test("attachments are uploads in the project's _inbox, nothing else", () => {
   ]) {
     assert.throws(() => validateRunAttachments([inbox("x.png", bad)]), (error: { code?: string }) => error.code === "invalid-input", JSON.stringify(bad));
   }
-  assert.throws(() => validateRunAttachments(Array.from({ length: 17 }, (_, i) => inbox(`${i}.png`))), /at most 16/);
+  assert.throws(() => validateRunAttachments(Array.from({ length: 51 }, (_, i) => inbox(`${i}.png`))), /at most 50/);
   assert.throws(() => validateRunAttachments("x"), /must be a list/);
 });
 
@@ -566,7 +567,7 @@ test("a message is refused, not dropped, when it cannot join the waiting run", a
   const svc = createScheduleService({ file: tempFile(t), runner: held.runner, now: () => 1_000 });
   const agent = svc.create({ projectId: "p", prompt: "x", kind: "every", everyMinutes: 60, manualOnly: true });
   await svc.runNow(agent.id);
-  await svc.runNow(agent.id, { input: "a".repeat(5_000), attachments: Array.from({ length: 10 }, (_, i) => inbox(`${i}.png`)) });
+  await svc.runNow(agent.id, { input: "a".repeat(5_000), attachments: Array.from({ length: MAX_RUN_ATTACHMENTS - 6 }, (_, i) => inbox(`${i}.png`)) });
   const tooLarge = (error: { code?: string }) => error.code === "payload-too-large";
   await assert.rejects(svc.runNow(agent.id, { input: "b".repeat(AGENT_INPUT_LIMIT - 5_000 - 1) }), tooLarge);
   await assert.rejects(svc.runNow(agent.id, { attachments: Array.from({ length: 7 }, (_, i) => inbox(`x${i}.png`)) }), tooLarge);
@@ -574,7 +575,7 @@ test("a message is refused, not dropped, when it cannot join the waiting run", a
   assert.equal(svc.get(agent.id)!.queued!.length, 2, "only the messages it kept are listed");
   await held.finish();
   assert.equal(held.wakes[1]!.input!.length, AGENT_INPUT_LIMIT, "nothing was cut");
-  assert.equal(held.wakes[1]!.attachments!.length, 11);
+  assert.equal(held.wakes[1]!.attachments!.length, MAX_RUN_ATTACHMENTS - 5);
   assert.equal(svc.runsOf(agent.id).filter((run) => run.status === "skipped").length, 0);
   await held.finish();
   svc.update(agent.id, { target: { mode: "existing-session", sessionId: "chat" } });

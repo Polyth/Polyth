@@ -445,10 +445,25 @@ One rule decides every attachment, shared by the composer and the server:
 declared modalities, the selected model's `input:*` capabilities and the
 remote-project policy, and `planAttachmentDelivery`
 (`packages/harness-runtime/src/delivery.ts`) turns each ref into `native`,
-`harness-emulated`, `text-projection` or a refusal that names the engine. A
-`text-projection` is read server-side at turn admission and appended to the
-prompt as a fenced section; the adapter never receives that ref, and the
-canonical `user/message` keeps the ref, not the projected text.
+`harness-emulated`, `text-projection`, `file-reference` or a refusal that names
+the engine. A `text-projection` is read server-side at turn admission and
+appended to the prompt as a fenced section; the adapter never receives that
+ref, and the canonical `user/message` keeps the ref, not the projected text.
+
+Every file format is accepted. A file the engine cannot take as content
+(an archive, a binary, audio on an engine without audio) is a
+`file-reference` wherever the upload sits in the agent's workspace (a local
+project, or a remote one Polyth materializes into): the prompt gets one
+`referenceAttachmentFile` section naming its path, type and size and telling
+the agent to open it with its own tools or say plainly that it cannot. A
+`text-projection` that fails (binary or non-UTF-8 content, a PDF without a
+text layer) falls back to the same section; only a line range of such a file
+is still refused. ACP agents with `embeddedContext` get a `resource_link` for
+a binary or oversized file instead of a refusal. What stays refused: a link
+the engine cannot take, and a file on a remote project Polyth cannot reach.
+A message carries at most 50 attachments (`MAX_TURN_ATTACHMENTS`, the
+composer's `MAX_PENDING_ATTACHMENTS`); the composer uploads at most four at
+once and refuses past the limit before the bytes leave the device.
 
 PDFs work on every harness. When the harness or the model cannot take one
 natively (including a harness that declares `pdf: "unsupported"`), the PDF

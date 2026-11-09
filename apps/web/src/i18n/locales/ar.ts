@@ -317,6 +317,7 @@ export const ar: AppMessages = {
   "composer.discovery.valueAvailable": "{value} متاح",
   "composer.dismiss": "رفض",
   "composer.dropToAttach": "قم بإسقاطها للتثبيت",
+  "composer.dropAnyFormat": "أي تنسيق · حتى {count} ملفًا",
   "composer.editProfile": "تعديل الملف الشخصي",
   "composer.editProfileValue": "تعديل الملف الشخصي {name}",
   "composer.editingQueuedMessageValueInComposer": "تعديل الرسالة المجدولة {position} في محرر الرسائل.",

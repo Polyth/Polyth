@@ -320,6 +320,7 @@ export const en = {
   "composer.discovery.valueAvailable": "{value} available",
   "composer.dismiss": "dismiss",
   "composer.dropToAttach": "Drop to attach",
+  "composer.dropAnyFormat": "Any format · up to {count} files",
   "composer.editProfile": "Edit profile",
   "composer.editProfileValue": "Edit profile {name}",
   "composer.editingQueuedMessageValueInComposer": "Editing queued message {position} in the composer.",

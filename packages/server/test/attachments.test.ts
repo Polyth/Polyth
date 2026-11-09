@@ -138,7 +138,7 @@ test("sanitizeAttachments: typed rejections", () => {
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "blob", path: "f.txt" }], /kind/);
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "range", path: "f.txt", range: [0, 4] }], /range/);
   bad([{ id: "x", name: "a", mime: "application/vnd.polyth.browser-context+json", size: 0, kind: "browser-context", browserContext: { id: "x" } }], /browser context invalid/);
-  bad(Array.from({ length: 17 }, (_, i) => ({ id: `i${i}`, name: "a", mime: "text/plain", size: 1, path: "f.txt" })), /too many/);
+  bad(Array.from({ length: 51 }, (_, i) => ({ id: `i${i}`, name: "a", mime: "text/plain", size: 1, path: "f.txt" })), /too many/);
 });
 
 // ---------------------------------------------------------------- send path

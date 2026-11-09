@@ -317,6 +317,7 @@ export const zhCN: AppMessages = {
   "composer.discovery.valueAvailable": "{value} 可用",
   "composer.dismiss": "忽略",
   "composer.dropToAttach": "拖放以附加",
+  "composer.dropAnyFormat": "任意格式 · 最多 {count} 个文件",
   "composer.editProfile": "编辑配置档案",
   "composer.editProfileValue": "编辑配置档案 {name}",
   "composer.editingQueuedMessageValueInComposer": "正在输入框中编辑队列中的第 {position} 条消息。",

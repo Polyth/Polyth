@@ -243,7 +243,14 @@ outcome appears exactly once. Attach sources are one row of equal tiles —
 sheet in browsers and the native shell), **Photos** (`accept="image/*"`; native
 `FilePicker.pickImages`, transcoded so iOS HEIC arrives as JPEG) and **Files** —
 with one quiet note under them: the `_inbox` destination, or the shared reason
-all three are unavailable. Below them the labelled rows (Add context: mention
+all three are unavailable (only on a remote project Polyth cannot reach: any
+other format is delivered, by path when the engine cannot take its content).
+Dragging files: while they are anywhere over the window the composer card
+firms its contour (`is-drop-ready`, an accent border and `--focus-wash`
+outline, so each style recipe keeps its own rim); over the card an opaque
+accent sheet with the dashed drop-target edge, an upload mark and "Drop to
+attach · Any format · up to 50 files" fades in (`is-drop-target`,
+`.composer-drop-overlay`, always mounted and never taking the pointer). Below them the labelled rows (Add context: mention
 and package contributions; Compose: commands, snippets, shell) retain
 capability reasons and catalog states, and a hairline closes the list with
 **More composer tools**. Labels and supporting copy wrap with the menu font

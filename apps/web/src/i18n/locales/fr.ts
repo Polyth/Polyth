@@ -317,6 +317,7 @@ export const fr: AppMessages = {
   "composer.discovery.valueAvailable": "{value} disponibles",
   "composer.dismiss": "ignorer",
   "composer.dropToAttach": "Déposer pour attacher",
+  "composer.dropAnyFormat": "Tout format · jusqu’à {count} fichiers",
   "composer.editProfile": "Modifier le profil",
   "composer.editProfileValue": "Modifier le profil {name}",
   "composer.editingQueuedMessageValueInComposer": "Modification du message en file d’attente {position} dans la zone de saisie.",

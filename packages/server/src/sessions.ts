@@ -86,6 +86,7 @@ import {
   planAttachmentDelivery,
   projectAttachmentPdf,
   projectAttachmentText,
+  referenceAttachmentFile,
   resolveModelSelection,
   titleFromPrompt,
 } from "@polyth/harness-runtime";
@@ -4174,6 +4175,7 @@ export function createSessionService(deps: {
         harnessName: inputs.harnessName,
         supportDeclared,
         projected,
+        referenceable: !inputs.remote || inputs.materializeAvailable,
       });
       if (plan.kind === "unsupported") {
         throw Object.assign(new Error(plan.reason), { code: plan.code });
@@ -7949,9 +7951,19 @@ export function createSessionService(deps: {
           }
           continue;
         }
-        const plan = planAttachmentDelivery({ ref, support, harnessName, supportDeclared, projected });
+        const referenceable = !project?.remote || Boolean(deps.attachments?.materialize);
+        const plan = planAttachmentDelivery({ ref, support, harnessName, supportDeclared, projected, referenceable });
         if (plan.kind === "unsupported") {
           throw Object.assign(new Error(plan.reason), { code: plan.code });
+        }
+        // Any format is accepted: what the engine cannot take as content is
+        // handed over by path, and the agent opens it or says it cannot.
+        const reference = (reason: string): string => referenceAttachmentFile({
+          path: ref.path!, ...(ref.mime ? { mime: ref.mime } : {}), size: ref.size, reason,
+        });
+        if (plan.kind === "file-reference") {
+          sections.push(reference(`${harnessName} cannot take this kind of file as message content`));
+          continue;
         }
         if (plan.kind !== "text-projection") { forwarded.push(ref); continue; }
         const projectRoot = await projects.get(proj.projectId);
@@ -7980,7 +7992,15 @@ export function createSessionService(deps: {
             bytes,
           });
         if (!projection.ok) {
-          throw Object.assign(new Error(projection.reason), { code: projection.code });
+          // A binary, non-UTF-8 or text-less file is still the person's
+          // upload: name it instead of refusing the whole turn.
+          if (!referenceable || ref.kind === "range") {
+            throw Object.assign(new Error(projection.reason), { code: projection.code });
+          }
+          sections.push(reference(plan.modality === "pdf"
+            ? "Polyth could not extract its text"
+            : "it is not plain text, so Polyth did not inline it"));
+          continue;
         }
         sections.push(projection.section);
       }
