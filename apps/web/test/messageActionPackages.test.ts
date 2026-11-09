@@ -111,6 +111,33 @@ test("a menu-capable package button moves into More and acts on each selection",
   }
 });
 
+test("a package's menu row can say what a press would do for this message", async () => {
+  const seen: Seen[] = [];
+  let bookmarked = false;
+  const off = contribution("test.mark", seen, {
+    messageAction: {
+      label: "Bookmark",
+      icon: PluginIcon,
+      menu: true,
+      menuLabel: (context: Record<string, unknown>) => `${bookmarked ? "Remove" : "Add"} #${String(context.eventSeq)}`,
+    },
+  });
+  const view = await mount([{ id: "copy", placement: "bar" }, { id: "pkg:test.mark", placement: "menu" }]);
+  const rows = () => [...document.querySelectorAll<HTMLElement>("[role='menuitem']")].map((row) => row.textContent ?? "");
+  const more = view.container.querySelector<HTMLButtonElement>(".chat-action-more")!;
+  try {
+    await act(async () => { more.click(); });
+    assert.ok(rows().some((row) => row.includes("Add #7")), rows().join("|"));
+    await act(async () => { more.click(); });
+    bookmarked = true;
+    await act(async () => { more.click(); });
+    assert.ok(rows().some((row) => row.includes("Remove #7")), rows().join("|"));
+  } finally {
+    await view.unmount();
+    off();
+  }
+});
+
 test("menu-only reveal folds menu-capable package buttons and keeps bar-only ones", async () => {
   const quote: Seen[] = [];
   const chip: Seen[] = [];

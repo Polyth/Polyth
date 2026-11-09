@@ -804,19 +804,21 @@ function ChatSessionSurface() {
       </div>
        {archived && sessionId
         ? <>
-            <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
+            {/* Above the package rows: the jump button floats up from here and must not lie on them. */}
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
+            <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
             <ArchivedComposerGuard sessionId={sessionId} />
           </>
         : <div className="conversation-composer-dock">
+            {/* Above the package rows: the jump button floats up from here and must not lie on them. */}
+            <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
             {/* The area renders nothing while empty, so its pencil lives in a
                 zero-height zone that only takes space in edit mode. */}
             <div className="composer-before-zone customize-zone">
               <CustomizeZoneButton slot="session.composer.before" align="center" side="up" />
             </div>
-            <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             {/* The status zone. Delegated work outlives the agent's own turn:
                 its active subagents hang from whichever status line shows (the
                 git package's live dock, the startup dock or the live dock

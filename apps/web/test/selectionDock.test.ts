@@ -61,6 +61,7 @@ const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
 const { COMPOSER_INSERT } = await import("../src/composerInsert.ts");
 const { default: SelectionMenu } = await import("../src/components/SelectionMenu.tsx");
+const { registerSlot } = await import("../src/slots.ts");
 
 const EventCtor = (dom as unknown as { Event: typeof Event }).Event;
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
@@ -80,7 +81,8 @@ function Harness() {
   const ref = useRef<HTMLDivElement>(null);
   return createElement("div", null,
     createElement("div", { ref, className: "timeline" },
-      createElement("p", { id: "line" }, "Polyth keeps one canonical history for every session.")),
+      createElement("div", { className: "msg assistant", "data-message-seq": 7 },
+        createElement("p", { id: "line" }, "Polyth keeps one canonical history for every session."))),
     createElement(SelectionMenu, { container: ref }));
 }
 
@@ -202,6 +204,42 @@ test("a tap that collapses the selection under the dock still runs Copy, then th
     assert.equal(dock(), null);
   } finally {
     await view.unmount();
+  }
+});
+
+test("a package action sits beside Quote and runs on the dock's copy of a collapsed selection", async () => {
+  const runs: Array<Record<string, unknown>> = [];
+  const off = registerSlot("session.selection.actions", "test.keep", () => null, 10, {
+    selectionAction: { label: "Keep", title: "Keep this", run: (context: Record<string, unknown>) => { runs.push(context); } },
+  });
+  const skipped = registerSlot("session.selection.actions", "test.never", () => null, 20, {
+    selectionAction: { label: "Never", available: () => false, run: () => { throw new Error("unavailable action ran"); } },
+  });
+  const view = await mount();
+  try {
+    await act(async () => { pointer("pointerdown", document.getElementById("line")!, { pointerType: "touch" }); });
+    await act(async () => { select(7, 12); });
+    await sleep(PAST_SETTLE_MS);
+    const labels = [...document.querySelectorAll(".selection-dock-action")].map((button) => button.textContent);
+    assert.equal(labels[0], "Quote");
+    assert.equal(labels[1], "Keep");
+    assert.equal(labels.includes("Never"), false);
+    const keep = action("Keep")!;
+    await act(async () => { pointer("pointerdown", keep, { pointerType: "touch" }); });
+    await act(async () => { collapse(); });
+    await act(async () => { pointer("pointerup", keep, { pointerType: "touch" }); });
+    await act(async () => { keep.click(); });
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]!.text, "keeps");
+    assert.equal(runs[0]!.eventSeq, 7);
+    assert.equal(runs[0]!.messageRole, "assistant");
+    assert.equal(runs[0]!.projectId, "alpha");
+    await sleep(PAST_EXIT_MS);
+    assert.equal(dock() === null, true, "the dock leaves after the action");
+  } finally {
+    await view.unmount();
+    off();
+    skipped();
   }
 });
 

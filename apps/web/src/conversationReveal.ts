@@ -3,6 +3,8 @@ export interface ConversationRevealRequest {
   sessionId: string;
   eventSeq: number;
   focus: boolean;
+  /** Text inside the message to land on. */
+  passage?: string;
   signal: AbortSignal;
   current(): boolean;
   finish(revealed: boolean): void;
@@ -20,6 +22,24 @@ function dispatch(request: ConversationRevealRequest): void {
   }
 }
 
+/** The part of a transcript row a reveal needs. */
+export interface RevealableRow {
+  kind: string;
+  id: string;
+  eventSeq?: number;
+}
+
+/** A prompt row carries its id; an answer row is addressed by its message
+ *  sequence, which is what a reveal asks for. */
+export function answerRowNode<T>(
+  timeline: { querySelector(selector: string): T | null },
+  rows: readonly RevealableRow[],
+  id: string,
+): T | null {
+  const row = rows.find((candidate) => candidate.kind !== "activity" && candidate.id === id);
+  return row?.eventSeq === undefined ? null : timeline.querySelector(`[data-message-seq="${row.eventSeq}"]`);
+}
+
 export function registerConversationReveal(sessionId: string, handle: Handler): () => void {
   const entry = { sessionId, handle };
   handlers.add(entry);
@@ -30,7 +50,7 @@ export function registerConversationReveal(sessionId: string, handle: Handler): 
 export function requestConversationReveal(
   sessionId: string,
   eventSeq: number,
-  options: { focus?: boolean; signal?: AbortSignal; current?: () => boolean } = {},
+  options: { focus?: boolean; signal?: AbortSignal; current?: () => boolean; passage?: string } = {},
 ): Promise<boolean> {
   if (!sessionId || !Number.isSafeInteger(eventSeq) || eventSeq < 1 || options.signal?.aborted) {
     return Promise.resolve(false);
@@ -43,6 +63,7 @@ export function requestConversationReveal(
     const abort = () => request.finish(false);
     const request: ConversationRevealRequest = {
       sessionId, eventSeq, signal: controller.signal, focus: options.focus !== false,
+      ...(options.passage ? { passage: options.passage } : {}),
       current: () => !settled && !controller.signal.aborted && (options.current?.() ?? true),
       finish: (revealed) => {
         if (settled) return;

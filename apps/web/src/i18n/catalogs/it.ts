@@ -4,6 +4,7 @@
 // locale ships as its own chunk.
 import { it as app } from "../locales/it.ts";
 import { it as p_agents } from "@polyth/agents/i18n/it";
+import { it as p_bookmarks } from "@polyth/bookmarks/i18n/it";
 import { it as p_browser } from "@polyth/browser/i18n/it";
 import { it as p_commands } from "@polyth/commands/i18n/it";
 import { it as p_custom_action } from "@polyth/custom-action/i18n/it";
@@ -45,6 +46,7 @@ import { it as p_workflow } from "@polyth/workflow/i18n/it";
 
 const parts: Array<Record<string, string>> = [app,
   p_agents,
+  p_bookmarks,
   p_browser,
   p_commands,
   p_custom_action,

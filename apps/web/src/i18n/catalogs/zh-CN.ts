@@ -4,6 +4,7 @@
 // locale ships as its own chunk.
 import { zhCN as app } from "../locales/zh-CN.ts";
 import { zhCN as p_agents } from "@polyth/agents/i18n/zh-CN";
+import { zhCN as p_bookmarks } from "@polyth/bookmarks/i18n/zh-CN";
 import { zhCN as p_browser } from "@polyth/browser/i18n/zh-CN";
 import { zhCN as p_commands } from "@polyth/commands/i18n/zh-CN";
 import { zhCN as p_custom_action } from "@polyth/custom-action/i18n/zh-CN";
@@ -45,6 +46,7 @@ import { zhCN as p_workflow } from "@polyth/workflow/i18n/zh-CN";
 
 const parts: Array<Record<string, string>> = [app,
   p_agents,
+  p_bookmarks,
   p_browser,
   p_commands,
   p_custom_action,

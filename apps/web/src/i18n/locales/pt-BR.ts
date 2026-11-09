@@ -2472,6 +2472,7 @@ export const ptBR: AppMessages = {
   "timeline.loadEarlierHistory": "Carregar histórico anterior",
   "timeline.promptHistoryFailed": "Não foi possível carregar o histórico de prompts. Tente novamente.",
   "timeline.promptBookmarkMoveHint": "Arraste o favorito para movê-lo, ou mantenha Shift pressionado e pressione uma tecla de seta. Shift com Home o redefine. A posição fica salva apenas neste dispositivo.",
+  "timeline.promptsTab": "Prompts",
   "timeline.loadingEarlierHistory": "Carregando histórico anterior…",
   "timeline.manageTurns": "GERENCIAR TURNOS",
   "timeline.message": "×",

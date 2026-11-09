@@ -6,23 +6,28 @@
 // of chasing the selection rect. Touch and pen selections (and the phone
 // shell before any pointer is seen) get SelectionDock instead: a bottom card
 // that does not collide with the OS selection callout.
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { clampMenuPosition, selectionSurface } from "../selectionActions.ts";
 import { quoteSelectionInComposer, startSessionFromSelection } from "../selectionCommands.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { copyText } from "../utils.ts";
-import { useTimelineProjectId } from "../timelineSession.ts";
+import { useTimelineProjectId, useTimelineSessionId } from "../timelineSession.ts";
+import { snapshotSelection, type SelectionSnapshot } from "../selectionSnapshot.ts";
 import { tr } from "../i18n/index.ts";
 import { Button } from "./ui/index.ts";
 import SelectionDock from "./SelectionDock.tsx";
+import { useSelectionActionContributions } from "./selectionContributions.ts";
 
 const MENU_W = 270;
 const MENU_H = 34;
 
 interface MenuState {
+  /** Horizontal centre of the selection; the toolbar's real width places it. */
+  centre: number;
   x: number;
   y: number;
   text: string;
+  snapshot: SelectionSnapshot;
 }
 
 // The pointer type of the latest press decides the surface, so a touch laptop
@@ -63,8 +68,18 @@ function FloatingSelectionMenu({ container }: {
   container: React.RefObject<HTMLDivElement | null>;
 }) {
   const projectId = useTimelineProjectId();
+  const sessionId = useTimelineSessionId();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [flash, setFlash] = useState("");
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const contributions = useSelectionActionContributions();
+  // Package actions make the toolbar wider than the host's own three.
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar || !menu) return;
+    const width = toolbar.offsetWidth;
+    toolbar.style.left = `${clampMenuPosition(menu.centre - width / 2, menu.y, width, MENU_H, window.innerWidth, window.innerHeight).x}px`;
+  });
 
   const compute = useCallback(() => {
     const el = container.current;
@@ -81,7 +96,7 @@ function FloatingSelectionMenu({ container }: {
       rect.left + rect.width / 2 - MENU_W / 2, rect.top - MENU_H - 10,
       MENU_W, MENU_H, window.innerWidth, window.innerHeight,
     );
-    setMenu({ x: pos.x, y: pos.y, text });
+    setMenu({ centre: rect.left + rect.width / 2, x: pos.x, y: pos.y, text, snapshot: snapshotSelection(range, text) });
   }, [container]);
 
   useEffect(() => {
@@ -131,8 +146,16 @@ function FloatingSelectionMenu({ container }: {
     setTimeout(() => { setFlash(""); setMenu(null); }, 900);
   };
 
+  const actionContext = { ...menu.snapshot, sessionId: sessionId ?? null, projectId: projectId ?? null };
+  const shownContributions = contributions.filter((entry) => entry.available(actionContext));
+  const runContribution = (entry: (typeof contributions)[number]) => {
+    void entry.run(actionContext);
+    dismiss();
+  };
+
   return (
     <div
+      ref={toolbarRef}
       className="selection-menu"
       role="toolbar"
       aria-label={tr("selectionmenu.selectionActions")}
@@ -146,6 +169,9 @@ function FloatingSelectionMenu({ container }: {
             <Button size="sm" variant="ghost" title={tr("selectionmenu.quoteTheSelectionInTheComposer")} onClick={quote}>{tr("selectionmenu.quoteInReply")}</Button>
             <Button size="sm" variant="ghost" title={tr("selectionmenu.startANewSessionWithThisSelection")} onClick={newSession} disabled={!projectId}>{tr("selectionmenu.newSession")}</Button>
             <Button size="sm" variant="ghost" title={tr("selectionmenu.copyTheSelection")} onClick={() => void copy()}>{tr("common.copy")}</Button>
+            {shownContributions.map((entry) => (
+              <Button key={entry.id} size="sm" variant="ghost" title={entry.title} onClick={() => runContribution(entry)}>{entry.label}</Button>
+            ))}
           </>
         )}
     </div>

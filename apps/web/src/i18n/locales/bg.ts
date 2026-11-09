@@ -2472,6 +2472,7 @@ export const bg: AppMessages = {
   "timeline.loadEarlierHistory": "Зареждане на по-ранна хронология",
   "timeline.promptHistoryFailed": "Хронологията на промптовете не можа да се зареди. Опитайте отново.",
   "timeline.promptBookmarkMoveHint": "Плъзнете отметката, за да я преместите, или задръжте Shift и натиснете стрелка. Shift с Home я връща на мястото ѝ. Позицията се запазва само на това устройство.",
+  "timeline.promptsTab": "Промптове",
   "timeline.loadingEarlierHistory": "Зареждане на по-ранна история…",
   "timeline.manageTurns": "УПРАВЛЕНИЕ НА ХОДОВЕТЕ",
   "timeline.message": "×",

@@ -2472,6 +2472,7 @@ export const it: AppMessages = {
   "timeline.loadEarlierHistory": "Carica cronologia precedente",
   "timeline.promptHistoryFailed": "Impossibile caricare la cronologia dei prompt. Riprova.",
   "timeline.promptBookmarkMoveHint": "Trascina il segnalibro per spostarlo, oppure tieni premuto Maiusc e premi un tasto freccia. Maiusc con Home lo reimposta. La posizione resta su questo dispositivo.",
+  "timeline.promptsTab": "Prompt",
   "timeline.loadingEarlierHistory": "Caricamento della cronologia precedente…",
   "timeline.manageTurns": "GESTIRE I TURNI",
   "timeline.message": "×",

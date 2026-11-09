@@ -141,7 +141,8 @@ export default function MessageActionBar<T extends string>({
       const entry = byPackage.get(actionId)!;
       return {
         id: actionId,
-        label: entry.label,
+        // Rebuilt whenever the menu opens, so the row reads the current state.
+        label: entry.menuLabel?.(context) || entry.label,
         icon: entry.icon,
         onSelect: () => setRequests((current) => ({ ...current, [actionId]: (current[actionId] ?? 0) + 1 })),
       };

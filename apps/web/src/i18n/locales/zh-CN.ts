@@ -2472,6 +2472,7 @@ export const zhCN: AppMessages = {
   "timeline.loadEarlierHistory": "加载更早的历史记录",
   "timeline.promptHistoryFailed": "无法加载提示词历史。请重试。",
   "timeline.promptBookmarkMoveHint": "拖动即可移动书签，也可按住 Shift 并按方向键。Shift 加 Home 可将其复位。位置仅保存在此设备上。",
+  "timeline.promptsTab": "提示词",
   "timeline.loadingEarlierHistory": "正在加载更早的历史记录…",
   "timeline.manageTurns": "管理轮次",
   "timeline.message": "×",

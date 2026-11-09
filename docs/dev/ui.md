@@ -389,6 +389,16 @@ counted twice. The scroller itself is observed too, because a scrollbar
 appearing or disappearing changes its content box without resizing the rail's
 viewport.
 
+Packages add tabs beside the prompt list through `session.prompt.tabs`
+(`meta.promptTab`, `PromptTabSlotMeta` in `@polyth/web-sdk`; host side in
+`components/promptTabs.ts`). The tab strip appears only when a tab has content
+for the chat (`hasContent`); until then each contribution renders once with
+`promptTabPlacement: "footer"` under the list, one quiet row or nothing. Content
+also fills the icon and shows it in that chat though both settings are off. The
+last tab used is remembered per device. With no contribution the popover is the
+plain prompt list. The context's `promptReadingPosition()` names the answer being
+read and the heading above the reading line.
+
 The rail's hover panel and the bookmark peek share `.prompt-nav-row`: text two
 pixels above `--font-meta`, clamped to two lines, with no leading mark (the tape
 ticks carry the active and pointed-at state). Both
@@ -1903,6 +1913,18 @@ subscribe? })` — pure functions of a session and the package's own state; the
 host draws headings and rows. A stored package grouping waits for its package
 to register and reads as None meanwhile. Chat markers add "Marker".
 
+`session.selection.actions` adds an action to a transcript selection, beside
+Quote and Copy in the floating toolbar and the touch dock. It is data only
+(`meta.selectionAction`, `SelectionActionSlotMeta`): the host draws the button,
+runs it on its own copy of the selection (`text`, `markdown`, `eventSeq`,
+`messageRole`, `sessionId`, `projectId`, from `selectionSnapshot.ts`), then clears
+the selection. The contribution's `render` is never mounted.
+
+`host.conversation.revealEvent` takes an optional `passage`: text inside the
+message to land on and light for a moment with the CSS Custom Highlight API,
+without touching the message's DOM (`conversationPassage.ts`). The message alone
+is shown when the text is no longer in it.
+
 `session.message.actions` supplies `sessionId`, `projectId`, `spaceId`,
 `kind` and `messageRole` (`user`/`assistant`), `messageId`, `messageText`, and
 `eventSeq`; user messages also supply their attachment references. These are
@@ -1910,7 +1932,9 @@ presentation inputs, not server authorization. The host renders these
 contributions inside the role's quick-action layout (`MessageActionBar`), so
 the user orders them and places each on the bar, in the More menu or off.
 Describe the button with `meta.messageAction` (`MessageActionSlotMeta` in
-`@polyth/web-sdk`: label, description, icon, `roles`, `menu`, `available`);
+`@polyth/web-sdk`: label, description, icon, `roles`, `menu`, `available`,
+and `menuLabel`, the More row for one message when it should say what a press
+would do, read each time the menu opens);
 without it the button is listed by its id and stays on the bar. A contribution
 that sets `menu: true` must honour `MessageActionSlotContext`: with
 `messageActionPlacement: "menu"` it renders no trigger, stays mounted, and acts

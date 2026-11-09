@@ -2475,6 +2475,7 @@ export const en = {
   "timeline.loadEarlierHistory": "Load earlier history",
   "timeline.promptHistoryFailed": "Could not load prompt history. Try again.",
   "timeline.promptBookmarkMoveHint": "Drag to move the bookmark, or hold Shift and press an arrow key. Shift with Home resets it. The position stays on this device.",
+  "timeline.promptsTab": "Prompts",
   "timeline.loadingEarlierHistory": "Loading earlier history…",
   "timeline.manageTurns": "MANAGE TURNS",
   "timeline.message": "×",

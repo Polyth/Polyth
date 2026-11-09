@@ -507,7 +507,8 @@ a tab cut at the border with nothing hinting at more. Strips that opt into
   the measured frame (`--layer-frame-bottom`, above `--safe-bottom`), refreshes
   its quote preview as the handles move, stays put while the timeline scrolls,
   swipes down to clear the selection, and shares the selection-menu glass
-  rules. Both surfaces run the same commands (`selectionCommands.ts`).
+  rules. Both surfaces run the same commands (`selectionCommands.ts`) and list
+  the same package actions (`session.selection.actions`).
 - Package/panel content adapts with container queries; viewport media queries
   are shell-only.
 - Narrow phones (320–375px) are first-class: check every surface at 320, 360

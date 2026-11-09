@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { registerConversationReveal, requestConversationReveal, type ConversationRevealRequest } from "../src/conversationReveal.ts";
+import { answerRowNode, registerConversationReveal, requestConversationReveal, type ConversationRevealRequest } from "../src/conversationReveal.ts";
 
 test("a reveal waits for the matching conversation mount and preserves finder focus", async () => {
   const request = requestConversationReveal("older-chat", 17, { focus: false });
@@ -46,4 +46,18 @@ test("scope change or caller cancellation cannot acknowledge a stale navigation"
     assert.equal(target!.signal.aborted, true);
     assert.equal(await requestConversationReveal("chat", 0), false);
   } finally { unregister(); }
+});
+
+test("an answer row is found by its message sequence; an activity row never is", () => {
+  const asked: string[] = [];
+  const timeline = { querySelector: (selector: string) => { asked.push(selector); return "node"; } };
+  const rows = [
+    { kind: "activity", id: "tool", eventSeq: 3 },
+    { kind: "assistant", id: "part-1", eventSeq: 11 },
+  ];
+  assert.equal(answerRowNode(timeline, rows, "part-1"), "node");
+  assert.deepEqual(asked, ['[data-message-seq="11"]']);
+  assert.equal(answerRowNode(timeline, rows, "tool"), null);
+  assert.equal(answerRowNode(timeline, rows, "missing"), null);
+  assert.equal(asked.length, 1);
 });

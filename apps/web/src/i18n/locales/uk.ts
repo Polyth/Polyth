@@ -2472,6 +2472,7 @@ export const uk: AppMessages = {
   "timeline.loadEarlierHistory": "Завантажити попередню історію",
   "timeline.promptHistoryFailed": "Не вдалося завантажити історію промптів. Спробуйте ще раз.",
   "timeline.promptBookmarkMoveHint": "Перетягніть закладку, щоб перемістити її, або утримуйте Shift і натискайте клавішу зі стрілкою. Shift із Home повертає її на місце. Положення зберігається лише на цьому пристрої.",
+  "timeline.promptsTab": "Промпти",
   "timeline.loadingEarlierHistory": "Завантаження попередньої історії…",
   "timeline.manageTurns": "КЕРУВАННЯ ХОДАМИ",
   "timeline.message": "×",
