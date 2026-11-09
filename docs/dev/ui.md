@@ -2174,6 +2174,15 @@ stays open as an accent glyph colour only ([design system](design-system.md),
 "Press composes"). `apps/web/test/mobileSessionMenu.test.ts` covers the menu
 and the press/open rule.
 
+**Photo size:** a composer given a photo over 1 MB asks how large it goes up
+before anything leaves the device (`ImageSizePrompt`, `imageUploadSize.ts`;
+Chat and an agent's page alike, by picker, camera, paste or drop). Small, Medium
+and Large are 1024, 1600 and 2560 px on the long edge, each showing its real
+encoded size; Original sends the file untouched. Other files in the batch do not
+wait, and a size that would change nothing is not offered. **Settings → Chat →
+Photo size** (`imageUploadSize`) keeps a standing answer. A reduced copy is a
+canvas re-encode, so it carries no EXIF, and only that copy is uploaded.
+
 **Composer attachments:** the next message's files are one row of the card —
 the *attachment tray* — between the model line and the editor, in a new chat
 and an open one alike (never above the project row). `AttachmentPills` draws

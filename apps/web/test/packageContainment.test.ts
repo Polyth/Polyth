@@ -80,8 +80,10 @@ const GENERIC_SHELL_IMPORTS = new Set([
   // package's edited-files dock render the same host component.
   "components/AgentLiveStatusDock.tsx",
   // A package composer shows the files it carries the way Chat's does (an
-  // agent's page): the same pill row, removable or read-only.
+  // agent's page): the same pill row, removable or read-only, and the same
+  // question about how large a photo goes up.
   "components/AttachmentPills.tsx",
+  "components/ImageSizePrompt.tsx",
   // An agent's live turn reads its steps like the chat's activity block: the
   // same line swap, the same step presentation and the same step glyph.
   "components/ActivityTicker.tsx",

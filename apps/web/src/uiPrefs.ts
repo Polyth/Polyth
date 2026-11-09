@@ -2,6 +2,7 @@
 // versioned record; `polyth.settings` is read only as a one-time migration
 // source because older builds shared it with product-level settings.
 import { useSyncExternalStore } from "react";
+import { parseImageUploadPreference, type ImageUploadPreference } from "./imageUploadSize.ts";
 import type { NotificationKind, PromptHistoryScope } from "@polyth/contracts";
 import { clampPromptHistoryLimit, parsePromptHistoryScope, PROMPT_HISTORY_DEFAULT_LIMIT } from "@polyth/contracts";
 import {
@@ -154,6 +155,8 @@ export interface UiSettings {
   /** Send behavior while a turn is active. */
   followUpBehavior: FollowUpBehavior;
   largeTextPasteBehavior: LargeTextPasteBehavior;
+  /** What a composer does with a heavy photo: ask, or always use this size. */
+  imageUploadSize: ImageUploadPreference;
   /** Group tool/task actions into activity cards or render each independently. */
   actionGrouping: ActionGrouping;
   /** Keep thinking collapsed, expanded, or inside a grouped activity block. */
@@ -283,6 +286,7 @@ export const UI_DEFAULTS: UiSettings = {
   autoScroll: true,
   followUpBehavior: "queue",
   largeTextPasteBehavior: "ask",
+  imageUploadSize: "ask",
   actionGrouping: "grouped",
   thinkingDisplayMode: "collapsed",
   sessionActivityDetails: "all",
@@ -441,6 +445,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       largeTextPasteBehavior: data.largeTextPasteBehavior === "attach" || data.largeTextPasteBehavior === "inline"
         ? data.largeTextPasteBehavior
         : "ask",
+      imageUploadSize: parseImageUploadPreference(data.imageUploadSize),
       actionGrouping,
       thinkingDisplayMode: parseThinkingDisplayMode(data.thinkingDisplayMode, legacyThinking, actionGrouping),
       sessionActivityDetails: data.sessionActivityDetails === "all" ? "all" : "tabs",
