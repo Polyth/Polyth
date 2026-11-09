@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -241,7 +242,7 @@ test("Claude keeps MCP config secrets out of process argv and removes the privat
         releasedAuthorities: [],
         spawn(_command: string, args: string[]) {
             spawnedArgs = args;
-            return { stderr: { resume() {} } } as any;
+            return { stderr: new EventEmitter() } as any;
         },
         receipt: async (operationId: string, id: string) => { receipts[operationId] = id; },
         close: async () => {},
