@@ -26,6 +26,17 @@ test("runHarnessUpdate runs the argv without a shell and reports the exit", asyn
     assert.ok(refused.output);
 });
 
+test("runHarnessUpdate names the signal of an updater that crashed", { skip: process.platform === "win32" }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "harness-update-crash-"));
+    const bin = join(dir, "crashing-cli");
+    writeFileSync(bin, "#!/bin/sh\nkill -ILL $$\n");
+    chmodSync(bin, 0o755);
+    const crashed = await runHarnessUpdate([bin, "update"]);
+    assert.equal(crashed.ok, false);
+    assert.equal(crashed.exitCode, null);
+    assert.equal(crashed.output, `${bin} stopped with SIGILL`);
+});
+
 const space = { spaceId: "space-a", spaceSlug: "space-a", userId: "user-a", role: "owner", deployment: "local-trusted", storageDir: "/tmp/polyth-space-a" } as SpaceContext;
 
 function maintenanceHost(log: string[]): ServerPackageHost {

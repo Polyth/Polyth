@@ -32,18 +32,54 @@ const windowsShim = (command: string) => process.platform === "win32" && /\.(?:c
 const accountEnv = (account?: ResolvedHarnessAccount): Record<string, string> =>
     account ? { GROK_HOME: account.dir } : {};
 
-/** `grok models` is a local catalog report; it never runs a model turn. */
-const grokAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
-    const { command, env } = await resolveGrokBinary();
-    const { stdout, stderr, ok } = await exec(command, ["models"], {
+/**
+ * Child environment for a Grok CLI run. An added account must sign in as
+ * itself: `XAI_API_KEY` takes precedence over stored browser credentials, so a
+ * server-wide key would silently replace that account's own login. The default
+ * harness keeps the inherited environment untouched.
+ */
+const accountChildEnv = (base: NodeJS.ProcessEnv, account?: ResolvedHarnessAccount): NodeJS.ProcessEnv => {
+    const env = { ...base };
+    if (!account) return env;
+    delete env.XAI_API_KEY;
+    env.GROK_HOME = account.dir;
+    return env;
+};
+
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+
+/**
+ * `grok models` reports the sign-in state without running a model turn: the
+ * signed-out banner, the API-key banner, or a signed-in first line (usually an
+ * account label containing the email).
+ */
+export function parseGrokModelsStatus(output: { stdout: string; stderr: string; ok: boolean }): HarnessAccountStatus {
+    const text = `${output.stdout}\n${output.stderr}`;
+    if (/not authenticated|please (?:sign|log) ?in/i.test(text)) return { loggedIn: false };
+    if (/using XAI_API_KEY/i.test(text)) return { loggedIn: true, plan: "API key" };
+    if (!output.ok) return { loggedIn: "unknown" };
+    const firstLine = output.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+    if (!firstLine) return { loggedIn: "unknown" };
+    const email = EMAIL.exec(firstLine)?.[0];
+    return { loggedIn: true, ...(email ? { email } : {}) };
+}
+
+/** `grok models` never runs a model turn; a launch failure is never "signed out". */
+const readGrokModelsStatus = async (command: string, env: NodeJS.ProcessEnv): Promise<HarnessAccountStatus> =>
+    exec(command, ["models"], {
         timeout: 20_000,
         maxBuffer: 64 * 1024,
-        env: { ...env, ...accountEnv(account) },
+        env,
         shell: windowsShim(command),
-    }).then(({ stdout, stderr }) => ({ stdout, stderr, ok: true }), (error: { stdout?: string; stderr?: string }) =>
-        ({ stdout: error.stdout ?? "", stderr: error.stderr ?? "", ok: false }));
-    if (/not authenticated|please (?:sign|log) ?in/i.test(`${stdout}\n${stderr}`)) return { loggedIn: false };
-    return ok && stdout.trim() ? { loggedIn: true } : { loggedIn: "unknown" };
+    }).then(({ stdout, stderr }) => parseGrokModelsStatus({ stdout, stderr, ok: true }),
+        (error: { stdout?: string; stderr?: string; killed?: boolean; timedOut?: boolean; code?: string }) => {
+            if (error.killed || error.timedOut || error.code === "ETIMEDOUT") return { loggedIn: "unknown" as const };
+            return parseGrokModelsStatus({ stdout: error.stdout ?? "", stderr: error.stderr ?? "", ok: false });
+        });
+
+const grokAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
+    const { command, env } = await resolveGrokBinary();
+    return readGrokModelsStatus(command, accountChildEnv(env, account));
 };
 
 export function createGrokProfile(account?: ResolvedHarnessAccount): RegisteredAcpProfile {
@@ -64,25 +100,31 @@ export function createGrokProfile(account?: ResolvedHarnessAccount): RegisteredA
         },
         command: process.env.POLYTH_GROK_BIN?.trim() || "grok",
         args: ["agent", "stdio"],
-        ...(account ? { env: { ...process.env, ...accountEnv(account) } } : {}),
+        ...(account ? { env: accountChildEnv(process.env, account) } : {}),
         async probe(context) {
             if (context.remote)
                 return { harnessId, installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
             try {
                 const { command, env: baseEnv } = await resolveGrokBinary();
-                const env = { ...baseEnv, ...accountEnv(account) };
+                const env = accountChildEnv(baseEnv, account);
                 profile.command = command;
                 profile.env = env;
-                const version = await exec(command, ["version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
-                    .then(({ stdout, stderr }) => (stdout || stderr).trim())
-                    .catch(() => undefined);
+                // The sign-in state feeds the model-discovery cache key, so a
+                // fresh login (or an expired one) is seen without waiting for
+                // the 60 s/5 min discovery lifetimes.
+                const [version, status] = await Promise.all([
+                    exec(command, ["version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
+                        .then(({ stdout, stderr }) => (stdout || stderr).trim())
+                        .catch(() => undefined),
+                    readGrokModelsStatus(command, env),
+                ]);
                 return {
                     harnessId,
                     installed: true,
-                    authenticated: "unknown",
+                    authenticated: status.loggedIn,
                     healthy: true,
                     ...(version ? { version } : {}),
-                    message: "Native sign-in is verified when the ACP agent initializes",
+                    ...(status.loggedIn === "unknown" ? { message: "Native sign-in is verified when the ACP agent initializes" } : {}),
                 };
             }
             catch {
