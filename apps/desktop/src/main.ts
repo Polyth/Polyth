@@ -23,7 +23,7 @@ import {
 import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { boot } from "@polyth/server";
 import { cliLauncherPlan, installCliLauncher, openPathFromArgv } from "./cliInstall.ts";
 import { setLinuxAutostartEnabled } from "./linuxAutostart.ts";
@@ -72,7 +72,8 @@ import type {
   DesktopWindowState,
 } from "./types.ts";
 import { assertUpdaterCapability } from "./updaterCapability.ts";
-import { followsMacLegacyFeed, resolveUpdaterConfig, updateChannelForVersion } from "./updaterChannel.ts";
+import { followsMacLegacyFeed, pinnedUpdaterChannel, resolveUpdaterConfig, updateChannelForVersion } from "./updaterChannel.ts";
+import { desktopEdition, EditionUnavailableError, workstationServersState, workstationWindowRequestAllowed } from "./edition.ts";
 import { releasePageUrl, resolveUpdateInstallMode, type UpdateInstallMode } from "./updaterInstallMode.ts";
 import {
   parsePendingUpdate,
@@ -106,6 +107,15 @@ let autoUpdater: DesktopAutoUpdater | null = null;
 const backgroundStart = process.argv.includes("--background");
 /** The macOS 12 build on macOS 12 updates from its own stable-only feed. */
 const macLegacyUpdates = followsMacLegacyFeed(__POLYTH_DESKTOP_FLAVOR__, process.platform, process.getSystemVersion());
+/**
+ * The workstation edition (docs/security/workstation-edition.md) is a
+ * local-only shell: this computer's server on loopback, no Polyth Link, no
+ * other servers, no bundled Chromium, and a stable-only update feed of its own.
+ */
+const edition = desktopEdition(__POLYTH_DESKTOP_FLAVOR__);
+const workstation = edition === "workstation";
+/** A feed the build is pinned to whatever the chosen channel; null = the chosen channel. */
+const pinnedUpdates = pinnedUpdaterChannel(__POLYTH_DESKTOP_FLAVOR__, process.platform, process.getSystemVersion());
 
 interface SavedWindowState {
   bounds?: Rectangle;
@@ -248,12 +258,14 @@ const webPackagesPath = (): string => app.isPackaged
   : resolve(app.getAppPath(), "../../packages");
 
 const linkHostPath = (): string | undefined => {
+  if (workstation) return undefined;
   if (process.env.POLYTH_LINK_HOST) return process.env.POLYTH_LINK_HOST;
   const executable = process.platform === "win32" ? "polyth-link-host.exe" : "polyth-link-host";
   return app.isPackaged ? packagedResource(join("polyth-link", executable)) : undefined;
 };
 
 const linkClientBinary = (): string | undefined => {
+  if (workstation) return undefined;
   if (process.env.POLYTH_LINK_CLIENT) return process.env.POLYTH_LINK_CLIENT;
   const executable = process.platform === "win32" ? "polyth-link-client.exe" : "polyth-link-client";
   return app.isPackaged ? packagedResource(join("polyth-link", executable)) : undefined;
@@ -702,6 +714,7 @@ const disconnectLinkSessions = async (except?: string): Promise<void> => {
 };
 
 const refreshLinkConnections = async (): Promise<void> => {
+  if (workstation) return;
   // Nothing was ever paired: no reason to start the client for a menu.
   if (!existsSync(join(linkClientDir, "connections.json"))) return;
   try {
@@ -749,6 +762,7 @@ const failureCode = (error: unknown): string => {
 };
 
 const linkCall = async (rawMethod: unknown, rawParams: unknown): Promise<DesktopServersResult<unknown>> => {
+  if (workstation) return { ok: false, code: new EditionUnavailableError("Polyth Link").code };
   try {
     const { method, params } = linkRequest(rawMethod, rawParams);
     const client = requireLinkClient();
@@ -812,7 +826,10 @@ const loadInWindow = async (url: string): Promise<void> => {
   await mainWindow.loadURL(url).catch((error: unknown) => log("Window navigation failed", error));
 };
 
-const openServerList = (options: HubOptions = {}): Promise<void> => loadInWindow(hubUrl(options));
+/** The workstation edition has no server list: only this computer's server opens. */
+const openServerList = (options: HubOptions = {}): Promise<void> => workstation
+  ? openServer({ kind: "local" })
+  : loadInWindow(hubUrl(options));
 
 /** The status route of a server, with where its redirects ended: `net.fetch`
  *  reports neither the final URL nor, in manual mode, the redirect's target. */
@@ -886,6 +903,7 @@ const checkServerAddress = async (url: string): Promise<string> => {
 };
 
 const openServer = async (target: DesktopOpenServer): Promise<void> => {
+  if (workstation && target.kind !== "local") throw new EditionUnavailableError("Connecting to another server");
   if (target.kind === "local") {
     if (!servers.runLocalServer) persistServers({ ...servers, runLocalServer: true });
     if (!serverLifecycle) await startServer();
@@ -1056,7 +1074,7 @@ function rebuildTrayMenu(): void {
     { label: mainWindow?.isVisible() ? "Focus Polyth" : "Show Polyth", click: showWindow },
     { label: "Hide", enabled: mainWindow?.isVisible() ?? false, click: () => { mainWindow?.hide(); broadcastWindowState(); } },
     { type: "separator" },
-    { label: "Servers", submenu: serverMenuItems() },
+    { label: "Servers", visible: !workstation, submenu: serverMenuItems() },
     { type: "separator" },
     { label: "Open data folder", visible: servers.runLocalServer, click: () => void shell.openPath(dataDir).then((error) => { if (error) log(`Could not open data folder: ${error}`); }) },
     { label: "Install command-line tool…", visible: app.isPackaged, click: () => void installCommandLineTool() },
@@ -1067,7 +1085,7 @@ function rebuildTrayMenu(): void {
     { label: "Update automatically", type: "checkbox", checked: settings.automaticUpdates, click: ({ checked }) => void persistSettings({ automaticUpdates: checked }) },
     {
       label: "Update channel",
-      visible: !macLegacyUpdates,
+      visible: pinnedUpdates === null,
       submenu: (["stable", "test", "nightly"] as const).map((channel): MenuItemConstructorOptions => ({
         label: channel === "stable" ? "Stable" : channel === "test" ? "Test" : "Nightly",
         type: "radio",
@@ -1177,7 +1195,7 @@ const installApplicationMenu = (): void => {
       { label: "Command Palette…", ...rendererShortcut("CommandOrControl+K"), click: () => sendCommand("command-palette") },
       { type: "separator" },
       { label: "Show Polyth", accelerator: "CommandOrControl+Shift+P", click: showWindow },
-      { label: "Switch Server…", click: () => void popupServerMenu() },
+      { label: "Switch Server…", visible: !workstation, click: () => void popupServerMenu() },
       { label: "Open Data Folder", click: () => void shell.openPath(dataDir) },
       { label: "Install Command-Line Tool…", enabled: app.isPackaged, click: () => void installCommandLineTool() },
       ...(mac ? [] : [{ type: "separator" as const }, settingsItem]),
@@ -1540,6 +1558,7 @@ const installIpc = (): void => {
       canLaunchAtLogin: !remote && app.isPackaged && ["darwin", "linux", "win32"].includes(process.platform),
       keepAwakeActive: keepAwakeActive(), lowResourceMode: startupLowResourceMode,
       softwareRendering: startupSoftwareRendering, macLegacyUpdates,
+      stableOnlyUpdates: pinnedUpdates !== null, edition,
       server: activeServerInfo(),
     };
   });
@@ -1647,13 +1666,13 @@ const installIpc = (): void => {
 function applyUpdateChannel(): void {
   const updater = autoUpdater;
   if (!updater) return;
-  const config = resolveUpdaterConfig(settings.updateChannel, process.platform, process.arch, macLegacyUpdates);
+  const config = resolveUpdaterConfig(settings.updateChannel, process.platform, process.arch, pinnedUpdates);
   updater.allowPrerelease = config.allowPrerelease;
   updater.channel = config.channel;
   // Setting a channel turns downgrades on; a database never migrates backwards.
   updater.allowDowngrade = false;
-  log(macLegacyUpdates
-    ? `Updater follows the macOS 12 feed (${config.channel}, stable releases only)`
+  log(pinnedUpdates
+    ? `Updater follows the ${workstation ? "workstation" : "macOS 12"} feed (${config.channel}, stable releases only)`
     : `Updater follows the ${settings.updateChannel} channel (${config.channel}, prereleases ${config.allowPrerelease ? "on" : "off"})`);
   if (updateState.phase === "available" || updateState.phase === "up-to-date" || updateState.phase === "error") {
     setUpdateState({ phase: "idle", message: `Following the ${settings.updateChannel} channel. Check for updates to look for its newest build.` });
@@ -1766,11 +1785,23 @@ const startServer = async (preferredPort?: number): Promise<void> => {
   const port = preferredPort ?? await reserveServerPort(savedPort);
   baseUrl = `http://127.0.0.1:${port}`;
   process.env.POLYTH_DESKTOP = "1";
+  // Read by the server and its packages (@polyth/contracts/edition). Always
+  // written, so an inherited value cannot turn a standard build into a
+  // workstation one or the other way round.
+  process.env.POLYTH_EDITION = edition;
+  // The workstation edition has no phone pairing, so nothing may reach the
+  // push relay either (packages/server/src/nativePush.ts).
+  if (workstation) process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN = "off";
   const linkHost = linkHostPath();
   if (linkHost && existsSync(linkHost)) process.env.POLYTH_LINK_HOST = linkHost;
+  else delete process.env.POLYTH_LINK_HOST;
   if (app.isPackaged) process.env.POLYTH_RESOURCES_DIR ??= process.resourcesPath;
   const bundledChromium = stagedChromiumExecutable(process.resourcesPath, process.platform, process.arch);
-  if (app.isPackaged) {
+  if (workstation) {
+    // No embedded browser package ships, so nothing may start a browser.
+    delete process.env.POLYTH_CHROMIUM_PATH;
+    delete process.env.POLYTH_REQUIRE_BUNDLED_CHROMIUM;
+  } else if (app.isPackaged) {
     if (!bundledChromium) {
       throw new Error(`Packaged Chromium is missing for ${process.platform}-${process.arch}`);
     }
@@ -1825,7 +1856,7 @@ async function start(): Promise<void> {
   serverPortPath = join(desktopDir, "server-port.json");
   serversPath = join(desktopDir, "servers.json");
   linkClientDir = join(desktopDir, "link-client");
-  servers = readServersStateSync(serversPath);
+  servers = workstation ? workstationServersState(readServersStateSync(serversPath)) : readServersStateSync(serversPath);
   updatePendingPath = join(desktopDir, "update-pending.json");
   settings = await readDesktopSettings(settingsPath, desktopSettingsDefaults);
   if (startupLowResourceMode) log("Low-resource mode active");
@@ -1843,17 +1874,30 @@ async function start(): Promise<void> {
       void allowRemoteMicrophone(new URL(url).origin).then(callback, () => callback(false));
       return;
     }
-    callback(permission === "notifications" || microphone);
+    // The workstation edition ships no dictation or voice package: no microphone.
+    callback(permission === "notifications" || (microphone && !workstation));
   });
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
     const surface = webContents ? surfaceOf(webContents.getURL()) : null;
-    return (surface === "local" || surface === "remote") && (permission === "notifications" || (permission === "media" && details.mediaType === "audio"));
+    return (surface === "local" || surface === "remote")
+      && (permission === "notifications" || (!workstation && permission === "media" && details.mediaType === "audio"));
   });
+  if (workstation && process.platform !== "darwin") {
+    // Chromium fetches Hunspell dictionaries from Google's CDN on Linux (and
+    // on Windows when the OS checker is unavailable). Point it at a folder
+    // inside the app: spelling uses what the OS provides, nothing downloads.
+    session.defaultSession.setSpellCheckerDictionaryDownloadURL(pathToFileURL(join(process.resourcesPath, "dictionaries") + "/").href);
+  }
   // Only this computer's own page may call this computer's server.
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const contents = mainWindow?.webContents;
     const fromWindow = contents !== undefined && details.webContents === contents;
-    callback({ cancel: fromWindow && blockedFromLocalServer(details, details.frame?.url ?? contents.getURL(), windowOrigins()) });
+    callback({ cancel: fromWindow && (
+      blockedFromLocalServer(details, details.frame?.url ?? contents.getURL(), windowOrigins())
+      // The workstation window talks to this computer's server only: no
+      // remote images, scripts or sockets, whatever a page or message holds.
+      || (workstation && !workstationWindowRequestAllowed(details.url, baseUrl))
+    ) });
   });
   // Cookies ignore ports: Polyth's session never leaves for another local port.
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {

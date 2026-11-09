@@ -4017,6 +4017,7 @@ export const ptBR: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "Verificar versões assinadas no GitHub em segundo plano. Os downloads continuam sob seu controle.",
   "desktop.settings.updateChannel": "Canal de atualização",
   "desktop.settings.updateChannelLegacyHint": "Esta compilação para macOS 12 só recebe atualizações das versões estáveis. Atualize o macOS para a versão 13 ou mais recente para escolher um canal.",
+  "desktop.settings.updateChannelWorkstationHint": "A edição Workstation só é atualizada a partir de versões estáveis.",
   "desktop.settings.lowResource": "Modo de poucos recursos",
   "desktop.settings.lowResourceHint": "Desativa imediatamente animações e o desfoque de vidro em tempo real. Após reiniciar, também usa caches e histórico de rolagem do terminal menores, OpenCode adiado e uma janela de chat menor. A aceleração por GPU continua ativada.",
   "desktop.settings.softwareRendering": "Renderização por software",

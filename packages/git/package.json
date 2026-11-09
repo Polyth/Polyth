@@ -16,6 +16,7 @@
     "./hunks": "./src/hunks.ts"
   },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/sourceControlServerEntry.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {

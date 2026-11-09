@@ -17,6 +17,8 @@ import type {
   PolythDesktopServersApi,
 } from "./types.ts";
 
+declare const __POLYTH_DESKTOP_FLAVOR__: string;
+
 const subscribe = <T>(channel: string, listener: (value: T) => void): (() => void) => {
   const handler = (_event: Electron.IpcRendererEvent, value: T) => listener(value);
   ipcRenderer.on(channel, handler);
@@ -47,7 +49,9 @@ const place = placement();
 const api: PolythDesktopApi = {
   surface: place.surface,
   linkProxy: place.linkProxy,
-  servers: Object.freeze(servers),
+  // The workstation edition has no other servers (src/edition.ts): without the
+  // API the page shows no server switcher, and main refuses the channels anyway.
+  ...(__POLYTH_DESKTOP_FLAVOR__ === "workstation" ? {} : { servers: Object.freeze(servers) }),
   getInfo: () => ipcRenderer.invoke("desktop:info") as Promise<DesktopInfo>,
   requestSetupClaim: (request) =>
     ipcRenderer.invoke("desktop:setup:claim", { fresh: request?.fresh === true }) as Promise<DesktopSetupClaim>,

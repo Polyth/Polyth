@@ -1,4 +1,5 @@
 import type { ModelDescriptor } from "@polyth/contracts";
+import { isWorkstationEdition } from "@polyth/contracts/edition";
 
 const MODELS_DEV_URL = "https://models.dev/api.json";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -315,6 +316,10 @@ export function createModelContextCatalog(
   let pending: Promise<ModelContextIndex> | undefined;
 
   const load = (): Promise<ModelContextIndex> => {
+    // The workstation edition contacts no third-party catalog service: it uses
+    // exactly the offline path (no context window enrichment, no cache entry,
+    // no retry backoff), and no request leaves this machine.
+    if (isWorkstationEdition(process.env)) return Promise.resolve({ byModel: new Map() });
     const timestamp = now();
     if (cached && cached.expiresAt > timestamp) return Promise.resolve(cached.index);
     if (timestamp < retryAt) return Promise.resolve({ byModel: new Map() });

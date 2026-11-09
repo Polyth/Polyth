@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync } from "node:fs";
+import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { electronBuilderFeedArgs, macPartialMetadataName, resolveFeedRepository } from "./update-feed.mjs";
@@ -8,6 +8,10 @@ import {
   MAC_LEGACY_ARCH, MAC_LEGACY_ELECTRON_VERSION, MAC_LEGACY_FLAVOR, MAC_LEGACY_METADATA,
   MAC_LEGACY_MINIMUM_SYSTEM_VERSION, macLegacyBuilderArgs,
 } from "./mac-legacy.mjs";
+import {
+  WORKSTATION_ASSET_INFIX, WORKSTATION_FLAVOR, WORKSTATION_METADATA, assertWorkstationPackage, resourcesDirOf,
+  workstationBuilderArgs, workstationMacPartialName, workstationPackageIds, workstationSbom, workstationSbomName,
+} from "./workstation.mjs";
 
 const ROOT = process.cwd();
 const TARGET = process.env.REMOTE_BUILD_TARGET;
@@ -106,6 +110,78 @@ function copyFileAs(file, name) {
   cpSync(file, join(OUTPUT, name));
 }
 
+/**
+ * The workstation edition (scripts/ci/workstation.mjs): the same app for a
+ * managed work computer. Builds with POLYTH_DESKTOP_FLAVOR=workstation, no
+ * Chromium and no Link binaries, its own electron-builder configuration file
+ * and its own output directory, so it never collides with the standard
+ * targets. Its feed channel is `workstation`.
+ */
+function workstationBuild(tag) {
+  const packageIds = workstationPackageIds(ROOT);
+  if (packageIds.length === 0) fail("No package lists the workstation edition (polyth.editions)");
+  const configFile = join(TMP, `electron-builder-workstation-${tag}.json`);
+  return {
+    packageIds,
+    builderArgs: workstationBuilderArgs({ repoRoot: ROOT, file: configFile, packageIds }),
+    // The configuration names the workstation channel; the standard feed args force `latest`.
+    feedArgs: FEED_ARGS.filter((arg) => !arg.startsWith("--config.publish.channel=")),
+    outputDir: `release/${tag}`,
+  };
+}
+
+const WORKSTATION_META = join(ROOT, "apps/desktop/build-meta");
+
+/** Unpacked app directories (`*.app`, `win-unpacked`, `linux-unpacked`) one level or two under a builder output. */
+function unpackedApps(dir) {
+  return walkDirs(dir, 3).filter((path) => /(\.app|-unpacked)$/.test(path));
+}
+
+function walkDirs(dir, depth) {
+  if (!existsSync(dir) || depth < 0) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const path = join(dir, entry.name);
+      return /(\.app|-unpacked)$/.test(entry.name) ? [path] : walkDirs(path, depth - 1);
+    });
+}
+
+function assertWorkstationOutput(outputRoot, packageIds) {
+  const apps = unpackedApps(join(ROOT, "apps/desktop", outputRoot));
+  if (apps.length === 0) fail(`No unpacked workstation app under ${outputRoot}`);
+  for (const appOutDir of apps) {
+    assertWorkstationPackage({
+      resourcesDir: resourcesDirOf(appOutDir),
+      metafilePath: join(WORKSTATION_META, "main.metafile.json"),
+      packageIds,
+      repoRoot: ROOT,
+    });
+    console.log(`remote-build workstation: ${relative(ROOT, appOutDir)} passes the edition check`);
+  }
+}
+
+/** Per-platform SBOM next to the installers, named for the release. */
+function writeWorkstationSbom(os, arch) {
+  const version = feedVersion();
+  const sbom = workstationSbom({ metafilePath: join(WORKSTATION_META, "main.metafile.json"), repoRoot: ROOT, version });
+  writeFileSync(join(OUTPUT, workstationSbomName(version, os, arch)), `${JSON.stringify(sbom, null, 2)}\n`);
+}
+
+/** The version baked into this build: the feed build's version, or the manifest's. */
+function feedVersion() {
+  const arg = FEED_ARGS.find((value) => value.startsWith("--config.extraMetadata.version="));
+  return arg ? arg.slice(arg.indexOf("=") + 1) : DESKTOP_VERSION;
+}
+
+/** electron-builder writes `workstation*.yml` (channel); a `latest*.yml` is renamed to be safe. */
+function workstationMetadata(dir, name, latestName) {
+  const named = join(dir, name);
+  if (existsSync(named)) return named;
+  const latest = join(dir, latestName);
+  return existsSync(latest) ? latest : null;
+}
+
 function readBytes(file, position, length) {
   const fd = openSync(file, "r");
   try {
@@ -155,6 +231,13 @@ function requireFiles(outputs, extension, label, predicate) {
   return files;
 }
 
+/** A workstation installer must carry the infix that keeps it out of every download list. */
+function requireWorkstationNames(files, label) {
+  for (const file of files) {
+    if (!basename(file).includes(WORKSTATION_ASSET_INFIX)) fail(`Workstation ${label} is not named ${WORKSTATION_ASSET_INFIX}: ${basename(file)}`);
+  }
+}
+
 function validateOutputFormats(target, outputs) {
   const names = outputs.map((file) => basename(file));
   const encryptedLookingOutputs = names.filter((name) => name.toLowerCase().endsWith(".bin"));
@@ -186,6 +269,22 @@ function validateOutputFormats(target, outputs) {
         requireFiles(outputs, MAC_LEGACY_METADATA, "macOS 12 update metadata");
       }
       break;
+    case "mac-dmg-workstation":
+      requireWorkstationNames(requireFiles(outputs, ".dmg", "workstation macOS disk image", isDiskImage), "dmg");
+      requireFiles(outputs, ".cdx.json", "workstation SBOM");
+      if (FEED_BUILD) requireFiles(outputs, ".partial.yml", "workstation macOS update metadata");
+      break;
+    case "windows-exe-workstation":
+      requireWorkstationNames(requireFiles(outputs, ".exe", "workstation Windows installer", isPeExecutable), "exe");
+      requireFiles(outputs, ".blockmap", "workstation Windows blockmap");
+      requireFiles(outputs, ".cdx.json", "workstation SBOM");
+      if (FEED_BUILD) requireFiles(outputs, WORKSTATION_METADATA.windows, "workstation Windows update metadata");
+      break;
+    case "linux-appimage-workstation":
+      requireWorkstationNames(requireFiles(outputs, ".appimage", "workstation AppImage", isElfExecutable), "AppImage");
+      requireFiles(outputs, ".cdx.json", "workstation SBOM");
+      if (FEED_BUILD) requireFiles(outputs, WORKSTATION_METADATA.linux, "workstation Linux update metadata");
+      break;
     case "windows-exe": {
       requireFiles(outputs, ".exe", "Windows installer", isPeExecutable);
       // electron-builder has emitted both JSON and binary blockmap formats
@@ -216,6 +315,7 @@ function npmCi() {
 }
 
 /** Release-only tools (electron-builder, Capacitor CLI, sharp) live in tools/release. */
+const ELECTRON_BUILDER = join(ROOT, "tools/release/node_modules/electron-builder/cli.js");
 function releaseToolsCi() {
   npmCi();
   run(npm, ["run", "release-tools:install"]);
@@ -476,17 +576,20 @@ function distributeTestFlight() {
  * `legacy` builds the macOS 12 package (scripts/ci/mac-legacy.mjs): Intel
  * only, Electron 43, its own artifact names and legacy-mac.yml metadata.
  */
-function buildMac({ legacy = false } = {}) {
+function buildMac({ legacy = false, workstation = false } = {}) {
   if (legacy && process.arch !== MAC_LEGACY_ARCH) {
     fail(`The macOS 12 build runs on an Intel runner (its startup smoke test needs a native app), found ${process.arch}`);
   }
   const architectures = legacy ? [MAC_LEGACY_ARCH] : getMacArchitectures();
-  const outputDir = (arch) => legacy ? `mac-legacy-${arch}` : `mac-${arch}`;
+  const outputDir = (arch) => legacy ? `mac-legacy-${arch}` : workstation ? `mac-workstation-${arch}` : `mac-${arch}`;
+  const edition = workstation ? workstationBuild("mac-workstation") : null;
+  const feedArgs = edition ? edition.feedArgs : FEED_ARGS;
   releaseToolsCi();
   const browserPath = (arch) => join(TMP, `playwright-mac-${arch}`);
   const hostPlatform = (arch) => arch === "arm64" ? "mac14-arm64" : "mac14";
 
-  for (const arch of architectures) {
+  // The workstation edition ships no Chromium; nothing to download or stage.
+  for (const arch of workstation ? [] : architectures) {
     run(npx, ["playwright-core", "install", "chromium"], {
       env: {
         PLAYWRIGHT_BROWSERS_PATH: browserPath(arch),
@@ -508,17 +611,19 @@ function buildMac({ legacy = false } = {}) {
   ]);
 
   run(npm, ["run", "build:desktop"], {
-    env: { POLYTH_MAC_MULTI_ARCH: "1", POLYTH_DESKTOP_FLAVOR: legacy ? MAC_LEGACY_FLAVOR : "" },
+    env: { POLYTH_MAC_MULTI_ARCH: "1", POLYTH_DESKTOP_FLAVOR: legacy ? MAC_LEGACY_FLAVOR : workstation ? WORKSTATION_FLAVOR : "" },
   });
   for (const arch of architectures) {
-    run(npm, ["run", "desktop:stage-chromium"], {
-      env: {
-        PLAYWRIGHT_BROWSERS_PATH: browserPath(arch),
-        PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: hostPlatform(arch),
-        POLYTH_TARGET_PLATFORM: "darwin",
-        POLYTH_TARGET_ARCH: arch,
-      },
-    });
+    if (!workstation) {
+      run(npm, ["run", "desktop:stage-chromium"], {
+        env: {
+          PLAYWRIGHT_BROWSERS_PATH: browserPath(arch),
+          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: hostPlatform(arch),
+          POLYTH_TARGET_PLATFORM: "darwin",
+          POLYTH_TARGET_ARCH: arch,
+        },
+      });
+    }
     run(npm, ["run", "desktop:download-opencode"], {
       env: { POLYTH_TARGET_PLATFORM: "darwin", POLYTH_TARGET_ARCH: arch },
     });
@@ -532,8 +637,10 @@ function buildMac({ legacy = false } = {}) {
         : ["--config.mac.identity=-"]),
       `--config.directories.output=release/${outputDir(arch)}`,
       ...(legacy ? macLegacyBuilderArgs() : []),
-      ...FEED_ARGS,
+      ...(edition ? edition.builderArgs : []),
+      ...feedArgs,
     ], { cwd: join(ROOT, "apps/desktop") });
+    if (edition) assertWorkstationOutput(`release/${outputDir(arch)}`, edition.packageIds);
   }
 
   run("bash", ["-lc", `
@@ -588,37 +695,72 @@ function buildMac({ legacy = false } = {}) {
     // Each architecture's job writes its own latest-mac.yml; update-feed.mjs
     // merges them, so keep both under distinct names. The macOS 12 package's
     // metadata is the separate feed only that build reads.
-    const metadata = join(dir, "latest-mac.yml");
-    if (existsSync(metadata)) copyFileAs(metadata, legacy ? MAC_LEGACY_METADATA : macPartialMetadataName(arch));
+    const metadata = workstation
+      ? workstationMetadata(dir, WORKSTATION_METADATA.mac, "latest-mac.yml")
+      : join(dir, "latest-mac.yml");
+    if (metadata && existsSync(metadata)) {
+      copyFileAs(metadata, legacy ? MAC_LEGACY_METADATA : workstation ? workstationMacPartialName(arch) : macPartialMetadataName(arch));
+    }
+    if (workstation) writeWorkstationSbom("mac", arch);
   }
 }
 
-function buildWindows() {
+function buildWindows({ workstation = false } = {}) {
+  const edition = workstation ? workstationBuild("win-workstation") : null;
+  const releaseDir = join(ROOT, "apps/desktop", edition ? edition.outputDir : "release");
   releaseToolsCi();
-  run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
-  run(npm, ["run", "build:desktop"]);
-  run(npm, ["run", "desktop:stage-chromium"], {
-    env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" },
-  });
+  if (!workstation) run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
+  run(npm, ["run", "build:desktop"], { env: { POLYTH_DESKTOP_FLAVOR: workstation ? WORKSTATION_FLAVOR : "" } });
+  if (!workstation) {
+    run(npm, ["run", "desktop:stage-chromium"], {
+      env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" },
+    });
+  }
   run(npm, ["run", "desktop:download-opencode"], { env: { POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" } });
-  run(process.execPath, [join(ROOT, "tools/release/node_modules/electron-builder/cli.js"), "--win", "nsis", "--x64", "--publish", "never", ...FEED_ARGS], { cwd: join(ROOT, "apps/desktop") });
-  run(process.execPath, ["apps/desktop/test/startup-smoke.mjs", "apps/desktop/release/win-unpacked/Polyth.exe"]);
-  copyFiles(directFiles(join(ROOT, "apps/desktop/release"))
-    .filter((p) => p.endsWith(".exe") || p.endsWith(".blockmap") || basename(p) === "latest.yml"));
+  run(process.execPath, [
+    ELECTRON_BUILDER, "--win", "nsis", "--x64", "--publish", "never",
+    ...(edition ? [`--config.directories.output=${edition.outputDir}`, ...edition.builderArgs] : []),
+    ...(edition ? edition.feedArgs : FEED_ARGS),
+  ], { cwd: join(ROOT, "apps/desktop") });
+  if (edition) assertWorkstationOutput(edition.outputDir, edition.packageIds);
+  run(process.execPath, ["apps/desktop/test/startup-smoke.mjs", join(releaseDir, "win-unpacked/Polyth.exe")]);
+  const metadata = edition ? workstationMetadata(releaseDir, WORKSTATION_METADATA.windows, "latest.yml") : join(releaseDir, "latest.yml");
+  copyFiles(directFiles(releaseDir).filter((p) => p.endsWith(".exe") || p.endsWith(".blockmap")));
+  if (metadata && existsSync(metadata)) copyFileAs(metadata, edition ? WORKSTATION_METADATA.windows : "latest.yml");
+  if (edition) writeWorkstationSbom("win", "x64");
 }
 
-function buildLinux() {
+function buildLinux({ workstation = false } = {}) {
+  const edition = workstation ? workstationBuild("linux-workstation") : null;
+  const releaseDir = join(ROOT, "apps/desktop", edition ? edition.outputDir : "release");
   releaseToolsCi();
-  run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
-  run(npm, ["run", "build:desktop"]);
-  run(npm, ["run", "desktop:stage-chromium"], {
-    env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" },
-  });
+  if (!workstation) run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
+  run(npm, ["run", "build:desktop"], { env: { POLYTH_DESKTOP_FLAVOR: workstation ? WORKSTATION_FLAVOR : "" } });
+  if (!workstation) {
+    run(npm, ["run", "desktop:stage-chromium"], {
+      env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" },
+    });
+  }
   run(npm, ["run", "desktop:download-opencode"], { env: { POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" } });
-  run(process.execPath, [join(ROOT, "tools/release/node_modules/electron-builder/cli.js"), "--linux", "AppImage", "--x64", "--publish", "never", ...FEED_ARGS], { cwd: join(ROOT, "apps/desktop") });
+  run(process.execPath, [
+    ELECTRON_BUILDER, "--linux", "AppImage", "--x64", "--publish", "never",
+    ...(edition ? [`--config.directories.output=${edition.outputDir}`, ...edition.builderArgs] : []),
+    ...(edition ? edition.feedArgs : FEED_ARGS),
+  ], { cwd: join(ROOT, "apps/desktop") });
+  if (edition) assertWorkstationOutput(edition.outputDir, edition.packageIds);
 
-  const appImage = walk(join(ROOT, "apps/desktop/release")).find((p) => p.endsWith(".AppImage"));
+  const appImage = walk(releaseDir).find((p) => p.endsWith(".AppImage"));
   if (!appImage) fail("AppImage was not produced");
+  if (edition) {
+    // appimage-e2e.mjs drives the packaged Link host, which this edition does not ship.
+    run("xvfb-run", ["-a", process.execPath, "apps/desktop/test/startup-smoke.mjs", join(releaseDir, "linux-unpacked/polyth")]);
+    const files = directFiles(releaseDir).filter((p) => p.endsWith(".AppImage") || p.endsWith(".blockmap"));
+    copyFiles(files);
+    const metadata = workstationMetadata(releaseDir, WORKSTATION_METADATA.linux, "latest-linux.yml");
+    if (metadata) copyFileAs(metadata, WORKSTATION_METADATA.linux);
+    writeWorkstationSbom("linux", "x64");
+    return;
+  }
   const screenshot = join(TMP, "appimage-e2e.png");
   const smokeLog = join(TMP, "appimage-e2e.log");
   try {
@@ -653,8 +795,11 @@ const handlers = {
   "ios-app": buildIos,
   "mac-dmg": () => buildMac(),
   "mac-dmg-legacy": () => buildMac({ legacy: true }),
-  "windows-exe": buildWindows,
-  "linux-appimage": buildLinux,
+  "mac-dmg-workstation": () => buildMac({ workstation: true }),
+  "windows-exe": () => buildWindows(),
+  "windows-exe-workstation": () => buildWindows({ workstation: true }),
+  "linux-appimage": () => buildLinux(),
+  "linux-appimage-workstation": () => buildLinux({ workstation: true }),
   "npm-packages": buildNpmPackages,
   testflight: distributeTestFlight,
 };

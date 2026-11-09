@@ -4017,6 +4017,7 @@ export const uk: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "Перевіряти підписані випуски на GitHub у фоні. Завантаження залишаються під вашим контролем.",
   "desktop.settings.updateChannel": "Канал оновлень",
   "desktop.settings.updateChannelLegacyHint": "Ця збірка для macOS 12 оновлюється лише зі стабільних випусків. Щоб вибрати канал, оновіть macOS до версії 13 або новішої.",
+  "desktop.settings.updateChannelWorkstationHint": "Редакція Workstation оновлюється лише зі стабільних випусків.",
   "desktop.settings.lowResource": "Режим низького споживання ресурсів",
   "desktop.settings.lowResourceHint": "Одразу вимикає анімацію та живе розмиття скла. Після перезапуску також використовує менші кеші й історію прокручування термінала, відкладений запуск OpenCode і менше вікно чату. Апаратне прискорення GPU залишається ввімкненим.",
   "desktop.settings.softwareRendering": "Програмний рендеринг",

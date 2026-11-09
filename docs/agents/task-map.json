@@ -352,10 +352,13 @@
         ".github/workflows/release.yml"
       ],
       "references": [
-        "docs/agents/verification.md"
+        "docs/agents/verification.md",
+        "docs/security/workstation-edition.md"
       ],
       "testHints": [
         "apps/desktop/test/configuration.test.ts",
+        "apps/desktop/test/edition.test.ts",
+        "scripts/test/workstationEdition.test.ts",
         "apps/desktop/test/serverPackages.test.ts",
         "apps/desktop/test/windowSurface.test.ts",
         "apps/web/test/desktopServerList.test.ts"

@@ -34,6 +34,35 @@ test("desktop bundles every discovered server package with its manifest descript
   assert.ok(desktopServerPackages.every(({ factory }) => typeof factory === "function"));
 });
 
+test("the workstation bundle imports only the packages that opt into the edition", async () => {
+  const result = await build({
+    entryPoints: [join(repositoryRoot, "apps/desktop/src/serverPackages.ts")],
+    bundle: true, platform: "node", format: "esm", write: false,
+    plugins: [desktopServerPackagesPlugin(repositoryRoot, "workstation")],
+    external: [join(packagesDir, "*")],
+    logLevel: "silent",
+  });
+  const source = result.outputFiles[0]!.text;
+  let included = 0;
+  for (const id of (await readdir(packagesDir)).sort()) {
+    let manifest: { polyth?: { serverEntry?: string; editions?: string[] } };
+    try {
+      manifest = JSON.parse(await readFile(join(packagesDir, id, "package.json"), "utf8")) as typeof manifest;
+    } catch {
+      continue;
+    }
+    const entry = manifest.polyth?.serverEntry;
+    if (!entry) continue;
+    const bundled = source.includes(`${id}/${entry.replace(/^\.\//, "")}`);
+    const opted = manifest.polyth?.editions?.includes("workstation") === true;
+    assert.equal(bundled, opted, `${id}: ${opted ? "opts in but is missing" : "does not opt in but is bundled"}`);
+    if (opted) included += 1;
+  }
+  assert.ok(included > 0);
+  const loaded = await loadDesktopServerPackages(repositoryRoot, "workstation");
+  assert.equal(loaded.length, included);
+});
+
 test("bundled server inventory includes discovered factories without runtime directory discovery", async () => {
   const result = await build({
     entryPoints: [join(repositoryRoot, "apps/desktop/src/serverPackages.ts")],

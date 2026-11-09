@@ -4017,6 +4017,7 @@ export const fr: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "Vérifier les versions signées sur GitHub en arrière-plan. Les téléchargements restent sous votre contrôle.",
   "desktop.settings.updateChannel": "Canal de mise à jour",
   "desktop.settings.updateChannelLegacyHint": "Cette version pour macOS 12 ne reçoit que les mises à jour stables. Mettez à jour macOS vers la version 13 ou ultérieure pour choisir un canal.",
+  "desktop.settings.updateChannelWorkstationHint": "L’édition Workstation se met à jour uniquement à partir des versions stables.",
   "desktop.settings.lowResource": "Mode économie de ressources",
   "desktop.settings.lowResourceHint": "Désactive immédiatement les animations et le flou de verre en direct. Après redémarrage, utilise aussi des caches et un historique de terminal plus petits, un démarrage différé d’OpenCode et une fenêtre de chat plus petite. L’accélération GPU reste active.",
   "desktop.settings.softwareRendering": "Rendu logiciel",

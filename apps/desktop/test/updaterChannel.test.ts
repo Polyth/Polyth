@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  followsMacLegacyFeed, MAC_LEGACY_FLAVOR, resolveUpdaterChannel, resolveUpdaterConfig, updateChannelForVersion,
+  followsMacLegacyFeed, MAC_LEGACY_FLAVOR, pinnedUpdaterChannel, resolveUpdaterChannel, resolveUpdaterConfig, updateChannelForVersion,
 } from "../src/updaterChannel.ts";
+import { WORKSTATION_FLAVOR } from "../src/edition.ts";
 
 test("Windows arm64 uses its architecture-specific update channel", () => {
   assert.equal(resolveUpdaterChannel("win32", "arm64"), "latest-arm64");
@@ -40,7 +41,20 @@ test("the macOS 12 build follows its own feed only while the Mac runs macOS 12 o
 
 test("the macOS 12 feed is stable-only legacy-mac.yml on every channel", () => {
   for (const channel of ["stable", "test", "nightly"] as const) {
-    assert.deepEqual(resolveUpdaterConfig(channel, "darwin", "x64", true), { allowPrerelease: false, channel: "legacy" });
+    assert.deepEqual(resolveUpdaterConfig(channel, "darwin", "x64", "legacy"), { allowPrerelease: false, channel: "legacy" });
   }
-  assert.deepEqual(resolveUpdaterConfig("nightly", "darwin", "x64", false), { allowPrerelease: true, channel: "nightly" });
+  assert.deepEqual(resolveUpdaterConfig("nightly", "darwin", "x64", null), { allowPrerelease: true, channel: "nightly" });
+});
+
+test("the workstation edition is pinned to its stable-only feed on every platform and channel", () => {
+  for (const [platform, version] of [["win32", "10.0.26100"], ["darwin", "26.1"], ["darwin", "12.7.6"], ["linux", "6.8.0"]] as const) {
+    assert.equal(pinnedUpdaterChannel(WORKSTATION_FLAVOR, platform, version), "workstation");
+    for (const channel of ["stable", "test", "nightly"] as const) {
+      assert.deepEqual(resolveUpdaterConfig(channel, platform, "x64", pinnedUpdaterChannel(WORKSTATION_FLAVOR, platform, version)),
+        { allowPrerelease: false, channel: "workstation" });
+    }
+  }
+  assert.equal(pinnedUpdaterChannel(MAC_LEGACY_FLAVOR, "darwin", "12.7.6"), "legacy");
+  assert.equal(pinnedUpdaterChannel(MAC_LEGACY_FLAVOR, "darwin", "13.0.0"), null);
+  assert.equal(pinnedUpdaterChannel("", "win32", "10.0.26100"), null);
 });

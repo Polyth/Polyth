@@ -5,9 +5,17 @@ import type { Plugin } from "esbuild";
 import { discoverServerPackages, type ServerPackageFactory } from "@polyth/plugins";
 import type { ServerPackageRegistration } from "@polyth/server";
 import type { PackageDescriptorDto } from "@polyth/contracts";
+import { packageInEdition, type PolythEdition } from "@polyth/contracts/edition";
 
-async function inventory(root: string) {
+/** The server packages an edition bundles: every one for standard, only those
+ *  whose manifest lists the edition for the workstation build. */
+export async function editionServerPackages(root: string, edition: PolythEdition) {
   const packages = await discoverServerPackages(resolve(root, "packages"));
+  return packages.filter((pkg) => packageInEdition(pkg.editions, edition));
+}
+
+async function inventory(root: string, edition: PolythEdition) {
+  const packages = await editionServerPackages(root, edition);
   return Promise.all(packages.map(async (pkg) => {
     const manifest = JSON.parse(await readFile(resolve(pkg.dir, "package.json"), "utf8")) as {
       polyth: { descriptor: Omit<PackageDescriptorDto, "id"> };
@@ -27,8 +35,8 @@ async function inventory(root: string) {
 }
 
 /** Unbundled development/test path. Packaged builds substitute static imports below. */
-export async function loadDesktopServerPackages(root: string): Promise<ServerPackageRegistration[]> {
-  const packages = await inventory(root);
+export async function loadDesktopServerPackages(root: string, edition: PolythEdition = "standard"): Promise<ServerPackageRegistration[]> {
+  const packages = await inventory(root, edition);
   return Promise.all(packages.map(async (pkg) => {
     const loaded = await import(pathToFileURL(pkg.modulePath).href) as { default?: ServerPackageFactory };
     if (typeof loaded.default !== "function") throw new Error(`Invalid desktop server factory: ${pkg.id}`);
@@ -36,13 +44,15 @@ export async function loadDesktopServerPackages(root: string): Promise<ServerPac
   }));
 }
 
-/** Every discovered feature is included by esbuild; no runtime filesystem scan in an installed app. */
-export function desktopServerPackagesPlugin(root: string): Plugin {
+/** Every feature of the edition is included by esbuild; no runtime filesystem
+ *  scan in an installed app. Packages outside the edition are never imported,
+ *  so none of their code reaches the bundle. */
+export function desktopServerPackagesPlugin(root: string, edition: PolythEdition = "standard"): Plugin {
   const modulePath = resolve(root, "apps/desktop/src/serverPackages.ts");
   return { name: "polyth-desktop-server-packages", setup(build) {
     build.onLoad({ filter: /[/\\]src[/\\]serverPackages\.ts$/ }, async (args) => {
       if (args.path !== modulePath) return;
-      const packages = await inventory(root);
+      const packages = await inventory(root, edition);
       return { loader: "js", resolveDir: root, contents: [
         ...packages.map((pkg, i) => `import factory${i} from ${JSON.stringify(pkg.modulePath)};`),
         "export const desktopServerPackages = [",

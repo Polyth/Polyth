@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,6 +15,8 @@ import {
   resolveReleaseChannel,
 } from "../ci/update-feed.mjs";
 import { MAC_LEGACY_ELECTRON_VERSION, macLegacyBuilderArgs } from "../ci/mac-legacy.mjs";
+
+const WORKSTATION_MISSING = "The workstation edition is missing; this release has no workstation feed";
 
 const mac = (arch: string) => [
   "version: 0.1.86",
@@ -121,7 +123,10 @@ test("assembling the feed requires every platform's metadata and files", () => {
     put("products-linux-appimage", "latest-linux.yml", "version: 0.1.86\nfiles:\n  - url: Polyth-0.1.86-linux-x86_64.AppImage\n    sha512: a\n    size: 1\npath: Polyth-0.1.86-linux-x86_64.AppImage\n");
     const result = assembleFeed(products, feed);
     assert.equal(result.version, "0.1.86");
-    assert.deepEqual(result.warnings, ["The macOS 12 build is missing; this release has no legacy-mac.yml"]);
+    assert.deepEqual(result.warnings, [
+      "The macOS 12 build is missing; this release has no legacy-mac.yml",
+      WORKSTATION_MISSING,
+    ]);
     assert.ok(result.files.includes("latest-mac.yml"));
     assert.deepEqual(result.files, [
       "Polyth-0.1.86-android.apk",
@@ -213,7 +218,7 @@ test("the macOS 12 feed ships as legacy-mac.yml alone, beside the regular metada
     const feed = join(root, "feed");
 
     const result = assembleFeed(products, feed);
-    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(result.warnings, [WORKSTATION_MISSING]);
     assert.ok(result.files.includes("legacy-mac.yml"));
     // No channel copies: the macOS 12 build reads only legacy-mac.yml on stable releases.
     assert.ok(!result.files.some((file) => /^(beta|nightly)-legacy|legacy-mac\.(beta|nightly)/.test(file)));
@@ -225,6 +230,89 @@ test("the macOS 12 feed ships as legacy-mac.yml alone, beside the regular metada
     assert.throws(() => assembleFeed(products, feed), /legacy-mac\.yml references Polyth-0\.1\.86-mac-legacy-x64\.dmg/);
     put("products-mac-dmg-legacy", "legacy-mac.yml", legacyMac("0.1.85"));
     assert.throws(() => assembleFeed(products, feed), /legacy-mac\.yml is version 0\.1\.85, the release is 0\.1\.86/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the workstation edition joins stable releases as its own feed and never touches latest*.yml", () => {
+  const root = mkdtempSync(join(tmpdir(), "update-feed-workstation-"));
+  try {
+    const products = join(root, "products");
+    const put = (dir: string, name: string, content = "x") => {
+      mkdirSync(join(products, dir), { recursive: true });
+      writeFileSync(join(products, dir, name), content);
+    };
+    const single = (url: string) => `version: 0.1.86\nfiles:\n  - url: ${url}\n    sha512: a\n    size: 1\npath: ${url}\n`;
+    const stdMac = (arch: string) => mac(arch);
+    for (const arch of ["x64", "arm64"]) {
+      put(`products-mac-dmg-${arch}`, `latest-mac.${arch}.partial.yml`, stdMac(arch));
+      for (const ext of ["zip", "dmg"]) put(`products-mac-dmg-${arch}`, `Polyth-0.1.86-mac-${arch}.${ext}`);
+    }
+    put("products-windows-exe", "latest.yml", single("Polyth-0.1.86-win-x64.exe"));
+    put("products-windows-exe", "Polyth-0.1.86-win-x64.exe");
+    put("products-linux-appimage", "latest-linux.yml", single("Polyth-0.1.86-linux-x86_64.AppImage"));
+    put("products-linux-appimage", "Polyth-0.1.86-linux-x86_64.AppImage");
+    const feed = join(root, "feed");
+
+    // Without workstation products: the standard feed still assembles, with a warning.
+    const without = assembleFeed(products, feed);
+    assert.ok(without.warnings.includes(WORKSTATION_MISSING));
+    assert.ok(!without.files.some((file) => file.includes("workstation") || file.startsWith("SHA256SUMS")));
+
+    for (const arch of ["x64", "arm64"]) {
+      put(`products-mac-dmg-workstation-${arch}`, `workstation-mac.${arch}.partial.yml`,
+        mac(arch).replaceAll(`mac-${arch}.`, `mac-${arch}-workstation.`));
+      for (const ext of ["zip", "dmg", "zip.blockmap"]) put(`products-mac-dmg-workstation-${arch}`, `Polyth-0.1.86-mac-${arch}-workstation.${ext}`, `mac-${arch}`);
+      put(`products-mac-dmg-workstation-${arch}`, `Polyth-0.1.86-workstation-sbom-mac-${arch}.cdx.json`, "{}");
+    }
+    put("products-windows-exe-workstation", "workstation.yml", single("Polyth-0.1.86-win-x64-workstation.exe"));
+    put("products-windows-exe-workstation", "Polyth-0.1.86-win-x64-workstation.exe", "win");
+    put("products-windows-exe-workstation", "Polyth-0.1.86-win-x64-workstation.exe.blockmap", "bm");
+    put("products-windows-exe-workstation", "Polyth-0.1.86-workstation-sbom-win-x64.cdx.json", "{}");
+    put("products-linux-appimage-workstation", "workstation-linux.yml", single("Polyth-0.1.86-linux-x86_64-workstation.AppImage"));
+    put("products-linux-appimage-workstation", "Polyth-0.1.86-linux-x86_64-workstation.AppImage", "lin");
+    put("products-linux-appimage-workstation", "Polyth-0.1.86-workstation-sbom-linux-x64.cdx.json", "{}");
+
+    const result = assembleFeed(products, feed);
+    assert.ok(!result.warnings.some((warning) => /workstation/i.test(warning)), result.warnings.join("; "));
+    const names = result.files.filter((file) => file.includes("workstation") || file.startsWith("SHA256SUMS"));
+    assert.deepEqual(names, [
+      "Polyth-0.1.86-linux-x86_64-workstation.AppImage",
+      "Polyth-0.1.86-mac-arm64-workstation.dmg", "Polyth-0.1.86-mac-arm64-workstation.zip", "Polyth-0.1.86-mac-arm64-workstation.zip.blockmap",
+      "Polyth-0.1.86-mac-x64-workstation.dmg", "Polyth-0.1.86-mac-x64-workstation.zip", "Polyth-0.1.86-mac-x64-workstation.zip.blockmap",
+      "Polyth-0.1.86-win-x64-workstation.exe", "Polyth-0.1.86-win-x64-workstation.exe.blockmap",
+      "Polyth-0.1.86-workstation-sbom-linux-x64.cdx.json",
+      "Polyth-0.1.86-workstation-sbom-mac-arm64.cdx.json", "Polyth-0.1.86-workstation-sbom-mac-x64.cdx.json",
+      "Polyth-0.1.86-workstation-sbom-win-x64.cdx.json",
+      "SHA256SUMS-workstation.txt",
+      "workstation-linux.yml", "workstation-mac.yml", "workstation.yml",
+    ]);
+    // No channel copies, and nothing workstation in the standard metadata.
+    assert.ok(!result.files.some((file) => /^(beta|nightly)-workstation|workstation-(beta|nightly)/.test(file)));
+    for (const name of ["latest.yml", "latest-mac.yml", "latest-linux.yml", "beta.yml", "beta-mac.yml", "beta-linux.yml"]) {
+      assert.ok(!readFileSync(join(feed, name), "utf8").includes("workstation"), name);
+    }
+    assert.equal(metadataUrls(readFileSync(join(feed, "workstation-mac.yml"), "utf8")).length, 4);
+    const sums = readFileSync(join(feed, "SHA256SUMS-workstation.txt"), "utf8").trim().split("\n");
+    const summed = sums.map((line) => line.split("  ")[1]);
+    assert.deepEqual([...summed].sort(), names.filter((file) => file !== "SHA256SUMS-workstation.txt"));
+    assert.ok(sums.every((line) => /^[0-9a-f]{64}  \S+$/.test(line)));
+
+    // A missing platform is a warning, never an error.
+    rmSync(join(products, "products-linux-appimage-workstation"), { recursive: true });
+    const partial = assembleFeed(products, feed);
+    assert.ok(partial.warnings.some((warning) => warning.includes("workstation-linux.yml")));
+    assert.ok(!partial.files.includes("workstation-linux.yml"));
+    assert.ok(partial.files.includes("workstation.yml"));
+
+    // Workstation products on a non-stable channel are refused.
+    for (const dir of ["products-mac-dmg-x64", "products-mac-dmg-arm64", "products-windows-exe", "products-linux-appimage"]) {
+      for (const file of readdirSync(join(products, dir))) {
+        if (file.endsWith(".yml")) writeFileSync(join(products, dir, file), readFileSync(join(products, dir, file), "utf8").replace("version: 0.1.86", "version: 0.1.86-nightly"));
+      }
+    }
+    assert.throws(() => assembleFeed(products, feed, "nightly"), /Workstation products .* stable releases only, not nightly/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

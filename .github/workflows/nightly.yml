@@ -42,7 +42,7 @@ on:
         type: choice
         required: true
         default: all
-        options: [all, android-apk, ios-app, mac-dmg, mac-dmg-legacy, windows-exe, linux-appimage, npm-packages]
+        options: [all, android-apk, ios-app, mac-dmg, mac-dmg-legacy, mac-dmg-workstation, windows-exe, windows-exe-workstation, linux-appimage, linux-appimage-workstation, npm-packages]
 
 permissions:
   contents: read
@@ -158,11 +158,19 @@ jobs:
             { target: 'mac-dmg', artifact: 'mac-dmg-x64', runner: 'macos-15-intel', remote_arch: 'x64', java: false, rust: true, rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin' },
             // macOS 12 (Electron 43, Intel only; scripts/ci/mac-legacy.mjs). Never blocks publication.
             { target: 'mac-dmg-legacy', artifact: 'mac-dmg-legacy', runner: 'macos-15-intel', java: false, rust: true, rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin' },
+            // Workstation edition (scripts/ci/workstation.mjs): stable releases only, never blocks publication.
+            { target: 'mac-dmg-workstation', artifact: 'mac-dmg-workstation-arm64', runner: 'macos-15', remote_arch: 'arm64', java: false, rust: false, rust_targets: '', stable_only: true },
+            { target: 'mac-dmg-workstation', artifact: 'mac-dmg-workstation-x64', runner: 'macos-15-intel', remote_arch: 'x64', java: false, rust: false, rust_targets: '', stable_only: true },
+            { target: 'windows-exe-workstation', artifact: 'windows-exe-workstation', runner: 'windows-2025', java: false, rust: false, rust_targets: '', stable_only: true },
+            { target: 'linux-appimage-workstation', artifact: 'linux-appimage-workstation', runner: 'ubuntu-24.04', java: false, rust: false, rust_targets: '', stable_only: true },
             { target: 'windows-exe', artifact: 'windows-exe', runner: 'windows-2025', java: false, rust: false, rust_targets: '' },
             { target: 'linux-appimage', artifact: 'linux-appimage', runner: 'ubuntu-24.04', java: false, rust: true, rust_targets: '' },
             { target: 'npm-packages', artifact: 'npm-packages', runner: 'ubuntu-24.04', java: false, rust: false, rust_targets: '' },
           ];
-          const selected = env.TARGET === 'all' ? entries : entries.filter((entry) => entry.target === env.TARGET);
+          // `all` adds the workstation edition on a stable release only; naming one of its targets builds it on any channel.
+          const selected = env.TARGET === 'all'
+            ? entries.filter((entry) => !entry.stable_only || env.POLYTH_RELEASE_CHANNEL === 'stable')
+            : entries.filter((entry) => entry.target === env.TARGET);
           if (selected.length === 0) throw new Error(`Unknown target ${env.TARGET}`);
           // X.Y.Z + build N -> X.Y.N-nightly; N must exceed Z (scripts/ci/update-feed.mjs).
           const offset = Number(env.BUILD_OFFSET);

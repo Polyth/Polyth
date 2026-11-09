@@ -11,6 +11,7 @@
     "./people": "./src/personConnections.ts"
   },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/serverEntry.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {

@@ -134,6 +134,7 @@ import { createNotificationStore, type NotificationAccount } from "./notificatio
 import { resolveSessionAccount } from "./sessionAccount.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
+import { workstationPushDisabled } from "./workstationPolicy.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
@@ -2343,8 +2344,9 @@ export async function boot(opts: BootOptions = {}) {
     file: `${dataDir}/native-push.json`,
     // Phones register over Polyth Link; pushes go out through Polyth's push
     // service, or straight to APNs when this server's owner placed the app's key.
-    relay: relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
-    apns: apnsFromDir(`${dataDir}/native-push`),
+    // The workstation edition sends none (workstationPolicy.ts).
+    relay: workstationPushDisabled(process.env) ? undefined : relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
+    apns: workstationPushDisabled(process.env) ? () => undefined : apnsFromDir(`${dataDir}/native-push`),
     authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
     // A Live Activity only ever reflects chats this person could open in the
     // navigator: same Space, visible project, readable row (as the WS fan-out).

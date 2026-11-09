@@ -284,3 +284,48 @@ test("Antigravity's Claude thinking ids resolve to the vendor window; GPT-OSS di
   ], index);
   assert.deepEqual(models.map((model) => model.context), [1_000_000, 262_144, undefined]);
 });
+
+/** Run `run` with the edition set, restoring the environment afterwards. */
+async function withEdition<T>(edition: string | undefined, run: () => Promise<T>): Promise<T> {
+  const previous = process.env.POLYTH_EDITION;
+  if (edition === undefined) delete process.env.POLYTH_EDITION;
+  else process.env.POLYTH_EDITION = edition;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.POLYTH_EDITION;
+    else process.env.POLYTH_EDITION = previous;
+  }
+}
+
+test("workstation edition makes no models.dev request and uses the offline path", async () => {
+  let calls = 0;
+  const catalog = createModelContextCatalog({
+    async fetchImpl() {
+      calls += 1;
+      return new Response(JSON.stringify(payload), { status: 200 });
+    },
+  });
+  const models = await withEdition("workstation", () => catalog.enrich([
+    { providerID: "openai", modelID: "gpt-5.6-sol", name: "GPT" },
+    { providerID: "claude", modelID: "claude-sonnet-5", name: "Claude", context: 200_000 },
+  ]));
+  assert.equal(calls, 0, "no request to models.dev");
+  assert.deepEqual(models.map((model) => model.context), [undefined, 200_000], "native values survive, nothing is enriched");
+  // A second look stays offline too: no retry backoff, no cached answer.
+  assert.equal((await withEdition("workstation", () => catalog.enrich([{ providerID: "xai", modelID: "grok-4.7", name: "Grok" }])))[0]?.context, undefined);
+  assert.equal(calls, 0);
+});
+
+test("standard edition still enriches from models.dev", async () => {
+  let calls = 0;
+  const catalog = createModelContextCatalog({
+    async fetchImpl() {
+      calls += 1;
+      return new Response(JSON.stringify(payload), { status: 200 });
+    },
+  });
+  const models = await withEdition(undefined, () => catalog.enrich([{ providerID: "openai", modelID: "gpt-5.6-sol", name: "GPT" }]));
+  assert.equal(calls, 1);
+  assert.equal(models[0]?.context, 1_050_000);
+});

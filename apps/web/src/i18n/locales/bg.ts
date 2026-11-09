@@ -4017,6 +4017,7 @@ export const bg: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "Проверка за подписани версии в GitHub във фонов режим. Изтеглянията остават под ваш контрол.",
   "desktop.settings.updateChannel": "Канал за актуализации",
   "desktop.settings.updateChannelLegacyHint": "Тази компилация за macOS 12 се актуализира само от стабилни версии. Обновете macOS до 13 или по-нова, за да изберете канал.",
+  "desktop.settings.updateChannelWorkstationHint": "Изданието Workstation се обновява само от стабилни версии.",
   "desktop.settings.lowResource": "Режим с ниско потребление на ресурси",
   "desktop.settings.lowResourceHint": "Веднага изключва анимациите и живото размиване на стъклото. След рестартиране използва и по-малки кешове и история на терминала, отложен OpenCode и по-малък прозорец на чата. GPU ускорението остава включено.",
   "desktop.settings.softwareRendering": "Софтуерно изобразяване",

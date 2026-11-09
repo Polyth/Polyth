@@ -26,6 +26,7 @@
     "@polyth/web-sdk": "0.1.0"
   },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/packageEntry.ts",
     "descriptor": {
       "name": "Harnesses",

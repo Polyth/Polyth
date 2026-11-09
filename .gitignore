@@ -6,6 +6,7 @@ packages/*/dist
 packages/harness-runtime/native/bin
 apps/desktop/dist
 apps/desktop/release
+apps/desktop/build-meta
 apps/desktop/resources/opencode/*/opencode
 apps/desktop/resources/opencode/*/opencode.exe
 apps/desktop/resources/opencode/*/provenance.json

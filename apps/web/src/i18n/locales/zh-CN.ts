@@ -4017,6 +4017,7 @@ export const zhCN: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "在后台检查 GitHub 上已签名的版本。下载由你决定。",
   "desktop.settings.updateChannel": "更新渠道",
   "desktop.settings.updateChannelLegacyHint": "此 macOS 12 版本仅从稳定版更新。请将 macOS 升级到 13 或更高版本以选择更新渠道。",
+  "desktop.settings.updateChannelWorkstationHint": "Workstation 版仅从稳定版更新。",
   "desktop.settings.lowResource": "低资源模式",
   "desktop.settings.lowResourceHint": "立即停用动画和实时玻璃模糊效果。重启后还会使用更小的缓存和终端回滚缓冲区、延迟启动 OpenCode，并缩小聊天窗口。GPU 加速保持开启。",
   "desktop.settings.softwareRendering": "软件渲染",

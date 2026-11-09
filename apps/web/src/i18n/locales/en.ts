@@ -4020,6 +4020,7 @@ export const en = {
   "desktop.settings.automaticUpdatesHint": "Check signed GitHub releases in the background. Downloads remain under your control.",
   "desktop.settings.updateChannel": "Update channel",
   "desktop.settings.updateChannelLegacyHint": "This macOS 12 build updates from stable releases only. Update macOS to 13 or newer to choose a channel.",
+  "desktop.settings.updateChannelWorkstationHint": "The workstation edition updates from stable releases only.",
   "desktop.settings.lowResource": "Low resource mode",
   "desktop.settings.lowResourceHint": "Immediately disables motion and live glass blur. After restart, also uses smaller caches and terminal scrollback, deferred OpenCode, and a smaller chat window. GPU acceleration stays on.",
   "desktop.settings.softwareRendering": "Software rendering",
