@@ -20,7 +20,7 @@ export {
 } from "./sessionConfig.ts";
 export { acpToolName, type AcpToolCallOptions } from "./acpToolCall.ts";
 import { randomUUID } from "node:crypto";
-import { open, readFile, realpath } from "node:fs/promises";
+import { open, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AgentRuntime, HarnessContext, HarnessDescriptor, HarnessProvider, JsonObject, ModelDescriptor, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeErrorCode, RuntimeEvent, RuntimeSnapshot } from "@polyth/contracts";
@@ -941,6 +941,20 @@ export function createAcpRuntime(
                     }
                     try {
                         const path = await confinedAttachmentPath(context.cwd, ref.path);
+                        // Not text (an archive, a binary, anything too big to
+                        // embed): every ACP agent takes a resource_link, so
+                        // name the file instead of refusing it.
+                        const link = () => prompt.push({
+                            type: "resource_link",
+                            uri: pathToFileURL(path).href,
+                            name: ref.name,
+                            ...(ref.mime ? { mimeType: ref.mime } : {}),
+                            ...(typeof ref.size === "number" ? { size: ref.size } : {}),
+                        });
+                        if (ref.kind !== "range" && (await stat(path)).size > ACP_TEXT_SOURCE_MAX_BYTES) {
+                            link();
+                            continue;
+                        }
                         const data = await readBoundedTextSource(path);
                         const materialized = materializeAttachmentText({
                             path: ref.path,
@@ -948,7 +962,11 @@ export function createAcpRuntime(
                             bytes: data,
                         });
                         if (!materialized.ok) {
-                            return { kind: "rejected", code: materialized.code, message: materialized.reason };
+                            if (ref.kind === "range") {
+                                return { kind: "rejected", code: materialized.code, message: materialized.reason };
+                            }
+                            link();
+                            continue;
                         }
                         const resourceText = materialized.truncatedBytes > 0
                             ? `${materialized.content}\n[truncated ${materialized.truncatedBytes} bytes]`

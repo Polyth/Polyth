@@ -2678,6 +2678,89 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   border-color: var(--accent-line);
   box-shadow: var(--material-glass-highlight), var(--shadow-md), 0 0 0 3px var(--focus-wash);
 }
+/* File drop. While files are dragged anywhere over the window the composer
+   firms its contour (ready); over the card an accent sheet with the dashed
+   drop-target edge (styles.md, "Affordances keep their edge") says what a
+   release does. The sheet never takes the pointer, so the drag keeps landing
+   on the card, and it is always mounted so it fades out as well as in. */
+.composer-card { position: relative; }
+/* The ring is an outline, so every style recipe keeps its own rim and shadow;
+   the doubled class outranks a recipe's `html[data-theme-style] .composer-card`. */
+.composer-card.is-drop-ready.is-drop-ready {
+  border-color: var(--accent-line);
+  outline: 3px solid var(--focus-wash);
+  outline-offset: 0;
+}
+.composer-card.is-drop-target.is-drop-target {
+  border-color: var(--accent);
+  outline: 4px solid var(--accent-wash);
+  outline-offset: 0;
+}
+.composer-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: inherit;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--motion-fast) var(--motion-ease), visibility 0s linear var(--motion-fast);
+}
+.composer-drop-overlay::before {
+  content: "";
+  position: absolute;
+  inset: var(--space-1);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: max(0px, calc(var(--radius-composer) - var(--space-1)));
+}
+.composer-drop-overlay[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--motion-fast) var(--motion-ease), visibility 0s;
+}
+.composer-drop-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--accent-text);
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  transform: translateY(4px) scale(.92);
+  transition: transform var(--motion-normal) var(--motion-ease);
+}
+.composer-drop-mark .ui-icon,
+.composer-drop-mark svg { width: var(--icon-lg); height: var(--icon-lg); }
+.composer-drop-overlay[data-active="true"] .composer-drop-mark { transform: none; }
+.composer-drop-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.composer-drop-title {
+  font-size: var(--font-body);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.composer-drop-meta {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.composer-mobile.composer-collapsed .composer-drop-overlay { gap: var(--space-2); padding: 0 var(--space-3); }
+.composer-mobile.composer-collapsed .composer-drop-mark { width: 28px; height: 28px; }
+.composer-mobile.composer-collapsed .composer-drop-meta { display: none; }
 .composer-note {
   margin: var(--space-3) var(--space-3) 0;
   color: var(--text-dim);
@@ -12715,8 +12798,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
      row's item order; unmounting them here (rather than just visually) would
      lose their announcement, so keep them mounted but out of the row box. */
   .composer-mobile.composer-collapsed .composer-note,
-  .composer-mobile.composer-collapsed .composer-attach-note,
-  .composer-mobile.composer-collapsed .drop-hint {
+  .composer-mobile.composer-collapsed .composer-attach-note {
     display: none;
   }
   .composer-mobile.composer-collapsed .composer-rail { display: contents; }

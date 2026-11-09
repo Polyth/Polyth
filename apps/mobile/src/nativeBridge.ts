@@ -109,7 +109,9 @@ function retainNativeListener(
 export const MAX_NATIVE_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_NATIVE_SELECTION_BYTES = 16 * 1024 * 1024;
 const NATIVE_STAGING_ROOT = "polyth-staging";
-const MAX_NATIVE_STAGING_FILES = 64;
+/** Files one native pick may carry: the composer's per-message limit. */
+const MAX_NATIVE_PICK_FILES = 50;
+const MAX_NATIVE_STAGING_FILES = 100;
 const MAX_NATIVE_STAGING_BYTES = 64 * 1024 * 1024;
 
 export interface NativePickedFileMetadata {
@@ -249,7 +251,7 @@ export async function pickNativeFiles(source: "files" | "photos" = "files"): Pro
       ? await FilePicker.pickImages({ readData: false, skipTranscoding: false })
       : await FilePicker.pickFiles({ readData: false });
     if (result.files.length === 0) return { status: "cancelled" };
-    if (result.files.length > 16) throw new Error("Choose at most 16 files at a time.");
+    if (result.files.length > MAX_NATIVE_PICK_FILES) throw new Error(`Choose at most ${MAX_NATIVE_PICK_FILES} files at a time.`);
     let selectedBytes = 0;
     for (const picked of result.files) {
       const size = byteLength(picked.size);

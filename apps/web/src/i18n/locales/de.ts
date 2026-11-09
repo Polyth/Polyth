@@ -317,6 +317,7 @@ export const de: AppMessages = {
   "composer.discovery.valueAvailable": "{value} verfügbar",
   "composer.dismiss": "Schließen",
   "composer.dropToAttach": "Hier ablegen zum Anhängen",
+  "composer.dropAnyFormat": "Jedes Format · bis zu {count} Dateien",
   "composer.editProfile": "Profil bearbeiten",
   "composer.editProfileValue": "Profil bearbeiten {name}",
   "composer.editingQueuedMessageValueInComposer": "Warteschlangennachricht {position} wird im Eingabefeld bearbeitet.",

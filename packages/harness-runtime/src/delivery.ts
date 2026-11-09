@@ -20,6 +20,11 @@ export type AttachmentDeliveryPlan =
   | { kind: "text-projection"; modality: "file" | "pdf" }
   /** Nothing to deliver (browser context is merged into the prompt text). */
   | { kind: "prompt-merged"; modality?: AttachmentModality }
+  /** The engine cannot take this content, but the uploaded file sits in the
+   *  agent's workspace: Polyth names its path in the prompt so the agent can
+   *  open it with its own tools, or tell the person it cannot. The ref must
+   *  NOT be forwarded to the adapter. */
+  | { kind: "file-reference"; modality: AttachmentModality }
   | { kind: "unsupported"; modality?: AttachmentModality; code: TurnRejectionCode; reason: string };
 
 const MODALITY_NOUN: Record<AttachmentModality, string> = {
@@ -50,7 +55,15 @@ export interface AttachmentDeliveryInput {
   /** `effectiveAttachmentDelivery(...).projected`: modalities Polyth converts
    *  to prompt text itself because neither harness nor model takes them. */
   projected?: readonly AttachmentModality[];
+  /** True when an uploaded file lives where the agent works (a local project,
+   *  or a remote one Polyth materializes into). Then a modality the engine
+   *  cannot take is handed over as a path instead of being refused. */
+  referenceable?: boolean;
 }
+
+/** Whether a ref names an uploaded or project file the agent could open. */
+const isFileRef = (ref: AttachmentRef): boolean =>
+  Boolean(ref.path) && ref.kind !== "url" && ref.kind !== "browser-context";
 
 export function planAttachmentDelivery(input: AttachmentDeliveryInput): AttachmentDeliveryPlan {
   const { ref, support, harnessName } = input;
@@ -80,6 +93,7 @@ export function planAttachmentDelivery(input: AttachmentDeliveryInput): Attachme
         && (ref.mime?.startsWith("text/") || ref.mime === "application/json")) {
       return { kind: "text-projection", modality: "file" };
     }
+    if (input.referenceable && isFileRef(ref)) return { kind: "file-reference", modality };
     return {
       kind: "unsupported",
       modality,
@@ -257,6 +271,43 @@ export function projectAttachmentPdf(input: PdfProjectionInput): TextProjection 
       : []),
   ].join("\n");
   return { ok: true, section, truncatedBytes };
+}
+
+export interface FileReferenceInput {
+  /** Workspace-relative path of the uploaded or selected file. */
+  path: string;
+  mime?: string;
+  size?: number;
+  /** Short reason Polyth could not inline it, e.g. "binary file". */
+  reason?: string;
+}
+
+const formatBytes = (size: number): string => {
+  if (size < 1024) return `${size} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = size / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10} ${units[unit]}`;
+};
+
+const oneLine = (value: string): string => value.replace(/[\r\n\t]+/g, " ").trim();
+
+/**
+ * A prompt section that hands the agent a file by path instead of by content:
+ * any format is accepted, and the agent opens it with its own tools or says
+ * plainly that it cannot. Deterministic for identical input.
+ */
+export function referenceAttachmentFile(input: FileReferenceInput): string {
+  const facts = [
+    input.mime && input.mime !== "application/octet-stream" ? oneLine(input.mime) : undefined,
+    typeof input.size === "number" && Number.isFinite(input.size) && input.size >= 0 ? formatBytes(input.size) : undefined,
+  ].filter(Boolean);
+  const reason = input.reason ? oneLine(input.reason) : "its contents cannot be inlined here";
+  return [
+    `Attached file: ${oneLine(input.path)}${facts.length ? ` (${facts.join(", ")})` : ""}`,
+    `[Saved in your workspace; ${reason}. Open it with your own tools if you can (for example, list or extract an archive). If you cannot work with this kind of file, tell the user so plainly instead of guessing what it contains.]`,
+  ].join("\n");
 }
 
 /** Append projected sections after the user's text, preserving their order. */

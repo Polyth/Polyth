@@ -317,6 +317,7 @@ export const uk: AppMessages = {
   "composer.discovery.valueAvailable": "Доступно: {value}",
   "composer.dismiss": "закрити",
   "composer.dropToAttach": "Відпустіть, щоб прикріпити",
+  "composer.dropAnyFormat": "Будь-який формат · до {count} файлів",
   "composer.editProfile": "Редагувати профіль",
   "composer.editProfileValue": "Редагувати профіль {name}",
   "composer.editingQueuedMessageValueInComposer": "Редагується повідомлення №{position} з черги в полі повідомлення.",

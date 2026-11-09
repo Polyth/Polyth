@@ -317,6 +317,7 @@ export const pt: AppMessages = {
   "composer.discovery.valueAvailable": "{value} disponível",
   "composer.dismiss": "dispensar",
   "composer.dropToAttach": "Solte para anexar",
+  "composer.dropAnyFormat": "Qualquer formato · até {count} ficheiros",
   "composer.editProfile": "Editar perfil",
   "composer.editProfileValue": "Editar perfil {name}",
   "composer.editingQueuedMessageValueInComposer": "A editar a mensagem em fila {position} no compositor.",

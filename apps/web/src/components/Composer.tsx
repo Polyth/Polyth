@@ -76,7 +76,7 @@ import { activeBrowserAccountId } from "../accountStorage.ts";
 import { assignPersonTones, personToneOf } from "../personIdentity.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachNativeStagedUpload, attachText, attachUpload, clearAttachments, isLargeTextPaste, PASTED_TEXT_NAME, pendingAttachments, recoverNativeStagedUploads, removeAttachment, seedAttachments, usePendingAttachments,
+  addAttachment, attachNativeStagedUpload, attachText, attachUpload, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, PASTED_TEXT_NAME, pendingAttachments, recoverNativeStagedUploads, removeAttachment, seedAttachments, usePendingAttachments,
 } from "../attachments.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import {
@@ -246,7 +246,7 @@ import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
 import { chatAmongOthers, rootProjects } from "../privateRoom.ts";
 import { ChatAudienceChip } from "./ChatAudience.tsx";
-import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, type MenuEntry } from "./ui/index.ts";
+import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, UploadIcon, type MenuEntry } from "./ui/index.ts";
 import { canCollaborateSession, ownerName } from "../sessionSharing.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
@@ -1791,6 +1791,34 @@ function ComposerBody({
 
   // Drag-and-drop: tree paths and desktop files become attachment pills.
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
+  // Files dragged anywhere over the window: the composer says it takes them
+  // before the pointer reaches it. Enter/leave pair up per element, so a depth
+  // count (not relatedTarget) tells when the drag has left the window.
+  const [windowDrag, setWindowDrag] = useState(false);
+  useEffect(() => {
+    let depth = 0;
+    const enter = (event: DragEvent) => {
+      if (!event.dataTransfer || !dragKind(event.dataTransfer)) return;
+      depth += 1;
+      if (depth === 1) setWindowDrag(true);
+    };
+    const leave = (event: DragEvent) => {
+      if (depth === 0 || !event.dataTransfer || !dragKind(event.dataTransfer)) return;
+      depth -= 1;
+      if (depth === 0) { setWindowDrag(false); setDropHint(null); }
+    };
+    const end = () => { depth = 0; setWindowDrag(false); setDropHint(null); };
+    window.addEventListener("dragenter", enter, true);
+    window.addEventListener("dragleave", leave, true);
+    window.addEventListener("drop", end, true);
+    window.addEventListener("dragend", end, true);
+    return () => {
+      window.removeEventListener("dragenter", enter, true);
+      window.removeEventListener("dragleave", leave, true);
+      window.removeEventListener("drop", end, true);
+      window.removeEventListener("dragend", end, true);
+    };
+  }, []);
 
   // Pending attachment pills live in the per-session draft store.
   // History browsing overlays recalled refs locally; the canonical store is
@@ -2030,8 +2058,15 @@ function ComposerBody({
     onScopeChanged: () => setUiError(tr("composer.attachmentContextChanged")),
   });
   const offerImages = imageChoice.offer;
-  const attachFilesTo = useCallback((projectId: string, target: string | null, files: File[]) => {
+  const attachFilesTo = useCallback((projectId: string, target: string | null, dropped: File[]) => {
     if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
+    // One notice for a drop past the limit, not one per extra file.
+    const room = Math.max(0, MAX_PENDING_ATTACHMENTS - pendingAttachments(target).length);
+    const files = dropped.slice(0, room);
+    if (dropped.length > room) {
+      setUiError(tr("attachments.atMostValueAttachmentsPerMessage", { count: MAX_PENDING_ATTACHMENTS }), null, undefined, "info");
+    }
+    if (files.length === 0) return;
     offerImages(files.map((f) => ({
       file: f,
       commit: (chosen) => attachUpload(projectId, target, chosen).then((r) => {
@@ -3925,6 +3960,11 @@ function ComposerBody({
   // `input:image` = supported (no note); an input report without
   // image support names the block when an image pill is pending; no report
   // keeps the legacy "not reported" line.
+  // Where uploads land in the agent's own workspace, every format is
+  // deliverable: what the engine cannot take as content is named by path.
+  const attachmentsReferenceable = runtimeFeatures
+    ? runtimeFeatures.remote !== true || runtimeFeatures.materializeAvailable === true
+    : true;
   const attachNote = (() => {
     if (attachments.length === 0) return null;
     // No capability report is not a claim of incompatibility — most providers
@@ -3936,6 +3976,9 @@ function ComposerBody({
       if (!modality) continue;
       const level = composerAttachmentSupport[modality];
       if (level === "native" || level === "emulated") continue;
+      // Any other uploaded file reaches the agent by path (the server's
+      // file-reference plan); the agent opens it or says it cannot.
+      if (attachmentsReferenceable && modality !== "image" && attachment.path) continue;
       if (modality === "image") return tr("composer.discovery.attachmentImagesOmitted");
       if (modality === "pdf") return tr("composer.discovery.currentlyUnavailable");
       if (modality === "audio") return tr("composer.discovery.currentlyUnavailable");
@@ -3945,7 +3988,7 @@ function ComposerBody({
     return null;
   })();
   const uploadDisabledReason = (() => {
-    if (!composerAttachmentSupport) return undefined;
+    if (!composerAttachmentSupport || attachmentsReferenceable) return undefined;
     const anySupported = Object.values(composerAttachmentSupport).some(
       (level) => level === "native" || level === "emulated",
     );
@@ -4614,7 +4657,7 @@ function ComposerBody({
         />
       )}
       <GlassDock
-        className={`composer-card${selectingConversation ? " is-choosing-messages" : ""}${activeMode ? " is-composer-mode" : ""}`}
+        className={`composer-card${selectingConversation ? " is-choosing-messages" : ""}${activeMode ? " is-composer-mode" : ""}${dropHint ? " is-drop-target" : windowDrag && activeProjectId ? " is-drop-ready" : ""}`}
         {...(activeMode ? { "data-composer-mode": activeMode.id } : {})}
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropHint(null); }}
@@ -4627,9 +4670,15 @@ function ComposerBody({
             (reason) => setUiError(tr("composer.couldNotAttach", { reason })), attachFiles);
         }}
       >
-      {dropHint && (
-        <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
-      )}
+      {/* Always mounted so it can fade out as well as in; it never takes the
+          pointer, so the drag keeps landing on the card underneath. */}
+      <div className="composer-drop-overlay" data-active={dropHint ? "true" : "false"} aria-hidden={dropHint ? undefined : true}>
+        <span className="composer-drop-mark" aria-hidden="true"><UploadIcon /></span>
+        <span className="composer-drop-copy" role="status">
+          {dropHint && <span className="composer-drop-title">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</span>}
+          {dropHint === "files" && <span className="composer-drop-meta">{tr("composer.dropAnyFormat", { count: MAX_PENDING_ATTACHMENTS })}</span>}
+        </span>
+      </div>
       {pendingLargePaste && (
         <Notice className="composer-note composer-large-paste" role="status" actions={<>
           <Button size="sm" onClick={() => resolveLargePaste("attach")}>{tr("composer.largePasteAttach")}</Button>

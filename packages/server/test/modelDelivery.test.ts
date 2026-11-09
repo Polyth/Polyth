@@ -314,12 +314,13 @@ test("memory preparation append failure never reaches the runtime", async () => 
 const text = (value: string) => new TextEncoder().encode(value);
 
 test("an undeliverable attachment is refused at send, before materialize or queue", async () => {
-  const f = fixture({ capabilities: { attachments: { modalities: { file: "unsupported", image: "native" } } } });
+  // A link has no file behind it, so an engine that cannot take links refuses.
+  const f = fixture({ capabilities: { attachments: { modalities: { url: "unsupported", image: "native" } } } });
   const { id } = await f.sessions.create({ projectId: "p", title: "T" });
   await assert.rejects(
     f.sessions.send(id, {
       text: "read this",
-      attachments: [{ id: "a", name: "notes.txt", mime: "text/plain", size: 4, kind: "file", path: "notes.txt" }],
+      attachments: [{ id: "a", name: "site", mime: "text/uri-list", size: 0, kind: "url", url: "https://example.com/" }],
     }),
     (error: Error & { code?: string }) => {
       assert.equal(error.code, "unsupported");
@@ -330,6 +331,24 @@ test("an undeliverable attachment is refused at send, before materialize or queu
   assert.deepEqual(f.materialized, [], "nothing may be materialized for a refused send");
   assert.equal(f.requests.length, 0);
   assert.deepEqual((await f.store.events(id)).filter((event) => event.type === "user/message"), []);
+  await f.store.close();
+});
+
+test("a file the engine cannot take is handed to the agent by path, never refused", async () => {
+  const f = fixture({ capabilities: { attachments: { modalities: { file: "unsupported", image: "native" } } } });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await f.sessions.send(id, {
+    text: "unpack this",
+    attachments: [{ id: "a", name: "site.zip", mime: "application/zip", size: 2048, kind: "file", path: "_inbox/a-site.zip" }],
+  });
+  const request = f.requests[0]!;
+  assert.match(request.text, /^unpack this\n\nAttached file: _inbox\/a-site\.zip \(application\/zip, \d+ [KMG]?B\)\n/);
+  assert.match(request.text, /Fake Engine cannot take this kind of file as message content/);
+  assert.match(request.text, /tell the user so plainly/);
+  assert.deepEqual(request.attachments ?? [], [], "the adapter never sees a ref it cannot deliver");
+  assert.deepEqual(f.reads, [], "a reference never reads the bytes");
+  const logged = (await f.store.events(id)).find((event) => event.type === "user/message")!;
+  assert.equal((logged.data as { attachments?: unknown[] }).attachments?.length, 1);
   await f.store.close();
 });
 
@@ -417,7 +436,24 @@ test("a range attachment projects only the lines that were asked for", async () 
   await f.store.close();
 });
 
-test("a binary file is refused rather than projected as mojibake", async () => {
+test("a binary file is named by path rather than projected as mojibake", async () => {
+  const f = fixture({
+    capabilities: { attachments: { modalities: { file: "emulated" } } },
+    files: { "blob.bin": new Uint8Array([0x89, 0x50, 0x00, 0x01, 0x02]) },
+  });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await f.sessions.send(id, {
+    text: "read",
+    attachments: [{ id: "a", name: "blob.bin", mime: "application/octet-stream", size: 5, kind: "file", path: "blob.bin" }],
+  });
+  const request = f.requests[0]!;
+  assert.match(request.text, /Attached file: blob\.bin \(\d+ [KMG]?B\)\n\[Saved in your workspace; it is not plain text/);
+  assert.doesNotMatch(request.text, /\u0000/);
+  assert.deepEqual(request.attachments ?? [], []);
+  await f.store.close();
+});
+
+test("a binary line range is still refused: a range only makes sense for text", async () => {
   const f = fixture({
     capabilities: { attachments: { modalities: { file: "emulated" } } },
     files: { "blob.bin": new Uint8Array([0x89, 0x50, 0x00, 0x01, 0x02]) },
@@ -426,7 +462,7 @@ test("a binary file is refused rather than projected as mojibake", async () => {
   await assert.rejects(
     f.sessions.send(id, {
       text: "read",
-      attachments: [{ id: "a", name: "blob.bin", mime: "application/octet-stream", size: 5, kind: "file", path: "blob.bin" }],
+      attachments: [{ id: "a", name: "blob.bin", mime: "application/octet-stream", size: 5, kind: "range", path: "blob.bin", range: [1, 2] }],
     }),
     (error: Error & { code?: string }) => {
       assert.equal(error.code, "invalid-attachment");
@@ -472,24 +508,19 @@ test("a PDF the harness cannot take arrives as its extracted text, not an adapte
   await f.store.close();
 });
 
-test("a PDF with no text layer is refused before the runtime sees the turn", async () => {
+test("a PDF with no text layer is handed over by path for the agent's own tools", async () => {
   const f = fixture({
     capabilities: { attachments: { modalities: { image: "native" } } },
     files: { "scan.pdf": tinyPdf("q 1 0 0 1 0 0 cm Q") },
   });
   const { id } = await f.sessions.create({ projectId: "p", title: "T" });
-  await assert.rejects(
-    f.sessions.send(id, {
-      text: "read",
-      attachments: [{ id: "a", name: "scan.pdf", mime: "application/pdf", size: 300, kind: "file", path: "scan.pdf" }],
-    }),
-    (error: Error & { code?: string }) => {
-      assert.equal(error.code, "invalid-attachment");
-      assert.match(error.message, /no text layer/);
-      return true;
-    },
-  );
-  assert.equal(f.requests.length, 0);
+  await f.sessions.send(id, {
+    text: "read",
+    attachments: [{ id: "a", name: "scan.pdf", mime: "application/pdf", size: 300, kind: "file", path: "scan.pdf" }],
+  });
+  const request = f.requests[0]!;
+  assert.match(request.text, /Attached file: scan\.pdf \(application\/pdf, \d+ [KMG]?B\)\n\[Saved in your workspace; Polyth could not extract its text\./);
+  assert.deepEqual(request.attachments ?? [], []);
   await f.store.close();
 });
 
