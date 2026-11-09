@@ -29,6 +29,7 @@ import {
 import { assertOauthTxMatchesActive, consumeOauthTx, oauthRedirectOrigin } from "./oauthTx.ts";
 import { notFound, optionalSecretVault, secretVault } from "./pluginRouteShared.ts";
 import { withInitialPermissionReview } from "./managedPluginReview.ts";
+import { editionUnavailable, workstationEdition } from "./edition.ts";
 
 const fail: (code: string, message: string) => never = (code, message) => {
   throw Object.assign(new Error(message), { code });
@@ -302,6 +303,8 @@ export function managedPluginRoutes(
       return true;
     }
     if (path === "/api/plugins/install" && method === "POST") {
+      // No source is fetched, downloaded or unpacked by this edition.
+      if (workstationEdition()) throw editionUnavailable("Installing packages");
       assertDeploymentPackageMutator(request);
       const input = await request.body();
       const archive = typeof input.archive === "string" ? input.archive : "";
@@ -321,6 +324,8 @@ export function managedPluginRoutes(
       return true;
     }
     if (path === "/api/plugins/check-updates" && method === "POST") {
+      // Every source check is a network request to that source.
+      if (workstationEdition()) throw editionUnavailable("Checking packages for updates");
       assertDeploymentPackageMutator(request);
       // One failing source must not hide the others; each records its own error.
       for (const plugin of registry.list(storage)) {
@@ -432,10 +437,13 @@ export function managedPluginRoutes(
         invocationLeases.revokePackage(id);
         request.json(200, await registry.reload(id));
       } else if (operation === "update") {
+        // An update refetches the source and writes a new version over the old one.
+        if (workstationEdition()) throw editionUnavailable("Updating packages");
         assertDeploymentPackageMutator(request);
         invocationLeases.revokePackage(id);
         request.json(200, await retireRemovedConnections(id, () => registry.update(id, { storage })));
       } else if (operation === "check-update") {
+        if (workstationEdition()) throw editionUnavailable("Checking packages for updates");
         assertDeploymentPackageMutator(request);
         request.json(200, await registry.checkUpdate(id, { storage }));
       } else if (operation === "update-settings") {

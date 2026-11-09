@@ -4,6 +4,7 @@
   "type": "module",
   "exports": { ".": "./src/engine.ts" },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/serverEntry.ts",
     "descriptor": {
       "name": "Judgment backend: Local models",

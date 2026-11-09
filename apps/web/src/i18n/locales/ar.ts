@@ -4017,6 +4017,7 @@ export const ar: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "التحقق من إصدارات GitHub الموقّعة في الخلفية. تبقى التنزيلات تحت سيطرتك.",
   "desktop.settings.updateChannel": "قناة التحديث",
   "desktop.settings.updateChannelLegacyHint": "يتلقى إصدار macOS 12 هذا التحديثات من الإصدارات المستقرة فقط. حدِّث macOS إلى الإصدار 13 أو أحدث لاختيار قناة.",
+  "desktop.settings.updateChannelWorkstationHint": "يتم تحديث إصدار Workstation من الإصدارات المستقرة فقط.",
   "desktop.settings.lowResource": "وضع الموارد المنخفضة",
   "desktop.settings.lowResourceHint": "يعطّل الحركة وتمويه الزجاج المباشر فورًا. وبعد إعادة التشغيل يستخدم أيضًا ذاكرات تخزين مؤقت وسجل تمرير أصغر للطرفية، ويؤخّر تشغيل OpenCode، ويصغّر نافذة المحادثة. ويبقى تسريع GPU مفعّلًا.",
   "desktop.settings.softwareRendering": "العرض البرمجي",

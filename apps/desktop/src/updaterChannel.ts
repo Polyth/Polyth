@@ -1,4 +1,5 @@
 import type { DesktopUpdateChannel } from "./types.ts";
+import { WORKSTATION_FLAVOR, WORKSTATION_UPDATER_CHANNEL } from "./edition.ts";
 
 export const DESKTOP_UPDATE_CHANNELS: readonly DesktopUpdateChannel[] = ["stable", "test", "nightly"];
 
@@ -41,6 +42,20 @@ export const followsMacLegacyFeed = (
   return !Number.isInteger(major) || major < 13;
 };
 
+/**
+ * The stable-only feed a build is pinned to, whatever channel the person
+ * picked; null when the chosen channel applies. The workstation edition always
+ * follows `workstation*.yml`, so it can never update into the standard build.
+ */
+export const pinnedUpdaterChannel = (
+  flavor: string,
+  platform: NodeJS.Platform,
+  systemVersion: string,
+): string | null => {
+  if (flavor === WORKSTATION_FLAVOR) return WORKSTATION_UPDATER_CHANNEL;
+  return followsMacLegacyFeed(flavor, platform, systemVersion) ? MAC_LEGACY_UPDATER_CHANNEL : null;
+};
+
 export interface UpdaterChannelConfig {
   allowPrerelease: boolean;
   /** electron-updater channel; always a string because the updater cannot unset one. */
@@ -53,17 +68,18 @@ export interface UpdaterChannelConfig {
  * takes the newest beta or stable release and a custom `nightly` channel
  * takes only nightly releases.
  *
- * The macOS 12 feed is stable only, whatever the chosen channel: with
- * prereleases on, the provider reads the metadata named after the release's
- * prerelease id and falls back to `latest-mac.yml`, the regular build.
+ * A pinned feed (the macOS 12 build, the workstation edition) is stable only,
+ * whatever the chosen channel: with prereleases on, the provider reads the
+ * metadata named after the release's prerelease id and falls back to the
+ * regular build's `latest*.yml`.
  */
 export const resolveUpdaterConfig = (
   channel: DesktopUpdateChannel,
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
-  macLegacy = false,
+  pinnedChannel: string | null = null,
 ): UpdaterChannelConfig => {
-  if (macLegacy) return { allowPrerelease: false, channel: MAC_LEGACY_UPDATER_CHANNEL };
+  if (pinnedChannel) return { allowPrerelease: false, channel: pinnedChannel };
   if (channel === "test") return { allowPrerelease: true, channel: "beta" };
   if (channel === "nightly") return { allowPrerelease: true, channel: "nightly" };
   return { allowPrerelease: false, channel: resolveUpdaterChannel(platform, arch) ?? "latest" };

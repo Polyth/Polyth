@@ -4017,6 +4017,7 @@ export const it: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "Controlla in background le release firmate su GitHub. I download restano sotto il tuo controllo.",
   "desktop.settings.updateChannel": "Canale di aggiornamento",
   "desktop.settings.updateChannelLegacyHint": "Questa build per macOS 12 si aggiorna solo dalle versioni stabili. Aggiorna macOS alla versione 13 o successiva per scegliere un canale.",
+  "desktop.settings.updateChannelWorkstationHint": "L’edizione Workstation si aggiorna solo dalle versioni stabili.",
   "desktop.settings.lowResource": "Modalità a basso consumo di risorse",
   "desktop.settings.lowResourceHint": "Disattiva subito le animazioni e la sfocatura dinamica del vetro. Dopo il riavvio usa anche cache e cronologia del terminale più piccole, OpenCode differito e una finestra di chat più piccola. L’accelerazione GPU resta attiva.",
   "desktop.settings.softwareRendering": "Rendering software",

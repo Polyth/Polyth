@@ -1,4 +1,5 @@
 import type { PluginRegistry } from "./managedRegistry.ts";
+import { workstationEdition } from "./edition.ts";
 
 /** How stale a package's last check may get before the host checks again. */
 export const AUTO_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -41,6 +42,8 @@ async function checkAndApply(
 /** One pass over opted-in packages: check each due source. Failures are
  *  recorded on the package by the registry and never stop the pass. */
 export async function runAutoUpdates(options: AutoUpdaterOptions): Promise<string[]> {
+  // The workstation edition asks no package source anything on a timer.
+  if (workstationEdition()) return [];
   const interval = options.intervalMs ?? AUTO_UPDATE_INTERVAL_MS;
   const now = options.now?.() ?? Date.now();
   const updated: string[] = [];
@@ -59,6 +62,8 @@ export async function runAutoUpdates(options: AutoUpdaterOptions): Promise<strin
  *  an unchanged source is not checked again — after a restart or a rollback
  *  either — and a failed check waits for the next change or the full pass. */
 export async function runLocalSourceUpdates(options: LocalSourceUpdaterOptions): Promise<string[]> {
+  // Same rule as the full pass: no source is asked anything in this edition.
+  if (workstationEdition()) return [];
   const updated: string[] = [];
   for (const id of options.registry.changedLocalSources()) {
     if (await checkAndApply(options, id)) updated.push(id);
@@ -73,6 +78,9 @@ export async function runLocalSourceUpdates(options: LocalSourceUpdaterOptions):
 export function startAutoUpdater(
   options: AutoUpdaterOptions & { registry: Pick<PluginRegistry, "changedLocalSources"> },
 ): { dispose(): void } {
+  // No timers at all in the workstation edition: not even a local-source
+  // stat pass can turn into a refetch of a remote source.
+  if (workstationEdition()) return { dispose() {} };
   const queued = new Set<string>();
   let chain: Promise<unknown> = Promise.resolve();
   let disposed = false;

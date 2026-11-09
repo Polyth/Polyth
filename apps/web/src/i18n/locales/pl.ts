@@ -4017,6 +4017,7 @@ export const pl: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "Sprawdzaj podpisane wydania na GitHubie w tle. Pobieranie pozostaje pod Twoją kontrolą.",
   "desktop.settings.updateChannel": "Kanał aktualizacji",
   "desktop.settings.updateChannelLegacyHint": "Ta kompilacja dla macOS 12 aktualizuje się tylko z wydań stabilnych. Aby wybrać kanał, zaktualizuj macOS do wersji 13 lub nowszej.",
+  "desktop.settings.updateChannelWorkstationHint": "Edycja Workstation aktualizuje się wyłącznie z wydań stabilnych.",
   "desktop.settings.lowResource": "Tryb oszczędzania zasobów",
   "desktop.settings.lowResourceHint": "Natychmiast wyłącza animacje i rozmycie szkła na żywo. Po ponownym uruchomieniu używa też mniejszych pamięci podręcznych i historii przewijania terminala, opóźnionego OpenCode oraz mniejszego okna czatu. Akceleracja GPU pozostaje włączona.",
   "desktop.settings.softwareRendering": "Renderowanie programowe",

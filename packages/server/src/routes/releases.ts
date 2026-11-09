@@ -38,6 +38,11 @@ export function classifyReleasesAsset(name: string): {
   label: string;
 } | null {
   const lower = name.toLowerCase();
+  // The workstation edition ships beside the standard installers on the same
+  // release but is never offered as a download (scripts/ci/workstation.mjs).
+  // Its names end in `-<os>-<arch>-workstation.<ext>`; the suffix already
+  // misses every pattern below, the guard keeps it so if a pattern loosens.
+  if (/-workstation[.-]/.test(lower)) return null;
   if (lower.endsWith("-win-x64.exe")) {
     return { platform: "windows", arch: "x64", label: "Windows (x64) installer" };
   }

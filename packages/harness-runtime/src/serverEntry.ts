@@ -41,6 +41,7 @@ import { createHarnessInstallJobs, createInstallContainment, installMachineOs, i
 import { forgetRemoteHarnessProbes, resolveRemoteHarnessHost } from "./remoteHost.ts";
 import { browserOnServer, localSetupEnv, openSetupTerminal, previewSetupTerminal, readSetupAction, REMOTE_SETUP_PATH, requireSetupAuthority, setupCommand, setupTarget, type HarnessSetupTerminals } from "./setupTerminal.ts";
 import { createHarnessUpdateChecker, harnessUpdateStatus } from "./updates.ts";
+import { editionUnavailable, workstationEdition } from "./edition.ts";
 import { pruneHarnessVersions, type HarnessVersionPrune } from "./versionStore.ts";
 
 const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
@@ -625,6 +626,11 @@ export function harnessRoutes(
             if (!provider || !visible(provider.descriptor))
                 throw harnessError("not-found", "harness not found");
             const descriptor = provider.descriptor;
+            // The workstation edition starts no installer: no Node.js download
+            // from nodejs.org and no npm tarball. The preview (GET) still names
+            // the exact command so a person can run it themselves.
+            if (request.method === "POST" && workstationEdition())
+                throw editionUnavailable(`${descriptor.name} installation`);
             const input = request.method === "POST" ? await request.body() : {};
             const projectId = request.method === "POST" ? input.projectId : request.url.searchParams.get("projectId");
             const project = typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined;
@@ -704,6 +710,10 @@ export function harnessRoutes(
             if (projectId && !project)
                 throw harnessError("not-found", "project not found");
             requireSetupAuthority(request, provider.descriptor, action);
+            // A sign-in terminal stays; an install terminal would run the same
+            // download this edition refuses, so only its preview is offered.
+            if (action === "install" && workstationEdition())
+                throw editionUnavailable(`${provider.descriptor.name} installation in a terminal`);
             if (request.method === "GET") {
                 request.json(200, await previewSetupTerminal({ descriptor: provider.descriptor, action, project, localBrowser: browserOnServer(request) }));
                 return true;
@@ -753,6 +763,8 @@ export function harnessRoutes(
                 request.json(200, result);
                 return true;
             }
+            if (maintenance[2] === "update" && workstationEdition())
+                throw editionUnavailable(`Updating ${provider.descriptor.name}`);
             if (!provider.descriptor.updateCommand?.length)
                 throw harnessError("unsupported", "this harness has no update command");
             await freeHarnessExecutable(host, provider.descriptor);

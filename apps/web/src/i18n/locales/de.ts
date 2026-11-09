@@ -4017,6 +4017,7 @@ export const de: AppMessages = {
   "desktop.settings.automaticUpdatesHint": "Signierte GitHub-Releases im Hintergrund prüfen. Downloads bleiben unter Ihrer Kontrolle.",
   "desktop.settings.updateChannel": "Update-Kanal",
   "desktop.settings.updateChannelLegacyHint": "Dieser Build für macOS 12 erhält Updates nur aus stabilen Releases. Aktualisieren Sie auf macOS 13 oder neuer, um einen Kanal zu wählen.",
+  "desktop.settings.updateChannelWorkstationHint": "Die Workstation-Edition erhält Updates nur aus stabilen Releases.",
   "desktop.settings.lowResource": "Ressourcensparmodus",
   "desktop.settings.lowResourceHint": "Deaktiviert sofort Animationen und die Live-Glasunschärfe. Nach einem Neustart zusätzlich kleinere Caches und Terminal-Scrollback, verzögertes OpenCode und ein kleineres Chatfenster. Die GPU-Beschleunigung bleibt aktiv.",
   "desktop.settings.softwareRendering": "Software-Rendering",

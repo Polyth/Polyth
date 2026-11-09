@@ -408,7 +408,8 @@ function DesktopSettingsPage() {
       <div className="desktop-settings-hero">
         <img className="polyth-mark" src={POLYTH_MARK_SRC} alt="" aria-hidden="true" />
         <div>
-          <strong>Polyth Desktop</strong>
+          {/* "Workstation" is the edition's name, the same in every language. */}
+          <strong>{info?.edition === "workstation" ? "Polyth Desktop · Workstation" : "Polyth Desktop"}</strong>
           <span>{tr("desktop.settings.heroBody")}</span>
         </div>
         <span className="tag">{info?.platform ?? tr("desktop.settings.platformFallback")} {info?.arch ?? ""}</span>
@@ -506,10 +507,10 @@ function DesktopSettingsPage() {
           <Toggle on={settings.automaticUpdates} onChange={(value) => save("automaticUpdates", value)} label={tr("desktop.settings.automaticUpdates")} />
         </Row>
       )}
-      {remote ? null : info?.macLegacyUpdates ? (
+      {remote ? null : info?.macLegacyUpdates || info?.stableOnlyUpdates ? (
         <ReadonlyRow
           label={tr("desktop.settings.updateChannel")}
-          hint={tr("desktop.settings.updateChannelLegacyHint")}
+          hint={tr(info.edition === "workstation" ? "desktop.settings.updateChannelWorkstationHint" : "desktop.settings.updateChannelLegacyHint")}
           value={tr("desktop.settings.channelStable")}
           itemId="desktop.updateChannel"
         />

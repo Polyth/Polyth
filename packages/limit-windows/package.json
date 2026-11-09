@@ -7,6 +7,7 @@
     "./widgets": "./widgets/index.tsx"
   },
   "polyth": {
+    "editions": ["workstation"],
     "serverEntry": "./src/serverEntry.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {

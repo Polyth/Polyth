@@ -51,6 +51,10 @@ export interface DesktopInfo {
   /** The macOS 12 build on macOS 12: updates come from stable releases only.
    *  Absent from shells older than that build. */
   macLegacyUpdates?: boolean;
+  /** One stable-only feed, no channel choice. Absent from older shells. */
+  stableOnlyUpdates?: boolean;
+  /** "workstation": the local-only edition. Absent from older shells (standard). */
+  edition?: "standard" | "workstation";
   /** Absent from shells older than client mode. */
   server?: DesktopServerInfo;
 }

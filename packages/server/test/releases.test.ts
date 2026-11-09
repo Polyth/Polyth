@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { RouteRequest } from "../src/http.ts";
 import {
+  classifyReleasesAsset,
   parseReleaseDownloads,
   parseReleaseRepository,
   releasesRoutes,
@@ -158,4 +159,22 @@ test("release repository parsing rejects malformed values", () => {
   assert.equal(parseReleaseRepository("acme"), null);
   assert.equal(parseReleaseRepository("https://github.com/acme/polyth"), null);
   assert.equal(parseReleaseRepository("acme/../etc"), null);
+});
+
+test("workstation edition assets are never offered as downloads", () => {
+  for (const name of [
+    "Polyth-1.2.300-win-x64-workstation.exe",
+    "Polyth-1.2.300-mac-arm64-workstation.dmg",
+    "Polyth-1.2.300-linux-x86_64-workstation.AppImage",
+    "Polyth-1.2.300-workstation-win-x64.exe",
+    "Polyth-1.2.300-workstation-mac-arm64.dmg",
+    "Polyth-1.2.300-workstation-mac-x64.dmg",
+    "Polyth-1.2.300-workstation-linux-x86_64.AppImage",
+    "Polyth-1.2.300-workstation-linux-arm64.AppImage",
+  ]) {
+    assert.equal(classifyReleasesAsset(name), null, name);
+  }
+  // The standard installers of the same release still classify.
+  assert.equal(classifyReleasesAsset("Polyth-1.2.300-win-x64.exe")?.platform, "windows");
+  assert.equal(classifyReleasesAsset("Polyth-1.2.300-mac-arm64.dmg")?.arch, "arm64");
 });
