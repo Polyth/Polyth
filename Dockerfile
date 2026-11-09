@@ -19,7 +19,7 @@ ARG POLYTH_LINK=host
 # ---------------------------------------------------------------------------
 # Workspace manifests only, so dependency installation stays cached while
 # source files change.
-FROM node:22-bookworm@sha256:18a6d90fd60542269850c80ca03b29b1d9b14d6b221ac7ee8e35b0d33ef904bd AS manifests
+FROM node:26-bookworm@sha256:a546d3f8acd2af4382668a7e6acd3bc4418e6a27478373e3246f8162f5181509 AS manifests
 WORKDIR /src
 COPY . .
 # scripts/check-node.mjs is the root preinstall hook.
@@ -28,7 +28,7 @@ RUN find . -type f ! -name package.json ! -name package-lock.json \
  && find . -depth -type d -empty -delete
 
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm@sha256:18a6d90fd60542269850c80ca03b29b1d9b14d6b221ac7ee8e35b0d33ef904bd AS build
+FROM node:26-bookworm@sha256:a546d3f8acd2af4382668a7e6acd3bc4418e6a27478373e3246f8162f5181509 AS build
 WORKDIR /opt/polyth
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
@@ -46,7 +46,7 @@ RUN POLYTH_WEB_BUILD_ID="${POLYTH_WEB_BUILD_ID}" npm run build \
 
 # ---------------------------------------------------------------------------
 # Polyth Link host (remote/mobile access). Selected by POLYTH_LINK.
-FROM rust:1.91.0-bookworm@sha256:e187887ec511b3d93e45c0231d2f0fd59f1347526c58aa86343aa83c74f3e1a9 AS link-host
+FROM rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c AS link-host
 WORKDIR /src
 # The image already pins the toolchain; rust-toolchain.toml would only add
 # rustfmt/clippy downloads that a release build does not need.
@@ -63,7 +63,7 @@ RUN mkdir -p /out
 FROM link-${POLYTH_LINK} AS link
 
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS runtime
+FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS runtime
 ARG POLYTH_UID=1000
 ARG POLYTH_GID=1000
 ARG GH_CLI=1
