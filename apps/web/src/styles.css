@@ -718,8 +718,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding: 0;
   overflow: hidden;
   border-radius: var(--radius-card);
-  box-shadow: 0 4px 8px rgba(67, 78, 92, 0.16), 0 8px 16px rgba(55, 67, 82, 0.14);
-  color: #fff;
+  color: var(--text);
   text-align: start;
 }
 .sidebar-project-rail-tooltip-content {
@@ -752,7 +751,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-project-rail-tooltip-copy strong {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: #fff;
+  color: var(--text);
   font-size: var(--font-label);
   font-weight: 650;
   line-height: 1.25;
@@ -761,7 +760,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-project-rail-tooltip-copy > span {
   min-width: 0;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
   direction: ltr;
   font-family: var(--mono);
   font-size: var(--font-meta);
@@ -6753,9 +6752,9 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   content: attr(data-tooltip); position: absolute; z-index: 30;
   inset-block-end: calc(100% + 7px); inset-inline-start: 50%;
   width: max-content; max-width: 220px; padding: 7px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-control);
-  background: #1a1a1a; color: #fff;
-  box-shadow: 0 4px 8px rgba(67, 78, 92, 0.16), 0 8px 16px rgba(55, 67, 82, 0.14);
+  border: 1px solid var(--material-glass-border); border-radius: var(--radius-control);
+  background: var(--material-glass); color: var(--text);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   font-size: calc(var(--font-meta) + 2pt); font-weight: 500; line-height: var(--font-meta-lh); white-space: normal;
   opacity: 0; pointer-events: none; transform: translate(-50%, 3px);
   transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
@@ -17763,11 +17762,11 @@ body .ui-btn .ui-spinner {
   z-index: var(--z-tooltip);
   max-width: 280px;
   padding: 7px 11px;
-  background: #1a1a1a;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--material-glass);
+  border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-control);
-  box-shadow: 0 4px 8px rgba(67, 78, 92, 0.16), 0 8px 16px rgba(55, 67, 82, 0.14);
-  color: #fff;
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  color: var(--text);
   font-size: calc(var(--font-meta) + 2pt);
   font-weight: 500;
   line-height: var(--font-meta-lh);
@@ -17809,6 +17808,15 @@ body .ui-btn .ui-spinner {
       color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
+  }
+  /* Small, close-to-anchor overlays: lighter blur reads better at this size
+     than the full sheet-grade amount. */
+  :is(.ui-tooltip) {
+    background: var(--material-glass-texture), radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-fill), transparent) 0%,
+      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
   }
   /* Chat-turn cards: one per assistant turn, not a repeated list row, so a
      lighter blur is worth the cost here (unlike the excluded list surfaces
@@ -17881,11 +17889,11 @@ body .ui-btn .ui-spinner {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .dialog-panel, .sheet, .workspace-customize-panel, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip){
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .ui-tooltip, .dialog-panel, .sheet, .workspace-customize-panel, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip){
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .ui-tooltip, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
   body[data-desktop-low-resource="true"] :is(.dialog-panel, .sheet, .composer-card, .workspace-customize-panel, .notify-card, .sync-catch-up){ background: var(--material-glass-strong); }
   body[data-desktop-low-resource="true"] .task-list { background: var(--surface-activity); }
   body[data-desktop-low-resource="true"] :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
@@ -19438,6 +19446,7 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       .ui-popover,
       .picker-pop,
       .menu-popup,
+      .ui-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
       .jump-latest
@@ -19636,6 +19645,7 @@ body[data-glass="off"] :is(
   .prompt-nav-panel,
   .selection-menu,
   .selection-dock,
+  .ui-tooltip,
   .turn-rate-limit .turn-rate-limit-action,
   .turn-rate-limit .turn-rate-limit-model .picker-chip,
   .jump-latest
