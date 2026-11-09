@@ -190,13 +190,15 @@ export function HarnessTabs({
   const ordered = pickerRows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.name.localeCompare(b.identity.name));
   // A harness is offered by the model picker only when the user enabled it and
   // it can actually run here (installed, healthy and authorized). Roster
-  // metadata is process-free and arrives before per-harness probes, so a row
-  // without a snapshot yet stays visible while that probe settles; once a
-  // snapshot exists, an unusable harness (disabled, not installed,
+  // metadata is process-free and arrives before per-harness probes, but it
+  // says nothing about readiness: a row without a snapshot (the last known
+  // one included, see `useHarnesses`) stays hidden until its probe answers,
+  // so the picker never flashes harnesses that are not installed or set up
+  // and then drops them. An unusable harness (disabled, not installed,
   // unauthenticated or setup-incomplete) is not rendered at all. There is no
   // exception for the currently resolved, pinned or pending target: a harness
   // that cannot be used must not appear in the picker.
-  const visibleRows = ordered.filter((row) => row.policy.enabled && (row.snapshot === undefined || canExecute(row.snapshot)));
+  const visibleRows = ordered.filter((row) => row.policy.enabled && row.snapshot !== undefined && canExecute(row.snapshot));
   const resolvedTab = resolvedHarnessId && visibleRows.some((row) => row.identity.id === resolvedHarnessId)
     ? resolvedHarnessId
     : undefined;
@@ -218,8 +220,10 @@ export function HarnessTabs({
   // tab is gone, so keep the recovery path without naming the hidden harness:
   // the next turn can move to any visible tab, and Settings can finish setup.
   const boundId = activeSelection.mode === "pinned" ? activeSelection.harnessId : resolvedHarnessId;
+  // Only a known verdict hides it: a target still being probed is not
+  // reported as unusable.
   const boundHidden = Boolean(boundId) && !activeTab && !transition
-    && ordered.some((row) => row.identity.id === boundId);
+    && ordered.some((row) => row.identity.id === boundId && row.snapshot !== undefined);
   const chooseTab = (id: string) => {
     const next: HarnessSelection = { mode: "pinned", harnessId: id };
     if (id === activeTab) return;

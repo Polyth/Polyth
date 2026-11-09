@@ -402,31 +402,51 @@ test("active-session tab changes stay local until a message is submitted", async
   }
 });
 
-test("roster tabs stay visible while their availability probes settle", async () => {
-  let finishSnapshots!: (value: unknown) => void;
+test("roster rows stay hidden until their availability is known, and a reopen paints the last known rows", async () => {
+  let finishSnapshots: ((value: unknown) => void) | undefined;
+  let holdSnapshots = true;
   fetchHandler = async (input) => {
     const url = new URL(String(input), "http://test");
     if (url.pathname === "/api/harnesses/roster") {
       return new Response(JSON.stringify([
         { identity: { id: "codex", name: "Codex", integration: "App Server" }, policy: { enabled: true, priority: 10, autoSelect: true } },
         { identity: { id: "cursor", name: "Cursor", integration: "ACP v1" }, policy: { enabled: true, priority: 20, autoSelect: false } },
+        { identity: { id: "claude", name: "Claude", integration: "ACP v1" }, policy: { enabled: true, priority: 30, autoSelect: false } },
       ]));
     }
-    return new Response(JSON.stringify(await new Promise((resolve) => { finishSnapshots = resolve; })));
+    const rows = [snapshot("codex"), snapshot("cursor"), snapshot("claude", undefined, { state: "not-installed", installed: false, healthy: false })];
+    if (!holdSnapshots) return new Response(JSON.stringify(rows));
+    return new Response(JSON.stringify(await new Promise((resolve) => { finishSnapshots = () => resolve(rows); })));
   };
   const container = document.createElement("div");
   document.body.appendChild(container);
-  const root = createRoot(container);
+  const render = (root: ReturnType<typeof createRoot>) => act(async () => { root.render(createElement(HarnessTabs, {
+    ...props(host({ value: 0 }), "instant-roster"),
+    harnessSelection: { mode: "pinned", harnessId: "codex" },
+  })); });
+  let root = createRoot(container);
   try {
-    await act(async () => { root.render(createElement(HarnessTabs, {
-      ...props(host({ value: 0 }), "instant-roster"),
-      harnessSelection: { mode: "pinned", harnessId: "codex" },
-    })); });
+    await render(root);
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(tabProviders(container), [],
+      "an enabled roster row is not offered before its probe says it can run");
+    assert.equal(container.querySelector(".pkg-harnesses-picker-state"), null,
+      "a pinned target still being probed is not reported as unusable");
+    await act(async () => { finishSnapshots?.(undefined); await Promise.resolve(); });
+    assert.deepEqual(tabProviders(container), ["openai", "cursor"]);
+
+    // Close the picker, let something empty the shared caches, reopen it.
+    await act(async () => { root.unmount(); });
+    finishSnapshots = undefined;
+    holdSnapshots = true;
+    await act(async () => { invalidateRuntimeCatalogs(false); });
+    root = createRoot(container);
+    await render(root);
     await act(async () => { await Promise.resolve(); });
     assert.deepEqual(tabProviders(container), ["openai", "cursor"],
-      "the enabled roster is visible before slow per-harness probes finish");
+      "a reopen paints the last known runnable harnesses, never the uninstalled one");
   } finally {
-    await act(async () => { finishSnapshots([]); });
+    await act(async () => { finishSnapshots?.(undefined); });
     await act(async () => { root.unmount(); });
     container.remove();
   }
@@ -498,7 +518,7 @@ test("only enabled usable harnesses are rendered in the picker", async () => {
       harnessSelection: { mode: "auto" },
     })); });
     await act(async () => { await Promise.resolve(); });
-    assert.deepEqual(tabProviders(container), ["openai", "cursor", "xai"]);
+    assert.deepEqual(tabProviders(container), [], "nothing is offered before availability is known");
     await act(async () => {
       finishSnapshots([
         snapshot("codex"),
