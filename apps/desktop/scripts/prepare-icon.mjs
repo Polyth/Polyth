@@ -14,10 +14,31 @@
 // the apps beside it. Both app icons therefore re-frame the same mark, at the
 // same aspect ratio, onto a fuller canvas; only their pixel sizes differ.
 
-import { mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import sharp from "sharp";
+
+// sharp is a release-only tool: it lives in tools/release, not the root
+// install. The generated icons are committed; run `npm run icons` (after
+// `npm run release-tools:install`) only when a source changes.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+let sharpModule;
+function loadSharp() {
+  if (sharpModule) return sharpModule;
+  try {
+    sharpModule = createRequire(resolve(repoRoot, "tools/release/package.json"))("sharp");
+    return sharpModule;
+  } catch (error) {
+    throw new Error(
+      "sharp is not installed. Run `npm run release-tools:install` at the repository root first " +
+        `(${error instanceof Error ? error.message.split("\n")[0] : error}).`,
+    );
+  }
+}
+/** Lazy, so importing this module's constants never needs the release tools. */
+const sharp = (...args) => loadSharp()(...args);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const defaultSource = resolve(here, "../../web/icon-512.png");
@@ -91,9 +112,15 @@ export async function prepareAppIcons({
   await mkdir(buildDir, { recursive: true });
   await sharp(await buildAppIcon(source, APP_ICON_SIZE)).toFile(resolve(buildDir, "icon.png"));
   await sharp(await buildAppIcon(source, WINDOWS_ICON_SIZE)).toFile(resolve(buildDir, "icon-win.png"));
+  // Freshness stamp: sha256 of every source read, checked by appIcon.test.ts.
+  const sources = {};
+  for (const file of [source, fileURLToPath(import.meta.url)]) {
+    sources[relative(repoRoot, file).split("\\").join("/")] = createHash("sha256").update(await readFile(file)).digest("hex");
+  }
+  await writeFile(resolve(buildDir, "icons.stamp.json"), `${JSON.stringify({ sources }, null, 2)}\n`);
 }
 
-// `npm run build` runs this file directly; build.ts calls prepareAppIcons().
+// `npm run icons` runs this file directly.
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   await prepareAppIcons();
 }

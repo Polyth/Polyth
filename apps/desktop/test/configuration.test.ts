@@ -123,7 +123,7 @@ test("manual desktop workflow builds selectable Windows, Linux and macOS artifac
   const installed = workflow.indexOf("npx playwright-core install chromium");
   const bundled = workflow.indexOf("run: npm run build:desktop");
   const staged = workflow.indexOf("run: npm run desktop:stage-chromium");
-  const packaged = workflow.indexOf("npx electron-builder");
+  const packaged = workflow.indexOf("tools/release/node_modules/electron-builder/cli.js");
   assert.ok(installed >= 0 && installed < bundled, "Playwright Chromium must be provisioned before the desktop build");
   assert.ok(bundled >= 0 && bundled < staged, "Chromium must be staged after bundling");
   assert.ok(staged >= 0 && staged < packaged, "Chromium must be staged before electron-builder");

@@ -12,6 +12,18 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
 
+  # Release-only tooling (electron-builder, Capacitor CLI, sharp), kept out of
+  # the root install; see docs/operations/releases.md.
+  - package-ecosystem: npm
+    directory: /tools/release
+    target-branch: devel
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      release-tools-minor-and-patch:
+        update-types: [minor, patch]
+
   - package-ecosystem: cargo
     directories: ["/", "/fuzz"]
     target-branch: devel

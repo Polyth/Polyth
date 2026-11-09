@@ -5,10 +5,48 @@
 // bundle.
 import { readdirSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const LICENSE_FILE = /^(licen[cs]e|copying|notice|copyright)([-._].*)?$/i;
 const RULE = "=".repeat(72);
+
+const REPO_ROOT = resolve(import.meta.dirname, "..");
+
+/** Third-party code copied into Polyth's own sources instead of installed as a
+ *  dependency. A bundle containing one of `sources` carries the notice too. */
+export const VENDORED = [
+  {
+    name: "lucide (vendored icon data)",
+    version: "1.61.0",
+    license: "ISC",
+    repository: "https://github.com/lucide-icons/lucide",
+    sources: ["apps/web/src/components/ui/iconNodes.ts", "apps/web/src/components/ui/iconBase.tsx"],
+    licenseFile: "apps/web/src/components/ui/LUCIDE-LICENSE",
+  },
+  {
+    name: "node-semver (adapted grammar)",
+    version: "7.8.5",
+    license: "ISC",
+    repository: "https://github.com/npm/node-semver",
+    sources: ["packages/package-sdk/src/semver.ts"],
+    licenseFile: "packages/package-sdk/src/SEMVER-LICENSE",
+  },
+];
+
+const vendoredFor = (path) => {
+  const rel = relative(REPO_ROOT, path).split(sep).join("/");
+  const entry = VENDORED.find((candidate) => candidate.sources.includes(rel));
+  if (!entry) return null;
+  return {
+    id: `${entry.name}@${entry.version}`,
+    name: entry.name,
+    version: entry.version,
+    license: entry.license,
+    repository: entry.repository,
+    author: "",
+    files: [{ name: entry.licenseFile.split("/").pop(), text: readFileSync(join(REPO_ROOT, entry.licenseFile), "utf8").trim() }],
+  };
+};
 
 /** The package directory that owns a bundled input, or null for own sources. */
 export const packageRootOf = (path) => {
@@ -39,8 +77,14 @@ export const bundledPackages = (metafiles, workingDir = process.cwd()) => {
   for (const metafile of metafiles) {
     for (const input of Object.keys(metafile.inputs)) {
       if (/^[a-z-]+:/i.test(input) || input.startsWith("<")) continue; // namespaced/virtual inputs
-      const root = packageRootOf(isAbsolute(input) ? input : resolve(workingDir, input));
-      if (!root || packages.has(root)) continue;
+      const path = isAbsolute(input) ? input : resolve(workingDir, input);
+      const root = packageRootOf(path);
+      if (!root) {
+        const vendored = vendoredFor(path);
+        if (vendored && !packages.has(vendored.id)) packages.set(vendored.id, vendored);
+        continue;
+      }
+      if (packages.has(root)) continue;
       packages.set(root, readPackage(root));
     }
   }

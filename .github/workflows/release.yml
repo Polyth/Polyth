@@ -257,6 +257,9 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
+
       - name: Install pinned Chromium
         run: npx playwright-core install chromium
         env:
@@ -280,7 +283,7 @@ jobs:
 
       - name: Package AppImage and updater metadata
         working-directory: apps/desktop
-        run: npx electron-builder --linux AppImage --${{ matrix.arch }} --publish always
+        run: node ../../tools/release/node_modules/electron-builder/cli.js --linux AppImage --${{ matrix.arch }} --publish always
 
       - name: Smoke-test x64 AppImage
         if: matrix.arch == 'x64'
@@ -345,6 +348,9 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
+
       - name: Install pinned Chromium
         run: npx playwright-core install chromium
         env:
@@ -374,7 +380,7 @@ jobs:
           if [ "${{ matrix.arch }}" = "arm64" ]; then
             CHANNEL_ARGS+=(--config.publish.channel=latest-arm64)
           fi
-          npx electron-builder --win nsis --${{ matrix.arch }} --publish always "${CHANNEL_ARGS[@]}"
+          node ../../tools/release/node_modules/electron-builder/cli.js --win nsis --${{ matrix.arch }} --publish always "${CHANNEL_ARGS[@]}"
 
       - name: Smoke-test packaged Windows app
         if: matrix.arch == 'x64'
@@ -431,6 +437,9 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
+
       - name: Install Chromium for macOS x64
         run: npx playwright-core install chromium
         env:
@@ -475,7 +484,7 @@ jobs:
 
       - name: Package signed x64 + arm64 DMG, ZIP and updater metadata
         working-directory: apps/desktop
-        run: npx electron-builder --mac dmg zip --x64 --arm64 --publish always
+        run: node ../../tools/release/node_modules/electron-builder/cli.js --mac dmg zip --x64 --arm64 --publish always
 
       - name: Smoke-test packaged macOS app
         run: |
@@ -538,6 +547,9 @@ jobs:
 
       - name: Install workspace dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Install release tools (electron-builder, Capacitor CLI, sharp)
+        run: npm run release-tools:install
 
       - name: Resolve aligned release version
         run: node scripts/release-version.mjs

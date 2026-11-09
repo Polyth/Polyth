@@ -5,7 +5,6 @@
 // matching message through the conversation reveal seam.
 import { draftTitleSource } from "../sessionDraft.ts";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Search, X } from "lucide-react";
 import { getState, useStore, setOverlay } from "../store.ts";
 import { api, type SessionSearchMatch, type SessionSearchResult } from "@polyth/session/web-api";
 import type { SessionProjection } from "@polyth/contracts";
@@ -15,6 +14,7 @@ import { ago, deriveSessionTitle } from "../format.ts";
 import { firstUserText } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
 import { Button, Icon, IconButton, ResponsiveOverlay, Spinner } from "./ui/index.ts";
+import { CloseIcon, SearchIcon } from "./ui/icons.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import {
   SESSION_SEARCH_FACETS,
@@ -297,7 +297,7 @@ export default function SessionSearch() {
     >
       {!phone && (
         <div className="session-search-field">
-          <Icon icon={Search} className="session-search-field-icon" />
+          <Icon icon={SearchIcon} className="session-search-field-icon" />
           <input
             className="session-search-input"
             type="search"
@@ -317,7 +317,7 @@ export default function SessionSearch() {
           <span className="session-search-field-trail">
             {loading && <Spinner size="sm" label={tr("sessionsearch.searchingSessions")} />}
             {!loading && q && (
-              <IconButton icon={X} size="sm" label={tr("sessionsearch.clear")} onClick={() => setQ("")} />
+              <IconButton icon={CloseIcon} size="sm" label={tr("sessionsearch.clear")} onClick={() => setQ("")} />
             )}
           </span>
         </div>
@@ -335,7 +335,7 @@ export default function SessionSearch() {
         )}
         {!loading && !searchFailed && entries.length === 0 && (
           <div className="palette-empty session-search-empty">
-            <Icon icon={Search} size="lg" />
+            <Icon icon={SearchIcon} size="lg" />
             <span>{query.text ? tr("sessionsearch.noResults", { query: query.text }) : tr("sessionsearch.noSessions")}</span>
           </div>
         )}

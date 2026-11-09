@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "resources/icon-only.png": "be7f26051feab5746a13697a4a3a3f4459472356dc8b5eac8a45f792cd7aa9e3",
+    "resources/icon-background.svg": "7c3184eae708ed42d423f892b94828b723e8eb44ae2773b7fbca43264292d490",
+    "scripts/generate-assets.mjs": "85233bceada549887223830b158508da667ede5a00acc3d51c60598bad77e484"
+  }
+}

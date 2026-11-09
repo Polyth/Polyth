@@ -21,7 +21,8 @@ The mobile shell always consumes the canonical web output:
 npm run build:mobile
 ```
 
-This runs `build:web`, then `cap sync` for Android and iOS, then
+Run `npm run release-tools:install` once first: the Capacitor CLI lives in the
+separate release tree. This runs `build:web`, then `cap sync` for Android and iOS, then
 `scripts/bundle-package-assets.mjs`, which copies every package web bundle listed
 in the bundled `packages-manifest.json` into the native `public/packages/<id>/`
 directories (generated, gitignored; the build fails if a listed file is missing —
@@ -60,8 +61,11 @@ Regenerate both native asset catalogs with:
 npm --workspace @polyth/mobile run assets
 ```
 
-The generated PNGs are not committed (see `.gitignore`); `sync`, `copy` and the
-platform build scripts regenerate them. Git holds only the hand-written native
+The generator needs sharp from the release tools (`npm run release-tools:install`,
+see [Release tools](../operations/releases.md#release-tools)). The generated PNGs
+and `resources/assets.stamp.json` are committed; `sync`, `copy` and the platform
+build scripts do not regenerate them, and `assets.test.ts` fails when a source
+changed without regenerating. Git also holds the hand-written native
 pieces: `LaunchScreen.storyboard`, the `Contents.json` files, and on Android
 `res/values/polyth_launch.xml`, `res/drawable/polyth_launch.xml` and
 `styles.xml`. If the mark changes, also regenerate the Link bootstrap page's

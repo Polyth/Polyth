@@ -6,8 +6,6 @@ packages/*/dist
 packages/harness-runtime/native/bin
 apps/desktop/dist
 apps/desktop/release
-apps/desktop/build/icon.png
-apps/desktop/build/icon-win.png
 apps/desktop/resources/opencode/*/opencode
 apps/desktop/resources/opencode/*/opencode.exe
 apps/desktop/resources/opencode/*/provenance.json
@@ -101,17 +99,13 @@ Thumbs.db
 # Build-time staged controlled browser binaries
 /apps/desktop/resources/chromium/
 
-# Native branding outputs are generated from apps/mobile/resources/*.svg.
-# Keep only the source-of-truth artwork in Git; npm run assets recreates these.
+# Native branding outputs (icons, launch images) are generated from
+# apps/mobile/resources by `npm run assets` and committed; a stamp test catches stale ones.
 /apps/mobile/icons/
-/apps/mobile/android/app/src/main/res/mipmap-*/ic_launcher*
 /apps/mobile/android/app/src/main/res/drawable*/splash.png
-/apps/mobile/android/app/src/main/res/drawable*/polyth_launch_*.png
 /apps/mobile/android/app/src/main/res/drawable/ic_launcher_background.xml
 /apps/mobile/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
 /apps/mobile/android/app/src/main/res/values/ic_launcher_background.xml
-/apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset/*.png
-/apps/mobile/ios/App/App/Assets.xcassets/Splash.imageset/*.png
 
 # Transient local/recovery artifacts
 **/__pycache__/

@@ -19,13 +19,7 @@
     "js-yaml": "4.3.2",
     "mermaid": {
       "katex": "$katex"
-    },
-    "xcode": {
-      "uuid": "11.1.1"
-    },
-    "minimatch@^10.2.5": "11.0.5",
-    "rimraf@^6.0.1": "6.1.4",
-    "minimatch@^9.0.3": "11.0.5"
+    }
   },
   "scripts": {
     "check:node": "node scripts/check-node.mjs",
@@ -56,6 +50,7 @@
     "desktop:dist:linux": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:linux",
     "desktop:dist:mac": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:mac",
     "desktop:dist:win": "npm run build:web && npm run desktop:download-opencode && npm --workspace @polyth/desktop run dist:win",
+    "release-tools:install": "npm ci --prefix tools/release --no-audit --no-fund",
     "build:mobile": "npm run build:web && npm --workspace @polyth/mobile run sync",
     "mobile:sync": "npm run build:web && npm --workspace @polyth/mobile run sync",
     "mobile:open:android": "npm --workspace @polyth/mobile run open:android",
@@ -77,7 +72,6 @@
   },
   "dependencies": {
     "katex": "^0.19.1",
-    "lucide-react": "^1.61.0",
     "mermaid": "^11.17.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

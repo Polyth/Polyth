@@ -2,7 +2,7 @@ import { copyFile, lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
 import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync} from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { compare as compareSemver, valid as validSemver } from "semver";
+import { compare as compareSemver, valid as validSemver } from "@polyth/package-sdk/manifest";
 import { atomicWriteSync } from "./atomicWrite.ts";
 
 const SKIP = new Set(["node_modules", "versions", ".versions"]);
