@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 const executable = process.argv[2] ? resolve(process.argv[2]) : "";
@@ -43,7 +43,21 @@ const dumpLogs = (dir) => {
 // GitHub's Windows runner can leave Electron's sandbox/GPU startup waiting
 // forever in a non-interactive desktop session. Keep the packaged executable
 // unchanged, but make the CI startup probe deterministic.
-const launchArgs = process.platform === "win32" ? ["--no-sandbox", "--disable-gpu"] : [];
+// An unpacked Linux build's chrome-sandbox is not setuid root (an installed
+// AppImage or package sets that up), so Chromium aborts before the app runs;
+// the AppImage end-to-end test passes --no-sandbox for the same reason.
+const linuxSandboxUnusable = () => {
+  try {
+    const helper = statSync(join(dirname(executable), "chrome-sandbox"));
+    return helper.uid !== 0 || (helper.mode & 0o4000) === 0;
+  } catch {
+    return false;
+  }
+};
+const launchArgs = process.platform === "win32"
+  ? ["--no-sandbox", "--disable-gpu"]
+  : process.platform === "linux" && linuxSandboxUnusable() ? ["--no-sandbox"] : [];
+if (launchArgs.includes("--no-sandbox")) console.log("startup-smoke: launching with --no-sandbox (CI probe only)");
 const child = spawn(executable, launchArgs, {
   env: {
     ...process.env,
