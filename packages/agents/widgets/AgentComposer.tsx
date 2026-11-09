@@ -16,6 +16,7 @@ import { matchesSendShortcut } from "../../../apps/web/src/settings.ts";
 import { getUiSettings } from "../../../apps/web/src/uiPrefs.ts";
 import { isLargeTextPaste, MAX_PENDING_ATTACHMENTS, PASTED_TEXT_NAME, uploadInboxFile } from "../../../apps/web/src/attachments.ts";
 import AttachmentPills from "../../../apps/web/src/components/AttachmentPills.tsx";
+import ImageSizePrompt, { useImageSizeChoice } from "../../../apps/web/src/components/ImageSizePrompt.tsx";
 import {
   AttachmentIcon, ChevronDownIcon, Icon, IconButton, Menu, NewChatIcon, QueueSendIcon, ReplyIcon, SendIcon,
   Spinner, StopIcon, Textarea, type MenuEntry,
@@ -222,23 +223,30 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
   }, []);
   useEffect(() => { writeAgentDraft(agent.id, text); }, [agent.id, text]);
 
+  const imageChoice = useImageSizeChoice({
+    scopeKey: agent.id,
+    onScopeChanged: () => setUiError(tr("composer.attachmentContextChanged")),
+  });
   const attach = (picked: readonly File[]): void => {
     const room = MAX_PENDING_ATTACHMENTS - attachments.length - uploading;
     const batch = picked.slice(0, Math.max(0, room));
     if (picked.length > batch.length) {
       setUiError(tr("agents.tooManyFilesValue", { count: MAX_PENDING_ATTACHMENTS }), null, undefined, "info");
     }
-    for (const file of batch) {
-      setUploading((count) => count + 1);
-      void uploadInboxFile(agent.projectId, null, file).then((result) => {
-        if (!result.ok) {
-          setUiError(tr("agents.couldNotAttachValue", { name: file.name || "file", reason: result.reason }));
-          return;
-        }
-        // An upload that finishes after the person left this agent is dropped.
-        if (mounted.current) setAttachments((current) => [...current, result.ref].slice(0, MAX_PENDING_ATTACHMENTS));
-      }).finally(() => { if (mounted.current) setUploading((count) => Math.max(0, count - 1)); });
-    }
+    imageChoice.offer(batch.map((file) => ({
+      file,
+      commit: (chosen) => {
+        setUploading((count) => count + 1);
+        return uploadInboxFile(agent.projectId, null, chosen).then((result) => {
+          if (!result.ok) {
+            setUiError(tr("agents.couldNotAttachValue", { name: file.name || "file", reason: result.reason }));
+            return;
+          }
+          // An upload that finishes after the person left this agent is dropped.
+          if (mounted.current) setAttachments((current) => [...current, result.ref].slice(0, MAX_PENDING_ATTACHMENTS));
+        }).finally(() => { if (mounted.current) setUploading((count) => Math.max(0, count - 1)); });
+      },
+    })));
   };
   // A batch dropped before this composer existed (on another agent) is not
   // taken: only a new drop on this agent is.
@@ -347,6 +355,7 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
       aria-label={tr("agents.composerLabelValue", { name })}
       onSubmit={(event) => { event.preventDefault(); void submit(); }}
     >
+      <ImageSizePrompt choice={imageChoice} />
       {(attachments.length > 0 || uploading > 0) && (
         <div className="agent-composer-files">
           {attachments.length > 0 && (

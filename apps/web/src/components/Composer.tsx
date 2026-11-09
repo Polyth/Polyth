@@ -189,6 +189,8 @@ import {
 } from "@polyth/models/web-prefs";
 import { hiddenModelMatcher } from "@polyth/models";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { isResizableImage, shouldAskImageSize } from "../imageUploadSize.ts";
+import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import { useSpaces } from "../spaces.ts";
 import { useProjectInterfaceMode } from "../projectInterfaceScope.ts";
@@ -878,6 +880,15 @@ const ComposerFileInput = memo(function ComposerFileInput({ inputRef, onFiles, a
     />
   );
 });
+
+/** A picked photo that may be reduced is read now rather than uploaded from
+ *  staging, which can only send the exact bytes it holds. */
+function shouldReadStagedPhoto(metadata: { mimeType: string; size: number }): boolean {
+  const photo = { type: metadata.mimeType, size: metadata.size };
+  const preference = getUiSettings().imageUploadSize;
+  if (preference === "original") return false;
+  return preference === "ask" ? shouldAskImageSize(photo) : isResizableImage(photo);
+}
 
 const EMPTY_MENTION_LEVELS: readonly SessionAccessLevel[] = [];
 const EMPTY_MENTION_CANDIDATES: SessionMentionCandidateDto[] = [];
@@ -2009,22 +2020,29 @@ function ComposerBody({
       if (failed && !failed.ok) setUiError(failed.reason);
     });
   }, [activeProjectId, session?.id]);
-  const attachFiles = useCallback((files: File[]) => {
-    const projectId = getState().activeProjectId;
-    if (!projectId || files.length === 0) return;
-    const target = sessionIdRef.current;
+  const imageChoice = useImageSizeChoice({
+    scopeKey: scopedDraftCacheKey(session?.id ?? null),
+    onScopeChanged: () => setUiError(tr("composer.attachmentContextChanged")),
+  });
+  const offerImages = imageChoice.offer;
+  const attachFilesTo = useCallback((projectId: string, target: string | null, files: File[]) => {
     if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
-    for (const f of files) {
-      void attachUpload(projectId, target, f).then((r) => {
+    offerImages(files.map((f) => ({
+      file: f,
+      commit: (chosen) => attachUpload(projectId, target, chosen).then((r) => {
         if (!r.ok) {
           setUiError(tr("composer.couldNotAttachValue", {
             name: f.name || tr("composer.discovery.file"),
             reason: r.reason,
           }));
         }
-      });
-    }
-  }, []);
+      }),
+    })));
+  }, [offerImages]);
+  const attachFiles = useCallback((files: File[]) => {
+    const projectId = getState().activeProjectId;
+    if (projectId && files.length > 0) attachFilesTo(projectId, sessionIdRef.current, files);
+  }, [attachFilesTo]);
   const attachPastedText = useCallback((pasted: string, projectId: string, sessionId: string | null) => {
     if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
     void attachText(projectId, sessionId, pasted).then((r) => {
@@ -2069,6 +2087,20 @@ function ComposerBody({
           return;
         }
         for (const metadata of result.metadata) {
+          // The question can outlast this process, and a staged file nothing
+          // refers to would count against staging for good: bring its bytes
+          // here and free the staged copy before asking. Failed reads fall
+          // through to the staged path, which reports them.
+          const photo = shouldReadStagedPhoto(metadata);
+          if (photo) {
+            const file = await readNativeStagedFile(metadata).catch(() => null);
+            if (file) {
+              await removeNativeStagedFile(metadata).catch(() => undefined);
+              if (sessionIdRef.current === target) attachFilesTo(projectId, target, [file]);
+              else setUiError(tr("composer.attachmentContextChanged"));
+              continue;
+            }
+          }
           const attached = await attachNativeStagedUpload(projectId, target, metadata, {
             read: readNativeStagedFile,
             remove: removeNativeStagedFile,
@@ -2082,7 +2114,7 @@ function ComposerBody({
       else if (result.status === "denied" || result.status === "failed") setUiError(result.message);
       // Native cancellation is a normal no-op and keeps the draft untouched.
     });
-  }, []);
+  }, [attachFilesTo]);
 
   const onPaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
     const projectId = getState().activeProjectId;
@@ -4196,7 +4228,7 @@ function ComposerBody({
     || borrowedEpochPending
     || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
-  const hasDraft = liveText.trim() !== "" || attachments.length > 0;
+  const hasDraft = liveText.trim() !== "" || attachments.length > 0 || imageChoice.pending.length > 0;
   const peopleSendDisabled = peopleSending || (liveText.trim() === "" && attachments.length === 0);
   const runningHasSend = !sendDisabled;
   const runningPrimaryLabel = queueEdit
@@ -4587,7 +4619,7 @@ function ComposerBody({
           if (!k || !activeProjectId) return;
           e.preventDefault();
           void dropIntoSession(e.dataTransfer, activeProjectId, sessionIdRef.current,
-            (reason) => setUiError(tr("composer.couldNotAttach", { reason })));
+            (reason) => setUiError(tr("composer.couldNotAttach", { reason })), attachFiles);
         }}
       >
       {dropHint && (
@@ -4602,6 +4634,7 @@ function ComposerBody({
           {tr("composer.largePasteBanner")}
         </Notice>
       )}
+      <ImageSizePrompt choice={imageChoice} />
       {!conversation && showModelWarning && !hostOnlyCommandReady && (
         <div className="composer-note composer-runtime-unavailable" role="status">
           <span>

@@ -286,6 +286,11 @@ and Android. It accepts documents and images, converts the selected native URLs
 to browser `File` objects, then reuses the existing `_inbox` upload and
 attachment-pill path.
 
+- A photo that may be reduced ([Photo size](../dev/ui.md)) is read into memory
+  and its staged copy freed before the question appears, because a staged file
+  no draft refers to would count against staging permanently. Such a photo is
+  not recoverable across an app restart and is picked again; every other file
+  keeps the staged path.
 - Cancellation is silent and preserves the draft.
 - A denied or unreadable selection shows a bounded existing UI error.
 - The picker grants only scoped access to user-selected files; Polyth requests

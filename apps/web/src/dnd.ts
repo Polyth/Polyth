@@ -207,6 +207,8 @@ export async function dropIntoSession(
   projectId: string,
   sessionId: string | null,
   onError?: (reason: string) => void,
+  /** Takes the desktop files, when the caller has its own way to attach them. */
+  attachFiles?: (files: File[]) => void,
 ): Promise<void> {
   if (dt.getData(RESOURCE_MIME)) {
     const ref = getDragResource(dt);
@@ -270,6 +272,10 @@ export async function dropIntoSession(
   if (p) {
     const r = await attachProjectFile(projectId, sessionId, p);
     if (!r.ok) onError?.(r.reason);
+    return;
+  }
+  if (attachFiles) {
+    attachFiles(Array.from(dt.files));
     return;
   }
   for (const f of Array.from(dt.files)) {

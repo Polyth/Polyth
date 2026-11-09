@@ -10,7 +10,8 @@ import { isPromptBookmarkHome, usePromptBookmarkPosition, writePromptBookmarkPos
 import { updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings, type ActivityBlockStyle } from "../../uiPrefs.ts";
 import { useTouchPointer } from "../MessageActionBar.tsx";
-import { Button, CheckIcon, ChevronDownIcon, ChevronUpIcon } from "../ui/index.ts";
+import { Button, CheckIcon, ChevronDownIcon, ChevronUpIcon, Select } from "../ui/index.ts";
+import { parseImageUploadPreference } from "../../imageUploadSize.ts";
 import { ChatSettingsPreview, type ChatPreviewDevice } from "./ChatSettingsPreview.tsx";
 import {
   CHAT_DETAIL_LEVELS,
@@ -267,6 +268,13 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
     ["attach", tr("composer.largePasteAttach")],
     ["inline", tr("composer.largePasteInline")],
   ];
+  const imageSizeOptions: Array<[typeof ui.imageUploadSize, string]> = [
+    ["ask", tr("settings.pages.largePasteAsk")],
+    ["small", tr("composer.imageSize.small")],
+    ["medium", tr("composer.imageSize.medium")],
+    ["large", tr("composer.imageSize.large")],
+    ["original", tr("composer.imageSize.original")],
+  ];
   const mobileTitleOptions: Array<[typeof ui.mobileSessionTitle, string]> = [
     ["hidden", tr("settings.pages.mobileSessionTitleHidden")],
     ["title", tr("settings.pages.mobileSessionTitleOnly")],
@@ -488,6 +496,21 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                     value={ui.largeTextPasteBehavior}
                     options={pasteOptions}
                     onChange={(largeTextPasteBehavior) => setUiSettings({ largeTextPasteBehavior })}
+                  />
+                </Row>
+              </DisclosureRow>
+              <DisclosureRow
+                {...rowProps("imageSize")}
+                label={tr("settings.chatPage.imageSize")}
+                value={optionLabel(imageSizeOptions, ui.imageUploadSize)}
+              >
+                <Row hint={tr("settings.chatPage.imageSizeHint")} layout="stacked" itemId="chat.imageSize">
+                  <Select
+                    label={optionLabel(imageSizeOptions, ui.imageUploadSize)}
+                    ariaLabel={tr("settings.chatPage.imageSize")}
+                    value={ui.imageUploadSize}
+                    options={imageSizeOptions.map(([value, label]) => ({ value, label }))}
+                    onChange={(value) => setUiSettings({ imageUploadSize: parseImageUploadPreference(value) })}
                   />
                 </Row>
               </DisclosureRow>

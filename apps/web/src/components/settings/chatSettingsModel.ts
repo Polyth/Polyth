@@ -95,6 +95,7 @@ export const CHAT_ROW_ITEMS = {
   send: ["chat.sendOnEnter", "chat.mobileSendShortcut"],
   followUp: ["chat.followUp"],
   paste: ["chat.largePaste"],
+  imageSize: ["chat.imageSize"],
   userActions: ["chat.messageActions"],
   replies: ["chat.responseActions"],
   composer: ["chat.showDictate", "chat.showQuickActions"],
@@ -131,6 +132,7 @@ export function chatPreviewFocus(row: ChatRowId | null, prefs: Pick<UiSettings, 
     case "send": return ["send"];
     case "followUp":
     case "paste":
+    case "imageSize":
     case "composer": return ["composer"];
     case "userActions": return ["user"];
     case "replies": return ["replies"];

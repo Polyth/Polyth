@@ -172,6 +172,7 @@ test("search finds a setting by the name its row shows on the page", () => {
   assert.ok(finds("agent steps", "chat.activityStyle"));
   assert.ok(finds("group steps", "chat.actionBlocks"));
   assert.ok(finds("long pastes", "chat.largePaste"));
+  assert.ok(finds("photo size", "chat.imageSize"));
   assert.ok(finds("under your messages", "chat.messageActions"));
   assert.ok(finds("under agent replies", "chat.responseActions"));
   assert.ok(finds("send with", "chat.sendOnEnter"));
