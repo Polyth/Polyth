@@ -238,6 +238,12 @@ html[data-theme-style="liquid-glass"] .menu-kbd {
   color: var(--faint); font: 400 var(--font-meta)/1 var(--ui-font-family);
 }
 
+/* Help tag: a small plate on the glass stroke. */
+html[data-theme-style="liquid-glass"] .ui-tooltip {
+  border-color: var(--lg-stroke-glass);
+  border-radius: var(--lg-radius-tooltip);
+  box-shadow: var(--lg-rim), var(--shadow-sm);
+}
 
 /* Alert and sheet: strong glass on the glass stroke under the alert shadow;
    title and commands share it, with no rules or bands between. */
