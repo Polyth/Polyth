@@ -784,6 +784,8 @@ export const pl: HarnessRuntimeMessages = {
   "harnessruntime.skills.source.project": "Ten projekt",
   "harnessruntime.skills.source.user": "Twoje skille",
   "harnessruntime.skills.source.plugin": "Z wtyczek",
+  "harnessruntime.skills.source.bundled": "Wbudowany",
+  "harnessruntime.skills.lockedHint": "{name} ładuje te skille samodzielnie, więc Polyth nie może ich wyłączyć; aby to zrobić, usuń skill z jego folderu. Aby użyć któregoś w innych harnessach, otwórz go w menu Ustawienia → Skille.",
   "harnessruntime.skills.changeAction": "Zmiana skilli {name}",
   "harnessruntime.skills.loadTitle": "Nie udało się odczytać skilli {name}",
   "harnessruntime.skills.reading": "Odczytywanie skilli…",

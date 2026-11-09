@@ -783,6 +783,8 @@ export const en = {
   "harnessruntime.skills.source.project": "This project",
   "harnessruntime.skills.source.user": "Your skills",
   "harnessruntime.skills.source.plugin": "From plugins",
+  "harnessruntime.skills.source.bundled": "Built in",
+  "harnessruntime.skills.lockedHint": "{name} loads these by itself, so Polyth can't turn them off; remove one from its folder for that. To use one in your other harnesses, open it in Settings → Skills.",
   "harnessruntime.skills.changeAction": "Change {name} skills",
   "harnessruntime.skills.loadTitle": "Couldn’t read {name} skills",
   "harnessruntime.skills.reading": "Reading skills…",

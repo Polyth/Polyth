@@ -4128,6 +4128,46 @@ remove another person's provider. The same file is the migration seed for
 accounts that predate the section, so existing host-global curation carries over
 into each account's list on first read.
 
+### Skills page (`skills` settings page)
+
+`packages/commands/widgets`. Two tabs that stay mounted behind an open skill, so
+its Back returns to the same search, filter and scroll position (`SkillsPage`).
+Search targets are `skills.catalog` (Library) and `skills.browse` (Catalog). The
+catalog is requested only when its tab opens, because it reads repositories.
+
+**Library** answers "what do I have, and where does it work". A row of harness
+chips with faceted counts filters it, so every added harness is visible without
+opening anything. Groups are *In every harness* (Polyth's copies, with an
+invitation to the catalog when empty), *Only in some harnesses*, and *Built into
+your harnesses*, collapsed because it is the least likely reason to come here.
+"Use in all harnesses" appears for the hovered or focused row, always on touch, and
+leaves narrow lists to the skill's own page.
+
+**Catalog** leads with search, focused on opening where there is a real pointer
+(↑↓ walk the rows; Esc clears; `/` stays with Settings' own search). Source
+tiles show their count and stars, and while searching, how many matches each holds.
+Choosing one filters in place and opens its masthead rather than a second page. A
+source's shelves are chips up to seven, and a `Select` past that. *Start here* shows
+only on the calm, unfiltered list. A row installs in one click to the open project;
+anything a person must weigh first (invisible characters, a taken name) opens the
+review page instead.
+
+**A skill's page** takes the page over, Esc steps back out of it rather than
+closing Settings, and Back returns focus to the row it came from. A catalog skill opens on its instructions,
+since it is being read before use; a library skill opens on *Harnesses*, since that
+is what only this page can answer. Facts are plain type, not pills. Every harness
+row states how the skill reaches it: *Native skill*, *Read when needed*, or the
+harness's own copy, and harnesses without it collapse to one line. Switches appear
+only where Polyth can truly act; a harness that loads its own skills says *Always
+on*. The page says what installing does and does not do, and warns only for
+invisible characters.
+
+Source pictures come through the server as checked data URLs, never from the
+client, and a source without one shows the page glyph, never initials. Tiles and
+cards use `--surface-overlay`, because `--elevated` is white on a white canvas. The
+page's grids need a `minmax(0, 1fr)` track: a strip that scrolls sideways otherwise
+widens the whole page on a phone.
+
 ### Package library surface (`packages` settings page)
 
 The host's `packages` settings page is one surface for built-in packages and

@@ -908,9 +908,74 @@ remote-access only:
   project; elsewhere the list is `supported: false` with a reason, mutations
   are `unsupported`, and a stored opt-in is ignored at launch.
 
-Changes apply to the next native session. Only Claude has a manager today.
-Checks: `packages/harness-runtime/test/nativeSkills.test.ts`,
-`harnessSkills.test.ts`, `packages/backend-claude/test/promptSuggestions.test.ts`.
+Changes apply to the next native session. Checks:
+`packages/harness-runtime/test/nativeSkills.test.ts`, `harnessSkills.test.ts`,
+`packages/backend-claude/test/promptSuggestions.test.ts`.
+
+Every harness with skill folders declares them, because a harness's folder
+layout is backend knowledge. Only Claude can honor the inherit switch and
+per-skill mute, since it alone takes a launch-time allowlist. The others load
+their skills by themselves, so they use
+`createFolderSkillManager` (`control: "none"`): a read-only, truthful list whose
+rows are `locked`, and `update` refuses. `locate(context, name)` returns the
+confined folder of one skill; it never reaches a client.
+
+| Harness | Project folders | Person's folders | Ships with it | Evidence |
+| --- | --- | --- | --- | --- |
+| Claude Code | `.claude/skills` | `$CLAUDE_CONFIG_DIR/skills`, enabled plugins' `skills/` | | SDK, plugin list |
+| Codex | `.agents/skills` | `$CODEX_HOME/skills`, `~/.agents/skills` | `$CODEX_HOME/skills/.system` | `skills/list` on 0.166.0 |
+| OpenCode | `.opencode/skill(s)`, `.claude/skills`, `.agents/skills` | `$XDG_CONFIG_HOME/opencode/skill(s)`, `~/.claude/skills`, `~/.agents/skills` | | Its docs; `OPENCODE_DISABLE_*_SKILLS` honored |
+| Pi | `.pi/skills`, `.agents/skills`, once the project is trusted | `$PI_CODING_AGENT_DIR/skills`, `~/.agents/skills` | | Its trust rules |
+| Antigravity | `.agents/skills`, `_agents/skills` | `~/.gemini/config/skills` | not listed | `agy -p /skills` |
+| Cursor | `.cursor/skills`, `.agents/skills`, `.claude/skills`, `.codex/skills` | the same under `~` | `~/.cursor/skills-cursor` | CLI bundle |
+| Grok Build | `.grok/skills`, `.claude/skills`, `.cursor/skills` | `$GROK_HOME/skills`, `~/.claude/skills`, `~/.cursor/skills` | | CLI help |
+| OMP | `.omp`, `.agents`, `.agent`, `.claude`, `.codex`, `.opencode`, `.github` (each `/skills`) | `$PI_CODING_AGENT_DIR/skills`, `~/.agents`, `~/.agent`, `~/.codex`, `~/.config/opencode` (each `/skills`) | | Its discovery providers; `~/.claude/skills` is opt-in there |
+| Command Code | `.commandcode/skills`, `.agents/skills` | `~/.commandcode/skills`, `~/.agents/skills` | | CLI bundle |
+
+DeepSeek (`dsh`), FX and generic ACP show no skill folders of their own and have
+no manager; Polyth's skills still reach them through the prompt.
+
+Known gaps, all under-reporting rather than false claims: Codex plugin skills
+under `$CODEX_HOME/plugins/cache` and Antigravity's five built-in skills have no
+folder this seam reads. Listing them needs the CLI's own report (`skills/list`,
+`agy -p /skills`), which is too slow for a settings page unless cached.
+
+### Skills across harnesses
+
+Settings → Skills is one view of all of this, owned by `@polyth/commands`
+(`skillLibrary.ts`). A row is one skill name: its Polyth-managed copy, if any, plus
+what each added harness has of its own. A harness counts as added when it is on
+the roster, open to this person (`harnessUsableByUser`), switched on, and not
+known to be `not-installed`. So enabling the Grok package is all it takes to join.
+
+A person can use a harness's skill everywhere: **adopt** copies its whole folder
+into Polyth, which then delivers it like any managed skill. The harness keeps its
+own copy, and Polyth notices when that folder later changes. A plugin's
+`plugin:skill` is stored as plain `skill`, since a namespace means nothing to the
+other harnesses, and stays one row.
+
+**A managed skill carries its files.** `installCopy` stores every file in a
+content-addressed bundle (`skill-bundles/<sha256>`, freed when no skill points at
+it). Delivery is unchanged for the capability contract except for two optional
+fields: `skill.bundleDir`, and `excludedHarnessIds` on the capability base, which
+`targetsHarness` honors before planning.
+
+- Native projections receive the instructions with a leading `Base directory for
+  this skill:` line, because the copy they materialize has no folder of its own.
+  Text too long for the 64 KB capability limit becomes a pointer to the bundle's
+  `SKILL.md`.
+- Prompt projections (`renderCapabilityText`) receive the description and that
+  pointer, never the whole text, so a long skill does not weigh on every prompt.
+- A remote target gets the instructions alone: the files live on this host.
+- Each skill keeps `offHarnesses`, an exclusion list rather than an allowlist, so
+  a harness added later receives it by default.
+
+**From any chat, in any harness.** Every harness has the agent-tool bridge, so
+`polyth_skills` (read-only, auto-approved: list, search, read) and
+`polyth_skills_manage` (mutating, never auto-approved, needs an acting person:
+install, adopt, update, remove) are the one path that reaches them all. `read`
+lets an agent follow a skill that only another harness has, including on a remote
+target with no access to this host's folders.
 
 ## Native prompt suggestions
 
@@ -1438,10 +1503,26 @@ when private skills are staged: relocating its relative plugins/file references
 would change user configuration semantics. User repository files are not edited.
 See the [native config source](https://opencode.ai/docs/config/#custom-path).
 
+Files under a revision directory (`runtime/opencode/<project>/revisions/<rev>`)
+never change content once written. MCP secrets reach OpenCode as `{file:…}`
+references to files under its `secrets/` folder. A secret value is not part of
+the capability revision. The agent-tools token lives only in server memory and
+belongs to a provisioning lease, so the same revision gets a new token after
+every server start. A later reconcile in the same process can also mint one,
+for example while a session is created. Each secret file name
+therefore carries a digest of its value. A new value gets a new file, and the
+files of superseded values stay until the revision itself retires. OpenCode
+resolves `{file:}` when it loads the config, which can happen after launch.
+Writing a different value to an existing path is refused (`Refusing to modify an
+immutable OpenCode revision`).
+
 Model-free process conformance is opt-in via `POLYTH_NATIVE_CAPABILITY_TESTS=1` in
 the backend native capability tests. It uses temporary storage and fixture MCP
 servers. Protocol fakes and successful native lists are not paid model-turn
 evidence; unavailable native invocation APIs remain explicitly unverified.
+The OpenCode case lists skills with `opencode debug skill`, a subcommand that
+OpenCode 2.2.5 no longer has (observed 2026-11-06), so it fails on 2.x until the
+skill readback moves to the server API.
 
 ```sh
 POLYTH_NATIVE_CAPABILITY_TESTS=1 node --experimental-strip-types --test \

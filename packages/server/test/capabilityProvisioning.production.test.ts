@@ -592,6 +592,79 @@ test("token lease survives while old generation is live", async () => {
   assert.equal(retired.captured()?.code, 401);
 });
 
+test("a server restart re-mints the tool token without failing OpenCode tools on the same revision", async () => {
+  const dataDir = tmp();
+  const space = spaceOf(dataDir);
+  const cwd = join(dataDir, "proj");
+  mkdirSync(cwd, { recursive: true });
+  const ctx = { spaceId: space.spaceId, projectId: "p", cwd, space };
+  const endpoint = `http://127.0.0.1:9999${AGENT_TOOLS_PATH}`;
+  const boot = () => {
+    // Everything a server process holds in memory is rebuilt; only the data
+    // directory (status file, Space storage, OpenCode revision dirs) persists.
+    const registry = createCapabilityContributionRegistry();
+    registry.register("example-feature", {
+      descriptor: {
+        id: "example-feature.ping",
+        kind: "tool",
+        owner: "example-feature",
+        scope: "space",
+        revision: "1",
+        name: "ping",
+        description: "ping",
+        inputSchema: { type: "object", properties: {} },
+        trust: "pure",
+        mutating: false,
+      },
+      execute: async () => ({ output: "pong" }),
+    });
+    const inner = createAgentToolBridge({
+      executor: (id) => registry.executor(id),
+      contribution: (id) => registry.contribution(id),
+    });
+    const minted: string[] = [];
+    const tools = { ...inner, mint(grant: Parameters<typeof inner.mint>[0]) {
+      const next = inner.mint(grant);
+      minted.push(next.token);
+      return next;
+    } };
+    const harness = opencodeHarness({ applyBehavior: async () => 0, applyMcp: async () => {} });
+    const controller = createCapabilityProvisioningController({
+      contributions: registry,
+      harnesses: mockHarnessRegistry(harness),
+      behavior: createBehaviorService({ file: join(dataDir, "behavior.md") }),
+      mcp: createMcpConfigService({ dataDir, deployment: "local-trusted", defaultSpaceId: space.spaceId }),
+      file: join(dataDir, "status.json"),
+      tools,
+      toolsEndpoint: () => endpoint,
+    });
+    return { harness, controller, minted };
+  };
+  const overlayToken = (): string => {
+    const overlay = peekOpenCodeLaunchOverlay({ cwd, spaceId: space.spaceId, projectId: "p" });
+    const config = JSON.parse(overlay!.configContent) as { mcp: Record<string, { environment?: Record<string, string> }> };
+    const ref = Object.values(config.mcp).find((entry) => entry.environment?.POLYTH_AGENT_TOOLS_TOKEN)
+      ?.environment?.POLYTH_AGENT_TOOLS_TOKEN ?? "";
+    assert.match(ref, /^\{file:.+\}$/, "the token reaches OpenCode through a private file reference");
+    return readFileSync(ref.slice(6, -1), "utf8");
+  };
+  const failed = (records: Array<{ capabilityId: string; status: string; reason?: string }>) =>
+    records.filter((row) => row.status === "failed").map((row) => `${row.capabilityId}: ${row.reason}`);
+
+  const before = boot();
+  const first = await before.controller.reconcile(before.harness, ctx);
+  assert.deepEqual(failed(first.records), []);
+  assert.equal(overlayToken(), before.minted[0]);
+
+  const after = boot();
+  const second = await after.controller.reconcile(after.harness, ctx);
+  assert.equal(second.desiredRevision, first.desiredRevision, "the restart keeps the same capability revision");
+  assert.notEqual(after.minted[0], before.minted[0]);
+  assert.deepEqual(failed(second.records), []);
+  assert.equal(second.records.find((row) => row.capabilityId === "example-feature.ping")?.status, "pending");
+  assert.equal(overlayToken(), after.minted[0], "the next OpenCode launch gets the live token, not the revoked one");
+});
+
 test("old tool grant cannot authorize a replaced executor", async () => {
   const dataDir = tmp();
   const space = spaceOf(dataDir);

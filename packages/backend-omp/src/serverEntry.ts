@@ -1,7 +1,10 @@
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessRegistry } from "@polyth/contracts";
 import { createAcpProvider } from "@polyth/backend-acp";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import type { RegisteredAcpProfile } from "@polyth/backend-acp/profile";
 import { createHarnessAccountFamily, harnessCommandLine, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
@@ -101,7 +104,26 @@ export default function registerPackage(host: ServerPackageHost) {
         storageDir: host.storageDir,
         deployment: host.deployment,
         registry: () => host.services.require(serverServiceKey<HarnessRegistry>("harnesses")),
-        createProvider: (account) => createAcpProvider(host, createOmpProfile(account)),
+        createProvider: (account) => {
+            const provider = createAcpProvider(host, createOmpProfile(account));
+            // Its discovery providers. `~/.claude/skills` is opt-in there
+            // (`skills.enableClaudeUser`), so it is not claimed here.
+            provider.skills = createFolderSkillManager({
+                harnessId: provider.descriptor.id,
+                harnessName: "OMP",
+                folders: (context) => nativeSkillFolders(context, {
+                    project: [".omp", ".agents", ".agent", ".claude", ".codex", ".opencode", ".github"].map((folder) => join(folder, "skills")),
+                    user: [
+                        join(account?.dir ?? process.env.PI_CODING_AGENT_DIR?.trim() ?? join(homedir(), ".omp", "agent"), "skills"),
+                        join(homedir(), ".agents", "skills"),
+                        join(homedir(), ".agent", "skills"),
+                        join(homedir(), ".codex", "skills"),
+                        join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "opencode", "skills"),
+                    ],
+                }),
+            });
+            return provider;
+        },
         status: ompAccountStatus,
         // OMP signs in from its own interactive `/login` command.
         signInCommand: (account) => harnessCommandLine([knownOmpCommand ?? "omp"], accountEnv(account)),

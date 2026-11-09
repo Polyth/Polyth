@@ -11,7 +11,8 @@ export function agentBetaBlocksPackageRoute(
   if (owner === "commands") {
     return request.path === "/api/commands"
       || request.path === "/api/snippets"
-      || request.path === "/api/skills";
+      || request.path === "/api/skills"
+      || request.path.startsWith("/api/skills/");
   }
   return owner === "editor" && request.path === "/api/editor/language/rename-apply";
 }

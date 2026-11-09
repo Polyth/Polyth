@@ -243,8 +243,11 @@ export async function parseClaudePluginList(
     context: Pick<HarnessContext, "cwd">,
     configRoot: string | undefined,
     inheritedSkills = false,
-): Promise<{ plugins: NativePluginDto[]; warnings: string[] }> {
+): Promise<{ plugins: NativePluginDto[]; warnings: string[]; roots: Map<string, string> }> {
     const warnings: string[] = [];
+    // Confined plugin folders by plugin id, for reading their skills. Never
+    // part of a DTO: a host path is not a client's business.
+    const roots = new Map<string, string>();
     const rows = parseArray(stdout, "plugin list");
     if (rows.length > MAX_PLUGINS) warnings.push(`Showing the first ${MAX_PLUGINS} of ${rows.length} plugins`);
     const plugins: NativePluginDto[] = [];
@@ -268,6 +271,8 @@ export async function parseClaudePluginList(
         // flag: offering a switch or Remove that always fails is worse.
         const managed = scope === "managed";
         const components = installPath ? await readComponents(configRoot, installPath, inheritedSkills) : undefined;
+        const root = configRoot && installPath && isAbsolute(installPath) ? await confined(configRoot, installPath) : undefined;
+        if (root) roots.set(id, root);
         plugins.push({
             harnessId,
             id,
@@ -286,7 +291,7 @@ export async function parseClaudePluginList(
                 : {}),
         });
     }
-    return { plugins, warnings };
+    return { plugins, warnings, roots };
 }
 
 export function parseClaudeMarketplaces(stdout: string): NativePluginMarketplaceDto[] {
@@ -317,9 +322,14 @@ export function claudePluginMutationArgs(
     return { args: ["plugin", input.action, input.plugin, ...(scope ? ["--scope", scope] : [])] };
 }
 
-export function createClaudeNativePlugins(options: ClaudeNativePluginsOptions): HarnessNativePluginManager {
+export function createClaudeNativePlugins(options: ClaudeNativePluginsOptions): HarnessNativePluginManager & {
+    /** Folder of a plugin the last `list` saw, confined to the account's config. */
+    pluginRoot(pluginId: string): string | undefined;
+} {
     const { harnessId } = options;
+    let pluginRoots = new Map<string, string>();
     return {
+        pluginRoot: (pluginId) => pluginRoots.get(pluginId),
         support,
         async list(context, listOptions) {
             if (context.remote) {
@@ -334,6 +344,7 @@ export function createClaudeNativePlugins(options: ClaudeNativePluginsOptions): 
             if (plugins.status === "rejected") throw plugins.reason;
             const inherited = await options.inheritsSkills?.(context).catch(() => false) ?? false;
             const parsed = await parseClaudePluginList(harnessId, plugins.value.stdout, context, await configRootFor(env), inherited);
+            pluginRoots = parsed.roots;
             const result: NativePluginListDto = {
                 harnessId,
                 support: support(context),

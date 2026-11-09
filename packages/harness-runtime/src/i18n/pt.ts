@@ -784,6 +784,8 @@ export const pt: HarnessRuntimeMessages = {
   "harnessruntime.skills.source.project": "Este projeto",
   "harnessruntime.skills.source.user": "As suas competências",
   "harnessruntime.skills.source.plugin": "De plugins",
+  "harnessruntime.skills.source.bundled": "Integrada",
+  "harnessruntime.skills.lockedHint": "{name} carrega estas competências por si mesmo, pelo que o Polyth não as pode desativar; remova uma da pasta respetiva para o fazer. Para usar uma nos seus outros harnesses, abra-a em Definições → Competências.",
   "harnessruntime.skills.changeAction": "Alterar as competências de {name}",
   "harnessruntime.skills.loadTitle": "Não foi possível ler as competências de {name}",
   "harnessruntime.skills.reading": "A ler as competências…",

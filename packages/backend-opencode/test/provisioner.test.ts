@@ -378,6 +378,79 @@ test("physical OpenCode release deletes private revision resources", async () =>
   assert.equal(existsSync(secretPath), false);
 });
 
+test("a re-minted secret under the same revision stages a new file and keeps the old one", async () => {
+  // The agent-tools token lives only in server memory, so every server start
+  // mints a new one while the capability revision (token excluded) and its
+  // on-disk revision directory stay the same.
+  const space = spaceOf(tmp());
+  const cwd = tmp();
+  const provisioner = createOpenCodeProvisioner({} as BackendConfigApplier);
+  const context = { spaceId: space.spaceId, projectId: "p", cwd, space };
+  const bridgePlan: HarnessProvisioningPlan = {
+    harnessId: "opencode",
+    desiredRevision: "rev-tools",
+    items: [{
+      capability: {
+        id: "polyth.agent-tools",
+        kind: "mcp-server",
+        owner: "polyth",
+        scope: "project",
+        revision: "tools-1",
+        name: "polyth-agent-tools",
+        enabled: true,
+        transport: { kind: "stdio", command: "node", args: ["bridge.mjs"], envKeys: ["POLYTH_AGENT_TOOLS_TOKEN"] },
+      },
+      mode: "config",
+      mutability: "requires-restart",
+    }, {
+      capability: {
+        id: "pkg.tool.search",
+        kind: "tool",
+        owner: "pkg",
+        scope: "project",
+        revision: "1",
+        name: "search",
+        description: "Search",
+        inputSchema: { type: "object" },
+      },
+      mode: "mcp",
+      mutability: "requires-restart",
+    }] as HarnessProvisioningPlan["items"],
+  };
+  const tokenPath = (): string => {
+    const overlay = peekOpenCodeLaunchOverlay({ cwd, spaceId: space.spaceId, projectId: "p" });
+    const parsed = JSON.parse(overlay!.configContent) as {
+      mcp: Record<string, { environment?: Record<string, string> }>;
+    };
+    const ref = parsed.mcp["polyth-agent-tools"]?.environment?.POLYTH_AGENT_TOOLS_TOKEN ?? "";
+    assert.match(ref, /^\{file:.+\}$/);
+    return ref.slice(6, -1);
+  };
+
+  const first = await provisioner.apply(context, bridgePlan, { mcpSecrets: () => ({ POLYTH_AGENT_TOOLS_TOKEN: "token-a" }) });
+  assert.deepEqual(first.records.map((row) => row.status), ["pending", "pending"]);
+  const firstPath = tokenPath();
+  assert.equal(readFileSync(firstPath, "utf8"), "token-a");
+
+  const again = await provisioner.apply(context, bridgePlan, { mcpSecrets: () => ({ POLYTH_AGENT_TOOLS_TOKEN: "token-a" }) });
+  assert.deepEqual(again.records.map((row) => row.status), ["pending", "pending"]);
+  assert.equal(tokenPath(), firstPath);
+
+  const restarted = await provisioner.apply(context, bridgePlan, { mcpSecrets: () => ({ POLYTH_AGENT_TOOLS_TOKEN: "token-b" }) });
+  assert.deepEqual(restarted.records.map((row) => [row.capabilityId, row.status, row.reason]), [
+    ["polyth.agent-tools", "pending", "Staged as a private OpenCode launch overlay"],
+    ["pkg.tool.search", "pending", "Presented through the scoped Polyth MCP capability bridge"],
+  ]);
+  const secondPath = tokenPath();
+  assert.notEqual(secondPath, firstPath);
+  assert.equal(readFileSync(secondPath, "utf8"), "token-b");
+  // A runtime already launched from this revision may still resolve the old
+  // file lazily; it stays until the revision itself is retired.
+  assert.equal(readFileSync(firstPath, "utf8"), "token-a");
+  assert.ok(!basenameOf(secondPath).includes("token-b"));
+});
+
+const basenameOf = (path: string): string => path.split(/[\\/]/).pop() ?? "";
 
 test("V2 launch overlay preserves native server options and user skill sources", () => {
   const existing = { mcp: { servers: { user: { type: "remote", url: "https://example.test", timeout: { startup: 9000 } } }, codemode: { instructions: "preserve" } }, skills: ["/user/skills"], plugins: [{ package: "user-plugin", options: { future: true } }], future: { untouched: true } };

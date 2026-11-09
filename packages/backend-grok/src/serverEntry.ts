@@ -1,7 +1,10 @@
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessRegistry } from "@polyth/contracts";
 import { createAcpProvider } from "@polyth/backend-acp";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import type { RegisteredAcpProfile } from "@polyth/backend-acp/profile";
 import { createHarnessAccountFamily, harnessCommandLine, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
@@ -98,7 +101,23 @@ export default function registerPackage(host: ServerPackageHost) {
         storageDir: host.storageDir,
         deployment: host.deployment,
         registry: () => host.services.require(serverServiceKey<HarnessRegistry>("harnesses")),
-        createProvider: (account) => createAcpProvider(host, createGrokProfile(account)),
+        createProvider: (account) => {
+            const provider = createAcpProvider(host, createGrokProfile(account));
+            // Its help names these, the other agents' folders included.
+            provider.skills = createFolderSkillManager({
+                harnessId: provider.descriptor.id,
+                harnessName: "Grok Build",
+                folders: (context) => nativeSkillFolders(context, {
+                    project: [join(".grok", "skills"), join(".claude", "skills"), join(".cursor", "skills")],
+                    user: [
+                        join(account?.dir ?? process.env.GROK_HOME?.trim() ?? join(homedir(), ".grok"), "skills"),
+                        join(homedir(), ".claude", "skills"),
+                        join(homedir(), ".cursor", "skills"),
+                    ],
+                }),
+            });
+            return provider;
+        },
         status: grokAccountStatus,
         signInCommand: (account) => harnessCommandLine([knownGrokCommand ?? "grok", "login"], accountEnv(account)),
         // The CLI's own flow "for headless/remote environments".

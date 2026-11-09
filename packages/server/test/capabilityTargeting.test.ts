@@ -83,3 +83,53 @@ test("harness-targeted capabilities are absent from other harness bundles", asyn
   assert.ok(codexPlans.at(-1)?.includes("polyth.behavior"));
   assert.notEqual(controller.status(context, "claude")[0]?.desiredRevision, controller.status(context, "codex")[0]?.desiredRevision);
 });
+
+test("a capability withheld from one harness still reaches every other, including new ones", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-excluded-capability-"));
+  const space = {
+    spaceId: "space-a",
+    spaceSlug: "space-a",
+    userId: "user-a",
+    role: "owner",
+    deployment: "local-trusted",
+    storageDir: dir,
+  } as SpaceContext;
+  const context = { spaceId: space.spaceId, projectId: "p", cwd: join(dir, "project"), space };
+  const contributions = createCapabilityContributionRegistry();
+  contributions.register("commands", {
+    descriptor: {
+      id: "commands.skill.pdf",
+      kind: "skill",
+      owner: "commands",
+      scope: "space",
+      revision: "1",
+      name: "pdf",
+      title: "pdf",
+      description: "Work with PDFs.",
+      instructions: "Do it.",
+      excludedHarnessIds: ["codex"],
+    },
+  });
+
+  const claudePlans: string[][] = [];
+  const codexPlans: string[][] = [];
+  const laterPlans: string[][] = [];
+  const claude = provider("claude", claudePlans);
+  const codex = provider("codex", codexPlans);
+  const later = provider("added-later", laterPlans);
+  const controller = createCapabilityProvisioningController({
+    contributions,
+    harnesses: mockHarnessRegistry(claude, codex, later),
+    behavior: createBehaviorService({ file: join(dir, "behavior.md") }),
+    mcp: createMcpConfigService({ dataDir: dir, deployment: "local-trusted", defaultSpaceId: space.spaceId }),
+    file: join(dir, "status.json"),
+  });
+
+  await controller.reconcile(claude, context);
+  await controller.reconcile(codex, context);
+  await controller.reconcile(later, context);
+
+  assert.ok(claudePlans.at(-1)?.includes("commands.skill.pdf"));
+  assert.equal(codexPlans.at(-1)?.includes("commands.skill.pdf"), false);
+  assert.ok(laterPlans.at(-1)?.includes("commands.skill.pdf"));
+});

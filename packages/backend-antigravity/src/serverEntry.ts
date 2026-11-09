@@ -14,6 +14,7 @@ import { vendorScriptInstallCommand } from "@polyth/harness-runtime/installers";
 import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { createHarnessAccountFamily, harnessCommandLine, linkAccountOverlay, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
+import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { readAgySkills } from "./commands.ts";
 import { createAntigravityPermissionBridge } from "./permissions.ts";
 import { createAntigravityNativePlugins } from "./nativePlugins.ts";
@@ -362,6 +363,16 @@ export function createAntigravityPackage(
       },
       provisioner: createAntigravityProvisioner(harnessId),
       plugins: createAntigravityNativePlugins({ harnessId, resolveBinary }),
+      // The private runtime home links `~/.gemini/config/skills` back, so the CLI
+      // reads the same folder this lists.
+      skills: createFolderSkillManager({
+        harnessId,
+        harnessName: "Antigravity",
+        folders: (context) => nativeSkillFolders(context, {
+          project: [join(".agents", "skills"), join("_agents", "skills")],
+          user: [join(geminiHome(process.env), ".gemini", "config", "skills")],
+        }),
+      }),
     };
   };
   const accounts = createHarnessAccountFamily({
