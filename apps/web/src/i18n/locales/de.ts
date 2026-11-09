@@ -2472,6 +2472,7 @@ export const de: AppMessages = {
   "timeline.loadEarlierHistory": "Früheren Verlauf laden",
   "timeline.promptHistoryFailed": "Prompt-Verlauf konnte nicht geladen werden. Versuchen Sie es erneut.",
   "timeline.promptBookmarkMoveHint": "Ziehen Sie das Lesezeichen, um es zu verschieben, oder halten Sie Umschalt gedrückt und drücken Sie eine Pfeiltaste. Umschalt mit Pos1 setzt es zurück. Die Position bleibt auf diesem Gerät gespeichert.",
+  "timeline.promptsTab": "Prompts",
   "timeline.loadingEarlierHistory": "Früherer Verlauf wird geladen…",
   "timeline.manageTurns": "ZÜGE VERWALTEN",
   "timeline.message": "×",

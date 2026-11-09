@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { tr } from "../i18n/index.ts";
 import {
   promptBookmarkFromOffset,
@@ -7,10 +7,14 @@ import {
   type PromptBookmarkBox,
   type PromptBookmarkPosition,
 } from "../promptBookmarkPosition.ts";
-import { promptRowLabel, RAIL_PANEL_ROWS } from "../promptRail.ts";
+import { promptRailInset, promptRowLabel, RAIL_EDGE_GAP, RAIL_PANEL_ROWS } from "../promptRail.ts";
+import type { ReadingPosition } from "../conversationPassage.ts";
 import { useSessionPrompts } from "../useSessionPrompts.ts";
+import { useTimelineProjectId } from "../timelineSession.ts";
+import { PROMPT_TABS_SLOT, PROMPTS_TAB_ID, readPromptTabChoice, usePromptTabContent, usePromptTabs, writePromptTabChoice } from "./promptTabs.ts";
+import { SlotBoundary } from "./slots/SlotHost.ts";
 import { BookmarkIcon } from "./ui/icons.ts";
-import { IconButton, Popover, Spinner } from "./ui/index.ts";
+import { IconButton, Popover, Spinner, Tabs } from "./ui/index.ts";
 
 export interface PromptBookmarkTarget {
   id: string;
@@ -50,7 +54,7 @@ interface Drag {
  * dragged anywhere in the conversation viewport; its placement is remembered
  * on this device (see promptBookmarkPosition.ts). `narrow`/`wide` say which
  * side of the rail breakpoint shows it; CSS hides it on the other. */
-export default function PromptBookmark({ sessionId, spaceId, revision, prompt, narrow = true, wide = true, onJump, onCancelJump }: {
+export default function PromptBookmark({ sessionId, spaceId, revision, prompt, narrow = true, wide = true, onJump, onCancelJump, readingPosition }: {
   sessionId: string | null;
   spaceId?: string;
   revision: string;
@@ -59,6 +63,8 @@ export default function PromptBookmark({ sessionId, spaceId, revision, prompt, n
   wide?: boolean;
   onJump: (prompt: PromptBookmarkTarget) => Promise<void>;
   onCancelJump: () => void;
+  /** What the person is reading, for a package tab offering to save it. */
+  readingPosition?: () => ReadingPosition | null;
 }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const freeArea = useRef<HTMLDivElement>(null);
@@ -76,13 +82,64 @@ export default function PromptBookmark({ sessionId, spaceId, revision, prompt, n
   const saved = usePromptBookmarkPosition();
   const position = live ?? saved;
   const history = useSessionPrompts({ sessionId, spaceId, revision, open });
+  const projectId = useTimelineProjectId();
+  const packageTabs = usePromptTabs();
+  const withContent = usePromptTabContent(sessionId).split(",");
+  const shownTabs = packageTabs.filter((tab) => withContent.includes(tab.id));
+  const tabbed = shownTabs.length > 0;
+  const [tabChoice, setTabChoice] = useState(readPromptTabChoice);
+  const activeTab = tabbed
+    ? tabChoice === PROMPTS_TAB_ID || shownTabs.some((tab) => tab.id === tabChoice) ? tabChoice : shownTabs[0]!.id
+    : PROMPTS_TAB_ID;
+  const activePackageTab = shownTabs.find((tab) => tab.id === activeTab);
+  const iconLabel = [...shownTabs.map((tab) => tab.label()), tr("messageActions.promptNavigation")].join(", ");
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  // A rail floating over the chat's edge would otherwise lie on the icon and take
+  // its clicks. The drag area ends where that chrome starts, and is measured for
+  // the same reason as the prompt rail: the chrome changes with the window.
+  const [chromeInset, setChromeInset] = useState(0);
+  useLayoutEffect(() => {
+    const area = freeArea.current;
+    const viewport = area?.parentElement;
+    if (!area || !viewport) return;
+    const shell = area.closest(".app-shell") ?? area.ownerDocument;
+    const obstacles = Array.from(shell.querySelectorAll<HTMLElement>(".railbar, .sidebar"));
+    const measure = () => {
+      const side = getComputedStyle(area).direction === "rtl" ? "left" : "right";
+      const inset = promptRailInset(
+        viewport.getBoundingClientRect(),
+        obstacles.map((element) => element.getBoundingClientRect()),
+        side,
+      );
+      setChromeInset(inset > RAIL_EDGE_GAP ? inset : 0);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(viewport);
+    for (const element of obstacles) observer?.observe(element);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
   useEffect(() => { setOffset(0); }, [revision]);
 
   const prompts = history.loaded ? history.prompts : prompt ? [prompt] : [];
   const end = Math.max(0, prompts.length - offset);
   const start = Math.max(0, end - RAIL_PANEL_ROWS);
   const rows = prompts.slice(start, end);
+  const chooseTab = (id: string) => {
+    setTabChoice(id);
+    writePromptTabChoice(id);
+  };
+  const tabContext = (placement: "tab" | "footer") => ({
+    sessionId,
+    projectId: projectId ?? null,
+    promptTabPlacement: placement,
+    closePromptPopover: close,
+    promptReadingPosition: () => readingPosition?.() ?? null,
+  });
   const close = () => {
     jumpGeneration.current += 1;
     onCancelJump();
@@ -181,15 +238,20 @@ export default function PromptBookmark({ sessionId, spaceId, revision, prompt, n
       ref={freeArea}
       className="prompt-bookmark"
       data-open={open || undefined}
+      data-filled={tabbed ? "true" : undefined}
       data-dragging={live ? "true" : undefined}
       data-narrow={narrow ? undefined : "off"}
       data-wide={wide ? undefined : "off"}
-      style={{ "--prompt-bookmark-x": String(position.x), "--prompt-bookmark-y": String(position.y) } as CSSProperties}
+      style={{
+        "--prompt-bookmark-x": String(position.x),
+        "--prompt-bookmark-y": String(position.y),
+        ...(chromeInset > 0 ? { "--prompt-bookmark-chrome": `${chromeInset}px` } : {}),
+      } as CSSProperties}
     >
       <IconButton
         ref={anchor}
         icon={BookmarkIcon}
-        label={tr("messageActions.promptNavigation")}
+        label={iconLabel}
         size="sm"
         variant="ghost"
         aria-expanded={open}
@@ -217,12 +279,28 @@ export default function PromptBookmark({ sessionId, spaceId, revision, prompt, n
         side="left"
         align="start"
         compact
-        ariaLabel={tr("messageActions.promptNavigation")}
+        ariaLabel={iconLabel}
         className="prompt-nav-panel prompt-bookmark-peek"
-        initialFocus=".prompt-nav-row"
+        initialFocus={tabbed ? ".prompt-bookmark-tabs [aria-selected='true']" : ".prompt-nav-row"}
         restoreFocus={false}
       >
-        <div className="prompt-bookmark-heading">{tr("messageActions.promptNavigation")}</div>
+        {tabbed ? (
+          <Tabs
+            size="sm"
+            className="prompt-bookmark-tabs"
+            label={iconLabel}
+            value={activeTab}
+            onChange={chooseTab}
+            tabs={[
+              ...shownTabs.map((tab) => ({ id: tab.id, label: tab.label() })),
+              { id: PROMPTS_TAB_ID, label: tr("timeline.promptsTab") },
+            ]}
+          />
+        ) : <div className="prompt-bookmark-heading">{tr("messageActions.promptNavigation")}</div>}
+        {activePackageTab && sessionId && (
+          <SlotBoundary slot={PROMPT_TABS_SLOT} item={activePackageTab.item} context={tabContext("tab")} />
+        )}
+        {activeTab === PROMPTS_TAB_ID && <>
         {(start > 0 || history.hasOlder) && (
           <button type="button" className="prompt-nav-page" disabled={history.busy || jumping !== null}
             aria-label={tr("timeline.loadEarlierHistory")}
@@ -253,6 +331,10 @@ export default function PromptBookmark({ sessionId, spaceId, revision, prompt, n
           </div>
         )}
         {history.loaded && prompts.length === 0 && <div className="prompt-bookmark-status">{tr("messageActions.emptyPrompt")}</div>}
+        </>}
+        {!tabbed && sessionId && packageTabs.map((tab) => (
+          <SlotBoundary key={tab.id} slot={PROMPT_TABS_SLOT} item={tab.item} context={tabContext("footer")} />
+        ))}
       </Popover>
     </div>
   );

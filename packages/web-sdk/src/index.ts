@@ -68,7 +68,12 @@ export interface SlotRegistration {
  *  ones, where the user orders it and places it on the bar, in the "More"
  *  menu, or off. Without it the host still lists the button by its id. */
 export interface MessageActionSlotMeta {
+  /** The button's name in Settings. Also its "More" menu row, unless `menuLabel`
+   *  says otherwise. */
   label: string | (() => string);
+  /** The "More" menu row for this message, read each time the menu opens, for
+   *  an action whose row says what a press would do ("Remove bookmark"). */
+  menuLabel?: (context: Readonly<Record<string, unknown>>) => string;
   description?: string | (() => string);
   /** Glyph for Settings and the "More" menu (a host `ui` icon). */
   icon?: ComponentType<{ className?: string; strokeWidth?: number }>;
@@ -97,6 +102,56 @@ export interface MessageActionSlotContext {
   messageActionPlacement: "bar" | "menu";
   messageActionRequest: number;
   messageActionAnchor: () => HTMLElement | null;
+}
+
+/** `meta.promptTab` on a `session.prompt.tabs` contribution: a tab beside the
+ *  prompt list in the chat's bookmark popover. */
+export interface PromptTabSlotMeta {
+  label: string | (() => string);
+  /** This chat has something to show. The tab strip appears only then; until
+   *  then the popover is the prompt list plus each tab's "footer" rendering.
+   *  It also fills the icon and shows it though its setting is off. */
+  hasContent(sessionId: string): boolean;
+  /** Notifies when `hasContent` may have changed. */
+  subscribe(listener: () => void): Unregister;
+}
+
+/** Extra context the host gives every `session.prompt.tabs` contribution.
+ *  "tab" is the tab's body. "footer" sits under the prompt list while no tab has
+ *  content: render one quiet row or nothing. `closePromptPopover` gives focus
+ *  back to the icon, so call it before moving focus elsewhere. */
+export interface PromptTabSlotContext {
+  sessionId: string;
+  projectId: string | null;
+  promptTabPlacement: "tab" | "footer";
+  closePromptPopover: () => void;
+  /** The answer being read when asked, and the heading above the reading line. */
+  promptReadingPosition: () => { eventSeq: number; heading?: string } | null;
+}
+
+/** The host's copy of a transcript selection, taken while it was alive. */
+export interface SelectionActionContext {
+  text: string;
+  /** The same passage as Markdown, so its links and code survive. */
+  markdown: string;
+  sessionId: string | null;
+  projectId: string | null;
+  /** The message the selection starts in; null outside any message. */
+  eventSeq: number | null;
+  messageRole: "user" | "assistant" | null;
+}
+
+/** `meta.selectionAction` on a `session.selection.actions` contribution. The host
+ *  draws the button in its floating toolbar and touch dock and clears the
+ *  selection after `run`; the contribution's `render` is never mounted. */
+export interface SelectionActionSlotMeta {
+  label: string | (() => string);
+  /** Tooltip; `label` when omitted. */
+  title?: string | (() => string);
+  /** Glyph in the touch dock (a host `ui` icon). */
+  icon?: ComponentType<{ className?: string; strokeWidth?: number }>;
+  available?: (context: SelectionActionContext) => boolean;
+  run: (context: SelectionActionContext) => void | Promise<void>;
 }
 
 /** Package status choice in the Settings → Packages toolbar. */
@@ -1167,7 +1222,13 @@ export interface WebPackageHost {
     openSession(sessionId: string): Promise<void>;
     /** Reveal a visible canonical message, paging older history if needed.
      * False means the target could not be displayed. Optional for older hosts. */
-    revealEvent?(sessionId: string, eventSeq: number, options?: { focus?: boolean; signal?: AbortSignal }): Promise<boolean>;
+    revealEvent?(sessionId: string, eventSeq: number, options?: {
+      focus?: boolean;
+      signal?: AbortSignal;
+      /** Text inside the message to land on and light for a moment. The message
+       *  alone is shown when the text is no longer in it. */
+      passage?: string;
+    }): Promise<boolean>;
     send(sessionId: string, text: string, options?: { delivery?: "normal" | "queue" | "interrupt" }): Promise<boolean>;
     /** Stream a spoken transcript into the mounted composer as a run-scoped
      * span (a draft, never a canonical turn). False when no composer took it.

@@ -2472,6 +2472,7 @@ export const ar: AppMessages = {
   "timeline.loadEarlierHistory": "تحميل السجل الأقدم",
   "timeline.promptHistoryFailed": "تعذّر تحميل سجل المطالبات. حاول مرة أخرى.",
   "timeline.promptBookmarkMoveHint": "اسحب العلامة لنقلها، أو اضغط باستمرار على Shift مع أحد مفاتيح الأسهم. يعيدها الضغط على Shift مع Home إلى موضعها الأصلي. يبقى الموضع محفوظًا على هذا الجهاز.",
+  "timeline.promptsTab": "الطلبات",
   "timeline.loadingEarlierHistory": "جارٍ تحميل السجل الأقدم…",
   "timeline.manageTurns": "إدارة الأدوار",
   "timeline.message": "×",

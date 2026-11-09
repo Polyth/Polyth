@@ -2472,6 +2472,7 @@ export const fr: AppMessages = {
   "timeline.loadEarlierHistory": "Charger l'historique précédent",
   "timeline.promptHistoryFailed": "Impossible de charger l’historique des prompts. Réessayez.",
   "timeline.promptBookmarkMoveHint": "Faites glisser le signet pour le déplacer, ou maintenez Maj et appuyez sur une touche fléchée. Maj avec Début le réinitialise. La position reste sur cet appareil.",
+  "timeline.promptsTab": "Prompts",
   "timeline.loadingEarlierHistory": "Chargement de l'historique précédent…",
   "timeline.manageTurns": "GÉRER LES TOURS",
   "timeline.message": "×",

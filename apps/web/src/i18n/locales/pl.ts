@@ -2472,6 +2472,7 @@ export const pl: AppMessages = {
   "timeline.loadEarlierHistory": "Załaduj wcześniejszą historię",
   "timeline.promptHistoryFailed": "Nie udało się wczytać historii promptów. Spróbuj ponownie.",
   "timeline.promptBookmarkMoveHint": "Przeciągnij zakładkę, aby ją przesunąć, albo przytrzymaj Shift i naciśnij klawisz strzałki. Shift z Home przywraca ją na miejsce. Położenie jest zapamiętywane tylko na tym urządzeniu.",
+  "timeline.promptsTab": "Prompty",
   "timeline.loadingEarlierHistory": "Ładowanie wcześniejszej historii…",
   "timeline.manageTurns": "ZARZĄDZAJ TURAMI",
   "timeline.message": "×",

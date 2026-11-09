@@ -977,6 +977,7 @@ that hold one person's data each have an owner (a person or the Space).
 | Store | Owner and behavior |
 |---|---|
 | Workflows | A run acts for the person who started it (`launchers` beside the run in `workflows.json`); every unit goes through `host.personSpaceContext(launcher)`, refused before any child exists if they left. A retry acts for whoever asks (a system retry keeps the launcher). [`packages/workflow/README.md`](../../packages/workflow/README.md) |
+| Bookmarks | Per (person, Space) in `host.people.storage`, never in session history or a project. Access follows the chat at every read: a chat closed to the person hides its bookmarks, their own deleted chat keeps them, and someone else's deleted chat erases the copy ([package](../../packages/bookmarks/README.md)) |
 | Personal coach, markets | Per (person, Space) in `host.people.storage`; the pre-person Space data moves to the first Space owner who opens it. Agent tools need an acting person |
 | Handoff bundles | Visible to their creator and to whoever can open the source chat; legacy creatorless bundles to Space admins only |
 | Slash commands, snippets | `user` scope is personal (person storage) and overrides `project` (shared, admin-written). Expansion on send runs as the message's author. Legacy `~/.config/polyth` files are copied once to the instance owner only |

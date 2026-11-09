@@ -19,8 +19,11 @@ import { scheduleSurfaceExit } from "../motionPresence.ts";
 import { errorFeedback, selectionFeedback, successFeedback, tapFeedback } from "../haptics.ts";
 import { copyText } from "../utils.ts";
 import { useStore } from "../store.ts";
+import { useTimelineSessionId } from "../timelineSession.ts";
+import { snapshotSelection, type SelectionSnapshot } from "../selectionSnapshot.ts";
 import { tr } from "../i18n/index.ts";
 import { isImeComposing } from "./input/editorCore.ts";
+import { useSelectionActionContributions } from "./selectionContributions.ts";
 import {
   CheckIcon,
   CopyIcon,
@@ -81,6 +84,12 @@ function readSelection(container: HTMLElement | null): string | null {
   return sel.toString().trim() || null;
 }
 
+/** The dock's own copy of the selection: a tap can collapse the real one. */
+function readSnapshot(text: string): SelectionSnapshot | null {
+  const sel = document.getSelection();
+  return sel && sel.rangeCount > 0 && !sel.isCollapsed ? snapshotSelection(sel.getRangeAt(0), text) : null;
+}
+
 function clearSelection(): void {
   document.getSelection()?.removeAllRanges();
 }
@@ -89,6 +98,8 @@ export default function SelectionDock({ container }: {
   container: React.RefObject<HTMLDivElement | null>;
 }) {
   const projectId = useStore((s) => s.activeProjectId);
+  const sessionId = useTimelineSessionId();
+  const contributions = useSelectionActionContributions();
   const [view, setView] = useState<DockView | null>(null);
   const [copied, setCopied] = useState<"ok" | "failed" | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -103,6 +114,7 @@ export default function SelectionDock({ container }: {
   const frame = useRef(0);
   const cancelExit = useRef<(() => void) | null>(null);
   const textRef = useRef("");
+  const snapshotRef = useRef<SelectionSnapshot | null>(null);
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
 
   const close = useCallback((exit: DockExit = "collapse") => {
@@ -123,6 +135,7 @@ export default function SelectionDock({ container }: {
     cancelExit.current?.();
     cancelExit.current = null;
     textRef.current = text;
+    snapshotRef.current = readSnapshot(text) ?? snapshotRef.current;
     if (!openRef.current) {
       openRef.current = true;
       dockRef.current?.style.setProperty("--selection-dock-drag", "0px");
@@ -314,6 +327,26 @@ export default function SelectionDock({ container }: {
       state: copied === "ok" ? "done" : copied === "failed" ? "failed" : undefined,
     },
   ];
+  // Package actions sit beside Quote, the other way to keep what was selected.
+  const actionContext = {
+    text: textRef.current,
+    markdown: snapshotRef.current?.markdown ?? textRef.current,
+    eventSeq: snapshotRef.current?.eventSeq ?? null,
+    messageRole: snapshotRef.current?.messageRole ?? null,
+    sessionId: sessionId ?? null,
+    projectId: projectId ?? null,
+  };
+  actions.splice(1, 0, ...contributions.filter((entry) => entry.available(actionContext)).map((entry): DockAction => ({
+    key: `pkg:${entry.id}`,
+    icon: entry.icon,
+    label: entry.label,
+    title: entry.title,
+    run: () => {
+      tapFeedback();
+      void entry.run(actionContext);
+      finish();
+    },
+  })));
   if (canShare) {
     actions.push({
       key: "share",

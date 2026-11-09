@@ -6918,7 +6918,7 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   inset-block-start: calc(var(--timeline-bookmark-top) + var(--space-1));
   inset-block-end: 0;
   inset-inline-start: max(var(--safe-left), var(--safe-right));
-  inset-inline-end: max(var(--safe-left), var(--safe-right));
+  inset-inline-end: max(var(--safe-left), var(--safe-right), var(--prompt-bookmark-chrome, 0px));
   pointer-events: none;
 }
 .prompt-bookmark > * { pointer-events: auto; }
@@ -6983,6 +6983,9 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   inline-size: min(340px, calc(100vw - var(--safe-left) - var(--safe-right) - 2 * var(--screen-gutter)));
   text-align: start;
 }
+/* A package tab has something saved in this chat. */
+.prompt-bookmark[data-filled] .prompt-bookmark-toggle svg { fill: currentColor; }
+.prompt-bookmark-tabs { flex: none; margin-block-end: var(--space-1); }
 .prompt-bookmark-heading {
   padding: var(--space-1) var(--space-2);
   color: var(--muted);
@@ -7154,6 +7157,8 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
   --selection-menu-glass-edge: calc(72% + var(--material-glass-edge) * 0.5);
   --selection-menu-glass-blur: calc(var(--material-glass-blur) * 3.2);
 }
+/* A revealed passage, lit for a moment (conversationPassage.ts). */
+::highlight(polyth-reveal) { background-color: color-mix(in srgb, var(--accent) 32%, transparent); }
 .selection-menu .ui-btn--ghost { color: var(--text); }
 .selection-menu-flash { font-size: var(--font-meta); color: var(--text); padding: 2px var(--control-pad-x-sm); white-space: nowrap; }
 .timeline-earlier {

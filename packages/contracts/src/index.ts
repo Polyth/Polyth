@@ -6207,6 +6207,14 @@ export const UI_SLOTS = [
   // information density is user-configurable and plugins can replace it.
   "session.empty.widgets",
   "session.message.actions",
+  // Tabs beside the prompt list in the chat's bookmark popover. Described by
+  // `meta.promptTab` (PromptTabSlotMeta in @polyth/web-sdk). A tab with content
+  // for the chat also fills the icon and shows it though its setting is off.
+  "session.prompt.tabs",
+  // Actions on a transcript selection, beside Quote and Copy in the floating
+  // toolbar and the touch dock. Data only: `meta.selectionAction`
+  // (SelectionActionSlotMeta in @polyth/web-sdk); the host draws the buttons.
+  "session.selection.actions",
   "sidebar.project.actions", "sidebar.session.actions",
   // Package actions for the sessions selected in the navigator, rendered as
   // menu items in the selection bar's menu. Context: sessionIds (string[]),

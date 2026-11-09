@@ -79,7 +79,8 @@ import {
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import { useTimelineCompanion, useTimelineSessionId } from "../timelineSession.ts";
 import { publishPromptVisibility } from "../promptVisibility.ts";
-import { registerConversationReveal, type ConversationRevealRequest } from "../conversationReveal.ts";
+import { landOnPassage, readingPositionIn } from "../conversationPassage.ts";
+import { answerRowNode, registerConversationReveal, type ConversationRevealRequest, type RevealableRow } from "../conversationReveal.ts";
 import {
   fillDownScrollTop,
   focusLineScrollTop,
@@ -149,6 +150,7 @@ import MessageQuickActions from "./MessageQuickActions.tsx";
 import QuestionPrompt from "./QuestionCards.tsx";
 import QuestionRecord from "./QuestionRecord.tsx";
 import PromptBookmark, { type PromptBookmarkTarget } from "./PromptBookmark.tsx";
+import { usePromptTabContent } from "./promptTabs.ts";
 
 const EMPTY_SESSION_EVENTS: SessionEvent[] = [];
 
@@ -177,6 +179,14 @@ function promptBookmarkPreview(text: string): string {
   return normalized.length > BOOKMARK_PREVIEW_LIMIT
     ? `${normalized.slice(0, BOOKMARK_PREVIEW_LIMIT - 1)}…`
     : normalized;
+}
+
+function conversationRowNode(
+  timeline: HTMLElement | null,
+  rows: readonly RevealableRow[],
+  id: string,
+): HTMLElement | null {
+  return promptRowNode(timeline, id) ?? (timeline ? answerRowNode<HTMLElement>(timeline, rows, id) : null);
 }
 
 function promptRowNode(timeline: HTMLElement | null, id: string): HTMLElement | null {
@@ -3773,7 +3783,9 @@ export default function Timeline({
   // initial event page when fewer than three prompts are cached.
   // When the bookmark is on for narrow windows only, the rail is its wide-window
   // form, so it keeps that history reachable there even before the third prompt.
-  const showBookmark = prefs.pinLatestPrompt || prefs.promptBookmarkDesktop;
+  // A package tab with content for this chat shows the icon though its setting is off.
+  const promptTabsHaveContent = usePromptTabContent(sessionId ?? null) !== "";
+  const showBookmark = prefs.pinLatestPrompt || prefs.promptBookmarkDesktop || promptTabsHaveContent;
   const showNav = prefs.promptNavigator === "on"
     || (prefs.promptNavigator === "auto" && (prompts.length >= 3 || canLoadOlder
       || (prefs.pinLatestPrompt && !prefs.promptBookmarkDesktop && prompts.length > 0)));
@@ -4043,7 +4055,7 @@ export default function Timeline({
     pendingJump.current = null;
     pendingJumpSmooth.current = false;
     if (target) {
-      const node = promptRowNode(el, target);
+      const node = conversationRowNode(el, rows, target);
       node?.scrollIntoView({
         block: "center",
         behavior: smooth && !timelineLiftMotionDisabled() ? "smooth" : "auto",
@@ -4157,7 +4169,7 @@ export default function Timeline({
       growWindow(next);
       return;
     }
-    const node = promptRowNode(ref.current, id);
+    const node = conversationRowNode(ref.current, rows, id);
     node?.scrollIntoView({
       block: "center",
       behavior: opts?.smooth === true && !timelineLiftMotionDisabled() ? "smooth" : "auto",
@@ -4172,6 +4184,9 @@ export default function Timeline({
   jumpRef.current = jump;
   const revealTargetIndex = externalReveal === null ? -1 : rows.findIndex((row) =>
     row.kind !== "activity" && row.eventSeq === externalReveal.eventSeq);
+  // A chat just opened has no events yet: that is not "the message is gone". The
+  // request's own timeout ends the wait if its history never arrives.
+  const revealHistoryLoaded = useStore((s) => sessionId !== null && s.events[sessionId] !== undefined);
   useLayoutEffect(() => {
     const request = externalReveal;
     if (!request) return;
@@ -4181,20 +4196,21 @@ export default function Timeline({
       return;
     }
     if (revealTargetIndex < 0) {
-      if (!canLoadOlder) { request.finish(false); setExternalReveal(null); }
+      if (revealHistoryLoaded && !canLoadOlder) { request.finish(false); setExternalReveal(null); }
       return;
     }
     const next = limitToInclude(rows.length, windowLimit, revealTargetIndex);
     if (next !== windowLimit) { growWindow(next); return; }
     const target = rows[revealTargetIndex]!;
-    const node = promptRowNode(ref.current, target.id);
+    const node = conversationRowNode(ref.current, rows, target.id);
     if (!node) { request.finish(false); setExternalReveal(null); return; }
     jumpRef.current?.(target.id, { focus: request.focus });
+    if (request.passage) landOnPassage(node, request.passage);
     request.finish(true);
     setExternalReveal(null);
     // growWindow reads this render's window; the deps above change with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [externalReveal, revealTargetIndex, canLoadOlder, sessionId, rows.length, windowLimit]);
+  }, [externalReveal, revealTargetIndex, canLoadOlder, revealHistoryLoaded, sessionId, rows.length, windowLimit]);
   useEffect(() => {
     const request = externalReveal;
     if (!request || !request.current() || request.sessionId !== sessionId
@@ -4681,9 +4697,10 @@ export default function Timeline({
           spaceId={spaceId}
           revision={`${latestPromptId ?? "none"}:${model.rewind?.markerSeq ?? "none"}`}
           prompt={latestPrompt}
-          narrow={prefs.pinLatestPrompt}
-          wide={prefs.promptBookmarkDesktop}
+          narrow={prefs.pinLatestPrompt || promptTabsHaveContent}
+          wide={prefs.promptBookmarkDesktop || promptTabsHaveContent}
           onJump={requestBookmarkJump}
+          readingPosition={() => (ref.current ? readingPositionIn(ref.current, timelineVisibleArea(ref.current)) : null)}
           onCancelJump={() => {
             bookmarkJumpGeneration.current += 1;
             bookmarkRequest.current?.reject(new Error("Prompt navigation cancelled"));

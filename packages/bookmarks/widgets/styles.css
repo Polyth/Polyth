@@ -1,0 +1,315 @@
+/* Bookmarks. Everything is scoped under .bm-* and reads canonical tokens only. */
+
+/* ---- the panel ------------------------------------------------------------ */
+.bm-panel {
+  container: bm-panel / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 100%;
+  padding: var(--space-3) var(--screen-gutter, var(--gutter)) var(--space-5);
+}
+
+.bm-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.bm-toolbar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-inline-start: auto;
+}
+.bm-tabs { min-width: 0; }
+/* Follows its tab's ink: a selected tab's fill can be any accent. */
+.bm-count {
+  margin-inline-start: var(--space-1);
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+.bm-scope { min-width: 0; }
+
+.bm-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+
+.bm-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- rows ----------------------------------------------------------------- */
+.bm-list-wrap { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.bm-group { min-width: 0; }
+.bm-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  margin: 0 0 var(--space-1);
+  padding-inline: var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.bm-group-state { color: var(--muted); font-size: var(--font-meta); font-weight: 400; }
+
+.bm-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bm-item { min-width: 0; border-radius: var(--radius-control); }
+.bm-item + .bm-item { box-shadow: 0 -1px 0 var(--hair); }
+.bm-item[data-active] { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.bm-row { display: flex; align-items: center; min-width: 0; }
+.bm-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: max(48px, var(--hit-min));
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .bm-row-main:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.bm-row-main:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.bm-row-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--icon-md);
+  height: 1.35em;
+  color: var(--accent-text);
+}
+.bm-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.bm-row-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--font-label);
+  font-weight: 550;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.bm-row-meta {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-variant-numeric: tabular-nums;
+}
+.bm-row-expand { flex: none; }
+
+.bm-row-panel { min-width: 0; padding: 0 var(--space-1) var(--space-2); }
+.bm-row-panel[hidden] { display: none; }
+.bm-text { min-width: 0; overflow-wrap: anywhere; font-size: var(--font-body); line-height: 1.5; }
+.bm-text pre { max-width: 100%; overflow-x: auto; }
+.bm-note {
+  margin: 0 0 var(--space-2);
+  padding-inline-start: var(--space-2);
+  border-inline-start: 2px solid var(--accent);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bm-row-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-block-start: var(--space-2); }
+
+.bm-privacy {
+  margin: 0;
+  padding-inline: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* ---- editing --------------------------------------------------------------- */
+.bm-form { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.bm-form--new { padding: var(--space-2) var(--space-1); }
+/* 16px keeps iOS from zooming the page when a field takes focus. */
+@media (pointer: coarse) {
+  .bm-form :is(input, textarea) { font-size: max(16px, var(--font-input), 1em); }
+}
+.bm-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.bm-field-name { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.bm-form-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.bm-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-inline-start: var(--space-2);
+  border-inline-start: 2px solid var(--amber);
+}
+.bm-conflict-text { margin: 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+/* ---- links ---------------------------------------------------------------- */
+.bm-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: max(44px, var(--hit-min));
+  padding: var(--space-1);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  text-decoration: none;
+}
+@media (hover: hover) {
+  .bm-link:hover { background: var(--surface-overlay-hover); }
+}
+.bm-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.bm-link-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.bm-link-label { color: var(--accent-text); font-size: var(--font-label); line-height: 1.35; overflow-wrap: anywhere; }
+.bm-link:visited .bm-link-label { color: var(--text-dim); }
+.bm-link-host {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bm-link-glyph { flex: none; display: grid; place-items: center; color: var(--faint); }
+
+/* ---- the walk above the composer ------------------------------------------ */
+.bm-walk {
+  /* The chat frame the agent status line uses: aligned with the composer. */
+  width: min(
+    var(--chat-measure, 100%),
+    calc(100% - var(--conversation-frame-inline-start, 0px) - var(--conversation-frame-inline-end, 0px))
+  );
+  margin-inline: var(--conversation-frame-inline-start, 0px) var(--conversation-frame-inline-end, 0px);
+  min-width: 0;
+  min-height: max(32px, var(--hit-min));
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.2;
+}
+.bm-walk-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: max(32px, var(--hit-min));
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .bm-walk-open:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+.bm-walk-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.bm-walk-at {
+  flex: none;
+  color: var(--text-dim);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bm-walk-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- the chat's popover ---------------------------------------------------- */
+.bm-peek-list { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.bm-peek-item { min-width: 0; }
+.bm-peek-line { display: flex; align-items: flex-start; min-width: 0; }
+/* A real box of hit size: the shared hit seam reaches past a small button, which
+   would make the popover scroll sideways at its edge. */
+.bm-peek-line > .ui-icon-btn {
+  flex: none;
+  inline-size: max(var(--control-h-sm), var(--hit-min));
+  block-size: max(var(--control-h-sm), var(--hit-min));
+}
+.bm-peek-line > .ui-icon-btn::after,
+.bm-peek-line > .ui-icon-btn::before { display: none; }
+.bm-peek-name { flex: 1 1 auto; min-width: 0; gap: var(--space-2); }
+.bm-peek-glyph { flex: none; display: grid; place-items: center; height: calc(var(--prompt-nav-row-font) * var(--prompt-nav-row-lh)); color: var(--accent-text); }
+/* A code block scrolls inside itself; the popover never scrolls sideways. */
+.bm-peek-body { min-width: 0; overflow-x: hidden; padding: var(--space-1) var(--space-2) var(--space-2); }
+.bm-peek-body .bm-text { font-size: var(--font-meta); }
+
+.bm-peek-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-block-start: var(--space-1);
+  padding-block-start: var(--space-1);
+  box-shadow: 0 -1px 0 var(--hair);
+}
+.bm-peek-foot:empty { display: none; }
+.bm-peek-add,
+.bm-peek-all {
+  min-height: max(32px, var(--hit-min));
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  line-height: 1.25;
+  text-align: start;
+  cursor: pointer;
+}
+.bm-peek-add { flex: 1 1 auto; min-width: 0; color: var(--accent-text); }
+.bm-peek-all { flex: none; margin-inline-start: auto; }
+.bm-peek-add-text { min-width: 0; overflow-wrap: anywhere; }
+@media (hover: hover) {
+  .bm-peek-add:hover:where(:not(:disabled)),
+  .bm-peek-all:hover:where(:not(:disabled)) { background: var(--panel); }
+}
+.bm-peek-add:focus-visible,
+.bm-peek-all:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.bm-peek-add:disabled { cursor: wait; }
+
+.bm-peek-links { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.bm-peek-group {
+  margin: 0;
+  padding: var(--space-1) var(--space-1) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
