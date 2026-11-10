@@ -13,6 +13,7 @@ import {
 import { sanitizeRule } from "../src/reflect.ts";
 import { failureReason, format, type ReflectStrings } from "./reflectStrings.ts";
 import { isImeComposing } from "@polyth/web-sdk";
+import { Btn, Check, Choice, TextArea } from "./ui.tsx";
 
 type Props = {
   projectId: string;
@@ -22,6 +23,8 @@ type Props = {
   memoryOff?: boolean;
   /** Refresh the records list after an approval created a memory. */
   onMemoryChanged(): void;
+  /** How many proposals wait for a decision (the page shows it on the tab). */
+  onPendingChange?(count: number): void;
 };
 
 type Draft = { id: string; rule: string; category: MemoryCategory; file: ReflectInstructionFile | "" };
@@ -40,7 +43,7 @@ export function instructionPath(project: Readonly<Project>, file: string): strin
   return `${root.replace(/[\\/]+$/, "")}${sep}${file}`;
 }
 
-export default function ReflectPanel({ projectId, project, strings: t, memoryOff = false, onMemoryChanged }: Props) {
+export default function ReflectPanel({ projectId, project, strings: t, memoryOff = false, onMemoryChanged, onPendingChange }: Props) {
   const [view, setView] = useState<ReflectViewDto | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -71,6 +74,9 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
     const card = previous ? [...root.querySelectorAll<HTMLElement>("[data-proposal]")].find((el) => el.dataset.proposal === previous) : undefined;
     card?.querySelector<HTMLElement>(".memory-card-actions .memory-button")?.focus();
   }, [confirm?.id, confirm?.file]);
+
+  const pendingTotal = view?.pendingTotal ?? 0;
+  useEffect(() => { onPendingChange?.(pendingTotal); }, [pendingTotal]);
 
   const load = useCallback(async () => {
     const current = ++generation.current;
@@ -174,8 +180,8 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
         </dl>
         <p className="memory-help">{t.confirmSection}</p>
         <div className="memory-actions">
-          <button type="button" className="memory-button memory-button-primary" disabled={busy} onClick={() => confirmWrite(proposal, confirm)}>{confirm.later ? t.confirmWrite : t.confirmApprove}</button>
-          <button type="button" className="memory-button" disabled={busy} onClick={() => setConfirm(null)}>{t.cancel}</button>
+          <Btn variant="primary" disabled={busy} onClick={() => confirmWrite(proposal, confirm)}>{confirm.later ? t.confirmWrite : t.confirmApprove}</Btn>
+          <Btn disabled={busy} onClick={() => setConfirm(null)}>{t.cancel}</Btn>
         </div>
       </div>
     );
@@ -191,13 +197,13 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
       <div className="memory-section-head">
         <div><h3 id={`${uid}-heading`}>{t.heading}</h3><p>{t.intro}</p></div>
         <div className="memory-actions">
-          <button type="button" className="memory-button" disabled={scanDisabled} aria-describedby={off && view ? `${uid}-off` : undefined} onClick={() => void run(() => reflectApi.scan(projectId), (result) => ({ tone: "success", text: format(t.scanned, result) }))}>{t.scan}</button>
+          <Btn disabled={scanDisabled} aria-describedby={off && view ? `${uid}-off` : undefined} onClick={() => void run(() => reflectApi.scan(projectId), (result) => ({ tone: "success", text: format(t.scanned, result) }))}>{t.scan}</Btn>
         </div>
       </div>
       {error && (
         <div className={`memory-notice memory-notice-${error.kind}`} role="alert">
           <span>{error.message}</span>
-          {!view && <button type="button" className="memory-button" onClick={() => { setError(null); void load(); }}>{t.retry}</button>}
+          {!view && <Btn onClick={() => { setError(null); void load(); }}>{t.retry}</Btn>}
         </div>
       )}
       {notice && <div className={`memory-notice memory-notice-${notice.tone}`} role="status">{notice.text}</div>}
@@ -205,7 +211,7 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
       {view && (
         <>
           {off && <div className="memory-notice memory-notice-info" role="note" id={`${uid}-off`}>{t.memoryOff}</div>}
-          <label className="memory-check"><input type="checkbox" checked={view.enabled} disabled={busy || off} onChange={(event) => void run(() => reflectApi.setEnabled(projectId, event.target.checked), () => null)} /> {t.enabled}</label>
+          <Check checked={view.enabled} disabled={busy || off} onChange={(enabled) => void run(() => reflectApi.setEnabled(projectId, enabled), () => null)} label={t.enabled} />
           {!view.enabled && !off && <p className="memory-help">{t.disabledHelp}</p>}
           {!view.instructionWritable && <p className="memory-help">{t.remoteOnly}</p>}
           {view.pending.length === 0 && (!view.hidden || view.hidden.length === 0) ? <p className="memory-empty">{t.empty}</p> : (
@@ -213,9 +219,9 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
               <div className="memory-reflect-count-row">
                 <span className="memory-help">{view.pendingTotal === 1 ? t.pendingCountOne : format(t.pendingCount, { count: view.pendingTotal })}</span>
                 {view.hidden && view.hidden.length > 0 && (
-                  <button type="button" className="memory-button" onClick={() => setShowHidden(!showHidden)}>
+                  <Btn onClick={() => setShowHidden(!showHidden)}>
                     {showHidden ? t.hideHidden : format(t.showHidden, { count: view.hidden.length })}
-                  </button>
+                  </Btn>
                 )}
               </div>
               {(showHidden && view.hidden?.length ? [...view.pending, ...view.hidden] : view.pending).map((proposal) => {
@@ -243,10 +249,10 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
                           if (isImeComposing(event)) return;
                           if (event.key === "Escape" && !confirming) { event.stopPropagation(); setDraft(null); }
                         }}>
-                          <label className="memory-field">{t.rule}<textarea rows={3} maxLength={280} value={editing.rule} disabled={confirming} onChange={(event) => setDraft({ ...editing, rule: event.target.value })} autoFocus /></label>
+                          <label className="memory-field"><span>{t.rule}</span><TextArea rows={3} maxLength={280} value={editing.rule} disabled={confirming} onChange={(rule) => setDraft({ ...editing, rule })} /></label>
                           <div className="memory-field-grid">
-                            <label className="memory-field">{t.category}<select value={editing.category} disabled={confirming} onChange={(event) => setDraft({ ...editing, category: event.target.value as MemoryCategory })}>{CATEGORIES.map((category) => <option key={category} value={category}>{t[`category_${category}`]}</option>)}</select></label>
-                            <label className="memory-field">{t.alsoWrite}<select value={editing.file} disabled={confirming || !view.instructionWritable} onChange={(event) => setDraft({ ...editing, file: event.target.value as Draft["file"] })}><option value="">{t.noFile}</option>{view.instructionFiles.map((entry) => <option key={entry.file} value={entry.file}>{fileLabel(entry.file)}</option>)}</select></label>
+                            <label className="memory-field"><span>{t.category}</span><Choice label={t.category} value={editing.category} disabled={confirming} onChange={(category) => setDraft({ ...editing, category: category as MemoryCategory })} options={CATEGORIES.map((category) => ({ value: category, label: t[`category_${category}`] }))} /></label>
+                            <label className="memory-field"><span>{t.alsoWrite}</span><Choice label={t.alsoWrite} value={editing.file} disabled={confirming || !view.instructionWritable} onChange={(file) => setDraft({ ...editing, file: file as Draft["file"] })} options={[{ value: "", label: t.noFile }, ...view.instructionFiles.map((entry) => ({ value: entry.file as string, label: fileLabel(entry.file) }))]} /></label>
                           </div>
                         </div>
                       ) : <strong className="memory-reflect-rule" id={ruleId}>{proposal.rule}</strong>}
@@ -257,16 +263,16 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
                       <div className="memory-card-actions">
                         {editing ? (
                           <>
-                            <button type="button" className="memory-button memory-button-primary" disabled={busy || !editing.rule.trim()} onClick={() => approve(proposal, editing)}>{t.approve}</button>
-                            <button type="button" className="memory-button" disabled={busy} onClick={() => setDraft(null)}>{t.cancel}</button>
+                            <Btn variant="primary" disabled={busy || !editing.rule.trim()} onClick={() => approve(proposal, editing)}>{t.approve}</Btn>
+                            <Btn disabled={busy} onClick={() => setDraft(null)}>{t.cancel}</Btn>
                           </>
                         ) : (
                           <>
-                            <button type="button" className="memory-button memory-button-primary" disabled={busy} onClick={() => approve(proposal, null)}>{t.approve}</button>
-                            <button type="button" className="memory-button" disabled={busy} onClick={() => { setConfirm(null); setDraft({ id: proposal.id, rule: proposal.rule, category: "convention", file: "" }); }}>{t.edit}</button>
+                            <Btn variant="primary" disabled={busy} onClick={() => approve(proposal, null)}>{t.approve}</Btn>
+                            <Btn disabled={busy} onClick={() => { setConfirm(null); setDraft({ id: proposal.id, rule: proposal.rule, category: "convention", file: "" }); }}>{t.edit}</Btn>
                           </>
                         )}
-                        <button type="button" className="memory-button memory-button-danger" disabled={busy} onClick={() => void run(() => reflectApi.reject(projectId, proposal.id), () => ({ tone: "success", text: t.rejected }))}>{t.reject}</button>
+                        <Btn variant="danger" disabled={busy} onClick={() => void run(() => reflectApi.reject(projectId, proposal.id), () => ({ tone: "success", text: t.rejected }))}>{t.reject}</Btn>
                       </div>
                     )}
                   </article>
@@ -293,7 +299,7 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
                     {confirmBox(proposal)}
                     {proposal.status === "approved" && !proposal.instruction && view.instructionWritable && confirm?.id !== proposal.id && (
                       <div className="memory-card-actions">
-                        {view.instructionFiles.map((entry) => <button key={entry.file} type="button" className="memory-button" disabled={busy} onClick={() => setConfirm({ id: proposal.id, file: entry.file, line: `- ${sanitizeRule(proposal.rule) ?? proposal.rule}`, draft: null, later: true })}>{format(t.writeTo, { file: entry.file })}</button>)}
+                        {view.instructionFiles.map((entry) => <Btn key={entry.file} disabled={busy} onClick={() => setConfirm({ id: proposal.id, file: entry.file, line: `- ${sanitizeRule(proposal.rule) ?? proposal.rule}`, draft: null, later: true })}>{format(t.writeTo, { file: entry.file })}</Btn>)}
                       </div>
                     )}
                   </article>
