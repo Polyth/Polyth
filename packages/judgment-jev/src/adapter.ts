@@ -134,7 +134,8 @@ export function createJevJudgmentEngine(options: JevJudgmentAdapterOptions): Jud
         await withRoute(options, route, async (client) => {
           if (context.signal.aborted) throw new JudgmentExecutionError("cancelled");
           const raw = await client.systemOne({ model: request.target.modelId,
-            state: typeof request.state === "boolean" || typeof request.state === "number" ? { value: request.state } : request.state,
+            // The SDK (0.7+) takes no bare scalar or null state: wrap it as `{ value }`.
+            state: request.state === null || typeof request.state === "boolean" || typeof request.state === "number" ? { value: request.state } : request.state,
             questions: translateQuestions(request.questions) },
           { signal: context.signal, timeout: Math.max(1, context.deadlineAt - Date.now()), retry: { maxRetries: 0 } });
           if (!route.floating.includes(request.target.modelId) && raw.model !== request.target.modelId) {
