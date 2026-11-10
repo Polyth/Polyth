@@ -986,6 +986,32 @@ margin-top: 0;
 .pr-comment-body > :last-child {
 margin-bottom: 0;
 }
+/* Dependabot and PR templates wrap long notes in <details>. The body view
+   renders them as a real disclosure: a bordered row per section instead of a
+   wall of raw tags. */
+.pr-details {
+border: 1px solid var(--hair-strong); border-radius: var(--radius-card);
+  background: var(--surface-overlay); margin: 8px 0; overflow: hidden;
+}
+.pr-details > summary {
+cursor: pointer; padding: 7px 10px; font-size: var(--font-meta); font-weight: 600;
+  color: var(--text-dim); list-style-position: inside;
+}
+.pr-details > summary:hover {
+color: var(--text);
+}
+.pr-details[open] > summary {
+border-bottom: 1px solid var(--hair-strong);
+}
+.pr-details-body {
+padding: 8px 10px; font-size: var(--font-meta);
+}
+.pr-details-body > :first-child {
+margin-top: 0;
+}
+.pr-details-body > :last-child {
+margin-bottom: 0;
+}
 /* The host wraps every Markdown table in `.md-table-scroll`, which owns the
    horizontal overflow; making the table itself `display: block` would break
    its internal table layout (rows render as blocks and columns stop aligning).
