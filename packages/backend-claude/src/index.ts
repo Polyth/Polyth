@@ -28,6 +28,14 @@ const UNADMITTED_SETTLE_MS = 10_000;
  *  the agent waits for it. The cron tools make the same promise of a later
  *  prompt and go with it. */
 const NATIVE_SCHEDULING_TOOLS = ["ScheduleWakeup", "CronCreate", "CronDelete", "CronList"];
+/** Claude Code (2.1.3xx) leaves TodoWrite/TaskCreate out for current models
+ *  (Opus/Sonnet 5.x, Fable) unless this is set. Polyth renders those native
+ *  todos in the timeline, status and island, and its todo rule names them, so
+ *  without the opt-in the agent has to ToolSearch for the deferred
+ *  `polyth_todo` MCP tool first. An operator's explicit value wins. */
+export function claudeChildEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+    return env.CLAUDE_CODE_ENABLE_TODO_TOOLS === undefined ? { ...env, CLAUDE_CODE_ENABLE_TODO_TOOLS: "true" } : env;
+}
 /** A `/compact` reports its outcome in a status message; the CLI's closing
  *  `result` normally follows at once. Stop waiting for it after this long. */
 const COMPACTION_RESULT_GRACE_MS = 5_000;
@@ -656,7 +664,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     promptSuggestions: preferences.promptSuggestions,
                     spawnClaudeCodeProcess(options) {
                         const args = protectClaudeMcpConfigArgs(context, options.args, protectedMcpConfigFiles);
-                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: options.env, signal: options.signal });
+                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: claudeChildEnv(options.env), signal: options.signal });
                         // Drained as before; only a bounded tail is kept.
                         child.stderr!.on("data", (chunk: Buffer | string) => {
                             stderrTail = (stderrTail + String(chunk)).slice(-STDERR_TAIL_CHARS);
