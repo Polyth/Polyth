@@ -1,13 +1,17 @@
 import "./styles.css";
-import { createElement } from "react";
 import { defineWebPackage } from "@polyth/web-sdk";
-import { glanceStrings } from "../src/strings.ts";
-import { Clock, DEFAULT_PLACES, WorldClock } from "./clocks.tsx";
-import { UNIT_CHOICES, Weather } from "./weather.tsx";
+// Disabled 2026-11-10: the board tiles are not usable yet. Restore these
+// imports and the registration below to bring Clock, World clock and Weather back.
+// import { createElement } from "react";
+// import { glanceStrings } from "../src/strings.ts";
+// import { Clock, DEFAULT_PLACES, WorldClock } from "./clocks.tsx";
+// import { UNIT_CHOICES, Weather } from "./weather.tsx";
 
-const SLOTS = ["session.empty.widgets", "workspace.main", "workspace.right"] as const;
+// const SLOTS = ["session.empty.widgets", "workspace.main", "workspace.right"] as const;
 
-export default defineWebPackage((host) => () => {
+export default defineWebPackage((_host) => () => {
+  const off: Array<() => void> = [];
+  /* Disabled 2026-11-10 (see the imports above).
   const locale = () => host.ui.locale.get();
   const strings = glanceStrings(locale());
   const shared = {
@@ -82,5 +86,6 @@ export default defineWebPackage((host) => () => {
       ],
     }),
   ];
+  */
   return () => off.toReversed().forEach((dispose) => dispose());
 });

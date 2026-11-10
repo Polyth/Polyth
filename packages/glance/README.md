@@ -1,5 +1,7 @@
 # Glance
 
+> **Disabled since 2026-11-10.** The widget registration in `widgets/index.tsx` is commented out, so Clock, World clock and Weather are not offered anywhere; the weather route and the code stay. Uncomment the imports and the `registerPlugin` call to bring them back.
+
 Small tiles for the new-chat screen's board (New chat → Customize → *Add
 widget*). They also fit the Canvas (`workspace.main`, `workspace.right`).
 The package ships off (Beta); nothing is placed until a person adds it.

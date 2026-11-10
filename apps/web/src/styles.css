@@ -12049,7 +12049,12 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   background: var(--surface-1);
   color: var(--text);
 }
-.hero-widget[data-size] > :not(.hero-widget-edit) { flex: 1 1 auto; min-height: 0; }
+.hero-widget[data-size] > :not(.hero-widget-edit) { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; border-radius: inherit; }
+/* A tile is a glance: a long list (every limit source, say) scrolls inside
+   its card instead of growing the tile and stretching its row neighbours.
+   The edit badges sit over the corners, so the tile itself never clips. */
+.hero-widget[data-size] { max-height: calc(7 * var(--control-h-lg)); }
+.hero-widget[data-size="large"] { max-height: calc(14 * var(--control-h-lg)); }
 @container hero-body (max-width: 479px) {
   .hero-widget-host { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-widget[data-size="standard"] { grid-column: 1 / -1; }
