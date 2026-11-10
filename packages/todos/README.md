@@ -75,7 +75,7 @@ query), and agent-written labels and steps are bidi-isolated for RTL.
 
 | Harness | Native surface | Owner |
 | --- | --- | --- |
-| Claude | `TodoWrite`, `TaskCreate`/`TaskUpdate`/`TaskList` tool calls | `backend-claude` |
+| Claude | `TodoWrite`, `TaskCreate`/`TaskUpdate`/`TaskList` tool calls (Claude Code hides these for current models; `backend-claude` launches with `CLAUDE_CODE_ENABLE_TODO_TOOLS=true` unless the operator sets it) | `backend-claude` |
 | Codex | `turn/plan/updated` (`update_plan`) | `backend-codex` |
 | ACP agents (Grok, OMP, Fx, Cursor, …) | `session/update` `plan` entries | `backend-acp` |
 | Cursor | `cursor/update_todos`, `cursor/create_plan` | `backend-cursor` |
