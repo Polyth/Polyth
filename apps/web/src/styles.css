@@ -13709,11 +13709,19 @@ width: 100%; min-height: var(--tap);
     padding: 0;
   }
   .attachment-pills { --att-remove: var(--tap); }
-  /* The tile keeps its badge in the corner; the full target hangs off it. */
+  /* A picture tile is barely larger than a tap target, so a full-size remove
+     target would cover the picture and swallow the tap that opens it. The
+     tile's remove owns only its top-end quarter (badge in the corner); the
+     rest of the picture opens the preview. */
   .attachment-pill.att-tile .att-remove {
     inset-block-start: 0;
+    width: calc(var(--att-h) / 2);
+    min-width: 0;
+    height: calc(var(--att-h) / 2);
+    min-height: 0;
     place-items: start end;
-    padding: var(--space-1);
+    padding: var(--space-1) var(--space-1) 0 0;
+    padding-inline: 0 var(--space-1);
   }
   .msg.assistant .msg-action-btn,
   .focus-conversation .msg.assistant .msg-action-btn,
