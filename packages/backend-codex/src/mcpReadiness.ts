@@ -5,7 +5,9 @@ export const CODEX_AGENT_TOOLS_MCP_NAME = "polyth-agent-tools";
 
 const AGENT_TOOLS_CAPABILITY_ID = "polyth.agent-tools";
 
-export const CODEX_MCP_STARTUP_TIMEOUT_SEC = 15;
+/** Same budget Claude Code gives an MCP server (its `MCP_TIMEOUT`, 30 s):
+ *  a healthy bridge on a loaded host can take longer than 15 s to answer. */
+export const CODEX_MCP_STARTUP_TIMEOUT_SEC = 30;
 
 type CodexMcpStatusRow = {
   name?: string;

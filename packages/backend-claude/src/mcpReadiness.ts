@@ -26,6 +26,22 @@ const TERMINAL_FAILURES = new Set([
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Claude Code's own per-server MCP connect timeout (`MCP_TIMEOUT`, 30 s by
+ *  default). The CLI connects servers in small batches, so the bridge can
+ *  stay `pending` behind slow connectors (claude.ai, plugin OAuth) for
+ *  seconds while it is perfectly healthy. Waiting less than the CLI does
+ *  turned a healthy, slow start into a failed chat. */
+const CLAUDE_DEFAULT_MCP_TIMEOUT_MS = 30_000;
+const CLAUDE_MCP_BATCH_SLACK_MS = 5_000;
+
+export function claudeAgentToolsTimeoutMs(env: Record<string, string | undefined> = {}): number {
+  const configured = Number(env.MCP_TIMEOUT);
+  const mcpTimeoutMs = Number.isFinite(configured) && configured > 0
+    ? configured
+    : CLAUDE_DEFAULT_MCP_TIMEOUT_MS;
+  return mcpTimeoutMs + CLAUDE_MCP_BATCH_SLACK_MS;
+}
+
 export function hasPolythAgentToolsMcp(mcpServers: unknown): boolean {
   return Boolean(
     mcpServers
@@ -46,11 +62,11 @@ export async function waitForClaudeAgentTools(
     );
   }
 
-  const timeoutMs = Math.max(0, options.timeoutMs ?? 5_000);
+  const timeoutMs = Math.max(0, options.timeoutMs ?? claudeAgentToolsTimeoutMs());
   const initialPollIntervalMs = Math.max(0, options.pollIntervalMs ?? 50);
   const maxPollIntervalMs = Math.max(
     initialPollIntervalMs,
-    options.maxPollIntervalMs ?? 150,
+    options.maxPollIntervalMs ?? 250,
   );
   const deadline = Date.now() + timeoutMs;
   let nextPollIntervalMs = initialPollIntervalMs;

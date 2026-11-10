@@ -41,7 +41,7 @@ import {
   OPENCODE_V2_DELEGATION_PLUGIN_FILENAME,
   OPENCODE_V2_DELEGATION_PLUGIN_SOURCE,
 } from "./delegation.ts";
-import type { OpenCodeLaunchOverlay } from "./provisioner.ts";
+import { OPENCODE_MCP_TIMEOUT_MS, type OpenCodeLaunchOverlay } from "./provisioner.ts";
 import { mergeRemoteConfigContent, portableOpenCodeConfig } from "./remoteConfig.ts";
 import type { PreparedRemoteOpenCodeRuntime } from "./remoteStorage.ts";
 import {
@@ -194,6 +194,7 @@ const remoteAgentToolsConfig = (
       url: `http://127.0.0.1:${remotePort}${launch.path}`,
       headers: launch.headers,
       enabled: true,
+      timeout: OPENCODE_MCP_TIMEOUT_MS,
     },
   },
 });

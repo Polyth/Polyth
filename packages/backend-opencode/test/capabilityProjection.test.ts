@@ -134,6 +134,8 @@ test("OpenCode projects package-owned MCP descriptors from the canonical plan", 
     type: "local",
     command: ["package-helper", "--stdio"],
     enabled: true,
+    // OpenCode's own default is 5 s, then it silently drops the server.
+    timeout: 30_000,
   });
   const v2 = applyOpenCodeLaunchOverlay({}, overlay, "v2");
   // Released V2 performs its own backwards-compatible normalization.

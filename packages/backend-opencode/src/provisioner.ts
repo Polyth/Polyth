@@ -262,6 +262,7 @@ const overlayMcpEntry = (
       type: "local",
       command: [capability.transport.command, ...capability.transport.args].filter(Boolean),
       enabled: true,
+      timeout: OPENCODE_MCP_TIMEOUT_MS,
       ...(Object.keys(environment).length ? { environment } : {}),
     };
   }
@@ -274,9 +275,15 @@ const overlayMcpEntry = (
     type: "remote",
     url: capability.transport.url,
     enabled: true,
+    timeout: OPENCODE_MCP_TIMEOUT_MS,
     ...(Object.keys(headers).length ? { headers } : {}),
   };
 };
+
+/** OpenCode gives an MCP server 5 s by default to connect and list its
+ *  tools, then silently drops it. A healthy Polyth bridge on a loaded host can
+ *  take longer, so staged servers get the budget Claude Code uses (30 s). */
+export const OPENCODE_MCP_TIMEOUT_MS = 30_000;
 
 export function polythSkillId(owner: string, name: string): string {
   const raw = `polyth-${owner}-${name}`
