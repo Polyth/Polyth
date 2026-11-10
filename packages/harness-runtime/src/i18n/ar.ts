@@ -29,6 +29,7 @@ export const ar: HarnessRuntimeMessages = {
   "harnessruntime.install.title.failed": "تعذّر تثبيت {name}",
   "harnessruntime.install.title.cancelled": "تم إيقاف التثبيت",
   "harnessruntime.install.lead.confirm": "ينزّل Polyth ‏{name} من مطوّره ويُعدّه {onMachine}. لا حاجة لكتابة أي شيء.",
+  "harnessruntime.install.lead.manual": "لا يُنزّل هذا الإصدار من Polyth برامج التثبيت. انسخ الأمر أدناه وشغّله في الطرفية الخاصة بك {onMachine}، ثم عُد إلى هنا.",
   "harnessruntime.install.lead.queued": "ينتهي أولًا تثبيت آخر {onMachine}، ثم يبدأ هذا مباشرة بعده.",
   "harnessruntime.install.lead.running": "يستغرق ذلك عادةً دقيقة أو دقيقتين. يمكنك إغلاق هذه النافذة: يستمر التثبيت وسيخبرك Polyth عند اكتماله.",
   "harnessruntime.install.lead.succeededVersion": "الإصدار {version} موجود الآن {onMachine}.",

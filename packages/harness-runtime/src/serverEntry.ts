@@ -728,6 +728,7 @@ export function harnessRoutes(
                 sources: installSources(chosen.command),
                 browserOnMachine: !remote && browserOnServer(request),
                 ...(descriptor.setupUrl ? { setupUrl: descriptor.setupUrl } : {}),
+                ...(workstationEdition() ? { manualOnly: true as const } : {}),
             };
             if (request.method === "GET") {
                 request.json(200, { preview, job: installs.get(key) ?? null });

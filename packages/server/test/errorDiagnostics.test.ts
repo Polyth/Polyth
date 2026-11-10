@@ -17,7 +17,7 @@ test("diagnostics distinguish components and preserve request identity without e
 });
 
 test("an untagged mutation refusal is not-started, never a false outcome-unknown", () => {
-  for (const code of ["not-found", "conflict", "draft-conflict", "history-mismatch", "worktree-dirty", "payload-too-large", "unsupported", "runtime-unavailable"]) {
+  for (const code of ["not-found", "conflict", "draft-conflict", "history-mismatch", "worktree-dirty", "payload-too-large", "unsupported", "runtime-unavailable", "unavailable-in-edition"]) {
     assert.equal(httpErrorDiagnostics({ code }, "POST", "r").mutationOutcome, "not-started", code);
   }
   // A genuinely uncertain failure keeps the conservative default.

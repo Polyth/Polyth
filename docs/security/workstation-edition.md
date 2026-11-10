@@ -59,7 +59,10 @@ spell checker is pointed at a folder inside the app, so Chromium does not fetch
 dictionaries from Google.
 
 **Harness CLIs.** The agent CLIs are separate programs the person installs and
-signs in to. Each talks to its own provider (Anthropic, OpenAI, Cursor, Google…)
+signs in to. Settings shows each CLI's official install command to copy and
+run in the person's own terminal; it offers no Install button, and the install
+routes refuse with `unavailable-in-edition`, which clients read as refused
+before anything started. Each talks to its own provider (Anthropic, OpenAI, Cursor, Google…)
 exactly as it does in a terminal; Polyth starts them as child processes and
 does not proxy or inspect that traffic. The bundled OpenCode binary is started
 with its self-update turned off; its own provider and model-list requests are

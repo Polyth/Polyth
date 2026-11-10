@@ -131,6 +131,9 @@ function InstallDialog({ host, projectId, harnessId, harnessName, row, checking,
   const staleSuccess = job?.phase === "succeeded" && row !== undefined && !row.availability.installed
     && row.availability.checkedAt > (job.finishedAt ?? job.startedAt);
   const phase = job && !staleSuccess ? job.phase : "confirm";
+  // This server starts no installer (workstation edition): the person runs
+  // the command themselves, so nothing here offers Install or a terminal.
+  const manualOnly = preview?.manualOnly === true;
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -146,7 +149,7 @@ function InstallDialog({ host, projectId, harnessId, harnessName, row, checking,
   const next = phase === "succeeded" ? nextStepAfterInstall(row, checking) : "none";
   const failure = job?.phase === "failed" ? failureCopy(job, words, t, locale) : undefined;
   const elapsed = job && active ? formatElapsed(now - job.startedAt) : "";
-  const lead = phase === "confirm" ? (preview ? t("lead.confirm", { name, onMachine: words.on }) : "")
+  const lead = phase === "confirm" ? (preview ? t(manualOnly ? "lead.manual" : "lead.confirm", { name, onMachine: words.on }) : "")
     : phase === "queued" ? t("lead.queued", { onMachine: words.on })
       : phase === "running" || phase === "verifying" ? t("lead.running")
         : phase === "succeeded" ? (job?.result?.version ? t("lead.succeededVersion", { version: displayVersion(job.result.version) ?? job.result.version, onMachine: words.on }) : t("lead.succeeded", { name, onMachine: words.on }))
@@ -159,6 +162,7 @@ function InstallDialog({ host, projectId, harnessId, harnessName, row, checking,
     : null;
   const footer: ReactNode = problem
     ? <>{guide}<Button size="sm" variant="primary" onClick={onClose}>{t("action.close")}</Button></>
+    : phase === "confirm" && manualOnly ? <>{guide}<Button size="sm" variant="primary" onClick={onClose}>{t("action.close")}</Button></>
     : phase === "confirm" ? <>
       <Button size="sm" variant="ghost" onClick={onClose}>{t("action.cancel")}</Button>
       <Button size="sm" variant="primary" iconStart={DownloadIcon} busy={busy} disabled={!preview || !canManage} onClick={install}>{t("action.install")}</Button>
@@ -204,12 +208,12 @@ function InstallDialog({ host, projectId, harnessId, harnessName, row, checking,
             : problem.message}
       </Notice>}
 
-      {!problem && phase === "confirm" && preview && <ul className="pkg-harnesses-install-facts">
+      {!problem && phase === "confirm" && preview && !manualOnly && <ul className="pkg-harnesses-install-facts">
         <li><Icon icon={ShieldIcon} size="md" /><span><strong>{t("fact.source.title")}</strong><small>{preview.sources.length ? t("fact.source.body", { sources: sourceList(preview.sources, locale) }) : t("fact.source.bodyUnknown", { name })}</small></span></li>
         <li><Icon icon={SessionIcon} size="md" /><span><strong>{t("fact.user.title")}</strong><small>{preview.machine.kind === "remote" ? t("fact.user.bodyRemote", { onMachine: words.on }) : t("fact.user.body", { onMachine: words.on })}</small></span></li>
         <li><Icon icon={ClockIcon} size="md" /><span><strong>{t("fact.time.title")}</strong><small>{t("fact.time.body")}</small></span></li>
       </ul>}
-      {!problem && phase === "confirm" && !canManage && preview && <Notice>{t("notAllowed", { name, onMachine: words.on })}</Notice>}
+      {!problem && phase === "confirm" && !canManage && preview && !manualOnly && <Notice>{t("notAllowed", { name, onMachine: words.on })}</Notice>}
 
       {job && (active || phase === "succeeded") && <ol className="pkg-harnesses-install-steps" aria-label={title}>
         {installSteps(job).map((step) => <li key={step.id} data-state={step.state}>
@@ -240,14 +244,15 @@ function InstallDialog({ host, projectId, harnessId, harnessName, row, checking,
 
       {actionError && <Notice tone="error" role="alert">{actionError}</Notice>}
 
-      {source && <Details t={t} preview={source} words={words} job={staleSuccess ? undefined : job} row={row} projectId={projectId} onTerminal={onTerminal} />}
+      {source && <Details t={t} preview={source} open={manualOnly && phase === "confirm"} words={words} job={staleSuccess ? undefined : job} row={row} projectId={projectId} onTerminal={onTerminal} />}
     </div>
   </Dialog>;
 }
 
 /** Everything a technical person checks before trusting an installer. */
-function Details({ t, preview, words, job, row, projectId, onTerminal }: {
+function Details({ t, preview, open, words, job, row, projectId, onTerminal }: {
   t: Translate;
+  open: boolean;
   preview: HarnessInstallPreviewDto;
   words: { title: string };
   job: HarnessInstallDto | undefined;
@@ -264,7 +269,7 @@ function Details({ t, preview, words, job, row, projectId, onTerminal }: {
     if (element && pinned.current) element.scrollTop = element.scrollHeight;
   }, [output]);
   const canTerminal = Boolean(row) && !installIsActive(job);
-  return <details className="pkg-harnesses-install-details">
+  return <details className="pkg-harnesses-install-details" open={open || undefined}>
     <summary><span>{t("details.summary")}</span></summary>
     <div className="pkg-harnesses-install-details-body">
     <dl className="pkg-harnesses-install-facts-list">
@@ -288,10 +293,10 @@ function Details({ t, preview, words, job, row, projectId, onTerminal }: {
         {output && <CopyButton text={output} label={t("action.copyLog")} />}
       </div>
     </div>}
-    <div className="pkg-harnesses-install-terminal">
+    {!preview.manualOnly && <div className="pkg-harnesses-install-terminal">
       <p>{projectId ? t("details.terminalHint") : t("details.terminalNeedsProject")}</p>
       <Button size="sm" variant="ghost" iconStart={TerminalIcon} disabled={!projectId || !canTerminal} onClick={() => { if (row) onTerminal(row, preview.command); }}>{t("action.terminal")}</Button>
-    </div>
+    </div>}
     </div>
   </details>;
 }
