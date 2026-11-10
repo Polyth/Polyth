@@ -29,8 +29,8 @@
     "@polyth/plugins": "0.1.0",
     "@polyth/session": "0.1.0",
     "@polyth/web-sdk": "0.1.0",
-    "playwright-core": "^1.62.1",
-    "three": "0.186.1"
+    "playwright-core": "^1.65.0",
+    "three": "0.187.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"
