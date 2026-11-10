@@ -44,6 +44,14 @@ test("a dragged open Navigator is not pinned by its forwards-filling entrance an
   assert.ok(css.indexOf(rule[0]) > css.indexOf('[data-swipe-handoff="open"]:not'));
 });
 
+test("a long press in the Navigator never selects text or raises the iOS callout", async () => {
+  const css = await read("../src/components/mobile/MobileNavigator.css");
+  const root = css.match(/\.mobile-navigator\s*\{\s*-webkit-user-select:\s*none;\s*user-select:\s*none;\s*-webkit-touch-callout:\s*none;\s*\}/);
+  assert.ok(root, "the Navigator root opts out of selection and the callout");
+  assert.match(css, /\.mobile-navigator :is\(input, textarea, \[contenteditable="true"\]\)\s*\{\s*-webkit-user-select:\s*text;\s*user-select:\s*text;/,
+    "search and inline rename stay editable");
+});
+
 test("the session swipe action (Pin to top) stays hidden until actually swiped", async () => {
   const css = await read("../src/components/mobile/MobileNavigator.css");
   // The row only marks the underlay aria-hidden at rest; without a matching
