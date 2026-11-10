@@ -234,6 +234,46 @@ for (const variant of VARIANTS) for (const [name, family] of Object.entries(FAMI
   });
 }
 
+// In the native app the WebView itself ends at the keyboard, so its edges are
+// the band. A layer placed by frame arithmetic there vanished on an iPhone (a
+// package window shrank to its status-bar padding and the chat showed in its
+// place, 2026-11-10) while the chat chain on the same frame stood right; the
+// layers keep the WebView's own edges whatever top the frame reports. The
+// bottom stays the WebView's: the composer on the same frame stood right.
+const NATIVE_FRAMES = [
+  { id: "stale pan offset", top: 345, bottom: 508 },
+  { id: "offset at the frame bottom", top: 500, bottom: 508 },
+  { id: "dynamic frame", top: 0, bottom: 508 },
+];
+for (const variant of VARIANTS.filter((candidate) => !candidate.webkit)) for (const [name, family] of Object.entries(FAMILIES)) {
+  test(`${variant.name}: in the native app ${name} keeps the WebView's edges while the keyboard is open`, { skip: !available }, async () => {
+    const { page, close } = await open(variant, family.html);
+    try {
+      for (const frame of NATIVE_FRAMES) {
+        await page.setViewportSize({ width: WIDTH, height: 508 });
+        const m = await page.evaluate(({ frame, layer, probeX }) => {
+          const root = document.documentElement;
+          root.style.setProperty("--visual-frame-top", `${frame.top}px`);
+          root.style.setProperty("--visual-offset", `${frame.top}px`);
+          root.style.setProperty("--layer-frame-bottom", `${frame.bottom}px`);
+          root.style.setProperty("--keyboard-inset", "336px");
+          document.body.dataset.keyboard = "open";
+          document.body.dataset.keyboardSource = "native";
+          document.getAnimations().forEach((animation) => animation.finish());
+          const r = document.querySelector(layer)!.getBoundingClientRect();
+          const hitAt = (y: number) => !!document.elementFromPoint(probeX, y)?.closest(layer);
+          return { top: Math.round(r.top), bottom: Math.round(r.bottom), hitTop: hitAt(Math.round(r.top) + 4), hitBottom: hitAt(503) };
+        }, { frame, layer: family.layer, probeX: PROBE_X });
+        const where = `${name} / ${frame.id}`;
+        assert.ok(near(m.top, 0) && near(m.bottom, 508), `${where}: layer is the WebView box 0..508 (got ${m.top}..${m.bottom})`);
+        assert.ok(m.hitTop && m.hitBottom, `${where}: the layer, not the chat, answers at the top and bottom of the WebView`);
+      }
+    } finally {
+      await close();
+    }
+  });
+}
+
 for (const variant of VARIANTS) {
   test(`${variant.name}: the widget catalog sheet sits on the band's bottom edge, above the keyboard`, { skip: !available }, async () => {
     // A bottom sheet with a search field: pinned with `bottom: 0`, it would sit
