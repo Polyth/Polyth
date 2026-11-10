@@ -17,13 +17,15 @@
 // On a stable release the workstation edition (scripts/ci/workstation.mjs) adds
 // workstation.yml, workstation-mac.yml and workstation-linux.yml with their
 // installers, per-platform SBOMs and SHA256SUMS-workstation.txt; never any
-// latest*/beta*/nightly* file.
+// latest*/beta*/nightly* file. On a nightly build the workstation assets are a
+// separate set, published onto the newest stable release so the edition tracks
+// devel (`update-feed.mjs workstation <productsDir> <feedDir>`).
 //
 // POLYTH_RELEASE_CHANNEL picks the release channel (stable | test | nightly,
 // default stable). Test and nightly versions carry a semver prerelease id
 // (X.Y.N-beta, X.Y.N-nightly) and are published as GitHub prereleases; the
 // desktop updater (apps/desktop/src/updaterChannel.ts) keys on that id.
-import { appendFileSync, cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MAC_LEGACY_METADATA } from "./mac-legacy.mjs";
@@ -180,28 +182,20 @@ function filesIn(dir) {
 
 const WORKSTATION_SBOM = /-workstation-sbom-[a-z0-9]+-[a-z0-9_]+\.cdx\.json$/;
 
+/** The workstation metadata files a channel has (the builder always writes the stable names). */
+export function workstationMetadataNames(names) {
+  const partials = MAC_ARCHITECTURES.map((arch) => workstationMacPartialName(arch));
+  return [WORKSTATION_METADATA.windows, WORKSTATION_METADATA.linux, ...partials].filter((name) => names.has(name));
+}
+
 /**
- * The workstation edition's share of the feed: its own metadata files plus the
- * SBOMs, or null when there is nothing to publish. Refuses any workstation
- * product on a non-stable channel. A missing, mismatching or incomplete
- * platform is skipped with a warning; the standard feed is never blocked.
+ * The workstation edition's own asset set built from those products: metadata
+ * with every referenced installer and blockmap, per-platform SBOMs and
+ * SHA256SUMS-workstation.txt. A missing platform is a warning, never an error.
  */
-function workstationFeed(byName, version, channel, warnings) {
+function workstationParts(byName, version, warnings) {
   const partials = MAC_ARCHITECTURES.map((arch) => [arch, workstationMacPartialName(arch)]);
   const sboms = [...byName.keys()].filter((name) => WORKSTATION_SBOM.test(name));
-  const present = [WORKSTATION_METADATA.windows, WORKSTATION_METADATA.linux, ...partials.map(([, name]) => name), ...sboms]
-    .filter((name) => byName.has(name));
-  const installers = [...byName.keys()].filter((name) => name.includes(WORKSTATION_ASSET_INFIX) && !WORKSTATION_SBOM.test(name));
-  if (channel !== "stable") {
-    if (present.length > 0 || installers.length > 0) {
-      throw new Error(`Workstation products (${[...present, ...installers].join(", ")}) are published on stable releases only, not ${channel}`);
-    }
-    return null;
-  }
-  if (present.length === 0) {
-    warnings.push("The workstation edition is missing; this release has no workstation feed");
-    return null;
-  }
   const metadata = new Map();
   const usable = (name, text) => {
     if (metadataVersion(text) !== version) {
@@ -231,6 +225,78 @@ function workstationFeed(byName, version, channel, warnings) {
   const keep = sboms.filter((name) => name.startsWith(`Polyth-${version}-`));
   for (const name of sboms) if (!keep.includes(name)) warnings.push(`${name} is not version ${version}; skipped`);
   return { metadata, sboms: keep };
+}
+
+/**
+ * The workstation edition's share of a stable release: its own metadata files
+ * plus the SBOMs, or null when there is nothing to publish. On any other
+ * channel the edition is published separately by `assembleWorkstationFeed`, so
+ * its products are ignored here and the standard feed is never blocked.
+ */
+function workstationFeed(byName, version, channel, warnings) {
+  if (channel !== "stable") return null;
+  const names = new Set(byName.keys());
+  const present = [...workstationMetadataNames(names), ...[...names].filter((name) => WORKSTATION_SBOM.test(name))]
+    .filter((name) => names.has(name));
+  if (present.length === 0) {
+    warnings.push("The workstation edition is missing; this release has no workstation feed");
+    return null;
+  }
+  return workstationParts(byName, version, warnings);
+}
+
+/**
+ * The workstation edition built by any channel, as its own release asset set:
+ * installers, blockmaps, SBOMs, `workstation*.yml` (builder channel names) and
+ * SHA256SUMS-workstation.txt. Returns null when this build produced no
+ * workstation products. Used for the temporary arrangement where the newest
+ * nightly replaces the workstation assets on the latest stable release, so the
+ * edition tracks devel without a second channel in the app.
+ */
+export function assembleWorkstationFeed(productsDir, feedDir, channel = "nightly") {
+  const releaseChannel = resolveReleaseChannel(channel);
+  const byName = new Map();
+  if (!existsSync(resolve(productsDir))) return null;
+  for (const file of filesIn(resolve(productsDir))) {
+    const name = basename(file);
+    if (byName.has(name)) throw new Error(`Two builder products are both named ${name}`);
+    byName.set(name, file);
+  }
+  const names = new Set(byName.keys());
+  const metadataNames = workstationMetadataNames(names);
+  if (metadataNames.length === 0) return null;
+  const versions = new Set(metadataNames.map((name) => metadataVersion(readFileSync(byName.get(name), "utf8"))));
+  if (versions.size > 1) throw new Error(`Workstation metadata versions differ: ${[...versions].join(", ")}`);
+  const version = [...versions][0];
+  if (channelOfVersion(version) !== releaseChannel) {
+    throw new Error(`Workstation version ${version} does not belong to the ${releaseChannel} channel`);
+  }
+  const warnings = [];
+  const { metadata, sboms } = workstationParts(byName, version, warnings);
+  const out = resolve(feedDir);
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
+  const files = [];
+  const copy = (name) => {
+    cpSync(byName.get(name), join(out, name));
+    files.push(name);
+  };
+  for (const [name, text] of metadata) {
+    writeFileSync(join(out, name), text);
+    files.push(name);
+    for (const url of metadataUrls(text)) {
+      const file = byName.get(url);
+      if (!file) throw new Error(`${name} references ${url}, which no builder product provides`);
+      copy(url);
+      if (byName.has(`${url}.blockmap`)) copy(`${url}.blockmap`);
+    }
+  }
+  for (const name of sboms) copy(name);
+  if (files.length > 0) {
+    writeFileSync(join(out, WORKSTATION_SUMS_NAME), sha256Sums([...new Set(files)].map((name) => join(out, name))));
+    files.push(WORKSTATION_SUMS_NAME);
+  }
+  return { version, channel: releaseChannel, files: files.sort(), warnings };
 }
 
 /**
@@ -326,9 +392,22 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, productsDir, feedDir] = process.argv.slice(2);
-  if (command !== "assemble" || !productsDir || !feedDir) {
-    console.error("usage: update-feed.mjs assemble <productsDir> <feedDir>");
+  if ((command !== "assemble" && command !== "workstation") || !productsDir || !feedDir) {
+    console.error("usage: update-feed.mjs assemble|workstation <productsDir> <feedDir>");
     process.exit(2);
+  }
+  if (command === "workstation") {
+    const workstation = assembleWorkstationFeed(productsDir, feedDir, process.env.POLYTH_RELEASE_CHANNEL);
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `present=${workstation !== null}\n`);
+    if (!workstation) {
+      console.log("update-feed: this build has no workstation products");
+      process.exit(0);
+    }
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `version=${workstation.version}\n`);
+    console.log(`update-feed: workstation ${workstation.channel} version ${workstation.version}`);
+    for (const warning of workstation.warnings) console.log(`::warning::update-feed: ${warning}`);
+    for (const file of workstation.files) console.log(`  ${file}`);
+    process.exit(0);
   }
   const { version, channel, prerelease, files, warnings } = assembleFeed(productsDir, feedDir, process.env.POLYTH_RELEASE_CHANNEL);
   console.log(`update-feed: ${channel} version ${version}`);
