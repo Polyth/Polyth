@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent,
 } from "react";
@@ -33,7 +33,13 @@ import { useUiSettings } from "../uiPrefs.ts";
 import { attachSwipeSurface } from "../swipeSurface.ts";
 import { swipeZoneInHost } from "../shellSwipe.ts";
 import { guardedProjectAddAllowed, limitedProjectAddAllowed, useAccountLimits, useGuardrails } from "../guardrails.ts";
-import { EXPANDED_PROJECTS_KEY, readNavigatorState, writeNavigatorState } from "../navigatorState.ts";
+import {
+  DEFAULT_NAVIGATOR_ACTIONS, EXPANDED_PROJECTS_KEY, NAVIGATOR_ACTIONS_VISIBLE_MAX,
+  readNavigatorActions, readNavigatorState, subscribeNavigatorActions, writeNavigatorActions, writeNavigatorState,
+} from "../navigatorState.ts";
+import { useResolvedCapabilities, type CapabilityDescriptor } from "../capabilities.ts";
+import { railIconFor } from "../railIcons.ts";
+import { commandHint, listCommands } from "../commands.ts";
 import {
   permuteManualProjects,
   setProjectOrder, setProjectSortMode,
@@ -44,7 +50,7 @@ import {
 import { useOrderedProjects } from "../projectRecency.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
-  CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu,
+  CloseIcon, ComposeIcon, EditIcon, FilterIcon, IconButton, Menu, MoreIcon, PlusIcon,
   SearchIcon, SelectIcon, SidebarCollapseIcon, SidebarExpandIcon, SortIcon, Tooltip,
   type MenuEntry,
 } from "./ui/index.ts";
@@ -92,17 +98,16 @@ export const RAIL_COLLAPSE_CLICK_DELAY_MS = 300;
 
 /**
  * Narrowest sessions column that still fits the full "Search sessions…"
- * placeholder beside the toolbar's three 36px actions.
+ * placeholder in the toolbar row: [collapse 28] [search] [filter 32].
  *
  * Measured, not guessed: the placeholder renders 116.84px wide in Inter at the
- * 13.02px UI size, and the toolbar spends 16px on padding, 108px on the three
- * actions, 6px on the gaps and 30px on the field's own inline padding. That is
- * 160px of chrome, so the full label needs a 277px column. The default sidebar
- * leaves 281px, which is why the full label shows by default and only a
- * narrower column swaps to the short one. Below the threshold the toolbar
- * keeps one row and shortens the label instead of clipping it.
+ * 13.02px UI size, and the row spends 16px on padding, 28px on the collapse
+ * toggle, 32px on the list options, 12px on the two 6px gaps and 30px on the
+ * field's own inline padding. That is 118px of chrome, so the full label needs
+ * a 235px column. Below the threshold the row keeps one line and shortens the
+ * label instead of clipping it.
  */
-export const SEARCH_FULL_LABEL_MIN_WIDTH = 277;
+export const SEARCH_FULL_LABEL_MIN_WIDTH = 235;
 
 function loadExpandedProjects(activeProjectId: string | null): ReadonlySet<string> {
   try {
@@ -131,6 +136,141 @@ function sessionsNeedAttention(candidates: readonly SessionProjection[]): boolea
       || session.status === "unknown"
       || (session.attention?.questions ?? 0) > 0
       || (session.attention?.permissions ?? 0) > 0));
+}
+
+/** The wide navigator's package action rows: which capabilities are chosen
+ *  (device-local, navigatorState.ts) resolved against the capability
+ *  registry, which owns each one's label, mark, availability and open(). */
+export interface NavigatorActionsModel {
+  /** Drawn as rows, in the chosen order. */
+  shown: readonly CapabilityDescriptor[];
+  /** Chosen past the visible cap; listed by the More… row. */
+  rest: readonly CapabilityDescriptor[];
+  /** Checkbox list for the block's edit menu and the list options. */
+  editEntries: MenuEntry[];
+}
+
+export function useNavigatorActions(): NavigatorActionsModel {
+  const resolved = useResolvedCapabilities();
+  const chosen = useSyncExternalStore(subscribeNavigatorActions, readNavigatorActions, readNavigatorActions);
+  // Chat is what the New chat row above starts; every other launchable
+  // capability can be a row.
+  const launchable = resolved.map((c) => c.descriptor)
+    .filter((descriptor) => descriptor.rail !== false && descriptor.id !== "session");
+  const byId = new Map(launchable.map((descriptor) => [descriptor.id, descriptor]));
+  const rows = chosen.flatMap((id) => {
+    const descriptor = byId.get(id);
+    return descriptor && descriptor.available() ? [descriptor] : [];
+  });
+  const overflow = rows.length > NAVIGATOR_ACTIONS_VISIBLE_MAX;
+  const toggle = (id: string) => writeNavigatorActions(chosen.includes(id)
+    ? chosen.filter((candidate) => candidate !== id)
+    : [...chosen, id]);
+  const choices = [...launchable].sort((a, b) => a.label.localeCompare(b.label));
+  return {
+    shown: overflow ? rows.slice(0, NAVIGATOR_ACTIONS_VISIBLE_MAX) : rows,
+    rest: overflow ? rows.slice(NAVIGATOR_ACTIONS_VISIBLE_MAX) : [],
+    editEntries: [
+      { heading: tr("sidebar.navigatorActions") },
+      ...choices.map((descriptor): MenuEntry => {
+        const checked = chosen.includes(descriptor.id);
+        return {
+          id: `navigator-action:${descriptor.id}`,
+          label: descriptor.label,
+          kind: "checkbox",
+          checked,
+          // A chosen row that is unavailable right now can still be removed.
+          disabled: !checked && !descriptor.available(),
+          onSelect: () => toggle(descriptor.id),
+        };
+      }),
+      "separator",
+      {
+        id: "navigator-actions-reset",
+        label: tr("sidebar.navigatorActionsReset"),
+        onSelect: () => writeNavigatorActions(DEFAULT_NAVIGATOR_ACTIONS),
+      },
+    ],
+  };
+}
+
+/** Full-width New chat row (tree and rail headers). Its trailing hint is the
+ *  shell's own New chat command hint (`cmd.new`, shell.ts), which resolves
+ *  the user's keymap at render time, so a rebinding shows through. */
+function NavigatorNewChat({ label, onStart }: { label: string; onStart: () => void }) {
+  const command = listCommands().find((candidate) => candidate.id === "cmd.new");
+  const combo = (command && commandHint(command)) ?? "";
+  return (
+    <button
+      type="button"
+      className="sidebar-nav-row sidebar-nav-new"
+      aria-label={label}
+      title={combo ? `${label} (${combo})` : label}
+      onClick={onStart}
+    >
+      <span className="sidebar-nav-glyph" aria-hidden="true"><ComposeIcon strokeWidth={1.75} /></span>
+      <span className="sidebar-nav-label">{tr("sidebar.newChat")}</span>
+      {combo && <kbd className="sidebar-nav-hint" aria-hidden="true">{combo}</kbd>}
+    </button>
+  );
+}
+
+/** One row per chosen capability (capped, with More…), and the block's edit
+ *  menu. Draws nothing when nothing is chosen; the list options keep the same
+ *  edit list so the block can always come back. */
+function NavigatorActions({ model, onOpened }: { model: NavigatorActionsModel; onOpened: () => void }) {
+  if (model.shown.length === 0) return null;
+  const open = (descriptor: CapabilityDescriptor) => {
+    descriptor.open();
+    onOpened();
+  };
+  return (
+    <div className="sidebar-nav-actions" role="group" aria-label={tr("sidebar.navigatorActions")}>
+      {model.shown.map((descriptor) => {
+        const Mark = railIconFor(descriptor.id);
+        return (
+          <button
+            key={descriptor.id}
+            type="button"
+            className="sidebar-nav-row sidebar-nav-action"
+            data-capability={descriptor.id}
+            onClick={() => open(descriptor)}
+          >
+            <span className="sidebar-nav-glyph" aria-hidden="true"><Mark /></span>
+            <span className="sidebar-nav-label">{descriptor.label}</span>
+          </button>
+        );
+      })}
+      {model.rest.length > 0 && (
+        <Menu
+          label={tr("sidebar.navigatorActionsMore")}
+          align="start"
+          entries={model.rest.map((descriptor) => ({
+            id: descriptor.id,
+            label: descriptor.label,
+            onSelect: () => open(descriptor),
+          }))}
+        >
+          {(trigger) => (
+            <button {...trigger} type="button" className="sidebar-nav-row sidebar-nav-action sidebar-nav-more">
+              <span className="sidebar-nav-glyph" aria-hidden="true"><MoreIcon strokeWidth={1.75} /></span>
+              <span className="sidebar-nav-label">{tr("sidebar.navigatorActionsMore")}</span>
+            </button>
+          )}
+        </Menu>
+      )}
+      <Menu label={tr("sidebar.editNavigatorActions")} align="end" entries={model.editEntries}>
+        {(trigger) => (
+          <IconButton
+            icon={EditIcon}
+            label={tr("sidebar.editNavigatorActions")}
+            className="sidebar-nav-actions-edit"
+            {...trigger}
+          />
+        )}
+      </Menu>
+    </div>
+  );
 }
 
 export default function Sidebar() {
@@ -191,6 +331,7 @@ export default function Sidebar() {
     setAppearanceProjectId(projectId);
   }), []);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const navActions = useNavigatorActions();
   const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
   // Newest session activity per project, for the shared "recent" ordering.
   const latestProjectActivity = useCallback((projectId: string) => sessions.reduce(
@@ -772,7 +913,21 @@ export default function Sidebar() {
         })}
         title={tr("sidebar.moreSidebarActions")}
         align="end"
-        entries={[...layoutEntries, "separator", ...sortEntries, "separator", ...filterEntries]}
+        entries={[
+          ...layoutEntries, "separator", ...sortEntries, "separator", ...filterEntries, "separator",
+          // The wide toolbar has no select toggle of its own any more.
+          {
+            id: "select",
+            label: selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions"),
+            onSelect: toggleSelectMode,
+          },
+          {
+            id: "navigator-actions",
+            label: tr("sidebar.navigatorActions"),
+            entries: navActions.editEntries,
+            onSelect: () => {},
+          },
+        ]}
         className="session-filter-menu"
         footer={<SessionDateFilterControls value={dateFilter} onChange={setDateFilter} />}
       >
@@ -787,7 +942,8 @@ export default function Sidebar() {
       </Menu>
     </div>
   );
-  /** The rail header row's list tools, beside the focused project's ⋮. Toolbar
+  /** The rail header row's list tools, beside the focused project's ⋮: search
+   *  and the list options. New chat is the full-width row under it. Toolbar
    *  widgets (`sidebar.toolbar`) come along: this row is that toolbar now. */
   const renderRailHeaderTools = (p: Project) => (
     <span className="sidebar-header-tools customize-zone">
@@ -801,15 +957,6 @@ export default function Sidebar() {
         label={tr("sidebar.searchProjectsWorktreesAndSessions")}
         className="sidebar-header-tool sidebar-header-search"
         onClick={() => setSearchOpen(true)}
-      />
-      <IconButton
-        icon={ComposeIcon}
-        label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
-        className="sidebar-header-tool sidebar-header-compose"
-        onClick={() => {
-          startFreshSession(p.id);
-          closeDrawer();
-        }}
       />
       {renderListOptions("sidebar-header-tool")}
       <CustomizeZoneButton slot="sidebar.toolbar" className="sidebar-header-tool" />
@@ -951,6 +1098,22 @@ export default function Sidebar() {
       )}
     </PrivateRoomGroup>
   );
+  /** Collapsed navigator rails: a soft square New chat under the expand
+   *  toggle, then a short divider before the project glyphs. */
+  const renderRailNewChat = () => project && (
+    <>
+      <IconButton
+        icon={PlusIcon}
+        className="sidebar-rail-new-chat"
+        label={tr("sidebar.newChat")}
+        onClick={() => {
+          startFreshSession(project.id);
+          closeDrawer();
+        }}
+      />
+      <span className="sidebar-rail-divider" aria-hidden="true" />
+    </>
+  );
   const renderProjectCard = (p: Project, tools?: ReactNode) => {
     if (renamingProject === p.id) {
       return (
@@ -1084,6 +1247,7 @@ export default function Sidebar() {
               aria-expanded="false"
               onClick={expandCollapsed}
             />
+            {renderRailNewChat()}
             <ShellDock column="start" group="tools" />
             <ShellDock column="start" group="actions" />
             <ShellColumnAccount />
@@ -1123,6 +1287,7 @@ export default function Sidebar() {
               />
             </span>
             )}
+            {railCollapsed && renderRailNewChat()}
             {!compact && <ShellDock column="start" group="tools" />}
             <div
               ref={railListRef}
@@ -1353,7 +1518,7 @@ export default function Sidebar() {
         {showServiceBar && (
         <div className="sidebar-service-bar customize-zone" data-rail={railHeader ? "" : undefined}>
           {searchPages.hasMore && <button className="show-more-sessions" disabled={searchPages.busy} onClick={() => void searchPages.more()}>{tr("sidebar.sessionlist.showMoreSessions")}</button>}
-          {!compact && (
+          {!compact && !railHeader && (
             <IconButton
               icon={SidebarCollapseIcon}
               className="sidebar-collapse"
@@ -1362,8 +1527,10 @@ export default function Sidebar() {
               onClick={() => setSidebarLayout({ collapsed: true, restoreViewMode: "tree" })}
             />
           )}
-          {/* The rail selects from the project's ⋮ menu instead. */}
-          {!railHeader && (
+          {/* Wide navigators select from the list options (and the rail from
+              the project's ⋮); the compact drawer's own toolbar keeps its
+              toggle. */}
+          {compact && (
             <IconButton
               icon={SelectIcon}
               label={selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions")}
@@ -1403,7 +1570,8 @@ export default function Sidebar() {
               >{tr("sidebar.message")}</button>
             )}
           </div>
-          {project && (
+          {/* Wide navigators start a chat from the full-width row below. */}
+          {compact && project && (
             <IconButton
               icon={ComposeIcon}
               label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
@@ -1426,6 +1594,21 @@ export default function Sidebar() {
             <CustomizeZoneButton slot="sidebar.toolbar" className="sidebar-service-btn" />
           )}
         </div>
+        )}
+        {/* Rows under the header row, the same in the tree and the rail: New
+            chat, then the chosen package actions. The compact drawer starts
+            chats from its own toolbar. */}
+        {!compact && project && (
+          <div className="sidebar-nav-block">
+            <NavigatorNewChat
+              label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
+              onStart={() => {
+                startFreshSession(project.id);
+                closeDrawer();
+              }}
+            />
+            <NavigatorActions model={navActions} onOpened={closeDrawer} />
+          </div>
         )}
         <div
           ref={sideScrollRef}

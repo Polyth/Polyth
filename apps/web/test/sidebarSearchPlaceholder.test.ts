@@ -65,13 +65,14 @@ test("the width hook measures the element and keeps tracking it", async () => {
 });
 
 test("the threshold is anchored to the measured full placeholder", () => {
-  // Keep the documented budget honest: 16px bar padding + 3 x 36px actions +
-  // 3 x 2px gaps + the field's 26px leading and 4px trailing padding.
+  // Keep the documented budget honest: 16px bar padding + the 28px collapse
+  // toggle + the 32px list options + 2 x 6px gaps + the field's 26px leading
+  // and 4px trailing padding.
   const threshold = Number(
     sidebarSource.match(/export const SEARCH_FULL_LABEL_MIN_WIDTH = (\d+);/)?.[1],
   );
   assert.ok(Number.isFinite(threshold), "SEARCH_FULL_LABEL_MIN_WIDTH must be exported");
-  const chrome = 16 + 3 * 36 + 3 * 2 + 26 + 4;
+  const chrome = 16 + 28 + 32 + 2 * 6 + 26 + 4;
   const fullPlaceholderWidth = 116.84; // measured in Inter at the 13.02px UI size
   assert.ok(
     threshold >= fullPlaceholderWidth + chrome,

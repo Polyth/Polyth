@@ -1840,11 +1840,11 @@ the interaction. A footer contribution is unmounted with its menu, so content
 that must outlive the dropdown (a dialog, a panel) belongs in `app.layers`.
 
 **Navigator multi-select.** A select toggle (`SelectIcon`, `aria-pressed`)
-sits immediately left of the session search field in the desktop service
-bar, right after the search tool in the phone navigator header, and beside
-the list filter in the compact drawer toolbar. It enters and leaves selection
-(project `⋯` → Select sessions remains as a second entry); Escape, and Android
-Back through the escape stack, end it. Desktop rows show checkboxes and a click
+sits beside the list filter in the compact drawer toolbar and right after the
+search tool in the phone navigator header. On a wide navigator it lives in the
+list options (Sessions select toggle removed from the header row); project `⋯`
+→ Select sessions remains as a second entry. It enters and leaves selection;
+Escape, and Android Back through the escape stack, end it. Desktop rows show checkboxes and a click
 on the row title toggles the row instead of opening it (double-click rename and
 long-press menu are off); phone rows turn their status slot into a check mark
 and a tap toggles the row (swipe and long-press are off while selecting). `SessionSelectionBar` shows the count and
@@ -4579,19 +4579,36 @@ not the sessions toolbar; while that editor is open the whole rail stays live
 icons still drag and sort. The sessions column's header row carries the
 `sidebar.toolbar` pencil. The sidebar does not show a server connection status control.
 In the wide shell's Project rail the focused project's row is the sessions
-column's only header row: name and path, then Search, New chat, the list
-options and ⋮. Widgets placed in `sidebar.toolbar` sit before Search. There is
-no separate toolbar row. Search opens the field in that row's place at the same
-height, so the list does not move. Escape or × clears and closes the field and
+column's first header row: name and path, then Search, the list options and ⋮.
+Widgets placed in `sidebar.toolbar` sit before Search. There is no separate
+toolbar row. Search opens the field in that row's place at the same height, so
+the list does not move. Escape or × clears and closes the field and
 returns focus to Search. An empty field also closes when focus moves outside
 its row. The toolbar row stays while a query is typed, or while a filter hides
 the focused project, so the list options stay reachable. Selection lives in
-the project's ⋮ menu there. The tree keeps its toolbar row with the select
-toggle. The list-options button lights only for a filter (Needs attention or a
-date filter). The layout, sort and grouping choices in the same menu do not
+the project's ⋮ menu there. The list-options button lights only for a filter
+(Needs attention or a date filter). The layout, sort and grouping choices in the same menu do not
 light it.
 The compact drawer's sort button lights only for a non-default sort. Covered
 by `apps/web/test/sidebarFolderMode.test.ts`.
+
+**Navigator header rows.** On a wide navigator the header is two rows, not
+one: `[collapse 28] [search] [filter 32]`, then a full-width New chat row, then
+the chosen package actions, each a full-width row with its icon and label
+(`Quick actions`; capability rows from `useResolvedCapabilities()`, default
+Agents `schedule` then `planner`, capped at four plus a `More…` row, edited from
+the block's pencil or the list options and stored device-locally under
+`polyth.sidebar.navigatorActions`). The Project rail starts from its project
+row instead and drops the collapse toggle, which lives in the rail. The
+compact drawer keeps its own single toolbar.
+
+Every row — header and list — shares one grid: the pill runs from 8px to
+width−8, its glyph starts at 16px and every label (New chat, actions,
+projects, chats) sits on the 40px axis. Labels that ellipsize keep an 18px
+line at 13px, because `line-height: 1` clips `g`/`y` descenders under
+`overflow: hidden`. The search field follows Settings → corner rounding
+(`--radius-card`), never the glass capsule.
+
 Each project tile carries a live status dot: green while any of that project's
 sessions works, amber when one needs attention. The socket keeps active rows
 from every project current as summary projections, so the dot appears and
