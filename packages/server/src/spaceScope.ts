@@ -50,7 +50,12 @@ export interface SpaceOwnershipSource {
  *  cannot enter `deleting` while a durable child still depends on it, and a
  *  chat is unreachable once its project row is gone anyway — so the cascade
  *  loses nothing the close could have kept. Only this Space's chats go: a
- *  project id never crosses a Space, and the store list is not Space-scoped. */
+ *  project id never crosses a Space, and the store list is not Space-scoped.
+ *
+ *  The list is not the whole set: it hides chats that failed at startup, yet
+ *  their resources still hang under the project and refuse its deletion
+ *  ("Delete child resources before deleting their parent"). The canonical
+ *  registry is what that check reads, so it also names what still has to go. */
 function closeRemovesChats(
   ctx: SpaceContext,
   projects: ProjectService,
@@ -59,13 +64,27 @@ function closeRemovesChats(
   const drop = sessions.delete?.bind(sessions);
   if (!drop) return projects;
   const remove = projects.remove.bind(projects);
+  const dropUnlessGone = async (sessionId: string): Promise<void> => {
+    try {
+      await drop(sessionId);
+    } catch (cause) {
+      // Already gone, e.g. a retry after a partial close.
+      if ((cause as { code?: unknown } | null)?.code !== "not-found") throw cause;
+    }
+  };
   return {
     ...projects,
     async remove(id) {
       for (const session of await sessions.list(id)) {
         if (session.spaceId && session.spaceId !== ctx.spaceId) continue;
-        await drop(session.id);
+        await dropUnlessGone(session.id);
       }
+      const leftovers = canonicalSecurity()?.control.all<{ id: string }>(
+        "SELECT id FROM resources WHERE parent_id=? AND kind='session' AND space_id=? AND lifecycle IN ('active','archived','deleting') ORDER BY id",
+        id,
+        ctx.spaceId,
+      ) ?? [];
+      for (const { id: sessionId } of leftovers) await dropUnlessGone(sessionId);
       await remove(id);
     },
   };
