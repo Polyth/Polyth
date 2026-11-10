@@ -573,7 +573,7 @@ export function validateFallbackModels(raw: unknown): ScheduleExecutionModel[] {
 }
 
 /** Files one message to an agent may carry (the session's own limit). */
-export const MAX_RUN_ATTACHMENTS = 16;
+export const MAX_RUN_ATTACHMENTS = 50;
 const ATTACHMENT_MIME = /^[\w.+-]+\/[\w.+-]+$/;
 
 export const AGENT_CONTINUATIONS: readonly AgentContinuation[] = ["auto", "continue", "new"];

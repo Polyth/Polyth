@@ -35,7 +35,7 @@ export type AgyAttachmentResult =
 
 export const AGY_ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024;
 export const AGY_ATTACHMENT_TURN_MAX_BYTES = 128 * 1024 * 1024;
-export const AGY_ATTACHMENT_MAX_COUNT = 16;
+export const AGY_ATTACHMENT_MAX_COUNT = 50;
 /** Turn directories kept so a later turn can reopen an earlier attachment. */
 const RETAINED_TURNS = 24;
 

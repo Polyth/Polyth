@@ -14,10 +14,10 @@ use polyth_link_core::wire::read_bounded_line;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncWriteExt, BufReader};
-use tokio::net::UnixListener;
 use tokio::sync::{broadcast, Mutex};
 
 mod conn;
+mod local_ipc;
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -94,7 +94,8 @@ async fn main() {
 /// arm the kernel parent-death signal before touching the control socket so a
 /// hard-killed owner cannot leave an orphan bound to a path a later process
 /// will unlink and replace. Clean shutdown still uses the explicit RPC/close
-/// path; this is only the crash boundary.
+/// path; this is only the crash boundary. Windows has no such signal; there
+/// the host exits when its owner's stdin pipe closes (`local_ipc`).
 #[cfg(target_os = "linux")]
 fn arm_parent_death_signal() -> Result<(), String> {
     use std::os::raw::{c_int, c_ulong};
@@ -127,15 +128,10 @@ fn arm_parent_death_signal() -> Result<(), String> {
 
 async fn serve(data_dir: PathBuf, socket: PathBuf) -> Result<(), String> {
     arm_parent_death_signal()?;
+    local_ipc::exit_when_owner_closes_stdin();
     let identity_path = data_dir.join("tunnel").join("identity");
     let identity = identity::load_or_create(&identity_path).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600));
-    }
+    let mut listener = local_ipc::ControlListener::bind(&socket).map_err(|e| e.to_string())?;
     let policy_path = data_dir.join("tunnel").join("policy.json");
     let policy = load_host_policy(&policy_path);
     save_host_policy(&policy_path, policy);
@@ -154,10 +150,10 @@ async fn serve(data_dir: PathBuf, socket: PathBuf) -> Result<(), String> {
         events,
     }));
     loop {
-        let (stream, _) = listener.accept().await.map_err(|e| e.to_string())?;
+        let stream = listener.accept().await.map_err(|e| e.to_string())?;
         let state = state.clone();
         tokio::spawn(async move {
-            let (reader, mut writer) = stream.into_split();
+            let (reader, mut writer) = tokio::io::split(stream);
             let mut reader = BufReader::new(reader);
             let mut control_buf = Vec::new();
             let mut events = state.lock().await.events.subscribe();

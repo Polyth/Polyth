@@ -76,8 +76,8 @@ all. There are two ways to reach a server.
 
 - **Polyth Link.** On the other computer: Polyth Link → Pair device → *Copy pairing
   link*, because a computer cannot scan its own screen. The same invitation as the
-  QR code, with the same safety words and approval. It needs that server to have a
-  Link host, which Windows does not ship yet. The connection works across networks
+  QR code, with the same safety words and approval. Every desktop build ships the
+  Link host, Windows included (named-pipe IPC). The connection works across networks
   and keeps its device grants.
 - **By address.** Any server already open in a browser, such as an HTTPS origin.
   The page is that server's own code, and it signs in like any browser.
@@ -150,8 +150,11 @@ other's session cookie. This computer's session stays out of that, in both direc
 
 Live-tested only on Linux arm64 with debug binaries in an unpackaged Electron: pairing,
 Link and address sessions, restart, connect-only launch, client crash, revocation and
-blocked requests. `polyth-link-client` is type-checked for `x86_64-pc-windows-gnu`, not
-linked or run. No package, macOS or Windows window has run this. The `arm64` Windows
+blocked requests. `polyth-link-client` and `polyth-link-host` are type-checked for
+`x86_64-pc-windows-gnu`, not linked or run here; the `link-client-windows` CI job runs
+the client's stdio test and the host's named-pipe tests on a Windows runner. No
+package, macOS or Windows window has run this, and no phone has paired with a Windows
+host yet. The `arm64` Windows
 release carries the x64 client under emulation because that job builds on an x64 runner.
 
 ## Command-line tool
@@ -313,13 +316,13 @@ The renderer learns about updates only through the preload bridge: `onUpdateStat
 
 ## Workstation edition build
 
-The workstation edition is a local-only shell for coding harnesses on a managed work computer (rules and network endpoints: [workstation edition](../security/workstation-edition.md)). It is the same app (`com.polyth.desktop`, product name Polyth) built only for stable releases, for every desktop target, and published as extra assets on the same GitHub release. `scripts/ci/workstation.mjs` owns the build helpers; `remote-build.mjs` targets `mac-dmg-workstation` (arm64 and x64), `windows-exe-workstation` and `linux-appimage-workstation` run them.
+The workstation edition is a local-only shell for coding harnesses on a managed work computer (rules and network endpoints: [workstation edition](../security/workstation-edition.md)). It is the same app (`com.polyth.desktop`, product name Polyth) built for every desktop target and published as extra assets on the same GitHub release. `scripts/ci/workstation.mjs` owns the build helpers; `remote-build.mjs` targets `mac-dmg-workstation` (arm64 and x64), `windows-exe-workstation` and `linux-appimage-workstation` run them.
 
 - **Flavor.** `POLYTH_DESKTOP_FLAVOR=workstation` for `build:desktop`: `build.ts` bundles only packages whose manifest lists `"editions": ["workstation"]`, builds no Link binaries and removes `resources/chromium`. These targets skip `desktop:stage-chromium` and the Playwright download.
-- **electron-builder configuration.** `workstationBuilderArgs` derives a full config from the `build` field of `apps/desktop/package.json` and passes it as `--config <file>`. electron-builder 26 reads only that file in place of the `build` field (`app-builder-lib` `util/config/load.js`), so the file is complete; relative `from` paths still resolve against `apps/desktop`; later `--config.*` flags merge on top. The derived config names artifacts `Polyth-<v>-workstation-<os>-<arch>.<ext>`, drops the `chromium` and `polyth-link` extra resources, narrows the `packages` resource to `<id>/dist/web/**` and `<id>/assets/**` of workstation packages, excludes `node_modules/playwright-core/**` from the app files and sets the publish channel `workstation`. Output goes to `release/{mac-workstation-<arch>,win-workstation,linux-workstation}`.
+- **electron-builder configuration.** `workstationBuilderArgs` derives a full config from the `build` field of `apps/desktop/package.json` and passes it as `--config <file>`. electron-builder 26 reads only that file in place of the `build` field (`app-builder-lib` `util/config/load.js`), so the file is complete; relative `from` paths still resolve against `apps/desktop`; later `--config.*` flags merge on top. The derived config names artifacts `Polyth-<v>-<os>-<arch>-workstation.<ext>` (the edition after `<os>-<arch>`, so no standard-name filter can match it), drops the `chromium` and `polyth-link` extra resources, narrows the `packages` resource to `<id>/dist/web/**` and `<id>/assets/**` of workstation packages, excludes `node_modules/playwright-core/**` from the app files and sets the publish channel `workstation`. Output goes to `release/{mac-workstation-<arch>,win-workstation,linux-workstation}`.
 - **Package check.** After electron-builder, `assertWorkstationPackage` fails the job when the unpacked app has `resources/chromium`, any `resources/polyth-link` file, a `resources/packages/<dir>` outside the workstation list, or when `build-meta/main.metafile.json` (esbuild's inputs for `dist/main.js`) reads a feature package (`polyth.serverEntry`) outside the list or `playwright-core`.
 - **SBOM and sums.** `workstationSbom` writes a CycloneDX 1.5 document from the same metafile (every bundled `node_modules` package, Electron, the bundled OpenCode); `update-feed.mjs` adds `SHA256SUMS-workstation.txt` over every workstation asset.
-- **Updates.** The build reads `workstation*.yml` (channel `workstation`, prereleases off) from the latest stable release; see [release operations](../operations/releases.md#workstation-edition-assets). The Linux job runs the startup smoke test under Xvfb instead of `appimage-e2e.mjs`, which drives the Link host this edition does not ship.
+- **Updates.** The build reads `workstation*.yml` (channel `workstation`, prereleases off) from the latest stable release; see [release operations](../operations/releases.md#workstation-edition-assets). The Linux job runs the startup smoke test under Xvfb instead of `appimage-e2e.mjs`, which drives the Link host this edition does not ship. While the edition tracks devel, a nightly build replaces those assets on the newest stable release; the app code and its updater channel are unchanged.
 
 ## Window chrome and interaction
 

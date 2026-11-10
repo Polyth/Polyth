@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   assembleFeed,
+  assembleWorkstationFeed,
   channelMetadataAliases,
   channelOfVersion,
   electronBuilderFeedArgs,
@@ -306,13 +307,82 @@ test("the workstation edition joins stable releases as its own feed and never to
     assert.ok(!partial.files.includes("workstation-linux.yml"));
     assert.ok(partial.files.includes("workstation.yml"));
 
-    // Workstation products on a non-stable channel are refused.
-    for (const dir of ["products-mac-dmg-x64", "products-mac-dmg-arm64", "products-windows-exe", "products-linux-appimage"]) {
+    // Workstation products never enter a non-stable channel's standard feed; the
+    // edition is assembled separately for the nightly release (next test).
+    for (const dir of readdirSync(products)) {
       for (const file of readdirSync(join(products, dir))) {
-        if (file.endsWith(".yml")) writeFileSync(join(products, dir, file), readFileSync(join(products, dir, file), "utf8").replace("version: 0.1.86", "version: 0.1.86-nightly"));
+        if (!file.endsWith(".yml")) continue;
+        const path = join(products, dir, file);
+        writeFileSync(path, readFileSync(path, "utf8").replace(/^version: .*$/m, "version: 0.1.86-nightly"));
       }
     }
-    assert.throws(() => assembleFeed(products, feed, "nightly"), /Workstation products .* stable releases only, not nightly/);
+    const nightly = assembleFeed(products, feed, "nightly");
+    assert.ok(!nightly.files.some((file) => file.includes("workstation") || file.startsWith("SHA256SUMS")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a nightly build's workstation edition assembles as its own asset set", () => {
+  const root = mkdtempSync(join(tmpdir(), "update-feed-workstation-nightly-"));
+  try {
+    const version = "0.1.86-nightly";
+    const products = join(root, "products");
+    const put = (dir: string, name: string, content = "x") => {
+      mkdirSync(join(products, dir), { recursive: true });
+      writeFileSync(join(products, dir, name), content);
+    };
+    const single = (url: string) => `version: ${version}\nfiles:\n  - url: ${url}\n    sha512: a\n    size: 1\npath: ${url}\n`;
+    const file = (dir: string, name: string, blockmap = true) => {
+      put(dir, name, name);
+      if (blockmap) put(dir, `${name}.blockmap`, "bm");
+    };
+
+    // Nothing to assemble is not an error.
+    assert.equal(assembleWorkstationFeed(products, join(root, "none"), "nightly"), null);
+
+    put("products-windows-exe-workstation", "workstation.yml", single(`Polyth-${version}-win-x64-workstation.exe`));
+    file("products-windows-exe-workstation", `Polyth-${version}-win-x64-workstation.exe`);
+    put("products-windows-exe-workstation", `Polyth-${version}-workstation-sbom-win-x64.cdx.json`, "{}");
+    put("products-linux-appimage-workstation", "workstation-linux.yml", single(`Polyth-${version}-linux-x86_64-workstation.AppImage`));
+    file("products-linux-appimage-workstation", `Polyth-${version}-linux-x86_64-workstation.AppImage`, false);
+    put("products-linux-appimage-workstation", `Polyth-${version}-workstation-sbom-linux-x64.cdx.json`, "{}");
+    for (const arch of ["x64", "arm64"]) {
+      const zip = `Polyth-${version}-mac-${arch}-workstation.zip`;
+      const dmg = `Polyth-${version}-mac-${arch}-workstation.dmg`;
+      put(`products-mac-dmg-workstation-${arch}`, `workstation-mac.${arch}.partial.yml`,
+        `version: ${version}\nfiles:\n  - url: ${zip}\n    sha512: z\n    size: 1\n  - url: ${dmg}\n    sha512: d\n    size: 1\npath: ${zip}\n`);
+      file(`products-mac-dmg-workstation-${arch}`, zip);
+      file(`products-mac-dmg-workstation-${arch}`, dmg);
+      put(`products-mac-dmg-workstation-${arch}`, `Polyth-${version}-workstation-sbom-mac-${arch}.cdx.json`, "{}");
+    }
+
+    const out = join(root, "edition");
+    const result = assembleWorkstationFeed(products, out, "nightly");
+    assert.ok(result);
+    assert.equal(result.version, version);
+    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(result.files, [
+      `Polyth-${version}-linux-x86_64-workstation.AppImage`,
+      `Polyth-${version}-mac-arm64-workstation.dmg`, `Polyth-${version}-mac-arm64-workstation.dmg.blockmap`,
+      `Polyth-${version}-mac-arm64-workstation.zip`, `Polyth-${version}-mac-arm64-workstation.zip.blockmap`,
+      `Polyth-${version}-mac-x64-workstation.dmg`, `Polyth-${version}-mac-x64-workstation.dmg.blockmap`,
+      `Polyth-${version}-mac-x64-workstation.zip`, `Polyth-${version}-mac-x64-workstation.zip.blockmap`,
+      `Polyth-${version}-win-x64-workstation.exe`, `Polyth-${version}-win-x64-workstation.exe.blockmap`,
+      `Polyth-${version}-workstation-sbom-linux-x64.cdx.json`,
+      `Polyth-${version}-workstation-sbom-mac-arm64.cdx.json`,
+      `Polyth-${version}-workstation-sbom-mac-x64.cdx.json`,
+      `Polyth-${version}-workstation-sbom-win-x64.cdx.json`,
+      "SHA256SUMS-workstation.txt",
+      "workstation-linux.yml", "workstation-mac.yml", "workstation.yml",
+    ]);
+    assert.equal(metadataUrls(readFileSync(join(out, "workstation-mac.yml"), "utf8")).length, 4);
+    const sums = readFileSync(join(out, "SHA256SUMS-workstation.txt"), "utf8").trim().split("\n");
+    assert.deepEqual([...sums.map((line) => line.split("  ")[1])].sort(),
+      result.files.filter((file) => file !== "SHA256SUMS-workstation.txt"));
+
+    // A build only ever replaces assets of its own channel.
+    assert.throws(() => assembleWorkstationFeed(products, out, "stable"), /does not belong to the stable channel/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -129,7 +129,7 @@ test("lost prompt response records one durable unknown and never redispatches", 
       return {
         kind: "unknown",
         operationId,
-        message: "request accepted but response was lost",
+        message: "request accepted but response was lost (Bearer abcdefghijklmnop1234)",
       } satisfies MutationOutcome<Record<string, never>>;
     },
     abort: async () => undefined,
@@ -146,7 +146,14 @@ test("lost prompt response records one durable unknown and never redispatches", 
 
   await assert.rejects(
     () => sessions.send(created.id, { text: "run once" }),
-    (error: Error & { code?: string }) => error.code === "outcome-unknown",
+    (error: Error & { code?: string; details?: string }) => {
+      assert.equal(error.code, "outcome-unknown");
+      // The stable message stays; the harness's own words travel as
+      // redacted `details` for the client's "Copy error" report.
+      assert.match(error.message, /upstream outcome is unknown/);
+      assert.equal(error.details, "request accepted but response was lost (Bearer [redacted])");
+      return true;
+    },
   );
   await waitFor(async () => (await store.projection(created.id))?.status === "unknown");
 

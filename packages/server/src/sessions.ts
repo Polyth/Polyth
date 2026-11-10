@@ -66,6 +66,7 @@ import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
+import { redactSecrets } from "@polyth/plugins";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
   projectRepositories,
@@ -85,6 +86,7 @@ import {
   planAttachmentDelivery,
   projectAttachmentPdf,
   projectAttachmentText,
+  referenceAttachmentFile,
   resolveModelSelection,
   titleFromPrompt,
 } from "@polyth/harness-runtime";
@@ -1648,11 +1650,16 @@ export function createSessionService(deps: {
         retryability: "never",
       });
     }
+    // The harness's own words ("Claude Code did not confirm the operation
+    // (…)") travel as `details` for the person's "Copy error" report; the
+    // message stays the stable contract. Redacted and capped like a log line.
+    const details = outcome.message ? redactSecrets(outcome.message).slice(0, 600) : "";
     return Object.assign(new Error("upstream outcome is unknown; reconciliation is required"), {
       code: "outcome-unknown",
       operationId: outcome.operationId,
       mutationOutcome: "unknown",
       retryability: "never",
+      ...(details ? { details } : {}),
     });
   };
 
@@ -4168,6 +4175,7 @@ export function createSessionService(deps: {
         harnessName: inputs.harnessName,
         supportDeclared,
         projected,
+        referenceable: !inputs.remote || inputs.materializeAvailable,
       });
       if (plan.kind === "unsupported") {
         throw Object.assign(new Error(plan.reason), { code: plan.code });
@@ -7943,9 +7951,19 @@ export function createSessionService(deps: {
           }
           continue;
         }
-        const plan = planAttachmentDelivery({ ref, support, harnessName, supportDeclared, projected });
+        const referenceable = !project?.remote || Boolean(deps.attachments?.materialize);
+        const plan = planAttachmentDelivery({ ref, support, harnessName, supportDeclared, projected, referenceable });
         if (plan.kind === "unsupported") {
           throw Object.assign(new Error(plan.reason), { code: plan.code });
+        }
+        // Any format is accepted: what the engine cannot take as content is
+        // handed over by path, and the agent opens it or says it cannot.
+        const reference = (reason: string): string => referenceAttachmentFile({
+          path: ref.path!, ...(ref.mime ? { mime: ref.mime } : {}), size: ref.size, reason,
+        });
+        if (plan.kind === "file-reference") {
+          sections.push(reference(`${harnessName} cannot take this kind of file as message content`));
+          continue;
         }
         if (plan.kind !== "text-projection") { forwarded.push(ref); continue; }
         const projectRoot = await projects.get(proj.projectId);
@@ -7974,7 +7992,15 @@ export function createSessionService(deps: {
             bytes,
           });
         if (!projection.ok) {
-          throw Object.assign(new Error(projection.reason), { code: projection.code });
+          // A binary, non-UTF-8 or text-less file is still the person's
+          // upload: name it instead of refusing the whole turn.
+          if (!referenceable || ref.kind === "range") {
+            throw Object.assign(new Error(projection.reason), { code: projection.code });
+          }
+          sections.push(reference(plan.modality === "pdf"
+            ? "Polyth could not extract its text"
+            : "it is not plain text, so Polyth did not inline it"));
+          continue;
         }
         sections.push(projection.section);
       }

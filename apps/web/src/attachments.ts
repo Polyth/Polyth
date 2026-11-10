@@ -17,7 +17,7 @@ import {
   updateScopedDraftRecord,
 } from "./draftRecord.ts";
 
-export const MAX_PENDING_ATTACHMENTS = 16;
+export const MAX_PENDING_ATTACHMENTS = 50;
 const EMPTY: AttachmentRef[] = [];
 
 /** Browser-compatible UUID for attachment references. Some embedded WebViews
@@ -238,10 +238,39 @@ export async function attachProjectFile(
   return described;
 }
 
+/** Uploads in flight at once. A drop of dozens of files reads each one whole
+ *  into memory before sending it; a few at a time keeps a phone's memory and
+ *  its one connection usable while the rest wait their turn. */
+const UPLOAD_CONCURRENCY = 4;
+let uploadsRunning = 0;
+const uploadQueue: Array<() => void> = [];
+
+async function withUploadSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (uploadsRunning >= UPLOAD_CONCURRENCY) {
+    await new Promise<void>((resolve) => uploadQueue.push(resolve));
+  }
+  uploadsRunning += 1;
+  try {
+    return await run();
+  } finally {
+    uploadsRunning -= 1;
+    uploadQueue.shift()?.();
+  }
+}
+
 /** Store a desktop/pasted file under `_inbox/` and describe the stored copy,
  *  without adding it to any draft (a composer that keeps its own pills, such
- *  as an agent's page, takes the result). */
-export async function uploadInboxFile(
+ *  as an agent's page, takes the result). Any format is accepted. */
+export function uploadInboxFile(
+  projectId: string,
+  sessionId: string | null | undefined,
+  file: File,
+  displayName?: string,
+): Promise<AttachResult> {
+  return withUploadSlot(() => storeInboxFile(projectId, sessionId, file, displayName));
+}
+
+async function storeInboxFile(
   projectId: string,
   sessionId: string | null | undefined,
   file: File,
@@ -275,6 +304,12 @@ export async function attachUpload(
   displayName?: string,
 ): Promise<AttachResult> {
   const expectedScopeKey = scopedDraftCacheKey(sessionId);
+  const full = {
+    ok: false as const,
+    reason: tr("attachments.atMostValueAttachmentsPerMessage", { count: MAX_PENDING_ATTACHMENTS }),
+  };
+  // A file past the limit is refused before its bytes leave the device.
+  if (pendingAttachments(sessionId).length >= MAX_PENDING_ATTACHMENTS) return full;
   const uploaded = await uploadInboxFile(projectId, sessionId, file, displayName);
   if (!uploaded.ok) return uploaded;
   if (scopedDraftCacheKey(sessionId) !== expectedScopeKey) {

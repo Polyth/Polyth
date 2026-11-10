@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import type { AgentRuntime, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage, WorkspaceContext } from "@polyth/contracts";
 import { runtimeEventHasTurnContent } from "@polyth/contracts";
 import { createTodoToolTracker } from "@polyth/todos";
+import { redactSecrets } from "@polyth/plugins";
 import { agentBetaEnabled, attachmentModality, composeTurnPrompt, contextWindowTelemetry, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle, normalizeTokenUsage, resolveModelSelection, unsupportedAttachmentMessage } from "@polyth/harness-runtime";
 import type { EffortLevel, SDKUserMessage, Query, PermissionResult, Settings, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
@@ -74,6 +75,18 @@ export { claudeOverlays, createClaudeProvisioner } from "./provisioner.ts";
 export { claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache } from "./discovery.ts";
 type Sdk = Pick<typeof import("@anthropic-ai/claude-agent-sdk"), "query" | "getSessionInfo">;
 const claudeExecutable = (): string => process.env.POLYTH_CLAUDE_BIN ?? "claude";
+/** How much of a Claude Code process's stderr is kept for a start failure. */
+const STDERR_TAIL_CHARS = 2_048;
+/**
+ * A start failure in Claude Code's own words. The SDK reports only "process
+ * exited with code 1"; the reason (a refused gateway, a bad setting, a missing
+ * login) is on stderr. Its last lines join the message on one line, redacted,
+ * so the ledger and the person's "Copy error" report can name it.
+ */
+export const claudeStartFailureReason = (message: string, stderr: string): string => {
+    const tail = redactSecrets(stderr).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(-3).join(" · ");
+    return tail ? `${message} (stderr: ${tail.slice(-300)})` : message;
+};
 const protectClaudeMcpConfigArgs = (
     context: HarnessContext,
     args: readonly string[],
@@ -618,6 +631,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             ...(desiredAutoCompact ? {} : { autoCompactEnabled: false }),
         };
         appliedAutoCompact = desiredAutoCompact;
+        let stderrTail = "";
         try {
             query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: true,
                     // A private session leaves no transcript in
@@ -643,7 +657,10 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     spawnClaudeCodeProcess(options) {
                         const args = protectClaudeMcpConfigArgs(context, options.args, protectedMcpConfigFiles);
                         const child = authority.spawn(options.command, args, { cwd: options.cwd, env: options.env, signal: options.signal });
-                        child.stderr!.resume();
+                        // Drained as before; only a bounded tail is kept.
+                        child.stderr!.on("data", (chunk: Buffer | string) => {
+                            stderrTail = (stderrTail + String(chunk)).slice(-STDERR_TAIL_CHARS);
+                        });
                         return child as SpawnedProcess;
                     },
                     canUseTool: async (tool, input, options) => {
@@ -673,6 +690,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     target: launchTarget,
                     desiredRevision: staged.desiredRevision,
                 });
+            }
+            if (error instanceof Error && stderrTail) {
+                error.message = claudeStartFailureReason(error.message.split("\n", 1)[0]!.trim(), stderrTail);
             }
             throw error;
         }
@@ -1121,7 +1141,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             return { kind: "rejected", code: "unsupported", message: error instanceof Error ? error.message : "Claude Code refused the operation" };
         // Keep the native reason with the ledger entry: without it an
         // uncertain operation cannot be diagnosed after the fact.
-        const reason = error instanceof Error ? error.message.split("\n", 1)[0]!.trim().slice(0, 160) : "";
+        const reason = error instanceof Error ? error.message.split("\n", 1)[0]!.trim().slice(0, 400) : "";
         return { kind: "unknown", operationId, message: reason ? `Claude Code did not confirm the operation (${reason})` : "Claude Code did not confirm the operation" };
     } };
     const create: NonNullable<AgentRuntime["createSessionOperation"]> = async (request, operationId) => {

@@ -4,6 +4,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { resolveHostBinary, type HostBinaryResolution } from "./hostBinary.ts";
+import { isWindowsPipePath } from "./localIpc.ts";
 
 export { resolveHostBinary, hostExecutableName } from "./hostBinary.ts";
 export type { HostBinaryResolution, HostBinaryLookup } from "./hostBinary.ts";
@@ -56,6 +57,8 @@ function unavailableHost(resolution: HostBinaryResolution): LinkHostClient {
 }
 
 function unlinkSocket(path: string): void {
+  // A named pipe vanishes with its last handle; there is no file to remove.
+  if (isWindowsPipePath(path)) return;
   try { unlinkSync(path); } catch { /* stale or missing */ }
 }
 
@@ -79,11 +82,16 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
   if (!resolved.ok) return unavailableHost(resolved);
   const binary = resolved.path;
   unlinkSocket(opts.socketPath);
+  // Windows has no parent-death signal: the host exits when this stdin pipe
+  // closes, which the OS does however this process ends.
+  const ownerPipe = process.platform === "win32";
   const child: ChildProcess = spawn(binary, ["serve", opts.dataDir, opts.socketPath], {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [ownerPipe ? "pipe" : "ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   let spawnError: Error | undefined;
   child.once("error", (error) => { spawnError = error; });
+  child.stdin?.on("error", () => { /* the host already exited */ });
   child.stdout?.resume();
   child.stderr?.on("data", (chunk) => {
     const text = String(chunk);
@@ -122,14 +130,9 @@ export async function startLinkHost(opts: { dataDir: string; socketPath: string 
       close: terminate,
     };
   };
-  try {
-    await connectWhenReady(opts.socketPath, child, 12_000, () => spawnError);
-  } catch (error) {
-    return failedStart("host-start-failed", error);
-  }
   let socket: Socket;
   try {
-    socket = await connectSocket(opts.socketPath);
+    socket = await connectWhenReady(opts.socketPath, child, 12_000, () => spawnError);
   } catch (error) {
     return failedStart("host-start-failed", error);
   }
@@ -318,15 +321,28 @@ async function connectWhenReady(
   child: ChildProcess,
   timeoutMs: number,
   childError: () => Error | undefined,
-): Promise<void> {
+): Promise<Socket> {
   const started = Date.now();
-  while (!existsSync(path)) {
+  const pipe = isWindowsPipePath(path);
+  for (;;) {
     const error = childError();
     if (error) throw error;
     if (child.exitCode != null || child.signalCode) {
       throw new Error("polyth-link-host exited before the control socket was ready");
     }
     if (Date.now() - started > timeoutMs) throw new Error("polyth-link-host did not start");
+    // A pipe has no file to poll (stat would open an instance), so try to
+    // connect until the host has created it.
+    if (pipe) {
+      try {
+        return await connectSocket(path);
+      } catch (connectError) {
+        const code = (connectError as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "EBUSY") throw connectError;
+      }
+    } else if (existsSync(path)) {
+      return connectSocket(path);
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }

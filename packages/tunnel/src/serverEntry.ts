@@ -27,6 +27,7 @@ import { attachTunnelEventsWs, TunnelEventBus } from "./events.ts";
 import { buildTunnelDiagnostics, buildTunnelStatus, type TunnelLiveSnapshot } from "./status.ts";
 import { fallbackServerName, type TunnelServerNameDto } from "./serverName.ts";
 import { deviceBaseLabel, distinctDeviceLabels } from "./deviceLabel.ts";
+import { linkIpcPaths } from "./localIpc.ts";
 
 const OWNER_USER_ID = "usr_owner";
 
@@ -492,8 +493,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   let ingressSecret = randomIngressSecret();
   const socketDir = join(host.storageDir, "tunnel");
   mkdirSync(socketDir, { recursive: true });
-  const controlSocket = join(socketDir, "host.sock");
-  const ingressSocket = join(socketDir, "ingress.sock");
+  const { control: controlSocket, ingress: ingressSocket } = linkIpcPaths(socketDir);
   const nativePushAuthority: NativePushAuthorityService = {
     async hostEndpointId() {
       if (!lifecycle.ready || !linkHost?.available) return undefined;
@@ -624,7 +624,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       identityError = error instanceof Error ? error.message : "host-identity-unavailable";
       lastErrorCode = "host-identity-unavailable";
     }
-    const platformSupported = linkHost ? linkHost.platformSupported : process.platform !== "win32";
+    const platformSupported = linkHost ? linkHost.platformSupported : true;
     const hostAlive = Boolean(lifecycle.ready && linkHost?.available);
     let directConnections = 0;
     let relayConnections = 0;

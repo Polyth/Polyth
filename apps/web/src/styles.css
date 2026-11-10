@@ -718,8 +718,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding: 0;
   overflow: hidden;
   border-radius: var(--radius-card);
-  box-shadow: 0 4px 8px rgba(67, 78, 92, 0.16), 0 8px 16px rgba(55, 67, 82, 0.14);
-  color: #fff;
+  color: var(--text);
   text-align: start;
 }
 .sidebar-project-rail-tooltip-content {
@@ -752,7 +751,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-project-rail-tooltip-copy strong {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: #fff;
+  color: var(--text);
   font-size: var(--font-label);
   font-weight: 650;
   line-height: 1.25;
@@ -761,7 +760,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-project-rail-tooltip-copy > span {
   min-width: 0;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
   direction: ltr;
   font-family: var(--mono);
   font-size: var(--font-meta);
@@ -2679,6 +2678,89 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   border-color: var(--accent-line);
   box-shadow: var(--material-glass-highlight), var(--shadow-md), 0 0 0 3px var(--focus-wash);
 }
+/* File drop. While files are dragged anywhere over the window the composer
+   firms its contour (ready); over the card an accent sheet with the dashed
+   drop-target edge (styles.md, "Affordances keep their edge") says what a
+   release does. The sheet never takes the pointer, so the drag keeps landing
+   on the card, and it is always mounted so it fades out as well as in. */
+.composer-card { position: relative; }
+/* The ring is an outline, so every style recipe keeps its own rim and shadow;
+   the doubled class outranks a recipe's `html[data-theme-style] .composer-card`. */
+.composer-card.is-drop-ready.is-drop-ready {
+  border-color: var(--accent-line);
+  outline: 3px solid var(--focus-wash);
+  outline-offset: 0;
+}
+.composer-card.is-drop-target.is-drop-target {
+  border-color: var(--accent);
+  outline: 4px solid var(--accent-wash);
+  outline-offset: 0;
+}
+.composer-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: inherit;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--motion-fast) var(--motion-ease), visibility 0s linear var(--motion-fast);
+}
+.composer-drop-overlay::before {
+  content: "";
+  position: absolute;
+  inset: var(--space-1);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: max(0px, calc(var(--radius-composer) - var(--space-1)));
+}
+.composer-drop-overlay[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--motion-fast) var(--motion-ease), visibility 0s;
+}
+.composer-drop-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--accent-text);
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  transform: translateY(4px) scale(.92);
+  transition: transform var(--motion-normal) var(--motion-ease);
+}
+.composer-drop-mark .ui-icon,
+.composer-drop-mark svg { width: var(--icon-lg); height: var(--icon-lg); }
+.composer-drop-overlay[data-active="true"] .composer-drop-mark { transform: none; }
+.composer-drop-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.composer-drop-title {
+  font-size: var(--font-body);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.composer-drop-meta {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.composer-mobile.composer-collapsed .composer-drop-overlay { gap: var(--space-2); padding: 0 var(--space-3); }
+.composer-mobile.composer-collapsed .composer-drop-mark { width: 28px; height: 28px; }
+.composer-mobile.composer-collapsed .composer-drop-meta { display: none; }
 .composer-note {
   margin: var(--space-3) var(--space-3) 0;
   color: var(--text-dim);
@@ -6753,9 +6835,9 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   content: attr(data-tooltip); position: absolute; z-index: 30;
   inset-block-end: calc(100% + 7px); inset-inline-start: 50%;
   width: max-content; max-width: 220px; padding: 7px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-control);
-  background: #1a1a1a; color: #fff;
-  box-shadow: 0 4px 8px rgba(67, 78, 92, 0.16), 0 8px 16px rgba(55, 67, 82, 0.14);
+  border: 1px solid var(--material-glass-border); border-radius: var(--radius-control);
+  background: var(--material-glass); color: var(--text);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
   font-size: calc(var(--font-meta) + 2pt); font-weight: 500; line-height: var(--font-meta-lh); white-space: normal;
   opacity: 0; pointer-events: none; transform: translate(-50%, 3px);
   transition: opacity var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
@@ -12716,8 +12798,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
      row's item order; unmounting them here (rather than just visually) would
      lose their announcement, so keep them mounted but out of the row box. */
   .composer-mobile.composer-collapsed .composer-note,
-  .composer-mobile.composer-collapsed .composer-attach-note,
-  .composer-mobile.composer-collapsed .drop-hint {
+  .composer-mobile.composer-collapsed .composer-attach-note {
     display: none;
   }
   .composer-mobile.composer-collapsed .composer-rail { display: contents; }
@@ -17763,11 +17844,11 @@ body .ui-btn .ui-spinner {
   z-index: var(--z-tooltip);
   max-width: 280px;
   padding: 7px 11px;
-  background: #1a1a1a;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--material-glass);
+  border: 1px solid var(--material-glass-border);
   border-radius: var(--radius-control);
-  box-shadow: 0 4px 8px rgba(67, 78, 92, 0.16), 0 8px 16px rgba(55, 67, 82, 0.14);
-  color: #fff;
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+  color: var(--text);
   font-size: calc(var(--font-meta) + 2pt);
   font-weight: 500;
   line-height: var(--font-meta-lh);
@@ -17809,6 +17890,15 @@ body .ui-btn .ui-spinner {
       color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
     -webkit-backdrop-filter: blur(var(--material-glass-blur));
     backdrop-filter: blur(var(--material-glass-blur));
+  }
+  /* Small, close-to-anchor overlays: lighter blur reads better at this size
+     than the full sheet-grade amount. */
+  :is(.ui-tooltip) {
+    background: var(--material-glass-texture), radial-gradient(140% 140% at 50% 50%,
+      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-fill), transparent) 0%,
+      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
+    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
+    backdrop-filter: blur(calc(var(--material-glass-blur) * .7));
   }
   /* Chat-turn cards: one per assistant turn, not a repeated list row, so a
      lighter blur is worth the cost here (unlike the excluded list surfaces
@@ -17881,11 +17971,11 @@ body .ui-btn .ui-spinner {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .dialog-panel, .sheet, .workspace-customize-panel, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip){
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .ui-tooltip, .dialog-panel, .sheet, .workspace-customize-panel, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar, .composer-card, .ui-glass-island, .ui-glass-dock, .msg.user .bubble, .msg .bubble pre, .msg .bubble .md-code-block, .mobile-island-sheet.sheet, .task-list, .turn-rate-limit .turn-rate-limit-action, .turn-rate-limit .turn-rate-limit-model .picker-chip){
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
+  body[data-desktop-low-resource="true"] :is(.ui-popover, .picker-pop, .menu-popup, .ac-popup, .prompt-nav-panel, .selection-menu, .selection-dock, .ui-tooltip, .app > .header:not([data-top-rail-surface="floating"]), .sidebar, .railbar) { background: var(--sidebar-glass-surface, var(--material-glass)); }
   body[data-desktop-low-resource="true"] :is(.dialog-panel, .sheet, .composer-card, .workspace-customize-panel, .notify-card, .sync-catch-up){ background: var(--material-glass-strong); }
   body[data-desktop-low-resource="true"] .task-list { background: var(--surface-activity); }
   body[data-desktop-low-resource="true"] :is(.ui-glass-island, .ui-glass-dock) { background: var(--material-glass); }
@@ -19438,6 +19528,7 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
       .ui-popover,
       .picker-pop,
       .menu-popup,
+      .ui-tooltip,
       .turn-rate-limit .turn-rate-limit-action,
       .turn-rate-limit .turn-rate-limit-model .picker-chip,
       .jump-latest
@@ -19636,6 +19727,7 @@ body[data-glass="off"] :is(
   .prompt-nav-panel,
   .selection-menu,
   .selection-dock,
+  .ui-tooltip,
   .turn-rate-limit .turn-rate-limit-action,
   .turn-rate-limit .turn-rate-limit-model .picker-chip,
   .jump-latest

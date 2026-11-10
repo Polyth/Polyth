@@ -536,20 +536,40 @@ test("embedded context carries a text file as an ACP resource block", async () =
     }
 });
 
-test("embedded context rejects non-UTF-8 and NUL content", async () => {
+test("embedded context links non-UTF-8 and NUL content instead of refusing it", async () => {
     for (const [suffix, data] of [["invalid", Buffer.from([0xff])], ["nul", Buffer.from("a\0b")]] as const) {
-        const path = `/tmp/acp-${suffix}-${process.pid}.txt`;
+        const path = `/tmp/acp-${suffix}-${process.pid}.zip`;
         await writeFile(path, data);
         try {
-            const { rt } = await startedRuntime(configOptionsSession, { promptCapabilities: { embeddedContext: true } });
+            const { f, rt } = await startedRuntime(configOptionsSession, { promptCapabilities: { embeddedContext: true } });
             const outcome = await rt.startTurnOperation!({
                 sessionId: "canonical", text: "look",
-                attachments: [{ kind: "file", name: "bad.txt", path, mime: "text/plain" }],
+                attachments: [{ kind: "file", name: "bundle.zip", path, mime: "application/zip", size: data.length }],
             }, `submit-${suffix}`);
-            assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-attachment");
+            assert.notEqual(outcome.kind, "rejected");
+            const [prompt] = paramsOf(f, "session/prompt");
+            assert.equal(prompt.prompt.some((block: { type: string }) => block.type === "resource"), false);
+            assert.deepEqual(prompt.prompt.find((block: { type: string }) => block.type === "resource_link"), {
+                type: "resource_link", uri: `file://${path}`, name: "bundle.zip", mimeType: "application/zip", size: data.length,
+            });
         } finally {
             await rm(path, { force: true });
         }
+    }
+});
+
+test("embedded context still refuses a binary line range", async () => {
+    const path = `/tmp/acp-range-bin-${process.pid}.txt`;
+    await writeFile(path, Buffer.from("a\0b"));
+    try {
+        const { rt } = await startedRuntime(configOptionsSession, { promptCapabilities: { embeddedContext: true } });
+        const outcome = await rt.startTurnOperation!({
+            sessionId: "canonical", text: "look",
+            attachments: [{ kind: "range", name: "bad.txt", path, mime: "text/plain", range: [1, 1] }],
+        }, "submit-range-bin");
+        assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-attachment");
+    } finally {
+        await rm(path, { force: true });
     }
 });
 
@@ -587,7 +607,7 @@ test("embedded context honors a late line range with bounded canonical text", as
     }
 });
 
-test("embedded context rejects oversized files and symlink escapes", async () => {
+test("embedded context links an oversized file and rejects a symlink escape", async () => {
     const root = await mkdtemp(join(tmpdir(), "acp-safe-root-"));
     const outside = join(tmpdir(), `acp-outside-${process.pid}.txt`);
     const oversized = join(root, "oversized.txt");
@@ -602,13 +622,18 @@ test("embedded context rejects oversized files and symlink escapes", async () =>
             promptCapabilities: { embeddedContext: true },
         }, "Test Agent");
         await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: root }, "create");
-        for (const path of ["oversized.txt", "escape.txt"]) {
-            const outcome = await rt.startTurnOperation!({
-                sessionId: "canonical", text: "look",
-                attachments: [{ kind: "file", name: path, path, mime: "text/plain" }],
-            }, `submit-${path}`);
-            assert.equal(outcome.kind === "rejected" && outcome.code, "invalid-attachment");
-        }
+        const large = await rt.startTurnOperation!({
+            sessionId: "canonical", text: "look",
+            attachments: [{ kind: "file", name: "oversized.txt", path: "oversized.txt", mime: "text/plain" }],
+        }, "submit-oversized");
+        assert.notEqual(large.kind, "rejected");
+        const [prompt] = paramsOf(f, "session/prompt");
+        assert.equal(prompt.prompt.find((block: { type: string }) => block.type === "resource_link")?.name, "oversized.txt");
+        const escape = await rt.startTurnOperation!({
+            sessionId: "canonical", text: "look",
+            attachments: [{ kind: "file", name: "escape.txt", path: "escape.txt", mime: "text/plain" }],
+        }, "submit-escape");
+        assert.equal(escape.kind === "rejected" && escape.code, "invalid-attachment");
     } finally {
         await rm(root, { recursive: true, force: true });
         await rm(outside, { force: true });

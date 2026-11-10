@@ -96,6 +96,78 @@ test("the push service gets only the token and a payload without words, never fo
   assert.equal(relaySender("https://push.example.com/path"), undefined);
 });
 
+test("a send that never reached the push service is retried once; an uncertain one never; health changes are logged once", async () => {
+  const ios: Destination = { subscriptionId, version: 1, platform: "ios", environment: "production", providerToken: apnsToken };
+  const alert: DeliveryInput = { version: 1, subscriptionId, notificationId: "n-1", kind: "completed", tag: "t" };
+  const lines: string[] = [];
+  const replies: Array<() => Response> = [];
+  let calls = 0;
+  const unsent = (code: string) => () => { throw new TypeError("fetch failed", { cause: Object.assign(new Error(code), { code }) }); };
+  const ok = (result = "success") => () => new Response(JSON.stringify({ result }), { status: 200 });
+  const sender = relaySender("http://127.0.0.1:8787", async () => { calls++; return replies.shift()!(); }, { log: (line) => lines.push(line), retryDelayMs: 0 })!;
+
+  replies.push(unsent("ENOTFOUND"), ok());
+  assert.equal(await sender.deliver(ios, alert), "success", "DNS failure: retried and delivered");
+  assert.equal(calls, 2);
+  assert.deepEqual(lines, [], "a recovered retry is not a health change");
+
+  replies.push(unsent("ECONNREFUSED"), unsent("ECONNREFUSED"));
+  assert.equal(await sender.deliver(ios, alert), "transient");
+  assert.equal(calls, 4, "only one retry");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /not delivering: network ECONNREFUSED/);
+  assert.doesNotMatch(lines[0]!, new RegExp(apnsToken), "never logs the token");
+
+  replies.push(unsent("ECONNREFUSED"), unsent("ECONNREFUSED"));
+  await sender.deliver(ios, alert);
+  assert.equal(lines.length, 1, "the same trouble is reported once");
+
+  for (const reply of [unsent("ECONNRESET"), unsent("UND_ERR_HEADERS_TIMEOUT"), () => new Response("{}", { status: 502 })]) {
+    calls = 0;
+    replies.push(reply);
+    assert.equal(await sender.deliver(ios, alert), "transient");
+    assert.equal(calls, 1, "a send the service may have accepted is never repeated");
+  }
+
+  calls = 0;
+  replies.push(() => new Response("{}", { status: 503 }), ok());
+  assert.equal(await sender.deliver(ios, alert), "success", "503 is a refusal before any provider call");
+  assert.equal(calls, 2);
+  assert.match(lines.at(-1)!, /delivers again/);
+
+  replies.push(ok("config"));
+  assert.equal(await sender.deliver(ios, alert), "config");
+  assert.match(lines.at(-1)!, /no APNs credential/);
+  replies.push(ok("permanent"));
+  assert.equal(await sender.deliver(ios, alert), "permanent");
+  assert.match(lines.at(-1)!, /delivers again/, "a dead token proves the service works");
+});
+
+test("send reaches every device at once: one slow phone does not hold the others", async () => {
+  const persisted = file();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const delivered: string[] = [];
+  const slow = "b".repeat(64);
+  const relay: PushSender = {
+    async deliver(destination) {
+      if (destination.providerToken === slow) await gate;
+      delivered.push(destination.providerToken);
+      return "success";
+    },
+    async deliverActivity() { return "success"; },
+  };
+  const authority = () => ({ hostEndpointId: async () => "host-endpoint", validate: async (input: typeof alice) => input.userId === alice.userId });
+  const service = createNativePushService({ file: persisted, relay, authority });
+  await service.register({ ...alice, deviceId: "slow-phone", deviceEndpointId: "slow-endpoint", subscriptionId: `sub_${"s".repeat(22)}`, providerToken: slow, environment: "production" });
+  await service.register({ ...alice, subscriptionId, providerToken: apnsToken, environment: "production" });
+  const sending = service.send({ userId: alice.userId, spaceId: alice.spaceId, ...send });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(delivered, [apnsToken], "the fast phone got it while the slow one is still pending");
+  release();
+  assert.deepEqual(await sending, { sent: 2 });
+});
+
 test("account removal drops its devices; relay-claim entries from older servers are dropped on load", async () => {
   const persisted = file();
   const relay = new FakeSender();

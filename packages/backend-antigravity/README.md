@@ -182,7 +182,7 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   before the turn's first model call. The prompt also lists every staged path
   and link, so a model can open one itself if a CLI version ignores injected
   steps. Ref paths must resolve (after symlinks) inside the session workspace
-  or its selected repository; limits are 16 attachments, 64 MB per file and
+  or its selected repository; limits are 50 attachments (the turn limit), 64 MB per file and
   128 MB per message, and the newest 24 turn directories are retained so a later
   turn can reopen an earlier attachment. Text files keep Polyth's server-side
   text projection. `agy models` reports no modalities, so the catalog uses a

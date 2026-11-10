@@ -14,6 +14,20 @@ export const canExecute = (row: HarnessSnapshot): boolean => row.policy.enabled
   && !["auth-required", "setup-required", "partially-configured", "incompatible", "offline", "not-installed"]
     .includes(row.availability.state);
 
+/** The snapshot rows each account/Space/project scope last received in this
+ *  page. ModelPicker mounts its header slot only while the popover is open,
+ *  so component state does not survive a close; an invalidation empties the
+ *  shared caches. Without this, a reopen right after one had no availability
+ *  to filter by and painted harnesses that cannot run until the probe
+ *  answered. Presentation only: the switch boundary re-verifies readiness. */
+const lastSnapshotsByScope = new Map<string, HarnessSnapshot[]>();
+const LAST_SNAPSHOT_SCOPES = 16;
+const rememberScopeSnapshots = (scope: string, rows: HarnessSnapshot[]) => {
+  lastSnapshotsByScope.delete(scope);
+  lastSnapshotsByScope.set(scope, rows);
+  while (lastSnapshotsByScope.size > LAST_SNAPSHOT_SCOPES) lastSnapshotsByScope.delete(lastSnapshotsByScope.keys().next().value!);
+};
+
 /** `settings`: the Harnesses page revalidates instead of trusting stored rows,
  *  and its selected harness waits for a native readiness check. The picker
  *  keeps painting cached metadata. */
@@ -45,6 +59,7 @@ export function useHarnesses(projectId?: string | null, spaceId?: string, harnes
       }
       if (seq !== requestSeq.current) return;
       setResult({ key, scope, rows });
+      rememberScopeSnapshots(scope, rows);
       setError("");
       setUnreachable(false);
     } catch (cause) {
@@ -75,7 +90,8 @@ export function useHarnesses(projectId?: string | null, spaceId?: string, harnes
   // a different scope falls back to nothing rather than showing foreign rows.
   const rows = result?.key === key
     ? result.rows
-    : peekHarnessSnapshots({ projectId, spaceId }) ?? (result?.scope === scope ? result.rows : []);
+    : peekHarnessSnapshots({ projectId, spaceId })
+      ?? (result?.scope === scope ? result.rows : lastSnapshotsByScope.get(scope) ?? []);
   const roster = rosterResult?.key === key
     ? rosterResult.rows
     : peekHarnessRoster({ projectId, spaceId }) ?? (rosterResult?.scope === scope ? rosterResult.rows : []);

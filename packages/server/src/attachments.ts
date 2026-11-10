@@ -3,7 +3,7 @@
 // service where the project root is known.
 import { parseBrowserContext, type AttachmentRef, type BrowserContext } from "@polyth/contracts";
 
-const MAX_ATTACHMENTS = 16;
+const MAX_ATTACHMENTS = 50;
 export const MAX_TURN_ATTACHMENTS = MAX_ATTACHMENTS;
 const NAME_MAX = 200;
 const MIME_RE = /^[\w.+-]+\/[\w.+-]+$/;

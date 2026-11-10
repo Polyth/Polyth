@@ -145,7 +145,7 @@ html[data-theme-style="fluent"] body[data-glass="clear"] {
   --material-glass-mobile-chrome-fill: 64%;
   --material-glass-mobile-chrome-edge: 64%;
 }
-html[data-theme-style="fluent"] :is(.ui-popover, .picker-pop, .menu-popup, .selection-menu, .prompt-nav-panel) {
+html[data-theme-style="fluent"] :is(.ui-popover, .picker-pop, .menu-popup, .ui-tooltip, .selection-menu, .prompt-nav-panel) {
   --material-glass-texture: var(--fluent-acrylic-noise);
 }
 /* Mica for the window chrome: the base colour, opaque enough to read as a
