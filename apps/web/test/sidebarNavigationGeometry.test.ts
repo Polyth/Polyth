@@ -56,9 +56,12 @@ test("sidebar geometry links worktree and session type while density controls ro
     "--nav-branch-size",
     "--nav-session-size",
     "--nav-meta-size",
-    "--nav-indent-project: 0px",
-    "--nav-indent-worktree: 8px",
-    "--nav-indent-session: 2px",
+    "--nav-gutter: 8px",
+    "--nav-glyph-inset: 8px",
+    "--nav-text-inset: 32px",
+    "--nav-indent-project: var(--nav-glyph-inset)",
+    "--nav-indent-worktree: var(--nav-glyph-inset)",
+    "--nav-indent-session: var(--nav-glyph-inset)",
   ]) assert.ok(css.includes(variable), `${variable} is part of the sidebar geometry contract`);
 
   assert.match(css, /--nav-project-size:\s*var\(--subheader-font-size,\s*16px\)/);
@@ -75,10 +78,10 @@ test("sidebar geometry links worktree and session type while density controls ro
     "the active project does not receive a row highlight");
   assert.match(css, /\.session-row\.active \.session-btn::before\s*\{[\s\S]*?inset-block:\s*0;[\s\S]*?inset-inline:\s*calc\(var\(--session-body-start\) - var\(--session-pill-inset\)\) -2px;/,
     "the active session highlight is taller and wider than its hover surface");
-  // Horizontal rhythm: the state column starts 2px into the row, the pill
-  // overhangs it by the 6px inset and the title follows one 6px gap later.
-  // Children, rename text and "show more" all share the title axis.
-  assert.match(css, /\.session-org\s*\{[\s\S]*?--session-lead-gap:\s*6px;[\s\S]*?--session-pill-inset:\s*6px;/);
+  // Horizontal rhythm (one grid with the header rows): the pill starts at the
+  // row box, the state mark one glyph inset in and the title on the text
+  // axis. Children, rename text and "show more" all share the title axis.
+  assert.match(css, /\.session-org,\s*\.private-room-row,\s*\.private-room-chats\s*\{[\s\S]*?--session-lead-gap:\s*calc\(var\(--nav-text-inset\) - var\(--nav-glyph-inset\) - var\(--session-lead-size\)\);[\s\S]*?--session-pill-inset:\s*var\(--nav-glyph-inset\);/);
   assert.match(css, /\.session-row\s*\{[\s\S]*?--session-body-start:\s*var\(--nav-session-row-indent, var\(--nav-indent-session\)\);/);
   assert.match(css, /\.session-subagent-children\s*\{[\s\S]*?--nav-session-row-indent:\s*calc\(var\(--nav-indent-session\) \+ var\(--session-lead-size\) \+ var\(--session-lead-gap\)\);/,
     "a child's state mark sits under its parent's title");
@@ -90,8 +93,8 @@ test("sidebar geometry links worktree and session type while density controls ro
   // A day caption labels the group beneath it: the gap above is density air,
   // the gap below is a hairline, so a chat cannot read as the next day's.
   assert.match(css, /\.session-date-divider\s*\{[\s\S]*?padding:\s*calc\(var\(--space-2\) \* var\(--density-scale\)\) var\(--space-2\) 1px;/, "a date heading sits closer to its own day than to the one above");
-  assert.match(css, /\.session-row-body\s*\{[\s\S]*?padding-inline:\s*var\(--session-body-start\) 4px;/,
-    "row geometry is logical so RTL mirrors it, and rows use their full width at rest");
+  assert.match(css, /\.session-row-body\s*\{[\s\S]*?padding-inline:\s*var\(--session-body-start\) 10px;/,
+    "row geometry is logical so RTL mirrors it; trailing meta ends 10px inside the row, like the header rows");
   // The ⋯ trigger never paints over the title or the subagent disclosure:
   // whenever it is shown it takes its own trailing slot.
   assert.match(css, /--session-menu-slot:\s*calc\(2px \+ var\(--session-menu-size\)\);/);

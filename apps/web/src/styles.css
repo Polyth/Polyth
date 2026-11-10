@@ -593,9 +593,15 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   /* Projects and worktrees retain their visual nesting. A session row starts
      with its compact state column, so the indent is where that column begins;
      the title follows one column and one gap later. */
-  --nav-indent-project: 0px;
-  --nav-indent-worktree: 8px;
-  --nav-indent-session: 2px;
+  /* One horizontal grid for every navigator row, header and list alike: a row
+     (and its highlight pill) runs gutter to gutter, its glyph starts one inset
+     in (16px from the edge) and its text on one axis (40px). */
+  --nav-gutter: 8px;
+  --nav-glyph-inset: 8px;
+  --nav-text-inset: 32px;
+  --nav-indent-project: var(--nav-glyph-inset);
+  --nav-indent-worktree: var(--nav-glyph-inset);
+  --nav-indent-session: var(--nav-glyph-inset);
   --nav-row-project: 56px;
   --nav-row-branch: 50px;
   --nav-row-session: 48px;
@@ -970,25 +976,36 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-service-bar {
   position: relative;
   z-index: 20;
-  min-height: 52px;
+  min-height: 36px;
   display: flex;
   align-items: center;
-  gap: 2px;
-  /* One row at every sidebar width: a hair more top padding than the original
-     6px keeps the controls off the project header without opening a dead band
-     above the session list. The tight 2px gap is what buys the search field
-     enough text room for its full placeholder beside the 36px actions. */
-  padding: max(8px, var(--safe-top)) 8px 6px;
+  gap: 6px;
+  /* Navigator header row 1, one row at every width: [collapse 28] [search]
+     [filter 32]. The 4px top puts the first baseline about 8px under the
+     block's top; the rows below (New chat, package actions) carry the divider. */
+  padding: max(4px, var(--safe-top)) var(--nav-gutter) 6px;
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
 }
+.sidebar-service-bar:has(+ .sidebar-nav-block) {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.sidebar-service-bar .sidebar-collapse {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  flex: none;
+  color: var(--muted);
+}
+.sidebar-service-bar .sidebar-collapse svg { width: 16px; height: 16px; }
 .sidebar-search {
   position: relative;
   /* The field must keep enough text room for "Search sessions…" (measured at
      116.8px at the 13.02px UI size). The live budget at the default 281px
      sidebar is ~119px, so the padding below — not the label — is what yields. */
   min-width: 96px;
-  height: 40px;
+  height: 36px;
   display: flex;
   align-items: center;
   flex: 1 1 auto;
@@ -1076,6 +1093,13 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .sidebar-new-session:hover:where(:not(:disabled)),
   .sidebar-list-options:hover:where(:not(:disabled)) { background: var(--elevated); color: var(--text); }
 }
+/* Wide toolbar: a 32px target whose 16px glyph sits 16px from the block edge. */
+.sidebar-service-bar .sidebar-list-options {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+}
+.sidebar-service-bar .sidebar-list-options svg { width: 16px; height: 16px; }
 .sidebar-service-bar .sidebar-list-options.active { color: var(--accent); background: var(--accent-wash); }
 .sidebar-drawer-tool.sidebar-select-toggle.active { color: var(--accent); background: var(--accent-wash); }
 /* An active toggle stays visibly on under the pointer, one wash stronger. */
@@ -1086,6 +1110,132 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-service-bar .sidebar-new-session { color: var(--accent); }
 @media (hover: hover) {
   .sidebar-service-bar .sidebar-new-session:hover:where(:not(:disabled)) { color: var(--text); }
+}
+/* Navigator header rows under row 1 (Sidebar.tsx `sidebar-nav-block`): the
+   full-width New chat, then the chosen package actions. Every row is a pill
+   from gutter to gutter with its 16px glyph at the glyph inset and its label
+   on the text axis, like the list below. Labels keep an 18px line at 13px:
+   a line-height of 1 clips descenders under the ellipsis overflow. */
+.sidebar-nav-block {
+  position: relative;
+  z-index: 19;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px var(--nav-gutter) 8px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.sidebar-nav-block + .side-scroll { padding-block-start: var(--space-2); }
+.sidebar-nav-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  margin: 0;
+  padding: 0 10px 0 var(--nav-glyph-inset);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: calc(var(--ui-font-size, 14px) * .93);
+  font-weight: 600;
+  line-height: 1.385;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.sidebar-nav-glyph {
+  display: grid;
+  flex: none;
+  place-items: center start;
+  width: calc(var(--nav-text-inset) - var(--nav-glyph-inset));
+  height: 16px;
+}
+.sidebar-nav-glyph svg { width: 16px; height: 16px; }
+.sidebar-nav-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-nav-new {
+  height: 36px;
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.sidebar-nav-hint {
+  flex: none;
+  margin-inline-start: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: currentColor;
+  font: 550 calc(var(--ui-font-size, 14px) * .82)/1.5 var(--ui-font-family);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+  opacity: .62;
+}
+.sidebar-nav-actions {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* The block's edit menu rides the first row's trailing edge (the child
+   selector outranks the icon button's own `position: relative`). */
+.sidebar-nav-actions > .sidebar-nav-actions-edit {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  color: var(--muted);
+}
+.sidebar-nav-actions-edit svg { width: 14px; height: 14px; }
+.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-row:first-child { padding-inline-end: 34px; }
+@media (hover: hover) {
+  .sidebar-nav-new:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .sidebar-nav-action:hover:where(:not(:disabled)),
+  .sidebar-nav-action[aria-expanded="true"] { background: var(--elevated); color: var(--text); }
+  .sidebar-nav-actions-edit:hover:where(:not(:disabled)) { background: var(--elevated); color: var(--text); }
+}
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-nav-actions-edit { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+  .sidebar-nav-actions:hover .sidebar-nav-actions-edit,
+  .sidebar-nav-actions:focus-within .sidebar-nav-actions-edit,
+  .sidebar-nav-actions-edit[aria-expanded="true"] { opacity: 1; }
+}
+/* Collapsed navigator rails: a soft square New chat under the expand toggle,
+   then a short divider before the project glyphs. */
+.sidebar .sidebar-rail-new-chat {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  flex: none;
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.sidebar .sidebar-rail-new-chat svg { width: 18px; height: 18px; }
+@media (hover: hover) {
+  .sidebar .sidebar-rail-new-chat:hover:where(:not(:disabled)) {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+  }
+}
+.sidebar-rail-divider {
+  display: block;
+  flex: none;
+  width: 22px;
+  height: 1px;
+  background: var(--surface-divider);
 }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -0.022em; font-size: var(--font-label); }
 .brand i {
@@ -1114,7 +1264,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .icon-btn:hover:where(:not(:disabled)) { color: var(--text); }
 }
 
-.side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-block: var(--space-3) var(--space-2); padding-inline: var(--space-2) var(--space-1); }
+.side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-block: var(--space-3) var(--space-2); padding-inline: var(--nav-gutter); }
 
 /* Title-first project tree. Indents are absolute within the sidebar content. */
 .project-card-shell {
@@ -1197,7 +1347,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   isolation: isolate;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 0;
   width: 100%;
   min-width: 0;
   min-height: var(--nav-row-project);
@@ -1225,7 +1375,13 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.project-card::before { left: calc(var(--nav-indent-project) - 4px); }
+.project-card::before { left: calc(var(--nav-indent-project) - var(--nav-glyph-inset)); }
+/* The glyph column ends where the text axis starts; the 17px folder (or a
+   19px project image) sits at its start. */
+.project-card > .project-glyph {
+  width: calc(var(--nav-text-inset) - var(--nav-glyph-inset));
+  justify-items: start;
+}
 .project-card > * { position: relative; z-index: 1; }
 @media (hover: hover) {
   .project-card:hover:where(:not(:disabled)) { background: transparent; }
@@ -1330,7 +1486,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-height: 34px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 0;
   margin-top: 6px;
   padding: 0 4px 0 var(--nav-indent-project);
   border: 0;
@@ -1343,7 +1499,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 @media (hover: hover) {
   .sidebar-add-project:hover:where(:not(:disabled)) { background: var(--elevated); color: var(--text); }
 }
-.sidebar-add-project svg { width: 15px; height: 15px; flex: none; }
+.sidebar-add-project svg { width: 16px; height: 16px; flex: none; margin-inline-end: calc(var(--nav-text-inset) - var(--nav-glyph-inset) - 16px); }
 
 /* Project-rail presentation: the selected project's identity and complete
    session tree own the detail pane; other projects stay in the narrow rail. */
@@ -1357,7 +1513,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-height: 54px;
   padding-inline: var(--space-2) var(--space-1);
 }
-.sidebar-focused-project > .project-card-shell .project-glyph { display: none; }
+.sidebar-focused-project:not([data-tools]) > .project-card-shell .project-glyph { display: none; }
 .sidebar-focused-project > .project-card-shell .project-name {
   font-size: var(--subheader-font-size);
   font-weight: 680;
@@ -1387,20 +1543,33 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   /* Padding, not margin, keeps the content where it was while the divider
      runs edge to edge like the toolbar row's. */
   margin: 0;
-  padding: max(var(--space-1), var(--safe-top)) var(--space-1) 0;
+  padding: max(4px, var(--safe-top)) var(--nav-gutter) 0;
 }
-.sidebar-focused-project[data-tools] > .project-card-shell .project-card { min-height: 48px; }
+.sidebar-focused-project[data-tools]:has(+ .sidebar-nav-block) > .project-card-shell { border-bottom: 0; }
+.sidebar-focused-project[data-tools] > .project-card-shell .project-card {
+  min-height: 44px;
+  padding-inline: var(--nav-glyph-inset) 4px;
+}
+.sidebar-focused-project[data-tools] .project-actions { gap: 0; }
+.sidebar-focused-project[data-tools] :is(.sidebar-header-tool, .project-menu-btn) {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+}
+.sidebar-focused-project[data-tools] :is(.sidebar-header-tool, .project-menu-btn) svg { width: 16px; height: 16px; }
+/* Searching, the toolbar takes the project row's place at its exact height,
+   so the rows below never jump. */
 .sidebar-service-bar[data-rail] {
-  min-height: 0;
-  padding-block: max(var(--space-1), var(--safe-top)) var(--space-2);
+  min-height: calc(max(4px, var(--safe-top)) + 44px);
+  padding-block: max(4px, var(--safe-top)) 0;
 }
-:is(.sidebar-focused-project[data-tools], .sidebar-service-bar[data-rail]) + .side-scroll {
+.sidebar-service-bar[data-rail]:not(:has(+ .sidebar-nav-block)) { padding-block-end: var(--space-2); }
+:is(.sidebar-focused-project[data-tools], .sidebar-service-bar[data-rail], .sidebar-nav-block) + .side-scroll {
   padding-block-start: var(--space-2);
 }
 .sidebar-header-tools { display: inline-flex; align-items: center; }
 /* Same box, glyph and hover as the row's ⋮ (.project-menu-btn). */
 .sidebar-header-tool svg { width: var(--icon-sm); height: var(--icon-sm); }
-.sidebar-header-tool.sidebar-header-compose { color: var(--accent); }
 .project-actions .sidebar-header-tool[aria-expanded="true"] { color: var(--text); background: var(--panel); }
 .sidebar-header-tool.active { color: var(--accent); background: var(--accent-wash); }
 @media (hover: hover) {
@@ -1529,8 +1698,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .private-room-row,
 .private-room-chats {
   --session-lead-size: calc(var(--nav-session-size, 15px) * .94);
-  --session-lead-gap: 6px;
-  --session-pill-inset: 6px;
+  /* The state mark starts at the glyph inset and the title on the text axis. */
+  --session-lead-gap: calc(var(--nav-text-inset) - var(--nav-glyph-inset) - var(--session-lead-size));
+  --session-pill-inset: var(--nav-glyph-inset);
   /* Trailing footprint the ⋯ trigger claims while it is shown (its inset +
      target); the grid's column gap keeps the title clear of it. */
   --session-menu-size: 28px;
@@ -1612,7 +1782,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
      mirrors the state mark's inset inside the highlight. The ⋯ trigger takes
      --session-menu-slot only while it is shown (rules below). */
   padding-block: 0;
-  padding-inline: var(--session-body-start) 4px;
+  /* Trailing meta ends 10px inside the pill. */
+  padding-inline: var(--session-body-start) 10px;
   color: var(--text);
   font-size: var(--nav-session-size);
   line-height: 1.32;
@@ -1946,7 +2117,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
     display: flex;
     visibility: hidden;
   }
-  .session-row.has-subagents:is(:hover, :has(:focus-visible), .menu-open) .session-row-body { padding-inline-end: 4px; }
+  .session-row.has-subagents:is(:hover, :has(:focus-visible), .menu-open) .session-row-body { padding-inline-end: 10px; }
 }
 .session-menu-trigger[aria-expanded="true"] { color: var(--text); background: var(--panel); }
 @media (hover: hover) {
@@ -5191,7 +5362,7 @@ body[data-density="compact"] .sidebar {
   --nav-row-session: 30px;
 }
 html[data-density="compact"] .sidebar .side-scroll,
-body[data-density="compact"] .sidebar .side-scroll { padding-block: 6px 2px; padding-inline: 6px 4px; }
+body[data-density="compact"] .sidebar .side-scroll { padding-block: 6px 2px; padding-inline: var(--nav-gutter); }
 html[data-density="compact"] .sidebar .side-search,
 body[data-density="compact"] .sidebar .side-search { margin-top: 8px; margin-bottom: 3px; }
 html[data-density="compact"] .sidebar .side-label,
@@ -5203,7 +5374,7 @@ body[data-density="balanced"] .sidebar {
   --nav-row-session: 32px;
 }
 html[data-density="balanced"] .sidebar .side-scroll,
-body[data-density="balanced"] .sidebar .side-scroll { padding-block: 7px 3px; padding-inline: 7px 4px; }
+body[data-density="balanced"] .sidebar .side-scroll { padding-block: 7px 3px; padding-inline: var(--nav-gutter); }
 html[data-density="balanced"] .sidebar .side-search,
 body[data-density="balanced"] .sidebar .side-search { margin-top: 9px; margin-bottom: 3px; }
 html[data-density="balanced"] .sidebar .side-label,
@@ -5215,7 +5386,7 @@ body[data-density="comfortable"] .sidebar {
   --nav-row-session: 34px;
 }
 html[data-density="comfortable"] .sidebar .side-scroll,
-body[data-density="comfortable"] .sidebar .side-scroll { padding-block: 8px 4px; padding-inline: 8px 4px; }
+body[data-density="comfortable"] .sidebar .side-scroll { padding-block: 8px 4px; padding-inline: var(--nav-gutter); }
 html[data-density="comfortable"] .sidebar .side-search,
 body[data-density="comfortable"] .sidebar .side-search { margin-top: 10px; margin-bottom: 4px; }
 html[data-density="comfortable"] .sidebar .side-label,
@@ -10461,7 +10632,7 @@ min-height: var(--tap);
 }
 
 /* Sessions drawer --------------------------------------------------------- */
-.side-scroll { padding: 6px 6px max(14px, var(--safe-bottom)); }
+.side-scroll { padding: 6px var(--nav-gutter) max(14px, var(--safe-bottom)); }
 .project-menu-btn svg { width: 16px; height: 16px; }
 .session-pagination {
   display: flex;
@@ -10728,8 +10899,8 @@ width: 44px;
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.sidebar-service-bar { padding-top: max(8px, var(--safe-top)); }
-  .side-scroll { padding-inline: 8px; }
+.sidebar-service-bar { padding-top: max(4px, var(--safe-top)); }
+  .side-scroll { padding-inline: var(--nav-gutter); }
   .composer-simple .composer-card { border-radius: var(--radius-sheet); }
   .composer-simple .composer-actions { flex-wrap: nowrap; }
   .composer-simple .composer-actions .icon-btn { width: 42px; height: 42px; }
@@ -14094,9 +14265,9 @@ button[aria-busy="true"] { position: relative; }
   .session-row:not(.menu-open) { overflow: hidden; border-radius: var(--radius-control); }
   .session-menu-trigger { inset-inline-end: 0; width: var(--tap); height: var(--tap); }
   .sidebar .session-org { --session-menu-slot: var(--tap); }
-  /* The swipe clip ends the highlight at the row box, so the state column
-     moves in by the overhang to keep the same inset inside the pill. */
-  .sidebar { --nav-indent-session: 6px; --nav-indent-worktree: 12px; }
+  /* The swipe clip ends the highlight at the row box; the pill already starts
+     at the row box (--session-pill-inset = --nav-glyph-inset), so the grid
+     tokens need no override here. */
 }
 
 

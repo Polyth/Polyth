@@ -91,8 +91,9 @@ async function mount(element: ReturnType<typeof createElement>) {
 const buttonNamed = (scope: ParentNode, name: string) =>
   [...scope.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === name);
 
-test("the select toggle sits left of the search field and ends selection on Escape", async () => {
-  // The tree's toolbar row; the desktop rail selects from the project's ⋮ menu.
+test("the wide toolbar selects from its list options and ends selection on Escape", async () => {
+  // The tree's toolbar row is [collapse] [search] [filter]: selection is a
+  // list option there (the desktop rail selects from the project's ⋮ menu).
   setSidebarViewMode("tree");
   applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
   activateProject("p1");
@@ -101,15 +102,18 @@ test("the select toggle sits left of the search field and ends selection on Esca
     session({ id: "s-b", title: "Beta" }),
   ]);
   const { container, unmount } = await mount(createElement(Sidebar));
+  const selectEntry = async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>(".sidebar-service-bar .sidebar-list-options")!.click());
+    return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((item) => /^(Select sessions|Cancel)/.test(item.textContent?.trim() ?? ""));
+  };
   try {
-    const toggle = container.querySelector<HTMLButtonElement>(".sidebar-service-bar .sidebar-select-toggle");
-    assert.ok(toggle, "the toggle is rendered without opening a menu");
-    assert.equal(toggle!.nextElementSibling?.className, "sidebar-search", "it sits left of the search field");
-    assert.equal(toggle!.getAttribute("aria-pressed"), "false");
+    assert.equal(container.querySelector(".sidebar-service-bar .sidebar-select-toggle"), null,
+      "the wide toolbar has no select toggle of its own");
     assert.equal(container.querySelector(".session-bulk-actions"), null);
-
-    await act(async () => toggle!.click());
-    assert.equal(toggle!.getAttribute("aria-pressed"), "true");
+    const start = await selectEntry();
+    assert.equal(start?.textContent?.trim(), "Select sessions", "the list options offer selection");
+    await act(async () => start!.click());
     assert.ok(container.querySelector(".session-bulk-actions"));
     const checks = container.querySelectorAll<HTMLInputElement>(".session-check");
     assert.equal(checks.length, 2);
@@ -131,7 +135,6 @@ test("the select toggle sits left of the search field and ends selection on Esca
     });
     assert.equal(container.querySelector(".session-bulk-actions"), null);
     assert.equal(container.querySelectorAll(".session-check").length, 0);
-    assert.equal(toggle!.getAttribute("aria-pressed"), "false");
   } finally {
     await unmount();
     setSidebarViewMode("rail");

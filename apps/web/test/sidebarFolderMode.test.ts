@@ -154,8 +154,10 @@ for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact 
         }
       }
       if (presentation.includes("rail")) {
+        // Wide rails start chats from the full-width New chat row under the
+        // project row; the compact drawer keeps its toolbar compose button.
         const compose = container.querySelector<HTMLButtonElement>(presentation === "compact rail"
-          ? ".sidebar-drawer-tool-compose" : ".sidebar-focused-project .sidebar-header-compose")!;
+          ? ".sidebar-drawer-tool-compose" : ".sidebar-main .sidebar-nav-block .sidebar-nav-new")!;
         assert.equal(compose.getAttribute("aria-label"), "New chat in beta");
         await act(async () => { click(compose); });
         assert.equal(store.getState().activeProjectId, "beta", "explicit new chat opens the browsed project");
@@ -483,7 +485,9 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-focused-project")), 0);
     assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-service-bar")), -1,
       "the rail has no toolbar row of its own while the project row is shown");
-    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("side-scroll")), 1);
+    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-nav-block")), 1,
+      "New chat and the package actions follow the project row");
+    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("side-scroll")), 2);
 
     const sessionIntent = store.getState().newSessionIntent;
     await act(async () => { click(focused!.querySelector(".project-card")!); });
@@ -1044,9 +1048,11 @@ test("desktop rail: the project row is the header and search opens in its place"
         // The toolbar's Customize pencil shows only in Edit mode / Shift.
         .filter((button) => !button.classList.contains("zone-customize-trigger"))
         .map((button) => button.getAttribute("aria-label")),
-      ["Search projects, worktrees, and sessions", "New chat in alpha", "More sidebar actions", "Actions for alpha"],
-      "search, new chat, list options, then the project's ⋮",
+      ["Search projects, worktrees, and sessions", "More sidebar actions", "Actions for alpha"],
+      "search, list options, then the project's ⋮; New chat is the row below",
     );
+    const newChat = container.querySelector<HTMLButtonElement>(".sidebar-focused-project + .sidebar-nav-block > .sidebar-nav-new");
+    assert.equal(newChat?.getAttribute("aria-label"), "New chat in alpha", "the full-width New chat row follows the project row");
     assert.ok(
       header()!.querySelector('.sidebar-header-tools > .zone-customize-trigger[aria-label="Customize Sidebar"]'),
       "the sessions toolbar keeps its own editor; the rail's pencil edits the rail",
@@ -1063,6 +1069,9 @@ test("desktop rail: the project row is the header and search opens in its place"
     assert.equal(document.activeElement, input, "the field takes focus as it opens");
     assert.ok(bar()!.querySelector(".sidebar-search-clear"), "an open field can always be closed");
     assert.equal(bar()!.querySelector(".sidebar-select-toggle"), null);
+    assert.equal(bar()!.querySelector(".sidebar-new-session"), null, "the wide search row has no compose button");
+    assert.ok(container.querySelector(".sidebar-service-bar[data-rail] + .sidebar-nav-block"),
+      "the New chat row stays under the search row, so the list does not jump");
     await act(async () => { typeQuery(input, "beta"); });
     assert.match(container.querySelector(".sidebar-search-results")?.textContent ?? "", /Beta session/);
     await act(async () => {

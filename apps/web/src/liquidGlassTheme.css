@@ -151,9 +151,12 @@ html[data-theme-style="liquid-glass"] :is(.sidebar, .app > .header, .railbar, .s
 /* ---- toolbar: glass capsules and circles --------------------------------- */
 /* Toolbar items float as Liquid Glass: grouped items share one capsule, a
    lone glyph is a circle, the session title is a capsule. */
-html[data-theme-style="liquid-glass"] :is(.view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .sidebar-search) {
+html[data-theme-style="liquid-glass"] :is(.view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger) {
   border-radius: var(--lg-radius-capsule);
 }
+/* The navigator search is a field in the navigator's row grid, not a toolbar
+   capsule: it keeps --radius-card so Settings → corner rounding applies. */
+html[data-theme-style="liquid-glass"] .sidebar-search { border-radius: var(--radius-card); }
 /* Segments inside a capsule are capsules, so the selected plate stays
    concentric with the group. */
 html[data-theme-style="liquid-glass"] :is(.view-switcher-pill .view-icon, .workspace-mode-switch button) { border-radius: var(--lg-radius-capsule); }
