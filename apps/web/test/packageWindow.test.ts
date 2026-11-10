@@ -309,12 +309,18 @@ test("dynamic peek shares the launcher seam and owns the selected glass material
     /\.package-window-resize--w\s*\{[^}]*inset-inline-start:\s*0[^}]*cursor:\s*ew-resize;/s,
     "the inline-start edge stays the window's width handle",
   );
+  assert.doesNotMatch(
+    css,
+    /\.package-window-resize--(?:n|s|nw|sw)\b/,
+    "a floating window spans the launcher column; its height has no resize edge",
+  );
   assert.match(
     source,
-    /const RESIZE_EDGES: ResizeEdge\[\] = \["n", "nw", "w", "sw", "s"\];/,
-    "the floating window mounts no inline-end resize edge",
+    /className="package-window-resize package-window-resize--w"/,
+    "the floating window mounts exactly one resize edge, the inline start",
   );
-  assert.match(source, /edge === "w" \|\| edge === "s"/, "only the start edge and the bottom edge are keyboard resizers");
+  assert.doesNotMatch(source, /package-window-resize--\$\{/, "no per-edge resize handles are generated");
+  assert.doesNotMatch(source, /--package-window-h/, "nothing sets a floating window height");
   assert.match(
     css,
     /\.app-shell:has\(\.rail-pinned-narrow\) > \.railbar > \.rail-pinned-narrow[\s\S]*?inset-inline-end:\s*var\(--rail-strip-width-right, calc\(var\(--control-h-sm\) \+ var\(--space-3\) \+ 1px\)\);/s,

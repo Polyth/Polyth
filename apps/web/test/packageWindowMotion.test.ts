@@ -74,7 +74,7 @@ async function load({ pane, exiting = false, dir = "ltr", at = { x: 0, y: 0 }, a
         <main class="workspace"></main>
         <aside class="railbar${exiting ? "" : " railbar-open"}${pane.split(" ").includes("rail-dynamic") ? " railbar-dynamic" : ""}" data-rail-motion="${motion}" id="host">
           <div class="${pane}${exiting ? " rail-exiting" : ""}" id="pkg" data-rail-motion="${motion}"
-            style="--rail-w: ${RAIL_W}px; --package-window-h: 600px; --package-window-x: ${at.x}px; --package-window-y: ${at.y}px">
+            style="--rail-w: ${RAIL_W}px; --package-window-x: ${at.x}px; --package-window-y: ${at.y}px">
             <section class="module-view module-view--rail" id="content"><div class="module-view-body">Package</div></section>
           </div>
           <div class="rail-icon-col plugin-strip customize-zone" id="strip">
