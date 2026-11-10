@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
     AgentCapabilityContribution,
@@ -32,7 +32,7 @@ import {
     requireInstanceOwnerAuthority,
 } from "@polyth/contracts/instance-authority";
 import { localOnlyRemoteAccess, packageDataDir, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { discoverHarnessExecutable, harnessExecutableChildEnv } from "./executableDiscovery.ts";
+import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimFile } from "./executableDiscovery.ts";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
 import { createNativePluginRoutes } from "./nativePluginRoutes.ts";
 import { readNativeSkillPatch } from "./nativeSkills.ts";
@@ -148,12 +148,23 @@ export async function freeHarnessExecutable(
 }
 export type HarnessUpdateResult = { ok: boolean; exitCode: number | null; output: string; versions?: HarnessVersionPrune };
 
+/** The npm package a harness CLI was installed from, and the command it
+ *  installs when the update argv runs a package manager (default: `[0]`). */
+export type HarnessUpdateNpmTarget = {
+    npmPackage?: string;
+    npmBin?: string;
+    npmDistTag?: string;
+    /** The npm to run instead of the one discovery finds. */
+    npmCommand?: string;
+};
 /** Run a harness CLI's own self-update argv: resolved like the harness
- *  executable, no shell, stdin closed, bounded time and output. After a
- *  successful update of a side-by-side install, the old versions no running
+ *  executable, no shell, stdin closed, bounded time and output. A CLI that
+ *  npm installed (`npmPackage`) is updated by npm instead, into the npm
+ *  prefix it lives in (`npm install -g <package>@<tag>`). After
+ *  a successful update of a side-by-side install, the old versions no running
  *  process uses are removed (`versionStore`). */
-export async function runHarnessUpdate(command: readonly string[], versionStore?: HarnessVersionStore): Promise<HarnessUpdateResult> {
-    const result = await runUpdateCommand(command);
+export async function runHarnessUpdate(command: readonly string[], versionStore?: HarnessVersionStore, options: HarnessUpdateNpmTarget = {}): Promise<HarnessUpdateResult> {
+    const result = await runUpdateCommand(command, options);
     if (!result.ok || !versionStore) return result;
     // The update moved the launcher to the new version; resolve it again.
     const { hit } = await discoverHarnessExecutable(command[0]!);
@@ -177,14 +188,73 @@ export const updateCrashName = (signal: unknown, exitCode: number | null): strin
     const status = exitCode === null ? undefined : WINDOWS_CRASH_STATUS[exitCode >>> 0];
     return status ? `${status} (0x${(exitCode! >>> 0).toString(16).toUpperCase()})` : undefined;
 };
-async function runUpdateCommand(command: readonly string[]): Promise<HarnessUpdateResult> {
-    const [binary, ...args] = command;
+const isFile = (path: string): Promise<boolean> => stat(path).then((entry) => entry.isFile(), () => false);
+/**
+ * The npm global prefix a CLI launcher belongs to, when npm installed
+ * `packageName` there: `<prefix>\<bin>.cmd` beside `<prefix>\node_modules`
+ * on Windows, `<prefix>/bin/<bin>` beside `<prefix>/lib/node_modules`
+ * elsewhere. The launcher must lead into that package, so a standalone
+ * binary next to a stale npm copy is not mistaken for it.
+ */
+export async function npmGlobalPrefixOf(
+    hit: { executablePath: string; launcherPath?: string },
+    packageName: string,
+    platform: NodeJS.Platform = process.platform,
+): Promise<string | undefined> {
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    const launcherDir = dirname(launcher);
+    const prefix = platform === "win32" ? launcherDir : dirname(launcherDir);
+    const packageDir = join(prefix, ...(platform === "win32" ? [] : ["lib"]), "node_modules", ...packageName.split("/"));
+    if (!await isFile(join(packageDir, "package.json")))
+        return undefined;
+    // A Windows npm launcher is a `.cmd` shim; follow it to the script it runs.
+    const target = platform === "win32" ? await windowsCmdShimFile(launcher) : hit.executablePath;
+    if (!target)
+        return undefined;
+    const [real, root] = await Promise.all([realpath(target).catch(() => undefined), realpath(packageDir).catch(() => undefined)]);
+    return real && root && real.startsWith(`${root}${sep}`) ? prefix : undefined;
+}
+/** The npm prefix the update must install into, from the CLI's own install. */
+async function updateNpmPrefix(hit: { executablePath: string; launcherPath?: string }, target: HarnessUpdateNpmTarget): Promise<string | undefined> {
+    if (!target.npmPackage)
+        return undefined;
+    if (!target.npmBin)
+        return npmGlobalPrefixOf(hit, target.npmPackage);
+    const { hit: cli } = await discoverHarnessExecutable(target.npmBin);
+    return cli ? npmGlobalPrefixOf(cli, target.npmPackage) : undefined;
+}
+async function runUpdateCommand(command: readonly string[], target: HarnessUpdateNpmTarget): Promise<HarnessUpdateResult> {
+    const [binary, ...ownArgs] = command;
     if (!binary)
         throw harnessError("unsupported", "this harness has no update command");
-    const { hit } = await discoverHarnessExecutable(binary);
-    if (!hit)
+    const { hit: found } = await discoverHarnessExecutable(binary);
+    if (!found)
         throw harnessError("not-found", `${binary} is not installed`);
+    // A CLI's self-updater runs `npm install -g`, which installs into npm's
+    // configured prefix, not the one the CLI lives in. Polyth installs into
+    // its own (`%LOCALAPPDATA%\Polyth\npm`, `~/.local`): Pi then refuses
+    // ("not managed by a global npm install") and Codex would install a copy
+    // nothing runs; a plain `npm install -g` (DeepSeek's dsh) the same.
+    const prefix = await updateNpmPrefix(found, target);
+    // A CLI that npm installed is updated the way it was installed: npm
+    // itself, into that prefix. Each self-updater has its own idea of how it
+    // was installed (Pi asks `npm root -g`, Codex wants its launcher's
+    // environment) and refuses when that guess fails; Polyth already knows.
+    // (An argv that already runs the package manager, `npmBin`, stays as is.)
+    const npm = prefix && target.npmPackage && !target.npmBin ? (await discoverHarnessExecutable(target.npmCommand ?? "npm")).hit : undefined;
+    const hit = npm ?? found;
+    const args = npm ? ["install", "-g", `${target.npmPackage}@${target.npmDistTag ?? "latest"}`] : ownArgs;
     const env = await harnessExecutableChildEnv(hit.executablePath);
+    // Without an npm to run, the self-updater still gets the right prefix.
+    if (prefix) {
+        for (const key of Object.keys(env))
+            if (key.toLowerCase() === "npm_config_prefix")
+                delete env[key];
+        env.npm_config_prefix = prefix;
+    }
+    // Which program ran is the first question about a failed update (a CLI
+    // found on PATH may not be the copy Polyth installed).
+    const ran = `Program: ${[hit.launcherPath ?? hit.executablePath, ...(npm ? args : [])].join(" ")}`;
     // npm installs Windows CLIs as `.cmd` shims, which only start through
     // `cmd.exe`; Node refuses them without a shell (spawn EINVAL). The argv is
     // the descriptor's fixed words; the path is quoted because the shell joins
@@ -200,13 +270,13 @@ async function runUpdateCommand(command: readonly string[]): Promise<HarnessUpda
                 // prints nothing; name the crash so the failure is legible.
                 const crash = error ? updateCrashName((error as { signal?: unknown }).signal, exitCode) : undefined;
                 const crashed = crash ? `${binary} stopped with ${crash}` : "";
-                resolve({ ok: !error, exitCode, output: [output || (error && !crashed ? error.message : ""), crashed].filter(Boolean).join("\n") });
+                resolve({ ok: !error, exitCode, output: [output || (error && !crashed ? error.message : ""), crashed, error ? ran : ""].filter(Boolean).join("\n") });
             });
             child.stdin?.end();
         }
         catch (error) {
             // A launch Node refuses up front is a failed update, not a server error.
-            resolve({ ok: false, exitCode: null, output: error instanceof Error ? error.message : String(error) });
+            resolve({ ok: false, exitCode: null, output: [error instanceof Error ? error.message : String(error), ran].join("\n") });
         }
     });
 }
@@ -768,7 +838,8 @@ export function harnessRoutes(
             if (!provider.descriptor.updateCommand?.length)
                 throw harnessError("unsupported", "this harness has no update command");
             await freeHarnessExecutable(host, provider.descriptor);
-            const result = await runHarnessUpdate(provider.descriptor.updateCommand, provider.versionStore);
+            const source = provider.descriptor.releaseSource;
+            const result = await runHarnessUpdate(provider.descriptor.updateCommand, provider.versionStore, source?.kind === "npm" ? { npmPackage: source.package, ...(source.bin ? { npmBin: source.bin } : {}), ...(source.distTag ? { npmDistTag: source.distTag } : {}) } : {});
             invalidateModels();
             if (result.ok && provider.descriptor.releaseSource)
                 updateChecker.forget(provider.descriptor.releaseSource);
