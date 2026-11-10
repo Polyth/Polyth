@@ -636,6 +636,7 @@ test("Badge, Separator, Spinner, Progress, Skeleton, VisuallyHidden semantics", 
     createElement(ui.Separator, {}),
     createElement(ui.Spinner, { label: "Loading sessions" }),
     createElement(ui.Progress, { value: 0.4, label: "Import progress" }),
+    createElement(ui.Progress, { value: 0, label: "Starting download", indeterminate: true }),
     createElement(ui.Skeleton, { shape: "block", height: 60 }),
     createElement(ui.VisuallyHidden, null, "hidden context"),
   ));
@@ -646,6 +647,10 @@ test("Badge, Separator, Spinner, Progress, Skeleton, VisuallyHidden semantics", 
     assert.equal(spinner.getAttribute("aria-label"), "Loading sessions");
     const progress = view.container.querySelector('[role="progressbar"]')!;
     assert.equal(progress.getAttribute("aria-valuenow"), "40");
+    const unknown = view.container.querySelector('.ui-progress--indeterminate')!;
+    assert.equal(unknown.getAttribute("aria-valuenow"), null, "an unknown completion has no fake percentage");
+    assert.equal(unknown.querySelector<HTMLElement>(".ui-progress-fill")!.style.width, "", "the sliding segment owns its own width");
+    assert.match(await read("../src/styles.css"), /\.ui-progress--indeterminate \.ui-progress-fill \{\s*width: 34%;\s*animation: ui-progress-slide/);
     assert.equal(view.container.querySelector(".ui-skeleton")!.getAttribute("aria-hidden"), "true");
     assert.equal(view.container.querySelector(".sr-only")!.textContent, "hidden context");
   } finally { await view.unmount(); }

@@ -427,11 +427,26 @@ body.desktop-app[data-desktop-focused="false"] .desktop-window-button:not(:hover
 .desktop-update-action {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
-.desktop-update-action progress {
-  width: 110px;
-  accent-color: var(--accent);
+.desktop-update-status { display: flex; flex-direction: column; min-width: 0; }
+.desktop-update-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(280px, 100%);
+  margin-top: 6px;
+}
+.desktop-update-progress-bar { flex: 1 1 40px; min-width: 40px; }
+.desktop-update-progress-percent {
+  min-width: 4ch;
+  text-align: end;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
 }
 input, select, textarea {
   font: inherit;
@@ -17557,6 +17572,22 @@ body .ui-btn .ui-spinner {
   border-radius: var(--radius-round);
   background: linear-gradient(90deg, var(--accent), var(--accent-hi));
   transition: width var(--motion-normal) var(--motion-ease);
+}
+/* Unknown completion: a segment slides instead of filling. */
+.ui-progress--indeterminate .ui-progress-fill {
+  width: 34%;
+  animation: ui-progress-slide 1.3s ease-in-out infinite;
+}
+@keyframes ui-progress-slide {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
+}
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .ui-progress--indeterminate .ui-progress-fill {
+  width: 100%;
+  opacity: 0.45;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-progress--indeterminate .ui-progress-fill { width: 100%; opacity: 0.45; }
 }
 
 .ui-skeleton {

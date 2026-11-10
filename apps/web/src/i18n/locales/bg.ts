@@ -4033,7 +4033,6 @@ export const bg: AppMessages = {
   "desktop.settings.downloadUpdate": "Изтегляне на актуализацията",
   "desktop.settings.restartInstall": "Рестартиране и инсталиране",
   "desktop.settings.checking": "Проверка…",
-  "desktop.settings.showProgress": "Показване на напредъка",
   "desktop.settings.installing": "Инсталиране…",
   "desktop.settings.checkNow": "Проверка сега",
   "desktop.settings.polythData": "Данни на Polyth",
