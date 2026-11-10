@@ -1,7 +1,7 @@
 // A project's Agents group inside the phone Navigator, measured in a real
 // browser (skipped without one). The group is part of the list: its chevron and
 // every agent's mark share the leading column centred under the project mark,
-// its label and agent names start on the session-title edge, ⋮ shares the chat
+// its label and agent names start on the session-title edge, ⋯ shares the chat
 // rows' trailing column, and a row is a chat row's height at every density.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -36,8 +36,8 @@ after(async () => {
 
 const svg = `<svg viewBox="0 0 24 24"><path d="M4 12h16"/></svg>`;
 const icon = (size = "sm", extra = "") => `<svg class="ui-icon ui-icon--${size}${extra}" viewBox="0 0 24 24"><path d="M4 12h16"/></svg>`;
-// The Lucide ellipsis the package renders for ⋮ (stroked circles).
-const dots = `<svg class="ui-icon ui-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>`;
+// The Lucide ellipsis the package renders for ⋯ (stroked circles).
+const dots = `<svg class="ui-icon ui-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
 
 const agentRow = (id: string, name: string, lead: string, meta = "") => `<div class="agent-nav-row" id="${id}">
   <button type="button" class="agent-nav-btn">
@@ -159,19 +159,19 @@ for (const width of [320, 390, 430]) {
       for (const x of [...m.chevrons, ...m.leads]) near(x, m.glyphCentre, "chevron and agent marks centred under the project mark");
       for (const x of [...m.labels, ...m.names]) near(x, m.titleEdge, "group label and agent names on the session-title edge");
       for (const h of [...m.heads, ...m.rows]) near(h, m.sessionRow, "group header and agent rows are a chat row's height");
-      for (const x of [...m.headMore, ...m.rowMore]) near(x, m.sessionMore, "⋮ shares the chat rows' trailing column");
-      for (const s of m.rowMoreSizes) near(s, m.sessionMoreSize, "⋮ is the chat row's glyph size");
+      for (const x of [...m.headMore, ...m.rowMore]) near(x, m.sessionMore, "⋯ shares the chat rows' trailing column");
+      for (const s of m.rowMoreSizes) near(s, m.sessionMoreSize, "⋯ is the chat row's glyph size");
       for (const s of m.leadSizes) assert.ok(s <= 20, `an agent mark stays a state-mark size (${s}px)`);
       near(m.metaEnd, m.flagEnd, "the trailing measure ends where a chat row's marks do");
       assert.ok(m.summaryMark <= 18, `folded summary marks stay small (${m.summaryMark}px)`);
       assert.ok(m.summaryStart >= m.foldedLabelEnd, "folded summary follows the label");
-      near(m.longNameEnd, m.flagEnd, "a long name truncates on the chat rows' trailing measure");
+      near(m.longNameEnd, m.titleEdge, "a long name with no measure ends where titles start, mirrored, as a chat title does");
       near(m.gapBelowOpenGroup, 8, "an open group ends one rhythm step before the chats");
       near(m.gapBelowFoldedGroup, 0, "a folded group is one more line of the list");
       assert.equal(m.caption.label, m.caption.divider, "the group header uses the navigator's caption style");
-      assert.equal(m.moreInk.agent, m.moreInk.session, "agent ⋮ shares the chat rows' quiet ink");
-      assert.equal(m.moreInk.head, m.moreInk.session, "the group ⋮ shares the chat rows' quiet ink");
-      assert.equal(m.dotsFilled, true, "agent ⋮ dots are filled like the chat rows' ⋮");
+      assert.equal(m.moreInk.agent, m.moreInk.session, "agent ⋯ shares the chat rows' quiet ink");
+      assert.equal(m.moreInk.head, m.moreInk.session, "the group ⋯ shares the chat rows' quiet ink");
+      assert.equal(m.dotsFilled, true, "agent ⋯ dots are filled like the chat rows' ⋯");
       assert.equal(m.overflow, false, "nothing leaves the screen");
     });
   }

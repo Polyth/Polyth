@@ -1,8 +1,8 @@
 // Phone Navigator geometry measured in a real browser (skipped without one).
 // The list is one grid: project marks and session state marks share a leading
-// column, names and titles share one start edge, and project ⋮ and session
-// ⋮ share the trailing column. The toolbar's tools keep full tap boxes, and
-// so do a project's New chat and ⋮; both clusters space their glyphs by
+// column, names and titles share one start edge, and project ⋯ and session
+// ⋯ share the trailing column. The toolbar's tools keep full tap boxes, and
+// so do a project's New chat and ⋯; both clusters space their glyphs by
 // visible ink. These checks hold at every phone width, density, status mix
 // and direction.
 import { after, before, test } from "node:test";
@@ -12,11 +12,13 @@ import { register } from "node:module";
 import type { Browser, Page } from "playwright-core";
 import { createElement, type FunctionComponent } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MoreVerticalIcon, NewChatIcon, SelectIcon, type LucideIcon } from "../src/components/ui/icons.ts";
+import type { LucideIcon } from "../src/components/ui/icons.ts";
 import { findChromium } from "./chromium.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 const { Icon } = await import("../src/icons.tsx");
+// The phone navigator draws every row menu as horizontal dots.
+const { MoreIcon, NewChatIcon, SelectIcon } = await import("../src/components/ui/icons.ts");
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 const CHROME = await findChromium();
@@ -44,7 +46,7 @@ after(async () => {
 
 const svg = `<svg viewBox="0 0 24 24"><path d="M4 12h16"/></svg>`;
 const icon = (size = "md") => `<svg class="ui-icon ui-icon--${size}" viewBox="0 0 24 24"><path d="M4 12h16"/></svg>`;
-// The toolbar's tools and a project's New chat and ⋮ are spaced by their
+// The toolbar's tools and a project's New chat and ⋯ are spaced by their
 // ink, so they draw the real glyphs, as UiIcon and Icon render them.
 const lucide = (glyph: LucideIcon, size = "lg") =>
   renderToStaticMarkup(createElement(glyph, { className: `ui-icon ui-icon--${size}`, strokeWidth: 1.75, "aria-hidden": true }));
@@ -59,7 +61,7 @@ function project(id: string, name: string, pills: string, body = "") {
       <button class="mobile-nav-project-main"><span class="mobile-nav-project-name">${name}</span>${pills ? `<span class="mobile-nav-project-statuses">${pills}</span>` : ""}</button>
       <div class="mobile-nav-project-actions">
         <button class="mobile-nav-project-action">${lucide(NewChatIcon)}</button>
-        <button class="mobile-nav-project-action" aria-haspopup="menu">${lucide(MoreVerticalIcon)}</button>
+        <button class="mobile-nav-project-action" aria-haspopup="menu">${lucide(MoreIcon)}</button>
       </div>
     </div>
     ${body ? `<div class="mobile-nav-project-body">${body}</div>` : ""}
@@ -75,7 +77,7 @@ function session(title: string, lead: string, flags = "", children = 0, clock = 
       <span class="mobile-nav-session-heading"><span class="mobile-nav-session-title" dir="auto">${title}</span>${pill}</span>
       <span class="mobile-nav-session-trailing">${clock ? `<span class="mobile-nav-duration">${clock}</span>` : ""}<span class="mobile-nav-session-flags">${flags}</span></span>
     </span>
-    <button class="mobile-nav-more">${lucide(MoreVerticalIcon, "md")}</button>
+    <button class="mobile-nav-more">${lucide(MoreIcon, "md")}</button>
   </div></div>`;
 }
 
@@ -167,12 +169,15 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
       // The truncating title of the row with no marks or subagent pill.
       plainTitleEnd: endFromEnd(all(".mobile-nav-session-title")[4]!),
       flagEnd: endFromEnd(q("#flag")),
-      // A running clock's air, on its ink: the ⋮ dots to the clock's last
+      clockEnds: all(".mobile-nav-duration").map(endFromEnd),
+      closeCentre: centreFromEnd(q("#close svg")),
+      glyphWidth: rect(q(".project-glyph")).width,
+      // A running clock's air, on its ink: the ⋯ dots to the clock's last
       // character, the title's end to its box, and the screen edge to the dots.
       ...(() => {
         const clocks = all(".mobile-nav-duration");
         // The clock reads left to right in either direction, so the
-        // character nearest ⋮ is its last in LTR and its first in RTL.
+        // character nearest ⋯ is its last in LTR and its first in RTL.
         const textEnd = (el: Element) => {
           const node = el.firstChild as Text;
           const at = rtl ? 0 : node.length - 1;
@@ -197,8 +202,8 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
         };
       })(),
       // Edge controls draw a small circle on the edge column but keep a
-      // target that runs out to the edge. A row's ⋮ keeps 44px (the body
-      // tucks over it); close and project ⋮ meet their neighbour's target.
+      // target that runs out to the edge. A row's ⋯ keeps 44px (the body
+      // tucks over it); close and project ⋯ meet their neighbour's target.
       edgeTargets: (() => {
         const y = (el: Element) => { const r = rect(el); return r.top + r.height / 2; };
         const at = (fromEnd: number, row: Element) => {
@@ -251,7 +256,7 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
         return [rtl ? lens.left - dot.left : dot.right - lens.right, lens.top - dot.top] as const;
       })(),
       projectNew: all(".mobile-nav-project-actions > :first-child svg").map(centreFromEnd),
-      // The visible air in a project's trailing cluster: screen edge to the ⋮
+      // The visible air in a project's trailing cluster: screen edge to the ⋯
       // dots, dots to New chat's bubble, bubble to the status pills.
       edgeGap: inkEnd(busyDots),
       dotsGap: inkEnd(busyBubble) - inkStart(busyDots),
@@ -285,7 +290,7 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
       })(),
       pillFont: parseFloat(getComputedStyle(q(".mobile-nav-subagent-toggle")).fontSize),
       // A row without marks: its subagent pill must stay clear of the part of
-      // the row the ⋮ control tucks over, or its end would open the menu.
+      // the row the ⋯ control tucks over, or its end would open the menu.
       pillClearOfMenu: (() => {
         const row = q(".mobile-nav-subagent-toggle").closest(".mobile-nav-session-row")!;
         const pill = rect(q(".mobile-nav-subagent-toggle"));
@@ -309,63 +314,61 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
 const near = (actual: number, expected: number, label: string) =>
   assert.ok(Math.abs(actual - expected) <= 0.6, `${label}: ${actual} ≠ ${expected}`);
 
-// gutter: content edge, the ⋮ glyph's own edge; axis: end-column glyph
-// centre from the screen; titleStart: gutter + 24px mark + 8px.
-for (const [width, gutter, axis, titleStart] of [[320, 11, 20, 43], [390, 15, 24, 47], [430, 15, 24, 47]] as const) {
+// The two ends of a row mirror. axis: the edge columns' centre from its own
+// screen edge (state and project marks at the start, ⋯ and × at the end);
+// gutter: content edge, the ⋯ glyph's own box edge (the axis less half an
+// 18px glyph); titleStart: gutter + the 18px column + 8px, which is also
+// where a title with no marks ends, measured from the other edge.
+for (const [width, gutter, axis, titleStart] of [[320, 11, 20, 37], [390, 15, 24, 41], [430, 15, 24, 41]] as const) {
   for (const density of ["comfortable", "compact"]) {
     test(`phone navigator grid holds at ${width}px, ${density}`, { skip: !CHROME }, async () => {
       const m = await measure(width, { density });
       near(m.place, gutter, "the toolbar title starts on the content edge");
       near(m.searchEnd, gutter, "the open search field ends on the content edge");
-      for (const g of m.glyphs) near(g, gutter, "project mark on the content edge");
-      near(m.glyphCentre, gutter + 12, "a 24px project mark: the leading column is no wider than the marks need");
-      // Both ends of a row keep the same air: the start edge is the ⋮ glyph's
-      // own edge (the axis less half an 18px glyph).
-      near(m.glyphs[0]!, axis - 9, "the start edge sits on the ⋮ glyph's edge, so the two margins measure the same");
+      near(m.glyphWidth, 22, "a project mark is 22px");
+      for (const g of m.glyphs) near(g, axis - 11, "a project mark overhangs the leading column evenly");
+      near(m.glyphCentre, axis, "the leading column stands as far from the start as ⋯ from the end");
       near(m.backCentre, m.glyphCentre, "search's Back glyph sits over the project marks");
       for (const lead of m.leads) near(lead, m.glyphCentre, "session state mark centred under the project mark");
       const titleEdge = m.names[0]!;
       near(titleEdge, titleStart, "titles start one mark and one gap in, not a wasted indent");
       for (const x of [...m.names, ...m.titles, m.pagination, m.empty]) near(x, titleEdge, "names, titles, pagination and empty text share one edge");
-      near(m.plainTitleEnd, m.flagEnd, "a title with no marks ends where marks do, not a column gap short");
+      near(m.plainTitleEnd, titleStart, "a title with no marks ends where titles start, mirrored");
       for (const x of [...m.projectMore, ...m.rowMore]) near(x, axis, "project ⋯ and session ⋯ glyphs share the edge column, clear of the screen's rounded edge");
-      // A chat row's trailing marks are spaced by ink too: the running clock
-      // stands as far from the ⋮ dots as the dots from the screen edge, so
-      // marks end two axes in; the first mark keeps 12px from the title.
-      near(m.flagEnd, 2 * axis, "a session's trailing marks end two axes in");
-      near(m.rowEdgeGap, axis - 1.4, "a session's ⋮ dots stay on the edge column");
-      near(m.clockGap, m.rowEdgeGap, "the running clock stands as far from ⋮ as ⋮ from the screen edge");
-      near(m.pinnedClockGap, m.clockGap, "a Pinned row's hidden pin leaves no lead-in before ⋮");
+      // A chat row's trailing marks stand in one column under a project's New
+      // chat, clear of the dots; a running clock ends on that column's edge.
+      near(m.flag, m.projectNew[0]!, "a session's last mark is centred under New chat");
+      near(m.rowEdgeGap, axis - 6.7, "a session's ⋯ dots stay on the edge column");
+      for (const end of m.clockEnds) near(end, m.flagEnd, "a running clock ends on the marks' column, pinned or not");
+      assert.ok(m.clockGap >= 8, `the running clock stays clear of ⋯ (${m.clockGap})`);
       near(m.clockLead, 12, "a running clock keeps 12px from a truncated title");
       const air = m.rowEdgeGap;
       // The toolbar's tools are its primary controls: a full tap box each,
       // never squeezed into the row-mark rhythm below.
       for (const [w, h] of m.toolBoxes) assert.ok(w >= 44 && h >= 44, `a toolbar tool keeps the 44px tap floor (${w}×${h})`);
       const [washW, washH, rowH] = m.rowMoreWash;
-      near(washW, 28, "a row's ⋮ press circle keeps its size whatever the axis");
-      assert.ok(washW === washH && washH <= rowH, `the ⋮ circle (${washW}×${washH}) fits its row (${rowH}px)`);
+      near(washW, 28, "a row's ⋯ press circle keeps its size whatever the axis");
+      assert.ok(washW === washH && washH <= rowH, `the ⋯ circle (${washW}×${washH}) fits its row (${rowH}px)`);
       for (const [w, h] of m.projectGlyphSizes) {
-        assert.ok(w === m.toolGlyph && h === m.toolGlyph, `a project's New chat and ⋮ draw the toolbar's glyph size (${w}×${h} vs ${m.toolGlyph})`);
+        assert.ok(w === m.toolGlyph && h === m.toolGlyph, `a project's New chat and ⋯ draw the toolbar's glyph size (${w}×${h} vs ${m.toolGlyph})`);
       }
       // One visible rhythm across a project's cluster, measured on the ink
-      // (the ⋮ dots are 3px wide in a 20px box): the screen edge, the dots,
-      // New chat's bubble and the pills stand the same air apart. Only the
-      // narrowest axis is too tight for that and two 44px targets, so there
-      // the two inner gaps share the extra.
-      near(m.edgeGap, axis - 1.6, "the ⋮ dots stay on the edge column");
-      near(m.pillsGap, m.dotsGap, "the pills stand as far from New chat as New chat from ⋮");
-      if (axis >= 24) near(m.dotsGap, m.edgeGap, "New chat stands as far from ⋮ as ⋮ from the screen edge");
-      else assert.ok(m.dotsGap > m.edgeGap && m.dotsGap - m.edgeGap <= 6, `the narrow axis widens only the inner gaps (${m.dotsGap} vs ${m.edgeGap})`);
+      // (the ⋯ dots span 16 of the glyph's 24 units): the screen edge, the dots,
+      // New chat's bubble and the pills stand one air apart, and the two
+      // inner gaps share whatever two 44px targets need beyond it.
+      near(m.edgeGap, axis - 7.4, "the ⋯ dots stay on the edge column");
+      near(m.pillsGap, m.dotsGap, "the pills stand as far from New chat as New chat from ⋯");
+      assert.ok(m.dotsGap >= m.edgeGap - 0.6 && m.dotsGap - m.edgeGap <= 9,
+        `New chat stands at least as far from ⋯ as ⋯ from the screen edge; two 44px targets widen only the inner gaps (${m.dotsGap} vs ${m.edgeGap})`);
       near(m.newChatWidth, 44, "New chat keeps a full tap box");
-      assert.equal(m.bubbleInTarget, true, "New chat's bubble lies inside its own target, never ⋮'s");
-      // The toolbar keeps that rhythm on its own ink: the edge, ×, the gear,
-      // select's box and the lens stand one gap apart. The gap is the
-      // cluster's edge air, so × ends where the ⋮ dots below it do, unless
-      // four 44px targets need more, which only the narrowest axis does.
-      const [toolEdge] = m.toolGaps as [number];
-      for (const gap of m.toolGaps) near(gap, toolEdge, "toolbar glyphs stand one gap apart, the edge included");
-      if (axis >= 24) near(toolEdge, m.edgeGap, "× ends where the ⋮ dots below it do");
-      else assert.ok(toolEdge > m.edgeGap && toolEdge - m.edgeGap <= 3, `the narrow axis widens the toolbar's gap only as far as its targets need (${toolEdge} vs ${m.edgeGap})`);
+      assert.equal(m.bubbleInTarget, true, "New chat's bubble lies inside its own target, never ⋯'s");
+      // The toolbar: × is centred on the edge column, over the ⋯ dots below
+      // it; the gear, select's box and the lens then stand one gap of ink
+      // apart, the cluster's edge air unless the 44px targets need more.
+      near(m.closeCentre, axis, "× sits on the edge column, over every ⋯");
+      const [, toolGap] = m.toolGaps as [number, number];
+      for (const gap of m.toolGaps.slice(1)) near(gap, toolGap, "toolbar glyphs after × stand one gap apart");
+      assert.ok(toolGap >= m.edgeGap - 0.6 && toolGap - m.edgeGap <= 11, `the toolbar's gap is the cluster's edge air, widened only as far as its targets need (${toolGap} vs ${m.edgeGap})`);
       assert.deepEqual(m.toolInkInTarget, [true, true, true, true], "each tool's glyph lies inside its own target");
       near(m.seedOffset, 0, "the search pill grows out of the lens");
       near(m.filterDot[0], 1, "the filter dot sits on the lens's end corner");
@@ -384,10 +387,10 @@ for (const [width, gutter, axis, titleStart] of [[320, 11, 20, 43], [390, 15, 24
       assert.ok(m.type.title <= m.type.name && m.type.titleWeight < m.type.nameWeight,
         `a chat title never outranks its project name (${m.type.title}/${m.type.titleWeight} vs ${m.type.name}/${m.type.nameWeight})`);
       near(m.pillFont, m.metaFont, "the subagent count is metadata caliber, not the row's size");
-      assert.equal(m.pillClearOfMenu, true, "a subagent pill never sits under the ⋮ control's tucked edge");
+      assert.equal(m.pillClearOfMenu, true, "a subagent pill never sits under the ⋯ control's tucked edge");
       near(m.searchHeight, m.toolHeight, "the search field shares the tools' height");
-      assert.equal(m.ink.project, m.ink.row, "project and session ⋮ share the quiet ink");
-      assert.notEqual(m.ink.row, m.ink.muted, "repeated ⋮ is quieter than the muted ink");
+      assert.equal(m.ink.project, m.ink.row, "project and session ⋯ share the quiet ink");
+      assert.notEqual(m.ink.row, m.ink.muted, "repeated ⋯ is quieter than the muted ink");
     });
   }
 }
@@ -400,8 +403,8 @@ test("phone navigator grid mirrors in RTL", { skip: !CHROME }, async () => {
   }
   for (const key of ["toolGaps", "projectNew", "filterDot"] as const) rtl[key].forEach((x, i) => near(x, ltr[key][i]!, `${key} mirror`));
   near(rtl.seedOffset, 0, "the search pill grows out of the lens in RTL");
-  near(rtl.clockGap, rtl.rowEdgeGap, "the running clock keeps its air from ⋮ in RTL");
-  near(rtl.pinnedClockGap, rtl.clockGap, "a Pinned row's clock keeps it too");
+  rtl.clockEnds.forEach((x, i) => near(x, ltr.clockEnds[i]!, "the running clock mirrors, pinned or not"));
+  near(rtl.closeCentre, ltr.closeCentre, "× mirrors");
   for (const [a, b] of rtl.titleBoxes.map((x, i) => [x, ltr.titleBoxes[i]!] as const)) near(a, b, "titles mirror");
   assert.equal(rtl.pillsClearOfActions, true);
   assert.equal(rtl.pillClearOfMenu, true);
@@ -409,7 +412,7 @@ test("phone navigator grid mirrors in RTL", { skip: !CHROME }, async () => {
 });
 
 // Opening a project is the whole line. A press lights one plate from the
-// mark to ⋮ in the row's corner; the shared button press (the .98 settle and
+// mark to ⋯ in the row's corner; the shared button press (the .98 settle and
 // inset washes) and the system tap highlight never paint the button's own
 // box, which drew a patch between the mark and New chat.
 test("a pressed project lights its whole line, not the button's box", { skip: !CHROME }, async () => {

@@ -512,7 +512,7 @@ itself. One drop listener on the navigator serves every row
 (`useSessionMoveDropZones`, `apps/web/src/sessionMove.ts`).
 
 The row menu's *Move to project…* is the keyboard and touch way, in both navigators
-and the phone's ⋮ menu: `MoveSessionDialog` lists the projects (a Sheet on the phone).
+and the phone's ⋯ menu: `MoveSessionDialog` lists the projects (a Sheet on the phone).
 Both ways end at the same `requestSessionMove`: it asks for the server's preview
 first, words a refusal from its stable reason, and otherwise confirms with
 `confirmAlert`, which says what can't be seen from the navigator: subagents coming
@@ -4414,8 +4414,8 @@ readable stub and the pills that do not fit drop whole from the end (the
 group's label still lists every count). An expanded project with nothing to
 list says "No sessions".
 A project header opens and closes on the whole line: its open button's plate
-(`.mobile-nav-project-main::before`) spans the header from the mark to ⋮ and
-the mark lets taps through to it, while New chat and ⋮ keep their own press
+(`.mobile-nav-project-main::before`) spans the header from the mark to ⋯ and
+the mark lets taps through to it, while New chat and ⋯ keep their own press
 circles above it. A press lights that plate at once in the row's corner and
 fades it on release; the button opts out of the system tap highlight and the
 shared button press (the .98 settle and inset washes), which painted only
@@ -4424,40 +4424,38 @@ material, edge, corner and reach are `--nav-press*`; an interface style sets
 them from its `--look-row-press*` (Air lights the whole island of a closed
 project and the head of an open one, square where its chats begin). The
 keyboard ring is the same plate.
-The phone Navigator is one grid (`MobileNavigator.css`, pinned by
-`mobileNavigatorLayout.test.ts` at 320–430px, every density and RTL). Most
-rows leave the leading column empty and every row ends in ⋮, so both edge
-columns are kept to what their marks need. Project marks are 24px tiles on a
-content edge that is the ⋮ glyph's own edge (the end axis less half a glyph,
-`--nav-gutter`, 15px on a standard phone), so the empty margin measures the
-same at both ends of a row; a session's state mark is centred in the same
-leading column, and search's Back glyph on that column's centre. Names,
-titles, pagination and the empty text share one start
-edge 47px in (gutter + mark + 8px). On the end side project ⋯ and session ⋯ glyphs share one
-column 24px from the screen (`--nav-axis`): the thumb aims at the glyph and a
-phone's rounded edge and case lip make the last few points hard to press, so
-the axis sits clear of the screen's rounded edge while every target still
-runs out to the edge. Close's × ends where those ⋮ dots do (see the toolbar
-below). The toolbar's `--nav-bar-axis` is `--nav-axis` unless an
-interface style floats the rows in from the edge (Air insets it with its
-islands, so close moves in with their ⋮; inside an island Air also gives the rows
-their own `--nav-row-inset`, so a mark sits as far in from the island's side
-as from its top and names, chats, Add project and the title follow it). A chat row's ⋮ draws a 28px press circle centred on that
-axis (`--nav-dots-wash`), whatever the axis; a project's New chat and ⋮ use
-the toolbar tools' 32px circle. A row's trailing marks (isolation, merge,
-running clock, an agent's next wake) are spaced by ink like a project's
-cluster: the last mark stands as far from the ⋮ dots as the dots from the
-screen edge (22.6px on the 24px axis), so marks end two axes in
-(`--nav-mark-end`, 48px from the screen), on the column where a project's
-New chat bubble ends. The body runs `--nav-mark-tuck` into the ⋮ control's
-44px target. A title with no marks runs to that same edge (the row grid has
-no column gap; the first present mark brings a 12px lead-in from the title,
+The phone Navigator is one grid whose two ends mirror (`MobileNavigator.css`,
+pinned by `mobileNavigatorLayout.test.ts` at 320–430px, every density and
+RTL). Each end has an edge column whose centre stands `--nav-axis` from its
+own screen edge (24px on a standard phone): the leading column holds a
+session's state mark, a project's mark and search's Back glyph; the trailing
+one holds every ⋯ and the toolbar's ×. The leading column is one 18px mark
+wide and starts on `--nav-gutter`, the ⋯ glyph's own box edge (the axis less
+half a glyph, 15px); a project mark is a 22px tile (`--nav-project-mark`)
+centred on it, overhanging evenly. Names, titles, pagination and the empty
+text share one start edge 41px in (`--nav-title-start`: gutter + column +
+8px), and a title with no marks ends on the same line measured from the
+other edge (`--nav-title-end`), so text keeps the same distance from both
+edge columns. The thumb aims at the glyph and a phone's rounded edge and
+case lip make the last few points hard to press, so the axis sits clear of
+the screen's rounded edge while every target still runs out to the edge.
+The toolbar's `--nav-bar-axis` is `--nav-axis` unless an interface style
+floats the rows in from the edge. Air does: its islands stand 8px from the
+screen and both edge columns 21px inside an island (29px from the screen,
+titles from 46px), and the toolbar, Add project and the place title follow.
+A chat row's ⋯ draws a 28px press circle centred on the axis
+(`--nav-dots-wash`), whatever the axis; a project's New chat and ⋯ use the
+toolbar tools' 32px circle. A row's trailing marks (isolation, merge,
+sharing, an agent's next wake) stand in fixed columns: the last mark is
+centred under a project's New chat (`--nav-mark-axis`) and each earlier one
+a mark and 8px before it, so a lock or a branch never moves when another
+mark joins the row; a running clock ends on that column's edge. The body
+runs `--nav-mark-tuck` into the ⋯ control's 44px target. The row grid has
+no column gap: the first present mark brings a 12px lead-in from the title,
 the next ones 8px each, and in the Pinned group the hidden pin leaves none
-behind), so the last few pixels of a
-long title sit over the ⋮ target; only a subagent pill, a real control,
-stays clear of it. Rows keep a 6px edge for the current row's rounded wash.
-Small phones (≤360px) use an 11px content edge, a 20px end column and a 4px
-edge.
+behind. A subagent pill, a real control, stays clear of the ⋯ target. Rows
+keep a 6px edge for the current row's rounded wash. Small phones (≤360px)
+use an 11px content edge, a 20px axis and a 4px edge.
 The toolbar is the title and four tools. The title is the active Space's
 name on the content edge, at a project name's size and a firmer weight; in
 the native app it opens the native server menu (the separate Switch server
@@ -4483,40 +4481,36 @@ focus), and the bar tools' keyboard ring is their round wash, not the slot.
 Sort and filter is a circle in the field's round end cap, and a choice
 away from the default puts a dot on the search tool as well. The field is
 the tools' 44px height and ends on the content edge.
-A project's New chat and ⋮ are the row's primary controls and are drawn
+A project's New chat and ⋯ are the row's primary controls and are drawn
 like the toolbar's tools: a full 44px box each and the toolbar's 20px glyph
-(`--icon-lg`, stroke `--nav-action-stroke`), ⋮ on the axis. The cluster is
-spaced by visible ink, not by boxes: the screen edge, the ⋮ dots, New
-chat's bubble and the status pills (or the name) stand one
-`--nav-cluster-gap` apart, which is the air between the screen edge and the
-dots (22.4px on a 24px axis). Even 20px boxes do not give even air, because
-the dots are about 3px of ink with 8px of empty box on each side. On the
-narrowest 20px axis that gap would squeeze a target under 44px, so there
-the two inner gaps share the extra (about 24px each, 18.4px at the edge).
+(`--icon-lg`, stroke `--nav-action-stroke`), ⋯ on the axis. The cluster is
+spaced by visible ink, not by boxes: the three dots span 16 of the glyph's
+24 units, so their ink starts about 16.6px from the screen on a 24px axis.
+New chat's bubble and the status pills (or the name) then stand one
+`--nav-cluster-gap` apart: that edge air, or what two 44px targets need
+when it is more (about 19px on a standard phone, 21px on the narrowest).
 The toolbar's tools are the bar's primary controls and each keeps a full
-44px box (close's runs out to the screen edge and half a gap past its ×).
-Their glyphs are spaced by ink the same way: the bar's edge, close's ×,
-the Settings gear, Select's box and Search's lens stand one
-`--nav-tool-gap` apart. That gap is the project cluster's edge air, so the
-× ends where the ⋮ dots below it do and the whole end side shares one
-22.4px rhythm; its centre sits about 4px inside the ⋮ column because the ×
-is wider. On the narrowest axis four 44px targets need a wider gap, so the
-toolbar's gaps are all about 20.8px there. The glyphs' ink spans are
+44px box (close's runs out to the screen edge). Close's × is centred on the
+edge column, over every ⋯ below it; the Settings gear, Select's box and
+Search's lens then stand one `--nav-tool-gap` of ink apart, the cluster's
+edge air unless the 44px targets need more. The glyphs' ink spans are
 recorded on Lucide's 24-unit grid in `MobileNavigator.css`; Select's box
 and the lens are not symmetric, so their end-side insets swap in RTL. The
-closed search pill and the filter dot follow the lens. Every phone row ⋮ is the stroked vertical ellipsis
-(`MoreVerticalIcon`; the session island's menu trigger is the horizontal `MoreIcon`), whose dots stay legible at row size. Their press wash
-is a circle round the glyph and their targets are the full row height. Search's Back and a row's ⋮ keep a 44px target that runs out
-to the edge through a transparent `::after`; press rules set
-`background-color` only.
+closed search pill and the filter dot follow the lens. Every phone row menu
+is the stroked horizontal ellipsis (`MoreIcon`), the session island's menu
+trigger included; the desktop sidebar keeps `MoreVerticalIcon`, and the
+Agents group draws whichever its host does. Their press wash is a circle
+round the glyph and their targets are the full row height. Search's Back
+and a row's ⋯ keep a 44px target that runs out to the edge through a
+transparent `::after`; press rules set `background-color` only.
 Hierarchy is size and weight together: a project name uses the user's
 subheading size at 650, its chats the activity-title role at 500, so a chat
 title never outranks its project; a subagent count is metadata caliber.
 What repeats on every row steps back without leaving: session, project and
-agent ⋮ use the quiet ink (`--nav-quiet-ink`, at least 3:1 on every theme)
+agent ⋯ use the quiet ink (`--nav-quiet-ink`, at least 3:1 on every theme)
 and identity marks (isolation, merge, sharing) the matching
 `--nav-quiet-mark` opacity, while the pin keeps its accent and the current
-row's ⋮ is one step firmer. Pinned chats are grouped by their caption
+row's ⋯ is one step firmer. Pinned chats are grouped by their caption
 alone: no row tint (it read as a second current row) and no pin glyph inside
 the group. Captions (dates, Pinned, the Agents header) share one faint voice;
 only the Pinned glyph keeps the accent. A failed row keeps a faint red wash,
@@ -4529,7 +4523,7 @@ only through a zero-specificity reset, so a control's own type role wins.
 Slot content inside a project joins the same grid: the Agents group
 (`agents` package, pinned by its `hostPhoneAgentNavLayout.test.ts`) puts
 its chevron and agent marks in the leading column, its label and agent names
-on the title edge, ⋮ in the trailing column (the same circle and target) and
+on the title edge, ⋯ in the trailing column (the same circle and target) and
 its trailing measure, a long name included, where session marks end, at a
 session row's height. Its header is a caption in the
 navigator's date-divider style; folded it is one more line of the list, open
