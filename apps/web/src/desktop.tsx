@@ -12,7 +12,7 @@ import {
 import { runCommand } from "./commands.ts";
 import { registerSlot } from "./slots.ts";
 import { ReadonlyRow, Row, Seg, Toggle } from "./components/settings/parts.tsx";
-import { Button, confirmAlert } from "./components/ui/index.ts";
+import { Button, confirmAlert, Progress } from "./components/ui/index.ts";
 import { POLYTH_MARK_SRC } from "./brandAsset.ts";
 import { DesktopUpdateNotice } from "./desktopUpdateNotice.tsx";
 import { installDesktopKeepAwake } from "./desktopKeepAwake.tsx";
@@ -347,6 +347,27 @@ function WindowControls() {
   return <>{captionZone}{typeof document === "undefined" ? controls : createPortal(controls, document.body)}</>;
 }
 
+/** The update row's own download bar: the shared Progress primitive, a narrow
+ *  percent readout, and an indeterminate slide until the updater reports its
+ *  first progress tick. The small update window shows the same information. */
+function DownloadProgress({ percent, label }: { percent?: number; label: string }) {
+  const known = typeof percent === "number" && Number.isFinite(percent);
+  const clamped = known ? Math.min(100, Math.max(0, percent)) : 0;
+  return (
+    <div className="desktop-update-progress">
+      <Progress
+        className="desktop-update-progress-bar"
+        value={clamped / 100}
+        indeterminate={!known}
+        label={label}
+      />
+      <span className="desktop-update-progress-percent" aria-hidden="true">
+        {known ? `${Math.floor(clamped)}%` : ""}
+      </span>
+    </div>
+  );
+}
+
 function DesktopSettingsPage() {
   const api = desktopBridge()!;
   const [settings, setSettings] = useState(DEFAULTS);
@@ -390,10 +411,6 @@ function DesktopSettingsPage() {
 
   const updateAction = () => {
     setError("");
-    if (update.phase === "downloading") {
-      void api.showUpdateProgress?.().catch(() => {});
-      return;
-    }
     const work = update.phase === "available"
       ? api.downloadUpdate()
       : update.phase === "downloaded"
@@ -544,28 +561,32 @@ function DesktopSettingsPage() {
       >
         <Toggle on={settings.reduceAnimations} onChange={(value) => save("reduceAnimations", value)} label={tr("desktop.settings.reduceMotion")} />
       </Row>
-      <Row label={tr("desktop.settings.updateStatus")} hint={update.message} itemId="desktop.updates">
+      <Row
+        label={tr("desktop.settings.updateStatus")}
+        hint={update.phase === "downloading"
+          ? <div className="desktop-update-status"><span>{update.message}</span><DownloadProgress percent={update.percent} label={update.message || tr("desktop.settings.updateStatus")} /></div>
+          : update.message}
+        itemId="desktop.updates"
+      >
         <div className="desktop-update-action">
-          {update.phase === "downloading" && <progress max={100} value={update.percent ?? 0} />}
-          <Button
-            size="sm"
-            busy={update.phase === "checking" || update.phase === "installing"}
-            disabled={update.phase === "checking" || update.phase === "installing" || update.phase === "disabled"
-              || (update.phase === "downloading" && !api.showUpdateProgress)}
-            onClick={updateAction}
-          >
-            {update.phase === "available"
-              ? update.version ? tr("desktop.settings.downloadVersion", { version: update.version }) : tr("desktop.settings.downloadUpdate")
-              : update.phase === "downloaded"
-                ? tr("desktop.settings.restartInstall")
-                : update.phase === "checking"
-                  ? tr("desktop.settings.checking")
-                  : update.phase === "downloading"
-                    ? tr("desktop.settings.showProgress")
+          {update.phase !== "downloading" && (
+            <Button
+              size="sm"
+              busy={update.phase === "checking" || update.phase === "installing"}
+              disabled={update.phase === "checking" || update.phase === "installing" || update.phase === "disabled"}
+              onClick={updateAction}
+            >
+              {update.phase === "available"
+                ? update.version ? tr("desktop.settings.downloadVersion", { version: update.version }) : tr("desktop.settings.downloadUpdate")
+                : update.phase === "downloaded"
+                  ? tr("desktop.settings.restartInstall")
+                  : update.phase === "checking"
+                    ? tr("desktop.settings.checking")
                     : update.phase === "installing"
                       ? tr("desktop.settings.installing")
                       : tr("desktop.settings.checkNow")}
-          </Button>
+            </Button>
+          )}
         </div>
       </Row>
       {!remote && (

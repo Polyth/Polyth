@@ -4036,7 +4036,6 @@ export const en = {
   "desktop.settings.downloadUpdate": "Download update",
   "desktop.settings.restartInstall": "Restart & install",
   "desktop.settings.checking": "Checking…",
-  "desktop.settings.showProgress": "Show progress",
   "desktop.settings.installing": "Installing…",
   "desktop.settings.checkNow": "Check now",
   "desktop.settings.polythData": "Polyth data",

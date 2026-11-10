@@ -4033,7 +4033,6 @@ export const ptBR: AppMessages = {
   "desktop.settings.downloadUpdate": "Baixar atualização",
   "desktop.settings.restartInstall": "Reiniciar e instalar",
   "desktop.settings.checking": "Verificando…",
-  "desktop.settings.showProgress": "Mostrar progresso",
   "desktop.settings.installing": "Instalando…",
   "desktop.settings.checkNow": "Verificar agora",
   "desktop.settings.polythData": "Dados do Polyth",

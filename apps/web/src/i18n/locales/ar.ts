@@ -4033,7 +4033,6 @@ export const ar: AppMessages = {
   "desktop.settings.downloadUpdate": "تنزيل التحديث",
   "desktop.settings.restartInstall": "إعادة التشغيل والتثبيت",
   "desktop.settings.checking": "جارٍ التحقق…",
-  "desktop.settings.showProgress": "عرض التقدم",
   "desktop.settings.installing": "جارٍ التثبيت…",
   "desktop.settings.checkNow": "التحقق الآن",
   "desktop.settings.polythData": "بيانات Polyth",

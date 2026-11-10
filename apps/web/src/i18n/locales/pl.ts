@@ -4033,7 +4033,6 @@ export const pl: AppMessages = {
   "desktop.settings.downloadUpdate": "Pobierz aktualizację",
   "desktop.settings.restartInstall": "Uruchom ponownie i zainstaluj",
   "desktop.settings.checking": "Sprawdzanie…",
-  "desktop.settings.showProgress": "Pokaż postęp",
   "desktop.settings.installing": "Instalowanie…",
   "desktop.settings.checkNow": "Sprawdź teraz",
   "desktop.settings.polythData": "Dane Polyth",

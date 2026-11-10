@@ -4033,7 +4033,6 @@ export const uk: AppMessages = {
   "desktop.settings.downloadUpdate": "Завантажити оновлення",
   "desktop.settings.restartInstall": "Перезапустити й встановити",
   "desktop.settings.checking": "Перевірка…",
-  "desktop.settings.showProgress": "Показати прогрес",
   "desktop.settings.installing": "Встановлення…",
   "desktop.settings.checkNow": "Перевірити зараз",
   "desktop.settings.polythData": "Дані Polyth",

@@ -4033,7 +4033,6 @@ export const zhCN: AppMessages = {
   "desktop.settings.downloadUpdate": "下载更新",
   "desktop.settings.restartInstall": "重启并安装",
   "desktop.settings.checking": "正在检查…",
-  "desktop.settings.showProgress": "显示进度",
   "desktop.settings.installing": "正在安装…",
   "desktop.settings.checkNow": "立即检查",
   "desktop.settings.polythData": "Polyth 数据",
