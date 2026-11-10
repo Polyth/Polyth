@@ -21,6 +21,44 @@ export const MACOS_TRAFFIC_LIGHT_POSITION = Object.freeze({
   y: Math.round((DESKTOP_TITLEBAR_HEIGHT - 14) / 2),
 });
 
+/** The traffic-light group in DIP: three 14 pt buttons on a 20 pt pitch.
+ *  Electron exposes where the group starts (getWindowButtonPosition) but not
+ *  its size, so this is the one size the renderer is told; the position is
+ *  always read back from the window. */
+export const MACOS_TRAFFIC_LIGHT_GROUP = Object.freeze({ width: 54, height: 14 });
+
+const pageZoom = (zoomFactor: number): number => Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1;
+
+/**
+ * Where to put the traffic lights for a caption band of `band` CSS px. The
+ * lights are drawn by the OS in DIP and do not scale with page zoom, while the
+ * band does: centring in DIP keeps them on the header's centre line at every
+ * zoom level. The edge inset stays the native 18 pt.
+ */
+export function macTrafficLightPosition(band: unknown, zoomFactor: number): { x: number; y: number } {
+  const zoom = pageZoom(zoomFactor);
+  const css = typeof band === "number" && Number.isFinite(band) && band > 0 ? Math.min(band, 200) : DESKTOP_TITLEBAR_HEIGHT;
+  const y = Math.round((css * zoom - MACOS_TRAFFIC_LIGHT_GROUP.height) / 2);
+  return { x: MACOS_TRAFFIC_LIGHT_POSITION.x, y: Math.max(0, Math.min(y, 160)) };
+}
+
+/** The traffic-light group as the page sees it: the window's applied position
+ *  (DIP) converted to CSS px, so the renderer's caption zone matches the real
+ *  buttons at any page zoom. */
+export function macCaptionGeometry(position: { x: number; y: number } | null, zoomFactor: number): {
+  x: number; y: number; width: number; height: number;
+} {
+  const zoom = pageZoom(zoomFactor);
+  const at = position ?? MACOS_TRAFFIC_LIGHT_POSITION;
+  const round = (value: number): number => Math.round(value * 100) / 100;
+  return {
+    x: round(at.x / zoom),
+    y: round(at.y / zoom),
+    width: round(MACOS_TRAFFIC_LIGHT_GROUP.width / zoom),
+    height: round(MACOS_TRAFFIC_LIGHT_GROUP.height / zoom),
+  };
+}
+
 export interface DesktopChromeOptions {
   titleBarStyle?: "hidden";
   trafficLightPosition?: { x: number; y: number };

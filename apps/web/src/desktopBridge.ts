@@ -21,7 +21,27 @@ export interface DesktopSettings {
   softwareRendering: boolean;
   reduceAnimations: boolean;
   controlsPosition: DesktopControlPosition;
+  /** Linux: follow the desktop environment's button layout. Absent from
+   *  shells older than it (they always use controlsPosition). */
+  controlsFollowSystem?: boolean;
   controlsTheme: DesktopControlTheme;
+}
+
+export type DesktopCaptionButton = "minimize" | "maximize" | "close";
+
+/** The caption-button layout the Linux desktop environment uses. */
+export interface DesktopSystemControls {
+  side: DesktopControlPosition;
+  /** In on-screen order, left to right. */
+  buttons: DesktopCaptionButton[];
+}
+
+/** The macOS traffic-light group as the window placed it, in CSS px. */
+export interface DesktopCaptionGeometry {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** What the window shows: this computer's server, the bundled server list, or
@@ -73,6 +93,9 @@ export interface DesktopWindowState {
   fullscreen: boolean;
   visible: boolean;
   focused: boolean;
+  /** Linux: the desktop environment's caption-button layout (null when it
+   *  cannot be read). Absent on other platforms and older shells. */
+  systemControls?: DesktopSystemControls | null;
 }
 
 /** The native Windows caption overlay: its background (`#rrggbbaa`, sent
@@ -178,6 +201,9 @@ export interface PolythDesktopApi {
   windowAction(action: DesktopWindowAction): Promise<DesktopWindowState>;
   getWindowState(): Promise<DesktopWindowState>;
   setTitleBarAppearance(appearance: DesktopTitleBarAppearance): Promise<void>;
+  /** macOS: centre the traffic lights on a caption band of this many CSS px
+   *  and report where they landed (null elsewhere). Absent from older shells. */
+  syncCaptionControls?(band: number): Promise<DesktopCaptionGeometry | null>;
   revealPath(path: string): Promise<void>;
   openPath(path: string): Promise<void>;
   openDataFolder(): Promise<void>;
