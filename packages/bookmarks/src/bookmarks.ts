@@ -101,8 +101,9 @@ export const isBookmarkId = (value: unknown): value is string => typeof value ==
 const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, Math.max(1, max - 1)).trimEnd()}…` : text);
 
 const stripInlineMarks = (line: string): string => line
-  .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-  .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+  // A label or target stops at the next `[`, so every attempt ends at the next
+  // bracket and an unterminated `![` / `](` run stays linear.
+  .replace(/!?\[([^[\]]*)\]\([^)[]*\)/g, "$1")
   .replace(/[*_`~]+/g, "")
   .replace(/\s+/g, " ")
   .trim();
@@ -334,13 +335,11 @@ export function compareBookmarks(left: Bookmark, right: Bookmark): number {
   return right.createdAt - left.createdAt;
 }
 
-const slug = (text: string): string => text
-  .normalize("NFKD")
-  .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
-  .replace(/^-+|-+$/g, "")
-  .toLowerCase()
-  .slice(0, 48)
-  .replace(/-+$/, "");
+const slug = (text: string): string => {
+  // split + join instead of `replace` with `^-+|-+$`: that trim is quadratic on long dash runs.
+  const joined = text.normalize("NFKD").split(/[^\p{Letter}\p{Number}]+/u).filter(Boolean).join("-").toLowerCase().slice(0, 48);
+  return joined.endsWith("-") ? joined.slice(0, -1) : joined;
+};
 
 export function bookmarkExportFileName(name: string, at: number): string {
   const day = new Date(at).toISOString().slice(0, 10);
