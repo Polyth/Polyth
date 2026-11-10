@@ -594,6 +594,11 @@ workspace-composition saves close their dialog at once through
 Project defaults in Settings → Projects (harness, model, model memory,
 isolation) go through `saveProjectDefaultsOptimistic`; `null` clears a default
 in the preview exactly as on the server.
+Settings → Projects also lists every page a package registers with
+`host.projectSettings.register` (Repositories, Git identity, Memory,
+Approvals…) under *Project settings*, for the project picked on that page; each
+Open button shows that page in the same project settings dialog the project
+menu uses, so the host names no package page.
 A person's own default harness (Settings → Harnesses → *My default*, Spaces
 §13) outranks project defaults for chats they start: while it is usable and
 nothing was chosen for the new chat (`newChatRouteChosen` in

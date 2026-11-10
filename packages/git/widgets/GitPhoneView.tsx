@@ -90,7 +90,7 @@ export interface PhoneRemote {
 }
 
 export interface PhoneRepositoryScope {
-  options: readonly { id: string; alias: string; detail?: string }[];
+  options: readonly { id: string; alias: string; detail?: string; group?: string }[];
   selectedId: string | null | undefined;
   alias: string | null;
   choose: (id: string | null) => void;
@@ -493,7 +493,7 @@ export default function GitPhoneView(props: GitPhoneViewProps) {
         ...repository.options.map((option): MenuEntry => ({
           id: `repository:${option.id}`,
           label: option.alias,
-          ...(option.detail ? { detail: option.detail } : {}),
+          ...(option.detail || option.group ? { detail: [option.group, option.detail].filter(Boolean).join(" · ") } : {}),
           kind: "radio",
           checked: option.id === repository.selectedId,
           onSelect: () => repository.choose(option.id),

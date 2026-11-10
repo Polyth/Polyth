@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useId, useState, type DragEven
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.ts";
 import { isManagedIsolationBranch, isolationBlocksUserMutation, projectIsolationLevel } from "@polyth/contracts";
-import { resolveWorkspaceContext, type WorkspaceRepository } from "@polyth/contracts/workspace";
+import { defaultSourceControlRepository, sourceControlRepositories, type SourceControlRepository } from "./sourceControlRepositories.ts";
 import { api, errorCodeOf, errorChangesOf, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "@polyth/session/web-api";
 import { layoutGraph, type GraphRow } from "./git/graph.ts";
 import { getGitRemoteSelection, getGitRepositorySelection, getGitViewState, setGitRemoteSelection, setGitRepositorySelection, setGitPrefs, setGitViewState, useGitPrefs, type GitPrefs, type GitTabId } from "./gitPrefs.ts";
@@ -174,7 +174,7 @@ interface RepositoryOverviewEntry {
   error?: string;
 }
 
-const EMPTY_REPOSITORIES: readonly WorkspaceRepository[] = [];
+const EMPTY_REPOSITORIES: readonly SourceControlRepository[] = [];
 const NO_PICKS: CommitPicks = new Map();
 
 const refusalField = (cause: unknown): { refusal?: GitRefusal } => {
@@ -572,16 +572,22 @@ export default function GitView({
   const storeProjectId = useStore(workspaceProjectId);
   const storeSessionId = useStore((state) => state.activeSessionId);
   const projectId = scopedProjectId === undefined ? storeProjectId : scopedProjectId;
-  const sessionId = scopedSessionId === undefined ? storeSessionId : scopedSessionId;
+  // The open chat. Its repositories come first; the project's others stay
+  // reachable and are worked on in the project's own checkout (`sessionId`
+  // below is then null), never through this chat's workspace.
+  const viewSessionId = scopedSessionId === undefined ? storeSessionId : scopedSessionId;
   const project = useStore((state) => state.projectRegistry.projects.find((candidate) => candidate.id === projectId) ?? null);
-  const session = useStore((state) => state.sessions.find((candidate) => candidate.id === sessionId) ?? null);
-  const workspace = useMemo(() => {
-    if (!project) return null;
-    try { return resolveWorkspaceContext(project, session); } catch { return null; }
-  }, [project, session]);
-  const workspaceInvalid = project !== null && (workspace === null || (sessionId !== null && sessionId !== undefined && session === null));
-  const repositoryRows = workspace?.repositories ?? EMPTY_REPOSITORIES;
-  const repositoryOptions = repositoryRows.map((repository) => ({ id: repository.repositoryId, alias: repository.alias, detail: repository.state === "missing" ? `${repository.path} · missing` : repository.path }));
+  const viewSession = useStore((state) => state.sessions.find((candidate) => candidate.id === viewSessionId) ?? null);
+  const workspace = useMemo(() => project ? sourceControlRepositories(project, viewSession) : null, [project, viewSession]);
+  const workspaceInvalid = project !== null && (workspace === null || (viewSessionId !== null && viewSessionId !== undefined && viewSession === null));
+  const repositoryRows: readonly SourceControlRepository[] = workspace ?? EMPTY_REPOSITORIES;
+  const outsideGroup = tr("gitview.otherProjectRepositories");
+  const repositoryOptions = repositoryRows.map((repository) => ({
+    id: repository.repositoryId,
+    alias: repository.alias,
+    detail: repository.state === "missing" ? `${repository.path} · missing` : repository.path,
+    ...(repository.outsideSession ? { group: outsideGroup } : {}),
+  }));
   const primaryRepositoryId = useMemo(() => {
     if (!workspace || !project) return null;
     if (project.primaryRepositoryId) return project.primaryRepositoryId;
@@ -590,15 +596,19 @@ export default function GitView({
   }, [project, repositoryRows, workspace]);
   const [storedRepositoryId, setStoredRepositoryId] = useState<string | null | undefined>(undefined);
   useEffect(() => {
-    setStoredRepositoryId(projectId ? getGitRepositorySelection(projectId, sessionId) : undefined);
-  }, [projectId, sessionId]);
+    setStoredRepositoryId(projectId ? getGitRepositorySelection(projectId, viewSessionId) : undefined);
+  }, [projectId, viewSessionId]);
   const selectedRepositoryId = useMemo(() => {
     if (repositoryRows.length === 0) return undefined;
     if (storedRepositoryId === null && repositoryRows.length > 1) return null;
     if (storedRepositoryId && repositoryRows.some((repository) => repository.repositoryId === storedRepositoryId)) return storedRepositoryId;
-    return primaryRepositoryId ?? repositoryRows[0]?.repositoryId;
-  }, [primaryRepositoryId, repositoryRows, storedRepositoryId]);
+    return defaultSourceControlRepository(repositoryRows, primaryRepositoryId, viewSession?.workspace?.executionRepositoryId);
+  }, [primaryRepositoryId, repositoryRows, storedRepositoryId, viewSession]);
   const allRepositoriesSelected = !workspaceInvalid && selectedRepositoryId === null && repositoryRows.length > 1;
+  const outsideSession = !allRepositoriesSelected
+    && repositoryRows.some((repository) => repository.repositoryId === selectedRepositoryId && repository.outsideSession);
+  const sessionId = outsideSession ? null : viewSessionId;
+  const session = outsideSession ? null : viewSession;
   // Preserve the legacy API shape for projects without an explicit inventory.
   const repositoryId = workspaceInvalid
     ? "__invalid_workspace__"
@@ -650,11 +660,11 @@ export default function GitView({
   const chooseRepository = useCallback((next: string | null) => {
     if (!projectId) return;
     setStoredRepositoryId(next);
-    setGitRepositorySelection(projectId, sessionId, next);
+    setGitRepositorySelection(projectId, viewSessionId, next);
     setCommitSel(null);
     setShowTreeForm(false);
     setShowPrForm(false);
-  }, [projectId, sessionId]);
+  }, [projectId, viewSessionId]);
   const settings = useStore((state) => state.settings);
   const diffPath = useStore((state) => state.gitDiffPath);
   // This project's worktree topology revision. It moves when a worktree is
@@ -775,7 +785,7 @@ export default function GitView({
   useEffect(() => {
     const onHydrated = (event: Event): void => {
       if (!projectId || projectPresentationEventProjectId(event) !== projectId || !projectPresentationEventHasKey(event, "workspaceState")) return;
-      setStoredRepositoryId(getGitRepositorySelection(projectId, sessionId));
+      setStoredRepositoryId(getGitRepositorySelection(projectId, viewSessionId));
       setStoredRemoteName(getGitRemoteSelection(projectId, sessionId, repositoryId));
       const saved = getGitViewState(gitViewScope);
       setSelected(saved.selected ?? null);
@@ -786,7 +796,7 @@ export default function GitView({
     };
     window.addEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, onHydrated);
     return () => window.removeEventListener(PROJECT_PRESENTATION_HYDRATED_EVENT, onHydrated);
-  }, [gitViewScope, projectId, repositoryId, sessionId]);
+  }, [gitViewScope, projectId, repositoryId, sessionId, viewSessionId]);
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [draft, setDraft] = useState<{ digest: string; line: number } | null>(null);
   const [draftText, setDraftText] = useState("");
@@ -883,7 +893,7 @@ export default function GitView({
       } as const;
       if (repository.state === "missing") return { ...base, status: null, error: tr("gitview.repositoryMissing") };
       try {
-        const nextStatus = await api.gitStatus(projectId, sessionId ?? undefined, repository.repositoryId);
+        const nextStatus = await api.gitStatus(projectId, repository.outsideSession ? undefined : viewSessionId ?? undefined, repository.repositoryId);
         return {
           ...base,
           status: nextStatus,
@@ -898,7 +908,7 @@ export default function GitView({
       if (!cancelled && generation === scopeGeneration.current) setOverviewLoading(false);
     });
     return () => { cancelled = true; };
-  }, [allRepositoriesSelected, projectId, repositoryOverviewKey, repositoryRows, sessionId]);
+  }, [allRepositoriesSelected, projectId, repositoryOverviewKey, repositoryRows, viewSessionId]);
 
   useEffect(() => {
     setSelected(null);

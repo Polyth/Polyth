@@ -615,6 +615,7 @@ export const pt: GitMessages = {
   "gitview.identity": "Identidade",
   "gitview.aheadValue": "{count} à frente",
   "gitview.allRepositories": "Todos os repositórios",
+  "gitview.otherProjectRepositories": "Outros repositórios do projeto",
   "gitview.backToChanges": "Voltar às alterações",
   "gitview.backToLog": "Voltar ao histórico",
   "gitview.behindValue": "{count} atrás",

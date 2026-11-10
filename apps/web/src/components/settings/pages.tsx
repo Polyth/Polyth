@@ -63,6 +63,8 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon, DeleteIcon, EditIcon, PlusIc
 import { BackgroundPicker } from "../BackgroundPicker.tsx";
 import { ShellLookPicker } from "./ShellLookPicker.tsx";
 import ProjectAppearanceDialogCore from "../ProjectAppearanceDialogCore.tsx";
+import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
+import { listProjectSettings, subscribeProjectSettings } from "../../projectSettings.ts";
 import { SHARED_PRESENTATION_SCOPE, useProjectInterfaceMode, type ProjectInterfaceMode } from "../../projectInterfaceScope.ts";
 import { chooseProjectInterface, copyProjectPresentationToShared } from "../../projectPresentationSync.ts";
 import { mobileRailScopeKey, parseMobileRail, readMobileRail, writeMobileRail } from "../../composer/mobileRail.ts";
@@ -1746,6 +1748,8 @@ export function ProjectsPage() {
             <ProjectProfileRows projectId={selectedProject.id} />
           </Section>
 
+          <ProjectSettingsPagesSection project={selectedProject} />
+
           <Section title={tr("settings.pages.newSession")}>
             <Row label={tr("settings.pages.defaultHarness")} hint={tr("settings.pages.overridesTheGlobalDefaultForNewSessions")} itemId="projects.executionHarness">
               <Select
@@ -1848,6 +1852,40 @@ export function ProjectsPage() {
       )}
       {picking && <ProjectFolderDialog onClose={() => setPicking(false)} />}
     </div>
+  );
+}
+
+/** Every page a package adds to a project's settings dialog (Repositories,
+ * Approvals, Memory…) is reachable from here too, for the project picked
+ * above, not only from that project's own menu. Each opens in the same
+ * dialog, so a package page renders exactly as it does there. */
+function ProjectSettingsPagesSection({ project }: { project: Project }) {
+  const [, setVersion] = useState(0);
+  useEffect(() => subscribeProjectSettings(() => setVersion((value) => value + 1)), []);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const pages = listProjectSettings(project.id);
+  if (pages.length === 0) return null;
+  return (
+    <Section title={tr("settings.pages.sectionProjectPages")} hint={tr("settings.pages.sectionProjectPagesHint")} itemId="projects.pages">
+      {pages.map((page) => (
+        <Row key={page.id} label={page.label} hint={page.description} itemId={`projects.page.${page.id}`}>
+          <Button
+            size="sm"
+            data-project-settings-contribution={page.id}
+            aria-label={tr("settings.pages.openProjectPage", { page: page.label })}
+            onClick={() => setOpenId(page.id)}
+          >{tr("settings.pages.openProjectPageShort")}</Button>
+        </Row>
+      ))}
+      {openId && (
+        <ProjectAppearanceDialog
+          key={`${project.id}:${openId}`}
+          project={project}
+          initialPage={`contribution:${openId}`}
+          onClose={() => setOpenId(null)}
+        />
+      )}
+    </Section>
   );
 }
 

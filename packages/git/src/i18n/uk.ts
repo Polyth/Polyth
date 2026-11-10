@@ -615,6 +615,7 @@ export const uk: GitMessages = {
   "gitview.identity": "Автор",
   "gitview.aheadValue": "Попереду: {count}",
   "gitview.allRepositories": "Усі репозиторії",
+  "gitview.otherProjectRepositories": "Інші репозиторії проєкту",
   "gitview.backToChanges": "Назад до змін",
   "gitview.backToLog": "Назад до журналу",
   "gitview.behindValue": "Позаду: {count}",

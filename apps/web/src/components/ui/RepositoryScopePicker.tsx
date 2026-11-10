@@ -1,7 +1,13 @@
 import Picker from "../Picker.tsx";
 import { tr } from "../../i18n/index.ts";
 
-export interface RepositoryScopeOption { id: string; alias: string; detail?: string }
+export interface RepositoryScopeOption {
+  id: string;
+  alias: string;
+  detail?: string;
+  /** Heading for a later group of options, e.g. repositories outside the open chat. */
+  group?: string;
+}
 
 type Selection =
   | { mode: "one" | "all"; value: string | null; onChange(value: string | null): void }
@@ -16,7 +22,7 @@ export type RepositoryScopePickerProps = Selection & {
 /** Repository scope belongs to the calling surface, never global navigation. */
 export default function RepositoryScopePicker(props: RepositoryScopePickerProps) {
   const items = props.repositories.map((repository) => ({
-    id: repository.id, label: repository.alias, group: "", detail: repository.detail,
+    id: repository.id, label: repository.alias, group: repository.group ?? "", detail: repository.detail,
   }));
   if (props.mode === "all") items.unshift({ id: "", label: tr("worktreesessiondialog.allRepositoriesShort"), group: "", detail: undefined });
   return <Picker
