@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "context7",
+  "name": "Context7",
+  "publisher": "Upstash",
+  "verified": true,
+  "summary": "Docs for the library version you use.",
+  "description": "Context7 resolves a library and version to its documentation and returns relevant excerpts. It works without an account; a key raises the rate limit. This is the cheapest fix for an agent that writes an API that no longer exists.",
+  "categories": ["ai", "code"],
+  "status": "stable",
+  "homepage": "https://context7.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.context7.com/mcp",
+      "tokenOptional": true
+    },
+    "tokenHelpUrl": "https://context7.com/dashboard"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://github.com/upstash/context7",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 405,
+      "challenge": "none",
+      "note": "Answers 405 with a JSON-RPC error on GET and sends no WWW-Authenticate header, so no sign-in is demanded up front; the optional key is documented by the vendor."
+    }
+  }
+}

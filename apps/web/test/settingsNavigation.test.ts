@@ -94,7 +94,7 @@ test("settings aliases redirect to the canonical page and mounted navigation upd
   }
 });
 
-test("legacy integrations settings route redirects to Source Control and stays out of navigation", async () => {
+test("a legacy settings route redirects to its target and stays out of navigation", async () => {
   const offGit = registerSlot(
     "settings.pages",
     "test.source-control",
@@ -102,14 +102,14 @@ test("legacy integrations settings route redirects to Source Control and stays o
     10,
     { pageId: "git", label: "Source Control", group: "Engineering" },
   );
-  const offIntegrations = registerSlot(
+  const offLegacy = registerSlot(
     "settings.pages",
-    "test.legacy-integrations",
-    () => createElement("div", { "data-legacy-integrations-settings": true }, "Legacy Integrations"),
+    "test.legacy-route",
+    () => createElement("div", { "data-legacy-route-settings": true }, "Legacy Route"),
     11,
     {
-      pageId: "integrations",
-      label: "Integrations",
+      pageId: "legacy-route",
+      label: "Legacy Route",
       group: "Workspace",
       nav: false,
       redirect: { pageId: "git" },
@@ -119,20 +119,20 @@ test("legacy integrations settings route redirects to Source Control and stays o
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    openSettingsPage("integrations");
+    openSettingsPage("legacy-route");
     await act(async () => { root.render(createElement(SettingsView)); });
     await act(async () => { await Promise.resolve(); });
     assert.equal(container.querySelector(".settings-page-git") !== null, true);
     assert.ok(container.querySelector("[data-source-control-settings]"));
-    assert.equal(container.querySelector("[data-legacy-integrations-settings]"), null);
+    assert.equal(container.querySelector("[data-legacy-route-settings]"), null);
     assert.equal(
-      [...container.querySelectorAll(".settings-nav-item")].some((button) => (button.textContent ?? "").includes("Integrations")),
+      [...container.querySelectorAll(".settings-nav-item")].some((button) => (button.textContent ?? "").includes("Legacy Route")),
       false,
     );
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
-    offIntegrations();
+    offLegacy();
     offGit();
     setOverlay(null);
   }

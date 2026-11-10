@@ -210,6 +210,7 @@ export const webPackageHost: WebPackageHost = {
         if (getState().activePage?.pageId === definition.id && !getPage(definition.id)) closePage();
       };
     },
+    has: (pageId: string) => getPage(pageId) !== undefined,
   },
   capabilities: {
     register: (definition: CapabilityDefinition) =>

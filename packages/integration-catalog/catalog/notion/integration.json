@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "notion",
+  "name": "Notion",
+  "publisher": "Notion",
+  "verified": true,
+  "summary": "Notion pages, databases and blocks.",
+  "description": "Notion's own remote MCP server. The agent searches pages and databases, reads their content and can create or edit entries. Access follows the OAuth grant you approve, and the pages you pick inside Notion.",
+  "categories": ["product"],
+  "status": "stable",
+  "featured": true,
+  "homepage": "https://www.notion.so",
+  "mcp": {
+    "auth": "oauth",
+    "remote": { "url": "https://mcp.notion.com/mcp" }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://developers.notion.com/docs/mcp",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "note": "401 with resource_metadata on mcp.notion.com; the protected-resource document lists mcp.notion.com as the authorization server with the default scope."
+    }
+  }
+}

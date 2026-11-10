@@ -158,6 +158,9 @@ export function createPackageActivation(
               if (disposed) return reject("pages.register");
               return track(pages.register({ ...definition, ownerPackageId }));
             },
+            // A read, not a grant: a package that offers a way into another
+            // package's page has to know whether that page exists yet.
+            ...(pages.has ? { has: (pageId: string) => pages.has!(pageId) } : {}),
           },
         }
       : {}),

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "playwright",
+  "name": "Playwright",
+  "publisher": "Microsoft",
+  "verified": true,
+  "summary": "A real browser, driven locally.",
+  "description": "Playwright's own MCP server, run on the machine Polyth runs on. It gives the agent a browser it can actually operate, which is different from reading a page: forms, signed-out public sites and visual checks. It needs Node.js and downloads a browser on first start.",
+  "categories": ["code", "quality"],
+  "status": "stable",
+  "homepage": "https://github.com/microsoft/playwright-mcp",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": ["npx", "-y", "@playwright/mcp@0.0.84"],
+      "requires": ["node"],
+      "timeoutMs": 60000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://github.com/microsoft/playwright-mcp",
+    "probe": {
+      "state": "documented",
+      "note": "The invocation comes from the vendor README; the version is the one npm published on 2026-11-06 (registry.npmjs.org/@playwright/mcp/latest = 0.0.84). The catalog never starts it unpinned."
+    }
+  }
+}

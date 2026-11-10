@@ -336,6 +336,13 @@
   justify-content: center;
   gap: var(--space-2);
 }
+/* Why the catalog button is first: one line, centred under the row. */
+.pkg-mcp-catalog-hint {
+  max-width: 46ch;
+  margin: 0;
+  text-align: center;
+  text-wrap: pretty;
+}
 .pkg-mcp-native-list {
   display: grid;
   gap: var(--space-1);

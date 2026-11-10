@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "exa",
+  "name": "Exa",
+  "publisher": "Exa",
+  "verified": true,
+  "summary": "Neural web search and page reading.",
+  "description": "Exa's remote MCP server gives the agent a search built for meaning rather than keywords, plus page extraction. It needs an API key, which bounds cost and access; store it in the credential vault.",
+  "categories": ["ai"],
+  "status": "stable",
+  "homepage": "https://exa.ai",
+  "mcp": {
+    "auth": "token",
+    "remote": { "url": "https://mcp.exa.ai/mcp" },
+    "tokenHelpUrl": "https://dashboard.exa.ai/api-keys"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://docs.exa.ai/reference/exa-mcp",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 405,
+      "challenge": "none",
+      "note": "Answers 405 with a JSON-RPC error on GET and sends no WWW-Authenticate header; the key is carried in the request as documented by Exa."
+    }
+  }
+}

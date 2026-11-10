@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "sentry",
+  "name": "Sentry",
+  "publisher": "Sentry",
+  "verified": true,
+  "summary": "Errors, stack traces, issues and alerts.",
+  "description": "Sentry's remote MCP server. The agent lists projects and issues, reads stack traces and events, and can write issue, alert and team changes when the granted scopes allow it. Scopes come from the OAuth consent screen.",
+  "categories": ["quality"],
+  "status": "stable",
+  "featured": true,
+  "homepage": "https://sentry.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": { "url": "https://mcp.sentry.dev/mcp" }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://docs.sentry.io/product/sentry-mcp/",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "note": "401 with resource_metadata at mcp.sentry.dev; the protected-resource document lists mcp.sentry.dev with org:read, project:write, team:write, event:write and alerts:write scopes."
+    }
+  }
+}

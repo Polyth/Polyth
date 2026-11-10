@@ -552,6 +552,7 @@
         "packages/share-chat/**",
         "packages/limit-windows/**",
         "packages/computer-use/**",
+        "packages/integration-catalog/**",
         "packages/glance/**"
       ],
       "entrypoints": [
@@ -559,6 +560,7 @@
         "packages/permissions",
         "packages/secure-safe",
         "packages/judgment-jev/src/adapter.ts",
+        "packages/integration-catalog",
         "packages/judgment-local/src/engine.ts"
       ],
       "references": [
@@ -573,6 +575,7 @@
         "packages/limit-windows/README.md",
         "packages/computer-use/README.md",
         "packages/glance/README.md",
+        "packages/integration-catalog/README.md",
         "packages/task-trackers/README.md"
       ],
       "testHints": [
@@ -582,6 +585,7 @@
         "packages/docker/test/docker.test.ts",
         "packages/terraform/test/terraform.test.ts",
         "packages/custom-action/test/routes.test.ts",
+        "packages/integration-catalog/test/entries.test.ts",
         "packages/terminal/test/projectTools.test.ts"
       ],
       "risk": "high"

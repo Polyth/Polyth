@@ -24,6 +24,7 @@ import {
   TextInput,
 } from "../../../apps/web/src/components/ui/index.ts";
 import {
+  AppsIcon,
   DeleteIcon,
   EditIcon,
   FolderIcon,
@@ -62,6 +63,20 @@ import {
 
 const api = createApiTransport();
 const SERVER_FILTER_THRESHOLD = 5;
+
+/** The catalog page's public id, owned by the `integration-catalog` package.
+ *  A string on purpose: offering a way into a package must not import that
+ *  package's code, and when it is disabled the way in simply disappears. */
+const CATALOG_PAGE_ID = "integration-catalog";
+
+/** Only the host seams this page needs, so the page (and its tests) never
+ *  stand in a whole package host to offer one link. */
+export interface McpCatalogHost {
+  pages?: { has?(pageId: string): boolean };
+  navigation?: {
+    openPage?(pageId: string, resource?: string | null, options?: { projectId?: string }): boolean;
+  };
+}
 
 /** Re-render when the language changes; copy is read through mcpText at render time. */
 function useLocaleRefresh(): void {
@@ -698,7 +713,7 @@ function McpToolDetails({ tool }: { tool: McpToolDto }) {
   </li>;
 }
 
-export default function McpPage() {
+export default function McpPage({ host }: { host?: McpCatalogHost } = {}) {
   useLocaleRefresh();
   const activeProjectId = useStore((state) => state.activeProjectId);
   const projectRegistry = useStore((state) => state.projectRegistry);
@@ -1040,6 +1055,12 @@ export default function McpPage() {
   }, { enabled: 0, failed: 0, unchecked: 0 });
   const projectCount = scope === "project" ? servers.filter((server) => server.scope === "project").length : undefined;
   const showList = canManage && !loading && servers.length > 0;
+  // Ask the host instead of guessing: a disabled or absent catalog means the
+  // control is not there at all, rather than a button that does nothing.
+  const catalogAvailable = host?.pages?.has?.(CATALOG_PAGE_ID) === true;
+  const openCatalog = () => {
+    host?.navigation?.openPage?.(CATALOG_PAGE_ID);
+  };
 
   const openInstall = (mode: InstallMode) => {
     setInstallMode(mode);
@@ -1276,6 +1297,14 @@ export default function McpPage() {
           onChange={(event) => setServerQuery(event.target.value)}
         />
       </div>}
+      {!adding && catalogAvailable && <Button
+        size="sm"
+        variant="ghost"
+        iconStart={AppsIcon}
+        data-settings-item="mcp.catalog"
+        title={mcpText("catalog.body")}
+        onClick={openCatalog}
+      >{mcpText("catalog.action")}</Button>}
       {!adding && canWrite && <Button size="sm" variant="primary" iconStart={PlusIcon} onClick={() => openInstall("http")}>
         {mcpText("install.title")}
       </Button>}
@@ -1317,11 +1346,19 @@ export default function McpPage() {
                         ? mcpText("empty.nonePersonBody")
                         : mcpText("empty.noneGlobalBody")}
                   />
-                  {canWrite && <div className="pkg-mcp-quickstart">
-                    <Button size="sm" iconStart={GlobeIcon} onClick={() => openInstall("http")}>{mcpText("quick.http")}</Button>
-                    <Button size="sm" iconStart={TerminalIcon} onClick={() => openInstall("stdio")}>{mcpText("quick.stdio")}</Button>
-                    {!personal && <Button size="sm" iconStart={UploadIcon} onClick={() => openInstall("import")}>{mcpText("quick.import")}</Button>}
+                  {(canWrite || catalogAvailable) && <div className="pkg-mcp-quickstart">
+                    {catalogAvailable && <Button
+                      size="sm"
+                      variant="primary"
+                      iconStart={AppsIcon}
+                      data-settings-item="mcp.catalog"
+                      onClick={openCatalog}
+                    >{mcpText("catalog.action")}</Button>}
+                    {canWrite && <Button size="sm" iconStart={GlobeIcon} onClick={() => openInstall("http")}>{mcpText("quick.http")}</Button>}
+                    {canWrite && <Button size="sm" iconStart={TerminalIcon} onClick={() => openInstall("stdio")}>{mcpText("quick.stdio")}</Button>}
+                    {canWrite && !personal && <Button size="sm" iconStart={UploadIcon} onClick={() => openInstall("import")}>{mcpText("quick.import")}</Button>}
                   </div>}
+                  {catalogAvailable && <p className="pkg-mcp-help pkg-mcp-catalog-hint">{mcpText("catalog.body")}</p>}
                 </div>
               : null}
 

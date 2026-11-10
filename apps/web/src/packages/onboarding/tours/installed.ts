@@ -212,31 +212,3 @@ export const PLUGINS_TOUR: PackageOnboardingTour = {
     },
   ],
 };
-
-
-export const INTEGRATIONS_TOUR: PackageOnboardingTour = {
-  packageId: "integrations",
-  title: tr("packages.onboarding.tours.installed.integrations"),
-  steps: [
-    {
-      id: "overview",
-      title: tr("packages.onboarding.tours.installed.connectThroughLocalServiceTools"),
-      body: tr("packages.onboarding.tours.installed.integrationsReportsExternalServiceReadinessThroughInstalled"),
-      media: { kind: "pattern", pattern: "orbit" },
-    },
-    {
-      id: "github",
-      title: tr("packages.onboarding.tours.installed.verifyGithubReadiness"),
-      body: tr("packages.onboarding.tours.installed.checkThatTheGithubCliIsInstalled"),
-      highlight: tr("packages.onboarding.tours.installed.githubCli"),
-      media: { kind: "pattern", pattern: "branches" },
-    },
-    {
-      id: "view",
-      title: tr("packages.onboarding.tours.installed.continueIntoRepositoryWork"),
-      body: tr("packages.onboarding.tours.installed.whenARepositoryIsDetectedOpenThe"),
-      highlight: tr("packages.onboarding.tours.installed.openGithubView"),
-      media: { kind: "pattern", pattern: "tiles" },
-    },
-  ],
-};
