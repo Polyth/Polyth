@@ -186,3 +186,32 @@ test("plan updates do not turn an activity group into external research", () => 
   assert.equal(executionGroupLabel([plan, plan, read]), "Repository inspection");
   assert.equal(executionGroupLabel([tool({ tool: "mcp__github__get_pull_request", input: {} })]), "External research");
 });
+
+test("Antigravity native tools read as the command or file they act on", () => {
+  const shell = executionPresentation({ tool: "run_command", input: { CommandLine: "git grep -n \"hover\" apps/web/src/fluentTheme.css" }, output: undefined, title: undefined });
+  assert.equal(shell.kind, "shell");
+  assert.equal(shell.command, "git grep -n \"hover\" apps/web/src/fluentTheme.css");
+  assert.notEqual(shell.preview, "run_command");
+
+  const test = executionPresentation({ tool: "run_command", input: { CommandLine: "npm test" }, output: undefined, title: undefined });
+  assert.equal(test.kind, "test");
+
+  const plain = executionPresentation({ tool: "run_command", input: { CommandLine: "ls -la" }, output: undefined, title: undefined });
+  assert.equal(plain.kind, "shell");
+  assert.equal(plain.label, "Shell");
+
+  const read = executionPresentation({ tool: "read_file", input: { Path: "/repo/apps/web/test/shellLooks.test.ts", StartLine: 350, EndLine: 370 }, output: "403 lines", title: undefined });
+  assert.equal(read.kind, "read");
+  assert.equal(read.path, "/repo/apps/web/test/shellLooks.test.ts");
+  assert.match(read.preview, /shellLooks\.test\.ts · L350–370$/);
+
+  const view = executionPresentation({ tool: "view_file", input: { AbsolutePath: "/var/log/alerts.log" }, output: undefined, title: undefined });
+  assert.equal(view.kind, "read");
+  assert.match(view.preview, /alerts\.log$/);
+
+  const write = executionPresentation({ tool: "write_file", input: { Path: "/repo/notes.md" }, output: undefined, title: undefined });
+  assert.equal(write.path, "/repo/notes.md");
+
+  assert.equal(classifyTool("run_command", { CommandLine: "ls" }), "shell");
+  assert.equal(executionGroupLabel([{ tool: "run_command", input: { CommandLine: "rg foo" } } as ToolMsg]), "Repository inspection");
+});
