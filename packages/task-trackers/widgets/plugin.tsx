@@ -112,6 +112,7 @@ import {
   TaskComposer,
   TaskStartOptionsFields,
   takeFieldDraft,
+  taskStartOptions,
   useActiveProjectId,
   useFieldDraft,
   useTaskLinks,
@@ -742,7 +743,9 @@ function TaskDetail({
   demo: boolean;
   loading: boolean;
   initialEditing?: boolean;
-  onClose: () => void;
+  /** Leaving the window for the session's chat passes false: focus belongs to
+   *  the chat that takes over, not the card behind the closed window. */
+  onClose: (restoreFocus?: boolean) => void;
   onTaskChanged: (task: TaskTrackerTaskDto, linked?: boolean) => void;
   /** Applies a change to the task wherever the board holds it, without
    *  reopening it: optimistic edits and their rollback. */
@@ -860,19 +863,29 @@ function TaskDetail({
   };
   const dispatch = async () => {
     if (!projectId) return;
+    // The start's own remembered options decide whether the app switches to
+    // the new session, and the window then closes with it.
+    const options = taskStartOptions();
     setBusy("dispatch");
     setError("");
     try {
-      const [result] = await dispatchTasks(projectId, [task], instructions);
+      const [result] = await dispatchTasks(projectId, [task], instructions, options);
       if (!result?.sessionId) throw new Error(result?.error || tt("tasktrackers.board.agentDidNotStart"));
       setStartedSession(result.sessionId);
       setNotice(tt("tasktrackers.board.agentStarted"));
       setInstructions("");
+      if (options.open) onClose(false);
     } catch (cause) {
       setError(messageOf(tt("tasktrackers.board.couldNotStartAgent"), cause));
     } finally {
       setBusy(null);
     }
+  };
+  // Opening a linked session leaves the board: the chat takes over, so the
+  // task window does not stay on top of it.
+  const openInSession = (id: string) => {
+    onClose(false);
+    openSession(id);
   };
   const link = async (startAgent: boolean) => {
     if (!sessionId) return;
@@ -1069,7 +1082,7 @@ function TaskDetail({
                 <Icon.external />
               </a>
             )}
-            <IconButton icon={CloseIcon} size="sm" label={tt("tasktrackers.board.closeDetails")} onClick={onClose} />
+            <IconButton icon={CloseIcon} size="sm" label={tt("tasktrackers.board.closeDetails")} onClick={() => onClose()} />
           </span>
         </header>
 
@@ -1513,7 +1526,7 @@ function TaskDetail({
                   </div>
                 )}
                 {startedSession && (
-                  <Button size="sm" variant="quiet" onClick={() => openSession(startedSession)}>{tt("tasktrackers.board.openNewSession")}</Button>
+                  <Button size="sm" variant="quiet" onClick={() => openInSession(startedSession)}>{tt("tasktrackers.board.openNewSession")}</Button>
                 )}
                 {target === "new" && !projectId && preferences.agentHandoff && <small className="tt-inline-hint">{tt("tasktrackers.board.openProjectForAgents")}</small>}
                 {(target === "current" || !preferences.agentHandoff) && !sessionId && <small className="tt-inline-hint">{tt("tasktrackers.board.openSessionToLink")}</small>}
@@ -1526,7 +1539,7 @@ function TaskDetail({
                     <small>{tt("tasktrackers.board.agentReports")}</small>
                   </div>
                 </div>
-                <AgentSessions links={links} />
+                <AgentSessions links={links} onOpen={openInSession} />
               </section>}
             </aside>
           </div>

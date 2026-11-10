@@ -547,7 +547,27 @@ test("task detail starts an agent in a new session and lists the task's agent se
     assert.match(sessions?.textContent ?? "", /POL-1 · Fix mobile overflow.*Agent working/);
     await act(async () => { (sessions!.querySelector("button") as HTMLButtonElement).click(); });
     assert.deepEqual(run.opened, ["s-1"]);
+    assert.equal(document.querySelector(".tt-detail") === null, true, "the task window closes behind the opened session");
   } finally {
+    await view.unmount();
+    run.restore();
+  }
+});
+
+test("a start that opens the session closes the task window with it", async () => {
+  const run = harness();
+  const view = await mountBoard();
+  try {
+    await act(async () => { work.setTaskStartOptions({ open: true }); });
+    await act(async () => { view.container.querySelector<HTMLButtonElement>('[aria-label^="Open POL-1:"]')!.click(); });
+    await settle();
+    const detail = document.querySelector(".tt-detail")!;
+    await act(async () => { button(detail, "Start agent in new session")!.click(); });
+    await settle(4);
+    assert.deepEqual(run.opened, ["s-1"], "the app switches to the started session");
+    assert.equal(document.querySelector(".tt-detail") === null, true, "the task window does not stay over the new chat");
+  } finally {
+    work.resetTaskStartOptions();
     await view.unmount();
     run.restore();
   }

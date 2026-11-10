@@ -369,7 +369,12 @@ function useSessions(ids: readonly string[]): Array<SessionProjection | undefine
 const ACTIVE = new Set(["working", "waiting", "reconciling", "epoch-pending"]);
 
 /** Agent sessions linked to one task, newest first, each one tap away. */
-export function AgentSessions({ links }: { links: readonly TaskTrackerTaskLinkDto[] }) {
+export function AgentSessions({ links, onOpen = openSession }: {
+  links: readonly TaskTrackerTaskLinkDto[];
+  /** A caller that must retire its own window first (the task detail closes
+   *  itself before the session's chat takes over). */
+  onOpen?: (sessionId: string) => void;
+}) {
   const sessions = useSessions(links.map((link) => link.sessionId));
   if (links.length === 0) return null;
   return (
@@ -379,7 +384,7 @@ export function AgentSessions({ links }: { links: readonly TaskTrackerTaskLinkDt
         const working = session ? ACTIVE.has(session.status) : false;
         return (
           <li key={link.sessionId}>
-            <button type="button" onClick={() => openSession(link.sessionId)}>
+            <button type="button" onClick={() => onOpen(link.sessionId)}>
               <i className={working ? "working" : session?.status ?? ""} aria-hidden="true" />
               <span>
                 <strong>{session?.title || link.taskKey}</strong>
