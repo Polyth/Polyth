@@ -3,11 +3,11 @@
   "budget": {
     "npmLockPackages": {
       "package-lock.json": 331,
-      "tools/release/package-lock.json": 309
+      "tools/release/package-lock.json": 308
     },
     "cargoLockCrates": {
-      "Cargo.lock": 519,
-      "fuzz/Cargo.lock": 444
+      "Cargo.lock": 510,
+      "fuzz/Cargo.lock": 436
     }
   },
   "npm": {
