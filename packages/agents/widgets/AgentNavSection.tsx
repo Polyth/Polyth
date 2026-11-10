@@ -8,9 +8,11 @@ import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { fmtSessionElapsed } from "../../../apps/web/src/format.ts";
 import { tapFeedback } from "../../../apps/web/src/haptics.ts";
 import {
-  BotIcon, ChevronRightIcon, CopyIcon, DeleteIcon, EditIcon, Icon, Menu, MoreIcon, MoreVerticalIcon, PauseIcon, PlayIcon,
-  PlusIcon, SettingsIcon, ShieldAlertIcon, Spinner, StopIcon, SuccessIcon, type MenuEntry,
+  BotIcon, CalendarIcon, ChevronRightIcon, ClockIcon, CopyIcon, DeleteIcon, EditIcon, HeartbeatIcon, Icon, Menu, MoreIcon,
+  MoreVerticalIcon, PauseIcon, PlayIcon, PlusIcon, ScheduleIcon, SettingsIcon, ShieldAlertIcon, Spinner, StopIcon,
+  SuccessIcon, SyncIcon, TimerIcon, type LucideIcon, type MenuEntry,
 } from "../../../apps/web/src/components/ui/index.ts";
+import { cadenceOfTask } from "./plannerShared.ts";
 import { AGENT_ICONS, AgentMark } from "./AgentGlyph.tsx";
 import { conversationMenuEntries } from "./agentConversationsMenu.ts";
 import type { AgentIconId } from "../src/agentPrompt.ts";
@@ -119,15 +121,45 @@ function Lead({ agent, live }: { agent: ScheduleTaskDto; live: AgentLive }) {
   }
 }
 
-/** The trailing measure: how long it has worked, or when it wakes next. */
-function Meta({ live, now }: { live: AgentLive; now: number }) {
+/** The glyph for how the next wake comes round: a heartbeat, a repeat for
+ *  every day, a calendar for chosen weekdays or a day of the month, a timer
+ *  for an interval, a clock for one time. */
+function wakeGlyph(agent: ScheduleTaskDto, kind: "schedule" | "heartbeat"): LucideIcon {
+  if (kind === "heartbeat") return HeartbeatIcon;
+  const cadence = cadenceOfTask(agent);
+  if (!cadence) return ScheduleIcon;
+  if (cadence.kind === "at") return ClockIcon;
+  if (cadence.kind === "every") return TimerIcon;
+  const fields = cadence.expression.trim().split(/\s+/);
+  if (fields.length !== 5) return ScheduleIcon;
+  const [minute, hour, dom, month, dow] = fields as [string, string, string, string, string];
+  const fixedTime = /^\d{1,2}$/.test(minute) && /^\d{1,2}$/.test(hour);
+  if (!fixedTime) return TimerIcon; // hourly or every few minutes
+  const everyDay = dom === "*" && month === "*" && (dow === "*" || dow === "0-6" || dow === "0,1,2,3,4,5,6");
+  return everyDay ? SyncIcon : CalendarIcon;
+}
+
+/** The trailing measure: how long it has worked, or when it wakes next. A
+ *  state with no number (paused, draft) is a glyph. */
+function Meta({ agent, live, now }: { agent: ScheduleTaskDto; live: AgentLive; now: number }) {
   if (live.phase === "working" && live.running) {
     return <span className="agent-nav-meta">{fmtSessionElapsed(now - live.running.startedAt)}</span>;
   }
-  if (live.phase === "paused") return <span className="agent-nav-meta">{tr("agents.statePaused")}</span>;
-  if (live.phase === "draft") return <span className="agent-nav-meta">{tr("agents.stateDraft")}</span>;
+  if (live.phase === "paused" || live.phase === "draft") {
+    // The row button's own name and tooltip carry the state in words.
+    return (
+      <span className="agent-nav-meta" data-meta="state">
+        <Icon icon={live.phase === "paused" ? PauseIcon : EditIcon} size="sm" />
+      </span>
+    );
+  }
   if (live.phase === "idle" && live.nextWake) {
-    return <span className="agent-nav-meta">{wakeLabel(live.nextWake.at)}</span>;
+    return (
+      <span className="agent-nav-meta" data-meta="wake">
+        <Icon icon={wakeGlyph(agent, live.nextWake.kind)} size="sm" />
+        {wakeLabel(live.nextWake.at)}
+      </span>
+    );
   }
   return null;
 }
@@ -272,7 +304,7 @@ function AgentRow({ host, agent, live, active, phone, onNavigate }: {
           <span className="agent-nav-lead" aria-hidden="true"><Lead agent={agent} live={live} /></span>
           {/* A name in the other script direction truncates at its own end. */}
           <span className="agent-nav-title" dir="auto">{name}</span>
-          <Meta live={live} now={now} />
+          <Meta agent={agent} live={live} now={now} />
         </button>
       )}
       {!renaming && (
@@ -283,9 +315,12 @@ function AgentRow({ host, agent, live, active, phone, onNavigate }: {
           open={menuOpen}
           onOpenChange={setMenuOpen}
           returnFocusRef={menuReturnRef}
+          // On a phone the row has no ⋯: a long press opens the menu, placed
+          // against the row itself.
+          {...(phone ? { anchorRef: buttonRef } : {})}
           entries={entries}
         >
-          {(trigger) => (
+          {(trigger) => phone ? null : (
             <button
               {...trigger}
               type="button"
@@ -297,7 +332,7 @@ function AgentRow({ host, agent, live, active, phone, onNavigate }: {
                 trigger.onClick();
               }}
             >
-              <Icon icon={phone ? MoreIcon : MoreVerticalIcon} size="sm" />
+              <Icon icon={MoreVerticalIcon} size="sm" />
             </button>
           )}
         </Menu>

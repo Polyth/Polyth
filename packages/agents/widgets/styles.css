@@ -1002,6 +1002,19 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* A cadence glyph before the next wake, or a state glyph alone: sized to
+   the meta text, one shade quieter than its numbers. */
+.agent-nav .agent-nav-meta:is([data-meta="wake"], [data-meta="state"]) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.agent-nav .agent-nav-meta .ui-icon {
+  flex: 0 0 auto;
+  width: 1.1em;
+  height: 1.1em;
+}
+.agent-nav .agent-nav-meta[data-meta="wake"] .ui-icon { color: var(--faint); }
 .agent-nav .agent-nav-row[data-phase="working"] .agent-nav-meta {
   color: var(--session-blue, var(--accent));
   font-weight: 600;
@@ -1040,20 +1053,15 @@
   .agent-nav .agent-nav-row:is(:hover, .menu-open) .agent-nav-meta,
   .agent-nav .agent-nav-row:has(:focus-visible) .agent-nav-meta { visibility: hidden; }
 }
-/* Touch: the open row offers its menu; every row opens it with a long press. */
-@media (hover: none), (pointer: coarse) {
-  .agent-nav .agent-nav-row:is(.active, .menu-open) .agent-nav-more { opacity: 1; pointer-events: auto; }
-  .agent-nav .agent-nav-row:is(.active, .menu-open) .agent-nav-meta { visibility: hidden; }
-}
-/* Phone navigator: like its chat rows, every row shows ⋯ in its own slot on
-   the row's end. The body runs --nav-mark-tuck into the ⋯ control, so a
-   name with no measure ends where a chat title with no marks does, and the
-   trailing measure ends on the chat rows' mark column. */
+/* Touch: no row shows ⋯, not even the open one; a long press opens the
+   menu. The trigger stays laid out (invisible) as the menu's anchor, and the
+   row keeps its measure. */
+/* Phone navigator: rows have no ⋯ (a long press opens the menu), so the body
+   runs to the row's end. Its name and measure end where the group's ⋯ dots
+   do: half the ⋯ wash in from the edge, less half the filled dots' ink
+   (16 of Lucide's 24 units). */
 .agent-nav[data-surface="phone"] .agent-nav-btn {
-  padding-inline-end: calc(var(--agent-nav-menu) - var(--nav-mark-tuck, var(--space-2)));
-}
-.agent-nav[data-surface="phone"] .agent-nav-meta {
-  margin-inline-end: calc(var(--nav-mark-end, 0px) - var(--nav-title-end, 0px));
+  padding-inline-end: calc(var(--agent-nav-inset) + var(--agent-nav-wash) / 2 - var(--icon-md) / 3);
 }
 .agent-nav[data-surface="phone"] .agent-nav-more { inset-inline-end: var(--agent-nav-inset); opacity: 1; pointer-events: auto; }
 .agent-nav[data-surface="phone"] .agent-nav-head-actions { inset-inline-end: var(--agent-nav-inset); }

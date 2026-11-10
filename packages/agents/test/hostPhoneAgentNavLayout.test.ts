@@ -45,7 +45,6 @@ const agentRow = (id: string, name: string, lead: string, meta = "") => `<div cl
     <span class="agent-nav-title" dir="auto">${name}</span>
     ${meta ? `<span class="agent-nav-meta">${meta}</span>` : ""}
   </button>
-  <button type="button" class="agent-nav-more">${dots}</button>
 </div>`;
 
 const agents = (id: string, folded: boolean) => `<div class="agent-nav" id="${id}" role="group" data-surface="phone"${folded ? " data-collapsed" : ""}>
@@ -112,8 +111,6 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
       titleEdge: textStart(q(".mobile-nav-session-title")),
       sessionRow: rect(q(".mobile-nav-session-row")).height,
       sessionMore: centreFromEnd(q(".mobile-nav-more svg")),
-      sessionMoreSize: rect(q(".mobile-nav-more svg")).width,
-      flagEnd: endFromEnd(q("#flag")),
       chevrons: all(".agent-nav-chevron").map(centreFromStart),
       labels: all(".agent-nav-label").map(textStart),
       heads: all(".agent-nav-head").map((el) => rect(el).height),
@@ -126,9 +123,10 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
       nameBoxes: all(".agent-nav-title").map((el) => { const r = rect(el); return fromStart(rtl ? r.right : r.left); }),
       shortName: textStart(q("#glyph .agent-nav-title")),
       rows: all(".agent-nav-row").map((el) => rect(el).height),
-      rowMore: all(".agent-nav-more svg").map(centreFromEnd),
-      rowMoreSizes: all(".agent-nav-more svg").map((el) => rect(el).width),
       metaEnd: endFromEnd(q("#glyph .agent-nav-meta")),
+      // The group ⋯'s filled dots: where an agent row's content ends now
+      // that rows carry no ⋯ of their own.
+      headDotsEnd: Math.min(...all("#open-agents .agent-nav-head-action circle").map(endFromEnd)),
       // A long name with no meta ends where a chat row's marks (and a
       // chat title without marks) do, not an empty column gap short.
       longNameEnd: endFromEnd(q("#stopped .agent-nav-title")),
@@ -141,9 +139,9 @@ async function measure(width: number, options: { density?: string; dir?: "ltr" |
         const style = (el: Element) => { const s = getComputedStyle(el); return [s.fontSize, s.fontWeight, s.letterSpacing, s.textTransform, s.color].join(" "); };
         return { label: style(q(".agent-nav-label")), divider: style(q(".mobile-nav-date-divider")) };
       })(),
-      moreInk: { agent: getComputedStyle(q(".agent-nav-more")).color, head: getComputedStyle(q(".agent-nav-head-action")).color, session: getComputedStyle(q(".mobile-nav-more")).color },
-      dotsFilled: all(".agent-nav :is(.agent-nav-more, .agent-nav-head-action) circle").length > 0
-        && all(".agent-nav :is(.agent-nav-more, .agent-nav-head-action) circle").every((c) => getComputedStyle(c).fill !== "none" && getComputedStyle(c).stroke === "none"),
+      moreInk: { head: getComputedStyle(q(".agent-nav-head-action")).color, session: getComputedStyle(q(".mobile-nav-more")).color },
+      dotsFilled: all(".agent-nav .agent-nav-head-action circle").length > 0
+        && all(".agent-nav .agent-nav-head-action circle").every((c) => getComputedStyle(c).fill !== "none" && getComputedStyle(c).stroke === "none"),
       overflow: all(".mobile-navigator *").some((el) => { const r = rect(el); return r.width > 0 && (r.left < -0.5 || r.right > W + 0.5); }),
     };
   });
@@ -159,19 +157,17 @@ for (const width of [320, 390, 430]) {
       for (const x of [...m.chevrons, ...m.leads]) near(x, m.glyphCentre, "chevron and agent marks centred under the project mark");
       for (const x of [...m.labels, ...m.names]) near(x, m.titleEdge, "group label and agent names on the session-title edge");
       for (const h of [...m.heads, ...m.rows]) near(h, m.sessionRow, "group header and agent rows are a chat row's height");
-      for (const x of [...m.headMore, ...m.rowMore]) near(x, m.sessionMore, "⋯ shares the chat rows' trailing column");
-      for (const s of m.rowMoreSizes) near(s, m.sessionMoreSize, "⋯ is the chat row's glyph size");
+      for (const x of m.headMore) near(x, m.sessionMore, "the group ⋯ shares the chat rows' trailing column");
       for (const s of m.leadSizes) assert.ok(s <= 20, `an agent mark stays a state-mark size (${s}px)`);
-      near(m.metaEnd, m.flagEnd, "the trailing measure ends where a chat row's marks do");
+      near(m.metaEnd, m.headDotsEnd, "with no row ⋯, the trailing measure runs to where the group's ⋯ dots end");
       assert.ok(m.summaryMark <= 18, `folded summary marks stay small (${m.summaryMark}px)`);
       assert.ok(m.summaryStart >= m.foldedLabelEnd, "folded summary follows the label");
-      near(m.longNameEnd, m.titleEdge, "a long name with no measure ends where titles start, mirrored, as a chat title does");
+      assert.ok(m.longNameEnd <= m.headDotsEnd + 0.6, `a long name with no measure uses the freed ⋯ slot (${m.longNameEnd} vs ${m.headDotsEnd})`);
       near(m.gapBelowOpenGroup, 8, "an open group ends one rhythm step before the chats");
       near(m.gapBelowFoldedGroup, 0, "a folded group is one more line of the list");
       assert.equal(m.caption.label, m.caption.divider, "the group header uses the navigator's caption style");
-      assert.equal(m.moreInk.agent, m.moreInk.session, "agent ⋯ shares the chat rows' quiet ink");
       assert.equal(m.moreInk.head, m.moreInk.session, "the group ⋯ shares the chat rows' quiet ink");
-      assert.equal(m.dotsFilled, true, "agent ⋯ dots are filled like the chat rows' ⋯");
+      assert.equal(m.dotsFilled, true, "the group ⋯ dots are filled like the chat rows' ⋯");
       assert.equal(m.overflow, false, "nothing leaves the screen");
     });
   }
@@ -182,7 +178,7 @@ test("phone Agents group mirrors in RTL", { skip: !CHROME }, async () => {
   const rtl = await measure(390, { dir: "rtl" });
   for (const key of ["glyphCentre", "titleEdge", "sessionMore", "metaEnd", "longNameEnd"] as const) near(rtl[key], ltr[key], `${key} mirrors`);
   near(rtl.shortName, ltr.shortName, "a short Latin name sits on the RTL title edge");
-  for (const key of ["chevrons", "labels", "leads", "nameBoxes", "rowMore"] as const) {
+  for (const key of ["chevrons", "labels", "leads", "nameBoxes"] as const) {
     rtl[key].forEach((x, i) => near(x, ltr[key][i]!, `${key} mirror`));
   }
 });

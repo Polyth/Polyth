@@ -376,6 +376,44 @@ test("agents sit above a project's chats: state marks, news, and a click opens t
   await view.unmount();
 });
 
+test("navigator rows show states and cadence as glyphs: paused is a pause mark, a daily wake a repeat", async () => {
+  resetRegistry();
+  fakeServer([
+    digest({ id: "agent-1", title: "Paused one", enabled: false, history: [] }),
+    digest({ id: "agent-2", title: "Daily one", cadence: { kind: "cron", expression: "0 1 * * *", timeZone: "UTC" },
+      nextRunAt: now + HOUR, heartbeat: undefined, nextBeatAt: undefined, history: [] }),
+    digest({ id: "agent-3", title: "Weekdays", nextRunAt: now + HOUR, heartbeat: undefined, nextBeatAt: undefined, history: [] }),
+  ]);
+  const { host } = fakeHost();
+  const nav = await mounted(createElement(AgentNavSection, { host, context: { projectId: "pr-home" } }));
+  await act(async () => { await delay(30); });
+  const meta = (title: string) => [...nav.container.querySelectorAll(".agent-nav-row")]
+    .find((row) => row.querySelector(".agent-nav-title")!.textContent === title)!.querySelector(".agent-nav-meta")!;
+  assert.equal(meta("Paused one").textContent, "", "no word for a paused agent");
+  assert.equal(!!meta("Paused one").querySelector(".lucide-pause"), true, "a pause glyph instead");
+  assert.equal(!!meta("Daily one").querySelector(".lucide-repeat"), true, "a daily wake leads with a repeat glyph");
+  assert.match(meta("Daily one").textContent ?? "", /\d/, "and keeps its time");
+  assert.equal(!!meta("Weekdays").querySelector(".lucide-calendar-days"), true, "chosen weekdays read as a calendar");
+  await nav.unmount();
+});
+
+test("the phone navigator has no row ⋯: a long press on the row opens the agent's menu", async () => {
+  resetRegistry();
+  fakeServer([digest({ history: [] })]);
+  const { host } = fakeHost();
+  const nav = await mounted(createElement(AgentNavSection, { host, context: { projectId: "pr-home", surface: "phone" } }));
+  await act(async () => { await delay(30); });
+  assert.equal(nav.container.querySelectorAll(".agent-nav-row .agent-nav-more").length, 0, "no ⋯ on a phone row");
+  assert.equal(nav.container.querySelectorAll(".agent-nav-head-action").length, 1, "the group keeps its own menu");
+  const button = nav.container.querySelector<HTMLButtonElement>(".agent-nav-row .agent-nav-btn")!;
+  await act(async () => {
+    button.dispatchEvent(new window.TouchEvent("touchstart", { bubbles: true }) as unknown as Event);
+    await delay(620);
+  });
+  assert.equal(document.querySelectorAll('[role="menu"]').length, 1, "the long press opened the menu");
+  await nav.unmount();
+});
+
 test("a working agent's clocks agree: its row, its status line and its live turn read the same second", async () => {
   resetRegistry();
   const startedAt = Date.now() - (2 * 60 + 42) * 1_000;
