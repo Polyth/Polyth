@@ -1088,7 +1088,7 @@
   display: flex;
   min-width: 0;
   min-height: var(--planner-chat-row);
-  padding: 0 var(--space-1);
+  padding: 0;
 }
 .planner-chat-toggle {
   flex: 1 1 auto;
@@ -1096,7 +1096,7 @@
   min-height: var(--planner-chat-row);
   margin: 0;
   padding: 0 var(--space-2);
-  padding-inline-start: calc(var(--composer-stack-mark, calc(var(--space-2) + var(--icon-md) / 2)) - var(--icon-md) / 2 - var(--space-1));
+  padding-inline-start: calc(var(--composer-stack-mark, calc(var(--space-2) + var(--icon-md) / 2)) - var(--icon-md) / 2);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -1166,7 +1166,7 @@
   flex: none;
   display: grid;
   place-items: center;
-  margin-inline: 0 calc(var(--space-1) * -1);
+  margin-inline: 0;
   color: var(--faint);
   transition: transform var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }

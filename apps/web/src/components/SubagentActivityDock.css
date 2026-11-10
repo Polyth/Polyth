@@ -279,7 +279,7 @@
      the row band (or the words) is their hover. */
   .subagent-branch-open:hover:where(:not(:disabled)),
   .subagent-branch-show-all:hover:where(:not(:disabled)) { background: none; }
-  .subagent-branch-row:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+  .subagent-branch-row:hover { background: var(--surface-overlay-hover); }
   .subagent-branch-row:hover .subagent-branch-actions--hover { opacity: 1; }
 }
 @media (hover: none) {

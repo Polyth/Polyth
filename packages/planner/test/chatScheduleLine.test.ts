@@ -244,3 +244,12 @@ test("the run fact names its task and opens it in the Planner", async (t) => {
   await act(async () => { root.render(createElement(PlannedRunFact, { host, event: event({ runId: "r3" }) })); await delay(10); });
   assert.equal(container.querySelector(".planner-run-fact"), null, "a malformed event renders nothing");
 });
+
+test("planner chat line spans full dock width and mark sits on pending stack grid", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../widgets/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.planner-chat-line\s*\{[^}]*padding:\s*0;/);
+  assert.match(css, /\.planner-chat-toggle\s*\{[^}]*padding-inline-start:\s*calc\(var\(--composer-stack-mark/);
+  assert.doesNotMatch(css, /\.planner-chat-toggle\s*\{[^}]*- var\(--space-1\)/, "no inset offset subtracting from mark grid");
+  assert.match(css, /\.planner-chat-chevron\s*\{[^}]*margin-inline:\s*0;/);
+});

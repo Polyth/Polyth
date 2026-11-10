@@ -64,6 +64,7 @@ test("edited files above the composer are a borderless line in every look", () =
   assert.match(styles, /\.pending-changes-bar \{[^}]*margin-inline-start:\s*var\(--conversation-frame-inline-start, auto\)/s);
   // It stands on the host's pending stack: mark column, text column, end column.
   assert.match(styles, /\.pending-changes-bar--collapsed > \.ui-run-summary \{[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark, 13px\) - var\(--pending-changes-mark\) \/ 2\) var\(--composer-stack-end, var\(--space-1\)\)/s);
+  assert.match(styles, /\.pending-changes-bar--collapsed > \.ui-run-summary:hover:where\(:not\(:disabled\)\)\s*\{[^}]*background:\s*var\(--surface-overlay-hover\);/s);
   assert.match(styles, /\.pending-changes-list \{[^}]*padding-inline:\s*var\(--composer-stack-text,/s);
   // A narrow bar keeps its head on one line; the words close the list.
   assert.match(styles, /@container pending-changes \(max-width: 420px\) \{[^}]*"lead lead toggle"[^}]*"more words words"/s);
