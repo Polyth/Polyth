@@ -146,6 +146,35 @@ final class PolythKeyboardMotionPlugin: CAPPlugin, CAPBridgedPlugin {
 
 final class PolythRootBridgeViewController: CAPBridgeViewController {
     private var pageCanvasObservation: NSKeyValueObservation?
+    private var pageLoadingObservation: NSKeyValueObservation?
+
+    /// WebKit can hand a freshly loaded document a zero safe area and keep it
+    /// until the WebView's next visible-rect update. Device report 2026-11-10
+    /// (1.2.325 and 1.2.327): on launch the shell's top controls sat under the
+    /// status bar, and they moved into place only after the keyboard resized
+    /// the WebView or a navigation scrolled it. Changing the WebView's frame
+    /// makes WebKit send the page its current insets again; the frame is put
+    /// back in the same pass, so no layout is visible.
+    ///
+    /// Never call this from viewSafeAreaInsetsDidChange: the WebView is this
+    /// controller's root view, so moving its frame changes its safe area and
+    /// calls that hook again. 1.2.329 did, and recursed until it crashed at
+    /// launch. The flag keeps any other re-entry out as well.
+    private var refreshingPageSafeArea = false
+
+    private func refreshPageSafeArea() {
+        guard !refreshingPageSafeArea, let webView, webView.window != nil else { return }
+        refreshingPageSafeArea = true
+        defer { refreshingPageSafeArea = false }
+        let frame = webView.frame
+        webView.frame = frame.insetBy(dx: 0, dy: 0.5)
+        webView.frame = frame
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        refreshPageSafeArea()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -156,6 +185,17 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
         webView?.scrollView.contentInsetAdjustmentBehavior = .never
         webView?.scrollView.contentInset = .zero
         webView?.scrollView.scrollIndicatorInsets = .zero
+        // iOS 26+ draws a scroll edge effect (a blurred, tinted band) over a
+        // scroll view's content under the status bar and home indicator. Here
+        // it lay over the page, the launch veil included, as a grey band at
+        // the top. The page paints its own chrome behind the bars, so the
+        // system band is never wanted.
+        if #available(iOS 26.0, *), let scroll = webView?.scrollView {
+            scroll.topEdgeEffect.isHidden = true
+            scroll.bottomEdgeEffect.isHidden = true
+            scroll.leftEdgeEffect.isHidden = true
+            scroll.rightEdgeEffect.isHidden = true
+        }
         // Wherever the page has not painted yet, WKWebView shows its scroll
         // view's background. The keyboard plugin (KeyboardResize.Native) grows
         // the WebView back to full height 10 ms after keyboardWillHide, and the
@@ -169,6 +209,12 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
             guard let canvas = observed.underPageBackgroundColor, canvas.cgColor.alpha > 0 else { return }
             observed.backgroundColor = canvas
             observed.scrollView.backgroundColor = canvas
+        }
+        // Every finished load (the bundled page, then the Link shell) gets the
+        // current safe area once it has a document to give it to.
+        pageLoadingObservation = webView?.observe(\.isLoading, options: [.new]) { [weak self] observed, _ in
+            guard !observed.isLoading else { return }
+            DispatchQueue.main.async { self?.refreshPageSafeArea() }
         }
     }
 
