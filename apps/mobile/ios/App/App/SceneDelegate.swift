@@ -155,16 +155,20 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
     /// the WebView or a navigation scrolled it. Changing the WebView's frame
     /// makes WebKit send the page its current insets again; the frame is put
     /// back in the same pass, so no layout is visible.
+    ///
+    /// Never call this from viewSafeAreaInsetsDidChange: the WebView is this
+    /// controller's root view, so moving its frame changes its safe area and
+    /// calls that hook again. 1.2.329 did, and recursed until it crashed at
+    /// launch. The flag keeps any other re-entry out as well.
+    private var refreshingPageSafeArea = false
+
     private func refreshPageSafeArea() {
-        guard let webView, webView.window != nil else { return }
+        guard !refreshingPageSafeArea, let webView, webView.window != nil else { return }
+        refreshingPageSafeArea = true
+        defer { refreshingPageSafeArea = false }
         let frame = webView.frame
         webView.frame = frame.insetBy(dx: 0, dy: 0.5)
         webView.frame = frame
-    }
-
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-        refreshPageSafeArea()
     }
 
     override func viewDidAppear(_ animated: Bool) {
