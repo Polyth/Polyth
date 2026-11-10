@@ -238,10 +238,12 @@ function classifyMcpCall(call: McpCall): ExecutionKind {
   return "mcp";
 }
 
-export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
-  // Every harness's MCP naming (wrappers included) is classified by the call it carries.
-  const mcpCall = effectiveToolCall(tool, input).mcp;
-  if (mcpCall) return classifyMcpCall(mcpCall);
+export function classifyTool(rawTool: string, rawInput: JsonObject): ExecutionKind {
+  // Every harness's MCP naming (wrappers included) is classified by the call it
+  // carries; native argument shapes (Antigravity's `run_command`) by their meaning.
+  const effective = effectiveToolCall(rawTool, rawInput);
+  if (effective.mcp) return classifyMcpCall(effective.mcp);
+  const { tool, input } = effective;
   // OpenCode prefixes project-provisioned package tools with the MCP server
   // name. "polyth-agent-tools" describes the bridge, not a delegated agent;
   // classify the contributed tool itself so ordinary package actions do not
