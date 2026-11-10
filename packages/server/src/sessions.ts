@@ -1675,7 +1675,8 @@ export function createSessionService(deps: {
       && isRuntimeOperationBlocking(operation));
 
   /** See `operationAdmission.ts`: restart-recovered unknowns no longer gate
-   *  send admission; fork / rewind / assertMutable still 409 on them. */
+   *  send admission; rewind / assertMutable still 409 on them, and a fork
+   *  of such a source is a continuity fork. */
   const restartRecoveredOperationIds = (sessionId: string): Promise<Set<string>> =>
     restartRecoveredOperationIdsOf(durable, sessionId);
 
@@ -6846,6 +6847,63 @@ export function createSessionService(deps: {
     return { proj, events };
   };
 
+  /** Fork reads canonical history and never needs the source at rest. A
+   *  source that is busy or recovering (running turn, waiting request, queued
+   *  messages, unresolved operation, reconciling / epoch-pending / unknown)
+   *  is `settled: false`: it gets a continuity fork, which touches neither the
+   *  source nor its runtime. Only states with no history to copy still refuse. */
+  const forkSource = async (
+    sessionId: string,
+  ): Promise<{ proj: SessionProjection; events: SessionEvent[]; settled: boolean }> => {
+    const proj = await store.projection(sessionId);
+    if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    if (await historyImportPending(proj)) throw Object.assign(new Error("history import is not complete"), { code: "conflict", component: "validation", mutationOutcome: "not-started" });
+    if (proj.status === "archived") {
+      throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
+    }
+    const events = await store.events(sessionId);
+    const reconciliation = await durable.reconciliation(sessionId);
+    const settled = proj.status !== "reconciling" && proj.status !== "epoch-pending" && proj.status !== "unknown"
+      && reconciliation?.state !== "reconciling" && reconciliation?.state !== "blocked"
+      && !(await blockingOperation(sessionId))
+      && !turnActive(sessionId)
+      && openRequestCount(events) === 0
+      && !(deps.queue && (await deps.queue.queueList(sessionId)).length > 0);
+    return { proj, events, settled };
+  };
+
+  /** What a copied prefix still holds open, closed for the child only: a
+   *  fork taken mid-turn must not open as a chat that is working, waiting on
+   *  a request nobody can answer, or running tools that are not its own. */
+  const forkClosingEvents = (
+    prefix: readonly SessionEvent[],
+  ): { type: string; data: JsonObject; ignorable: true }[] => {
+    const closing: { type: string; data: JsonObject; ignorable: true }[] = [];
+    for (const [callId, active] of activeToolsFromEvents(prefix)) {
+      closing.push({
+        type: "tool/error",
+        data: { callId, tool: active.tool, input: active.input, error: "Still running when this chat was forked." },
+        ignorable: true,
+      });
+    }
+    const open = new Map<string, string>();
+    for (const event of prefix) {
+      const requestId = (event.data as { requestId?: unknown }).requestId;
+      if (typeof requestId !== "string" || !requestId) continue;
+      const [kind, verb] = event.type.split("/");
+      if (kind !== "question" && kind !== "permission" && kind !== "secret") continue;
+      const key = `${kind}\0${requestId}`;
+      if (verb === "asked" || verb === "requested") open.set(key, `${kind}/expired`);
+      else if (verb === "answered" || verb === "resolved" || verb === "expired") open.delete(key);
+    }
+    for (const [key, type] of open) {
+      closing.push({ type, data: { requestId: key.slice(key.indexOf("\0") + 1), reason: "forked" }, ignorable: true });
+    }
+    const turn = openTurnFromEvents(prefix);
+    if (turn) closing.push({ type: "turn/stopped", data: { turnId: turn.turnId, reason: "aborted" }, ignorable: true });
+    return closing;
+  };
+
   const finishShell = async (
     sessionId: string,
     proj: SessionProjection,
@@ -10177,7 +10235,9 @@ export function createSessionService(deps: {
    *  (`session/snapshot-imported`, `mode: "fork"`), its native session is
    *  created on first use and that leg's first prompt carries the prefix as
    *  canonical continuity. Nothing is mutated on the source or its runtime,
-   *  so there is no outcome to reconcile. The caller holds the source lock. */
+   *  so there is no outcome to reconcile, and the source may be mid-turn or
+   *  recovering: whatever the prefix leaves open is closed in the child. The
+   *  caller holds the source lock. */
   async function publishContinuityFork(input: {
     sessionId: string;
     proj: SessionProjection;
@@ -10207,6 +10267,7 @@ export function createSessionService(deps: {
       createdAt: now,
       updatedAt: now,
     };
+    const closing = forkClosingEvents(prefix);
     const continuity = {
       type: "session/snapshot-imported",
       data: { mode: "fork", fromSessionId: sessionId, copiedThroughSeq } as JsonObject,
@@ -10230,6 +10291,7 @@ export function createSessionService(deps: {
             ...(ev.producerPlugin ? { producerPlugin: ev.producerPlugin } : {}),
             sourceSeq: ev.seq,
           })),
+          ...closing.map((event) => ({ time: now, ...event })),
           { time: now, ...continuity },
         ],
         projection,
@@ -10243,6 +10305,9 @@ export function createSessionService(deps: {
           ...(ev.surfaceOp ? { surfaceOp: ev.surfaceOp } : {}),
           sourceEventSeqs: [ev.seq],
         }));
+      }
+      for (const event of closing) {
+        copied.push(await store.append(forkId, event.type, event.data, { ignorable: true }));
       }
       copied.push(await store.append(forkId, continuity.type, continuity.data, { ignorable: true }));
       await store.upsertProjection(projection);
@@ -13370,7 +13435,7 @@ export function createSessionService(deps: {
         if (existing?.isolation || existing?.workspace?.repositories.some((row) => row.isolation)) {
           throw Object.assign(new Error("isolated sessions cannot be forked"), { code: "conflict" });
         }
-        const { proj, events } = await assertMutable(sessionId);
+        const { proj, events, settled } = await forkSource(sessionId);
         assertHasAgent(proj);
         if (proj.isolation) throw Object.assign(new Error("Merge or discard isolation before forking its workspace"), { code: "conflict" });
         const eff = effectiveHistory(events);
@@ -13417,7 +13482,15 @@ export function createSessionService(deps: {
         // ensureWired (not a bare runtime lookup): after a server restart the
         // adapter has no canonical→backend mapping yet, and branchSession must
         // resolve the SOURCE session's backend id to fork from it.
-        const rt = await ensureWired(sessionId, proj);
+        // A busy or recovering source is never wired or branched: its
+        // runtime is in use or unproven. A runtime that cannot be reached at
+        // all is no reason to refuse either; the child starts its own.
+        const rt = settled
+          ? await ensureWired(sessionId, proj).catch((error: unknown) => {
+              console.warn(`[polyth] fork of ${sessionId} continues without its runtime: ${materializationLogText(error instanceof Error ? error.message : error)}`);
+              return undefined;
+            })
+          : undefined;
         const title = `${proj.title} (fork)`;
         const target: CreateSessionInput & { sessionId: string; cwd: string } = {
           projectId: proj.projectId, title, titleSource: "manual", sessionId: forkId, cwd: forkCwd,
@@ -13433,11 +13506,12 @@ export function createSessionService(deps: {
         // the canonical prefix is published exactly, and the child's first
         // prompt hands it to a fresh native session, as a Snapshot import or
         // harness switch does. The native session is never told it holds
-        // history it does not.
-        const nativeBranch = history.length > 0
+        // history it does not. The same fork serves a source that is busy,
+        // recovering or without a reachable runtime.
+        const nativeBranch = rt !== undefined && history.length > 0
           && Boolean(rt.branchSession || rt.branchSessionOperation)
           && (await Promise.resolve(rt.capabilities?.()).catch(() => undefined))?.fork !== false;
-        if (history.length > 0 && !nativeBranch) {
+        if (!rt || (history.length > 0 && !nativeBranch)) {
           return publishContinuityFork({ sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq });
         }
         const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
