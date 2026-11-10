@@ -251,7 +251,7 @@ truth. Electron retains its original frame and transparent-window handling.
     finished load and on appear, so WebKit sends the current insets. Never
     from `viewSafeAreaInsetsDidChange`: the WebView is the root view, so the
     nudge changes its safe area and re-enters that hook (1.2.329 crashed at
-    launch that way). Source-checked; not device-verified.
+    launch that way). Device-verified 2026-11-10 (1.2.330).
   - **Only composer docks ride.** A Settings, navigator or module field takes
     the frame at once, as before: those layers anchor to the frame variables.
     Reduced motion (OS or in-app) never rides.
