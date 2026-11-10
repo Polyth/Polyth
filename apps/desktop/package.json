@@ -27,7 +27,7 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "electron": "44.9.3"
+    "electron": "45.2.3"
   },
   "build": {
     "appId": "com.polyth.desktop",
