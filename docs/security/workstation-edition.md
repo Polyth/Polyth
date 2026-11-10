@@ -16,7 +16,10 @@ checklist at the end says how to confirm each claim on an installed copy.
   `Polyth-1.2.300-linux-x86_64-workstation.AppImage`.
 - They are attached to the ordinary stable releases of
   [Polyth/Polyth](https://github.com/Polyth/Polyth/releases) and are not listed
-  on polyth.app or in the app's own download links.
+  on polyth.app or in the app's own download links. While the edition tracks
+  devel (owner's temporary testing arrangement, see [updates](#updates-and-signing)),
+  a nightly build replaces the edition files on the newest stable release, so
+  the installer there can be a `-nightly` build.
 - Each release that has them also carries `SHA256SUMS-workstation.txt` and a
   CycloneDX SBOM per platform, `Polyth-<version>-workstation-sbom-<os>-<arch>.cdx.json`.
 - It uses the same app id and name as the standard app (`com.polyth.desktop`,
@@ -154,6 +157,13 @@ is always present.
   (`workstation.yml`, `workstation-mac.yml`, `workstation-linux.yml`). It never
   reads the standard `latest*.yml`, `beta*.yml` or `nightly*.yml` feeds, so it
   cannot update into the standard build.
+- **Temporary owner testing arrangement.** Until the owner says otherwise, the
+  newest nightly build replaces the edition files on the latest stable release
+  (the app itself, its update lookup and its channel are unchanged). An
+  installed copy can therefore update to a `-nightly` build of the edition and
+  back to the next stable release. Reverting this needs no work-computer
+  change: the next stable release's own files are used again once the nightly
+  step is removed.
 - macOS packages are signed with Polyth's Developer ID and notarized by Apple.
 - **Windows and Linux packages are not code-signed yet.** Windows SmartScreen
   and endpoint protection may warn about an unsigned installer; verify it
