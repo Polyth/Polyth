@@ -8,7 +8,7 @@ import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { fmtSessionElapsed } from "../../../apps/web/src/format.ts";
 import { tapFeedback } from "../../../apps/web/src/haptics.ts";
 import {
-  BotIcon, ChevronRightIcon, CopyIcon, DeleteIcon, EditIcon, Icon, Menu, MoreVerticalIcon, PauseIcon, PlayIcon,
+  BotIcon, ChevronRightIcon, CopyIcon, DeleteIcon, EditIcon, Icon, Menu, MoreIcon, MoreVerticalIcon, PauseIcon, PlayIcon,
   PlusIcon, SettingsIcon, ShieldAlertIcon, Spinner, StopIcon, SuccessIcon, type MenuEntry,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { AGENT_ICONS, AgentMark } from "./AgentGlyph.tsx";
@@ -132,8 +132,10 @@ function Meta({ live, now }: { live: AgentLive; now: number }) {
   return null;
 }
 
-function AgentRow({ host, agent, live, active, onNavigate }: {
+function AgentRow({ host, agent, live, active, phone, onNavigate }: {
   host: WebPackageHost;
+  /** The phone navigator draws every row menu as horizontal dots. */
+  phone: boolean;
   agent: ScheduleTaskDto;
   live: AgentLive;
   active: boolean;
@@ -295,7 +297,7 @@ function AgentRow({ host, agent, live, active, onNavigate }: {
                 trigger.onClick();
               }}
             >
-              <Icon icon={MoreVerticalIcon} size="sm" />
+              <Icon icon={phone ? MoreIcon : MoreVerticalIcon} size="sm" />
             </button>
           )}
         </Menu>
@@ -420,7 +422,7 @@ export default function AgentNavSection({ host, context }: { host: WebPackageHos
                 aria-label={tr("agents.groupActions")}
                 title={tr("agents.groupActions")}
               >
-                <Icon icon={MoreVerticalIcon} size="sm" />
+                <Icon icon={phone ? MoreIcon : MoreVerticalIcon} size="sm" />
               </button>
             )}
           </Menu>
@@ -435,6 +437,7 @@ export default function AgentNavSection({ host, context }: { host: WebPackageHos
               agent={agent}
               live={live}
               active={activeAgentId === agent.id}
+              phone={phone}
               {...(onNavigate ? { onNavigate } : {})}
             />
           ))}

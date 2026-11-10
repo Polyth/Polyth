@@ -69,7 +69,7 @@ import {
   ArchiveIcon,
   CheckIcon,
   MentionIcon,
-  MoreVerticalIcon,
+  MoreIcon,
   NewChatIcon,
   PeopleIcon,
   PinIcon,
@@ -664,7 +664,7 @@ function SessionRow({
         >
           {(trigger) => (
             <button className="mobile-nav-more" aria-label={tr("common.more")} {...trigger}>
-              <UiIcon icon={MoreVerticalIcon} />
+              <UiIcon icon={MoreIcon} />
             </button>
           )}
         </Menu>
@@ -1676,7 +1676,7 @@ export default function MobileNavigator() {
                     >
                       {(trigger) => (
                         <button className="mobile-nav-project-action" aria-label={tr("common.more")} {...trigger}>
-                          <UiIcon icon={MoreVerticalIcon} size="lg" />
+                          <UiIcon icon={MoreIcon} size="lg" />
                         </button>
                       )}
                     </Menu>

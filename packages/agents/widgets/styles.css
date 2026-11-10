@@ -729,7 +729,7 @@
 }
 /* Phone navigator: the chat rows' grid (MobileNavigator.css). The chevron and
    every agent's mark sit in the leading column centred under the project
-   mark, the label and names start on the session-title edge, ⋮ shares the
+   mark, the label and names start on the session-title edge, ⋯ shares the
    chat rows' trailing column, and a row is a chat row's height at every
    density, so the group reads as part of the list, not a box beside it. */
 .agent-nav[data-surface="phone"] {
@@ -741,7 +741,7 @@
   --agent-nav-hit: 0px;
   --agent-nav-pill: 0px;
   --agent-nav-menu: var(--tap);
-  /* ⋮ draws the chat rows' press circle, inset from the row's end so its
+  /* ⋯ draws the chat rows' press circle, inset from the row's end so its
      glyph lands on the navigator's end axis. */
   --agent-nav-wash: var(--nav-dots-wash, 28px);
   --agent-nav-inset: var(--nav-dots-inset, 0px);
@@ -1045,11 +1045,15 @@
   .agent-nav .agent-nav-row:is(.active, .menu-open) .agent-nav-more { opacity: 1; pointer-events: auto; }
   .agent-nav .agent-nav-row:is(.active, .menu-open) .agent-nav-meta { visibility: hidden; }
 }
-/* Phone navigator: like its chat rows, every row shows ⋮ in its own slot on
-   the row's end, and the trailing measure ends where a chat row's marks do:
-   tucked --nav-mark-tuck inside the ⋮ control, beside the dots. */
+/* Phone navigator: like its chat rows, every row shows ⋯ in its own slot on
+   the row's end. The body runs --nav-mark-tuck into the ⋯ control, so a
+   name with no measure ends where a chat title with no marks does, and the
+   trailing measure ends on the chat rows' mark column. */
 .agent-nav[data-surface="phone"] .agent-nav-btn {
   padding-inline-end: calc(var(--agent-nav-menu) - var(--nav-mark-tuck, var(--space-2)));
+}
+.agent-nav[data-surface="phone"] .agent-nav-meta {
+  margin-inline-end: calc(var(--nav-mark-end, 0px) - var(--nav-title-end, 0px));
 }
 .agent-nav[data-surface="phone"] .agent-nav-more { inset-inline-end: var(--agent-nav-inset); opacity: 1; pointer-events: auto; }
 .agent-nav[data-surface="phone"] .agent-nav-head-actions { inset-inline-end: var(--agent-nav-inset); }
@@ -1065,7 +1069,7 @@
 .agent-nav[data-surface="phone"] .agent-nav-lead { grid-column: 1; }
 .agent-nav[data-surface="phone"] .agent-nav-title { grid-column: 3; }
 .agent-nav[data-surface="phone"] .agent-nav-meta { grid-column: 4; margin-inline-start: var(--space-2); }
-/* The navigator's edge column, like a chat row's ⋮: the visible control is
+/* The navigator's edge column, like a chat row's ⋯: the visible control is
    a circle centred on --nav-axis, and a transparent ::after keeps the 44px
    target running from inside the circle out to the row's end. */
 .agent-nav[data-surface="phone"] :is(.agent-nav-more, .agent-nav-head-action) {
@@ -1091,7 +1095,7 @@
   width: var(--icon-md);
   height: var(--icon-md);
 }
-/* The chat rows' ⋮ is three solid 2-unit dots; a stroked Lucide ellipsis
+/* The chat rows' ⋯ is three solid 2-unit dots; a stroked Lucide ellipsis
    reads a size heavier beside it. Fill the dots instead of stroking them. */
 .agent-nav[data-surface="phone"] :is(.agent-nav-more, .agent-nav-head-action) .ui-icon circle {
   fill: currentColor;
