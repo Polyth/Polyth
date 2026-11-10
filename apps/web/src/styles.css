@@ -15341,7 +15341,7 @@ width: 100%;
   border-inline-end: 0;
 }
 .rail-dynamic {
-  flex: none; width: calc(var(--rail-w) + var(--package-window-seam-padding)); min-width: 0; height: var(--package-window-h, 100%);
+  flex: none; width: calc(var(--rail-w) + var(--package-window-seam-padding)); min-width: 0; height: 100%;
   max-width: calc(100% - var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--package-window-seam-padding) - var(--space-6));
   max-height: calc(100% - var(--space-6)); margin: var(--space-4) 0;
   border-radius: 0;
@@ -15516,8 +15516,7 @@ width: 100%;
      window extends the launcher column: it opens over the column's whole
      height, its edges on the host's top and bottom lines (the host's border
      box, hence the 2px), and squares the corner where the column runs into
-     the window's bottom edge. A resize in this opening sets
-     --package-window-h (ContextRail); closing forgets it. */
+     the window's bottom edge. Its height is not adjustable (ContextRail). */
   .railbar:has(.rail-dynamic) > .rail-dynamic {
     position: absolute;
     inset-block-start: -1px;
@@ -15525,7 +15524,7 @@ width: 100%;
     margin: 0;
     z-index: 1;
     max-width: none;
-    height: var(--package-window-h, calc(100% + 2px));
+    height: calc(100% + 2px);
     max-height: calc(100% + 2px);
   }
   .railbar:has(.rail-dynamic) > .rail.rail-dynamic:not(.rail-fullscreen) {
@@ -15534,20 +15533,13 @@ width: 100%;
 }
 
 .package-window-resize { position: absolute; z-index: 4; touch-action: none; }
-.package-window-resize--n, .package-window-resize--s { inset-inline: var(--space-3); height: var(--package-window-resize-hit); }
-.package-window-resize--n { inset-block-start: 0; cursor: ns-resize; }
-.package-window-resize--s { inset-block-end: 0; cursor: ns-resize; }
-/* No inline-end (content/scrollbar) edge: a resize hit area there intercepted
-   wheel and touch scrolling and left an empty strip beside the window. The
-   window resizes from its inline start, top/bottom edges and start corners. */
+/* One resize edge, the logical inline start (the side facing Chat; an RTL
+   locale or a mirrored shell, shellDirection.ts, puts it on the right). No
+   inline-end (content/scrollbar) edge: a hit area there intercepted wheel and
+   touch scrolling and left an empty strip beside the window. No top/bottom
+   edge or corner: the window spans the launcher column, and a shorter one only
+   left dead space under it. */
 .package-window-resize--w { inset-block: var(--space-3); width: var(--package-window-resize-hit); inset-inline-start: 0; cursor: ew-resize; }
-.package-window-resize--nw, .package-window-resize--sw { width: var(--space-3); height: var(--space-3); }
-/* Corners are logical like the edges ("w" = inline start), so an RTL locale or
-   a mirrored shell (shellDirection.ts) puts them on the matching side. */
-.package-window-resize--nw { inset-block: 0 auto; inset-inline: 0 auto; cursor: nwse-resize; }
-.package-window-resize--sw { inset-block: auto 0; inset-inline: 0 auto; cursor: nesw-resize; }
-.package-window-resize--sw:dir(rtl) { cursor: nwse-resize; }
-.package-window-resize--nw:dir(rtl) { cursor: nesw-resize; }
 .package-window-resize:focus-visible { outline: var(--focus-ring); outline-offset: calc(-1 * var(--package-window-resize-hit)); }
 html[data-package-window-resizing="true"] { user-select: none; cursor: grabbing; }
 html[data-package-window-resizing="true"] :is(.rail-workspace, .app-shell:has(.rail-dock-bottom)) { transition: none; }

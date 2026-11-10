@@ -1146,17 +1146,15 @@ test("package window resizes and preserves dynamic, pinned, and fullscreen behav
     const narrowest = await window.boundingBox();
     assert.ok(narrowest && narrowest.width < widest.width && narrowest.width >= 380);
 
-    const shell = await page.locator(".app-shell").boundingBox();
-    assert.ok(shell);
-    await drag(".package-window-resize--n", narrowest.x + narrowest.width / 2, narrowest.y + 24);
-    const north = await window.boundingBox();
-    assert.ok(north && north.height <= narrowest.height && north.y >= narrowest.y);
-    await drag(".package-window-resize--s", north.x + north.width / 2, shell.y + shell.height - 8);
-    const tallest = await window.boundingBox();
-    assert.ok(tallest && tallest.height >= north.height);
-    await drag(".package-window-resize--s", tallest.x + tallest.width / 2, 100);
-    const shortest = await window.boundingBox();
-    assert.ok(shortest && shortest.height <= tallest.height && shortest.height >= 240);
+    assert.equal(
+      await window.locator(".package-window-resize").count(),
+      1,
+      "the inline-start edge is the only resize handle: the height is not adjustable",
+    );
+    assert.ok(
+      narrowest && Math.abs(narrowest.height - initial.height) <= 1,
+      "a width drag never changes the window's height",
+    );
 
     const keyboardResize = window.locator('.package-window-resize--w[role="separator"]');
     await keyboardResize.focus();

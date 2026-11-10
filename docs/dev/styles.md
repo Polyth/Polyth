@@ -792,14 +792,14 @@ at ≥ 6.6:1.
   With Floating columns the workspace ends at the columns' bottom
   (`--shell-edge`).
 - A floating package window extends the launcher rail (shellLooks.css §1d).
-  It opens over the column's full height (`ContextRail.tsx`, `railHeight`); a
+  It spans the column's full height (`styles.css`, `.rail-dynamic`); a
   look whose idle strip is a short island grows it into the column as the
   window opens. Once the host holds a window it has no fill, edge, shadow or
   filter of its own. The window and the strip share one material
   (`--look-rail*`) and are parted by a seam. The foot squares where the column
   runs into the window's edge and rounds on an island
-  (`--look-rail-island`, `--package-window-foot`). A height set by a resize
-  lasts until the window closes.
+  (`--look-rail-island`, `--package-window-foot`). Only its width resizes,
+  from the inline-start edge (ui.md).
 - A pinned (docked) window is part of the rail column (shellLooks.css §1e). It
   and the strip take the idle rail's material (`--look-dock*`: none by default,
   so they sit on the canvas as the idle rail does; Line and Editorial keep the
