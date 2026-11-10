@@ -622,6 +622,16 @@ toolbars use `WorkspaceSurfaceHeader`; Terminal keeps repository selection in
 its tab strip. ModuleView continues to own the window title and close controls.
 Features own their content and scoped CSS.
 
+Source Control in a multi-repository Project lists every registered
+repository, not only the open chat's selection
+(`packages/git/widgets/sourceControlRepositories.ts`): the chat's own rows come
+first and the rest follow under *Other project repositories* in the repository
+picker (phone: the option detail). A repository outside the chat is read and
+changed in the Project's own checkout — its git calls carry no `sessionId` — so
+browsing it never edits the chat's workspace or touches its isolation. The
+stored repository choice stays keyed by the open chat. A chat whose workspace
+does not resolve still fails closed.
+
 Source Control display preferences (`packages/git/widgets/gitPrefs.ts`) are
 account-wide defaults edited under Settings → Source Control → Display and
 synced through `package.git.preferences`: changes as folder tree or list,

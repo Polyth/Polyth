@@ -615,6 +615,7 @@ export const ar: GitMessages = {
   "gitview.identity": "الهوية",
   "gitview.aheadValue": "متقدّم بـ {count}",
   "gitview.allRepositories": "كل المستودعات",
+  "gitview.otherProjectRepositories": "مستودعات المشروع الأخرى",
   "gitview.backToChanges": "العودة إلى التغييرات",
   "gitview.backToLog": "العودة إلى السجل",
   "gitview.behindValue": "متأخر بـ {count}",

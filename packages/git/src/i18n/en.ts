@@ -617,6 +617,7 @@ export const en = {
   "gitview.identity": "Identity",
   "gitview.aheadValue": "{count} ahead",
   "gitview.allRepositories": "All repositories",
+  "gitview.otherProjectRepositories": "Other project repositories",
   "gitview.backToChanges": "Back to changes",
   "gitview.backToLog": "Back to log",
   "gitview.behindValue": "{count} behind",
