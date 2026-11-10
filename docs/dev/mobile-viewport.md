@@ -530,6 +530,19 @@ The frame variables are correct in both models, so the contract is:
   layer that stopped short would show the bottom of the composer in the
   accessory band. `tokens.css` holds the default; `mobileViewport.ts`
   publishes it, band included, with the rest of the frame.
+- **Keyboard open in the native app** (`body[data-keyboard-source="native"]`):
+  the WebView itself ends at the keyboard, so its own edges are the band and
+  every layer above keeps `top: 0; bottom: 0` with no frame arithmetic. On an
+  iPhone (2026-11-10) a package window placed by the frame shrank to its
+  status-bar padding while its own field held the keyboard, and the chat showed
+  in its place, although the chat chain on the same frame stood right. Since the
+  composer was right, the bottom edge was right, so the top was the suspect
+  value (never reproduced in Chromium). For the ~0.45 s before the deferred iOS
+  resize lands, the layer's foot sits behind the keyboard. Pinned in
+  `mobileViewportLayers.test.ts` ("in the native app … keeps the WebView's
+  edges"). A temporary three-finger-tap geometry overlay (`viewportProbe.ts`,
+  native app only) collects the device values. Remove it once the cause is
+  confirmed.
 - **Keyboard closed**: untouched. `inset: 0` is the one box that reaches the
   physical screen edge no measurement can, which is the same reason the
   installed-app `100vh` fill exists.
