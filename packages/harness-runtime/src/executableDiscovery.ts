@@ -369,15 +369,24 @@ const SHIM_TARGET = /"%~?dp0%?\\([^"%]+)"/gi;
  * or for anything unreadable.
  */
 export const windowsCmdShimTarget = async (shimPath: string, options: { scripts?: boolean } = {}): Promise<string | undefined> => {
+  const candidate = await windowsCmdShimFile(shimPath);
+  if (!candidate || !(options.scripts ? /\.(?:exe|com|m?js)$/i : /\.(?:exe|com)$/i).test(candidate)) return undefined;
+  return candidate;
+};
+
+/** The file an npm/pnpm Windows `.cmd` shim runs, whatever its type: npm
+ *  shims a package `bin` with no extension (a `#!/usr/bin/env node` script)
+ *  as well as `.js`/`.exe` ones. Undefined for anything unreadable. */
+export const windowsCmdShimFile = async (shimPath: string): Promise<string | undefined> => {
   if (!/\.(?:cmd|bat)$/i.test(shimPath)) return undefined;
   try {
     if ((await stat(shimPath)).size > SHIM_SIZE_LIMIT) return undefined;
     const text = await readFile(shimPath, "utf8");
-    const targets = [...text.matchAll(SHIM_TARGET)]
+    const target = [...text.matchAll(SHIM_TARGET)]
       .map((match) => match[1]!.trim())
-      .filter((target) => !/(?:^|\\)node\.exe$/i.test(target));
-    const target = targets.at(-1);
-    if (!target || !(options.scripts ? /\.(?:exe|com|m?js)$/i : /\.(?:exe|com)$/i).test(target)) return undefined;
+      .filter((entry) => !/(?:^|\\)node\.exe$/i.test(entry))
+      .at(-1);
+    if (!target) return undefined;
     const candidate = join(dirname(shimPath), ...target.split("\\"));
     return (await stat(candidate)).isFile() ? candidate : undefined;
   } catch {

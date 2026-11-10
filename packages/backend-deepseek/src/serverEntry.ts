@@ -98,7 +98,7 @@ export function createDeepSeekProfile(account?: ResolvedHarnessAccount): Registe
             setupUrl: "https://platform.deepseek.com/api_keys",
             installCommand: npmCliInstallCommand(NPM_PACKAGE, process.platform),
             updateCommand: ["npm", "install", "-g", `${NPM_PACKAGE}@latest`],
-            releaseSource: { kind: "npm", package: NPM_PACKAGE },
+            releaseSource: { kind: "npm", package: NPM_PACKAGE, bin: process.env.POLYTH_DEEPSEEK_BIN?.trim() || "dsh" },
             remoteHost: { binary: "dsh", installCommand: npmCliInstallCommand(NPM_PACKAGE) },
         },
         command: process.env.POLYTH_DEEPSEEK_BIN?.trim() || "dsh",

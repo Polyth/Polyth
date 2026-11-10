@@ -228,7 +228,24 @@ the descriptor's `updateCommand` argv (the CLI's own `update`/`upgrade`), resolv
 by harness executable discovery and run without a shell (a Windows npm `.cmd`/`.bat`
 shim goes through `cmd.exe` with its path quoted; the argv is fixed descriptor words),
 stdin closed, a 10-minute timeout and a 4 KB output tail. A launch Node refuses up
-front is a failed run (`exitCode: null`), not a 500. It ignores per-harness binary overrides such as
+front is a failed run (`exitCode: null`), not a 500; a failed run's output ends with
+`Program: <launcher path>`, the copy discovery chose. When the descriptor's
+`releaseSource` is npm and the launcher is npm's global install of that package
+(`<prefix>\<bin>.cmd` shimming into `<prefix>\node_modules\<pkg>` on Windows,
+`<prefix>/bin/<bin>` into `<prefix>/lib/node_modules/<pkg>` elsewhere;
+`npmGlobalPrefixOf`; a Windows shim may point at a `.js`, an `.exe` or an
+extensionless script), the server does not run the CLI's updater at all: it
+runs `npm install -g <pkg>@<distTag|latest>` with `npm_config_prefix=<prefix>`,
+the same way the CLI was installed. Self-updaters guess how they were installed
+and refuse when the guess fails: Pi asks `npm root -g`, whose prefix is npm's
+own and not Polyth's (`%LOCALAPPDATA%\Polyth\npm`, `~/.local`), and reports
+"not managed by a global npm install"; Codex reports "Could not detect the
+Codex installation method". If no npm is found, the CLI's updater runs with
+that `npm_config_prefix`. A copy npm did not install (a standalone or WinGet
+binary) keeps its own updater. An update argv that already runs the package
+manager (DeepSeek's `npm install -g @deepseek-ai/dsh@latest`) is kept and names
+the installed command in `releaseSource.bin`, whose install supplies the
+prefix. It ignores per-harness binary overrides such as
 `POLYTH_GROK_BIN`, and running runtimes keep the old binary until restarted.
 On Windows a running program's file cannot be replaced, so before the updater
 (and before a local install, which a reinstall is) the server releases every idle

@@ -4269,7 +4269,15 @@ export type HarnessSelection = { mode: "auto" } | { mode: "pinned"; harnessId: s
  *  say an update exists before running `updateCommand`. Fixed by the backend;
  *  never derived from user input. */
 export type HarnessReleaseSource =
-  | { kind: "npm"; package: string; distTag?: string }
+  | {
+      kind: "npm";
+      package: string;
+      distTag?: string;
+      /** The command this package installs, when `updateCommand` runs a
+       *  package manager instead of the CLI itself (`npm install -g …`): the
+       *  update goes into the npm prefix that command's install lives in. */
+      bin?: string;
+    }
   /** A vendor page (an installer script) whose text names the current
    *  release; the first capture group of `pattern` is the version. */
   | { kind: "page"; url: string; pattern: string };
