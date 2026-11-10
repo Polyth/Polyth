@@ -66,6 +66,7 @@ import type {
   DesktopServersResult,
   DesktopServersView,
   DesktopSettings,
+  DesktopSystemControls,
   DesktopUpdateState,
   DesktopWindowAction,
   DesktopWindowPlacement,
@@ -83,7 +84,14 @@ import {
   updateWindowBounds,
   type UpdateWindowAction,
 } from "./updateWindowView.ts";
-import { desktopChromeOptions, normalizeTitleBarAppearance, trayIconSize } from "./windowChrome.ts";
+import {
+  desktopChromeOptions,
+  macCaptionGeometry,
+  macTrafficLightPosition,
+  normalizeTitleBarAppearance,
+  trayIconSize,
+} from "./windowChrome.ts";
+import { readLinuxSystemControls } from "./linuxButtonLayout.ts";
 import { stagedChromiumExecutable } from "./chromiumResource.ts";
 import { keepAwakeWanted } from "./keepAwake.ts";
 import {
@@ -314,11 +322,31 @@ const scheduleWindowStateSave = (): void => {
   saveBoundsTimer.unref?.();
 };
 
+/** Linux: the desktop environment's caption-button layout, re-read when the
+ *  window gains focus (at most every 5 s) so a change in GNOME/KDE settings
+ *  reaches Polyth's buttons without a restart. */
+let systemControls: DesktopSystemControls | null = null;
+let systemControlsReadAt = 0;
+let systemControlsReading: Promise<void> | null = null;
+const refreshSystemControls = (): Promise<void> => {
+  if (process.platform !== "linux") return Promise.resolve();
+  if (systemControlsReading) return systemControlsReading;
+  if (systemControlsReadAt && Date.now() - systemControlsReadAt < 5000) return Promise.resolve();
+  systemControlsReading = readLinuxSystemControls().then((next) => {
+    systemControlsReadAt = Date.now();
+    const changed = JSON.stringify(next) !== JSON.stringify(systemControls);
+    systemControls = next;
+    if (changed) broadcastWindowState();
+  }).catch(() => { systemControlsReadAt = Date.now(); }).finally(() => { systemControlsReading = null; });
+  return systemControlsReading;
+};
+
 const windowState = (): DesktopWindowState => ({
   maximized: mainWindow?.isMaximized() ?? false,
   fullscreen: mainWindow?.isFullScreen() ?? false,
   visible: mainWindow?.isVisible() ?? false,
   focused: mainWindow?.isFocused() ?? false,
+  ...(process.platform === "linux" ? { systemControls } : {}),
 });
 
 const sendToRenderer = (channel: string, value: unknown): void => {
@@ -421,7 +449,12 @@ const persistSettings = async (patch: unknown): Promise<DesktopSettings> => {
   const requested = patch && typeof patch === "object" && !Array.isArray(patch)
     ? patch as Partial<DesktopSettings>
     : {};
-  const next = normalizeDesktopSettings({ ...settings, ...requested }, desktopSettingsDefaults);
+  // Choosing a side is a manual choice: a renderer that predates following
+  // the system layout sends only the side, and it must still take effect.
+  const explicitSide = "controlsPosition" in requested && !("controlsFollowSystem" in requested)
+    ? { controlsFollowSystem: false }
+    : {};
+  const next = normalizeDesktopSettings({ ...settings, ...requested, ...explicitSide }, desktopSettingsDefaults);
   const channelChanged = next.updateChannel !== settings.updateChannel;
   settings = next;
   await applyLoginSetting();
@@ -1302,6 +1335,7 @@ const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
     },
   });
   mainWindow = window;
+  void refreshSystemControls();
   pendingMaximize = saved.maximized === true;
   // The application menu still owns accelerators, but a frameless or
   // hidden-title-bar window must never grow an in-window menu bar.
@@ -1345,7 +1379,7 @@ const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   window.on("leave-full-screen", broadcastWindowState);
   window.on("show", () => { broadcastWindowState(); rebuildTrayMenu(); });
   window.on("hide", () => { broadcastWindowState(); rebuildTrayMenu(); });
-  window.on("focus", () => { broadcastWindowState(); nudgeActiveLink(); });
+  window.on("focus", () => { broadcastWindowState(); nudgeActiveLink(); void refreshSystemControls(); });
   window.on("blur", broadcastWindowState);
   window.on("close", (event) => {
     if (!quitting && settings.closeToTray) { event.preventDefault(); window.hide(); broadcastWindowState(); log("Window hidden to tray"); }
@@ -1610,7 +1644,19 @@ const installIpc = (): void => {
   trustedHandle("desktop:session:confirm", confirmDesktopOwnerSession);
   trustedHandle("desktop:settings:get", () => settings);
   trustedHandle("desktop:settings:set", (event, patch: unknown) => persistSettings(settingsPatchFor(senderSurface(event), patch)));
-  trustedHandle("desktop:window:get", () => windowState());
+  trustedHandle("desktop:window:get", async () => {
+    // The first paint waits briefly for the system layout so the buttons do
+    // not land on one side and jump; a slow reader arrives as a state event.
+    await Promise.race([refreshSystemControls(), new Promise((resolve) => setTimeout(resolve, 400).unref?.())]);
+    return windowState();
+  });
+  trustedHandle("desktop:window:caption", (_event, band: unknown) => {
+    if (process.platform !== "darwin" || !mainWindow || mainWindow.isDestroyed()) return null;
+    const zoom = mainWindow.webContents.getZoomFactor();
+    mainWindow.setWindowButtonPosition(macTrafficLightPosition(band, zoom));
+    // Report what the window applied, not what was asked for.
+    return macCaptionGeometry(mainWindow.getWindowButtonPosition(), zoom);
+  });
   trustedHandle("desktop:window:titlebar", (_event, appearance: unknown) => {
     if (process.platform !== "win32" || !mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.setTitleBarOverlay(normalizeTitleBarAppearance(appearance, mainWindow.webContents.getZoomFactor()));

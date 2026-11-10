@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DESKTOP_TITLEBAR_HEIGHT,
+  MACOS_TRAFFIC_LIGHT_GROUP,
   MACOS_TRAFFIC_LIGHT_POSITION,
   WINDOWS_CAPTION_HEIGHT,
   desktopChromeOptions,
+  macCaptionGeometry,
+  macTrafficLightPosition,
   normalizeTitleBarAppearance,
   trayIconSize,
 } from "../src/windowChrome.ts";
@@ -75,4 +78,25 @@ test("tray glyph matches each platform's notification area", () => {
   assert.equal(trayIconSize("win32"), 16);
   assert.equal(trayIconSize("darwin"), 18);
   assert.equal(trayIconSize("linux"), 22);
+});
+
+test("traffic lights stay centred on the header band at every page zoom", () => {
+  assert.deepEqual(macTrafficLightPosition(DESKTOP_TITLEBAR_HEIGHT, 1), MACOS_TRAFFIC_LIGHT_POSITION);
+  for (const zoom of [0.8, 1, 1.25, 1.5, 2]) {
+    const { x, y } = macTrafficLightPosition(52, zoom);
+    assert.equal(x, MACOS_TRAFFIC_LIGHT_POSITION.x, "the edge inset is the OS's, in DIP");
+    // The band covers 52 * zoom DIP; the 14 DIP group sits on its centre line.
+    assert.ok(Math.abs(y + MACOS_TRAFFIC_LIGHT_GROUP.height / 2 - (52 * zoom) / 2) <= 0.5, `zoom ${zoom}`);
+  }
+  assert.deepEqual(macTrafficLightPosition("tall", 1), MACOS_TRAFFIC_LIGHT_POSITION, "a malformed band keeps the default");
+  assert.ok(macTrafficLightPosition(10_000, 5).y <= 160, "a hostile band cannot fling the lights off the window");
+});
+
+test("the traffic-light extent is reported in the page's CSS px", () => {
+  assert.deepEqual(macCaptionGeometry({ x: 18, y: 19 }, 1), { x: 18, y: 19, width: 54, height: 14 });
+  // At 80 % zoom the same DIP group covers more CSS px: a fixed 86 px zone
+  // would end at 68.8 DIP, under the green light (18 + 54 = 72 DIP).
+  const small = macCaptionGeometry({ x: 18, y: 19 }, 0.8);
+  assert.equal(small.x + small.width, 90);
+  assert.deepEqual(macCaptionGeometry(null, 2), { x: 9, y: 9.5, width: 27, height: 7 });
 });

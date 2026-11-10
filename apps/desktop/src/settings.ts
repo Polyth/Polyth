@@ -16,6 +16,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   softwareRendering: false,
   reduceAnimations: false,
   controlsPosition: "right",
+  controlsFollowSystem: true,
   controlsTheme: "system",
 };
 
@@ -58,6 +59,11 @@ export function normalizeDesktopSettings(value: unknown, defaults: DesktopSettin
     controlsPosition: raw.controlsPosition === "left" || raw.controlsPosition === "right"
       ? raw.controlsPosition
       : defaults.controlsPosition,
+    // Shells before this setting had only a side: a person who moved the
+    // buttons to the left chose that; the untouched default follows the system.
+    controlsFollowSystem: typeof raw.controlsFollowSystem === "boolean"
+      ? raw.controlsFollowSystem
+      : raw.controlsPosition === "left" ? false : defaults.controlsFollowSystem,
     controlsTheme: raw.controlsTheme === "dark" || raw.controlsTheme === "light" || raw.controlsTheme === "system"
       ? raw.controlsTheme
       : defaults.controlsTheme,

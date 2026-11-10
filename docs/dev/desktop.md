@@ -333,13 +333,26 @@ height (below). `windowChrome.ts` owns the per-platform
 `BrowserWindow` chrome:
 
 - **macOS** — `titleBarStyle: "hidden"` with `trafficLightPosition` centring the native
-  traffic lights on the header. Their caption zone is an 86 px inset at the top-left
-  corner, which drops in fullscreen (the lights hide there).
+  traffic lights on the header. The OS draws them in DIP, so they do not scale with page
+  zoom while the header band does: the renderer (`MacCaptionSync` in `desktop.tsx`) sends
+  the band height through `syncCaptionControls` (`desktop:window:caption`) on every resize
+  or zoom change, main re-centres the lights in DIP (`macTrafficLightPosition`) and returns
+  the applied position read back with `getWindowButtonPosition()`, converted to CSS px
+  (`macCaptionGeometry`). The caption zone (`--desktop-macos-titlebar-inset`, inline on
+  `<body>`) is that extent plus a 14 px gap: 86 px at 100 %, wider below it, where a fixed
+  86 px ended under the green light. Electron exposes the lights' position but not their
+  size, so the 54×14 DIP group (`MACOS_TRAFFIC_LIGHT_GROUP`) is the one assumed constant;
+  a shell without the call keeps the 86 px CSS default. The zone drops in fullscreen (the
+  lights hide there).
 - **Windows** — `titleBarStyle: "hidden"` with the native Window Controls Overlay, so the
   caption buttons, Snap Layouts flyout, rounded corners, and shadow are the operating
-  system's. The caption zone takes the overlay's rectangle from the `titlebar-area-*`
-  environment variables (they track page zoom) and its side from
-  `navigator.windowControlsOverlay`, so a mirrored system UI moves it. The overlay
+  system's. The caption zone takes the overlay's rectangle as `desktop.tsx` measures it
+  with `navigator.windowControlsOverlay.getTitlebarAreaRect()` on every `geometrychange`
+  (`--desktop-wco-left/-right`, inline on `<body>`, rounded up so at 125 % and 150 %
+  scaling no sliver of content sits under a button's hover fill), falling back to the
+  `titlebar-area-*` environment variables before the first measurement; its side comes
+  from the same rect, so a mirrored system UI moves it. Real 125–150 % hardware is not
+  verified. The overlay
   background is fully transparent: the renderer sends the window background with zero
   alpha (`#rrggbb00`), so Windows paints only the glyphs and their hover/press fills over
   whatever surface the layout puts in the zone — the header's material, a column's head,
@@ -364,8 +377,19 @@ height (below). `windowChrome.ts` owns the per-platform
   header's own icon buttons (`--control-h-sm`, `--radius-control`), the `--surface-overlay`
   fill (`--surface-overlay-hover/-strong` on hover/press), the cut-glass chip material under
   glass, and the shared danger pair (`--red` on `--red-ink`) on the close button's
-  hover/focus/press. Desktop settings choose their side (left uses close-minimize-maximize
-  order) and an Auto/Dark/Light button theme. Auto follows the Polyth theme; Dark/Light pin a
+  hover/focus/press. By default (`controlsFollowSystem`, the setting's **Auto**) the
+  buttons follow the desktop environment's own layout — side, order and set — read by
+  `apps/desktop/src/linuxButtonLayout.ts`: GNOME-family `button-layout` through
+  `gsettings` (Cinnamon and MATE schemas too), KWin's `kwinrc` `ButtonsOnLeft/Right`, and
+  xfwm4's `button_layout` through `xfconf-query`, each bounded to 1.5 s and `null` on any
+  failure. GNOME's default `appmenu:close` shows Close alone; a split layout keeps only the
+  side that holds Close. Main reads it when the window opens and again on focus (at most
+  every 5 s), and sends it in window state (`systemControls`), so a change in the desktop's
+  settings lands without a restart; `--desktop-controls-count` sizes the cluster. Choosing
+  Left or Right turns following off (left uses close-minimize-maximize order); a settings
+  file from before the option follows the system unless it had moved the buttons left, and
+  a renderer that sends only a side also turns it off. Desktop settings also choose an
+  Auto/Dark/Light button theme. Auto follows the Polyth theme; Dark/Light pin a
   fixed scheme over the sampled/glass look, and the setting never touches `nativeTheme`, so it
   cannot repaint the app through `prefers-color-scheme`.
 
@@ -376,8 +400,10 @@ in macOS fullscreen) and renders an empty, unpainted `.desktop-caption-zone` box
 physical width at each top corner, breathing room included) and `--desktop-caption-h`
 (the band the controls centre on). Nothing renders under the zone. The classic header pads
 by it. In the full-height layouts (`columns`, `bare`) the workspace starts where the band
-ends (`--desktop-caption-band`); a navigator under the zone keeps its full height and
-starts its content below the band, and the navigator away from it keeps only the title
+ends (`--desktop-caption-band`); an expanded navigator under the zone keeps its full height and
+starts its content below the band, while a collapsed one (46–49 px, narrower than the
+traffic lights or any caption cluster) starts below the band entirely, so the controls
+never straddle its edge, and the navigator away from it keeps only the title
 bar's drag band (a no-drag strip carves the taller band out of its rows); the launcher column on that side is narrower than the
 zone (the Windows overlay alone is three 46 px buttons), so the whole column — idle strip,
 pinned or floating window, full-window layer, and a closing window on its way back to the
@@ -394,7 +420,8 @@ bar's height there. Pinned by
 
 Window state (`maximized`, `fullscreen`, `focused`) reaches `<body>` as `data-desktop-*`
 attributes: maximized/fullscreen windows square their corners and an inactive window's
-Linux buttons recede. The Desktop settings page shows the button preferences only on
+Linux buttons fall flat — no fill, edge or shadow, a 55 % glyph, eased — and come back
+on hover, while the Windows overlay's glyphs take the muted ink (`--muted`). The Desktop settings page shows the button preferences only on
 Linux. A window saved maximized is maximized when first shown, never while hidden (on
 Windows `maximize()` would show a start-hidden window).
 

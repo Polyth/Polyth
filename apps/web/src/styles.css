@@ -157,10 +157,12 @@ body.desktop-app {
   --desktop-controls-slot: var(--control-h-sm);
   --desktop-controls-gap: var(--space-2);
   --desktop-controls-pad: var(--space-3);
+  /* Linux shows the buttons the desktop's layout names (GNOME's default is
+     Close alone); desktop.tsx publishes how many as --desktop-controls-count. */
   --desktop-controls-island-width: calc(
     (var(--desktop-controls-pad) * 2)
-    + (var(--desktop-controls-slot) * 3)
-    + (var(--desktop-controls-gap) * 2)
+    + (var(--desktop-controls-slot) * var(--desktop-controls-count, 3))
+    + (var(--desktop-controls-gap) * (var(--desktop-controls-count, 3) - 1))
   );
   /* The caption controls float above full-window layers (scrims, drawers,
      phone-width package layers) but beneath toasts, popovers and tooltips. So
@@ -314,7 +316,9 @@ body.desktop-app:is([data-desktop-maximized="true"], [data-desktop-fullscreen="t
   transition:
     background-color var(--motion-fast) var(--motion-ease),
     border-color var(--motion-fast) var(--motion-ease),
-    color var(--motion-fast) var(--motion-ease);
+    box-shadow var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    opacity var(--motion-fast) var(--motion-ease);
 }
 /* Glass on: the cluster takes the header's own cut-glass chip material (the
    same gradient, edge and shadow as the header's icon buttons) so the caption
@@ -393,10 +397,17 @@ body:not([data-glass="off"]) .desktop-window-button {
 @media (hover: hover) {
   .desktop-window-controls[data-controls-theme="light"] .desktop-window-button:hover:where(:not(:disabled)) { color: #000; }
 }
-/* An inactive window's caption buttons recede, as native ones do. Opacity dims
-   the fill, edge and glyph together, whatever material they carry. */
-body.desktop-app[data-desktop-focused="false"] .desktop-window-button:not(:hover, :focus-visible) {
-  opacity: 0.6;
+/* An inactive window's caption buttons recede, as GNOME's and macOS's do:
+   the chip loses its fill, edge and shadow, leaving a quiet glyph in the muted
+   ink, so the focused window is the only one whose controls read as raised.
+   Pointing at a button brings the full chip back at once (hover and press
+   keep their own fills); the glass, light and dark themes all fall flat the
+   same way because only the shared custom properties change. */
+body.desktop-app[data-desktop-focused="false"] .desktop-window-button:not(:hover, :focus-visible, :active) {
+  --desktop-window-button-fill: transparent;
+  --desktop-window-button-border: 1px solid transparent;
+  --desktop-window-button-shadow: none;
+  opacity: 0.55;
 }
 .desktop-settings-page { display: flex; flex-direction: column; }
 .desktop-settings-hero {
@@ -905,7 +916,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-rail-toggle svg { stroke-width: 2; }
 .sidebar--animate-width {
   transition: width var(--motion-normal) var(--motion-ease),
-    min-width var(--motion-normal) var(--motion-ease);
+    min-width var(--motion-normal) var(--motion-ease),
+    margin-block-start var(--motion-normal) var(--motion-ease);
 }
 .sidebar--rail-collapsed { z-index: calc(var(--z-shell) + 1); overflow: visible; }
 .sidebar--rail-collapsed .sidebar-expanded-shell { position: relative; }
@@ -20155,8 +20167,10 @@ body.desktop-app:is([data-desktop-platform="darwin"], [data-desktop-platform="wi
   display: none;
 }
 /* Traffic lights: 18 px edge inset + a 54 px group, then the header's own
-   gap. Fullscreen hides them, and desktop.tsx drops the caption side with
-   them, so the zone collapses to nothing. */
+   gap, at 100 % zoom. desktop.tsx replaces it with the lights' real extent
+   from the window (inline on <body>), which differs at every other zoom since
+   the OS draws them in DIP. Fullscreen hides them, and desktop.tsx drops the
+   caption side with them, so the zone collapses to nothing. */
 body.desktop-app[data-desktop-platform="darwin"] {
   --desktop-macos-titlebar-inset: 86px;
 }
@@ -20180,11 +20194,14 @@ body.desktop-app[data-desktop-platform="win32"] {
      caption, flush in the top corner (WINDOWS_CAPTION_HEIGHT in
      apps/desktop/src/windowChrome.ts), never the full header height. */
   --desktop-caption-h: 32px;
-  --desktop-caption-left: calc(env(titlebar-area-x, 0px) + min(env(titlebar-area-x, 0px), var(--space-2)));
-  --desktop-caption-right: calc(
-    100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px))
-    + min(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)), var(--space-2))
-  );
+  /* The overlay's own rect as desktop.tsx measures it (rounded up, so no
+     sliver of content sits under a button at 125 % or 150 % scaling), with
+     the environment variables as the fallback before the first measurement. */
+  --desktop-wco-left-edge: var(--desktop-wco-left, env(titlebar-area-x, 0px));
+  --desktop-wco-right-edge: var(--desktop-wco-right,
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px))));
+  --desktop-caption-left: calc(var(--desktop-wco-left-edge) + min(var(--desktop-wco-left-edge), var(--space-2)));
+  --desktop-caption-right: calc(var(--desktop-wco-right-edge) + min(var(--desktop-wco-right-edge), var(--space-2)));
 }
 body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] .app > .header {
   padding-left: max(var(--space-3), var(--desktop-caption-left));

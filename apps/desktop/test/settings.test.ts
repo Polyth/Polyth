@@ -47,12 +47,21 @@ test("desktop settings round-trip atomically", async () => {
     softwareRendering: true,
     reduceAnimations: true,
     controlsPosition: "left" as const,
+    controlsFollowSystem: false,
     controlsTheme: "light" as const,
   };
   await writeDesktopSettings(path, expected);
   assert.deepEqual(await readDesktopSettings(path), expected);
   assert.deepEqual(readDesktopSettingsSync(path), expected);
   assert.equal((await readFile(path, "utf8")).endsWith("\n"), true);
+});
+
+test("a settings file from before the system button layout keeps a chosen left side", () => {
+  assert.equal(DEFAULT_DESKTOP_SETTINGS.controlsFollowSystem, true);
+  assert.equal(normalizeDesktopSettings({ controlsPosition: "right" }).controlsFollowSystem, true, "the untouched default follows the desktop");
+  assert.equal(normalizeDesktopSettings({ controlsPosition: "left" }).controlsFollowSystem, false, "moving the buttons left was a choice");
+  assert.equal(normalizeDesktopSettings({ controlsPosition: "left", controlsFollowSystem: true }).controlsFollowSystem, true);
+  assert.equal(normalizeDesktopSettings({ controlsFollowSystem: "yes" }).controlsFollowSystem, true);
 });
 
 test("missing desktop settings use safe defaults", async () => {

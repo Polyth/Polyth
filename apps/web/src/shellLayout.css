@@ -471,9 +471,20 @@ body.desktop-app:is([data-shell-layout="columns"], [data-shell-layout="bare"]):n
   margin-block-start: var(--desktop-caption-band) !important;
 }
 /* The navigator under the zone: its content starts where the band ends. */
-body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(ltr) > .sidebar,
-body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(rtl) > .sidebar {
+body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(ltr) > .sidebar:not(.collapsed, .sidebar--rail-collapsed),
+body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(rtl) > .sidebar:not(.collapsed, .sidebar--rail-collapsed) {
   padding-block-start: calc(var(--desktop-caption-h) - var(--shell-edge));
+}
+/* A collapsed navigator (46–49 px) is narrower than the zone it sits under —
+   the traffic lights alone span 18–70 px, Polyth's Linux cluster 124 px, the
+   Windows overlay 138 px — so the caption controls would straddle its edge,
+   half on the card and half off it. Like the launcher column, it starts
+   below the band, level with the workspace, and the band above it stays one
+   clear title bar the controls sit on, as in a native window whose sidebar
+   is hidden. The step glides with the width (.sidebar--animate-width). */
+body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(ltr) > .sidebar:is(.collapsed, .sidebar--rail-collapsed),
+body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(rtl) > .sidebar:is(.collapsed, .sidebar--rail-collapsed) {
+  margin-block-start: var(--desktop-caption-band) !important;
 }
 /* The navigator away from the zone keeps the title bar's drag band and no
    more: where the caption band reaches lower (Floating columns, the island)
