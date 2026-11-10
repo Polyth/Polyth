@@ -1265,6 +1265,28 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 
 .side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-block: var(--space-3) var(--space-2); padding-inline: var(--nav-gutter); }
+/* Rows scrolled out above the list are announced by a soft shadow under its
+   upper edge (Sidebar.tsx sets `data-scrolled` while scrollTop > 0). The
+   caster is a sticky box parked just above the scrollport, so only its shadow
+   shows; the negative margin takes it out of the flow. A sticky offset counts
+   from the list's padding, not its edge, so `--side-scroll-pad` (the measured
+   top padding) lifts the caster to the edge itself: without it the shadow
+   starts a few pixels under the header rows. */
+.side-scroll::before {
+  content: "";
+  display: block;
+  position: sticky;
+  top: calc(-1 * (var(--side-scroll-edge-h) + var(--side-scroll-pad, 0px)));
+  z-index: 2;
+  height: var(--side-scroll-edge-h);
+  margin: calc(-1 * var(--side-scroll-edge-h)) calc(-1 * var(--nav-gutter)) 0;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+  --side-scroll-edge-h: 48px;
+}
+.side-scroll[data-scrolled]::before { opacity: 1; }
 
 /* Title-first project tree. Indents are absolute within the sidebar content. */
 .project-card-shell {
