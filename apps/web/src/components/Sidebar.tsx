@@ -1620,7 +1620,18 @@ export default function Sidebar() {
           onTouchEnd={finishPull}
           onTouchCancel={() => { pullStartRef.current = null; setPull(0); }}
           onScroll={(event) => {
-            if (event.currentTarget.scrollTop > 0 && pullDistanceRef.current > 0) setPull(0);
+            const list = event.currentTarget;
+            const scrolled = list.scrollTop > 0;
+            // Rows hidden above the list's upper edge: styles.css draws the
+            // edge shadow from this flag. Set on the node, so a scroll never
+            // re-renders the navigator. Sticky offsets are measured from the
+            // padding, which differs by density and layout, so the shadow is
+            // told how far up the list's real edge is.
+            if (scrolled !== list.hasAttribute("data-scrolled")) {
+              if (scrolled) list.style.setProperty("--side-scroll-pad", getComputedStyle(list).paddingTop);
+              list.toggleAttribute("data-scrolled", scrolled);
+            }
+            if (scrolled && pullDistanceRef.current > 0) setPull(0);
           }}
         >
           {(pullDistance > 0 || pullRefreshing) && (

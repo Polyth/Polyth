@@ -4609,6 +4609,13 @@ line at 13px, because `line-height: 1` clips `g`/`y` descenders under
 `overflow: hidden`. The search field follows Settings → corner rounding
 (`--radius-card`), never the glass capsule.
 
+While rows are scrolled out above the list, a soft shadow (`--shadow-md`)
+lies under its upper edge, so the pinned rows do not read as the start of the
+list. `Sidebar.tsx` sets `data-scrolled` on `.side-scroll` from its scroll
+handler (no state, no re-render) together with `--side-scroll-pad`, the list's
+measured top padding, and `.side-scroll::before` casts the shadow from the
+list's very edge; at the top of the list there is none.
+
 Each project tile carries a live status dot: green while any of that project's
 sessions works, amber when one needs attention. The socket keeps active rows
 from every project current as summary projections, so the dot appears and
