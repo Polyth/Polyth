@@ -6,7 +6,21 @@ dialog. It supports review, manual create/update, pin/unpin, lock/unlock,
 archive, forget, bounded page search, export, staged import, policy controls,
 and clear.
 
-The records toolbar reports the server count for the active project filter.
+The page has three tabs: **Records** (search, lifecycle filter, the list and
+My notes), **Rules** (rules learned from corrections; the tab carries the count
+waiting for a decision) and **Settings** (delivery policy, harvesting, export,
+import and clear). Tabs stay mounted, so a draft in one survives a look at
+another. A record is one row: tapping it opens the editor, and its ⋯ menu holds
+mark reviewed, pin, lock, archive and forget. A row names only what sets the
+record apart (category, a lifecycle other than active, pinned, locked, a
+freshness other than current or unknown). Passing results go to the host
+notification stack; errors stay on the page. The page is drawn with the host's
+controls, handed to the package through `MemoryUiContext`
+(`packages/memory/widgets/ui.tsx`), and is laid out by container queries on
+`.pkg-memory`, phone first.
+
+Selection is a mode entered from the toolbar's ⋯ menu (**Select records**):
+rows gain checkboxes and a bar offers Archive and Forget.
 Visible-page selection is limited to one page; **Select all filtered** may select
 and act on at most 50 matching records. The filter is captured when selection is
 made, and changing it clears the selection. Each bulk archive or forget uses the

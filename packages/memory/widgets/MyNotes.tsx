@@ -8,6 +8,7 @@ import type { MemoryReceiptDto } from "@polyth/knowledge/memory-contracts";
 import type { WebNotificationInput } from "@polyth/web-sdk";
 import { memoryError, personalMemoryApi, type MemoryDto, type PersonalMemoryPage } from "../src/client.ts";
 import type { Translate } from "./i18n.ts";
+import { Btn, TextArea, TextField } from "./ui.tsx";
 
 export type Notify = (input: WebNotificationInput) => unknown;
 
@@ -72,9 +73,9 @@ function NoteList({ title, hint, notes, translate, onShare, under, onEdit, onRem
               {note.about && <small>{translate("memory.mine.about", { name: note.about })}</small>}
             </div>
             <div className="memory-actions">
-              {onShare && <button type="button" className="memory-button" disabled={busy} onClick={() => onShare(note)}>{translate("memory.share.action")}</button>}
-              <button type="button" className="memory-button" disabled={busy} onClick={() => onEdit(note)}>{translate("memory.mine.edit")}</button>
-              <button type="button" className="memory-button" disabled={busy} onClick={() => onRemove(note)}>{translate("memory.mine.delete")}</button>
+              {onShare && <Btn disabled={busy} onClick={() => onShare(note)}>{translate("memory.share.action")}</Btn>}
+              <Btn disabled={busy} onClick={() => onEdit(note)}>{translate("memory.mine.edit")}</Btn>
+              <Btn disabled={busy} onClick={() => onRemove(note)}>{translate("memory.mine.delete")}</Btn>
             </div>
           </div>
           {opened}
@@ -142,18 +143,18 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
           <p>{translate("memory.mine.hint")}</p>
         </div>
         <div className="memory-actions">
-          <button type="button" className="memory-button" disabled={busy} onClick={() => startAdding("here")}>{translate("memory.mine.add")}</button>
-          <button type="button" className="memory-button" disabled={busy} onClick={() => startAdding("about-me")}>{translate("memory.mine.addAboutMe")}</button>
+          <Btn disabled={busy} onClick={() => startAdding("here")}>{translate("memory.mine.add")}</Btn>
+          <Btn disabled={busy} onClick={() => startAdding("about-me")}>{translate("memory.mine.addAboutMe")}</Btn>
         </div>
       </div>
       {failed && <p className="memory-help" role="alert">{failed}</p>}
       {(adding || editing) && (
         <div className="memory-mine-editor">
-          <label className="memory-field">{translate("memory.field.title")}<input value={title} onChange={(event) => setTitle(event.target.value)} autoFocus /></label>
-          <label className="memory-field">{translate("memory.field.body")}<textarea value={body} rows={3} onChange={(event) => setBody(event.target.value)} /></label>
+          <label className="memory-field"><span>{translate("memory.field.title")}</span><TextField value={title} onChange={setTitle} /></label>
+          <label className="memory-field"><span>{translate("memory.field.body")}</span><TextArea value={body} rows={3} onChange={setBody} /></label>
           <div className="memory-actions">
-            <button type="button" className="memory-button memory-button-primary" disabled={busy || !title.trim() || !body.trim()} onClick={save}>{translate("memory.save")}</button>
-            <button type="button" className="memory-button" disabled={busy} onClick={closeEditor}>{translate("memory.cancel")}</button>
+            <Btn variant="primary" disabled={busy || !title.trim() || !body.trim()} onClick={save}>{translate("memory.save")}</Btn>
+            <Btn disabled={busy} onClick={closeEditor}>{translate("memory.cancel")}</Btn>
           </div>
         </div>
       )}
@@ -164,7 +165,7 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
           {page.review.map((note) => (
             <div key={note.id} className="memory-mine-note" data-memory-review={note.id}>
               <div className="memory-mine-note-copy"><strong>{note.title}</strong><span>{note.body}</span></div>
-              <button type="button" className="memory-button" disabled={busy} onClick={() => void run(() => personalMemoryApi.makePersonal(projectId, note.id, note.revision))}>{translate("memory.mine.makePersonal")}</button>
+              <Btn disabled={busy} onClick={() => void run(() => personalMemoryApi.makePersonal(projectId, note.id, note.revision))}>{translate("memory.mine.makePersonal")}</Btn>
             </div>
           ))}
         </div>
@@ -182,8 +183,8 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
               <div className="memory-mine-sharing">
                 <ShareText note={sharing} translate={translate} />
                 <div className="memory-actions">
-                  <button type="button" className="memory-button memory-button-primary" disabled={busy} onClick={() => share(sharing)}>{translate("memory.share.confirm")}</button>
-                  <button type="button" className="memory-button" disabled={busy} onClick={closeEditor}>{translate("memory.cancel")}</button>
+                  <Btn variant="primary" disabled={busy} onClick={() => share(sharing)}>{translate("memory.share.confirm")}</Btn>
+                  <Btn disabled={busy} onClick={closeEditor}>{translate("memory.cancel")}</Btn>
                 </div>
               </div>
             )}

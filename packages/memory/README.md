@@ -9,8 +9,8 @@ covers package-local behaviour that is not described there.
 
 Reflect turns corrections a person types in any harness ("always…", "never…",
 "no, use X instead", "I prefer…", and the Ukrainian equivalents) into
-**proposed** rules that the user reviews in Memory settings → *Learned from
-your corrections*.
+**proposed** rules that the user reviews in Memory settings → *Rules* tab
+(*Learned from your corrections*).
 
 - **Source.** Canonical Polyth session history, after each turn completes
   (`SERVER_TURN_COMPLETION_BUS`) or on *Scan recent sessions* (newest 25
