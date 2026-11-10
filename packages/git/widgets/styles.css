@@ -250,7 +250,7 @@
 .pending-changes-bar--collapsed .ui-run-summary-diff .negative { color: var(--chat-ink-red, var(--red)); }
 .pending-changes-bar--collapsed .ui-run-summary-chevron { color: var(--faint); }
 @media (hover: hover) {
-  .pending-changes-bar--collapsed > .ui-run-summary:hover:where(:not(:disabled)) { background: transparent; }
+  .pending-changes-bar--collapsed > .ui-run-summary:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
   .pending-changes-bar--collapsed > .ui-run-summary:hover:where(:not(:disabled)) :is(.ui-run-summary-copy strong, .ui-run-summary-chevron) { color: var(--text); }
 }
 /* A narrow bar: the head keeps one line and its chevron, and the words close the

@@ -124,6 +124,8 @@ test("the agent status above the composer is a borderless line, not glass", () =
   assert.match(css, /\.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar, \.subagent-island\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
   assert.match(dock, /@media \(max-width: 600px\) \{\s*\.agent-status-dock \.agent-status-dock-secondary \{ display: none; \}/);
   assert.match(dock, /@media \(prefers-reduced-motion: reduce\) \{\s*\.agent-status-dock-state \{ animation: none;/);
+  // An actionable status line shares the pending stack's subtle overlay hover, not the generic elevated button plate.
+  assert.match(dock, /button\.agent-status-dock:hover:where\(:not\(:disabled\)\)\s*\{[^}]*background:\s*var\(--surface-overlay-hover\);[^}]*border-color:\s*transparent;/s);
 });
 
 test("conversation chrome shares one horizontal frame", () => {
