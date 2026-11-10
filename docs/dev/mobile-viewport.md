@@ -242,7 +242,14 @@ truth. Electron retains its original frame and transparent-window handling.
     status bar's height over the page, the launch veil included. The same
     controller hides all four edge effects of the WebView's scroll view; the
     page paints its own chrome behind the bars. Source-checked in the same
-    test; not device-verified.
+    test; device-verified 2026-11-10 (1.2.327).
+  - **Safe area after a load.** WebKit can give a freshly loaded document a
+    zero `env(safe-area-inset-*)` until the WebView's next visible-rect
+    update. Device report 2026-11-10: the phone bar sat under the status bar
+    on launch until a keyboard or navigation moved the WebView. The same
+    controller nudges the WebView's frame (and puts it back) after every
+    finished load, on appear and on a safe-area change, so WebKit sends the
+    current insets. Source-checked; not device-verified.
   - **Only composer docks ride.** A Settings, navigator or module field takes
     the frame at once, as before: those layers anchor to the frame variables.
     Reduced motion (OS or in-app) never rides.

@@ -72,6 +72,11 @@ test("native shell leaves safe-area painting to the web app", async () => {
   for (const edge of ["top", "bottom", "left", "right"]) {
     assert.match(scene, new RegExp(`scroll\\.${edge}EdgeEffect\\.isHidden = true`), `${edge} edge effect stays hidden`);
   }
+  // A newly loaded document can start with a zero safe area until WebKit's
+  // next visible-rect update; the controller forces one after every load.
+  assert.match(scene, /webView\?\.observe\(\\\.isLoading[\s\S]*?refreshPageSafeArea\(\)/);
+  assert.match(scene, /override func viewSafeAreaInsetsDidChange\(\)[\s\S]*?refreshPageSafeArea\(\)/);
+  assert.match(scene, /webView\.frame = frame\.insetBy\(dx: 0, dy: 0\.5\)\s*\n\s*webView\.frame = frame/);
   assert.match(index, /viewport-fit=cover/,
     "the web viewport must remain edge-to-edge so CSS safe-area tokens can position controls");
 });
