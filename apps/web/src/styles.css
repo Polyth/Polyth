@@ -10568,7 +10568,23 @@ min-height: var(--tap);
 }
 
 .notification-centre { display: flex; flex-direction: column; gap: 10px; }
-.ntc-toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The actions are the panel's one fixed row: the rail body (--space-3 gutter)
+   is the scrollport, so the bar sticks to its top, paints the panel surface
+   over the gutter and keeps both buttons reachable however far the list
+   scrolls. They share one line whenever it fits and wrap only in a genuinely
+   narrow pane — never a forced column at a comfortable width. */
+.ntc-toolbar {
+  position: sticky;
+  top: calc(-1 * var(--space-3));
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3)) 0;
+  padding: var(--space-3);
+  background: var(--panel);
+}
+.ntc-toolbar > button { flex: 1 1 auto; }
 .ntc-error { display: flex; align-items: center; gap: 8px; font-size: var(--font-meta); color: var(--red, #e5534b); }
 .ntc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 
@@ -15050,20 +15066,6 @@ min-width: 0;
   white-space: nowrap;
 }
 @container feature-panel (max-width: 700px) {
-.ntc-toolbar {
-align-items: stretch;
-    flex-direction: column;
-}
-
-.ntc-toolbar > button {
-width: 100%;
-}
-
-.ntc-toolbar .header-spacer {
-display: none;
-}
-
-
   /* Settings pages */
   .settings-pane-body .set-row {
     align-items: stretch;
