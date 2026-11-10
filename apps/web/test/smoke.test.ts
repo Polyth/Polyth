@@ -2084,7 +2084,20 @@ test("truthful guards explain exactly why revert/fork are unavailable", () => {
     revertAvailability({ ...idle, turnWorking: true, pendingRequest: true }),
     { enabled: false, reason: "Revert unavailable while a request is waiting" },
   );
-  assert.equal(forkAvailability({ ...idle, turnWorking: true }).enabled, false);
+  // Fork never needs the source at rest: only an archived chat or an active
+  // revert refuse it.
+  assert.deepEqual(
+    forkAvailability({ ...idle, turnWorking: true, pendingRequest: true, queuedCount: 2, sessionBlocked: true }),
+    { enabled: true },
+  );
+  assert.deepEqual(
+    forkAvailability({ ...idle, archived: true }),
+    { enabled: false, reason: "Fork unavailable in an archived session" },
+  );
+  assert.deepEqual(
+    forkAvailability({ ...idle, rewindActive: true }),
+    { enabled: false, reason: "Restore or replace the current revert first" },
+  );
   // guardsFromModel derives from the live render model.
   const working = buildModel([ev("turn/started", { turnId: "g1" })]);
   assert.equal(guardsFromModel(working).turnWorking, true);

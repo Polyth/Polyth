@@ -276,7 +276,7 @@ test("state matrix: completed/failed/empty/active/waiting/queued/active-revert r
       await closePage(page);
     }
 
-    // -- waiting: pending question blocks mutations ----------------------------
+    // -- waiting: a pending question blocks Revert, never Fork ------------------
     {
       const page = await openApp({ width: w, height: h, session: SESSIONS.waiting, ready: ".question-card" });
       const ctx = ctxOf("waiting");
@@ -285,8 +285,7 @@ test("state matrix: completed/failed/empty/active/waiting/queued/active-revert r
         return b ? { disabled: b.disabled, title: b.title } : null;
       });
       assert.ok(btn, `${ctx}: fork control missing`);
-      assert.equal(btn.disabled, true, `${ctx}: fork enabled while a request is waiting`);
-      assert.match(btn.title, /while a request is waiting/, `${ctx}: reason "${btn.title}" is not truthful`);
+      assert.equal(btn.disabled, false, `${ctx}: fork unavailable while a request is waiting`);
       await closePage(page);
     }
 
