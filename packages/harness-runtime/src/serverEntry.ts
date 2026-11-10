@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -32,7 +32,7 @@ import {
     requireInstanceOwnerAuthority,
 } from "@polyth/contracts/instance-authority";
 import { localOnlyRemoteAccess, packageDataDir, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimFile } from "./executableDiscovery.ts";
+import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimFile, windowsCmdWrapperTarget } from "./executableDiscovery.ts";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
 import { createNativePluginRoutes } from "./nativePluginRoutes.ts";
 import { readNativeSkillPatch } from "./nativeSkills.ts";
@@ -200,19 +200,46 @@ export async function npmGlobalPrefixOf(
     hit: { executablePath: string; launcherPath?: string },
     packageName: string,
     platform: NodeJS.Platform = process.platform,
+    hops = 2,
 ): Promise<string | undefined> {
     const launcher = hit.launcherPath ?? hit.executablePath;
     const launcherDir = dirname(launcher);
     const prefix = platform === "win32" ? launcherDir : dirname(launcherDir);
     const packageDir = join(prefix, ...(platform === "win32" ? [] : ["lib"]), "node_modules", ...packageName.split("/"));
-    if (!await isFile(join(packageDir, "package.json")))
+    if (await isFile(join(packageDir, "package.json"))) {
+        // A Windows npm launcher is a `.cmd` shim; follow it to the script it runs.
+        const target = platform === "win32" ? await windowsCmdShimFile(launcher) : hit.executablePath;
+        const [real, root] = target
+            ? await Promise.all([realpath(target).catch(() => undefined), realpath(packageDir).catch(() => undefined)])
+            : [];
+        if (real && root && real.startsWith(`${root}${sep}`))
+            return prefix;
+    }
+    if (platform !== "win32" || hops <= 0)
         return undefined;
-    // A Windows npm launcher is a `.cmd` shim; follow it to the script it runs.
-    const target = platform === "win32" ? await windowsCmdShimFile(launcher) : hit.executablePath;
+    // Not npm's own shim: a `.cmd` wrapper on PATH (`~\.local\bin\codex.cmd`)
+    // that starts the npm copy installed somewhere else. The CLI's updater
+    // cannot tell how it was installed from there; the wrapper's target can.
+    const target = await windowsCmdWrapperTarget(launcher);
     if (!target)
         return undefined;
-    const [real, root] = await Promise.all([realpath(target).catch(() => undefined), realpath(packageDir).catch(() => undefined)]);
-    return real && root && real.startsWith(`${root}${sep}`) ? prefix : undefined;
+    if (/\.(?:cmd|bat)$/i.test(target))
+        return npmGlobalPrefixOf({ executablePath: target, launcherPath: target }, packageName, platform, hops - 1);
+    // A file inside `<prefix>\node_modules\<package>`: that prefix counts only
+    // when npm's shim for the package sits in it (not pnpm's or bun's store).
+    const real = await realpath(target).catch(() => target);
+    const at = real.indexOf([ "", "node_modules", ...packageName.split("/"), "" ].join(sep));
+    if (at <= 0)
+        return undefined;
+    const candidate = real.slice(0, at);
+    for (const entry of await readdir(candidate).catch(() => [] as string[])) {
+        if (!/\.cmd$/i.test(entry))
+            continue;
+        const shim = join(candidate, entry);
+        if (await npmGlobalPrefixOf({ executablePath: shim, launcherPath: shim }, packageName, platform, 0) === candidate)
+            return candidate;
+    }
+    return undefined;
 }
 /** The npm prefix the update must install into, from the CLI's own install. */
 async function updateNpmPrefix(hit: { executablePath: string; launcherPath?: string }, target: HarnessUpdateNpmTarget): Promise<string | undefined> {
@@ -254,7 +281,10 @@ async function runUpdateCommand(command: readonly string[], target: HarnessUpdat
     }
     // Which program ran is the first question about a failed update (a CLI
     // found on PATH may not be the copy Polyth installed).
-    const ran = `Program: ${[hit.launcherPath ?? hit.executablePath, ...(npm ? args : [])].join(" ")}`;
+    // A `.cmd` wrapper hides the copy it starts; a failure names that too.
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    const wrapped = !npm && process.platform === "win32" ? await windowsCmdWrapperTarget(launcher) : undefined;
+    const ran = `Program: ${[launcher, ...(npm ? args : [])].join(" ")}${wrapped ? `\nIt starts: ${wrapped}` : ""}`;
     // npm installs Windows CLIs as `.cmd` shims, which only start through
     // `cmd.exe`; Node refuses them without a shell (spawn EINVAL). The argv is
     // the descriptor's fixed words; the path is quoted because the shell joins

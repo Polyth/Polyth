@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { GIT_BINARY_ENV, resolvedExecutableDirectory } from "@polyth/kernel/executable";
 import { WINDOWS_NODE_DIR, WINDOWS_NPM_PREFIX } from "./installers.ts";
 
@@ -389,6 +389,52 @@ export const windowsCmdShimFile = async (shimPath: string): Promise<string | und
     if (!target) return undefined;
     const candidate = join(dirname(shimPath), ...target.split("\\"));
     return (await stat(candidate)).isFile() ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Programs a wrapper starts its real target with, never the target itself. */
+const WRAPPER_INTERPRETER = /^(?:node|cmd|powershell|pwsh|wsl|bash|sh|start|call)(?:\.exe)?$/i;
+/** A quoted string, or a bare word, of a `.cmd` line. */
+const WRAPPER_TOKEN = /"([^"\r\n]+)"|([^\s"&|<>()=]+)/g;
+
+/**
+ * The file a Windows `.cmd` launcher starts, for a launcher npm did not
+ * write as well: a wrapper somebody (or another tool) put on PATH that names
+ * the real program by an absolute path, `%USERPROFILE%\…` or `%~dp0\…`
+ * (`"C:\Users\me\AppData\Roaming\npm\codex.cmd" %*`). An npm/pnpm shim
+ * resolves as `windowsCmdShimFile` does. Undefined when the launcher names no
+ * existing file. The result says where a launcher leads; it is never run.
+ */
+export const windowsCmdWrapperTarget = async (
+  shimPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | undefined> => {
+  const shim = await windowsCmdShimFile(shimPath);
+  if (shim) return shim;
+  if (!/\.(?:cmd|bat)$/i.test(shimPath)) return undefined;
+  try {
+    if ((await stat(shimPath)).size > SHIM_SIZE_LIMIT) return undefined;
+    const own = dirname(shimPath);
+    const variable = (name: string): string | undefined => {
+      const key = Object.keys(env).find((entry) => entry.toLowerCase() === name.toLowerCase());
+      return key ? env[key] : undefined;
+    };
+    const expand = (token: string): string => token
+      .replace(/%~dp0\\?|%dp0%\\?/gi, `${own}${sep}`)
+      .replace(/%([A-Za-z_][\w()]*)%/g, (whole, name: string) => variable(name) ?? whole);
+    let found: string | undefined;
+    for (const line of (await readFile(shimPath, "utf8")).split(/\r?\n/)) {
+      if (/^\s*(?:@?rem\b|::)/i.test(line)) continue;
+      for (const match of line.matchAll(WRAPPER_TOKEN)) {
+        const candidate = expand((match[1] ?? match[2])!.trim());
+        if (!isAbsolute(candidate) || WRAPPER_INTERPRETER.test(basename(candidate))) continue;
+        if (resolve(candidate) === resolve(shimPath)) continue;
+        if (await stat(candidate).then((entry) => entry.isFile(), () => false)) found = resolve(candidate);
+      }
+    }
+    return found;
   } catch {
     return undefined;
   }

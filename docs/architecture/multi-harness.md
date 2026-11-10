@@ -241,7 +241,12 @@ and refuse when the guess fails: Pi asks `npm root -g`, whose prefix is npm's
 own and not Polyth's (`%LOCALAPPDATA%\Polyth\npm`, `~/.local`), and reports
 "not managed by a global npm install"; Codex reports "Could not detect the
 Codex installation method". If no npm is found, the CLI's updater runs with
-that `npm_config_prefix`. A copy npm did not install (a standalone or WinGet
+that `npm_config_prefix`. On Windows the launcher may also be a `.cmd` wrapper
+on PATH that is not npm's shim (`~\.local\bin\codex.cmd`): it is followed, up
+to two hops, to the file it starts (`windowsCmdWrapperTarget`: an absolute,
+`%VAR%` or `%~dp0` path), and the npm prefix is taken from there when npm's own
+shim for the package sits in that prefix. A failed self-update through such a
+wrapper adds `It starts: <target>` after the `Program:` line. A copy npm did not install (a standalone or WinGet
 binary) keeps its own updater. An update argv that already runs the package
 manager (DeepSeek's `npm install -g @deepseek-ai/dsh@latest`) is kept and names
 the installed command in `releaseSource.bin`, whose install supplies the
