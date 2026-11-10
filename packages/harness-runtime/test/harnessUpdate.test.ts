@@ -6,6 +6,7 @@ import { test } from "node:test";
 import type { HarnessRegistry, HarnessSnapshot, RouteRequest, SpaceContext } from "@polyth/contracts";
 import { createServerServiceRegistry, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { freeHarnessExecutable, harnessRoutes, npmGlobalPrefixOf, runHarnessUpdate, updateCrashName } from "../src/serverEntry.ts";
+import { windowsCmdWrapperTarget } from "../src/executableDiscovery.ts";
 
 test("runHarnessUpdate runs the argv without a shell and reports the exit", async () => {
     const dir = mkdtempSync(join(tmpdir(), "harness-update-"));
@@ -142,6 +143,29 @@ test("npmGlobalPrefixOf recognizes only a launcher that leads into the npm packa
     const exe = join(windowsPrefix, "pi.exe");
     writeFileSync(exe, "");
     assert.equal(await npmGlobalPrefixOf(hit(exe), "@earendil-works/pi-coding-agent", "win32"), undefined, "a program that is not npm's shim");
+
+    // A wrapper elsewhere on PATH (`~\.local\bin\pi.cmd`) that starts the npm
+    // copy: by the shim, by the script, or through an environment variable.
+    const elsewhere = mkdtempSync(join(tmpdir(), "harness-npm-wrapper-"));
+    const wrapper = (name: string, body: string): { launcherPath: string; executablePath: string } => {
+        writeFileSync(join(elsewhere, name), `@echo off\r\nrem "${exe}"\r\n${body}\r\n`);
+        return hit(join(elsewhere, name));
+    };
+    const pi = "@earendil-works/pi-coding-agent";
+    assert.equal(await npmGlobalPrefixOf(wrapper("shim.cmd", `"${shim}" %*`), pi, "win32"), windowsPrefix);
+    assert.equal(await npmGlobalPrefixOf(wrapper("script.cmd", `node "${script}" %*`), pi, "win32"), windowsPrefix);
+    assert.equal(await npmGlobalPrefixOf(wrapper("bare.cmd", `call ${shim} %*`), pi, "win32"), windowsPrefix);
+    assert.equal(await npmGlobalPrefixOf(wrapper("other.cmd", `"${shim}" %*`), "bare-cli", "win32"), undefined, "the wrapper leads to another package");
+    assert.equal(await npmGlobalPrefixOf(wrapper("native.cmd", `"${exe}" %*`), pi, "win32"), undefined, "a native program beside a stale npm copy");
+    assert.equal(await npmGlobalPrefixOf(wrapper("gone.cmd", `"${join(elsewhere, "missing.exe")}" %*`), pi, "win32"), undefined);
+    // A package in a store with no npm shim beside it (pnpm, a project install).
+    const store = mkdtempSync(join(tmpdir(), "harness-npm-store-"));
+    const stored = join(store, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+    mkdirSync(dirname(stored), { recursive: true });
+    writeFileSync(join(store, "node_modules", "@earendil-works", "pi-coding-agent", "package.json"), "{}");
+    writeFileSync(stored, "");
+    assert.equal(await npmGlobalPrefixOf(wrapper("store.cmd", `node "${stored}" %*`), pi, "win32"), undefined, "no npm shim owns that folder");
+    assert.equal(await windowsCmdWrapperTarget(join(elsewhere, "native.cmd")), exe, "a failed update can name what the wrapper starts");
 });
 
 const space = { spaceId: "space-a", spaceSlug: "space-a", userId: "user-a", role: "owner", deployment: "local-trusted", storageDir: "/tmp/polyth-space-a" } as SpaceContext;
