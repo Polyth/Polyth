@@ -28,6 +28,7 @@ export const en = {
   "harnessruntime.install.title.failed": "Couldn’t install {name}",
   "harnessruntime.install.title.cancelled": "Installation stopped",
   "harnessruntime.install.lead.confirm": "Polyth downloads {name} from its maker and sets it up {onMachine}. There is nothing to type.",
+  "harnessruntime.install.lead.manual": "This edition of Polyth doesn’t download installers. Copy the command below and run it in your own terminal {onMachine}, then come back.",
   "harnessruntime.install.lead.queued": "Another install {onMachine} finishes first. This one starts right after it.",
   "harnessruntime.install.lead.running": "This usually takes a minute or two. You can close this window: the install keeps going and Polyth tells you when it’s done.",
   "harnessruntime.install.lead.succeededVersion": "Version {version} is now {onMachine}.",

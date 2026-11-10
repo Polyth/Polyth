@@ -29,6 +29,7 @@ export const zhCN: HarnessRuntimeMessages = {
   "harnessruntime.install.title.failed": "无法安装 {name}",
   "harnessruntime.install.title.cancelled": "安装已停止",
   "harnessruntime.install.lead.confirm": "Polyth 会从开发者那里下载 {name}，并{onMachine}完成设置。你无需输入任何内容。",
+  "harnessruntime.install.lead.manual": "此版本的 Polyth 不会下载安装程序。请复制下方命令，在你自己的终端中运行（{onMachine}），然后回到这里。",
   "harnessruntime.install.lead.queued": "{onMachine}的另一项安装会先完成，这一项随后立即开始。",
   "harnessruntime.install.lead.running": "通常需要一两分钟。你可以关闭此窗口：安装会继续进行，完成后 Polyth 会通知你。",
   "harnessruntime.install.lead.succeededVersion": "版本 {version} 现已{onMachine}可用。",

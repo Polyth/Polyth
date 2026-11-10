@@ -8250,6 +8250,9 @@ export interface HarnessInstallPreviewDto {
   browserOnMachine: boolean;
   /** The harness's own setup guide, for a person who prefers to do it by hand. */
   setupUrl?: string;
+  /** This server starts no installer (the workstation edition): the person
+   *  runs `command` themselves. An Install request would be refused. */
+  manualOnly?: true;
 }
 
 /** Where a background install got to. `queued` = another install on the same

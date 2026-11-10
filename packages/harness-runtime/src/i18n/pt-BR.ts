@@ -29,6 +29,7 @@ export const ptBR: HarnessRuntimeMessages = {
   "harnessruntime.install.title.failed": "Não foi possível instalar {name}",
   "harnessruntime.install.title.cancelled": "Instalação interrompida",
   "harnessruntime.install.lead.confirm": "O Polyth baixa {name} do criador e o configura {onMachine}. Você não precisa digitar nada.",
+  "harnessruntime.install.lead.manual": "Esta edição do Polyth não baixa instaladores. Copie o comando abaixo, execute-o no seu próprio terminal {onMachine} e depois volte aqui.",
   "harnessruntime.install.lead.queued": "Primeiro termina outra instalação {onMachine}. Esta começa logo depois.",
   "harnessruntime.install.lead.running": "Normalmente leva um ou dois minutos. Você pode fechar esta janela: a instalação continua e o Polyth avisa quando terminar.",
   "harnessruntime.install.lead.succeededVersion": "A versão {version} já está {onMachine}.",

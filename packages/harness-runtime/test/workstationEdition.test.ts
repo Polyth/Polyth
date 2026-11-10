@@ -150,10 +150,14 @@ test("standard: the same install POST still starts the background install", asyn
 test("workstation: the install preview still names the command a person runs themselves", async () => {
     const routes = harnessRoutes(host(), fakeInstalls([]));
     const preview = await withEdition("workstation", () => call(routes, "GET", "/api/harnesses/codex/install")) as {
-        preview?: { command?: string; target?: string };
+        preview?: { command?: string; target?: string; manualOnly?: boolean };
     };
     assert.equal(preview.preview?.command, "npm install -g example-cli");
     assert.equal(preview.preview?.target, "local");
+    // The dialog then offers the command, not an Install the server refuses.
+    assert.equal(preview.preview?.manualOnly, true);
+    const standard = await withEdition(undefined, () => call(routes, "GET", "/api/harnesses/codex/install")) as { preview?: { manualOnly?: boolean } };
+    assert.equal(standard.preview?.manualOnly, undefined);
 });
 
 test("workstation: installing through a setup terminal and the harness self-update are refused", async () => {

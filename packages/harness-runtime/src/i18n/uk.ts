@@ -29,6 +29,7 @@ export const uk: HarnessRuntimeMessages = {
   "harnessruntime.install.title.failed": "Не вдалося встановити {name}",
   "harnessruntime.install.title.cancelled": "Встановлення зупинено",
   "harnessruntime.install.lead.confirm": "Polyth завантажить {name} від розробника й налаштує {onMachine}. Нічого вводити не потрібно.",
+  "harnessruntime.install.lead.manual": "Ця редакція Polyth не завантажує інсталятори. Скопіюйте команду нижче й виконайте її у власному терміналі {onMachine}, а потім поверніться сюди.",
   "harnessruntime.install.lead.queued": "Спершу завершиться інше встановлення {onMachine}. Це почнеться одразу після нього.",
   "harnessruntime.install.lead.running": "Зазвичай це займає хвилину-дві. Вікно можна закрити: встановлення триватиме, а Polyth повідомить, коли все буде готово.",
   "harnessruntime.install.lead.succeededVersion": "Тепер {onMachine} встановлено версію {version}.",
