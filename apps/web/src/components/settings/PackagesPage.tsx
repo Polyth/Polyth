@@ -47,7 +47,6 @@ const PACKAGE_NAME_KEYS: Readonly<Record<string, TranslationKey>> = {
   mcp: "packages.mcp.mcp",
   commands: "packages.commands.commands",
   plugins: "packages.plugins.plugins",
-  integrations: "packages.integrations.integrations",
   recap: "settings.packagespage.sessionAssist",
 };
 
@@ -71,7 +70,6 @@ const PACKAGE_DESCRIPTION_KEYS: Readonly<Record<string, TranslationKey>> = {
   mcp: "packages.mcp.modelContextProtocolServerConfiguration",
   commands: "settings.packagespage.commandsDescription",
   plugins: "settings.packagespage.pluginsDescription",
-  integrations: "settings.packagespage.integrationsDescription",
 };
 
 const CATEGORY_KEYS: Readonly<Record<string, TranslationKey>> = {

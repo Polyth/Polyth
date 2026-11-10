@@ -1625,7 +1625,12 @@ a link to change it. Search items: `git.personProfile`, `git.personAccounts`,
 `git.authentication`, `git.commitMessageModel`, `git.branchTemplate`,
 `git.conflictAgentTarget`, `git.display`, `git.servicePolicy`. The identity
 dialog's label/field grid becomes one column in narrow containers.
-The former Integrations settings route is a hidden compatibility redirect.
+
+There is no separate "Integrations" settings page: the stub route that only
+redirected here is gone, and an old `?settings=integrations` link falls back to
+the first settings page like any other unknown route. Service integrations now
+live where they are used (this page for hosting accounts, Settings → MCP for
+servers).
 
 Git action errors in the package go through `reportGitError`
 (`packages/git/widgets/gitRefusal.ts`): the friendly toast plus, for
@@ -3684,7 +3689,12 @@ A package **page** is different: it is an object of the navigator that opens
 *in place of Chat*, the way a chat does — an agent's own screen. Register it
 with `host.pages.register({ id, title, component })` and open it with
 `host.navigation.openPage(id, resource?, { projectId? })`; `closePage()`
-returns the canvas to Chat. The store holds `activePage { pageId, resource }`
+returns the canvas to Chat. `host.pages.has(id)` answers whether a page is
+registered right now: a package that only offers a way in (a settings page
+with "Browse the catalog", a capability that links elsewhere) asks first and
+renders no control while the page is absent, instead of a button that does
+nothing. A host without `has` is an older host, and `undefined` there means
+unknown, not absent. The store holds `activePage { pageId, resource }`
 (presentation-only navigation, never history); `activeSessionId` keeps the
 chat the canvas returns to. `WorkspaceHost` renders the page component with
 `{ resource, projectId }` inside `.page-canvas` behind its own

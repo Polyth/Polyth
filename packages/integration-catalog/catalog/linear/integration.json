@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "linear",
+  "name": "Linear",
+  "publisher": "Linear",
+  "verified": true,
+  "summary": "Linear issues, projects and comments.",
+  "description": "Linear's own remote MCP server. The agent reads issues and projects, searches, and writes comments or status changes with your account's permissions. Sign-in is a normal Linear OAuth flow, so access can be revoked from Linear at any time.",
+  "categories": ["product"],
+  "status": "stable",
+  "featured": true,
+  "homepage": "https://linear.app",
+  "mcp": {
+    "auth": "oauth",
+    "remote": { "url": "https://mcp.linear.app/mcp" }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://linear.app/docs/mcp",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "note": "GET without a token answers 401 with resource_metadata at mcp.linear.app; the protected-resource document lists authorization server https://mcp.linear.app with scopes read, write."
+    }
+  }
+}

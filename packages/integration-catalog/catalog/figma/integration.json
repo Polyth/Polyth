@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "figma",
+  "name": "Figma",
+  "publisher": "Figma",
+  "verified": true,
+  "summary": "Design context, components and variables.",
+  "description": "Figma's remote MCP server gives the agent design context it cannot get from a screenshot: frames, components, variables and styles from the files you allow. Sign-in is Figma's own OAuth consent, and the file access follows your account.",
+  "categories": ["design"],
+  "status": "stable",
+  "featured": true,
+  "homepage": "https://www.figma.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": { "url": "https://mcp.figma.com/mcp" }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://help.figma.com/hc/en-us/articles/32132100833559",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 405,
+      "challenge": "unknown",
+      "note": "Answers 405 with a JSON-RPC 'Method not allowed' body, so the endpoint is alive but refuses GET; the OAuth requirement is documented by Figma, not observed here."
+    }
+  }
+}

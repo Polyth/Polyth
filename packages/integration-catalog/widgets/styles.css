@@ -1,0 +1,1170 @@
+/* The Integrations page fills the canvas the host gives a package page: it owns
+   everything inside, its header included.
+
+   Rules this file follows, because they are the host's, not this page's:
+   - Type comes from the shell's roles (--font-title/--font-heading/--font-label
+     /--font-meta), so the text-size setting moves every line.
+   - Geometry is fixed, not density-scaled: density tunes the chat's rhythm, and
+     scaling a control or a brand mark with it produced 24px controls and 22px
+     marks, which the design system does not allow.
+   - Radii come from --radius-control/--radius-card, so corner rounding applies.
+   - The page is a surface, not text floating on the wallpaper: a text-dense
+     directory over a gradient measured 3.2-3.9:1 for its secondary text and
+     5.7:1 two rows lower, so contrast became a function of scroll position.
+   - Borderless appearance is on by default and clears every border colour, so
+     everything here separates with a fill or an inset shadow. A card edge or a
+     selected row drawn with `border` disappears for most people.
+   - One box, not three: the page, the directory panel and the search field were
+     three nested surfaces at 1.07:1 steps, which read as a form. The directory
+     sits on the page; the entry's connection card is the one filled box.
+
+   The shape is a directory beside a document: a calm column of services, and
+   the chosen service as a short article. */
+
+.icat-page {
+  container: icat-page / inline-size;
+
+  /* The readable accent, not --accent: a 2px ring of --accent measured 2.68:1
+     against the dark surface, below the 3:1 a focus indicator needs. */
+  --icat-link: var(--accent-text);
+  --icat-ring: var(--accent-text);
+  --icat-mark-row: 34px;
+  --icat-mark-detail: 56px;
+  --icat-row-h: 72px;
+  --icat-list-w: 340px;
+  --icat-control-h: var(--control-h, 40px);
+  --icat-page-pad: var(--space-5);
+  --icat-card-fill: color-mix(in oklab, var(--text) 5%, transparent);
+
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  min-block-size: 0;
+}
+
+/* Everything that scrolls, pads or paints lives here: a container cannot be
+   styled by its own `@container` query. */
+.icat-shell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  block-size: 100%;
+  /* The host gives a package page the canvas; on a phone the canvas can be as
+     tall as its content, so bound the shell to the measured frame or nothing
+     scrolls. */
+  max-block-size: var(--visual-frame-height, 100dvh);
+  min-block-size: 0;
+  margin-block-start: var(--space-2);
+  /* The right launcher strip's own width, which the shell zeroes when the
+     strip is hidden: a fixed 56px left a dead strip at tablet width. */
+  margin-inline-end: calc(var(--rail-strip-width-right, 0px) + var(--space-2));
+  padding-inline: var(--icat-page-pad);
+  /* 94% of the chrome fill keeps the wallpaper a suggestion and the contrast a
+     constant: at full transparency the same ink measured 3.2:1 over one part of
+     the gradient and 5.7:1 over another. */
+  background: color-mix(in oklab, var(--material-glass) 94%, transparent);
+  backdrop-filter: blur(18px) saturate(1.04);
+  border-start-start-radius: var(--radius-surface, var(--radius-card));
+  border-start-end-radius: var(--radius-surface, var(--radius-card));
+  color: var(--text);
+  /* Scrolls in every layout: on the desktop the panes inside are bounded and
+     this never activates, and on a phone the page is one column with nowhere
+     else to go. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  isolation: isolate;
+}
+
+/* Text direction per block, not per page: the shell may be RTL while these
+   strings are English (and Ukrainian), and a paragraph whose direction comes
+   from the layout puts the sentence-final period on the wrong side. */
+.icat-head h1,
+.icat-subtitle,
+.icat-row-title,
+.icat-row-summary,
+.icat-section-title,
+.icat-detail-title-row h2,
+.icat-detail-summary,
+.icat-detail-publisher,
+.icat-card-title,
+.icat-fact dt,
+.icat-fact dd,
+.icat-sec-label,
+.icat-sec-body,
+.icat-token-label,
+.icat-token-hint,
+.icat-blocked-text,
+.icat-action-error,
+.icat-action-notes li,
+.icat-problems-list li,
+.icat-empty-text,
+.icat-state-text,
+.icat-evidence-body,
+.icat-pill,
+.icat-badge,
+.icat-manual,
+.icat-fact-note,
+.icat-link,
+.icat-home,
+.icat-evidence > summary,
+.icat-problems-summary,
+.icat-chip,
+.icat-card-manual,
+.icat-token-help,
+.icat-back {
+  unicode-bidi: plaintext;
+}
+
+/* Back points toward the start of the flow, which is the other side in RTL. */
+html[dir="rtl"] .icat-back-glyph { transform: scaleX(-1); }
+
+/* ---- page head ---------------------------------------------------------- */
+
+.icat-head {
+  flex: 0 0 auto;
+  padding: var(--space-5) 0 var(--space-4);
+}
+
+.icat-head[data-hidden="true"] { display: none; }
+
+.icat-head h1 {
+  margin: 0;
+  font-size: var(--font-title);
+  line-height: var(--font-title-lh);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.icat-subtitle {
+  margin: var(--space-1) 0 0;
+  max-inline-size: 58ch;
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+/* ---- body: directory + document ---------------------------------------- */
+
+.icat-body {
+  display: grid;
+  grid-template-columns: var(--icat-list-w) minmax(0, 1fr);
+  gap: var(--space-6);
+  flex: 1;
+  min-block-size: 0;
+}
+
+.icat-col-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-block-size: 0;
+}
+
+/* Search and categories keep their height: the column scrolls under them, and a
+   shrinking row would clip the chips instead of scrolling the list. */
+.icat-list-head {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.icat-search { display: block; }
+
+/* A field needs an edge that survives borderless appearance and reads as an
+   input: --control-border is the host's stronger contour for exactly this. */
+.icat-search input {
+  inline-size: 100%;
+  block-size: max(var(--icat-control-h), var(--hit-min, 0px));
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--control-border);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+}
+
+.icat-search input::placeholder { color: var(--muted); }
+
+.icat-search input:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 1px;
+}
+
+/* ---- categories --------------------------------------------------------- */
+
+.icat-chips {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  /* The capsules start on the column's own edge. A negative margin pulled the
+     first one 12px into the page gutter, where it crossed the surface's edge and
+     read as an element sticking out. */
+  scroll-padding-inline: var(--space-1);
+  /* One row that scrolls, never a second row holding a single chip. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+  /* A chip cut in half by the edge reads as a bug; a fade reads as "more". */
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+
+.icat-chips::-webkit-scrollbar { display: none; }
+
+.icat-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+  block-size: max(var(--control-h-sm, 32px), var(--hit-min, 0px));
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+
+.icat-chip:hover:where(:not([aria-pressed="true"])) {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+
+/* Pressed is a tone step, not a blue tag: the only accent in the directory is
+   the selected row. --accent-line measured 1.22:1 in the dark theme. */
+.icat-chip[aria-pressed="true"] {
+  background: var(--surface-overlay-strong);
+  color: var(--text);
+}
+
+.icat-chip-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.icat-chip[aria-pressed="true"] .icat-chip-count { color: inherit; }
+
+.icat-chip:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 1px;
+}
+
+/* ---- the list ----------------------------------------------------------- */
+
+.icat-list {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-block-end: var(--space-3);
+}
+
+.icat-section + .icat-section { margin-block-start: var(--space-4); }
+
+.icat-section-title {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-1) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: var(--font-meta-lh);
+  text-transform: uppercase;
+}
+
+.icat-section-count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* ---- row ---------------------------------------------------------------- */
+
+.icat-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--icat-mark-row) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  inline-size: 100%;
+  block-size: var(--icat-row-h);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+
+.icat-row:hover:where(:not([data-active="true"])) { background: var(--surface-overlay-hover); }
+
+.icat-row[data-active="true"] { background: var(--accent-wash); }
+
+/* The bar is its own element, inset from the row's corners: an inset shadow on
+   a rounded row thins to nothing where the corners curve. */
+.icat-row[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  inset-block: var(--space-2);
+  inset-inline-start: 0;
+  inline-size: 3px;
+  border-radius: var(--radius-circle);
+  background: var(--accent-text);
+}
+
+.icat-row:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 2px;
+}
+
+.icat-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-inline-size: 0;
+}
+
+.icat-row-title {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-inline-size: 0;
+  font-size: var(--font-label);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+}
+
+.icat-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reading copy, not a footnote: --font-meta put fourteen roles at 11.2px. */
+.icat-row-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.25;
+  text-wrap: pretty;
+}
+
+/* The fill step alone is ~1.05:1, so hover also lifts the promise one ink
+   level. */
+.icat-row:hover:where(:not([data-active="true"])) .icat-row-summary { color: var(--text-dim); }
+
+.icat-badge {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: calc(var(--font-meta) * 1.45);
+}
+
+.icat-row-status {
+  justify-self: end;
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: var(--radius-circle);
+  background: transparent;
+}
+
+.icat-row-status-on {
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--green) 16%, transparent);
+}
+
+/* ---- brand mark --------------------------------------------------------- */
+
+.icat-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  inline-size: var(--icat-mark-row);
+  block-size: var(--icat-mark-row);
+  /* The tile carries the brand hue; the glyph stays the theme's text colour,
+     because a brand colour alone cannot be readable in both themes (GitHub and
+     Notion are nearly black). Mixing the tint onto a surface token also keeps
+     a dark brand visible instead of vanishing into the page. */
+  border-radius: calc(var(--radius-control) * 1.25);
+  background: color-mix(in oklab, var(--icat-brand, var(--text)) 14%, var(--elevated));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--icat-brand, var(--text)) 20%, var(--contour));
+  color: var(--text);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.icat-mark-detail {
+  inline-size: var(--icat-mark-detail);
+  block-size: var(--icat-mark-detail);
+  border-radius: calc(var(--radius-card) * 1.4);
+}
+
+.icat-mark-glyph {
+  inline-size: 18px;
+  block-size: 18px;
+  background-color: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+}
+
+.icat-mark-detail .icat-mark-glyph {
+  inline-size: 28px;
+  block-size: 28px;
+}
+
+/* ---- the entry's document ---------------------------------------------- */
+
+.icat-pane {
+  min-block-size: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 0 var(--space-6);
+}
+
+.icat-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-inline-size: 72ch;
+}
+
+/* Start-aligned, so the mark's top is level with the search field's top. */
+.icat-detail-head {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+.icat-detail-head-text { min-inline-size: 0; }
+
+.icat-detail-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.icat-detail-title-row h2 {
+  margin: 0;
+  font-size: var(--font-title);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+
+.icat-detail-summary {
+  margin: var(--space-1) 0 0;
+  max-inline-size: 56ch;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.icat-pill {
+  padding: 1px 7px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: calc(var(--font-meta) * 1.45);
+}
+
+.icat-pill-on {
+  background: color-mix(in oklab, var(--green) 14%, transparent);
+  color: var(--green-on-wash, var(--green));
+}
+
+.icat-detail-publisher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.icat-dot { color: var(--muted); }
+
+.icat-home {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.icat-home:hover { color: var(--icat-link); }
+
+.icat-detail-publisher .icat-home { margin-inline-start: 2px; }
+
+/* ---- the connection card ------------------------------------------------ */
+
+/* The one filled box on the page: the action and the two facts it depends on
+   share a surface, because a button floating under the title made the person
+   look in two places to answer one question. */
+.icat-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3) var(--space-4);
+  align-items: end;
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--icat-card-fill);
+  box-shadow: inset 0 0 0 1px var(--contour);
+}
+
+.icat-card-title { grid-column: 1 / -1; }
+
+.icat-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+/* One place for the action, for every entry: bottom-inline-end of the card. */
+.icat-card-action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.icat-card-manual {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-end;
+  text-align: end;
+}
+
+.icat-card > :is(.icat-action-error, .icat-action-notes) { grid-column: 1 / -1; }
+
+.icat-card-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: var(--font-meta-lh);
+  text-transform: uppercase;
+}
+
+/* ---- facts -------------------------------------------------------------- */
+
+.icat-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.icat-fact {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.icat-fact dt {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.icat-fact dd {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  min-inline-size: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.icat-fact dd > :is(a, .icat-mono) { align-self: flex-start; }
+
+.icat-fact-note {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+
+/* The evidence is a footnote a person can open, not four lines of HTTP prose in
+   the middle of a decision. */
+.icat-evidence {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.icat-evidence > summary {
+  cursor: pointer;
+  min-block-size: var(--tap, 32px);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+}
+
+.icat-evidence > summary:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 2px;
+}
+
+.icat-evidence-body {
+  margin: var(--space-1) 0 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.icat-mono {
+  padding: 1px 6px;
+  border-radius: calc(var(--radius-control) * 0.6);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--contour);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-technical);
+  overflow-wrap: anywhere;
+}
+
+/* ---- sections ----------------------------------------------------------- */
+
+/* Labels and values start on the card's own inner edge (16px), so the document
+   has one left edge above and below the card. */
+.icat-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-inline: var(--space-4);
+}
+
+.icat-sec-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: var(--font-meta-lh);
+  text-transform: uppercase;
+}
+
+.icat-sec-body {
+  margin: 0;
+  max-inline-size: 64ch;
+  color: var(--text);
+  font-size: var(--font-label);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+/* ---- actions ------------------------------------------------------------ */
+
+.icat-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.icat-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.icat-btn-primary,
+.icat-btn-secondary {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: center;
+  min-block-size: max(var(--icat-control-h), var(--hit-min, 0px));
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: var(--font-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+
+.icat-btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink, #0a0f1a);
+}
+
+.icat-btn-primary:hover:where(:not(:disabled)) {
+  background: color-mix(in oklab, var(--accent) 88%, var(--text));
+}
+
+.icat-btn-secondary {
+  background: var(--surface-overlay-hover);
+  box-shadow: inset 0 0 0 1px var(--contour);
+  color: var(--text);
+}
+
+.icat-btn-secondary:hover:where(:not(:disabled)) { background: var(--surface-overlay-strong); }
+
+.icat-btn-danger { color: color-mix(in oklab, var(--red) 78%, var(--text)); }
+
+.icat-btn-danger:hover:where(:not(:disabled)) {
+  background: color-mix(in oklab, var(--red) 12%, transparent);
+}
+
+/* A disabled action keeps a readable label: opacity alone left white on #A3A3A3
+   at 2.52:1. The host's disabled tokens are the sanctioned pair. */
+.icat-btn-primary:disabled,
+.icat-btn-secondary:disabled {
+  cursor: not-allowed;
+  background: var(--control-disabled-bg);
+  box-shadow: inset 0 0 0 1px var(--control-disabled-border);
+  color: var(--control-disabled-ink);
+}
+
+.icat-btn-primary:focus-visible,
+.icat-btn-secondary:focus-visible,
+.icat-token-toggle:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 2px;
+}
+
+.icat-spinner {
+  inline-size: 12px;
+  block-size: 12px;
+  border: 2px solid currentColor;
+  border-block-start-color: transparent;
+  border-radius: var(--radius-circle);
+  animation: icat-spin 700ms linear infinite;
+}
+
+@keyframes icat-spin { to { transform: rotate(360deg); } }
+
+.icat-link {
+  display: inline;
+  color: var(--icat-link);
+  font-size: var(--font-label);
+  text-decoration: none;
+}
+
+.icat-link:hover { text-decoration: underline; }
+
+.icat-manual {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.icat-action-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+
+.icat-action-notes {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.5;
+}
+
+.icat-blocked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--contour);
+}
+
+.icat-blocked-text {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+
+.icat-blocked-code {
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  overflow-wrap: anywhere;
+}
+
+/* ---- token field -------------------------------------------------------- */
+
+.icat-token {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.icat-token-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+
+.icat-token-row { display: flex; gap: var(--space-2); }
+
+/* A masked secret is not code: the keyboard-only monospace face gave the one
+   monospace line on the page to a field nobody reads. */
+.icat-token-input {
+  flex: 1;
+  min-inline-size: 0;
+  block-size: max(var(--icat-control-h), var(--hit-min, 0px));
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--control-border);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+}
+
+.icat-token-input::placeholder { color: var(--muted); }
+
+.icat-token-input:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 1px;
+}
+
+.icat-token-toggle {
+  block-size: max(var(--icat-control-h), var(--hit-min, 0px));
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-hover);
+  box-shadow: inset 0 0 0 1px var(--control-border);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+
+.icat-token-toggle:hover { background: var(--surface-overlay-strong); color: var(--text); }
+
+.icat-token-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: 1.45;
+}
+
+.icat-token-help { font-size: var(--font-meta); }
+
+/* ---- states ------------------------------------------------------------- */
+
+.icat-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-5);
+}
+
+.icat-state-text { margin: 0; color: var(--text-dim); font-size: var(--font-label); }
+
+/* A search with no result owns the whole page: an empty right half reads as a
+   broken pane, so the directory stops being a column and the message centres. */
+.icat-body[data-empty="true"] { grid-template-columns: minmax(0, 1fr); }
+
+.icat-body[data-empty="true"] .icat-list {
+  display: grid;
+  place-items: center;
+  overflow: visible;
+}
+
+.icat-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: center;
+  margin-inline: auto;
+  padding: var(--space-6) var(--space-4);
+  max-inline-size: 42ch;
+  text-align: center;
+}
+
+.icat-empty-text {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.icat-problems {
+  flex: 0 0 auto;
+  margin-block-end: var(--space-2);
+  border-radius: var(--radius-control);
+  background: color-mix(in oklab, var(--amber) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--amber) 34%, transparent);
+}
+
+.icat-problems-summary {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  inline-size: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  text-align: start;
+  cursor: pointer;
+}
+
+.icat-problems-summary:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 2px;
+}
+
+.icat-problems-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: var(--radius-circle);
+  background: var(--amber);
+}
+
+.icat-problems-toggle { margin-inline-start: auto; color: var(--muted); }
+
+.icat-problems-list {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2) var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: 1.5;
+}
+
+/* ---- skeleton ----------------------------------------------------------- */
+
+.icat-skeleton {
+  display: grid;
+  grid-template-columns: var(--icat-list-w) minmax(0, 1fr);
+  gap: var(--space-6);
+  flex: 1;
+  min-block-size: 0;
+  animation: icat-pulse 1.6s var(--motion-ease) infinite;
+}
+
+.icat-skeleton-list { padding: 0; }
+
+.icat-skeleton-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  block-size: var(--icat-row-h);
+  padding: 0 var(--space-2);
+}
+
+.icat-skeleton-mark {
+  flex: 0 0 auto;
+  inline-size: var(--icat-mark-row);
+  block-size: var(--icat-mark-row);
+  border-radius: calc(var(--radius-control) * 1.25);
+  background: var(--surface-overlay-hover);
+}
+
+.icat-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.icat-skeleton-line {
+  block-size: 8px;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-hover);
+}
+
+.icat-skeleton-line-dim { opacity: 0.65; }
+.icat-skeleton-title { block-size: 14px; inline-size: 40%; }
+
+.icat-skeleton-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.icat-skeleton-detail .icat-skeleton-line { max-inline-size: 62ch; }
+
+@keyframes icat-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.icat-sr {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- back (the entry's own screen on a phone) --------------------------- */
+
+.icat-back {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  align-self: flex-start;
+  min-block-size: var(--tap, 44px);
+  margin-block-end: var(--space-1);
+  padding: 0 var(--space-2) 0 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--icat-link);
+  font: inherit;
+  font-size: var(--font-label);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.icat-back:hover { background: var(--surface-overlay-hover); }
+
+.icat-back-glyph { font-size: var(--font-heading); line-height: 1; }
+
+.icat-back:focus-visible {
+  outline: 2px solid var(--icat-ring);
+  outline-offset: 2px;
+}
+
+/* ---- narrow ------------------------------------------------------------- */
+
+/* Two panes need the list's 340px plus a readable document, so below this the
+   page becomes one screen at a time: the directory, or the chosen entry with a
+   way back. */
+@container icat-page (max-width: 899px) {
+  .icat-body[data-view="detail"] .icat-col-list,
+  .icat-body[data-view="list"] .icat-pane {
+    display: none;
+  }
+
+  .icat-body,
+  .icat-skeleton {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .icat-body { flex: 0 0 auto; }
+
+  .icat-list { overflow: visible; }
+
+  .icat-pane {
+    overflow: visible;
+    padding-block-start: 0;
+  }
+
+  .icat-detail { max-inline-size: none; }
+
+  /* Nothing was tapped yet: the first entry is preselected for the document,
+     and a wash on the list would read as a pressed row. */
+  .icat-body[data-view="list"] .icat-row[data-active="true"] { background: transparent; }
+
+  .icat-body[data-view="list"] .icat-row[data-active="true"]::before { display: none; }
+}
+
+/* The canvas meets the window edge here, so the surface's corners go square
+   (styles.md: a surface touching a viewport edge keeps that corner at 0). */
+@media (max-width: 1023px) {
+  .icat-shell {
+    margin-block-start: 0;
+    margin-inline-end: 0;
+    border-start-start-radius: 0;
+    border-start-end-radius: 0;
+  }
+}
+
+@container icat-page (max-width: 639px) {
+  .icat-shell {
+    --icat-page-pad: var(--space-4);
+    --icat-row-h: 76px;
+  }
+
+  .icat-head { padding-block: var(--space-4); }
+
+  .icat-detail-head { gap: var(--space-3); }
+
+  .icat-mark-detail {
+    --icat-mark-detail: 48px;
+  }
+
+  .icat-mark-detail .icat-mark-glyph {
+    inline-size: 24px;
+    block-size: 24px;
+  }
+
+  .icat-fact {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .icat-card { padding: var(--space-3); }
+
+  /* One job per screen: the card stacks and the action is the width of the
+     card at the larger control height, instead of a 90×40 target at its edge. */
+  .icat-card { grid-template-columns: minmax(0, 1fr); }
+
+  .icat-card-action { align-items: stretch; }
+
+  .icat-card-action > :is(.icat-btn-primary, .icat-btn-secondary) {
+    inline-size: 100%;
+    /* A compact shell look publishes a 36px large control; the coarse-pointer
+       floor still wins, so the action never drops under 44 on a phone. */
+    min-block-size: max(var(--control-h-lg), var(--hit-min, 0px));
+  }
+
+  .icat-card-manual { align-items: stretch; text-align: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icat-spinner,
+  .icat-skeleton { animation: none; }
+
+  .icat-row,
+  .icat-chip,
+  .icat-btn-primary,
+  .icat-btn-secondary { transition: none; }
+}

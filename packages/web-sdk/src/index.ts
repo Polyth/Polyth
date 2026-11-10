@@ -1137,6 +1137,11 @@ export interface WebPackageHost {
   /** Package pages shown in place of Chat. Optional for older hosts. */
   pages?: {
     register(definition: PageDefinition): Unregister;
+    /** Whether a page with this id is registered right now. A package that
+     *  merely offers a way in (for example "browse the catalog") asks first,
+     *  so the control disappears with the page instead of doing nothing.
+     *  Optional for older hosts; treat a missing answer as "unknown". */
+    has?(pageId: string): boolean;
   };
   capabilities: {
     register(definition: CapabilityDefinition): Unregister;

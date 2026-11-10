@@ -1,0 +1,31 @@
+{
+  "name": "@polyth/integration-catalog",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Integration catalog",
+      "description": "A curated list of outside services the agent can be connected to: the MCP endpoint, how it authenticates, and what was actually verified.",
+      "core": false,
+      "enabled": false,
+      "maturity": "in-progress",
+      "icon": "server",
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

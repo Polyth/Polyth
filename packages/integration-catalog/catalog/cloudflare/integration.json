@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "cloudflare",
+  "name": "Cloudflare Docs",
+  "publisher": "Cloudflare",
+  "verified": true,
+  "summary": "Cloudflare docs and the Workers reference.",
+  "description": "Cloudflare's public documentation MCP server. It answers questions about Cloudflare products from the vendor's own reference, with no account and nothing to sign in. Useful for Workers, Pages, R2, D1 and Tunnel work.",
+  "categories": ["cloud", "data"],
+  "status": "stable",
+  "homepage": "https://developers.cloudflare.com",
+  "mcp": {
+    "auth": "none",
+    "remote": { "url": "https://docs.mcp.cloudflare.com/mcp" }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://developers.cloudflare.com/agents/model-context-protocol/",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 405,
+      "challenge": "none",
+      "note": "Answers 405 with a JSON-RPC 'Method not allowed' body on GET and sends no WWW-Authenticate header, which matches a public server with no account."
+    }
+  }
+}

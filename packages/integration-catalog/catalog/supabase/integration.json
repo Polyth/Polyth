@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "supabase",
+  "name": "Supabase",
+  "publisher": "Supabase",
+  "verified": true,
+  "summary": "SQL, schemas, projects and edge functions.",
+  "description": "Supabase's remote MCP server reaches the projects you approve: run SQL, read schemas, logs and analytics, and manage edge functions, storage and secrets when the scopes allow it. Write scopes are broad, so pick the project deliberately.",
+  "categories": ["cloud", "data"],
+  "status": "stable",
+  "featured": true,
+  "homepage": "https://supabase.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": { "url": "https://mcp.supabase.com/mcp" }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://supabase.com/docs/guides/getting-started/mcp",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "note": "401 with resource_metadata; the protected-resource document lists api.supabase.com with projects:read/write, database:read/write, secrets:read and edge-functions scopes."
+    }
+  }
+}

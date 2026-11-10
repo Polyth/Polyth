@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "stripe",
+  "name": "Stripe",
+  "publisher": "Stripe",
+  "verified": true,
+  "summary": "Customers, payments, invoices and prices.",
+  "description": "Stripe's remote MCP server works with an API key, which is its whole permission boundary: use a restricted key, stored in the credential vault. It is best treated as read-mostly, since a write-capable key can move real money.",
+  "categories": ["product"],
+  "status": "beta",
+  "homepage": "https://stripe.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.stripe.com/",
+      "tokenHeader": { "name": "Authorization", "valuePrefix": "Bearer " }
+    },
+    "tokenHelpUrl": "https://dashboard.stripe.com/apikeys"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-06",
+    "source": "https://docs.stripe.com/mcp",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer",
+      "note": "401 'missing_api_key'; the challenge points at mcp.stripe.com's protected-resource document, but the error body asks for an API key."
+    }
+  }
+}

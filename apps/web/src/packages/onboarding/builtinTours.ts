@@ -10,7 +10,6 @@ import {
   ROLES_TOUR,
   COMMANDS_TOUR,
   HOME_ASSISTANT_TOUR,
-  INTEGRATIONS_TOUR,
   MCP_TOUR,
   MODELS_TOUR,
   PLUGINS_TOUR,
@@ -34,6 +33,5 @@ export function registerBuiltinPackageTours(): void {
     MCP_TOUR,
     COMMANDS_TOUR,
     PLUGINS_TOUR,
-    INTEGRATIONS_TOUR,
-  ]) registerPackageOnboarding(tour);
+    ]) registerPackageOnboarding(tour);
 }
