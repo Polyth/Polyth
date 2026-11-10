@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { HostingIssueComment, HostingIssueDetail } from "@polyth/code-hosting";
 import { useCodeHosting, useCodeHostingStore } from "./context.tsx";
+import HostingBody from "./HostingBody.tsx";
 import ReplyPanel from "./ReplyPanel.tsx";
 
 const initials = (name: string): string =>
@@ -8,7 +9,7 @@ const initials = (name: string): string =>
 
 export default function IssueDetailView({ number, onClose }: { number: number; onClose: () => void }) {
   const { client, host, provider } = useCodeHosting();
-  const { Button, EmptyState, MarkdownDoc } = host.ui.components;
+  const { Button, EmptyState } = host.ui.components;
   const Icon = host.ui.icons;
   const t = provider.t;
   const projectId = useCodeHostingStore().activeProjectId;
@@ -109,7 +110,7 @@ export default function IssueDetailView({ number, onClose }: { number: number; o
             </header>
             <div className="pr-body markdown-body">
               {detail.body
-                ? <MarkdownDoc text={detail.body} keyBase={`issue-${detail.number}-body`} />
+                ? <HostingBody host={host} text={detail.body} keyBase={`issue-${detail.number}-body`} />
                 : <p>{t("issuedetail.noDescription")}</p>}
             </div>
           </section>
@@ -137,7 +138,7 @@ export default function IssueDetailView({ number, onClose }: { number: number; o
                       </a>
                     </header>
                     <div className="pr-comment-body markdown-body">
-                      <MarkdownDoc text={comment.body} keyBase={`issue-comment-${comment.id}`} />
+                      <HostingBody host={host} text={comment.body} keyBase={`issue-comment-${comment.id}`} />
                     </div>
                   </div>
                 </article>

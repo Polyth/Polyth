@@ -5085,6 +5085,17 @@ click everywhere else.
   writer's single newlines (`white-space: pre-line`); file preview keeps
   CommonMark soft breaks. A quote renders `blockquote.md-quote` and a rule
   `hr.md-hr` on every surface (styles in `styles.css`, not per package).
+- **Provider bodies.** Change-request and issue descriptions and comments
+  (GitHub, GitLab) render through `HostingBody`
+  (`packages/code-hosting/widgets/HostingBody.tsx`), which splits the text and
+  hands each part to `MarkdownDoc`. Providers send Markdown plus literal HTML —
+  Dependabot's release notes are `<details>`/`<p>`/`<blockquote>`/`<ul>` blocks
+  — so `bodyHtml.ts` converts the subset the providers themselves render into
+  Markdown (links and images keep the Markdown URL policy, unknown tags are
+  dropped, code spans and fenced blocks stay verbatim, an unterminated
+  `<details>` stays text) and keeps every `<details>` a real disclosure
+  (`.pr-details`). It only produces text, so no HTML string reaches the DOM;
+  bare Markdown without tags keeps its exact bytes.
 - **Videos.** `isVideoSource` (`markdown/sanitize.ts`) recognises video files.
   An image-syntax destination that is a video renders as a `<video controls>`
   player instead of a thumbnail, under the same image URL policy (an unsafe
