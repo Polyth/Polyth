@@ -12,7 +12,7 @@ import { vendorScriptInstallCommand } from "@polyth/harness-runtime/installers";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { readClaudeAuthReport } from "./authStatus.ts";
 import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
-import { gateClaudeAgentTools, hasPolythAgentToolsMcp } from "./mcpReadiness.ts";
+import { claudeAgentToolsTimeoutMs, gateClaudeAgentTools, hasPolythAgentToolsMcp } from "./mcpReadiness.ts";
 import { createClaudeNativePlugins } from "./nativePlugins.ts";
 import { claudeConfigDir, createClaudePreferences, nativeSkillsUnsupported } from "./preferences.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
@@ -126,6 +126,7 @@ export const titleSafeClaudeSdk = (
             return gateClaudeAgentTools(
                 query,
                 hasPolythAgentToolsMcp(options.mcpServers),
+                { timeoutMs: claudeAgentToolsTimeoutMs({ ...env, ...options.env }) },
             );
         },
         async getSessionInfo(...args: Parameters<typeof sdk.getSessionInfo>) {

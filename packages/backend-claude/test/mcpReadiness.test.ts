@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  claudeAgentToolsTimeoutMs,
   gateClaudeAgentTools,
   hasPolythAgentToolsMcp,
   waitForClaudeAgentTools,
@@ -51,4 +52,21 @@ test("fails closed when the private Polyth bridge never becomes ready", async ()
     }, { pollIntervalMs: 0, timeoutMs: 0 }),
     /did not become ready before Claude session admission/,
   );
+});
+
+test("waits at least as long as Claude's own MCP connect timeout", () => {
+  // The CLI keeps a healthy bridge `pending` while it connects other servers
+  // in batches; a gate shorter than MCP_TIMEOUT failed slow but healthy starts.
+  assert.equal(claudeAgentToolsTimeoutMs({}), 35_000);
+  assert.equal(claudeAgentToolsTimeoutMs({ MCP_TIMEOUT: "60000" }), 65_000);
+  assert.equal(claudeAgentToolsTimeoutMs({ MCP_TIMEOUT: "nonsense" }), 35_000);
+  assert.equal(claudeAgentToolsTimeoutMs({ MCP_TIMEOUT: "0" }), 35_000);
+});
+
+test("a bridge that turns connected after several seconds is admitted", async () => {
+  let polls = 0;
+  await waitForClaudeAgentTools({
+    mcpServerStatus: async () => [{ name: "polyth-agent-tools", status: ++polls < 4 ? "pending" : "connected" }],
+  }, { pollIntervalMs: 0 });
+  assert.equal(polls, 4);
 });
