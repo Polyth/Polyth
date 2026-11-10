@@ -67,6 +67,11 @@ test("native shell leaves safe-area painting to the web app", async () => {
     "Capacitor SystemBars must not double-consume insets owned by the SafeArea plugin");
   assert.match(scene, /contentInsetAdjustmentBehavior\s*=\s*\.never/);
   assert.match(scene, /contentInset\s*=\s*\.zero/);
+  // iOS 26+ scroll edge effects would lay a system band over the page under
+  // the status bar and home indicator.
+  for (const edge of ["top", "bottom", "left", "right"]) {
+    assert.match(scene, new RegExp(`scroll\\.${edge}EdgeEffect\\.isHidden = true`), `${edge} edge effect stays hidden`);
+  }
   assert.match(index, /viewport-fit=cover/,
     "the web viewport must remain edge-to-edge so CSS safe-area tokens can position controls");
 });

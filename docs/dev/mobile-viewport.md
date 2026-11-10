@@ -236,6 +236,13 @@ truth. Electron retains its original frame and transparent-window handling.
     closed projection's whole-app restyle is still in front of it.
     Source-checked in `apps/mobile/test/nativeBridgeLifecycle.test.ts`; the
     Swift is compiled only in CI and is not device-verified.
+  - **No system edge band.** On iOS 26+ a scroll view draws a scroll edge
+    effect (a blurred, tinted band) over its content under the status bar and
+    home indicator. Device report 2026-11-10 (build #231): a grey band the
+    status bar's height over the page, the launch veil included. The same
+    controller hides all four edge effects of the WebView's scroll view; the
+    page paints its own chrome behind the bars. Source-checked in the same
+    test; not device-verified.
   - **Only composer docks ride.** A Settings, navigator or module field takes
     the frame at once, as before: those layers anchor to the frame variables.
     Reduced motion (OS or in-app) never rides.

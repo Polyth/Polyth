@@ -156,6 +156,17 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
         webView?.scrollView.contentInsetAdjustmentBehavior = .never
         webView?.scrollView.contentInset = .zero
         webView?.scrollView.scrollIndicatorInsets = .zero
+        // iOS 26+ draws a scroll edge effect (a blurred, tinted band) over a
+        // scroll view's content under the status bar and home indicator. Here
+        // it lay over the page, the launch veil included, as a grey band at
+        // the top. The page paints its own chrome behind the bars, so the
+        // system band is never wanted.
+        if #available(iOS 26.0, *), let scroll = webView?.scrollView {
+            scroll.topEdgeEffect.isHidden = true
+            scroll.bottomEdgeEffect.isHidden = true
+            scroll.leftEdgeEffect.isHidden = true
+            scroll.rightEdgeEffect.isHidden = true
+        }
         // Wherever the page has not painted yet, WKWebView shows its scroll
         // view's background. The keyboard plugin (KeyboardResize.Native) grows
         // the WebView back to full height 10 ms after keyboardWillHide, and the
