@@ -331,6 +331,9 @@ test("the current harness shows only its source and the current model's windows,
   try {
     assert.match(card.text(), /Current harness \/ model/);
     assert.match(card.element.querySelector(".usage-widget-heading strong")!.textContent!, /^Claude Code · claude-opus-4-1$/);
+    // Harness and model are separate parts, so a quarter board tile can stack them.
+    assert.deepEqual(card.all(".usage-widget-heading strong > span").map((node) => node.textContent), ["Claude Code", " · claude-opus-4-1"]);
+    assert.ok(card.element.querySelector(".usage-widget-scroll"), "the card keeps one scroll region for capped hosts");
     assert.deepEqual(card.all(".usage-limits-group > h3 > span").map((node) => node.textContent), ["Claude"]);
     // The headline already names the one source: its heading is for assistive
     // tech only, and the plan sits beside the headline instead.

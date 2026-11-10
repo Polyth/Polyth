@@ -19,6 +19,7 @@ import {
   type LimitsSubject,
   type LimitsWidgetStyle,
 } from "./limitsModel.ts";
+import { useMoreBelow } from "./scrollFade.ts";
 import { usageWidgetCompact } from "./widgetPresentation.ts";
 
 const SEGMENTS = 10;
@@ -245,6 +246,7 @@ export function LimitsWidget({ session, config, editing, panelSize }: Pick<Widge
 }) {
   const limits = useUsageLimits();
   const limitsPrefs = useUsageLimitsPrefs();
+  const [scrollRef, moreBelow] = useMoreBelow<HTMLDivElement>();
   const prefs = limitsWidgetPreferences(config);
   const current = prefs.source === "current";
   const shown = limitProviders(limits.providers, prefs, limitsPrefs, session);
@@ -253,9 +255,11 @@ export function LimitsWidget({ session, config, editing, panelSize }: Pick<Widge
   const failed = groups.filter((group) => group.rows.length === 0 && group.error);
   const staleError = limits.error ?? filled.find((group) => group.stale)?.error;
   const stale = limits.error !== null || filled.some((group) => group.stale);
-  const headline = current
-    ? [session?.resolvedHarnessId ? limitsHarnessName(session.resolvedHarnessId, limits.providers) : "", session?.model?.modelID ?? ""].filter(Boolean).join(" · ")
-    : prefs.source === "selected" ? shown.map(limitSourceName).join(", ") : "";
+  // `current` names the harness, then the model; a narrow tile stacks the two.
+  const headlineParts = current
+    ? [session?.resolvedHarnessId ? limitsHarnessName(session.resolvedHarnessId, limits.providers) : "", session?.model?.modelID ?? ""].filter(Boolean)
+    : prefs.source === "selected" ? [shown.map(limitSourceName).join(", ")].filter(Boolean) : [];
+  const headline = headlineParts.join(" · ");
 
   const unavailable = limits.error !== null && limits.providers.length === 0;
   const empty: { title: string; description?: string; retry?: boolean } | null =
@@ -275,10 +279,10 @@ export function LimitsWidget({ session, config, editing, panelSize }: Pick<Widge
   const compact = usageWidgetCompact(panelSize);
 
   return <div className="usage-limits-widget" data-style={prefs.style} data-compact={compact || undefined} aria-busy={limits.loading || limits.refreshing}>
-    <div className="usage-widget-scroll" role="region" tabIndex={0} aria-label={tr("usage.limitsWidgetTitle")}>
+    <div className="usage-widget-scroll" ref={scrollRef} data-more={moreBelow || undefined} role="region" tabIndex={0} aria-label={tr("usage.limitsWidgetTitle")}>
       <div className="usage-widget-content">
         <header className="usage-widget-heading">
-          <div><span className={headline ? "sr-only" : undefined}>{tr(SOURCE_LABEL[prefs.source])}</span>{headline ? <strong title={headline}>{headline}</strong> : null}</div>
+          <div><span className={headline ? "sr-only" : undefined}>{tr(SOURCE_LABEL[prefs.source])}</span>{headline ? <strong title={headline}>{headlineParts.map((part, index) => <span key={index}>{index > 0 ? <i aria-hidden="true"> · </i> : null}{part}</span>)}</strong> : null}</div>
           {plan ? <span className="usage-limits-plan" title={plan}>{plan}</span> : null}
           {!editing ? <IconButton icon={RefreshIcon} size="sm" variant="quiet" label={tr("usage.limitsRefresh")}
             busy={limits.refreshing} onClick={limits.refresh} /> : null}

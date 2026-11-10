@@ -248,7 +248,13 @@ export default defineWebPackage((host) => () => {
   (`panelDefaultSize` first); a widget without them keeps a full-width row.
   Every sized tile sits in one card the board draws (`.hero-widget[data-size]`:
   border, card radius, `--surface-1`), so the widget renders content only and
-  fills the tile; it must not draw a second frame of its own. The host's `SlotHost` for that slot renders only registered contributions
+  fills the tile; it must not draw a second frame of its own. A tile is capped
+  at `7 × --control-h-lg` (`large` at 14), so a long list scrolls inside the
+  card instead of growing the tile and stretching its row neighbours; the
+  content child gets `overflow: auto`, and a widget with its own scroll region
+  should size it to the tile (flex column, `min-height: 0`). An item whose
+  widget no longer lists `session.empty.widgets` in its slots is kept but not
+  rendered (Glance and the Usage limits tile are disabled this way for now). The host's `SlotHost` for that slot renders only registered contributions
   (`placed={false}`); a visible layout placement there (an older client, the
   Canvas library) is adopted onto the board as an item of that project and
   hidden in the layout (`adoptLegacyHeroPlacements`). Nothing is added by
