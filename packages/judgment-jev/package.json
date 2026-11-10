@@ -21,6 +21,6 @@
     "@polyth/judgment": "0.1.0",
     "@polyth/contracts": "1.2.0",
     "@polyth/plugins": "0.1.0",
-    "@typesafe-ai/sdk": "0.6.0"
+    "@typesafe-ai/sdk": "0.7.0"
   }
 }
