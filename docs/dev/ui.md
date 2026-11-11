@@ -3646,6 +3646,48 @@ host.surfaces.register({
   open-state authority; reduced-motion/low-resource modes skip the hold. A
   hidden keep-alive pane must not retain pane borders, geometry-host materials,
   or launcher-seam styles after the exit.
+- **Nothing steps at a seam.** The first frame of any window motion is the
+  frame before the click, and its last frame is the settled layout. Three
+  rules keep that true and new CSS must follow them:
+  - The launcher column never changes when a window opens, pins or leaves.
+    The rail host keeps its idle frame (box, border widths, far corners)
+    under a floating window; only its glass moves to the strip, because a
+    filtered host would bound the window's own backdrop. The strip then
+    paints the same launcher chrome the idle host paints
+    (`--sidebar-glass-surface`, falling back to `--material-glass`) with the
+    host's inherited corners, while the window keeps `--material-glass`. The
+    seam beside a side window is a 1px line on the strip (`::before`), never
+    a border, which would narrow the strip and nudge every launcher.
+  - An idle rule on `.railbar` is written
+    `:not(.railbar-open):not([data-rail-motion="exiting"])` and an open rule
+    `:is(.railbar-open, [data-rail-motion="exiting"])`: a leaving window keeps
+    the open box until it is gone. The leaving surface also keeps rendering as
+    the active one (`active` stays true for its component), so its content
+    does not blank in the first exit frame.
+  - A side-docked window that leaves gives Chat back the strip's lane too
+    (idle, the strip floats over Chat): `playRailRelease` grows Chat over that
+    lane on the exit clock, so the hand-over to the idle layout moves nothing.
+- **Window morph (`railMorph.ts`).** An open window that changes presentation
+  (pin, unpin, full screen and back) or package did not arrive, so no entry
+  animation replays (`data-rail-entry="morph"` switches them off). Its frame
+  really resizes from the box it had to the box it gets, on the window clock:
+  `ContextRail` reads the old frame in render, before React commits the new
+  presentation, and starts the morph once the new geometry is measured. A
+  floating frame animates its width; a docked one animates width against a
+  matching negative inline-start margin, so its footprint in the row stays at
+  the final width and Chat's room is animated once, by its own margin on the
+  launcher's side (physical: a mirrored shell flips the shell's direction, not
+  Chat's); a layer is held at the old width by its inline-start
+  margin. The content's inline-start edge stays put whichever element draws
+  the frame's edge, the seam gutter closes with the motion, and a veil of the
+  previous material fades under the content when window glass turns into the
+  opaque layer or back. Content reflows live, as under a drag: nothing is
+  scaled or cross-faded. While a morph runs, the dock measurement and the
+  layout guard wait (transitional widths are nobody's choice) and run once on
+  the settled layout; a new presentation cancels a running morph and measures
+  at once. Size is never a CSS transition on `.rail`. Bottom and narrow docks
+  re-grid the shell and keep their own entry. Reduced motion and low-resource
+  mode skip the morph.
 - **Fullscreen frame (wide shells):** the fullscreen layer keeps the pinned
   window's frame — a hairline border and a rounded top corner on the side
   facing the navigator (`--radius-surface`, so the user's corner scale

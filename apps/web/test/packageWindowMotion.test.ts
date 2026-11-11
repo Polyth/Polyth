@@ -171,8 +171,8 @@ test("a floating window glides out of its launcher rail on compositor-only prope
   assert.deepEqual(open.properties.filter((property) => !COMPOSITED.has(property)), [],
     "transform and opacity only: the compositor keeps it at frame rate while the package mounts");
   assert.deepEqual(await motionsOf("#content"), [], "frame, glass and content arrive as one piece");
-  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-strip-seam", open.duration]],
-    "the launcher seam settles on the same clock");
+  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-seam-line-in", open.duration]],
+    "the launcher seam line fades in on the same clock, and nothing else on the strip moves");
   const hostDurations: string = await page.evaluate(() => getComputedStyle(document.querySelector("#host")!).transitionDuration);
   for (const duration of hostDurations.split(",")) {
     assert.equal(Math.round(millis(duration.trim())), open.duration, "the rail host squares its corners off in step");
@@ -228,7 +228,7 @@ test("closing takes the same path back into the rail, quicker and accelerating, 
   assert.equal(exit.fill, "both", "it holds its end state until the host unmounts it");
   assert.deepEqual(exit.properties.filter((property) => !COMPOSITED.has(property)), []);
   assert.deepEqual(await motionsOf("#content"), []);
-  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-seam-out", exit.duration]]);
+  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-seam-line-out", exit.duration]]);
 
   const travel = Number.parseFloat(await token("--motion-window-travel"));
   await freeze("#pkg", 0);
@@ -289,7 +289,7 @@ test("a docked window grows out of the seam while its content keeps its final wi
   assert.equal(frame.duration, windowMs);
   assert.equal(content?.name, "rail-window-content-in");
   assert.equal(content.duration, windowMs, "frame and content share one clock");
-  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-seam-in", windowMs]]);
+  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-seam-line-in", windowMs]]);
   const samples: { frame: number; content: number; opacity: number }[] = [];
   for (const fraction of [0.1, 0.5, 1]) {
     await freeze("#pkg", fraction);
@@ -308,7 +308,7 @@ test("a docked window grows out of the seam while its content keeps its final wi
   const exitMs = millis(await token("--motion-window-exit"));
   assert.deepEqual((await motionsOf("#pkg")).map((motion) => [motion.name, motion.duration]), [["rail-window-exit-inline", exitMs]]);
   assert.deepEqual((await motionsOf("#content")).map((motion) => [motion.name, motion.duration]), [["rail-window-content-out", exitMs]]);
-  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-seam-out", exitMs]]);
+  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-seam-line-out", exitMs]]);
   await freeze("#pkg", 0.5);
   await freeze("#content", 0.5);
   assert.equal(Math.round((await placement("#content")).width), RAIL_W, "it leaves at its final width too");
@@ -337,11 +337,11 @@ test("in the tablet band the launcher cluster docks and undocks on the window cl
   await load({ pane: "rail", viewport: BAND });
   const windowMs = millis(await token("--motion-window"));
   assert.deepEqual((await motionsOf("#host")).map((motion) => [motion.name, motion.duration]), [["rail-host-dock", windowMs]]);
-  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-strip-dock", windowMs]]);
+  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-strip-dock", windowMs], ["rail-seam-line-in", windowMs]]);
   await load({ pane: "rail", viewport: BAND, exiting: true });
   const exitMs = millis(await token("--motion-window-exit"));
   assert.deepEqual((await motionsOf("#host")).map((motion) => [motion.name, motion.duration]), [["rail-host-undock", exitMs]]);
-  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-strip-undock", exitMs]]);
+  assert.deepEqual((await motionsOf("#strip")).map((motion) => [motion.name, motion.duration]), [["rail-strip-undock", exitMs], ["rail-seam-line-out", exitMs]]);
 });
 
 test("a focused split brings the work surface in from its launcher rail", { skip: !CHROME }, async () => {

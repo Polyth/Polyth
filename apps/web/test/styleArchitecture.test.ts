@@ -245,7 +245,7 @@ test("tablet-class width is a container-query layout state, not a media pile", a
   );
   assert.match(
     bandBody,
-    /\.app-shell:not\(:has\(\.railbar-open\)\):not\(:has\(\.railbar\[data-rail-motion="exiting"\]\)\)[\s\S]*?padding-inline-end:/,
+    /\.app-shell:not\(:has\(\.railbar-open:not\(\.railbar-dynamic\)\)\):not\(:has\(\.railbar\[data-rail-motion="exiting"\]:not\(\.railbar-dynamic\)\)\)[\s\S]*?padding-inline-end:/,
     "chat surfaces reserve a lane for the affordance so nothing renders beneath it",
   );
 });

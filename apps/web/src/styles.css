@@ -15234,11 +15234,12 @@ width: 100%;
   border-inline-end: 0;
   background: var(--panel);
   transform-origin: right center;
+  /* Size is never a CSS transition: a window that changes presentation or
+     package is resized by railMorph.ts from the box it had, and a transition
+     would instead start from whatever width an unmeasured commit left. */
   transition:
-    width var(--motion-surface) var(--motion-ease),
-    height var(--motion-surface) var(--motion-ease),
-    border-radius var(--motion-surface) var(--motion-ease),
-    box-shadow var(--motion-surface) var(--motion-ease);
+    border-radius var(--motion-window) var(--motion-window-ease),
+    box-shadow var(--motion-window) var(--motion-window-ease);
 }
 /* A package window that runs into the window's bottom edge is square there;
    only the floating window clears it and keeps both start corners. */
@@ -15281,7 +15282,7 @@ width: 100%;
   border-inline-start: 1px solid var(--surface-divider);
   border-inline-end: 0;
   border-radius: 0;
-  background: var(--material-glass);
+  background: var(--sidebar-glass-surface, var(--material-glass));
 }
 /* Side docks go further: the wide rail host stays the ONE frame around pane
    and strip, exactly as it frames the idle strip — it simply grows around the
@@ -15314,20 +15315,9 @@ width: 100%;
     border-radius: 0;
     border-start-start-radius: calc(var(--radius-surface) - 1px);
   }
-  /* Low-specificity motion: the tablet band's cluster morph (further down)
-     replaces it with one that also re-rounds the strip. */
   .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .rail-icon-col.plugin-strip {
     border: 0;
-    border-inline-start: 1px solid var(--surface-divider);
     border-radius: 0;
-  }
-  /* Zero-specificity host so the tablet band's cluster morph (further down),
-     which also re-rounds the strip, replaces this seam fade. */
-  :where(.railbar[data-rail-motion="open"]:has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow))) > .rail-icon-col.plugin-strip {
-    animation: rail-seam-in var(--motion-window) var(--motion-window-ease) backwards;
-  }
-  :where(.railbar[data-rail-motion="exiting"]:has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow))) > .rail-icon-col.plugin-strip {
-    animation: rail-seam-out var(--motion-window-exit) var(--motion-window-exit-ease) both;
   }
 }
 /* A workspace package turns the railbar into a geometry host. Bottom and
@@ -15340,20 +15330,20 @@ width: 100%;
   backdrop-filter: none !important;
 }
 .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail-workspace) > .rail-icon-col.plugin-strip {
-  background: var(--material-glass);
+  background: var(--sidebar-glass-surface, var(--material-glass));
 }
+/* The host keeps the idle launcher frame while a floating window is open:
+   the same box, edges and far corners. Only its glass moves to the strip (a
+   filtered host would bound the window's own backdrop to the host's box), so
+   nothing in the launcher column steps when a window opens or leaves. */
 .railbar:has(.rail-dynamic) {
   pointer-events: none;
-  background: transparent; border: 0; border-radius: 0; box-shadow: none;
+  background: transparent;
   -webkit-backdrop-filter: none; backdrop-filter: none;
 }
 /* A class, not `:has()`: a `:has()` before a universal child subject made
    Chromium restyle the whole document on every inline-style change. */
 .railbar.railbar-dynamic > * { pointer-events: auto; }
-.railbar:has(> .rail-dynamic) > .rail-icon-col.plugin-strip {
-  border-inline-start: 1px solid var(--surface-divider);
-  border-inline-end: 0;
-}
 .rail-dynamic {
   flex: none; width: calc(var(--rail-w) + var(--package-window-seam-padding)); min-width: 0; height: 100%;
   max-width: calc(100% - var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--package-window-seam-padding) - var(--space-6));
@@ -15376,6 +15366,25 @@ width: 100%;
   animation: rail-window-open-bottom var(--motion-surface) var(--motion-ease) both;
 }
 .rail-exiting { pointer-events: none; }
+/* railMorph.ts: the previous presentation's material, fading under the content. */
+.rail-morph-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.rail:has(> .rail-morph-veil) { isolation: isolate; }
+.rail:has(> .rail-morph-veil) > .module-view { position: relative; z-index: 1; }
+/* A window that reached this presentation from another one (pin, full
+   screen, another package) did not arrive: railMorph.ts resizes its frame
+   from where it was, so no entry animation may replay over that. */
+.railbar[data-rail-entry="morph"]:not([data-rail-motion="exiting"]),
+.railbar[data-rail-entry="morph"]:not([data-rail-motion="exiting"]) > .rail-icon-col.plugin-strip,
+.railbar > .rail[data-rail-entry="morph"]:not(.rail-exiting),
+.railbar > .rail[data-rail-entry="morph"]:not(.rail-exiting) > .module-view {
+  animation: none !important;
+}
 .rail-exiting:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom) {
   animation: rail-window-exit-inline var(--motion-window-exit) var(--motion-window-exit-ease) both;
 }
@@ -15501,25 +15510,46 @@ width: 100%;
 @media (min-width: 961px) {
   /* The dynamic frame owns the seam; the launcher keeps the same top/bottom
      border instead of appearing unframed above the package window. */
+  /* The window attaches at the host's inline start: those two corners square
+     off (a transition on the window's clock) and round again as it leaves.
+     The strip draws the top highlight the host's glass carried. */
   .railbar:has(.rail-dynamic) {
-    border-block: 1px solid var(--hair-solid);
-    border-inline: 0 solid var(--hair-solid);
+    box-shadow: var(--shadow-sm);
   }
-  /* The host is transparent here, so the window and the strip each paint the
-     same glass fill, the same solid edge and the same top highlight: the line
-     and the highlight run on through the seam at identical colours. */
+  .railbar.railbar-open:has(.rail-dynamic) {
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+  }
+  /* The strip paints the launcher chrome the idle host painted, in the same
+     box and with the host's own corners (inherited, so it follows their
+     transition): the hand-over is invisible in both directions. */
   .railbar:has(> .rail-dynamic) > .rail-icon-col.plugin-strip {
-    background: var(--material-glass);
+    border-radius: inherit;
+    background: var(--sidebar-glass-surface, var(--material-glass));
     box-shadow: var(--material-glass-highlight);
   }
-  /* The host's rounded corner squares off (a transition) while the window
-     slides out of the seam; the strip now paints that corner's fill, so it
-     squares off in step instead of poking square glass past the curve. */
-  .railbar:has(> .rail-dynamic:not(.rail-exiting)) > .rail-icon-col.plugin-strip {
-    animation: rail-strip-seam var(--motion-window) var(--motion-window-ease) backwards;
+  /* The seam between a side window and the strip is a line drawn on the
+     strip, not a border: a border would narrow the strip and nudge every
+     launcher sideways as a window opens, pins or leaves. It fades with the
+     window. Borderless appearance and the interface styles draw no such
+     line (shellLooks.css parts window and strip itself). */
+  .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) > .rail-icon-col.plugin-strip::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 1px;
+    background: var(--surface-divider);
+    pointer-events: none;
   }
-  .railbar:has(> .rail-dynamic.rail-exiting) > .rail-icon-col.plugin-strip {
-    animation: rail-seam-out var(--motion-window-exit) var(--motion-window-exit-ease) both;
+  .railbar[data-rail-motion="open"]:not([data-rail-entry="morph"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) > .rail-icon-col.plugin-strip::before {
+    animation: rail-seam-line-in var(--motion-window) var(--motion-window-ease) backwards;
+  }
+  .railbar[data-rail-motion="exiting"]:not(.railbar-dock-bottom):not(.railbar-pinned-narrow) > .rail-icon-col.plugin-strip::before {
+    animation: rail-seam-line-out var(--motion-window-exit) var(--motion-window-exit-ease) both;
+  }
+  body:is([data-hide-borders="true"], [data-shell-look]:not([data-shell-look="standard"])) .railbar > .rail-icon-col.plugin-strip::before {
+    display: none;
   }
   .railbar:has(.rail-dynamic) > .rail-dynamic {
     border-color: var(--hair-solid);
@@ -18285,10 +18315,11 @@ body .ui-btn .ui-spinner {
     overflow: visible;
     /* The host re-frames itself as a window opens beside it, on the window's
        clock, so its corners square off in step with the strip's seam. */
-    transition:
-      border-radius var(--motion-window) var(--motion-window-ease),
-      border-inline-start-width var(--motion-window) var(--motion-window-ease),
-      box-shadow var(--motion-window) var(--motion-window-ease);
+    transition: border-radius var(--motion-window) var(--motion-window-ease);
+  }
+  /* The corners round again on the departure's clock. */
+  .railbar[data-rail-motion="exiting"] {
+    transition: border-radius var(--motion-window-exit) var(--motion-window-exit-ease);
   }
   .railbar > .rail-icon-col {
     position: relative;
@@ -18369,14 +18400,14 @@ body .ui-btn .ui-spinner {
   }
   .railbar:has(.rail-fullscreen) > .rail-icon-col {
     border-block: 1px solid var(--hair);
-    border-inline-start: 1px solid var(--material-glass-border);
-    border-inline-end: 0;
-    background: var(--material-glass);
+    border-inline: 0;
+    background: var(--sidebar-glass-surface, var(--material-glass));
   }
   .rail,
   .rail > .module-view { background: transparent; }
-  /* A package window is the launcher strip's extension: docked or floating,
-     it paints the strip's material (the glass profile below repeats it). */
+  /* A package window extends the launcher strip: docked or floating, it is
+     glass (the glass profile below repeats it). The strip itself keeps the
+     launcher chrome it shows idle, so it never repaints as a window opens. */
   .rail.rail-workspace:not(.rail-fullscreen) { background: var(--material-glass); }
 }
 
@@ -18477,7 +18508,11 @@ body .ui-btn .ui-spinner {
     border-radius: var(--radius-card);
     overflow: hidden;
   }
-  /* Opening a pane MORPHS the cluster into the docked column instead of
+  /* A floating window is laid over Chat: it takes no room, so the lane Chat
+     keeps clear of the launcher (the rules below) stays while one is open or
+     leaving, and Chat does not move when a window floats in. A docked window
+     takes its room in flow instead.
+     Opening a pane MORPHS the cluster into the docked column instead of
      jumping: the same host travels from its floating inset to the shell edge,
      grows from the cluster's height (ContextRail publishes
      --rail-cluster-block-size) to full height and trades its outer corners
@@ -18508,7 +18543,7 @@ body .ui-btn .ui-spinner {
     overflow-x: hidden;
     overflow-y: hidden;
   }
-  .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) :is(
+  .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) :is(
     .timeline,
     .composer-chat,
     .focus-conversation > .archived-guard
@@ -18520,7 +18555,7 @@ body .ui-btn .ui-spinner {
   }
   /* The transcript's strip lane (its scrollbar's border) is part of that
      clearance. */
-  .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .timeline-viewport > .timeline {
+  .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) .timeline-viewport > .timeline {
     padding-inline-end: max(0px, calc(
       max(var(--gutter), (100% - var(--chat-measure)) / 2)
       + var(--control-h-sm) + var(--space-5)
@@ -18535,8 +18570,8 @@ body .ui-btn .ui-spinner {
    shellLayout.css). */
 @keyframes rail-host-dock {
   from {
-    inset-block-start: var(--space-3);
-    inset-inline-end: var(--space-3);
+    inset-block-start: calc(var(--space-3) - var(--rail-host-inset, 0px));
+    inset-inline-end: calc(var(--space-3) - var(--rail-host-inset, 0px));
     max-height: min(var(--rail-cluster-block-size, 100%), calc(100% - var(--rail-cluster-clear, 0px) - 2 * var(--space-3)));
     border-inline-start-width: 1px;
     border-inline-end-width: 1px;
@@ -18548,8 +18583,8 @@ body .ui-btn .ui-spinner {
 @keyframes rail-host-undock {
   from { inset-block-start: 0; inset-inline-end: 0; max-height: 100%; }
   to {
-    inset-block-start: var(--space-3);
-    inset-inline-end: var(--space-3);
+    inset-block-start: calc(var(--space-3) - var(--rail-host-inset, 0px));
+    inset-inline-end: calc(var(--space-3) - var(--rail-host-inset, 0px));
     max-height: min(var(--rail-cluster-block-size, 100%), calc(100% - var(--rail-cluster-clear, 0px) - 2 * var(--space-3)));
     border-inline-start-width: 1px;
     border-inline-end-width: 1px;
@@ -18559,18 +18594,11 @@ body .ui-btn .ui-spinner {
 }
 /* The strip's seam divider exists only beside an open window: it fades with
    the window instead of popping in as a second line inside the frame. */
-@keyframes rail-seam-in {
-  from { border-inline-start-color: transparent; }
+@keyframes rail-seam-line-in {
+  from { opacity: 0; }
 }
-@keyframes rail-seam-out {
-  to { border-inline-start-color: transparent; }
-}
-@keyframes rail-strip-seam {
-  from {
-    border-start-start-radius: calc(var(--radius-card) - 1px);
-    border-end-start-radius: calc(var(--radius-card) - 1px);
-    border-inline-start-color: transparent;
-  }
+@keyframes rail-seam-line-out {
+  to { opacity: 0; }
 }
 @keyframes rail-strip-dock {
   from { border-radius: calc(var(--radius-card) - 1px); border-inline-start-color: transparent; }
@@ -19345,8 +19373,8 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   .railbar[data-side-strip] > .rail-icon-col.plugin-strip { --side-strip-head: 120px; }
 }
 @container app-shell (min-width: 961px) {
-  .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
-  .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
+  .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
+  .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
     /* At least the lane clear of the floating launcher strip, and the centred
        measure when that is wider: a column that does not fit the workspace
        must not lose its inline end to the strip lane, so it stays flush with
@@ -19358,8 +19386,8 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   }
   /* A mirrored shell floats the strip at the other edge. Chat's content keeps
      the document direction there, so the lane moves to its inline start. */
-  .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
-  .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open)):not(:has(.railbar[data-rail-motion="exiting"])):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
+  .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) .stage-new,
+  .app[data-shell-mirror="true"] .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) .focus-conversation {
     --conversation-frame-inline-start: max(
       calc(var(--gutter) + var(--control-h-sm) + var(--space-5)),
       calc((100% - var(--chat-measure)) / 2)
@@ -19922,10 +19950,21 @@ body:not([data-glass="off"]) .header-profile { border: 0; background: transparen
        the same glass locally, docked or floating. Their rail host stays
        transparent so the chat behind a floating window is not filtered twice. */
      body:not([data-glass="off"]):not([data-desktop-low-resource="true"])
-       :is(.rail-dynamic, .rail-workspace:not(.rail-fullscreen), .railbar:has(> :is(.rail-workspace, .rail-dynamic)) > .rail-icon-col.plugin-strip) {
+       :is(.rail-dynamic, .rail-workspace:not(.rail-fullscreen)) {
        background: radial-gradient(140% 140% at 50% 50%,
          color-mix(in srgb, var(--material-glass) var(--material-glass-readable-fill), transparent) 0%,
          color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
+      -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+      backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
+    }
+    /* The strip beside a window keeps the launcher chrome the idle host
+       paints (the same expression as the chrome rule above), so opening a
+       window never repaints the launcher column. */
+     body:not([data-glass="off"]):not([data-desktop-low-resource="true"])
+       .railbar:has(> :is(.rail-workspace, .rail-dynamic)) > .rail-icon-col.plugin-strip {
+       background: var(--material-glass-texture), radial-gradient(140% 140% at 50% 50%,
+         color-mix(in srgb, var(--sidebar-glass-surface, var(--material-glass)) var(--material-glass-readable-fill), transparent) 0%,
+         color-mix(in srgb, var(--sidebar-glass-surface, var(--material-glass)) var(--material-glass-readable-edge), transparent) 100%);
       -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
       backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation)) !important;
     }

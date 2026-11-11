@@ -305,7 +305,27 @@ function useHeaderOccupancy(active: boolean) {
 
 /** What overlays the workspace's edge in the full-height layouts: the idle
  *  launcher strip and a floating package window. */
-const SHELL_BAR_OVERLAYS = ":scope > .railbar > :is(.plugin-strip, .rail-dynamic)";
+const SHELL_BAR_OVERLAYS = ":scope > .railbar > :is(.plugin-strip, .rail-dynamic:not(.rail-exiting))";
+
+/** Where an overlay rests, not where it is this frame. A floating window
+ *  glides in by transform and resizes when it changes presentation; the bar
+ *  takes its settled box at once and moves there on the window clock
+ *  (shellLayout.css), instead of stepping at the start and again at the end.
+ *  A leaving window reserves nothing, so the bar grows back as it goes. */
+function settledSpan(el: HTMLElement): { left: number; right: number } {
+  const box = el.getBoundingClientRect();
+  if (!el.classList.contains("rail-dynamic")) return box;
+  const strip = el.parentElement?.querySelector<HTMLElement>(":scope > .plugin-strip")?.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  const width = (Number.parseFloat(style.getPropertyValue("--rail-w")) || 0)
+    + (Number.parseFloat(style.getPropertyValue("--package-window-seam-padding")) || 0);
+  if (!strip || !(width > 0)) return box;
+  const moved = Number.parseFloat(style.getPropertyValue("--package-window-x")) || 0;
+  // The window hangs off the strip's inline start, on either side.
+  return style.direction === "rtl"
+    ? { left: strip.right + moved, right: strip.right + moved + width }
+    : { left: strip.left + moved - width, right: strip.left + moved };
+}
 /** The desktop window's caption controls (desktop.tsx): they own a corner of
  *  the band the bar runs in, so the bar stops short of them too. */
 const CAPTION_ZONE = ".desktop-caption-zone";
@@ -336,7 +356,7 @@ function useShellBarFrame(headerRef: React.RefObject<HTMLElement | null>, active
       const overlays = [
         ...shell.querySelectorAll<HTMLElement>(SHELL_BAR_OVERLAYS),
         ...document.querySelectorAll<HTMLElement>(CAPTION_ZONE),
-      ].map((el) => el.getBoundingClientRect());
+      ].map(settledSpan);
       const gap = Number.parseFloat(getComputedStyle(shell).columnGap) || 0;
       const reserve = shellBarReserves(lane, overlays, gap);
       header.style.setProperty("--shell-bar-left", `${Math.round(lane.left - frame.left)}px`);

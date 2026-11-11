@@ -33,6 +33,9 @@ import {
   CHAT_FLOOR, clampDockWidth, commitFocusedChatWidth, decideDock, decideFocusedSplit, FOCUSED_WORK_MAX, FOCUSED_WORK_MIN, keptSurfaces, listSurfaces, paneDockEdge, paneDockOptions, paneWindowLayout, slotSurfaces, useSurfaceVersion, visibleSurfaces,
   type DockDecision, type DockGeometry, type FocusedSplitDecision, type RailSurface, type RailSurfaceContext, type WorkspacePaneDock, type WorkspacePaneMode,
 } from "../surfaces.ts";
+import {
+  playRailMorph, playRailRelease, railExitTiming, railMorphTiming, readRailFrame, type RailFrameLayout, type RailFrameReading, type RailMorphHandle,
+} from "../railMorph.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useSideSafeStrip } from "../sideSafeStrip.ts";
@@ -89,6 +92,8 @@ const SEPARATOR_FALLBACK = 6;
  *  window departure — the desktop --motion-window-exit and the full-screen
  *  phone travel (--motion-stack) — plus its composited tail. */
 const PANE_EXIT_FALLBACK_MS = 420;
+/** How long past its duration a frame morph may run before it is dropped. */
+const FRAME_MORPH_GRACE_MS = 160;
 const RESIZE_STEP = 16;
 const RESIZE_STEP_LARGE = 64;
 /** Bottom-dock (presentation.dock === "bottom") height bounds. The floor keeps
@@ -398,6 +403,21 @@ export default function ContextRail() {
   const shellDirection = useShellDirection();
   const separatorRef = useRef<HTMLDivElement>(null);
   const bottomSeparatorRef = useRef<HTMLDivElement>(null);
+  // While railMorph.ts resizes the frame, Chat and the window pass through
+  // widths nobody chose. The dock measurement and the layout guard must not
+  // judge those: they wait, and run once on the settled layout.
+  const frameMorphingRef = useRef(false);
+  const frameMorphRef = useRef<RailMorphHandle | null>(null);
+  const frameMorphTimerRef = useRef<number | null>(null);
+  const measuredKeyRef = useRef("");
+  const [frameSettled, setFrameSettled] = useState(0);
+  const endFrameMorph = () => {
+    frameMorphRef.current?.cancel();
+    frameMorphRef.current = null;
+    frameMorphingRef.current = false;
+    if (frameMorphTimerRef.current !== null) window.clearTimeout(frameMorphTimerRef.current);
+    frameMorphTimerRef.current = null;
+  };
   const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneMode}`;
   const [geometry, setGeometry] = useState<{ key: string; width: number; height: number; windowWidth: number }>({ key: "", width: 0, height: 0, windowWidth: 0 });
   // Docked-in-flow width remembered per shell box, so the layer's wider Chat box
@@ -419,6 +439,13 @@ export default function ContextRail() {
 
   useLayoutEffect(() => {
     const measure = () => {
+      if (frameMorphingRef.current) {
+        // A settled presentation waits for its morph. A new one must be
+        // measured now: drop the old motion and read the final layout.
+        if (measuredKeyRef.current === geometryKey) return;
+        endFrameMorph();
+      }
+      measuredKeyRef.current = geometryKey;
       const chat = chatElOf();
       const paneEl = paneRef.current;
       const dockedInFlow = Boolean(presentation && paneEl
@@ -477,7 +504,7 @@ export default function ContextRail() {
     if (railbarRef.current) ro.observe(railbarRef.current);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geometryKey, presentation]);
+  }, [geometryKey, presentation, frameSettled]);
 
   // The fullscreen layer is a sibling of the persistent navigator. Publish
   // the measured workspace edge so it starts at that seam instead of covering
@@ -786,6 +813,7 @@ export default function ContextRail() {
       setGuardPromoted(true);
     };
     const check = () => {
+      if (frameMorphingRef.current) return;
       const cur = guardLatchRef.current;
       if (cur !== null && cur.promoted) return;
       // "pending" (Chat mid-render) is NOT a failure: promoting on a
@@ -836,7 +864,7 @@ export default function ContextRail() {
       if (raf !== 0) cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardInputs, workspaceWidth, dockWidth, pinned, pinnedNarrow, isWorkspacePane, measured]);
+  }, [guardInputs, workspaceWidth, dockWidth, pinned, pinnedNarrow, isWorkspacePane, measured, frameSettled]);
 
   // Publish presentation truth so App can make hidden Chat inert. On phone a
   // contextual sheet also fully covers the session, so it counts too.
@@ -1122,6 +1150,74 @@ export default function ContextRail() {
   // surfaces retain the pane model's full-screen layer and launcher strip.
   const compactContext = compact && open !== null && !isWorkspacePane;
 
+  // ---- window morph ---------------------------------------------------------
+  // An open window that changes presentation (pin, full screen, back) or
+  // package keeps its frame: railMorph.ts resizes it from the box it had to
+  // the box it gets, instead of replaying an entry. The box it had is read
+  // here, in render, while the DOM still shows it; the morph starts once the
+  // new geometry is measured. Bottom and narrow docks re-grid the shell, so
+  // they keep their own entry.
+  const frameLayout: RailFrameLayout | null = open === null || compact
+    ? null
+    : dynamic ? "floating" : layered ? "layer" : bottomDock || pinnedNarrow ? null : "docked";
+  const frameKey = open === null || compact ? null : `${open.id}:${frameLayout ?? (bottomDock ? "bottom" : "narrow")}`;
+  const frameRef = useRef<{ key: string | null; layout: RailFrameLayout | null; projectId: string | null; entry: "enter" | "morph" }>(
+    { key: null, layout: null, projectId: null, entry: "enter" },
+  );
+  const frameBeforeRef = useRef<{ key: string; reading: RailFrameReading } | null>(null);
+  const frameEntry: "enter" | "morph" = frameKey === null
+    ? "enter"
+    : frameRef.current.key === frameKey
+      ? frameRef.current.entry
+      : frameRef.current.layout !== null && frameLayout !== null && frameRef.current.projectId === projectId
+        ? "morph"
+        : "enter";
+  if (frameKey !== null && frameEntry === "morph" && frameRef.current.key !== frameKey && frameBeforeRef.current?.key !== frameKey) {
+    // A reading that no morph has used yet is still the last frame the person
+    // saw (a pin the geometry promotes to the layer passes through an
+    // unmeasured docked commit): keep it and only aim it at the new target.
+    frameBeforeRef.current = frameBeforeRef.current !== null
+      ? { key: frameKey, reading: frameBeforeRef.current.reading }
+      : { key: frameKey, reading: readRailFrame({ pane: paneRef.current, workspace: chatElOf() as HTMLElement | null }) };
+  }
+  useLayoutEffect(() => {
+    if (frameKey === null) {
+      endFrameMorph();
+      frameBeforeRef.current = null;
+      frameRef.current = { key: null, layout: null, projectId, entry: "enter" };
+      return;
+    }
+    // The first commit of a presentation is unmeasured (and hidden): wait.
+    if (geometryPending || frameRef.current.key === frameKey) return;
+    frameRef.current = { key: frameKey, layout: frameLayout, projectId, entry: frameEntry };
+    const before = frameBeforeRef.current;
+    frameBeforeRef.current = null;
+    endFrameMorph();
+    if (frameEntry !== "morph" || frameLayout === null || before === null || before.key !== frameKey) return;
+    if (document.documentElement.dataset.packageWindowResizing === "true") return;
+    const railbar = railbarRef.current;
+    if (railbar === null) return;
+    const morph = playRailMorph(
+      { pane: paneRef.current, workspace: chatElOf() as HTMLElement | null },
+      before.reading,
+      frameLayout,
+      railMorphTiming(railbar),
+    );
+    if (morph === null) return;
+    frameMorphRef.current = morph;
+    frameMorphingRef.current = true;
+    const settle = () => {
+      if (frameMorphRef.current !== morph) return;
+      endFrameMorph();
+      setFrameSettled((revision) => revision + 1);
+    };
+    void morph.finished.then(settle);
+    // A timeline that never ends (a hidden tab, a paused debugger) must not
+    // leave the dock unmeasured.
+    frameMorphTimerRef.current = window.setTimeout(settle, morph.duration + FRAME_MORPH_GRACE_MS);
+  });
+  useEffect(() => endFrameMorph, []);
+
   // The store closes immediately; this short presentation-only presence keeps
   // the painted window mounted long enough to collapse toward the launcher.
   // A project/session/shell change or an unregistered surface skips the exit.
@@ -1200,6 +1296,34 @@ export default function ContextRail() {
     : surfaces.filter((surface) => surface.id === exitPaneMotion.surface.id || kept.includes(surface));
   const exiting = open === null && exitPaneMotion !== null;
 
+  // A side-docked window sits in the row with the launcher strip; idle, the
+  // strip floats over Chat instead. As such a window leaves, Chat takes that
+  // lane back on the exit's clock (railMorph.ts), so the hand-over is still.
+  const releaseRef = useRef<RailMorphHandle | null>(null);
+  const dockedExit = exiting && !paneCompactContext && !paneDynamic && !paneLayered && !paneBottomDock && !panePinnedNarrow;
+  useLayoutEffect(() => {
+    if (!dockedExit) return;
+    const railbar = railbarRef.current;
+    const shell = railbar?.closest<HTMLElement>(".app-shell");
+    const workspace = chatElOf() as HTMLElement | null;
+    const pane = paneRef.current;
+    if (!railbar || !shell || !workspace || !pane) return;
+    if (getComputedStyle(railbar).position === "absolute") return;
+    const shellBox = shell.getBoundingClientRect();
+    const chatBox = workspace.getBoundingClientRect();
+    const rtl = getComputedStyle(shell).direction === "rtl";
+    // What is left between Chat and the shell's edge once the window's own
+    // width is gone: the strip, its frame and the gaps around them.
+    const gap = rtl ? chatBox.left - shellBox.left : shellBox.right - chatBox.right;
+    const lane = gap - pane.getBoundingClientRect().width;
+    const release = playRailRelease(workspace, lane, railExitTiming(railbar));
+    releaseRef.current = release;
+    return () => {
+      release?.cancel();
+      if (releaseRef.current === release) releaseRef.current = null;
+    };
+  }, [dockedExit]);
+
   // The tablet band morphs the floating launcher cluster into the docked
   // column and back; both ends of that motion need the cluster's height,
   // which only exists while idle. Measure it at each open/close edge.
@@ -1255,6 +1379,7 @@ export default function ContextRail() {
       <aside
         className={`railbar${open ? " railbar-open" : ""}${panePinnedNarrow ? " railbar-pinned-narrow" : ""}${paneBottomDock ? " railbar-dock-bottom" : ""}${railDynamic ? " railbar-dynamic" : ""}`}
         data-rail-motion={exiting ? "exiting" : open ? "open" : "idle"}
+        data-rail-entry={open !== null && frameEntry === "morph" ? "morph" : undefined}
         data-rail-strip={showStrip ? undefined : "none"}
         data-side-strip={sideStripShown ? safeAreaStrip ?? undefined : undefined}
         ref={railbarRef}
@@ -1277,6 +1402,7 @@ export default function ContextRail() {
           data-geometry-ready={open !== null ? !geometryPending : true}
           data-rail-motion={exiting ? "exiting" : open !== null ? "open" : "closed"}
           data-geometry-flip={open !== null && geometryFlipped ? "true" : undefined}
+          data-rail-entry={open !== null && frameEntry === "morph" ? "morph" : undefined}
           onAnimationEnd={(event) => {
             if (exiting && exitPaneMotion !== null && event.target === event.currentTarget) {
               paneMotionRef.current = null;
@@ -1356,6 +1482,10 @@ export default function ContextRail() {
           {renderedSurfaces.map((s) => {
             const active = !exiting && s.id === paneSurface?.id;
             const leaving = exiting && s.id === paneSurface?.id;
+            // The leaving surface is inert, but it is still on screen: it keeps
+            // rendering as the active one until the exit ends, so its content
+            // does not blank out in the first frame of the departure.
+            const shown = active || leaving;
             return (
               <div
                 key={s.id}
@@ -1366,9 +1496,9 @@ export default function ContextRail() {
                 aria-hidden={!active || undefined}
               >
                 <PackageWindowContext.Provider value={s.id}>
-                  <PaneVisibilityContext.Provider value={active}>
+                  <PaneVisibilityContext.Provider value={shown}>
                     <ViewErrorBoundary inline resetKey={`${s.id}:${projectId ?? ""}`}>
-                      <s.component active={active} projectId={projectId} sessionId={sessionId} />
+                      <s.component active={shown} projectId={projectId} sessionId={sessionId} />
                     </ViewErrorBoundary>
                   </PaneVisibilityContext.Provider>
                 </PackageWindowContext.Provider>

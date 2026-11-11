@@ -16,9 +16,10 @@ export function timelineStripLane(timeline: LaneBox, overlays: readonly LaneBox[
 
 /** The overlay that floats over the workspace edge while no pane is open: the
  *  idle launcher strip (the wide shell's full-height column, the tablet
- *  band's cluster). An open pane sits in flow beside the workspace, or is a
- *  package window laid over Chat on purpose, so neither moves the scrollbar. */
-const IDLE_RAILBAR = ":scope > .railbar:not(.railbar-open)";
+ *  band's cluster), also under a floating window, whose host is still only
+ *  the strip, so the scrollbar does not step when a window floats in. A
+ *  docked pane sits in flow beside the workspace and reserves nothing. */
+const IDLE_RAILBAR = ":scope > .railbar:is(:not(.railbar-open), .railbar-dynamic)";
 
 /** Publish the lane as --timeline-strip-lane on the scroll root: styles.css
  *  turns it into a transparent inline-end border, inside which the scrollbar

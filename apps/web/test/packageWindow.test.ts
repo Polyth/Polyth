@@ -182,8 +182,14 @@ test("screen edges and package-to-launcher seams keep the wrong-side corners squ
   );
   assert.match(css, /\.rail-pinned\s*\{[^}]*border-radius: 0;[^}]*border-start-start-radius: var\(--radius-surface\)/s);
   assert.match(css, /\.rail-workspace\.rail-fullscreen\s*\{[^}]*border-radius: 0;/s);
-  assert.match(css, /\.railbar:has\(\.rail-fullscreen\) > \.rail-icon-col\s*\{[^}]*border-block: 1px solid var\(--hair\);[^}]*border-inline-end: 0;/s);
-  assert.match(css, /\.railbar:has\(> \.rail-dynamic\) > \.rail-icon-col\.plugin-strip\s*\{[^}]*border-inline-start: 1px solid var\(--surface-divider\);[^}]*border-inline-end: 0;/s);
+  assert.match(css, /\.railbar:has\(\.rail-fullscreen\) > \.rail-icon-col\s*\{[^}]*border-block: 1px solid var\(--hair\);[^}]*border-inline: 0;/s);
+  // The seam beside a side window is a line drawn on the strip. A border
+  // would narrow the strip and nudge every launcher as a window opens.
+  assert.match(
+    css,
+    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\) > \.rail-icon-col\.plugin-strip::before\s*\{[^}]*inset-inline-start: 0;[^}]*width: 1px;[^}]*background: var\(--surface-divider\);/s,
+  );
+  assert.doesNotMatch(css, /\.railbar:has\(> \.rail-dynamic\) > \.rail-icon-col\.plugin-strip\s*\{[^}]*border-inline-start:/s, "a floating window adds no border to the strip");
   assert.match(css, /\.rail-dock-bottom\s*\{[^}]*border-radius: 0;[^}]*border-start-start-radius: var\(--radius-surface\)/s);
   assert.doesNotMatch(css, /clip-path: inset\([^;]*round var\(--radius-surface\)/, "package motion never re-rounds the launcher seam");
 });
@@ -203,7 +209,7 @@ test("a docked package window and its launcher strip share one frame and one edg
   assert.match(host, /box-shadow: inset 0 0 0 transparent, var\(--shadow-sm\);/, "the highlight fades with the same list shape");
   const strip = css.match(new RegExp(String.raw`\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\)${docked} > \.rail-icon-col\.plugin-strip \{([^}]*)\}`))?.[1] ?? "";
   assert.match(strip, /border: 0;/, "the strip draws no second top/bottom edge");
-  assert.match(strip, /border-inline-start: 1px solid var\(--surface-divider\);/, "the strip only adds the seam");
+  assert.doesNotMatch(strip, /border-inline-start/, "the seam is the strip's line, not a border that would narrow it");
   assert.match(
     css,
     /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\) > \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\):not\(\.rail-dock-bottom\):not\(\.rail-pinned-narrow\) \{[^}]*border: 0;[^}]*border-start-start-radius: calc\(var\(--radius-surface\) - 1px\);/s,
@@ -243,7 +249,7 @@ test("window motion keeps the frame opaque and the corners continuous", async ()
     "the floating window starts back inside its rail, wherever it was moved",
   );
   assert.doesNotMatch(dynamic, /clip-path|scale\(|width|height/, "transform and opacity only; its top edge stays level with the strip's");
-  assert.match(css, /@keyframes rail-seam-in \{\s*from \{ border-inline-start-color: transparent; \}/, "the seam divider fades instead of popping");
+  assert.match(css, /@keyframes rail-seam-line-in \{\s*from \{ opacity: 0; \}/, "the seam line fades instead of popping");
   // Tablet band: the floating cluster morphs into the docked column and back.
   assert.match(css, /@container app-shell \(min-width: 961px\) and \(max-width: 1400px\) \{[\s\S]*?\.railbar\.railbar-open\[data-rail-motion="open"\]:not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\):not\(:has\(> \.rail-fullscreen\)\) \{\s*animation: rail-host-dock /);
   assert.match(css, /\.railbar\[data-rail-motion="exiting"\]:not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\):not\(:has\(> \.rail-fullscreen\)\) \{\s*animation: rail-host-undock [^;]* both;/);
@@ -252,7 +258,8 @@ test("window motion keeps the frame opaque and the corners continuous", async ()
     // Less the band a layout keeps the cluster clear of (the desktop caption
     // band; none elsewhere).
     assert.match(body, /max-height: min\(var\(--rail-cluster-block-size, 100%\), calc\(100% - var\(--rail-cluster-clear, 0px\) - 2 \* var\(--space-3\)\)\);/, `${name} uses the idle cluster's clamped height`);
-    assert.match(body, /inset-inline-end: var\(--space-3\);/);
+    // Less the margin a full-height layout gives an open host (--rail-host-inset).
+    assert.match(body, /inset-inline-end: calc\(var\(--space-3\) - var\(--rail-host-inset, 0px\)\);/);
     assert.match(body, /border-radius: var\(--radius-card\);/);
   }
   const source = await readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8");
@@ -345,13 +352,23 @@ test("dynamic peek shares the launcher seam and owns the selected glass material
   assert.match(css, /inset-inline-end:\s*var\(--rail-strip-width-right, calc\(var\(--control-h-sm\) \+ var\(--space-3\) \+ 1px\)\);/s);
   assert.match(
     css,
-    /@media \(min-width: 961px\)[\s\S]*?\.railbar:has\(\.rail-dynamic\)\s*\{[^}]*border-block:\s*1px solid var\(--hair-solid\);[^}]*border-inline:\s*0 solid var\(--hair-solid\);/s,
+    /\.railbar \{\s*position: absolute;[^}]*border-block: 1px solid var\(--hair-solid\);/s,
     "the open rail and package window share the same top/bottom border treatment",
+  );
+  // The host keeps its idle frame under a floating window: no border or
+  // radius reset, so the launcher column does not step when a window opens.
+  const dynamicHost = css.match(/\n\.railbar:has\(\.rail-dynamic\) \{([^}]*)\}/)?.[1] ?? "";
+  assert.match(dynamicHost, /background: transparent;/);
+  assert.doesNotMatch(dynamicHost, /border(?:-radius)?:|box-shadow/, "only the glass moves to the strip");
+  assert.match(
+    css,
+    /\.railbar:has\(> \.rail-dynamic\) > \.rail-icon-col\.plugin-strip \{\s*border-radius: inherit;\s*background: var\(--sidebar-glass-surface, var\(--material-glass\)\);/,
+    "the strip paints the launcher chrome the idle host painted, with the host's corners",
   );
   assert.match(
     css,
-    /\.railbar:has\(> \.rail-dynamic\) > \.rail-icon-col\.plugin-strip\s*\{[^}]*background: var\(--material-glass\);[^}]*box-shadow: var\(--material-glass-highlight\);/s,
-    "the strip repeats the floating window's fill and top highlight, so both run on through the seam",
+    /\.railbar:has\(> \.rail-dynamic\) > \.rail-icon-col\.plugin-strip\s*\{[^}]*box-shadow: var\(--material-glass-highlight\);/s,
+    "the strip repeats the floating window's top highlight, so it runs on through the seam",
   );
   assert.match(
     css,
@@ -360,8 +377,8 @@ test("dynamic peek shares the launcher seam and owns the selected glass material
   );
   assert.match(
     css,
-    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s*:is\(\.rail-dynamic, \.rail-workspace:not\(\.rail-fullscreen\), \.railbar:has\(> :is\(\.rail-workspace, \.rail-dynamic\)\) > \.rail-icon-col\.plugin-strip\)\s*\{[^}]*background:\s*radial-gradient\([\s\S]*?--material-glass-readable-fill[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/s,
-    "the dynamic and docked panes and the launcher strip follow the selected glass material",
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s*:is\(\.rail-dynamic, \.rail-workspace:not\(\.rail-fullscreen\)\)\s*\{[^}]*background:\s*radial-gradient\([\s\S]*?--material-glass-readable-fill[\s\S]*?backdrop-filter:\s*blur\(var\(--material-glass-blur\)\)/s,
+    "the dynamic and docked panes follow the selected glass material (the strip keeps the launcher chrome, asserted below)",
   );
   assert.doesNotMatch(css, /--rail-strip-width-right, calc\(var\(--control-h-sm\) \+ var\(--space-4\)\)/);
   assert.doesNotMatch(
@@ -416,8 +433,14 @@ test("a docked package window paints its launcher strip's material", async () =>
   assert.doesNotMatch(css, /\.rail\.rail-workspace:not\(\.rail-fullscreen\) \{\s*background: color-mix\(in srgb, var\(--panel\)/, "no separate panel fill under a wallpaper");
   assert.match(
     css,
-    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s*:is\(\.rail-dynamic, \.rail-workspace:not\(\.rail-fullscreen\), \.railbar:has\(> :is\(\.rail-workspace, \.rail-dynamic\)\) > \.rail-icon-col\.plugin-strip\) \{/,
-    "docked and floating windows share the strip's glass",
+    /body:not\(\[data-glass="off"\]\):not\(\[data-desktop-low-resource="true"\]\)\s*:is\(\.rail-dynamic, \.rail-workspace:not\(\.rail-fullscreen\)\) \{/,
+    "docked and floating windows share one glass",
+  );
+  // The strip beside a window keeps the chrome fill the idle rail host
+  // paints, so opening a window never repaints the launcher column.
+  assert.match(
+    css,
+    /\.railbar:has\(> :is\(\.rail-workspace, \.rail-dynamic\)\) > \.rail-icon-col\.plugin-strip \{\s*background: var\(--material-glass-texture\), radial-gradient\(140% 140% at 50% 50%,\s*color-mix\(in srgb, var\(--sidebar-glass-surface, var\(--material-glass\)\) var\(--material-glass-readable-fill\), transparent\) 0%,/,
   );
   // Dock admission reads Chat's margin box, so a look's sheet inset cannot
   // promote a pin to the full-screen layer.
