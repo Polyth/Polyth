@@ -135,8 +135,8 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
         <div className="pkg-harnesses-install-next pkg-harnesses-external" role="note">
           <Icon icon={InfoIcon} size="md" />
           <p>
-            <strong>{external.app ? t("external.title", { name, app: external.app }) : t("external.titleUnknown", { name })}</strong>
-            <span>{t("external.body")}</span>
+            <strong>{t("external.title", { name })}</strong>
+            <span>{external.app ? t("external.body", { app: external.app }) : t("external.bodyUnknown")}</span>
           </p>
         </div>
         <Row label={t("external.selfLabel")} hint={external.app ? t("external.selfHint", { app: external.app }) : t("external.selfHintUnknown")}>
