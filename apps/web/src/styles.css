@@ -654,7 +654,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-width: var(--rail-project-track);
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  /* Every tile in the rail — project, placed launcher, Settings, account —
+     sits one Icon spacing from the next, across group boundaries too. */
+  --rail-tile-gap: var(--rail-gap, var(--space-1));
+  gap: var(--rail-tile-gap);
   padding-block: max(var(--space-2), var(--safe-top)) max(var(--space-2), var(--safe-bottom));
   /* The tile centers in what the divider leaves, so the gutter is 6px each side. */
   padding-inline: calc(var(--space-1) * var(--rail-scale-left, 1));
@@ -851,6 +854,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   gap: var(--rail-gap, var(--space-1));
 }
 .sidebar-project-rail-actions > .zone-edit-button { inset-block-end: 0; }
+/* The rail's pencil is absolutely placed, so this box has no height of its
+   own; pull it back by its gap or it doubles the space above the account tile. */
+.sidebar-project-rail-actions { margin-block-start: calc(-1 * var(--rail-tile-gap, var(--space-1))); }
 /* The rail's own icon area (`sidebar.rail`, ProjectRailTools.tsx): placed
    launchers and icon widgets in the project tiles' box and ink. */
 .sidebar-project-rail-tools {
@@ -865,7 +871,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    gives back the rail's gap; while an icon could land it opens one tile. */
 .sidebar-project-rail-tools[data-empty]:not([data-receiving]) {
   height: 0;
-  margin-block-end: calc(-1 * var(--space-2));
+  margin-block-end: calc(-1 * var(--rail-tile-gap, var(--space-1)));
 }
 .sidebar-project-rail-tools[data-empty][data-receiving] { min-height: var(--rail-project-item); }
 .sidebar-project-rail-tools :is(.ui-icon-btn, .capability-launcher),
@@ -904,6 +910,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .sidebar-project-rail-list,
   .sidebar-project-rail-tools,
   .sidebar-project-rail-actions { gap: max(var(--rail-gap, var(--space-1)), var(--space-2)); }
+}
+/* The gap between the rail's groups follows the same touch pitch. */
+@media (pointer: coarse) {
+  .sidebar-project-rail { --rail-tile-gap: max(var(--rail-gap, var(--space-1)), var(--space-2)); }
 }
 .sidebar-expanded-shell--project-rail .sidebar-collapse { display: none; }
 /* Rail view collapses only the sessions column: the project icons keep their

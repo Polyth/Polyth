@@ -1159,7 +1159,9 @@ Edit mode reveals the pencils on touch tablets too (`min-width: 481px` with a
 coarse pointer); the transient Shift reveal stays mouse-only. Settings →
 Appearance → Layout → Rail size and spacing → *Set each rail* → **Icon spacing** (`ui.railSpacing`, 0–20 px,
 default 6; records saved before the setting existed keep 4) publishes `--rail-gap`, the gap of the left, right and top rails;
-coarse pointers never go below 8 px.
+coarse pointers never go below 8 px. The left rail applies it between its
+groups too (project list, placed icons, Settings dock, account;
+`--rail-tile-gap`), so every tile sits one spacing from the next.
 
 ### 3.3 First-open interface tour
 

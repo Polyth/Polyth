@@ -421,6 +421,10 @@ body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app
   background: var(--surface-divider);
 }
 .shell-dock--actions[data-orientation="vertical"]::after { content: none; }
+/* The project rail spaces every tile one Icon spacing apart; a docked group
+   there needs no seam on top of that. */
+.sidebar-project-rail > .shell-dock[data-orientation="vertical"]::before,
+.sidebar-project-rail > .shell-dock[data-orientation="vertical"]::after { content: none; }
 /* In the launcher strip, actions settle at its foot. */
 .plugin-strip > .shell-dock--actions { margin-block-start: auto; padding-block-end: var(--space-1); }
 .plugin-strip > .shell-dock--tools { padding-block-start: var(--space-1); }
