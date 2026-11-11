@@ -16,6 +16,7 @@ const HARNESS_PROVIDER_IDS = new Set([
   "codex",
   "command-code",
   "commandcode",
+  "copilot",
   "cursor",
   "fx",
   "grok",
@@ -26,7 +27,7 @@ const HARNESS_PROVIDER_IDS = new Set([
 
 /** Harnesses whose extra native logins register as `<family>-<account>`; an
  * ACP account catalog uses that harness id as its provider id. */
-const ACCOUNT_HARNESS_FAMILIES = new Set(["antigravity", "claude", "codex", "commandcode", "cursor", "deepseek", "grok", "omp", "pi"]);
+const ACCOUNT_HARNESS_FAMILIES = new Set(["antigravity", "claude", "codex", "commandcode", "copilot", "cursor", "deepseek", "grok", "omp", "pi"]);
 /** The harness provider id a provider id stands for (`grok-work` → `grok`). */
 const harnessProviderId = (providerID: string): string => {
   const normalized = providerID.trim().toLowerCase();
@@ -121,6 +122,9 @@ const providerCandidates = (providerID: string, modelID: string): string[] => {
     antigravity: inferred,
     claude: "anthropic",
     codex: "openai",
+    // Copilot caps each vendor's model at its own limits, which the catalog
+    // lists under this provider; the vendor row is the fallback.
+    copilot: "github-copilot",
     cursor: inferred,
     grok: "xai",
     "google-antigravity": "google",

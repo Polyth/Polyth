@@ -100,6 +100,7 @@ is always present.
 - backend-claude
 - backend-codex
 - backend-commandcode
+- backend-copilot
 - backend-cursor
 - backend-deepseek
 - backend-opencode

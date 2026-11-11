@@ -7,6 +7,28 @@ milestones are named after what shipped.
 
 ---
 
+## Unreleased — GitHub Copilot as a harness
+
+### Added
+
+- GitHub Copilot CLI is a harness. Install it from Settings → Harnesses on Linux,
+  macOS or Windows (no Node.js needed beforehand), sign in with your GitHub
+  account, and pick any model your Copilot plan offers, with its thinking level.
+  Chats stream, ask before changing files, resume after a restart, take images
+  and files, count tokens per model response and can run on an SSH host. A
+  Copilot you already have is used as is: the one from GitHub's Windows
+  installer, or the one inside the GitHub Copilot app for Mac or Windows once
+  the app has been opened. Several GitHub accounts can be added side by side, and earlier Copilot CLI sessions of
+  a project can be imported. Copilot's own subagents are switched off;
+  delegation stays with Polyth. Copilot plan limits are not shown in Usage yet.
+
+### Fixed
+
+- A tool result that an ACP agent sends twice, as text and as structured data,
+  is shown once.
+
+---
+
 ## Unreleased — new projects without choosing a folder
 
 ### Added

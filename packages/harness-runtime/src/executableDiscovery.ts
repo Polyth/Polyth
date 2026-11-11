@@ -133,6 +133,8 @@ export const wellKnownHarnessExecutableDirectories = (
       under("scoop", "shims"),
       join(programFiles, "nodejs"),
       join(programData, "chocolatey", "bin"),
+      // `winget install` links portable packages here (GitHub Copilot CLI).
+      local("Microsoft", "WinGet", "Links"),
       local("Microsoft", "WindowsApps"),
     ].filter((entry): entry is string => Boolean(entry));
   }

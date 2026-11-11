@@ -247,3 +247,27 @@ test("eventsFromAcpToolCallUpdate reports terminal-only execute output honestly"
         output: "Output streamed to terminal term-7",
     });
 });
+
+test("formatAcpToolOutput shows a result once when rawOutput repeats the content text", () => {
+    // Copilot CLI 1.0.109 sends a finished shell call in both forms.
+    const call = state();
+    mergeAcpToolCallUpdate(call, {
+        kind: "execute",
+        status: "completed",
+        content: [{ type: "content", content: { type: "text", text: "hi\n<shellId: 0 completed with exit code 0>" } }],
+        rawOutput: {
+            content: "hi\n<shellId: 0 completed with exit code 0>",
+            detailedContent: "hi\n<shellId: 0 completed with exit code 0>",
+            contents: [{ type: "shell_exit", shellId: "0", exitCode: 0 }],
+            structuredContent: { shellId: "0" },
+        },
+    });
+    assert.equal(formatAcpToolOutput(call).text, "hi\n<shellId: 0 completed with exit code 0>");
+    // A rawOutput that says something else is still appended.
+    const other = state();
+    mergeAcpToolCallUpdate(other, {
+        content: [{ type: "content", content: { type: "text", text: "done" } }],
+        rawOutput: { message: "2 files changed" },
+    });
+    assert.match(formatAcpToolOutput(other).text, /^done\n.*2 files changed/s);
+});

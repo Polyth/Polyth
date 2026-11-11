@@ -1091,8 +1091,8 @@ const SESSION_PLAN_TOOLS = new Set([
 ]);
 /** Polyth's own `polyth_todo`, bare or as published by the Polyth agent-tools
  * MCP server (Claude `mcp__polyth-agent-tools__…`, OpenCode `polyth-agent-tools_…`,
- * Antigravity `mcp_polyth-agent-tools_…`). */
-const POLYTH_TODO_TOOL = /^(?:(?:mcp__?)?polyth-agent-tools(?:__|_))?polyth_todo$/;
+ * Antigravity `mcp_polyth-agent-tools_…`, GitHub Copilot `polyth-agent-tools-…`). */
+const POLYTH_TODO_TOOL = /^(?:(?:mcp__?)?polyth-agent-tools(?:__|_|-))?polyth_todo$/;
 
 /** True when a request only edits the calling session's own todo list. Such a
  * request never needs a person: it has no effect outside the session plan.

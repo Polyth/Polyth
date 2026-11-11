@@ -102,7 +102,7 @@ export function mcpCallOf(tool: string, input: JsonObject): McpCall | undefined 
   }
   const qualified = name.match(/^mcp__(.+?)__(.+)$/);
   if (qualified) return { server: qualified[1]!, tool: qualified[2]!, args: input };
-  const polyth = name.match(/^(?:mcp__?)?polyth-agent-tools(?:__|_)(.+)$/);
+  const polyth = name.match(/^(?:mcp__?)?polyth-agent-tools(?:__|_|-)(.+)$/);
   if (polyth) return { server: POLYTH_MCP_SERVER, tool: polyth[1]!, args: input };
   // Antigravity's `mcp_<server>_<tool>`: only a hyphenated server splits unambiguously.
   const single = name.match(/^mcp_([a-z0-9]+(?:-[a-z0-9]+)+)_(.+)$/i);

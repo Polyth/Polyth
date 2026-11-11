@@ -320,7 +320,12 @@ function formatRawOutput(rawOutput: unknown): string {
 export function formatAcpToolOutput(state: AcpToolCallState): { text: string; inputPatch: JsonObject } {
     const textParts = textBlocksFromContent(state.content);
     const rawText = formatRawOutput(state.rawOutput);
-    if (rawText) textParts.push(rawText);
+    // Some agents send the same result twice: as content blocks and as a
+    // structured `rawOutput` whose text field repeats them. Show it once.
+    const shown = textParts.join("\n").trim();
+    const repeated = shown !== "" && isRecord(state.rawOutput)
+        && Object.values(state.rawOutput).some((value) => typeof value === "string" && value.trim() === shown);
+    if (rawText && !repeated) textParts.push(rawText);
     const inputPatch = diffInputPatch(state.content);
     let text = textParts.join("\n").trim();
     if (!text) {

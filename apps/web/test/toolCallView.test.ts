@@ -37,6 +37,8 @@ test("every harness's MCP naming folds into the same call", () => {
   assert.deepEqual(mcpCallOf("call_mcp_tool", { ServerName: "polyth-agent-tools", ToolName: "polyth_todo", Arguments: args }), expected);
   assert.deepEqual(mcpCallOf("call_mcp_tool", { ServerName: "polyth-agent-tools", ToolName: "polyth_todo", Arguments: JSON.stringify(args) }), expected);
   assert.deepEqual(mcpCallOf("mcp_polyth-agent-tools_polyth_todo", args), expected);
+  // GitHub Copilot CLI qualifies an MCP tool as `<server>-<tool>`.
+  assert.deepEqual(mcpCallOf("polyth-agent-tools-polyth_todo", args), expected);
   assert.deepEqual(mcpCallOf("mcp__polyth-agent-tools__polyth_todo", args), expected);
   assert.deepEqual(mcpCallOf("polyth-agent-tools_polyth_todo", args), expected);
   // Codex reports the bare tool and the server as an input field.
