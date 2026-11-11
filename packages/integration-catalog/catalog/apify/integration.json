@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "apify",
+  "name": "Apify",
+  "publisher": "Apify",
+  "verified": true,
+  "summary": "Run scrapers from the Apify Store.",
+  "description": "Apify's hosted server finds and runs Actors — ready-made scrapers and automations — and returns their datasets.",
+  "categories": [
+    "ai",
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://apify.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.apify.com/"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://apify.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (console-backend.apify.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

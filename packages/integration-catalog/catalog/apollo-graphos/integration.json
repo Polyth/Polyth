@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "apollo-graphos",
+  "name": "Apollo GraphOS",
+  "publisher": "Apollo GraphQL",
+  "verified": true,
+  "summary": "GraphQL docs, schemas and checks.",
+  "description": "Apollo's hosted server answers from Apollo documentation without a key; with a GraphOS API key it also inspects graphs, runs schema checks and publishes schemas.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.apollographql.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.apollographql.com",
+      "tokenHeader": {
+        "name": "x-api-key"
+      },
+      "tokenOptional": true
+    },
+    "tokenHelpUrl": "https://studio.apollographql.com/user-settings/api-keys"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.apollographql.com/docs/graphos/platform/graphos-mcp-server/install",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 48 tools; the vendor documents a key that raises limits or unlocks account tools, sent in the x-api-key header."
+    }
+  }
+}

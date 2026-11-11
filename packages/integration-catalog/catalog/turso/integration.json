@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "turso",
+  "name": "Turso",
+  "publisher": "Turso",
+  "verified": true,
+  "summary": "SQLite databases at the edge.",
+  "description": "Turso's hosted server manages databases and groups and runs queries.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://turso.tech",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.turso.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://turso.tech",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.turso.tech) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

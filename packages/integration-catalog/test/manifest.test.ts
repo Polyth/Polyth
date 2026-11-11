@@ -242,3 +242,72 @@ test("an unpinned local command fails the manifest", () => {
   floating.mcp = { auth: "none", local: { command: ["npx", "-y", "@playwright/mcp@latest"] } };
   assert.match(errorsOf(floating).join("\n"), /exact version/);
 });
+
+test("an input is declared, used, and bounded by choices or a pattern", () => {
+  const withInput = (url: string, inputs: unknown): Record<string, unknown> => {
+    const manifest = valid();
+    manifest.mcp = { auth: "oauth", remote: { url }, ...(inputs === undefined ? {} : { inputs }) };
+    return manifest;
+  };
+  const site = { id: "site", label: "Site", default: "a.test", choices: [{ value: "a.test", label: "A" }, { value: "b.test", label: "B" }] };
+  assert.deepEqual(errorsOf(withInput("https://mcp.{site}/mcp", [site])), []);
+
+  assert.match(errorsOf(withInput("https://mcp.{site}/mcp", undefined)).join("\n"), /\{site\} is used but not declared/);
+  assert.match(errorsOf(withInput("https://mcp.a.test/mcp", [site])).join("\n"), /never uses \{site\}/);
+  assert.match(
+    errorsOf(withInput("https://mcp.{site}/mcp", [{ id: "site", label: "Site", pattern: "^[a-z.]+$" }])).join("\n"),
+    /picks the URL host, so it must be a choice/,
+  );
+  assert.match(
+    errorsOf(withInput("https://mcp.a.test/{org}/mcp", [{ id: "org", label: "Org", pattern: "[a-z]+" }])).join("\n"),
+    /anchored/,
+  );
+  assert.match(
+    errorsOf(withInput("https://mcp.{site}/mcp", [{ ...site, default: "c.test" }])).join("\n"),
+    /default must be a valid value/,
+  );
+  assert.match(
+    errorsOf(withInput("https://mcp.{site}/mcp", [{ ...site, choices: [{ value: "a.test/x", label: "Bad" }] }])).join("\n"),
+    /plain value/,
+  );
+  assert.match(
+    errorsOf(withInput("https://mcp.{site}/mcp", [{ id: "site", label: "Site" }])).join("\n"),
+    /exactly one of choices and pattern/,
+  );
+});
+
+test("a local command may carry an input in an argument, never in the executable", () => {
+  const manifest = valid();
+  manifest.mcp = {
+    auth: "none",
+    local: { command: ["{bin}", "-y", "pkg@1.2.3"] },
+    inputs: [{ id: "bin", label: "Binary", pattern: "^[a-z]+$" }],
+  };
+  assert.match(errorsOf(manifest).join("\n"), /command\[0\] cannot carry an input/);
+  manifest.mcp = {
+    auth: "none",
+    local: { command: ["npx", "-y", "pkg@1.2.3", "{org}"] },
+    inputs: [{ id: "org", label: "Org", pattern: "^[a-z]+$" }],
+  };
+  assert.deepEqual(errorsOf(manifest), []);
+});
+
+test("an observed OAuth probe may record how a client registers", () => {
+  const manifest = valid();
+  (manifest.evidence as { probe: Record<string, unknown> }).probe.registration = "dynamic";
+  assert.deepEqual(errorsOf(manifest), []);
+  (manifest.evidence as { probe: Record<string, unknown> }).probe.registration = "maybe";
+  assert.match(errorsOf(manifest).join("\n"), /registration must be dynamic/);
+});
+
+test("the shipped catalog: every OAuth entry offers dynamic registration", async () => {
+  // One-click sign-in in the harnesses depends on it; an entry whose server
+  // needs a hand-registered app belongs in the README's "not suitable" table.
+  const { loadCatalog, CATALOG_DIR } = await import("../src/entries.ts");
+  const { entries, problems } = await loadCatalog(CATALOG_DIR);
+  assert.deepEqual(problems, []);
+  const offenders = entries
+    .filter((entry) => entry.mcp.auth === "oauth" && entry.evidence.probe.registration !== "dynamic")
+    .map((entry) => entry.id);
+  assert.deepEqual(offenders, []);
+});

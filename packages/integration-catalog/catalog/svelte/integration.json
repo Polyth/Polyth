@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "svelte",
+  "name": "Svelte",
+  "publisher": "Svelte",
+  "verified": true,
+  "summary": "Svelte docs and a component autofixer.",
+  "description": "The Svelte team's server returns current Svelte and SvelteKit documentation and checks generated components with an autofixer, without signing in.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://svelte.dev",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://mcp.svelte.dev/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://svelte.dev",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 4 tools; no sign-in is demanded."
+    }
+  }
+}

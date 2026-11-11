@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "apollo-io",
+  "name": "Apollo.io",
+  "publisher": "Apollo.io",
+  "verified": true,
+  "summary": "Prospects, companies and sequences.",
+  "description": "Apollo's hosted server searches people and companies and works with contacts and sequences, spending credits from your plan.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://www.apollo.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.apollo.io/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.apollo.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.apollo.io) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

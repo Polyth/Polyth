@@ -4,9 +4,22 @@ A curated, typed list of outside services the agent can be connected to: the
 MCP endpoint, how it authenticates, and what was actually verified about it —
 plus the page that shows the list in place of Chat.
 
-**Preview.** The catalog, its page and connecting through the host's existing
-MCP service ship here. Probing on a schedule, importing from an upstream
-registry and a generated skill per entry are the next slices.
+**Preview.** 212 services, each probed by this repository, with its own brand
+tile, a mobile-first page and connecting through the host's existing MCP
+service. Probing on a schedule, importing from an upstream registry and a
+generated skill per entry are the next slices.
+
+## Where the entries come from
+
+The list starts from [OpenChamber's catalog](https://github.com/openchamber/openchamber)
+(MIT; facts only, the wording here is our own) and adds vendor servers found in
+the official [MCP Registry](https://registry.modelcontextprotocol.io), whose
+reverse-DNS names (`com.stripe/mcp`) are verified against the vendor's domain,
+and in vendor documentation. No entry is taken on trust from either: every
+remote endpoint was probed from here (`scripts/probe-endpoint.mjs`), and a probe
+on a nonsense path of the same host separated real endpoints from hosts that
+answer every path alike. Candidates that failed, and why, are in
+[Not suitable yet](#not-suitable-yet).
 
 ## Why a catalog and not more code
 
@@ -27,44 +40,67 @@ breadth cheap: one folder per service, one screen that reads them.
 | `src/installLedger.ts` | Which installations this catalog owns (server-only). |
 | `src/serverEntry.ts` | `GET …/entries[/<id>]`, `GET …/logo/<id>`, `POST …/install`, `POST …/uninstall`. |
 | `src/strings.ts` | English canonical, Ukrainian overrides. |
-| `src/brand.ts` | Entry id → the service's own brand mark and colour. |
-| `assets/logos/` | The vendored marks themselves; provenance and licences in `CREDITS.md`. |
-| `scripts/` | Developer commands: refresh the vector marks, derive a raster mark. |
+| `src/brand.ts` | The brand-mark type and lookup. |
+| `src/brandMarks.ts` | Generated: entry id → tile file. |
+| `assets/logos/` | The vendored tiles, `sources.json` (where each comes from) and `CREDITS.md`. |
+| `scripts/probe-endpoint.mjs` | Probe remote endpoints without credentials and print the evidence. |
+| `scripts/build-marks.py` | Build the tiles and `src/brandMarks.ts` from `sources.json` (Pillow). |
 | `widgets/` | The page (`pages.register`) and the capability that opens it. |
 
 ## The page
 
-A directory beside a document, not a table. `widgets/IntegrationsPage.tsx` owns
-the state; `widgets/styles.css` owns the geometry, on the host's tokens only.
+Mobile first: the base stylesheet is the phone, and container queries on the
+page's own width add the rest. `widgets/IntegrationsPage.tsx` owns the state;
+`widgets/styles.css` owns the geometry, on the host's tokens only.
 
-- The directory is a 340px column on the page (no second panel: three nested
-surfaces at 1.07:1 read as a form), with rows that carry the service's own mark,
-its name, up to two lines of what it gives the agent, and a dot when connected.
-Its search field and category chips live *inside* that column, so they filter
-what they sit on and leave with it on a phone (`display: none`, not a
-hidden-but-tabbable row).
-- The entry is a document: mark, name, one-line promise, publisher, then the
-connection card — the one filled box, holding the facts the action depends on
-(sign-in, where it installs), the API-key field when one is needed, and the
-action in one place for every entry (the card's bottom-inline-end; full width
-on a phone). Evidence sits behind a "How it was checked" disclosure.
-- Everything separates with a fill or an `inset` contour shadow. Borderless
-appearance is on by default and clears every border colour, so a card edge or a
-selected row drawn as `border` disappears for most people.
-- Fixed geometry, never `--density-scale`: density describes the chat's rhythm
-and scaling these sizes produced 24px controls and 22px marks. One row pitch
-(72px, 76 on a phone) for every row: a two-line promise used to make its own row
-11px taller, which broke the column's rhythm.
-- One vertical ladder — 4 (title to subtitle), 8 (label to its content), 12
-(specimen gap), 16 (head to controls), 24 (document blocks) — and both columns
-start on the same line: the detail head's mark sits level with the search field.
-- Text direction is per block (`unicode-bidi: plaintext`), because the shell can
-be RTL while these strings are English or Ukrainian; without it a sentence-final
-period lands on the wrong side.
-- Below 900px of page width one screen replaces the pair; at 640px the facts
-stack, the card stacks and the action is full width at `max(--control-h-lg,
---hit-min)` — a compact shell look publishes 36px, which must not beat the
-44px coarse-pointer floor.
+- **Phone (under 900px of page width).** One screen at a time: the directory,
+  or one service with a way back. The search and the category chips stay
+  pinned while 200 rows scroll under them; the chips are one swipeable row that
+  runs to the screen edges. Every row leads to its own screen (a chevron says
+  so). Opening a service starts it at the top with focus on the way back;
+  going back restores the directory's scroll position and focus. The
+  connection card sits right under the service's head, so the action is on the
+  first screen without a pinned action bar (a filled bar reads as a foreign
+  card on glass looks), and the action is full width at
+  `max(--control-h-lg, --hit-min)`.
+- **640px.** Facts sit in two columns and the action moves to the card's
+  bottom-inline-end, the one place it has for every entry.
+- **900px.** The directory (360px) and the chosen service sit side by side and
+  scroll separately.
+- The directory lists each service once: what is connected, then the featured
+  ones, then everything under its primary category. A "Connected" chip appears
+  as soon as anything is.
+- Pinned strips are painted with the shell's own fill plus a backdrop blur;
+  everything separates with a fill or an inset shadow, and glyphs (magnifier,
+  chevrons, back arrow) are drawn with shadows, because borderless appearance
+  is on by default and clears every border colour.
+- Fixed geometry, never `--density-scale`. Fields use at least 16px text so iOS
+  does not zoom on focus. Hover styles live behind `(hover: hover)`, and touch
+  gets an `:active` state instead of a hover that sticks after a tap.
+- Text direction is per block (`unicode-bidi: plaintext`); chevrons and arrows
+  flip in RTL.
+
+### States
+
+| State | What the page does |
+| --- | --- |
+| Loading | A skeleton of the directory (and, wide, the document). |
+| Load failed | The reason and Try again; offline says so and reloads by itself when the network returns. |
+| Broken manifests | An amber strip with every reason, next to the healthy entries. |
+| Connections unreadable | The route reports `connections: "unavailable"`; a notice says connected services may look unconnected. |
+| No search result | The query and Clear search; inside a category, Search all categories. |
+| Needs inputs | A site picker (native select) or a checked text field; the endpoint preview fills in as you type. |
+| Needs a key | Connect waits for the key and says why; an optional key says Optional. |
+| Connecting / disconnecting | A spinner in the button; the rest of the page stays usable. |
+| Connected | A pill, a green dot in the row, the Connected section and chip. |
+| Connected, switched off | A ring instead of a dot, the reason, and a way to MCP settings. |
+| Connected by hand | No Disconnect (the catalog never removes what it did not add); a way to MCP settings. |
+| Disconnecting a personal key | One in-place confirmation, because the stored key is deleted. |
+| Already connected elsewhere | A 409 from a second tab refreshes to the connected state instead of an error. |
+| No project open | "The whole Space — no project is open", and the install is recorded that way. |
+| Install refused | The server's own message (an unpinned command, a local server on a sandboxed host, a bad input). |
+
+`openPage("integration-catalog", "<entry id>")` opens one service directly.
 
 ## Ways in
 
@@ -84,12 +120,23 @@ imports this package, and a disabled catalog removes the link with the page.
 official MCP Registry `server.json` where they overlap, so an importer can
 normalize into this shape later.
 
-- `mcp.auth`: `oauth` | `token` | `none`.
+- `mcp.auth`: `oauth` | `token` | `none`. An `oauth` entry ships only when its
+  probe recorded `registration: "dynamic"` (a test enforces it): the harnesses
+  sign in in one click only where the authorization server lets them register
+  themselves.
 - Exactly one of `mcp.remote` (an `https` URL) and `mcp.local` (argv,
   prerequisites, a startup timeout for a first-run download).
 - `mcp.auth: "token"` requires `mcp.tokenHelpUrl` — a person must know where
   the key comes from. `tokenOptional: true` means it works without one.
-- `categories`: one or two from `CATEGORY_ORDER` (the page's filter order).
+- `categories`: one or two from `CATEGORY_ORDER` (the page's filter order); the
+  first is the primary one the directory files it under.
+- `mcp.inputs`: values the endpoint interpolates where it says `{id}` — a
+  Datadog site, an Azure DevOps organization. Each is bounded by `choices` or an
+  anchored `pattern`, every value must also match a plain-token rule (no
+  separators, no URL or shell syntax), and an input that lands in a URL's host
+  must be a choice: a typed value never decides which server receives the
+  sign-in or the key. The validator checks every token is declared and every
+  declared input is used, and the planner re-checks the values server-side.
 - `evidence` is required and says how sure the entry is:
   - `state: "observed"` — this repository answered a request and records the
     `httpStatus` and the `challenge` it saw.
@@ -110,16 +157,20 @@ warning strip. A broken entry must never look like an absent one.
 2. Observe the endpoint before claiming anything:
 
    ```sh
-   curl -s -o /dev/null -D - -H 'accept: application/json, text/event-stream' https://mcp.example.com/mcp
+   node packages/integration-catalog/scripts/probe-endpoint.mjs https://mcp.example.com/mcp
    ```
 
-   `401` + `WWW-Authenticate` with `resource_metadata` is the OAuth shape;
-   `401` + "missing API key" is the token shape; `405` with a JSON-RPC body
-   means the endpoint is alive but refuses `GET`; no `WWW-Authenticate` at all
-   means nothing was demanded up front. Record exactly that in `evidence`.
+   It sends one unauthenticated `initialize`, follows the OAuth discovery chain
+   on a 401 and prints the verdict as JSON: `oauth` (dynamic registration —
+   ship as `auth: "oauth"`), `open` (`none`, or `token` + `tokenOptional` when
+   the vendor documents a key), `token` (a key in a documented header),
+   `registered-app` or `oauth-cimd` (not one-click: use a documented token or
+   leave it out), `refused`/`unreachable` (leave it out). Probe a nonsense path
+   on the same host too; if it answers the same way, confirm the path in the
+   vendor's docs. Record the result in `evidence`.
 
-   Do not register an OAuth client just to check an entry: dynamic client
-   registration leaves a real client at the vendor.
+   The probe never registers a client: dynamic client registration leaves a
+   real client at the vendor. `--catalog [id…]` re-probes shipped entries.
 3. Run the checks below. Then the page shows it.
 
 ## Connecting
@@ -152,7 +203,9 @@ Three rules are not negotiable here:
    installed bytes. A Docker image needs a tag other than `latest` or a digest.
 
 Installing is `POST /api/integration-catalog/install` with
-`{ entryId, projectId?, token?, scope? }`; removing is
+`{ entryId, projectId?, token?, scope?, inputs? }`; a second install of a
+connected entry answers 409 `already-installed` with the existing row, and an
+install without a project is recorded for the whole Space. Removing is
 `POST /api/integration-catalog/uninstall` with `{ entryId }`.
 
 Removal only touches installations this catalog made. The ledger
@@ -162,20 +215,44 @@ its scope; a server a person created by hand with the same name is reported as
 
 ## Brand marks
 
-Each entry shows the service's own glyph, served from `assets/logos/` by
+Each entry shows the service's own mark, served from `assets/logos/` by
 `GET /api/integration-catalog/logo/<id>`. The marks are vendored, not fetched
 from a vendor CDN when the page renders: a page of favicon requests would tell
-a dozen third parties which integrations somebody is browsing, and it would
-break on an offline or restricted network. `src/brand.ts` is the registry, and
-a test fails when an entry has no mark or the file is missing.
+two hundred third parties which integrations somebody is browsing, and it would
+break on an offline or restricted network.
 
-Vector marks are drawn as a CSS mask, so the glyph takes the theme's text
-colour — a brand colour alone cannot stay readable in both themes (GitHub and
-Notion are near-black). The tile keeps the brand hue, mixed onto a surface
-token so a dark brand does not vanish into the page.
+Every file is a finished square tile, so it reads the same in a light and a
+dark theme and the page only rounds it and draws a hairline: 104 are
+simple-icons glyphs (CC0) on their brand colour — white on a strong colour, the
+colour itself on a dark tile when it cannot hold white — and the rest are the
+vendor's own app icon (touch icon, manifest icon, the icon its MCP server
+declares, or its GitHub organization avatar), 128px palette PNGs or plain SVG.
+Row tiles load lazily, so the directory requests only what is on screen.
+`assets/logos/CREDITS.md` has the provenance; the tests fail when an entry has
+no tile, a tile is not square and sharp, an SVG carries script or external
+references, or a tile has no reviewed source.
+
+## Not suitable yet
+
+Probed on 2026-11-11 and left out, so they are not retried blind:
+
+| Service | Reason |
+| --- | --- |
+| Asana, Slack, HubSpot, Box, PagerDuty, Docusign, Smartsheet, Xero, Dovetail, Pitch, YouTrack | The authorization server has no dynamic registration: it needs an app registered by hand. A field for the person's own OAuth client would open these. |
+| Zendesk, Steel, ngrok | Client ID metadata documents only, which the harnesses do not all support yet. |
+| AWS MCP Server | `initialize` is open, but tool calls are signed with SigV4, which needs AWS's local proxy. AWS Knowledge (docs) ships instead. |
+| Gamma | Refuses a loopback redirect, which local harnesses need (OpenChamber's probe). |
+| Stack Overflow, Pipedrive, Rippling, QuickBooks, Bitbucket, Twilio, Kagi | 401/403 without OAuth metadata and no documented header, or a host that answers every path the same way. |
+| RunPod, Instatus, Plaid | The host answers every path the same way and the path could not be confirmed in vendor docs. |
+| Grafana (local), MCP Toolbox | Need connection settings in environment variables, which the catalog cannot ask for yet. |
+| MarkItDown | Only alpha releases, which the exact-version pin rule cannot accept as stable. |
+| Datadog Gov | `ddog-gov.com` did not answer at the documented path. |
 
 ## What is deliberately not here
 
+- **A key for local servers.** Local servers that need a token in their
+  environment (Brave, Elastic, CircleCI) are left out until the install planner
+  can put a Vault reference into a stdio environment.
 - **Continuous verification.** A scheduled probe that turns a broken or
   auth-drifted entry into a visible status instead of a stale comment.
 - **Upstream import.** A normalizer from the official MCP Registry into this
@@ -189,7 +266,7 @@ token so a dark brand does not vanish into the page.
 ## Checks
 
 ```sh
-node scripts/run-tests.mjs packages/integration-catalog/test/*.test.ts  # 58
+node scripts/run-tests.mjs packages/integration-catalog/test/*.test.ts
 npx tsc --noEmit -p packages/integration-catalog
 node scripts/test/packageRemovability.test.ts
 node --experimental-strip-types apps/web/buildPackages.ts

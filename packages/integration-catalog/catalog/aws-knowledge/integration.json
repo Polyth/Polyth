@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "aws-knowledge",
+  "name": "AWS Knowledge",
+  "publisher": "Amazon Web Services",
+  "verified": true,
+  "summary": "AWS docs and regional availability.",
+  "description": "AWS's knowledge server searches and reads AWS documentation and tells which services and APIs a region offers, without signing in.",
+  "categories": [
+    "cloud",
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://aws.amazon.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://knowledge-mcp.global.api.aws"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://aws.amazon.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 5 tools; no sign-in is demanded."
+    }
+  }
+}

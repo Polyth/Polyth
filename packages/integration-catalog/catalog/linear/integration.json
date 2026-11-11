@@ -4,24 +4,29 @@
   "name": "Linear",
   "publisher": "Linear",
   "verified": true,
-  "summary": "Linear issues, projects and comments.",
-  "description": "Linear's own remote MCP server. The agent reads issues and projects, searches, and writes comments or status changes with your account's permissions. Sign-in is a normal Linear OAuth flow, so access can be revoked from Linear at any time.",
-  "categories": ["product"],
+  "summary": "Issues, projects and cycles.",
+  "description": "Linear's hosted server: the agent can find, create and update issues, comment, and read projects and cycles as your account. Sign-in decides which teams it can reach.",
+  "categories": [
+    "product"
+  ],
   "status": "stable",
   "featured": true,
   "homepage": "https://linear.app",
   "mcp": {
     "auth": "oauth",
-    "remote": { "url": "https://mcp.linear.app/mcp" }
+    "remote": {
+      "url": "https://mcp.linear.app/mcp"
+    }
   },
   "evidence": {
-    "checkedAt": "2026-11-06",
-    "source": "https://linear.app/docs/mcp",
+    "checkedAt": "2026-11-11",
+    "source": "https://linear.app",
     "probe": {
       "state": "observed",
       "httpStatus": 401,
       "challenge": "bearer-oauth",
-      "note": "GET without a token answers 401 with resource_metadata at mcp.linear.app; the protected-resource document lists authorization server https://mcp.linear.app with scopes read, write."
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.linear.app) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
     }
   }
 }

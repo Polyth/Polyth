@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "firecrawl",
+  "name": "Firecrawl",
+  "publisher": "Firecrawl",
+  "verified": true,
+  "summary": "Scrape and crawl sites to markdown.",
+  "description": "Firecrawl's hosted server scrapes pages, crawls sites and extracts structured data.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://www.firecrawl.dev",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.firecrawl.dev/v2/mcp-oauth"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.firecrawl.dev",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (www.firecrawl.dev) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

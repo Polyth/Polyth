@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "ref",
+  "name": "Ref",
+  "publisher": "Ref",
+  "verified": true,
+  "summary": "Token-efficient documentation search.",
+  "description": "Ref searches public and private documentation and returns only the relevant part of a page, which keeps the agent's context small.",
+  "categories": [
+    "code",
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://ref.tools",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://api.ref.tools/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://ref.tools",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (ref.scalekit.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

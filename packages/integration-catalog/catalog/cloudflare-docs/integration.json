@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "cloudflare-docs",
+  "name": "Cloudflare Docs",
+  "publisher": "Cloudflare",
+  "verified": true,
+  "summary": "Search Cloudflare's documentation.",
+  "description": "Cloudflare's documentation server searches the developer docs, without signing in.",
+  "categories": [
+    "cloud",
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://developers.cloudflare.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://docs.mcp.cloudflare.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://developers.cloudflare.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 2 tools; no sign-in is demanded."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "buf",
+  "name": "Buf",
+  "publisher": "Buf",
+  "verified": true,
+  "summary": "Protobuf modules on the Buf registry.",
+  "description": "Buf's hosted server searches and reads Protobuf modules on the Buf Schema Registry.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://buf.build",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://buf.build/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://buf.build",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (buf.build) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

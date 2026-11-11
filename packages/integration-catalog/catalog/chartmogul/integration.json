@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "chartmogul",
+  "name": "ChartMogul",
+  "publisher": "ChartMogul",
+  "verified": true,
+  "summary": "Subscription metrics.",
+  "description": "ChartMogul's hosted server reads MRR, churn and customer subscription data.",
+  "categories": [
+    "data",
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://chartmogul.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.chartmogul.com"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://chartmogul.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.chartmogul.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

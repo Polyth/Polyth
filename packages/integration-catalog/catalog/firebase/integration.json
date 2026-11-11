@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "firebase",
+  "name": "Firebase",
+  "publisher": "Google",
+  "verified": true,
+  "summary": "Firebase projects, Firestore and Auth.",
+  "description": "The Firebase CLI's MCP mode manages projects, apps, Firestore, Auth users and security rules. It uses the account signed in with `firebase login` and needs Node.js.",
+  "categories": [
+    "code",
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://firebase.google.com",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "firebase-tools@15.35.0",
+        "mcp"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 90000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://firebase.google.com",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to firebase-tools@15.35.0, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "shortcut",
+  "name": "Shortcut",
+  "publisher": "Shortcut",
+  "verified": true,
+  "summary": "Stories, epics and iterations.",
+  "description": "Shortcut's hosted server reads and edits stories, epics, iterations and objectives, with the permissions of the signed-in member.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://www.shortcut.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.shortcut.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.shortcut.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.app.shortcut.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

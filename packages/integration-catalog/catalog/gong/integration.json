@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "gong",
+  "name": "Gong",
+  "publisher": "Gong",
+  "verified": true,
+  "summary": "Calls, deals and conversation insights.",
+  "description": "Gong's hosted server reads calls, transcripts and deal activity. It needs a paid Gong seat.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://www.gong.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.gong.io/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.gong.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.gong.io) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

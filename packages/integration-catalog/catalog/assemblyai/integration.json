@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "assemblyai",
+  "name": "AssemblyAI",
+  "publisher": "AssemblyAI",
+  "verified": true,
+  "summary": "Speech-to-text and transcripts.",
+  "description": "AssemblyAI's hosted server transcribes audio and reads transcripts.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://www.assemblyai.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.assemblyai.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.assemblyai.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (auth.assemblyai.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

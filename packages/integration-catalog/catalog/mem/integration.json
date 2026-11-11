@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "mem",
+  "name": "Mem",
+  "publisher": "Mem",
+  "verified": true,
+  "summary": "Notes and collections.",
+  "description": "Mem's hosted server searches and writes notes, so the agent can file what it learned and recall it later.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://mem.ai",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.mem.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://mem.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.mem.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "terraform",
+  "name": "Terraform",
+  "publisher": "HashiCorp",
+  "verified": true,
+  "summary": "Providers, modules and the registry.",
+  "description": "HashiCorp's server, run in Docker: the agent reads provider and module documentation from the Terraform Registry before writing configuration.",
+  "categories": [
+    "cloud",
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.terraform.io",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "hashicorp/terraform-mcp-server:1.4.1"
+      ],
+      "requires": [
+        "docker"
+      ],
+      "timeoutMs": 90000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.terraform.io",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to hashicorp/terraform-mcp-server:1.4.1, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

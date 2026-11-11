@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "socket",
+  "name": "Socket",
+  "publisher": "Socket",
+  "verified": true,
+  "summary": "Dependency risk scores.",
+  "description": "Socket's server scores npm, PyPI and other packages for supply-chain risk before the agent adds them, without signing in.",
+  "categories": [
+    "quality",
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://socket.dev",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://mcp.socket.dev/"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://socket.dev",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 7 tools; no sign-in is demanded."
+    }
+  }
+}

@@ -22,6 +22,10 @@ export interface CatalogPayload {
   stats: CatalogStats;
   /** Live MCP servers that match an entry, in this Space and this person. */
   installed: InstalledIntegration[];
+  /** `unavailable` when the host could not list MCP servers: the page then
+   *  cannot tell connected from not connected and says so. Absent on an older
+   *  server, which means `ok`. */
+  connections?: "ok" | "unavailable";
 }
 
 export interface CatalogFilter {
@@ -62,6 +66,32 @@ export function catalogSections(entries: readonly IntegrationManifest[]): Catalo
   for (const category of CATEGORY_ORDER) {
     const matching = entries.filter((entry) => entry.categories.includes(category)).sort(byName);
     if (matching.length > 0) sections.push({ id: category, entries: matching });
+  }
+  return sections;
+}
+
+/**
+ * The directory's unfiltered order: what is connected, then the featured
+ * services, then everything else under its first (primary) category. Each
+ * entry appears exactly once, so a row id is unique on the page, arrow keys
+ * never visit the same service twice and a long catalog is not padded with
+ * repeats.
+ */
+export function directorySections(
+  entries: readonly IntegrationManifest[],
+  connectedIds: ReadonlySet<string> = new Set(),
+): CatalogSection[] {
+  const sections: CatalogSection[] = [];
+  const placed = new Set<string>();
+  const take = (id: string, list: IntegrationManifest[]) => {
+    const fresh = list.filter((entry) => !placed.has(entry.id));
+    for (const entry of fresh) placed.add(entry.id);
+    if (fresh.length > 0) sections.push({ id, entries: fresh });
+  };
+  take("connected", entries.filter((entry) => connectedIds.has(entry.id)).sort(byName));
+  take("featured", entries.filter((entry) => entry.featured === true).sort(byName));
+  for (const category of CATEGORY_ORDER) {
+    take(category, entries.filter((entry) => entry.categories[0] === category).sort(byName));
   }
   return sections;
 }

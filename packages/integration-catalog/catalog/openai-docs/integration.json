@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "openai-docs",
+  "name": "OpenAI Docs",
+  "publisher": "OpenAI",
+  "verified": true,
+  "summary": "Search the OpenAI developer docs.",
+  "description": "OpenAI's documentation server searches and fetches the developer docs and the API's OpenAPI spec, without signing in.",
+  "categories": [
+    "code",
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://developers.openai.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://developers.openai.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://developers.openai.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 5 tools; no sign-in is demanded."
+    }
+  }
+}

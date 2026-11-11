@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "scalar",
+  "name": "Scalar",
+  "publisher": "Scalar",
+  "verified": true,
+  "summary": "Scalar documentation search.",
+  "description": "Scalar's documentation server: the agent searches Scalar's docs for API references and OpenAPI tooling without signing in.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://scalar.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://scalar.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://scalar.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 1 tools; no sign-in is demanded."
+    }
+  }
+}

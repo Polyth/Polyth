@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "weights-biases",
+  "name": "Weights & Biases",
+  "publisher": "Weights & Biases",
+  "verified": true,
+  "summary": "Experiments, runs and Weave traces.",
+  "description": "W&B's hosted server queries runs, metrics and Weave traces. It needs a W&B API key.",
+  "categories": [
+    "ai",
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://wandb.ai",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.withwandb.com/mcp",
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      }
+    },
+    "tokenHelpUrl": "https://wandb.ai/authorize"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://wandb.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "none",
+      "note": "Answers 401 without OAuth metadata; the key travels in the Authorization header."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "egnyte",
+  "name": "Egnyte",
+  "publisher": "Egnyte",
+  "verified": true,
+  "summary": "Enterprise files and content.",
+  "description": "Egnyte's hosted server searches and reads files in your Egnyte domain with your access rights.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://www.egnyte.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp-server.egnyte.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.egnyte.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp-oauth.egnyte.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

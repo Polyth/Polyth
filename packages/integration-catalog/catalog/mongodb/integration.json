@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "mongodb",
+  "name": "MongoDB",
+  "publisher": "MongoDB",
+  "verified": true,
+  "summary": "Query collections, read-only.",
+  "description": "MongoDB's own server, run locally in read-only mode: the agent connects to a cluster you name and can list, query and aggregate without writing. It needs Node.js.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://www.mongodb.com",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "mongodb-mcp-server@3.3.0",
+        "--readOnly"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 60000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.mongodb.com",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to mongodb-mcp-server@3.3.0, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "browser-use",
+  "name": "Browser Use",
+  "publisher": "Browser Use",
+  "verified": true,
+  "summary": "Browser tasks in the cloud.",
+  "description": "Browser Use's hosted server runs browser tasks in cloud sessions and returns what happened. It needs a Browser Use API key.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://browser-use.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://api.browser-use.com/v3/mcp",
+      "tokenHeader": {
+        "name": "x-browser-use-api-key"
+      }
+    },
+    "tokenHelpUrl": "https://cloud.browser-use.com/settings?tab=api-keys"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://browser-use.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 7 tools; the vendor documents an API key that the account's tools need, sent in the x-browser-use-api-key header."
+    }
+  }
+}

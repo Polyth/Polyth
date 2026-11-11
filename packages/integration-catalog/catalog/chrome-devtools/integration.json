@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "chrome-devtools",
+  "name": "Chrome DevTools",
+  "publisher": "Google",
+  "verified": true,
+  "summary": "Debug and profile pages in Chrome.",
+  "description": "The Chrome DevTools team's server drives a local Chrome: the agent can read console errors and network requests, take traces and check performance. It needs Node.js and Chrome.",
+  "categories": [
+    "code",
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@1.12.0"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 60000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to chrome-devtools-mcp@1.12.0, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

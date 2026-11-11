@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "tldraw",
+  "name": "tldraw",
+  "publisher": "tldraw",
+  "verified": true,
+  "summary": "An interactive drawing canvas.",
+  "description": "tldraw's hosted server gives the agent a canvas for diagrams and sketches, without signing in.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://www.tldraw.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://tldraw-mcp-app.tldraw.workers.dev/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.tldraw.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 6 tools; no sign-in is demanded."
+    }
+  }
+}

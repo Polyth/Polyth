@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "contentful",
+  "name": "Contentful",
+  "publisher": "Contentful",
+  "verified": true,
+  "summary": "Content models and entries.",
+  "description": "Contentful's hosted server reads and edits content types, entries and assets in your spaces.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://www.contentful.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.contentful.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.contentful.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.contentful.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

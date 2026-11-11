@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "datadog",
+  "name": "Datadog",
+  "publisher": "Datadog",
+  "verified": true,
+  "summary": "Logs, metrics, traces and monitors.",
+  "description": "Datadog's hosted server queries logs, metrics, traces, monitors and incidents in your organization. Pick the site your account lives on.",
+  "categories": [
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://www.datadoghq.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.{site}/v1/mcp"
+    },
+    "inputs": [
+      {
+        "id": "site",
+        "label": "Datadog site",
+        "hint": "The address you sign in at.",
+        "default": "datadoghq.com",
+        "choices": [
+          {
+            "value": "datadoghq.com",
+            "label": "US1 · datadoghq.com"
+          },
+          {
+            "value": "us3.datadoghq.com",
+            "label": "US3 · us3.datadoghq.com"
+          },
+          {
+            "value": "us5.datadoghq.com",
+            "label": "US5 · us5.datadoghq.com"
+          },
+          {
+            "value": "datadoghq.eu",
+            "label": "EU1 · datadoghq.eu"
+          },
+          {
+            "value": "ap1.datadoghq.com",
+            "label": "AP1 · ap1.datadoghq.com"
+          },
+          {
+            "value": "ap2.datadoghq.com",
+            "label": "AP2 · ap2.datadoghq.com"
+          }
+        ]
+      }
+    ]
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.datadoghq.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.datadoghq.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check. Probed with the default site; every listed site answered the same way."
+    }
+  }
+}

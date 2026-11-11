@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "posthog",
+  "name": "PostHog",
+  "publisher": "PostHog",
+  "verified": true,
+  "summary": "Analytics, flags and errors.",
+  "description": "PostHog's hosted server queries product analytics, manages feature flags and experiments, and reads error tracking.",
+  "categories": [
+    "data",
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://posthog.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.posthog.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://posthog.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (oauth.posthog.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

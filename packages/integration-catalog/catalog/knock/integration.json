@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "knock",
+  "name": "Knock",
+  "publisher": "Knock",
+  "verified": true,
+  "summary": "Notification workflows and messages.",
+  "description": "Knock's hosted server reads and edits notification workflows, templates and channels.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://knock.app",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.knock.app/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://knock.app",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.knock.app) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

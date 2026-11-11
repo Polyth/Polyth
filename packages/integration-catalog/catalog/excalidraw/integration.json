@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "excalidraw",
+  "name": "Excalidraw",
+  "publisher": "Excalidraw",
+  "verified": true,
+  "summary": "Hand-drawn diagrams.",
+  "description": "Excalidraw's hosted server draws diagrams in the Excalidraw style and exports them to excalidraw.com, without signing in.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://excalidraw.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://mcp.excalidraw.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://excalidraw.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 5 tools; no sign-in is demanded."
+    }
+  }
+}

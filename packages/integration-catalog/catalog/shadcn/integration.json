@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "shadcn",
+  "name": "shadcn/ui",
+  "publisher": "shadcn",
+  "verified": true,
+  "summary": "Browse and add registry components.",
+  "description": "The shadcn CLI's MCP mode: the agent can search component registries and add components to the project the way the CLI does. It needs Node.js.",
+  "categories": [
+    "code",
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://ui.shadcn.com",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "shadcn@4.23.0",
+        "mcp"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 60000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://ui.shadcn.com",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to shadcn@4.23.0, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

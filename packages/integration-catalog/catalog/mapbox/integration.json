@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "mapbox",
+  "name": "Mapbox",
+  "publisher": "Mapbox",
+  "verified": true,
+  "summary": "Geocoding, directions and maps.",
+  "description": "Mapbox's hosted server geocodes places, plans routes and renders static maps with your Mapbox account.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.mapbox.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.mapbox.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.mapbox.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.mapbox.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

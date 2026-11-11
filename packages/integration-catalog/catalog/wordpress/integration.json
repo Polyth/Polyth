@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "wordpress",
+  "name": "WordPress.com",
+  "publisher": "Automattic",
+  "verified": true,
+  "summary": "Posts, pages and site settings.",
+  "description": "WordPress.com's hosted server reads and edits posts, pages, comments and settings on your sites.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://wordpress.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://public-api.wordpress.com/wpcom/v2/mcp/v1"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://wordpress.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (public-api.wordpress.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

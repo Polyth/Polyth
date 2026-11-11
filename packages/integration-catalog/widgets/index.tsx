@@ -16,8 +16,10 @@ export default defineWebPackage((host) => () => {
       ? [host.pages.register({
         id: CATALOG_PAGE_ID,
         title: strings().title,
-        component: ({ projectId }) => createElement(IntegrationsPage, {
+        component: ({ projectId, resource }) => createElement(IntegrationsPage, {
           projectId,
+          // `openPage("integration-catalog", "<entry id>")` opens one service.
+          resource,
           locale: host.ui.locale.get(),
           // The page itself must not import the host: it is handed the one
           // route it needs to send a person to where a manual server lives.
@@ -31,7 +33,8 @@ export default defineWebPackage((host) => () => {
       plainDescription: strings().subtitle,
       keywords: [
         "integrations", "integration", "mcp", "catalog", "connector", "servers",
-        "linear", "notion", "github", "sentry", "figma", "supabase",
+        "linear", "notion", "github", "sentry", "figma", "supabase", "jira", "confluence",
+        "datadog", "vercel", "cloudflare", "stripe", "zapier", "postgres",
         "інтеграції", "каталог",
       ],
       standardTier: "more",
@@ -62,6 +65,7 @@ export default defineWebPackage((host) => () => {
           keywords: [
             "connect", "integration", "integrations", "mcp", "server", "tool",
             "linear", "notion", "github", "figma", "sentry", "supabase", "stripe",
+            "jira", "datadog", "vercel", "cloudflare", "zapier",
             "підключити", "інтеграції", "конектор",
           ],
           run: () => {

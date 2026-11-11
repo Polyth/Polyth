@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "day-ai",
+  "name": "Day AI",
+  "publisher": "Day AI",
+  "verified": true,
+  "summary": "CRM built from your conversations.",
+  "description": "Day AI's hosted server reads the people, companies and opportunities it tracks from your meetings and email.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://day.ai",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://day.ai/api/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://day.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (day.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

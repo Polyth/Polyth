@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "vanta",
+  "name": "Vanta",
+  "publisher": "Vanta",
+  "verified": true,
+  "summary": "Compliance tests and controls.",
+  "description": "Vanta's hosted server reads tests, controls, documents and vulnerabilities in your compliance program.",
+  "categories": [
+    "quality",
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://www.vanta.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.vanta.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.vanta.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.vanta.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

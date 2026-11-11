@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "coda",
+  "name": "Coda",
+  "publisher": "Coda",
+  "verified": true,
+  "summary": "Docs, tables and pages.",
+  "description": "Coda's hosted server reads and edits docs, pages and tables, so the agent can update a tracker or a spec where it lives.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://coda.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://coda.io/apis/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://coda.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (coda.io) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

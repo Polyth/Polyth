@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "mux",
+  "name": "Mux",
+  "publisher": "Mux",
+  "verified": true,
+  "summary": "Video assets and live streams.",
+  "description": "Mux's hosted server manages video assets, live streams and playback, and reads Mux Data metrics.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.mux.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.mux.com"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.mux.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (auth.mux.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,638 @@
+{
+ "airbyte": {
+  "simpleIcons": "airbyte"
+ },
+ "airtable": {
+  "simpleIcons": "airtable"
+ },
+ "algolia": {
+  "simpleIcons": "algolia"
+ },
+ "amplitude": {
+  "url": "https://amplitude.com/nextjs-public/favicon/apple-touch-icon.png"
+ },
+ "angular-cli": {
+  "simpleIcons": "angular"
+ },
+ "apify": {
+  "url": "https://apify.com/apple-icon.png?apple-icon.1qabm0kj8blk6.png?dpl=fa6adfe709"
+ },
+ "apollo-graphos": {
+  "simpleIcons": "apollographql"
+ },
+ "apollo-io": {
+  "url": "https://www.apollo.io/apple-icon.png?apple-icon.0-gy.9xjm.kcw.png"
+ },
+ "ashby": {
+  "url": "https://www.ashbyhq.com/icon.png"
+ },
+ "assemblyai": {
+  "url": "https://github.com/AssemblyAI.png?size=256"
+ },
+ "astro": {
+  "simpleIcons": "astro"
+ },
+ "atlassian": {
+  "simpleIcons": "atlassian"
+ },
+ "attio": {
+  "url": "https://github.com/attio.png?size=256"
+ },
+ "aws-knowledge": {
+  "url": "https://a0.awsstatic.com/libra-css/images/site/touch-icon-ipad-144-smile.png"
+ },
+ "axiom": {
+  "url": "https://axiom.co/apple-touch-icon.png"
+ },
+ "azure": {
+  "url": "https://github.com/Azure.png?size=256"
+ },
+ "azure-devops": {
+  "url": "https://cdn.vsassets.io/content/icons/favicon.ico"
+ },
+ "basecamp": {
+  "simpleIcons": "basecamp"
+ },
+ "better-stack": {
+  "simpleIcons": "betterstack"
+ },
+ "braintrust": {
+  "simpleIcons": "braintrust"
+ },
+ "brex": {
+  "simpleIcons": "brex"
+ },
+ "browser-use": {
+  "url": "https://browser-use.com/apple-touch-icon.png"
+ },
+ "browserbase": {
+  "url": "https://www.browserbase.com/favicon.svg"
+ },
+ "buddy": {
+  "simpleIcons": "buddy"
+ },
+ "buf": {
+  "url": "https://buf.build/images/webclip.png"
+ },
+ "buildkite": {
+  "simpleIcons": "buildkite"
+ },
+ "cal-com": {
+  "url": "https://cal.com/apple-touch-icon.png"
+ },
+ "canva": {
+  "url": "https://github.com/canva.png?size=256"
+ },
+ "chakra-ui": {
+  "simpleIcons": "chakraui"
+ },
+ "chartmogul": {
+  "simpleIcons": "chartmogul"
+ },
+ "chroma-package-search": {
+  "url": "https://www.trychroma.com/img/favicon.ico"
+ },
+ "chrome-devtools": {
+  "simpleIcons": "googlechrome"
+ },
+ "circleback": {
+  "url": "https://circleback.ai/apple-touch-icon.png"
+ },
+ "clerk": {
+  "simpleIcons": "clerk"
+ },
+ "clickhouse": {
+  "simpleIcons": "clickhouse"
+ },
+ "clickup": {
+  "simpleIcons": "clickup"
+ },
+ "close": {
+  "url": "https://close.com/apple-touch-icon.png"
+ },
+ "cloudflare": {
+  "simpleIcons": "cloudflare"
+ },
+ "cloudflare-docs": {
+  "same": "cloudflare"
+ },
+ "cloudflare-observability": {
+  "same": "cloudflare"
+ },
+ "cloudinary": {
+  "simpleIcons": "cloudinary"
+ },
+ "cockroachdb": {
+  "simpleIcons": "cockroachlabs"
+ },
+ "coda": {
+  "simpleIcons": "coda"
+ },
+ "contentful": {
+  "simpleIcons": "contentful"
+ },
+ "context7": {
+  "url": "https://context7.com/context7-icon-green.svg"
+ },
+ "courier": {
+  "url": "https://framerusercontent.com/images/oWKCLLJZ33f3VIBMMbvQmZCCSMs.png"
+ },
+ "craft": {
+  "url": "https://www.craft.do/images/favicon-large.png"
+ },
+ "customerio": {
+  "url": "https://customer.io/apple-touch-icon.png"
+ },
+ "datadog": {
+  "simpleIcons": "datadog"
+ },
+ "day-ai": {
+  "url": "https://day.ai/favicon-dark.png"
+ },
+ "deepwiki": {
+  "url": "https://github.com/CognitionAI.png?size=256"
+ },
+ "descope": {
+  "url": "https://github.com/descope.png?size=256"
+ },
+ "devcycle": {
+  "url": "https://github.com/devcyclehq.png?size=256"
+ },
+ "digitalocean": {
+  "simpleIcons": "digitalocean"
+ },
+ "drata": {
+  "url": "https://github.com/drata.png?size=256"
+ },
+ "dropbox": {
+  "simpleIcons": "dropbox"
+ },
+ "egnyte": {
+  "url": "https://www.egnyte.com/sites/default/files/2020-03/iPhone-6-Plus.png"
+ },
+ "evernote": {
+  "simpleIcons": "evernote"
+ },
+ "exa": {
+  "url": "https://exa.ai/images/logo/exa-logomark-blue.svg"
+ },
+ "excalidraw": {
+  "simpleIcons": "excalidraw"
+ },
+ "expo": {
+  "simpleIcons": "expo"
+ },
+ "fal": {
+  "url": "https://cdn.prod.website-files.com/6a72ef21c470312422dea9b3/6adae13a030770b54ecc8783_fal-icon-favicon.png"
+ },
+ "fathom": {
+  "simpleIcons": "fathom"
+ },
+ "fellow": {
+  "url": "https://framerusercontent.com/images/W3zP48ABQ5JvFZqDFzSM0WCWKg.png"
+ },
+ "figma": {
+  "simpleIcons": "figma"
+ },
+ "firebase": {
+  "simpleIcons": "firebase"
+ },
+ "firecrawl": {
+  "url": "https://www.firecrawl.dev/apple-touch-icon.png"
+ },
+ "fireflies": {
+  "url": "https://fireflies.ai/apple-icon.png?apple-icon.0zim7nfg3coaw.png"
+ },
+ "flagsmith": {
+  "url": "https://cdn.prod.website-files.com/64425c978745b453797839bb/6492f2e21ba18a967f85529d_icon256.png"
+ },
+ "framer": {
+  "simpleIcons": "framer"
+ },
+ "github": {
+  "simpleIcons": "github"
+ },
+ "gitlab": {
+  "simpleIcons": "gitlab"
+ },
+ "gong": {
+  "url": "https://www.gong.io/marketing-assets/apple-touch-icon.png"
+ },
+ "grafana-cloud": {
+  "simpleIcons": "grafana"
+ },
+ "granola": {
+  "url": "https://www.granola.ai/favicon/apple-touch-icon.png"
+ },
+ "groundcover": {
+  "url": "https://www.groundcover.com/webclip.png"
+ },
+ "growthbook": {
+  "url": "https://cdn.prod.website-files.com/6978e7d86b5629eb801262d8/6978fd20f59434b4a2cdd952_webclip.png"
+ },
+ "guru": {
+  "url": "https://cdn.prod.website-files.com/5d8d029013ffd80bbb91320d/6216a21ee8829c7531435bc8_Guru_G_Black%202256.png"
+ },
+ "gusto": {
+  "url": "https://github.com/Gusto.png?size=256"
+ },
+ "heroku": {
+  "url": "https://www.heroku.com/wp-content/uploads/2025/01/apple-touch-icon-180x180-1.png?w=180"
+ },
+ "hex": {
+  "url": "https://hex.tech/favicon.svg"
+ },
+ "honeybadger": {
+  "simpleIcons": "honeybadger"
+ },
+ "honeycomb": {
+  "url": "https://github.com/honeycombio.png?size=256"
+ },
+ "huggingface": {
+  "simpleIcons": "huggingface"
+ },
+ "hyperbrowser": {
+  "url": "https://github.com/hyperbrowserai.png?size=256"
+ },
+ "hyperping": {
+  "url": "https://hyperping.com/assets/hyperping/apple-touch-icon.png"
+ },
+ "ifttt": {
+  "url": "https://web-assets.ifttt.com/builds/assets/apple-touch-icon-ifttt-ai-180-D1OvLiQk.png"
+ },
+ "incident-io": {
+  "url": "https://incident.io/icons/icon-512x512.png"
+ },
+ "intercom": {
+  "simpleIcons": "intercom"
+ },
+ "jam": {
+  "url": "https://framerusercontent.com/images/PJzGWvCk8HH9Ho4kUWVsQtYI.png"
+ },
+ "jina": {
+  "url": "https://jina.ai/favicon-light.ico"
+ },
+ "jotform": {
+  "url": "https://github.com/jotform.png?size=256"
+ },
+ "kernel": {
+  "url": "https://www.kernel.sh/apple-touch-icon.png"
+ },
+ "klaviyo": {
+  "url": "https://www.klaviyo.com/icons/icon-512x512.png"
+ },
+ "knock": {
+  "url": "https://knock.app/favicon/favicon-dark.svg"
+ },
+ "krisp": {
+  "url": "https://krisp.ai/wp-content/uploads/2023/12/cropped-favicon-1-180x180.png"
+ },
+ "launchdarkly": {
+  "url": "https://github.com/launchdarkly.png?size=256"
+ },
+ "lightfield": {
+  "url": "https://lightfield.com/apple-touch-icon.png"
+ },
+ "linear": {
+  "simpleIcons": "linear"
+ },
+ "logfire": {
+  "url": "https://pydantic.dev/favicon/apple-touch-icon.png"
+ },
+ "logrocket": {
+  "url": "https://logrocket.com/favicon/apple-touch-icon.png"
+ },
+ "lovable": {
+  "url": "https://lovable.dev/apple-touch-icon.png"
+ },
+ "lucid": {
+  "simpleIcons": "lucid"
+ },
+ "magic-patterns": {
+  "url": "https://www.magicpatterns.com/apple-icon.png"
+ },
+ "make": {
+  "simpleIcons": "make"
+ },
+ "mapbox": {
+  "simpleIcons": "mapbox"
+ },
+ "mem": {
+  "url": "https://mem.ai/favicons/apple-touch-icon-180x180.png"
+ },
+ "mem0": {
+  "url": "https://framerusercontent.com/images/2ys67ADJdvcyGmQnhp8vKWSq8.svg"
+ },
+ "mercury": {
+  "url": "https://mercury.com/apple-icon.png?apple-icon.24duaeqfro1-o.png"
+ },
+ "mermaid-chart": {
+  "simpleIcons": "mermaid"
+ },
+ "microsoft-learn": {
+  "url": "https://learn.microsoft.com/apple-touch-icon.png"
+ },
+ "mintlify": {
+  "simpleIcons": "mintlify"
+ },
+ "miro": {
+  "simpleIcons": "miro"
+ },
+ "mixpanel": {
+  "simpleIcons": "mixpanel"
+ },
+ "monday": {
+  "url": "https://cdn.prod.website-files.com/656da6fea306219773d04208/65af6bd6e742d497b5f23f69_645898132bbaac20f1963919_256x256.png"
+ },
+ "mongodb": {
+  "simpleIcons": "mongodb"
+ },
+ "motherduck": {
+  "url": "https://motherduck.com/apple-touch-icon.png"
+ },
+ "mux": {
+  "url": "https://www.mux.com/apple-icon-pwu6ef.png?apple-icon.30dosf78dmoz6.png"
+ },
+ "neon": {
+  "simpleIcons": "neon"
+ },
+ "netlify": {
+  "simpleIcons": "netlify"
+ },
+ "new-relic": {
+  "simpleIcons": "newrelic"
+ },
+ "next-devtools": {
+  "simpleIcons": "nextdotjs"
+ },
+ "notion": {
+  "simpleIcons": "notion"
+ },
+ "novu": {
+  "simpleIcons": "novu"
+ },
+ "oneuptime": {
+  "url": "https://oneuptime.com/img/favicons/apple-touch-icon.png"
+ },
+ "onlineornot": {
+  "url": "https://onlineornot.com/apple-touch-icon.png"
+ },
+ "openai-docs": {
+  "url": "https://github.com/openai.png?size=256"
+ },
+ "openobserve": {
+  "url": "https://openobserve.ai/apple-touch-icon.png"
+ },
+ "openrouter": {
+  "simpleIcons": "openrouter"
+ },
+ "openstatus": {
+  "url": "https://www.openstatus.dev/icon.png?icon.0ql4z1tq5lt1f.png"
+ },
+ "otter": {
+  "url": "https://cdn.prod.website-files.com/618e9316785b3582a5178502/618e943a80919a98b5e9bf69_apple-icon.png"
+ },
+ "pandadoc": {
+  "url": "https://github.com/PandaDoc.png?size=256"
+ },
+ "parallel": {
+  "url": "https://parallel.ai/apple-icon.png?apple-icon.ea4d2091.png"
+ },
+ "paypal": {
+  "simpleIcons": "paypal"
+ },
+ "perplexity": {
+  "simpleIcons": "perplexity"
+ },
+ "pg-aiguide": {
+  "simpleIcons": "postgresql"
+ },
+ "plain": {
+  "url": "https://framerusercontent.com/images/oPE9BwSE8LUYzrxvpHa5FCmXc.png"
+ },
+ "plane": {
+  "simpleIcons": "plane"
+ },
+ "planetscale": {
+  "simpleIcons": "planetscale"
+ },
+ "playwright": {
+  "url": "https://playwright.dev/img/playwright-logo.svg"
+ },
+ "posthog": {
+  "simpleIcons": "posthog"
+ },
+ "postman": {
+  "simpleIcons": "postman"
+ },
+ "prisma": {
+  "simpleIcons": "prisma"
+ },
+ "process-street": {
+  "url": "https://www.process.st/wp-content/themes/koombea/icons/apple-touch-icon-180x180.png"
+ },
+ "productboard": {
+  "url": "https://www.productboard.com/apple-touch-icon.png"
+ },
+ "pulumi": {
+  "simpleIcons": "pulumi"
+ },
+ "pylon": {
+  "url": "https://cdn.prod.website-files.com/6a2c6d7ab6674379553c0824/6a2c722c63cfe1af0f3302b7_webclip.png"
+ },
+ "qovery": {
+  "url": "https://www.qovery.com/apple-touch-icon.png"
+ },
+ "railway": {
+  "simpleIcons": "railway"
+ },
+ "ramp": {
+  "url": "https://ramp.com/apple-touch-icon.png"
+ },
+ "raygun": {
+  "url": "https://cdn.prod.website-files.com/5e2701b416b6d176f5007781/6321348741e051a778e42e8f_256x256.png"
+ },
+ "read-ai": {
+  "url": "https://cdn.prod.website-files.com/614e5e239ea0f25fe5b6a797/615f71de842b191ea061fda6_ReadLogomark_256x256.png"
+ },
+ "readwise": {
+  "url": "https://github.com/readwiseio.png?size=256"
+ },
+ "redocly": {
+  "url": "https://github.com/Redocly.png?size=256"
+ },
+ "ref": {
+  "url": "https://github.com/ref-tools.png?size=256"
+ },
+ "remote": {
+  "url": "https://remote.com/web-app-manifest-512x512.png"
+ },
+ "render": {
+  "simpleIcons": "render"
+ },
+ "resend": {
+  "simpleIcons": "resend"
+ },
+ "retool": {
+  "simpleIcons": "retool"
+ },
+ "rootly": {
+  "url": "https://rootly.com/apple-touch-icon.png"
+ },
+ "sanity": {
+  "simpleIcons": "sanity"
+ },
+ "scalar": {
+  "simpleIcons": "scalar"
+ },
+ "semaphore": {
+  "simpleIcons": "semaphoreci"
+ },
+ "semgrep": {
+  "url": "https://semgrep.dev/build/assets/favicon-CIx-xpG_.svg"
+ },
+ "sentry": {
+  "simpleIcons": "sentry"
+ },
+ "shadcn": {
+  "simpleIcons": "shadcnui"
+ },
+ "shopify-dev": {
+  "simpleIcons": "shopify"
+ },
+ "shortcut": {
+  "simpleIcons": "shortcut"
+ },
+ "signoz": {
+  "url": "https://signoz.io/static/favicons/apple-touch-icon.png"
+ },
+ "snyk": {
+  "simpleIcons": "snyk"
+ },
+ "socket": {
+  "simpleIcons": "socket"
+ },
+ "sourcegraph": {
+  "url": "https://github.com/sourcegraph.png?size=256"
+ },
+ "spline": {
+  "url": "https://github.com/splinetool.png?size=256"
+ },
+ "square": {
+  "simpleIcons": "square"
+ },
+ "statsig": {
+  "url": "https://www.statsig.com/images/favicons/favicon180.png"
+ },
+ "storyblok": {
+  "simpleIcons": "storyblok"
+ },
+ "stripe": {
+  "simpleIcons": "stripe"
+ },
+ "stytch": {
+  "url": "https://github.com/stytchauth.png?size=256"
+ },
+ "supabase": {
+  "simpleIcons": "supabase"
+ },
+ "superhuman": {
+  "url": "https://superhumanstatic.com/super-funnel/main/public/images/v4/favicons/superhuman-apple-touch-icon.png"
+ },
+ "surveymonkey": {
+  "simpleIcons": "surveymonkey"
+ },
+ "svelte": {
+  "simpleIcons": "svelte"
+ },
+ "swaggerhub": {
+  "simpleIcons": "swagger"
+ },
+ "tally": {
+  "url": "https://tally.so/tally-square.png"
+ },
+ "tavily": {
+  "url": "https://www.tavily.com/apple-icon.png?apple-icon.2rsjznomrsf77.png"
+ },
+ "terraform": {
+  "simpleIcons": "terraform"
+ },
+ "thoughtspot": {
+  "url": "https://www.thoughtspot.com/images/TS-FAV-180x180_Dark.png?v=2025"
+ },
+ "tigris": {
+  "url": "https://github.com/tigrisdata.png?size=256"
+ },
+ "tinybird": {
+  "url": "https://github.com/tinybirdco.png?size=256"
+ },
+ "tldraw": {
+  "simpleIcons": "tldraw"
+ },
+ "todoist": {
+  "simpleIcons": "todoist"
+ },
+ "tuist": {
+  "url": "https://tuist.dev/apple-touch-icon.png"
+ },
+ "turso": {
+  "simpleIcons": "turso"
+ },
+ "typeform": {
+  "url": "https://cdn.prod.website-files.com/66ffe2174aa8e8d5661c2708/68b6f00951eb33cd19b77288_Frame%201867174.png"
+ },
+ "unthread": {
+  "url": "https://unthread.io/favicon.ico"
+ },
+ "upstash": {
+  "simpleIcons": "upstash"
+ },
+ "upsun": {
+  "simpleIcons": "platformdotsh"
+ },
+ "uptimerobot": {
+  "url": "https://uptimerobot.com/apple-touch-icon.png"
+ },
+ "vanta": {
+  "url": "https://cdn.prod.website-files.com/64009032676f24f376f002fc/6a8611e0bb23845c59b54179_ilma-favicon.png"
+ },
+ "vantage": {
+  "url": "https://www.vantage.sh/favicon/favicon-512x512.png"
+ },
+ "vapi": {
+  "url": "https://vapi.ai/apple-icon.png?apple-icon.09ry4e6-9jbfq.png"
+ },
+ "vercel": {
+  "simpleIcons": "vercel"
+ },
+ "webflow": {
+  "simpleIcons": "webflow"
+ },
+ "weights-biases": {
+  "simpleIcons": "weightsandbiases"
+ },
+ "whimsical": {
+  "url": "https://github.com/whimsical.png?size=256"
+ },
+ "windmill": {
+  "url": "https://www.windmill.dev/img/logo.svg"
+ },
+ "wix": {
+  "simpleIcons": "wix"
+ },
+ "wordpress": {
+  "simpleIcons": "wordpress"
+ },
+ "workos": {
+  "url": "https://cdn.prod.website-files.com/621f54116cab10f6e9215d8b/621f549024eb2947f6f2f7f7_Favicon%20256x256.png"
+ },
+ "you": {
+  "url": "https://you.com/apple-icon.png?apple-icon.04pft1wem7rx8.png"
+ },
+ "zapier": {
+  "url": "https://zapier.com/favicon.ico"
+ },
+ "zoominfo": {
+  "url": "https://cws-zoominfo-assets.zoominfo.com/Contentful/favicon/favicon-512x512-1.png"
+ }
+}

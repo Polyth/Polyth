@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "jina",
+  "name": "Jina AI",
+  "publisher": "Jina AI",
+  "verified": true,
+  "summary": "Read URLs, search, screenshots.",
+  "description": "Jina's hosted server reads pages as markdown, searches the web and arXiv and captures screenshots. It works without a key; a key raises the limits.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://jina.ai",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.jina.ai/v1",
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      },
+      "tokenOptional": true
+    },
+    "tokenHelpUrl": "https://jina.ai/api-dashboard"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://jina.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 12 tools; the vendor documents a key that raises limits or unlocks account tools, sent in the Authorization header."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "pulumi",
+  "name": "Pulumi",
+  "publisher": "Pulumi",
+  "verified": true,
+  "summary": "Stacks, resources and the registry.",
+  "description": "Pulumi's hosted server reads stacks and resources, searches the Pulumi registry and can ask Pulumi's assistant to write infrastructure code.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://www.pulumi.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.ai.pulumi.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.pulumi.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.ai.pulumi.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

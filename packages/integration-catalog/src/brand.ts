@@ -1,35 +1,27 @@
-// The brand mark each entry shows: the service's own glyph, so a person
-// recognizes Linear or Notion before reading a word.
+// The brand mark each entry shows: the service's own glyph or app icon, so a
+// person recognizes Linear or Notion before reading a word.
 //
-// Assets are vendored in `assets/logos/` (see CREDITS.md there) rather than
-// fetched from a vendor CDN at render time: a page of favicon requests would
-// tell twelve third parties which integrations someone is browsing, and it
-// would break on an offline or restricted network. Vector marks are drawn as a
-// mask, so the glyph takes its colour from the theme; the two raster marks are
-// alpha-only glyphs derived from the vendor icon for the same reason.
+// Assets are vendored in `assets/logos/` (see CREDITS.md and sources.json
+// there) rather than fetched from a vendor CDN at render time: a page of
+// favicon requests would tell two hundred third parties which integrations
+// someone is browsing, and it would break on an offline or restricted network.
+//
+// Every file is a finished square tile — a simple-icons glyph on its brand
+// colour, or the vendor's own app icon — so it reads the same on a light and a
+// dark theme; the page only rounds and outlines it. `scripts/build-marks.py`
+// writes the files and the registry in `brandMarks.ts`.
+import { BRAND_MARKS } from "./brandMarks.ts";
+
 export interface BrandMark {
   /** File name inside `assets/logos/`. */
   file: string;
   format: "svg" | "png";
-  /** The service's own colour, used for the tile tint and the glyph hue. */
-  color: string;
+  /** `simple-icons` (CC0 glyph on a brand tile) or `vendor` (the service's
+   *  own icon, used only to identify it). */
+  source: "simple-icons" | "vendor";
 }
 
-export const BRAND_MARKS: Readonly<Record<string, BrandMark>> = {
-  linear: { file: "linear.svg", format: "svg", color: "#5E6AD2" },
-  // Near-black marks read as disabled tiles on either theme, so the two
-  // monochrome brands get a neutral that still says "this is the mark".
-  github: { file: "github.svg", format: "svg", color: "#6E7482" },
-  notion: { file: "notion.svg", format: "svg", color: "#6E7482" },
-  atlassian: { file: "atlassian.svg", format: "svg", color: "#0052CC" },
-  sentry: { file: "sentry.svg", format: "svg", color: "#362D59" },
-  supabase: { file: "supabase.svg", format: "svg", color: "#3FCF8E" },
-  figma: { file: "figma.svg", format: "svg", color: "#F24E1E" },
-  stripe: { file: "stripe.svg", format: "svg", color: "#635BFF" },
-  cloudflare: { file: "cloudflare.svg", format: "svg", color: "#F38020" },
-  playwright: { file: "playwright.svg", format: "svg", color: "#2EAD33" },
-  exa: { file: "exa.png", format: "png", color: "#1E40EF" },
-  context7: { file: "context7.png", format: "png", color: "#0E7A61" },
-};
+export { BRAND_MARKS };
 
-export const brandMarkFor = (id: string): BrandMark | undefined => BRAND_MARKS[id];
+export const brandMarkFor = (id: string): BrandMark | undefined =>
+  Object.hasOwn(BRAND_MARKS, id) ? BRAND_MARKS[id] : undefined;

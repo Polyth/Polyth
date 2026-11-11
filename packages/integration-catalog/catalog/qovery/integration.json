@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "qovery",
+  "name": "Qovery",
+  "publisher": "Qovery",
+  "verified": true,
+  "summary": "Environments and deployments.",
+  "description": "Qovery's hosted server manages environments, services and deployments on your cloud.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://www.qovery.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.qovery.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.qovery.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.qovery.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

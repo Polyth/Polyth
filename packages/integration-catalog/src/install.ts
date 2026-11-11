@@ -13,7 +13,12 @@
 //   2. A local package must arrive from the manifest already pinned to an exact
 //      version. There is no "install latest and hope": the reviewed bytes are
 //      the installed bytes.
-import { localPinningErrors, type IntegrationManifest } from "./manifest.ts";
+import {
+  inputValueError,
+  interpolateInputs,
+  localPinningErrors,
+  type IntegrationManifest,
+} from "./manifest.ts";
 
 /** `project` is a Space-owned server scoped to one project; `space` covers the
  *  whole Space; `person` is owned by one person and reaches their own chats. */
@@ -38,6 +43,7 @@ export type InstallFailure =
   | "token-required"
   | "token-header-missing"
   | "local-unpinned"
+  | "input-invalid"
   | "scope-not-allowed";
 
 export type InstallPlan =
@@ -49,6 +55,14 @@ export type InstallPlan =
     notes: string[];
   }
   | { ok: false; failure: InstallFailure; message: string };
+
+const isHttps = (value: string): boolean => {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+};
 
 /** One catalog entry as one MCP server: the entry id is the server name, so an
  *  installation is recognizable without an extra marker in the native config. */
@@ -62,6 +76,27 @@ function tokenHeaderOf(entry: IntegrationManifest): { name: string; prefix: stri
 }
 
 /**
+ * Every declared input resolved to a checked value: what the person typed or
+ * picked, else the manifest default. Undeclared keys are ignored, so a client
+ * cannot smuggle a token the endpoint does not name.
+ */
+export function resolveInputs(
+  entry: IntegrationManifest,
+  supplied: Readonly<Record<string, unknown>> = {},
+): { ok: true; values: Record<string, string> } | { ok: false; message: string } {
+  const values: Record<string, string> = {};
+  for (const input of entry.mcp.inputs ?? []) {
+    const raw = supplied[input.id];
+    const value = typeof raw === "string" && raw.trim() ? raw.trim() : input.default;
+    if (value === undefined) return { ok: false, message: `${input.label} is required.` };
+    const problem = inputValueError(input, value);
+    if (problem) return { ok: false, message: problem };
+    values[input.id] = value;
+  }
+  return { ok: true, values };
+}
+
+/**
  * Decide the scope, the transport and the secrets for one entry.
  *
  * `requestedScope` is a preference, not an override: a token entry is always
@@ -70,13 +105,21 @@ function tokenHeaderOf(entry: IntegrationManifest): { name: string; prefix: stri
  */
 export function planInstall(
   entry: IntegrationManifest | undefined,
-  options: { token?: string; scope?: InstallScope } = {},
+  options: { token?: string; scope?: InstallScope; inputs?: Readonly<Record<string, unknown>> } = {},
 ): InstallPlan {
   if (!entry) {
     return { ok: false, failure: "unknown-entry", message: "No integration by that name." };
   }
-  const remote = entry.mcp.remote;
-  const local = entry.mcp.local;
+  const resolved = resolveInputs(entry, options.inputs);
+  if (!resolved.ok) return { ok: false, failure: "input-invalid", message: resolved.message };
+  const fillIn = (template: string): string => interpolateInputs(template, resolved.values);
+  const remote = entry.mcp.remote ? { ...entry.mcp.remote, url: fillIn(entry.mcp.remote.url) } : undefined;
+  const local = entry.mcp.local
+    ? { ...entry.mcp.local, command: entry.mcp.local.command.map(fillIn) as [string, ...string[]] }
+    : undefined;
+  if (remote && !isHttps(remote.url)) {
+    return { ok: false, failure: "input-invalid", message: "The endpoint would not be an https address." };
+  }
 
   if (entry.mcp.auth === "token") {
     if (options.scope && options.scope !== "person") {

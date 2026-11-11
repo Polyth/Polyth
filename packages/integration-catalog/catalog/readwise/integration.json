@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "readwise",
+  "name": "Readwise",
+  "publisher": "Readwise",
+  "verified": true,
+  "summary": "Highlights and saved reading.",
+  "description": "Readwise's hosted server searches your highlights and Reader documents, giving the agent the passages you already marked as important.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://readwise.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp2.readwise.io/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://readwise.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (readwise.io) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "render",
+  "name": "Render",
+  "publisher": "Render",
+  "verified": true,
+  "summary": "Services, deploys and logs.",
+  "description": "Render's hosted server reads services, deploys, logs and metrics and can create services. It needs a Render API key.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://render.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.render.com/mcp",
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      }
+    },
+    "tokenHelpUrl": "https://dashboard.render.com/u/settings#api-keys"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://render.com/docs/mcp-server",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "none",
+      "note": "Answers 401 and points to an authorization server (api.render.com) without dynamic client registration, so one-click OAuth is not available; the catalog connects with the vendor's documented token instead."
+    }
+  }
+}

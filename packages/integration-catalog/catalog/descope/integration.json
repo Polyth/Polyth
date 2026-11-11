@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "descope",
+  "name": "Descope",
+  "publisher": "Descope",
+  "verified": true,
+  "summary": "Auth flows, users and tenants.",
+  "description": "Descope's hosted server manages users, tenants and project configuration.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.descope.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.descope.com"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.descope.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.descope.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

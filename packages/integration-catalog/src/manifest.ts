@@ -22,6 +22,8 @@ export const CATEGORY_ORDER = [
   "data",
   "quality",
   "ai",
+  "business",
+  "automation",
   "other",
 ] as const;
 
@@ -34,7 +36,7 @@ export type IntegrationAuth = "oauth" | "token" | "none";
 export type IntegrationStatus = "stable" | "beta";
 
 export interface IntegrationRemoteEndpoint {
-  /** Carries `{inputId}` tokens once manifests gain org/region pickers. */
+  /** May carry `{inputId}` tokens, each declared in `mcp.inputs`. */
   url: string;
   /** For `auth: "token"`: the header the token travels in. */
   tokenHeader?: { name: string; valuePrefix?: string };
@@ -43,11 +45,38 @@ export interface IntegrationRemoteEndpoint {
 }
 
 export interface IntegrationLocalEndpoint {
-  /** Exact command; a floating `@latest` is allowed only with `timeoutMs`. */
+  /** Exact command, pinned to an exact version. Arguments may carry
+   *  `{inputId}` tokens, each declared in `mcp.inputs`. */
   command: [string, ...string[]];
   /** First run downloads a package, so the default startup timeout is too tight. */
   timeoutMs?: number;
   requires?: Array<"node" | "python" | "docker">;
+}
+
+/** One allowed value of a choice input. */
+export interface IntegrationInputChoice {
+  value: string;
+  label: string;
+}
+
+/**
+ * A value the person supplies before connecting — a region, a site, an
+ * organization — interpolated where the endpoint says `{id}`. Exactly one of
+ * `choices` and `pattern` bounds it, and an input that lands in a URL's host
+ * must be a choice: a typed value must never decide which server receives the
+ * sign-in or the key.
+ */
+export interface IntegrationInput {
+  id: string;
+  label: string;
+  /** Shown under the field. */
+  hint?: string;
+  placeholder?: string;
+  /** Preselected value; must itself be valid. */
+  default?: string;
+  choices?: IntegrationInputChoice[];
+  /** Anchored (`^…$`) pattern for a free-text value. */
+  pattern?: string;
 }
 
 export interface IntegrationMcp {
@@ -57,6 +86,8 @@ export interface IntegrationMcp {
   local?: IntegrationLocalEndpoint;
   /** Where the user creates a token, for `auth: "token"`. */
   tokenHelpUrl?: string;
+  /** Values the endpoint interpolates. */
+  inputs?: IntegrationInput[];
 }
 
 /** A skill the vendor publishes for use next to its server. */
@@ -79,6 +110,10 @@ export interface IntegrationEvidence {
     state: "observed" | "documented" | "pending";
     httpStatus?: number;
     challenge?: "bearer-oauth" | "bearer" | "none" | "unknown";
+    /** For an OAuth challenge: whether the authorization server lets a client
+     *  register itself (`dynamic`), accepts a client metadata document only, or
+     *  needs an app registered by hand. One-click sign-in needs `dynamic`. */
+    registration?: "dynamic" | "metadata-document" | "none";
     note?: string;
   };
 }
@@ -200,13 +235,15 @@ function validateMcp(value: unknown): string[] {
       errors.push("mcp.remote must be an object");
     } else {
       const remote = value.remote;
-      if (!isHttpsUrl(remote.url)) errors.push("mcp.remote.url must be an https URL");
+      if (typeof remote.url !== "string" || !isHttpsUrl(remote.url.replace(INPUT_TOKEN, "x"))) {
+        errors.push("mcp.remote.url must be an https URL");
+      }
       if (remote.tokenHeader !== undefined) {
         if (value.auth !== "token") errors.push("mcp.remote.tokenHeader only applies to auth \"token\"");
         if (!isObject(remote.tokenHeader)) errors.push("mcp.remote.tokenHeader must be an object");
         else {
           const header = remote.tokenHeader;
-          if (typeof header.name !== "string" || !/^[A-Za-z][A-Za-z0-9-]*$/.test(header.name)) {
+          if (typeof header.name !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(header.name)) {
             errors.push("mcp.remote.tokenHeader.name must be an HTTP header name");
           }
           if (header.valuePrefix !== undefined && typeof header.valuePrefix !== "string") {
@@ -253,6 +290,8 @@ function validateMcp(value: unknown): string[] {
     }
   }
 
+  errors.push(...validateInputs(value));
+
   if (value.tokenHelpUrl !== undefined && !isHttpsUrl(value.tokenHelpUrl)) {
     errors.push("mcp.tokenHelpUrl must be an https URL");
   }
@@ -260,6 +299,133 @@ function validateMcp(value: unknown): string[] {
     errors.push("a token remote must say where the token is created (mcp.tokenHelpUrl)");
   }
   return errors;
+}
+
+/** `{region}` inside a URL or a command argument. */
+const INPUT_TOKEN = /\{([a-z][a-zA-Z0-9]*)\}/g;
+const INPUT_ID = /^[a-z][a-zA-Z0-9]{0,31}$/;
+/** What any input value may contain, whatever its own rule says: no
+ *  separators, no URL syntax, no shell syntax. */
+export const INPUT_VALUE_SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/** The `{id}` tokens a template uses, in order of first use. */
+export function inputTokens(template: string): string[] {
+  return [...new Set([...template.matchAll(INPUT_TOKEN)].map((match) => match[1]!))];
+}
+
+/** True when `{id}` sits in the host part of an endpoint URL. */
+function tokenInHost(url: string, id: string): boolean {
+  const afterScheme = url.replace(/^https:\/\//, "");
+  const host = afterScheme.split("/")[0] ?? "";
+  return host.includes(`{${id}}`);
+}
+
+function validateInputs(mcp: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const remote = isObject(mcp.remote) && typeof mcp.remote.url === "string" ? mcp.remote.url : undefined;
+  const local = isObject(mcp.local) && Array.isArray(mcp.local.command)
+    ? (mcp.local.command as unknown[]).filter((part): part is string => typeof part === "string")
+    : [];
+  const used = new Set([
+    ...(remote ? inputTokens(remote) : []),
+    ...local.flatMap((part) => inputTokens(part)),
+  ]);
+  if (local[0] && inputTokens(local[0]).length > 0) errors.push("mcp.local.command[0] cannot carry an input");
+
+  if (mcp.inputs === undefined) {
+    for (const id of used) errors.push(`{${id}} is used but not declared in mcp.inputs`);
+    return errors;
+  }
+  if (!Array.isArray(mcp.inputs) || mcp.inputs.length === 0 || mcp.inputs.length > 4) {
+    return [...errors, "mcp.inputs must hold one to four inputs"];
+  }
+  const declared = new Set<string>();
+  for (const [index, input] of mcp.inputs.entries()) {
+    const at = `mcp.inputs[${index}]`;
+    if (!isObject(input)) {
+      errors.push(`${at} must be an object`);
+      continue;
+    }
+    const id = input.id;
+    if (typeof id !== "string" || !INPUT_ID.test(id)) {
+      errors.push(`${at}.id must be a camelCase identifier`);
+      continue;
+    }
+    if (declared.has(id)) errors.push(`duplicate input "${id}"`);
+    declared.add(id);
+    if (!used.has(id)) errors.push(`input "${id}" is declared but the endpoint never uses {${id}}`);
+    if (typeof input.label !== "string" || !input.label.trim() || input.label.length > 60) {
+      errors.push(`${at}.label must be a non-empty string up to 60 characters`);
+    }
+    for (const field of ["hint", "placeholder"] as const) {
+      if (input[field] !== undefined && (typeof input[field] !== "string" || (input[field] as string).length > 160)) {
+        errors.push(`${at}.${field} must be a string up to 160 characters`);
+      }
+    }
+    const hasChoices = input.choices !== undefined;
+    const hasPattern = input.pattern !== undefined;
+    if (hasChoices === hasPattern) errors.push(`${at} needs exactly one of choices and pattern`);
+    if (hasChoices) {
+      if (!Array.isArray(input.choices) || input.choices.length === 0 || input.choices.length > 32) {
+        errors.push(`${at}.choices must hold 1 to 32 choices`);
+      } else {
+        for (const choice of input.choices) {
+          if (!isObject(choice) || typeof choice.value !== "string" || !INPUT_VALUE_SAFE.test(choice.value)
+            || typeof choice.label !== "string" || !choice.label.trim()) {
+            errors.push(`${at}.choices hold { value, label } with a plain value`);
+            break;
+          }
+        }
+      }
+    }
+    if (hasPattern) {
+      if (typeof input.pattern !== "string" || !input.pattern.startsWith("^") || !input.pattern.endsWith("$")) {
+        errors.push(`${at}.pattern must be anchored with ^ and $`);
+      } else {
+        try {
+          new RegExp(input.pattern);
+        } catch {
+          errors.push(`${at}.pattern is not a valid regular expression`);
+        }
+      }
+      if (remote && tokenInHost(remote, id)) {
+        errors.push(`input "${id}" picks the URL host, so it must be a choice, not a pattern`);
+      }
+    }
+    if (input.default !== undefined) {
+      const rule = { ...input, id } as unknown as IntegrationInput;
+      if (typeof input.default !== "string" || inputValueError(rule, input.default)) {
+        errors.push(`${at}.default must be a valid value for this input`);
+      }
+    }
+  }
+  for (const id of used) {
+    if (!declared.has(id)) errors.push(`{${id}} is used but not declared in mcp.inputs`);
+  }
+  return errors;
+}
+
+/** Why a value is not acceptable for an input, or undefined when it is. */
+export function inputValueError(input: IntegrationInput, value: string): string | undefined {
+  if (!INPUT_VALUE_SAFE.test(value)) return `${input.label} may use letters, digits, dots, dashes and underscores only.`;
+  if (input.choices) {
+    return input.choices.some((choice) => choice.value === value) ? undefined : `${input.label} must be one of the listed options.`;
+  }
+  if (input.pattern) {
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(input.pattern);
+    } catch {
+      return `${input.label} cannot be checked.`;
+    }
+    return pattern.test(value) ? undefined : `${input.label} does not look right.`;
+  }
+  return undefined;
+}
+
+/** Replace every `{id}` with its value; callers validate the values first. */
+export function interpolateInputs(template: string, values: Readonly<Record<string, string>>): string {
+  return template.replace(INPUT_TOKEN, (whole, id: string) => values[id] ?? whole);
 }
 
 /** Package runners whose first argument is a package to fetch and run. */
@@ -352,6 +518,10 @@ function validateEvidence(value: unknown): string[] {
   if (probe.challenge !== undefined
     && !["bearer-oauth", "bearer", "none", "unknown"].includes(String(probe.challenge))) {
     errors.push("evidence.probe.challenge must be bearer-oauth, bearer, none or unknown");
+  }
+  if (probe.registration !== undefined
+    && !["dynamic", "metadata-document", "none"].includes(String(probe.registration))) {
+    errors.push("evidence.probe.registration must be dynamic, metadata-document or none");
   }
   if (probe.note !== undefined && (typeof probe.note !== "string" || probe.note.length > 600)) {
     errors.push("evidence.probe.note must be a string up to 600 characters");

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "onlineornot",
+  "name": "OnlineOrNot",
+  "publisher": "OnlineOrNot",
+  "verified": true,
+  "summary": "Uptime checks and status pages.",
+  "description": "OnlineOrNot's hosted server manages uptime checks and status pages.",
+  "categories": [
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://onlineornot.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.onlineornot.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://onlineornot.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.onlineornot.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

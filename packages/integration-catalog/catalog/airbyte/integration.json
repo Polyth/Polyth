@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "airbyte",
+  "name": "Airbyte",
+  "publisher": "Airbyte",
+  "verified": true,
+  "summary": "Data pipelines and connectors.",
+  "description": "Airbyte's hosted server manages connections, sources and sync jobs.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://airbyte.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.airbyte.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://airbyte.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.airbyte.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

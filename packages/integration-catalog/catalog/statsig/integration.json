@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "statsig",
+  "name": "Statsig",
+  "publisher": "Statsig",
+  "verified": true,
+  "summary": "Feature gates and experiments.",
+  "description": "Statsig's hosted server reads and changes feature gates, dynamic configs and experiments.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.statsig.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://api.statsig.com/v1/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.statsig.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.statsig.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

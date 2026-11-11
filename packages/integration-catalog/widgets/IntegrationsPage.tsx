@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  catalogSections,
   catalogStats,
+  directorySections,
   endpoint,
   filterEntries,
   isLocal,
   type CatalogPayload,
   type CatalogSection,
 } from "../src/catalog.ts";
-import { CATEGORY_ORDER, type IntegrationCategory, type IntegrationManifest } from "../src/manifest.ts";
-import { brandMarkFor } from "../src/brand.ts";
+import {
+  CATEGORY_ORDER,
+  inputValueError,
+  interpolateInputs,
+  type IntegrationCategory,
+  type IntegrationInput,
+  type IntegrationManifest,
+} from "../src/manifest.ts";
 import {
   planInstall,
   type InstallScope,
@@ -22,74 +28,87 @@ const LOGO_PATH = "/api/integration-catalog/logo";
 const INSTALL_PATH = "/api/integration-catalog/install";
 const UNINSTALL_PATH = "/api/integration-catalog/uninstall";
 
+/** Below this page width one screen replaces the list-and-document pair. The
+ *  stylesheet's container query uses the same number. */
+const SPLIT_MIN_WIDTH = 900;
+
 type Load =
   | { state: "loading" }
   | { state: "ready"; payload: CatalogPayload }
-  | { state: "failed" };
+  | { state: "failed"; offline: boolean };
 
 /** A mutation in flight: which entry, and whether it is an install or remove. */
 type Busy = { entryId: string; kind: "install" | "uninstall" } | null;
 
+type Filter = IntegrationCategory | "all" | "connected";
+
 /** The page's own classification of why a connection is (or is not) offered. */
 type Action =
   | { kind: "connect"; scope: InstallScope; needsToken: boolean; tokenOptional: boolean }
-  | { kind: "disconnect"; catalogManaged: boolean }
+  | { kind: "disconnect"; catalogManaged: boolean; enabled: boolean; personalKey: boolean }
   | { kind: "blocked"; reason: "token-header-missing" | "local-unpinned" };
 
-function scopeLabel(scope: InstallScope, s: CatalogStrings): string {
-  if (scope === "project") return s.detailScopeProject;
+/** What the person sees after an action, until they pick another entry. */
+type Outcome = { tone: "error" | "done"; text: string; notes: string[] } | null;
+
+function scopeLabel(scope: InstallScope, hasProject: boolean, s: CatalogStrings): string {
+  if (scope === "project") return hasProject ? s.detailScopeProject : s.detailScopeSpaceNoProject;
   if (scope === "space") return s.detailScopeSpace;
   return s.detailScopePerson;
 }
 
 /** Decide what the action area offers for one entry, from pure rules. */
-function actionFor(
-  entry: IntegrationManifest,
-  installed: InstalledIntegration | undefined,
-): Action {
+function actionFor(entry: IntegrationManifest, installed: InstalledIntegration | undefined): Action {
   if (installed) {
-    return { kind: "disconnect", catalogManaged: installed.catalogManaged };
+    return {
+      kind: "disconnect",
+      catalogManaged: installed.catalogManaged,
+      enabled: installed.enabled,
+      personalKey: installed.scope === "person" && entry.mcp.auth === "token",
+    };
   }
   const auth = entry.mcp.auth;
-
   // A token entry that never says how the key travels cannot connect: it is
   // a structural gap in the manifest, not something the person can fill in.
   if (auth === "token" && entry.mcp.remote && !entry.mcp.remote.tokenHeader) {
     return { kind: "blocked", reason: "token-header-missing" };
   }
-
   if (auth === "token") {
     const tokenOptional = entry.mcp.remote?.tokenOptional === true;
     return { kind: "connect", scope: "person", needsToken: !tokenOptional, tokenOptional };
   }
-
-  if (isLocal(entry)) {
-    const plan = planInstall(entry);
-    if (!plan.ok && plan.failure === "local-unpinned") {
-      return { kind: "blocked", reason: "local-unpinned" };
-    }
-    return { kind: "connect", scope: plan.ok ? plan.scope : "project", needsToken: false, tokenOptional: false };
-  }
-
-  // OAuth and no-auth remotes install into the project (or the Space).
-  const plan = planInstall(entry);
+  // Defaults satisfy the inputs here: the question is only whether the
+  // command itself is pinned.
+  const plan = planInstall(entry, { inputs: defaultInputs(entry) });
+  if (!plan.ok && plan.failure === "local-unpinned") return { kind: "blocked", reason: "local-unpinned" };
   return { kind: "connect", scope: plan.ok ? plan.scope : "project", needsToken: false, tokenOptional: false };
+}
+
+/** Every input at its default, or a placeholder value that passes, so a
+ *  scope can be computed before the person typed anything. */
+function defaultInputs(entry: IntegrationManifest): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const input of entry.mcp.inputs ?? []) {
+    values[input.id] = input.default ?? input.choices?.[0]?.value ?? "x";
+  }
+  return values;
 }
 
 function sectionTitle(section: CatalogSection, s: CatalogStrings): string {
   if (section.id === "featured") return s.featured;
+  if (section.id === "connected") return s.connected;
   if (section.id in s.category) return s.category[section.id as IntegrationCategory];
   return section.id;
 }
 
-function probeText(entry: IntegrationManifest): string {
+function probeText(entry: IntegrationManifest, s: CatalogStrings): string {
   const probe = entry.evidence.probe;
   if (probe.state === "observed") {
     const status = probe.httpStatus !== undefined ? `HTTP ${probe.httpStatus}` : "HTTP ?";
     return `${status}${probe.challenge ? ` · ${probe.challenge}` : ""}${probe.note ? ` — ${probe.note}` : ""}`;
   }
-  if (probe.state === "documented") return `Documented by the vendor${probe.note ? ` — ${probe.note}` : ""}`;
-  return `Not checked yet${probe.note ? ` — ${probe.note}` : ""}`;
+  if (probe.state === "documented") return `${s.detailVerified}${probe.note ? ` — ${probe.note}` : ""}`;
+  return probe.note ?? "";
 }
 
 function requirementLabel(requirement: string): string {
@@ -98,51 +117,72 @@ function requirementLabel(requirement: string): string {
   return "Docker";
 }
 
+const isTyping = (target: EventTarget | null): boolean => {
+  const element = target as HTMLElement | null;
+  return !!element && (element.tagName === "INPUT" || element.tagName === "TEXTAREA" || element.tagName === "SELECT");
+};
+
 /**
- * The Integrations page: the catalog in place of Chat. A geometric two-pane
- * surface — a fixed-height list of services on the left, a structured detail
- * panel on the right — with the connection itself as the primary action.
+ * The Integrations page: the catalog in place of Chat. On a phone it is one
+ * screen at a time — the directory, or one service with a way back; from
+ * 900px of page width the directory and the chosen service sit side by side.
  */
-export default function IntegrationsPage({ projectId, locale, onOpenMcpSettings }: {
+export default function IntegrationsPage({ projectId, locale, onOpenMcpSettings, resource }: {
   projectId?: string | null;
   locale?: string;
   /** Opens the host's MCP settings; absent on a host without that route. */
   onOpenMcpSettings?: () => void;
+  /** An entry id to open directly, as passed to `openPage`. */
+  resource?: string | null;
 }) {
   const s = catalogStrings(locale);
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<IntegrationCategory | "all">("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(resource ?? null);
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState<Busy>(null);
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionNotes, setActionNotes] = useState<string[]>([]);
+  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const [inputsTouched, setInputsTouched] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
-  /** Narrow enough that the detail replaces the list instead of sitting beside
-   *  it. Read from the page's own width, the same measure the CSS queries. */
+  const shellRef = useRef<HTMLDivElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
+  /** Where the directory was scrolled when an entry opened on a phone. */
+  const listScroll = useRef(0);
   const [narrow, setNarrow] = useState(false);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(Boolean(resource));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = pageRef.current;
-    if (!node || typeof ResizeObserver === "undefined") return;
+    if (!node) return;
+    setNarrow(node.clientWidth > 0 && node.clientWidth < SPLIT_MIN_WIDTH);
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
-      setNarrow((entry?.contentRect.width ?? node.clientWidth) < 820);
+      const width = entry?.contentRect.width ?? node.clientWidth;
+      setNarrow(width > 0 && width < SPLIT_MIN_WIDTH);
     });
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
 
+  // A deep link that changes while the page is open selects the new entry.
+  useEffect(() => {
+    if (!resource) return;
+    setSelectedId(resource);
+    setDetailOpen(true);
+  }, [resource]);
+
   useEffect(() => {
     const controller = new AbortController();
     // A refresh after an action keeps the list on screen; only the first load
-    // shows the skeleton, so a server note is not wiped by the re-read.
+    // shows the skeleton, so an outcome is not wiped by the re-read.
     setLoad((current) => (current.state === "ready" ? current : { state: "loading" }));
     const queryString = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
     void (async () => {
@@ -157,35 +197,24 @@ export default function IntegrationsPage({ projectId, locale, onOpenMcpSettings 
         setLoad({ state: "ready", payload });
       } catch {
         if (controller.signal.aborted) return;
-        setLoad({ state: "failed" });
+        const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+        setLoad((current) => (current.state === "ready" ? current : { state: "failed", offline }));
       }
     })();
     return () => controller.abort();
   }, [attempt, projectId]);
 
+  // A catalog that failed because the network dropped reloads by itself when
+  // the network returns; nobody should have to find the retry button.
+  useEffect(() => {
+    if (load.state !== "failed") return;
+    const retry = () => setAttempt((value) => value + 1);
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [load.state]);
+
   const payload = load.state === "ready" ? load.payload : null;
   const entries = payload?.entries ?? [];
-
-  const visible = useMemo(
-    () => (payload ? filterEntries(payload.entries, { query, category }) : []),
-    [payload, query, category],
-  );
-
-  const sections = useMemo(
-    () => (payload && !query.trim() && category === "all" ? catalogSections(payload.entries) : []),
-    [payload, query, category],
-  );
-
-  const flat = useMemo(() => {
-    if (sections.length > 0) return sections.flatMap((section) => section.entries);
-    return visible;
-  }, [sections, visible]);
-
-  const selected = useMemo(() => {
-    const byId = entries.find((entry) => entry.id === selectedId);
-    if (byId && flat.some((entry) => entry.id === byId.id)) return byId;
-    return flat[0] ?? null;
-  }, [entries, selectedId, flat]);
 
   const installedById = useMemo(() => {
     const map = new Map<string, InstalledIntegration>();
@@ -194,52 +223,110 @@ export default function IntegrationsPage({ projectId, locale, onOpenMcpSettings 
     }
     return map;
   }, [payload]);
+  const connectedIds = useMemo(() => new Set(installedById.keys()), [installedById]);
 
-  const totals = useMemo(() => (payload ? catalogStats(payload.entries) : null), [payload]);
-  // Counts describe what the search leaves, so a filtered view never advertises
-  // entries it is not showing.
-  const shownTotals = useMemo(() => {
-    if (!payload) return null;
-    if (!query.trim()) return totals;
-    return catalogStats(visible);
-  }, [payload, query, totals, visible]);
+  const searching = query.trim().length > 0;
+  const visible = useMemo(() => {
+    if (!payload) return [];
+    if (filter === "connected") {
+      return filterEntries(payload.entries, { query }).filter((entry) => connectedIds.has(entry.id));
+    }
+    return filterEntries(payload.entries, { query, category: filter });
+  }, [payload, query, filter, connectedIds]);
 
-  const installed = selected ? installedById.get(selected.id) : undefined;
-  const action = useMemo(
-    () => (selected ? actionFor(selected, installed) : null),
-    [selected, installed],
+  const sections = useMemo(
+    () => (payload && !searching && filter === "all" ? directorySections(payload.entries, connectedIds) : []),
+    [payload, searching, filter, connectedIds],
   );
 
-  // Reset per-entry form state whenever the selection changes.
+  const flat = useMemo(
+    () => (sections.length > 0 ? sections.flatMap((section) => section.entries) : visible),
+    [sections, visible],
+  );
+
+  const selected = useMemo(() => {
+    const byId = entries.find((entry) => entry.id === selectedId);
+    // An entry opened on its own screen stays open even when a filter hides
+    // it in the directory behind it.
+    if (byId && (flat.some((entry) => entry.id === byId.id) || (narrow && detailOpen))) return byId;
+    return narrow ? (byId ?? null) : (flat[0] ?? null);
+  }, [entries, selectedId, flat, narrow, detailOpen]);
+
+  const totals = useMemo(() => (payload ? catalogStats(payload.entries) : null), [payload]);
+
+  const installed = selected ? installedById.get(selected.id) : undefined;
+  const action = useMemo(() => (selected ? actionFor(selected, installed) : null), [selected, installed]);
+
+  // Per-entry form state belongs to the entry on screen, whichever way the
+  // selection changed (a click, an arrow key, a filter that hid the old one).
   const selectedKey = selected?.id ?? null;
   useEffect(() => {
     setToken("");
     setShowToken(false);
-    setActionError(null);
-    setActionNotes([]);
-  }, [selectedId]);
+    setInputs(selected ? defaultInputsForForm(selected) : {});
+    setInputsTouched(false);
+    setOutcome(null);
+    setConfirming(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the id
+  }, [selectedKey]);
 
-  const onSelect = useCallback((id: string) => {
+  const openEntry = useCallback((id: string) => {
     setSelectedId(id);
-    // On a phone the tap opens the entry's own screen; there is no second pane
-    // to show it in.
-    if (narrow) setDetailOpen(true);
+    if (!narrow) return;
+    listScroll.current = shellRef.current?.scrollTop ?? 0;
+    setDetailOpen(true);
   }, [narrow]);
 
-  const closeDetail = useCallback(() => setDetailOpen(false), []);
+  const closeDetail = useCallback(() => {
+    setDetailOpen(false);
+  }, []);
+
+  // On a phone the entry is its own screen: it starts at the top with focus on
+  // the way back, and returning restores the directory where it was.
+  const wasOpen = useRef(detailOpen);
+  useLayoutEffect(() => {
+    if (!narrow) {
+      wasOpen.current = detailOpen;
+      return;
+    }
+    const shell = shellRef.current;
+    if (detailOpen && !wasOpen.current) {
+      if (shell) shell.scrollTop = 0;
+      backRef.current?.focus({ preventScroll: true });
+    } else if (!detailOpen && wasOpen.current) {
+      if (shell) shell.scrollTop = listScroll.current;
+      const row = selectedId ? document.getElementById(`icat-opt-${selectedId}`) : null;
+      row?.focus({ preventScroll: true });
+    }
+    wasOpen.current = detailOpen;
+  }, [detailOpen, narrow, selectedId]);
+
+  const inputErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    for (const input of selected?.mcp.inputs ?? []) {
+      const value = (inputs[input.id] ?? "").trim();
+      if (!value) {
+        if (input.default === undefined) errors[input.id] = fill(s.inputInvalid, { label: input.label });
+        continue;
+      }
+      const problem = inputValueError(input, value);
+      if (problem) errors[input.id] = problem;
+    }
+    return errors;
+  }, [selected, inputs, s]);
 
   const runInstall = useCallback(async () => {
     if (!selected || busy) return;
+    setInputsTouched(true);
+    if (Object.keys(inputErrors).length > 0) return;
     const tokenValue = token.trim();
-    const plan = planInstall(selected, { token: tokenValue || undefined });
+    const plan = planInstall(selected, { token: tokenValue || undefined, inputs });
     if (!plan.ok) {
-      setActionError(plan.message);
-      setActionNotes([]);
+      setOutcome({ tone: "error", text: plan.message, notes: [] });
       return;
     }
     setBusy({ entryId: selected.id, kind: "install" });
-    setActionError(null);
-    setActionNotes([]);
+    setOutcome(null);
     try {
       const response = await fetch(INSTALL_PATH, {
         method: "POST",
@@ -247,35 +334,37 @@ export default function IntegrationsPage({ projectId, locale, onOpenMcpSettings 
         body: JSON.stringify({
           entryId: selected.id,
           ...(projectId ? { projectId } : {}),
-          ...(plan.scope === "person" ? { token: tokenValue } : {}),
+          ...(plan.scope === "person" && tokenValue ? { token: tokenValue } : {}),
+          ...((selected.mcp.inputs?.length ?? 0) > 0 ? { inputs } : {}),
           scope: plan.scope,
         }),
       });
-      const body = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        message?: string;
-        notes?: string[];
-      };
-      if (!response.ok) {
-        setActionError(body.message || s.errorGeneric);
+      const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string; notes?: string[] };
+      // Another tab, or a double tap, got there first: the result the person
+      // wanted exists, so show it instead of an error.
+      if (response.status === 409 && body.error === "already-installed") {
+        setAttempt((value) => value + 1);
         return;
       }
-      setActionNotes(body.notes ?? []);
+      if (!response.ok) {
+        setOutcome({ tone: "error", text: body.message || s.errorGeneric, notes: [] });
+        return;
+      }
+      setOutcome({ tone: "done", text: s.connectedNow, notes: body.notes ?? [] });
       setToken("");
       setShowToken(false);
       setAttempt((value) => value + 1);
     } catch {
-      setActionError(s.errorGeneric);
+      setOutcome({ tone: "error", text: s.errorGeneric, notes: [] });
     } finally {
       setBusy(null);
     }
-  }, [selected, busy, token, projectId, s]);
+  }, [selected, busy, token, inputs, inputErrors, projectId, s]);
 
   const runUninstall = useCallback(async () => {
     if (!selected || !installed || busy) return;
     setBusy({ entryId: selected.id, kind: "uninstall" });
-    setActionError(null);
-    setActionNotes([]);
+    setOutcome(null);
     try {
       const response = await fetch(UNINSTALL_PATH, {
         method: "POST",
@@ -284,253 +373,310 @@ export default function IntegrationsPage({ projectId, locale, onOpenMcpSettings 
       });
       const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
       if (!response.ok) {
-        setActionError(body.message || s.errorGeneric);
+        setOutcome({ tone: "error", text: body.message || s.errorGeneric, notes: [] });
         return;
       }
+      setConfirming(false);
       setAttempt((value) => value + 1);
     } catch {
-      setActionError(s.errorGeneric);
+      setOutcome({ tone: "error", text: s.errorGeneric, notes: [] });
     } finally {
       setBusy(null);
     }
   }, [selected, installed, busy, projectId, s]);
 
-  // Keyboard: "/" focuses search, Esc clears it, arrows move, Enter opens.
-  const onKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
-      const target = event.target as HTMLElement;
-      const inSearch = target === searchRef.current;
-      const inInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA";
-
-      if (event.key === "/" && !inInput) {
+  // Keyboard: "/" focuses search, Esc steps back, arrows move through the list.
+  const onKeyDown = useCallback((event: React.KeyboardEvent) => {
+    const inSearch = event.target === searchRef.current;
+    const typing = isTyping(event.target);
+    if (event.key === "/" && !typing) {
+      event.preventDefault();
+      if (narrow && detailOpen) setDetailOpen(false);
+      searchRef.current?.focus();
+      return;
+    }
+    if (event.key === "Escape") {
+      if (confirming) {
         event.preventDefault();
-        searchRef.current?.focus();
+        setConfirming(false);
         return;
       }
-      if (event.key === "Escape") {
-        if (narrow && detailOpen) {
-          event.preventDefault();
-          setDetailOpen(false);
-          return;
-        }
-        if (inSearch && query) {
-          event.preventDefault();
-          setQuery("");
-          searchRef.current?.focus();
-        }
-        return;
-      }
-      if (inInput) return;
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        if (flat.length === 0) return;
+      if (narrow && detailOpen) {
         event.preventDefault();
-        const index = selected ? flat.findIndex((entry) => entry.id === selected.id) : -1;
-        const next = event.key === "ArrowDown"
-          ? Math.min(index + 1, flat.length - 1)
-          : Math.max(index - 1, 0);
-        setSelectedId(flat[next]?.id ?? flat[0]?.id ?? null);
+        setDetailOpen(false);
         return;
       }
-    },
-    [flat, selected, query, narrow, detailOpen],
-  );
+      if (inSearch && query) {
+        event.preventDefault();
+        setQuery("");
+      }
+      return;
+    }
+    if (typing || (narrow && detailOpen)) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (flat.length === 0) return;
+      event.preventDefault();
+      const index = selected ? flat.findIndex((entry) => entry.id === selected.id) : -1;
+      const next = event.key === "ArrowDown" ? Math.min(index + 1, flat.length - 1) : Math.max(index - 1, 0);
+      const id = flat[next]?.id ?? null;
+      setSelectedId(id);
+      if (id) document.getElementById(`icat-opt-${id}`)?.focus({ preventScroll: false });
+    }
+  }, [flat, selected, query, narrow, detailOpen, confirming]);
 
-  // Keep the active list row scrolled into view as selection changes.
+  // Keep the active row in view when the selection moves on a wide page.
   useEffect(() => {
-    const active = listRef.current?.querySelector('[aria-selected="true"]');
-    active?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+    if (narrow) return;
+    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [selected, narrow]);
 
   const emptyVisible = payload !== null && entries.length > 0 && visible.length === 0;
+  const view = narrow ? (detailOpen && selected ? "detail" : "list") : "split";
+  const connectedCount = connectedIds.size;
 
   return (
     <div className="icat-page" data-project={projectId ?? undefined} onKeyDown={onKeyDown} ref={pageRef}>
-      <div className="icat-shell">
-      <header className="icat-head" data-hidden={narrow && detailOpen ? "true" : undefined}>
-        <h1>{s.title}</h1>
-        <p className="icat-subtitle">{s.subtitle}</p>
-      </header>
+      <div className="icat-shell" ref={shellRef} data-view={view}>
+        <header className="icat-head" hidden={view === "detail"}>
+          <div className="icat-head-text">
+            <h1>{s.title}</h1>
+            <p className="icat-subtitle">{s.subtitle}</p>
+          </div>
+          {totals ? (
+            <p className="icat-count">
+              {connectedCount > 0
+                ? fill(s.countConnected, { total: totals.total, connected: connectedCount })
+                : fill(s.countAll, { total: totals.total })}
+            </p>
+          ) : null}
+        </header>
 
-      {load.state === "loading" ? <Skeleton s={s} /> : null}
+        {load.state === "loading" ? <Skeleton s={s} /> : null}
 
-      {load.state === "failed" ? (
-        <div className="icat-state">
-          <p className="icat-state-text">{s.loadFailed}</p>
-          <button type="button" className="icat-btn-secondary" onClick={() => setAttempt((value) => value + 1)}>
-            {s.retry}
-          </button>
-        </div>
-      ) : null}
+        {load.state === "failed" ? (
+          <div className="icat-state" role="alert">
+            <p className="icat-state-text">{load.offline ? s.offline : s.loadFailed}</p>
+            <button type="button" className="icat-btn-secondary" onClick={() => setAttempt((value) => value + 1)}>
+              {s.retry}
+            </button>
+          </div>
+        ) : null}
 
-      {payload && payload.problems.length > 0 ? <Problems problems={payload.problems} s={s} /> : null}
+        {payload && view !== "detail" && payload.problems.length > 0 ? <Problems problems={payload.problems} s={s} /> : null}
+        {payload && view !== "detail" && payload.connections === "unavailable" ? (
+          <p className="icat-notice" role="status">{s.connectionsUnavailable}</p>
+        ) : null}
 
-      {payload && payload.entries.length === 0 ? (
-        <div className="icat-state">
-          <p className="icat-state-text">{s.empty}</p>
-        </div>
-      ) : null}
+        {payload && payload.entries.length === 0 ? (
+          <div className="icat-state">
+            <p className="icat-state-text">{s.empty}</p>
+          </div>
+        ) : null}
 
-      {payload && payload.entries.length > 0 ? (
-        <div
-          className="icat-body"
-          /* A filter that empties the list while an entry is open must not
-             leave a phone on a blank screen: the directory owns the view when
-             there is nothing to show beside it. */
-          data-view={narrow ? (detailOpen && selected ? "detail" : "list") : "split"}
-          data-empty={emptyVisible ? "true" : undefined}
-        >
-          {/* The search and the categories belong to the directory, so they live
-              inside its column: the entry's own screen has no list to filter,
-              and hiding them with the column is honest (display: none) instead
-              of leaving them in the tab order. */}
-          <div className="icat-col-list">
-            <div className="icat-list-head">
-              <label className="icat-search">
-                <span className="icat-sr">{s.search}</span>
-                <input
-                  ref={searchRef}
-                  type="search"
-                  value={query}
-                  placeholder={s.search}
-                  aria-label={s.search}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </label>
-              <div className="icat-chips" role="group" aria-label={s.sections}>
-                <button
-                  type="button"
-                  className="icat-chip"
-                  aria-pressed={category === "all"}
-                  onClick={() => setCategory("all")}
-                >
-                  {s.all}
-                  <span className="icat-chip-count">{shownTotals?.total ?? 0}</span>
-                </button>
-                {CATEGORY_ORDER.filter((id) => (totals?.byCategory[id] ?? 0) > 0).map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    className="icat-chip"
-                    aria-pressed={category === id}
-                    onClick={() => setCategory(id)}
-                  >
-                    {s.category[id]}
-                  </button>
-                ))}
+        {payload && payload.entries.length > 0 ? (
+          <div className="icat-body" data-view={view} data-empty={emptyVisible ? "true" : undefined}>
+            {/* The search and the categories belong to the directory, so they
+                live inside its column and leave with it on a phone (display:
+                none, not a hidden-but-tabbable row). */}
+            <div className="icat-col-list" hidden={view === "detail"}>
+              <div className="icat-list-head">
+                <label className="icat-search">
+                  <span className="icat-sr">{s.search}</span>
+                  <span className="icat-search-glyph" aria-hidden="true" />
+                  <input
+                    ref={searchRef}
+                    type="search"
+                    value={query}
+                    placeholder={s.search}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    enterKeyHint="search"
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                </label>
+                <div className="icat-chips" role="group" aria-label={s.sections}>
+                  <Chip pressed={filter === "all"} onClick={() => setFilter("all")} count={totals?.total}>{s.all}</Chip>
+                  {connectedCount > 0 ? (
+                    <Chip pressed={filter === "connected"} onClick={() => setFilter("connected")} count={connectedCount} tone="on">
+                      {s.connected}
+                    </Chip>
+                  ) : null}
+                  {CATEGORY_ORDER.filter((id) => (totals?.byCategory[id] ?? 0) > 0).map((id) => (
+                    <Chip key={id} pressed={filter === id} onClick={() => setFilter(id)}>{s.category[id]}</Chip>
+                  ))}
+                </div>
+              </div>
+              <div
+                className="icat-list"
+                ref={listRef}
+                role="listbox"
+                aria-label={s.title}
+                aria-activedescendant={!narrow && selected ? `icat-opt-${selected.id}` : undefined}
+              >
+                {emptyVisible ? (
+                  <div className="icat-empty" role="presentation">
+                    <p className="icat-empty-text" role="status">
+                      {filter !== "all" && filter !== "connected"
+                        ? fill(s.searchEmptyIn, { query, category: s.category[filter] })
+                        : fill(s.searchEmpty, { query })}
+                    </p>
+                    {filter !== "all" ? (
+                      <button type="button" className="icat-btn-secondary" onClick={() => setFilter("all")}>
+                        {s.searchEverywhere}
+                      </button>
+                    ) : (
+                      <button type="button" className="icat-btn-secondary" onClick={() => { setQuery(""); searchRef.current?.focus(); }}>
+                        {s.searchClear}
+                      </button>
+                    )}
+                  </div>
+                ) : sections.length > 0 ? (
+                  sections.map((section) => (
+                    <SectionGroup key={section.id} title={sectionTitle(section, s)} count={section.entries.length}>
+                      {section.entries.map((entry) => (
+                        <Row
+                          key={entry.id}
+                          entry={entry}
+                          active={!narrow && selected?.id === entry.id}
+                          installed={installedById.get(entry.id)}
+                          s={s}
+                          onSelect={openEntry}
+                        />
+                      ))}
+                    </SectionGroup>
+                  ))
+                ) : (
+                  visible.map((entry) => (
+                    <Row
+                      key={entry.id}
+                      entry={entry}
+                      active={!narrow && selected?.id === entry.id}
+                      installed={installedById.get(entry.id)}
+                      s={s}
+                      onSelect={openEntry}
+                    />
+                  ))
+                )}
               </div>
             </div>
-            <div
-              className="icat-list"
-              ref={listRef}
-              role="listbox"
-              aria-label={s.title}
-              aria-activedescendant={selected ? `icat-opt-${selected.id}` : undefined}
-            >
-              {emptyVisible ? (
-                <div className="icat-empty">
-                  <p className="icat-empty-text">{fill(s.searchEmpty, { query })}</p>
-                  <button type="button" className="icat-btn-secondary" onClick={() => setQuery("")}>
-                    {s.searchClear}
-                  </button>
-                </div>
-              ) : sections.length > 0 ? (
-                sections.map((section) => (
-                  <section key={section.id} className="icat-section">
-                    <h2 className="icat-section-title">
-                      {sectionTitle(section, s)}
-                      <span className="icat-section-count">{section.entries.length}</span>
-                    </h2>
-                    {section.entries.map((entry) => (
-                      <Row
-                        key={entry.id}
-                        entry={entry}
-                        active={selected?.id === entry.id}
-                        installed={installedById.get(entry.id)}
-                        s={s}
-                        onSelect={onSelect}
-                      />
-                    ))}
-                  </section>
-                ))
-              ) : (
-                visible.map((entry) => (
-                  <Row
-                    key={entry.id}
-                    entry={entry}
-                    active={selected?.id === entry.id}
-                    installed={installedById.get(entry.id)}
-                    s={s}
-                    onSelect={onSelect}
-                  />
-                ))
-              )}
-            </div>
-          </div>
 
-          {selected && (!narrow || detailOpen) ? (
-            <div className="icat-pane">
-              {narrow ? (
-                <button type="button" className="icat-back" onClick={closeDetail}>
-                  <span className="icat-back-glyph" aria-hidden="true">←</span>
-                  {s.back}
-                </button>
-              ) : null}
-              <Detail
-                entry={selected}
-                installed={installed}
-                action={action}
-                busy={busy?.entryId === selected.id ? busy.kind : null}
-                token={token}
-                showToken={showToken}
-                onTokenChange={setToken}
-                onToggleToken={() => setShowToken((value) => !value)}
-                onInstall={runInstall}
-                onUninstall={runUninstall}
-                actionError={actionError}
-                actionNotes={actionNotes}
-                onOpenMcpSettings={onOpenMcpSettings}
-                s={s}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+            {selected && view !== "list" ? (
+              <div className="icat-pane">
+                {narrow ? (
+                  <div className="icat-pane-top">
+                    <button type="button" className="icat-back" onClick={closeDetail} ref={backRef}>
+                      <span className="icat-back-glyph" aria-hidden="true" />
+                      {s.back}
+                    </button>
+                  </div>
+                ) : null}
+                <Detail
+                  entry={selected}
+                  installed={installed}
+                  action={action}
+                  hasProject={Boolean(projectId)}
+                  busy={busy?.entryId === selected.id ? busy.kind : null}
+                  token={token}
+                  showToken={showToken}
+                  inputs={inputs}
+                  inputErrors={inputsTouched ? inputErrors : {}}
+                  canConnect={Object.keys(inputErrors).length === 0}
+                  confirming={confirming}
+                  onTokenChange={setToken}
+                  onToggleToken={() => setShowToken((value) => !value)}
+                  onInputChange={(id, value) => setInputs((current) => ({ ...current, [id]: value }))}
+                  onInputBlur={() => setInputsTouched(true)}
+                  onInstall={runInstall}
+                  onUninstall={() => (action?.kind === "disconnect" && action.personalKey && !confirming ? setConfirming(true) : void runUninstall())}
+                  onCancelConfirm={() => setConfirming(false)}
+                  outcome={outcome}
+                  onOpenMcpSettings={onOpenMcpSettings}
+                  s={s}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
+/** The form starts from the manifest defaults; free-text inputs start empty. */
+function defaultInputsForForm(entry: IntegrationManifest): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const input of entry.mcp.inputs ?? []) values[input.id] = input.default ?? "";
+  return values;
+}
+
+function Chip(props: {
+  pressed: boolean;
+  onClick: () => void;
+  count?: number | undefined;
+  tone?: "on";
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="icat-chip"
+      aria-pressed={props.pressed}
+      data-tone={props.tone}
+      onClick={props.onClick}
+    >
+      {props.tone === "on" ? <span className="icat-chip-dot" aria-hidden="true" /> : null}
+      {props.children}
+      {props.count !== undefined ? <span className="icat-chip-count">{props.count}</span> : null}
+    </button>
+  );
+}
+
+/** A labelled group of options: a heading may not sit directly in a listbox. */
+function SectionGroup({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+  const id = useId();
+  return (
+    <div className="icat-section" role="group" aria-labelledby={id}>
+      <div className="icat-section-title" id={id} role="presentation">
+        <span>{title}</span>
+        <span className="icat-section-count" aria-hidden="true">{count}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /**
- * The service's own glyph on a brand-tinted tile. Vector marks are drawn as a
- * mask so the glyph follows the theme; the two raster marks are alpha-only for
- * the same reason. Without a mark the entry keeps a letter, never a broken
- * image.
+ * The service's own tile: a finished square image (a simple-icons glyph on its
+ * brand colour, or the vendor's app icon), rounded and outlined here. Row
+ * marks load lazily, so a 200-entry directory asks only for what is on screen.
+ * A mark that fails to load leaves the entry's initial, never a broken image.
  */
 function Mark({ entry, size }: { entry: IntegrationManifest; size: "row" | "detail" }) {
-  const mark = brandMarkFor(entry.id);
-  const style = mark ? ({ "--icat-brand": mark.color } as React.CSSProperties) : undefined;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [entry.id]);
   return (
-    <span
-      className={`icat-mark icat-mark-${size}${mark ? "" : " icat-mark-letter"}`}
-      style={style}
-      aria-hidden="true"
-    >
-      {mark
-        ? (
-          <span
-            className="icat-mark-glyph"
-            style={{ maskImage: `url(${LOGO_PATH}/${entry.id})`, WebkitMaskImage: `url(${LOGO_PATH}/${entry.id})` }}
+    <span className={`icat-mark icat-mark-${size}`} data-fallback={failed ? "true" : undefined} aria-hidden="true">
+      {failed
+        ? <span className="icat-mark-letter">{entry.name.slice(0, 1)}</span>
+        : (
+          <img
+            src={`${LOGO_PATH}/${encodeURIComponent(entry.id)}`}
+            alt=""
+            width={size === "row" ? 40 : 64}
+            height={size === "row" ? 40 : 64}
+            loading={size === "row" ? "lazy" : "eager"}
+            decoding="async"
+            draggable={false}
+            onError={() => setFailed(true)}
           />
-        )
-        : entry.name.slice(0, 1)}
+        )}
     </span>
   );
 }
 
-/** A catalog row: the service mark, its name, one line of what it gives the
- *  agent, and whether it is connected. */
+/** A directory row: the mark, the name, one line of what it gives the agent,
+ *  and whether it is connected. */
 function Row(props: {
   entry: IntegrationManifest;
   active: boolean;
@@ -539,6 +685,7 @@ function Row(props: {
   onSelect: (id: string) => void;
 }) {
   const { entry, active, installed, s, onSelect } = props;
+  const status = installed ? (installed.enabled ? s.installed : s.installedOff) : undefined;
   return (
     <button
       type="button"
@@ -557,170 +704,236 @@ function Row(props: {
           {isLocal(entry) ? <span className="icat-badge">{s.local}</span> : null}
         </span>
         <span className="icat-row-summary">{entry.summary}</span>
+        {status ? <span className="icat-sr">, {status}</span> : null}
       </span>
-      {installed
-        ? <span className={`icat-row-status${installed.enabled ? " icat-row-status-on" : ""}`} role="img" aria-label={s.installed} title={s.installed} />
-        : <span className="icat-row-status" aria-hidden="true" />}
+      <span className="icat-row-end">
+        {installed ? (
+          <span
+            className="icat-row-status"
+            data-on={installed.enabled ? "true" : undefined}
+            title={status}
+            aria-hidden="true"
+          />
+        ) : null}
+        <span className="icat-row-chevron" aria-hidden="true" />
+      </span>
     </button>
   );
 }
 
-/** The structured detail panel for the selected entry. */
+/** The chosen service as a short document with the connection card on top. */
 function Detail(props: {
   entry: IntegrationManifest;
   installed: InstalledIntegration | undefined;
   action: Action | null;
+  hasProject: boolean;
   busy: "install" | "uninstall" | null;
   token: string;
   showToken: boolean;
+  inputs: Record<string, string>;
+  inputErrors: Record<string, string>;
+  canConnect: boolean;
+  confirming: boolean;
   onTokenChange: (value: string) => void;
   onToggleToken: () => void;
+  onInputChange: (id: string, value: string) => void;
+  onInputBlur: () => void;
   onInstall: () => void;
   onUninstall: () => void;
-  actionError: string | null;
-  actionNotes: string[];
+  onCancelConfirm: () => void;
+  outcome: Outcome;
   onOpenMcpSettings?: (() => void) | undefined;
   s: CatalogStrings;
 }) {
   const {
-    entry, installed, action, busy, token, showToken,
-    onTokenChange, onToggleToken, onInstall, onUninstall, actionError, actionNotes,
-    onOpenMcpSettings, s,
+    entry, installed, action, hasProject, busy, token, showToken, inputs, inputErrors, canConnect, confirming,
+    onTokenChange, onToggleToken, onInputChange, onInputBlur, onInstall, onUninstall, onCancelConfirm,
+    outcome, onOpenMcpSettings, s,
   } = props;
   const local = isLocal(entry);
-  const target = endpoint(entry);
-  const probe = entry.evidence.probe;
+  // The endpoint as it will be installed: with the chosen site or
+  // organization filled in, not the manifest's template.
+  const template = endpoint(entry);
+  const target = template && entry.mcp.inputs?.length
+    ? interpolateInputs(template, Object.fromEntries((entry.mcp.inputs ?? []).map((input) => [
+      input.id,
+      inputs[input.id]?.trim() || input.default || `{${input.id}}`,
+    ])))
+    : template;
   const skills = entry.skills ?? [];
   const requires = entry.mcp.local?.requires ?? [];
-
-  const connectDisabled =
-    busy !== null || action === null || action.kind !== "connect"
-    || (action.kind === "connect" && action.needsToken && token.trim().length === 0);
-  const showTokenField = action?.kind === "connect" && action.scope === "person"
-    && entry.mcp.auth === "token";
+  const registration = entry.evidence.probe.registration;
+  const connect = action?.kind === "connect" ? action : null;
+  const disconnect = action?.kind === "disconnect" ? action : null;
+  const tokenMissing = Boolean(connect?.needsToken && token.trim().length === 0);
+  const connectDisabled = busy !== null || !connect || tokenMissing;
+  const showTokenField = connect?.scope === "person" && entry.mcp.auth === "token";
+  const showInputs = !installed && (entry.mcp.inputs?.length ?? 0) > 0;
+  const titleId = useId();
 
   return (
-    <article className="icat-detail" aria-labelledby="icat-detail-title">
+    <article className="icat-detail" aria-labelledby={titleId}>
       <header className="icat-detail-head">
         <Mark entry={entry} size="detail" />
         <div className="icat-detail-head-text">
           <div className="icat-detail-title-row">
-            <h2 id="icat-detail-title">{entry.name}</h2>
+            <h2 id={titleId}>{entry.name}</h2>
             {entry.status === "beta" ? <span className="icat-pill">{s.beta}</span> : null}
-            {installed ? <span className="icat-pill icat-pill-on">{s.installed}</span> : null}
+            {local ? <span className="icat-pill">{s.local}</span> : null}
+            {installed ? (
+              <span className="icat-pill icat-pill-on" data-off={installed.enabled ? undefined : "true"}>
+                {installed.enabled ? s.installed : s.installedOff}
+              </span>
+            ) : null}
           </div>
           <p className="icat-detail-summary">{entry.summary}</p>
           <p className="icat-detail-publisher">
-            <span>{entry.publisher}</span>
+            <span>{fill(s.publishedBy, { publisher: entry.publisher })}</span>
             <span className="icat-dot" aria-hidden="true">·</span>
             <span>{entry.verified ? s.detailVerified : s.detailThirdParty}</span>
-            <a className="icat-home" href={entry.homepage} target="_blank" rel="noreferrer noopener">
-              {s.detailHomepage}
-              <span aria-hidden="true">↗</span>
-            </a>
           </p>
         </div>
       </header>
 
-      {/* The one filled box on the page: the facts, the field they may need and
-          the action that depends on both. The action keeps one place — the
-          card's bottom-inline-end — for every entry. */}
-      <section className="icat-card">
-        <h3 className="icat-card-title">{s.detailConnection}</h3>
-        <div className="icat-card-main">
-          <dl className="icat-facts">
+      {/* The one filled box on the page: the facts, the fields they may need
+          and the action that depends on both. */}
+      <section className="icat-card" aria-label={s.detailConnection}>
+        <dl className="icat-facts">
+          <div className="icat-fact">
+            <dt>{s.detailSignIn}</dt>
+            <dd>
+              <span>
+                {entry.mcp.auth === "oauth"
+                  ? s.authOauth
+                  : entry.mcp.auth === "token"
+                    ? (entry.mcp.remote?.tokenOptional === true ? s.authTokenOptional : s.authToken)
+                    : (local ? s.authLocal : s.authNone)}
+              </span>
+              {entry.mcp.auth === "oauth" && !installed ? <span className="icat-fact-note">{s.authOauthNote}</span> : null}
+            </dd>
+          </div>
+          {installed || connect ? (
             <div className="icat-fact">
-              <dt>{s.detailSignIn}</dt>
+              <dt>{s.detailScope}</dt>
               <dd>
-                <span>
-                  {entry.mcp.auth === "oauth"
-                    ? s.authOauth
-                    : entry.mcp.auth === "token"
-                      ? (entry.mcp.remote?.tokenOptional === true ? s.authTokenOptional : s.authToken)
-                      : (local ? s.authLocal : s.authNone)}
-                </span>
-                {entry.mcp.auth === "oauth" ? <span className="icat-fact-note">{s.authOauthNote}</span> : null}
+                <span>{scopeLabel(installed ? installed.scope : connect!.scope, hasProject || installed?.scope === "project", s)}</span>
+                {connect?.scope === "person" ? <span className="icat-fact-note">{s.detailTokenScope}</span> : null}
               </dd>
             </div>
-            {(installed || action?.kind === "connect") ? (
-              <div className="icat-fact">
-                <dt>{s.detailScope}</dt>
-                <dd>
-                  <span>{scopeLabel(installed ? installed.scope : (action as Extract<Action, { kind: "connect" }>).scope, s)}</span>
-                  {action?.kind === "connect" && action.scope === "person"
-                    ? <span className="icat-fact-note">{s.detailTokenScope}</span>
-                    : null}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-
-          {showTokenField ? (
-            <TokenField
-              entryId={entry.id}
-              tokenHelpUrl={entry.mcp.tokenHelpUrl}
-              token={token}
-              showToken={showToken}
-              onTokenChange={onTokenChange}
-              onToggleToken={onToggleToken}
-              s={s}
-            />
           ) : null}
-
-          {action?.kind === "blocked" && action.reason === "local-unpinned" ? (
-            <div className="icat-blocked">
-              <p className="icat-blocked-text">{s.detailLocalPin}</p>
-              <span className="icat-mono">{endpoint(entry)}</span>
+          {requires.length > 0 ? (
+            <div className="icat-fact">
+              <dt>{s.requiresLabel}</dt>
+              <dd>{requires.map(requirementLabel).join(", ")}</dd>
             </div>
           ) : null}
+        </dl>
 
-          {action?.kind === "blocked" && action.reason === "token-header-missing" ? (
-            <p className="icat-blocked-text">{s.detailTokenMissing}</p>
-          ) : null}
-        </div>
+        {showInputs ? (
+          <fieldset className="icat-inputs">
+            <legend className="icat-sr">{s.inputsTitle}</legend>
+            {(entry.mcp.inputs ?? []).map((input) => (
+              <InputField
+                key={input.id}
+                entryId={entry.id}
+                input={input}
+                value={inputs[input.id] ?? ""}
+                error={inputErrors[input.id]}
+                onChange={(value) => onInputChange(input.id, value)}
+                onBlur={onInputBlur}
+              />
+            ))}
+          </fieldset>
+        ) : null}
+
+        {showTokenField ? (
+          <TokenField
+            entryId={entry.id}
+            tokenHelpUrl={entry.mcp.tokenHelpUrl}
+            token={token}
+            showToken={showToken}
+            optional={connect?.tokenOptional === true}
+            onTokenChange={onTokenChange}
+            onToggleToken={onToggleToken}
+            onSubmit={() => { if (!connectDisabled && canConnect) onInstall(); }}
+            s={s}
+          />
+        ) : null}
+
+        {action?.kind === "blocked" && action.reason === "local-unpinned" ? (
+          <div className="icat-blocked">
+            <p className="icat-blocked-text">{s.detailLocalPin}</p>
+            <span className="icat-mono">{target}</span>
+          </div>
+        ) : null}
+        {action?.kind === "blocked" && action.reason === "token-header-missing" ? (
+          <p className="icat-blocked-text">{s.detailTokenMissing}</p>
+        ) : null}
+
+        {disconnect && !disconnect.enabled ? <p className="icat-fact-note">{s.installedOffNote}</p> : null}
 
         <div className="icat-card-action" aria-live="polite">
-          {action?.kind === "connect" ? (
-            <button type="button" className="icat-btn-primary" disabled={connectDisabled} onClick={onInstall}>
-              {busy === "install" ? <span className="icat-spinner" aria-hidden="true" /> : null}
-              {busy === "install" ? s.installing : s.install}
-            </button>
+          {connect ? (
+            <>
+              <button type="button" className="icat-btn-primary" disabled={connectDisabled} aria-disabled={connectDisabled || !canConnect} onClick={onInstall}>
+                {busy === "install" ? <span className="icat-spinner" aria-hidden="true" /> : null}
+                {busy === "install" ? s.installing : s.install}
+              </button>
+              {tokenMissing ? <span className="icat-action-hint">{s.tokenNeeded}</span> : null}
+            </>
           ) : null}
-          {action?.kind === "disconnect" ? (
-            action.catalogManaged ? (
-              <button
-                type="button"
-                className="icat-btn-secondary icat-btn-danger"
-                disabled={busy !== null}
-                onClick={onUninstall}
-              >
+          {disconnect && disconnect.catalogManaged && confirming ? (
+            <div className="icat-confirm" role="group" aria-label={s.uninstall}>
+              <p className="icat-confirm-text">{fill(s.disconnectKeyWarning, { name: entry.name })}</p>
+              <div className="icat-confirm-actions">
+                <button type="button" className="icat-btn-secondary" onClick={onCancelConfirm} disabled={busy !== null}>{s.cancel}</button>
+                <button type="button" className="icat-btn-secondary icat-btn-danger" onClick={onUninstall} disabled={busy !== null}>
+                  {busy === "uninstall" ? <span className="icat-spinner" aria-hidden="true" /> : null}
+                  {busy === "uninstall" ? s.uninstalling : s.disconnectConfirm}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {disconnect && disconnect.catalogManaged && !confirming ? (
+            <div className="icat-card-buttons">
+              {!disconnect.enabled && onOpenMcpSettings ? (
+                <button type="button" className="icat-btn-secondary" onClick={onOpenMcpSettings}>{s.manageInSettings}</button>
+              ) : null}
+              <button type="button" className="icat-btn-secondary icat-btn-danger" disabled={busy !== null} onClick={onUninstall}>
                 {busy === "uninstall" ? <span className="icat-spinner" aria-hidden="true" /> : null}
                 {busy === "uninstall" ? s.uninstalling : s.uninstall}
               </button>
-            ) : (
-              <div className="icat-card-manual">
-                <span className="icat-manual">{s.installedManual}</span>
-                {onOpenMcpSettings ? (
-                  <button type="button" className="icat-btn-secondary" onClick={onOpenMcpSettings}>
-                    {s.manageInSettings}
-                  </button>
-                ) : null}
-              </div>
-            )
+            </div>
+          ) : null}
+          {disconnect && !disconnect.catalogManaged ? (
+            <div className="icat-card-manual">
+              <span className="icat-manual">{s.installedManual}</span>
+              {onOpenMcpSettings ? (
+                <button type="button" className="icat-btn-secondary" onClick={onOpenMcpSettings}>{s.manageInSettings}</button>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
-        {actionError ? <p className="icat-action-error" role="alert">{actionError}</p> : null}
-        {actionNotes.length > 0 ? (
-          <ul className="icat-action-notes">
-            {actionNotes.map((note) => <li key={note}>{note}</li>)}
-          </ul>
+        {outcome ? (
+          <div className="icat-outcome" data-tone={outcome.tone} role={outcome.tone === "error" ? "alert" : "status"}>
+            <p className="icat-outcome-text">{outcome.text}</p>
+            {outcome.notes.length > 0 ? (
+              <ul className="icat-outcome-notes">
+                {outcome.notes.map((note) => <li key={note}>{note}</li>)}
+              </ul>
+            ) : null}
+          </div>
         ) : null}
       </section>
 
       <section className="icat-sec">
         <h3 className="icat-sec-label">{s.detailAbout}</h3>
         <p className="icat-sec-body">{entry.description}</p>
+        <a className="icat-link icat-home" href={entry.homepage} target="_blank" rel="noreferrer noopener">
+          {fill(s.openService, { name: entry.name })}
+          <span aria-hidden="true"> ↗</span>
+        </a>
       </section>
 
       <section className="icat-sec">
@@ -736,10 +949,10 @@ function Detail(props: {
               <dd><span className="icat-mono">{target}</span></dd>
             </div>
           ) : null}
-          {requires.length > 0 ? (
+          {entry.mcp.auth === "oauth" || registration === "none" ? (
             <div className="icat-fact">
-              <dt>{s.requiresLabel}</dt>
-              <dd>{requires.map(requirementLabel).join(", ")}</dd>
+              <dt>{s.detailSignInMethod}</dt>
+              <dd>{registration === "none" ? s.registrationNone : s.registrationDynamic}</dd>
             </div>
           ) : null}
           {skills.length > 0 ? (
@@ -762,66 +975,119 @@ function Detail(props: {
             <dt>{s.detailSource}</dt>
             <dd>
               <a className="icat-link" href={entry.evidence.source} target="_blank" rel="noreferrer noopener">
-                {entry.evidence.source}
+                {entry.evidence.source.replace(/^https:\/\//, "")}
               </a>
             </dd>
           </div>
-          <div className="icat-fact">
-            <dt>{s.detailProbe}</dt>
-            <dd>
-              <details className="icat-evidence">
-                <summary>{s.detailProbeMore}</summary>
-                <p className="icat-evidence-body">{probeText(entry)}</p>
-              </details>
-            </dd>
-          </div>
         </dl>
+        <details className="icat-evidence">
+          <summary>{s.detailProbeMore}</summary>
+          <p className="icat-evidence-body">{probeText(entry, s)}</p>
+        </details>
       </section>
     </article>
   );
 }
 
-/** The API key field: a token entry asks for the key before it can act. */
+/** A region, site or organization the endpoint needs. A choice is a native
+ *  select (the phone's own picker); free text is checked as it is typed. */
+function InputField(props: {
+  entryId: string;
+  input: IntegrationInput;
+  value: string;
+  error: string | undefined;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+}) {
+  const { entryId, input, value, error, onChange, onBlur } = props;
+  const id = `icat-input-${entryId}-${input.id}`;
+  const hintId = `${id}-hint`;
+  return (
+    <div className="icat-field" data-invalid={error ? "true" : undefined}>
+      <label className="icat-field-label" htmlFor={id}>{input.label}</label>
+      {input.choices ? (
+        <select
+          id={id}
+          className="icat-select"
+          value={value}
+          aria-describedby={hintId}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
+        >
+          {input.default === undefined ? <option value="" disabled>{input.placeholder ?? "—"}</option> : null}
+          {input.choices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+        </select>
+      ) : (
+        <input
+          id={id}
+          className="icat-text-input"
+          type="text"
+          value={value}
+          placeholder={input.placeholder}
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={hintId}
+          onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
+        />
+      )}
+      <p className="icat-field-hint" id={hintId} role={error ? "alert" : undefined}>{error ?? input.hint ?? ""}</p>
+    </div>
+  );
+}
+
+/** The API key field. A required key gates the action; an optional one says so. */
 function TokenField(props: {
   entryId: string;
   tokenHelpUrl: string | undefined;
   token: string;
   showToken: boolean;
+  optional: boolean;
   onTokenChange: (value: string) => void;
   onToggleToken: () => void;
+  onSubmit: () => void;
   s: CatalogStrings;
 }) {
-  const { entryId, tokenHelpUrl, token, showToken, onTokenChange, onToggleToken, s } = props;
+  const { entryId, tokenHelpUrl, token, showToken, optional, onTokenChange, onToggleToken, onSubmit, s } = props;
+  const id = `icat-token-${entryId}`;
   return (
-    <div className="icat-token">
-      <label className="icat-token-label" htmlFor={`icat-token-${entryId}`}>{s.detailTokenLabel}</label>
+    <div className="icat-field icat-token">
+      <div className="icat-token-label-row">
+        <label className="icat-field-label" htmlFor={id}>{s.detailTokenLabel}</label>
+        {tokenHelpUrl ? (
+          <a className="icat-link icat-token-help" href={tokenHelpUrl} target="_blank" rel="noreferrer noopener">
+            {s.detailToken}
+            <span aria-hidden="true"> ↗</span>
+          </a>
+        ) : null}
+      </div>
       <div className="icat-token-row">
         <input
-          id={`icat-token-${entryId}`}
-          className="icat-token-input"
+          id={id}
+          className="icat-text-input icat-token-input"
           type={showToken ? "text" : "password"}
           value={token}
-          placeholder={s.detailTokenPlaceholder}
+          placeholder={optional ? s.detailTokenOptional : s.detailTokenPlaceholder}
           autoComplete="off"
+          autoCapitalize="none"
           spellCheck={false}
+          enterKeyHint="go"
           onChange={(event) => onTokenChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSubmit(); } }}
         />
         <button
           type="button"
           className="icat-token-toggle"
           aria-pressed={showToken}
-          aria-label={showToken ? s.detailTokenHide : s.detailTokenShow}
+          aria-controls={id}
           onClick={onToggleToken}
         >
           {showToken ? s.detailTokenHide : s.detailTokenShow}
         </button>
       </div>
-      <p className="icat-token-hint">{s.detailTokenVault}</p>
-      {tokenHelpUrl ? (
-        <a className="icat-link icat-token-help" href={tokenHelpUrl} target="_blank" rel="noreferrer noopener">
-          {s.detailToken}
-        </a>
-      ) : null}
+      <p className="icat-field-hint">{s.detailTokenVault}</p>
     </div>
   );
 }
@@ -849,19 +1115,29 @@ function Skeleton({ s }: { s: CatalogStrings }) {
     <div className="icat-skeleton">
       <span className="icat-sr" role="status">{s.loading}</span>
       <div className="icat-skeleton-list" aria-hidden="true">
-        {Array.from({ length: 7 }, (_, index) => (
+        <span className="icat-skeleton-search" />
+        <span className="icat-skeleton-chips">
+          {Array.from({ length: 5 }, (_, index) => <span key={index} className="icat-skeleton-chip" />)}
+        </span>
+        {Array.from({ length: 8 }, (_, index) => (
           <div className="icat-skeleton-row" key={index}>
             <span className="icat-skeleton-mark" />
             <span className="icat-skeleton-lines">
-              <span className="icat-skeleton-line" style={{ inlineSize: `${60 + (index % 3) * 14}%` }} />
-              <span className="icat-skeleton-line icat-skeleton-line-dim" style={{ inlineSize: `${80 + (index % 2) * 10}%` }} />
+              <span className="icat-skeleton-line" style={{ inlineSize: `${42 + (index % 3) * 12}%` }} />
+              <span className="icat-skeleton-line icat-skeleton-line-dim" style={{ inlineSize: `${64 + (index % 2) * 14}%` }} />
             </span>
           </div>
         ))}
       </div>
-      <div className="icat-skeleton-detail">
-        <span className="icat-skeleton-line icat-skeleton-title" />
-        <span className="icat-skeleton-line" style={{ inlineSize: "72%" }} />
+      <div className="icat-skeleton-detail" aria-hidden="true">
+        <span className="icat-skeleton-hero">
+          <span className="icat-skeleton-mark icat-skeleton-mark-lg" />
+          <span className="icat-skeleton-lines">
+            <span className="icat-skeleton-line icat-skeleton-title" />
+            <span className="icat-skeleton-line" style={{ inlineSize: "56%" }} />
+          </span>
+        </span>
+        <span className="icat-skeleton-card" />
         <span className="icat-skeleton-line icat-skeleton-line-dim" style={{ inlineSize: "90%" }} />
         <span className="icat-skeleton-line icat-skeleton-line-dim" style={{ inlineSize: "84%" }} />
       </div>

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "tigris",
+  "name": "Tigris",
+  "publisher": "Tigris Data",
+  "verified": true,
+  "summary": "S3-compatible object storage.",
+  "description": "Tigris' hosted server manages buckets and objects in Tigris storage.",
+  "categories": [
+    "cloud",
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://www.tigrisdata.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.storage.dev/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.tigrisdata.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.storage.dev) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

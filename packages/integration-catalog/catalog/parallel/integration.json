@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "parallel",
+  "name": "Parallel",
+  "publisher": "Parallel",
+  "verified": true,
+  "summary": "Web search and fetch built for agents.",
+  "description": "Parallel's search server returns ranked, compressed excerpts and fetches pages, without signing in.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://parallel.ai",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://search.parallel.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://parallel.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 3 tools; no sign-in is demanded."
+    }
+  }
+}

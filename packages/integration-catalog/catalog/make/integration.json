@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "make",
+  "name": "Make",
+  "publisher": "Make",
+  "verified": true,
+  "summary": "Run Make scenarios.",
+  "description": "Make's hosted server lets the agent run scenarios you mark as on-demand and read their results.",
+  "categories": [
+    "automation"
+  ],
+  "status": "stable",
+  "homepage": "https://www.make.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.make.com"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.make.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (www.make.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "courier",
+  "name": "Courier",
+  "publisher": "Courier",
+  "verified": true,
+  "summary": "Notifications, templates and messages.",
+  "description": "Courier's hosted server reads and sends notifications and manages templates, lists and profiles. It needs a Courier API key.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.courier.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.courier.com",
+      "tokenHeader": {
+        "name": "api_key"
+      }
+    },
+    "tokenHelpUrl": "https://app.courier.com/settings/api-keys"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.courier.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 173 tools; the vendor documents an API key that the account's tools need, sent in the api_key header."
+    }
+  }
+}

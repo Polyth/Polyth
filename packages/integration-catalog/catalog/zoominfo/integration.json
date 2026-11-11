@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "zoominfo",
+  "name": "ZoomInfo",
+  "publisher": "ZoomInfo",
+  "verified": true,
+  "summary": "B2B company and contact data.",
+  "description": "ZoomInfo's hosted server queries company and contact data; each query spends credits from your seats.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://www.zoominfo.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.zoominfo.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.zoominfo.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.zoominfo.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

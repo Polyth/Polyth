@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "lovable",
+  "name": "Lovable",
+  "publisher": "Lovable",
+  "verified": true,
+  "summary": "Lovable projects.",
+  "description": "Lovable's hosted server reads and changes your Lovable projects from the agent.",
+  "categories": [
+    "code",
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://lovable.dev",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.lovable.dev/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://lovable.dev",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (lovable.dev) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "oneuptime",
+  "name": "OneUptime",
+  "publisher": "OneUptime",
+  "verified": true,
+  "summary": "Monitoring, incidents and on-call.",
+  "description": "OneUptime's hosted server covers monitors, incidents, on-call and status pages. It needs a OneUptime API key.",
+  "categories": [
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://oneuptime.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://oneuptime.com/mcp",
+      "tokenHeader": {
+        "name": "x-api-key"
+      }
+    },
+    "tokenHelpUrl": "https://oneuptime.com/docs/ai/mcp-server"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://oneuptime.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 351 tools; the vendor documents an API key that the account's tools need, sent in the x-api-key header."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "basecamp",
+  "name": "Basecamp",
+  "publisher": "37signals",
+  "verified": true,
+  "summary": "Projects, to-dos and messages.",
+  "description": "Basecamp's hosted server reads projects, to-dos, message boards and schedules and can add to them as your account.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://basecamp.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.basecamp.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://basecamp.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (app.basecamp.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "vantage",
+  "name": "Vantage",
+  "publisher": "Vantage",
+  "verified": true,
+  "summary": "Cloud cost reports.",
+  "description": "Vantage's hosted server queries cloud cost reports, budgets and anomalies across providers.",
+  "categories": [
+    "cloud",
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://www.vantage.sh",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.vantage.sh/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.vantage.sh",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.vantage.sh) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

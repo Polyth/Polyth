@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "zapier",
+  "name": "Zapier",
+  "publisher": "Zapier",
+  "verified": true,
+  "summary": "Actions in thousands of apps.",
+  "description": "Zapier's hosted server exposes the actions you enable in Zapier — Gmail, Slack, HubSpot and thousands more — as tools the agent can call.",
+  "categories": [
+    "automation"
+  ],
+  "status": "stable",
+  "homepage": "https://zapier.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.zapier.com/api/mcp/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://zapier.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.zapier.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

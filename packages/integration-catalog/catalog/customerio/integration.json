@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "customerio",
+  "name": "Customer.io",
+  "publisher": "Customer.io",
+  "verified": true,
+  "summary": "Messaging campaigns and people.",
+  "description": "Customer.io's hosted server reads campaigns, segments and people.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://customer.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.customer.io/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://customer.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.customer.io) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

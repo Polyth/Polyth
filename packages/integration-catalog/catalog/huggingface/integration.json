@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "huggingface",
+  "name": "Hugging Face",
+  "publisher": "Hugging Face",
+  "verified": true,
+  "summary": "Models, datasets and Spaces.",
+  "description": "Hugging Face's hosted server searches models, datasets, papers and Spaces. Signing in lets it reach your own models, datasets and Spaces as well as public ones.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://huggingface.co",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://huggingface.co/mcp?login"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://huggingface.co",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (huggingface.co) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

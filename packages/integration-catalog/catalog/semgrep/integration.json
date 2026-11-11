@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "semgrep",
+  "name": "Semgrep",
+  "publisher": "Semgrep",
+  "verified": true,
+  "summary": "Static analysis and findings.",
+  "description": "Semgrep's hosted server scans code with Semgrep rules and reads findings from your Semgrep organization.",
+  "categories": [
+    "quality",
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://semgrep.dev",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.semgrep.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://semgrep.dev",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (login.semgrep.dev) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

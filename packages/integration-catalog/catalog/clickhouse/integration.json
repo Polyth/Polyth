@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "clickhouse",
+  "name": "ClickHouse Cloud",
+  "publisher": "ClickHouse",
+  "verified": true,
+  "summary": "Services and analytical queries.",
+  "description": "ClickHouse's hosted server lists services and databases and runs read queries on ClickHouse Cloud.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://clickhouse.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.clickhouse.cloud/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://clickhouse.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.clickhouse.cloud) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "cloudinary",
+  "name": "Cloudinary",
+  "publisher": "Cloudinary",
+  "verified": true,
+  "summary": "Media assets and transformations.",
+  "description": "Cloudinary's hosted asset-management server uploads, searches and transforms images and video in your account.",
+  "categories": [
+    "code",
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://cloudinary.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://asset-management.mcp.cloudinary.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://cloudinary.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (asset-management.mcp.cloudinary.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

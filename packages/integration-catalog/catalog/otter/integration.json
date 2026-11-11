@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "otter",
+  "name": "Otter.ai",
+  "publisher": "Otter.ai",
+  "verified": true,
+  "summary": "Meeting transcripts.",
+  "description": "Otter's hosted server searches and reads your meeting transcripts and summaries.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://otter.ai",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.otter.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://otter.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (otter.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

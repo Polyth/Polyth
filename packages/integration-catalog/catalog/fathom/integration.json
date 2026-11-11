@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "fathom",
+  "name": "Fathom",
+  "publisher": "Fathom",
+  "verified": true,
+  "summary": "Recorded calls and summaries.",
+  "description": "Fathom's hosted server reads your recorded meetings, their summaries and action items.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://fathom.video",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://api.fathom.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://fathom.video",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.fathom.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "deepwiki",
+  "name": "DeepWiki",
+  "publisher": "Cognition",
+  "verified": true,
+  "summary": "Ask questions about any public repository.",
+  "description": "DeepWiki answers questions about public GitHub repositories from generated wiki pages, without signing in. Useful for learning an unfamiliar dependency.",
+  "categories": [
+    "code",
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://deepwiki.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://mcp.deepwiki.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://deepwiki.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 3 tools; no sign-in is demanded."
+    }
+  }
+}

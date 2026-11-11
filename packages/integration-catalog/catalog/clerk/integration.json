@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "clerk",
+  "name": "Clerk",
+  "publisher": "Clerk",
+  "verified": true,
+  "summary": "Users, organizations and auth setup.",
+  "description": "Clerk's hosted server reads and manages users and organizations in your Clerk application and answers questions about wiring Clerk into code.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://clerk.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.clerk.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://clerk.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (clerk.clerk.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

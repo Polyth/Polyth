@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "openstatus",
+  "name": "openstatus",
+  "publisher": "openstatus",
+  "verified": true,
+  "summary": "Monitors and status pages.",
+  "description": "openstatus' hosted server reads and manages monitors, incidents and status pages.",
+  "categories": [
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://www.openstatus.dev",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://api.openstatus.dev/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.openstatus.dev",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.openstatus.dev) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "craft",
+  "name": "Craft",
+  "publisher": "Craft",
+  "verified": true,
+  "summary": "Documents and daily notes.",
+  "description": "Craft's hosted server reads and writes documents and daily notes in your Craft space.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://www.craft.do",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.craft.do/my/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.craft.do",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.craft.do) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

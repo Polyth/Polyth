@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "storyblok",
+  "name": "Storyblok",
+  "publisher": "Storyblok",
+  "verified": true,
+  "summary": "Stories, components and assets.",
+  "description": "Storyblok's hosted server reads and edits stories, components and assets. It needs a personal access token.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://www.storyblok.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.storyblok.com/mcp",
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      }
+    },
+    "tokenHelpUrl": "https://app.storyblok.com/#/me/account?tab=token"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.storyblok.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials; the vendor documents an API key that the account's tools need, sent in the Authorization header."
+    }
+  }
+}

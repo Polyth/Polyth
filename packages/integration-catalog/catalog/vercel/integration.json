@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "vercel",
+  "name": "Vercel",
+  "publisher": "Vercel",
+  "verified": true,
+  "summary": "Projects, deployments and logs.",
+  "description": "Vercel's hosted server reads projects, deployments and build logs and searches Vercel's docs.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "beta",
+  "featured": true,
+  "homepage": "https://vercel.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.vercel.com"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://vercel.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (vercel.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

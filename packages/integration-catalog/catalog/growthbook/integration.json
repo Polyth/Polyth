@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "growthbook",
+  "name": "GrowthBook",
+  "publisher": "GrowthBook",
+  "verified": true,
+  "summary": "Feature flags and experiment results.",
+  "description": "GrowthBook's hosted server manages feature flags and reads experiment results.",
+  "categories": [
+    "code",
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://www.growthbook.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.growthbook.io/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.growthbook.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.growthbook.io) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

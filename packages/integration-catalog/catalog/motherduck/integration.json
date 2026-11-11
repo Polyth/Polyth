@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "motherduck",
+  "name": "MotherDuck",
+  "publisher": "MotherDuck",
+  "verified": true,
+  "summary": "DuckDB in the cloud.",
+  "description": "MotherDuck's hosted server queries your MotherDuck databases with DuckDB SQL.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://motherduck.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://api.motherduck.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://motherduck.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp-auth.motherduck.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "digitalocean",
+  "name": "DigitalOcean",
+  "publisher": "DigitalOcean",
+  "verified": true,
+  "summary": "App Platform apps and resources.",
+  "description": "DigitalOcean's hosted server manages App Platform apps and reads their deployments and logs.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://www.digitalocean.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://apps.mcp.digitalocean.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.digitalocean.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (cloud.digitalocean.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

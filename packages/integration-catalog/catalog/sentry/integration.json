@@ -4,24 +4,30 @@
   "name": "Sentry",
   "publisher": "Sentry",
   "verified": true,
-  "summary": "Errors, stack traces, issues and alerts.",
-  "description": "Sentry's remote MCP server. The agent lists projects and issues, reads stack traces and events, and can write issue, alert and team changes when the granted scopes allow it. Scopes come from the OAuth consent screen.",
-  "categories": ["quality"],
+  "summary": "Errors, traces and releases.",
+  "description": "Sentry's hosted server reads issues, events, traces and releases and can ask Seer for a root cause, so the agent fixes a bug from its real stack trace.",
+  "categories": [
+    "quality",
+    "code"
+  ],
   "status": "stable",
   "featured": true,
   "homepage": "https://sentry.io",
   "mcp": {
     "auth": "oauth",
-    "remote": { "url": "https://mcp.sentry.dev/mcp" }
+    "remote": {
+      "url": "https://mcp.sentry.dev/mcp"
+    }
   },
   "evidence": {
-    "checkedAt": "2026-11-06",
-    "source": "https://docs.sentry.io/product/sentry-mcp/",
+    "checkedAt": "2026-11-11",
+    "source": "https://sentry.io",
     "probe": {
       "state": "observed",
       "httpStatus": 401,
       "challenge": "bearer-oauth",
-      "note": "401 with resource_metadata at mcp.sentry.dev; the protected-resource document lists mcp.sentry.dev with org:read, project:write, team:write, event:write and alerts:write scopes."
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.sentry.dev) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
     }
   }
 }

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "tinybird",
+  "name": "Tinybird",
+  "publisher": "Tinybird",
+  "verified": true,
+  "summary": "Real-time analytics endpoints.",
+  "description": "Tinybird's hosted server queries your workspace's data sources and endpoints. It needs a Tinybird token.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://www.tinybird.co",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.tinybird.co/mcp",
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      }
+    },
+    "tokenHelpUrl": "https://www.tinybird.co/docs/forward/administration/tokens"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.tinybird.co",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer",
+      "note": "Answers 401 without OAuth metadata; the key travels in the Authorization header."
+    }
+  }
+}

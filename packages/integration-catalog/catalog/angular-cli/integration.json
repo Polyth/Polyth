@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "angular-cli",
+  "name": "Angular CLI",
+  "publisher": "Google",
+  "verified": true,
+  "summary": "Angular best practices and docs.",
+  "description": "The Angular CLI's MCP mode answers from current Angular documentation and best practices and lists the workspace's projects. It needs Node.js.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://angular.dev",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "@angular/cli@22.2.6",
+        "mcp"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 60000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://angular.dev",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to @angular/cli@22.2.6, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

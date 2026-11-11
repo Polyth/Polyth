@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "next-devtools",
+  "name": "Next.js DevTools",
+  "publisher": "Vercel",
+  "verified": true,
+  "summary": "Next.js docs and the running dev server.",
+  "description": "Vercel's Next.js server answers from the Next.js docs and, with a dev server running, reads its errors, routes and build state. It needs Node.js.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://github.com/vercel/next-devtools-mcp",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "next-devtools-mcp@0.4.0"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 60000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://github.com/vercel/next-devtools-mcp",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to next-devtools-mcp@0.4.0, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

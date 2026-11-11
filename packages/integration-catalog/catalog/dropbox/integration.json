@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "dropbox",
+  "name": "Dropbox",
+  "publisher": "Dropbox",
+  "verified": true,
+  "summary": "Files and folders.",
+  "description": "Dropbox's hosted server searches and reads files and folders in your account, so the agent can work from documents you already keep there.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://www.dropbox.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.dropbox.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.dropbox.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (www.dropbox.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -4,24 +4,32 @@
   "name": "Exa",
   "publisher": "Exa",
   "verified": true,
-  "summary": "Neural web search and page reading.",
-  "description": "Exa's remote MCP server gives the agent a search built for meaning rather than keywords, plus page extraction. It needs an API key, which bounds cost and access; store it in the credential vault.",
-  "categories": ["ai"],
+  "summary": "Web search and page fetching.",
+  "description": "Exa's hosted server searches the web and fetches pages for the agent. It works without an account; a key raises the limits.",
+  "categories": [
+    "ai"
+  ],
   "status": "stable",
   "homepage": "https://exa.ai",
   "mcp": {
     "auth": "token",
-    "remote": { "url": "https://mcp.exa.ai/mcp" },
+    "remote": {
+      "url": "https://mcp.exa.ai/mcp",
+      "tokenHeader": {
+        "name": "x-api-key"
+      },
+      "tokenOptional": true
+    },
     "tokenHelpUrl": "https://dashboard.exa.ai/api-keys"
   },
   "evidence": {
-    "checkedAt": "2026-11-06",
+    "checkedAt": "2026-11-11",
     "source": "https://docs.exa.ai/reference/exa-mcp",
     "probe": {
       "state": "observed",
-      "httpStatus": 405,
+      "httpStatus": 200,
       "challenge": "none",
-      "note": "Answers 405 with a JSON-RPC error on GET and sends no WWW-Authenticate header; the key is carried in the request as documented by Exa."
+      "note": "Answered initialize without credentials and listed 2 tools; the vendor documents a key that raises limits or unlocks account tools, sent in the x-api-key header."
     }
   }
 }

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "mermaid-chart",
+  "name": "Mermaid Chart",
+  "publisher": "Mermaid Chart",
+  "verified": true,
+  "summary": "Validate and render Mermaid diagrams.",
+  "description": "Mermaid Chart's server checks and renders Mermaid diagram code, without signing in.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://www.mermaidchart.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://chatgpt.mermaid.ai/anthropic/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.mermaidchart.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 1 tools; no sign-in is demanded."
+    }
+  }
+}

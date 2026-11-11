@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "vapi",
+  "name": "Vapi",
+  "publisher": "Vapi",
+  "verified": true,
+  "summary": "Voice agents and calls.",
+  "description": "Vapi's hosted server manages voice assistants, phone numbers and calls.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://vapi.ai",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.vapi.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://vapi.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (auth.mcp.vapi.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "fireflies",
+  "name": "Fireflies",
+  "publisher": "Fireflies.ai",
+  "verified": true,
+  "summary": "Meeting transcripts and summaries.",
+  "description": "Fireflies' hosted server searches transcripts, summaries and action items from recorded meetings.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://fireflies.ai",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://api.fireflies.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://fireflies.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.fireflies.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

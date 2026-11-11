@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "remote",
+  "name": "Remote",
+  "publisher": "Remote",
+  "verified": true,
+  "summary": "Global employment and payroll.",
+  "description": "Remote's hosted server reads employments, time off and payroll.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://remote.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.remote.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://remote.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.employ.remote.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

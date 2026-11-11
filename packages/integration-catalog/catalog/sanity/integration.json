@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "sanity",
+  "name": "Sanity",
+  "publisher": "Sanity",
+  "verified": true,
+  "summary": "Content Lake documents and schemas.",
+  "description": "Sanity's hosted server queries and edits documents, reads schemas and manages releases in your projects.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://www.sanity.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.sanity.io"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.sanity.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.sanity.io) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

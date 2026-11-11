@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "microsoft-learn",
+  "name": "Microsoft Learn",
+  "publisher": "Microsoft",
+  "verified": true,
+  "summary": "Microsoft and Azure documentation.",
+  "description": "Microsoft's documentation server searches Microsoft Learn and returns official docs and code samples, without signing in.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://learn.microsoft.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://learn.microsoft.com/api/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://learn.microsoft.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 3 tools; no sign-in is demanded."
+    }
+  }
+}

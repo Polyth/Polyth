@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "astro",
+  "name": "Astro Docs",
+  "publisher": "Astro",
+  "verified": true,
+  "summary": "Search Astro's documentation.",
+  "description": "Astro's documentation server searches the current Astro docs, without signing in.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://astro.build",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://mcp.docs.astro.build/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://astro.build",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 1 tools; no sign-in is demanded."
+    }
+  }
+}

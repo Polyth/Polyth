@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "lucid",
+  "name": "Lucid",
+  "publisher": "Lucid Software",
+  "verified": true,
+  "summary": "Lucidchart and Lucidspark documents.",
+  "description": "Lucid's hosted server searches and reads diagrams and creates new ones.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://lucid.co",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.lucid.app/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://lucid.co",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.lucid.app) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "heroku",
+  "name": "Heroku",
+  "publisher": "Heroku",
+  "verified": true,
+  "summary": "Apps, dynos and add-ons.",
+  "description": "Heroku's hosted server manages apps, dynos, add-ons and logs.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://www.heroku.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.heroku.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.heroku.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.heroku.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

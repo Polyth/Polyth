@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "upstash",
+  "name": "Upstash",
+  "publisher": "Upstash",
+  "verified": true,
+  "summary": "Redis and QStash.",
+  "description": "Upstash's hosted server manages Redis databases, runs commands and reads usage.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://upstash.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.upstash.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://upstash.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (clerk.upstash.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

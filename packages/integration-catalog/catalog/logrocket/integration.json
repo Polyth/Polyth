@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "logrocket",
+  "name": "LogRocket",
+  "publisher": "LogRocket",
+  "verified": true,
+  "summary": "Session replays and issues.",
+  "description": "LogRocket's hosted server searches sessions and issues so the agent can see what users hit.",
+  "categories": [
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://logrocket.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.logrocket.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://logrocket.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.logrocket.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

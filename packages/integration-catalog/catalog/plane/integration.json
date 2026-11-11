@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "plane",
+  "name": "Plane",
+  "publisher": "Plane",
+  "verified": true,
+  "summary": "Work items, cycles and modules.",
+  "description": "Plane's hosted server for Plane Cloud: the agent can list and create work items, move them through states and read cycles and modules.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://plane.so",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.plane.so/http/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://plane.so",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.plane.so) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

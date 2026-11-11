@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "signoz",
+  "name": "SigNoz",
+  "publisher": "SigNoz",
+  "verified": true,
+  "summary": "Logs, traces and metrics.",
+  "description": "SigNoz Cloud's hosted server queries logs, traces, metrics and alerts (US region).",
+  "categories": [
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://signoz.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.us.signoz.cloud/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://signoz.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.us.signoz.cloud) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

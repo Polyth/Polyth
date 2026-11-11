@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "lightfield",
+  "name": "Lightfield",
+  "publisher": "Lightfield",
+  "verified": true,
+  "summary": "CRM records and meetings.",
+  "description": "Lightfield's hosted server reads and updates accounts, contacts and meeting notes.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://lightfield.app",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.lightfield.app/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://lightfield.app",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.stytch.lightfield.app) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

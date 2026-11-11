@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "chakra-ui",
+  "name": "Chakra UI",
+  "publisher": "Chakra UI",
+  "verified": true,
+  "summary": "Components, props and themes.",
+  "description": "Chakra UI's server lists components, their props and examples and helps customise themes or migrate from v2, without signing in.",
+  "categories": [
+    "code",
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://chakra-ui.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://mcp.chakra-ui.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://chakra-ui.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 6 tools; no sign-in is demanded."
+    }
+  }
+}

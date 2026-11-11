@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "process-street",
+  "name": "Process Street",
+  "publisher": "Process Street",
+  "verified": true,
+  "summary": "Checklists and workflow runs.",
+  "description": "Process Street's hosted server reads workflows and runs and can start or update checklist runs as your account.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://www.process.st",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.process.st"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.process.st",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (auth.process.st) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

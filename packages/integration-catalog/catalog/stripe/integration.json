@@ -4,27 +4,30 @@
   "name": "Stripe",
   "publisher": "Stripe",
   "verified": true,
-  "summary": "Customers, payments, invoices and prices.",
-  "description": "Stripe's remote MCP server works with an API key, which is its whole permission boundary: use a restricted key, stored in the credential vault. It is best treated as read-mostly, since a write-capable key can move real money.",
-  "categories": ["product"],
+  "summary": "Payments, customers and the docs.",
+  "description": "Stripe's hosted server reads and creates customers, products, prices, invoices and payment links and searches Stripe's documentation. Try it in a test-mode account first.",
+  "categories": [
+    "business",
+    "code"
+  ],
   "status": "beta",
+  "featured": true,
   "homepage": "https://stripe.com",
   "mcp": {
-    "auth": "token",
+    "auth": "oauth",
     "remote": {
-      "url": "https://mcp.stripe.com/",
-      "tokenHeader": { "name": "Authorization", "valuePrefix": "Bearer " }
-    },
-    "tokenHelpUrl": "https://dashboard.stripe.com/apikeys"
+      "url": "https://mcp.stripe.com"
+    }
   },
   "evidence": {
-    "checkedAt": "2026-11-06",
-    "source": "https://docs.stripe.com/mcp",
+    "checkedAt": "2026-11-11",
+    "source": "https://stripe.com",
     "probe": {
       "state": "observed",
       "httpStatus": 401,
-      "challenge": "bearer",
-      "note": "401 'missing_api_key'; the challenge points at mcp.stripe.com's protected-resource document, but the error body asks for an API key."
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (access.stripe.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
     }
   }
 }

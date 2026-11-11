@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "magic-patterns",
+  "name": "Magic Patterns",
+  "publisher": "Magic Patterns",
+  "verified": true,
+  "summary": "Generated UI designs.",
+  "description": "Magic Patterns' hosted server reads and generates UI designs you can bring into code.",
+  "categories": [
+    "design"
+  ],
+  "status": "stable",
+  "homepage": "https://www.magicpatterns.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.magicpatterns.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.magicpatterns.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (oauth.magicpatterns.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

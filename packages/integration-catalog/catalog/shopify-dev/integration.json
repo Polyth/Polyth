@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "shopify-dev",
+  "name": "Shopify Dev",
+  "publisher": "Shopify",
+  "verified": true,
+  "summary": "Shopify docs and API schemas.",
+  "description": "Shopify's developer server searches shopify.dev and introspects the Admin and Storefront GraphQL schemas, so generated queries match the real API. It needs Node.js.",
+  "categories": [
+    "code",
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://shopify.dev",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "@shopify/dev-mcp@1.18.0"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 60000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://shopify.dev",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to @shopify/dev-mcp@1.18.0, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "browserbase",
+  "name": "Browserbase",
+  "publisher": "Browserbase",
+  "verified": true,
+  "summary": "Cloud browsers driven by Stagehand.",
+  "description": "Browserbase's hosted server runs a cloud browser the agent can navigate, act in and extract from. It needs a Browserbase API key.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://www.browserbase.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.browserbase.com/mcp",
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      }
+    },
+    "tokenHelpUrl": "https://www.browserbase.com/overview"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.browserbase.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 6 tools; the vendor documents an API key that the account's tools need, sent in the Authorization header."
+    }
+  }
+}

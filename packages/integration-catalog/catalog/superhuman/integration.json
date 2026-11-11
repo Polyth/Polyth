@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "superhuman",
+  "name": "Superhuman Mail",
+  "publisher": "Superhuman",
+  "verified": true,
+  "summary": "Search and draft email.",
+  "description": "Superhuman's hosted server searches your mail and writes drafts.",
+  "categories": [
+    "business",
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://superhuman.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.mail.superhuman.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://superhuman.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.auth.mail.superhuman.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

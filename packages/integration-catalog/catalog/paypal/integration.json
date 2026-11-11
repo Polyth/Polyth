@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "paypal",
+  "name": "PayPal",
+  "publisher": "PayPal",
+  "verified": true,
+  "summary": "Invoices, orders and transactions.",
+  "description": "PayPal's hosted server creates invoices and orders and reads transactions and disputes.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://www.paypal.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.paypal.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.paypal.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.paypal.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

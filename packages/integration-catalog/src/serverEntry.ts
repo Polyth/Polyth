@@ -83,24 +83,30 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const ledger = (space: SpaceContext) =>
     createInstallLedger(host.spaceStorage(space).packageDir(host.pluginId));
 
-  /** Live servers that match a catalog entry, plus what the ledger owns. */
+  /** Live servers that match a catalog entry, plus what the ledger owns, or
+   *  null when the host cannot say: "nothing connected" and "cannot read the
+   *  connections" are different answers and the page shows them differently. */
+  const readInstalled = (
+    space: SpaceContext,
+    entries: CatalogLoad["entries"],
+    projectId?: string,
+  ): InstalledIntegration[] | null => {
+    let spaceServers: LiveInstallation[] = [];
+    let personalServers: LiveInstallation[] = [];
+    try {
+      const service = mcp();
+      spaceServers = service.list(space, projectId);
+      personalServers = service.listPersonal(space);
+    } catch {
+      return null;
+    }
+    return installedFrom(entries, spaceServers, personalServers, ledger(space).list());
+  };
   const installedFor = (
     space: SpaceContext,
     entries: CatalogLoad["entries"],
     projectId?: string,
-  ): InstalledIntegration[] => {
-    const service = mcp();
-    let spaceServers: LiveInstallation[] = [];
-    let personalServers: LiveInstallation[] = [];
-    try {
-      spaceServers = service.list(space, projectId);
-      personalServers = service.listPersonal(space);
-    } catch {
-      // A Space where MCP is unavailable still shows the catalog.
-      return [];
-    }
-    return installedFrom(entries, spaceServers, personalServers, ledger(space).list());
-  };
+  ): InstalledIntegration[] => readInstalled(space, entries, projectId) ?? [];
 
   /** Brand marks are static deployment data: no Space, no tenant, no secret. */
   const serveLogo = (rc: Parameters<RouteHandler>[0], id: string): void => {
@@ -118,7 +124,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     }
     // Defence in depth: these files never carry script, but an SVG is markup
     // and the file could have been replaced on disk.
-    if (mark.format === "svg" && /<script|<foreignObject|on[a-z]+\s*=|<iframe/i.test(body.toString("utf8"))) {
+    if (mark.format === "svg" && /<script|<foreignObject|\son[a-z]+\s*=|<iframe|<image|href\s*=\s*["']?(?:https?:|data:|javascript:)/i.test(body.toString("utf8"))) {
       rc.json(415, { error: "unsupported-logo", message: "The brand mark is not a plain drawing." });
       return;
     }
@@ -161,11 +167,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       }
       if (path === ENTRIES_PATH) {
         const projectId = rc.url.searchParams.get("projectId")?.trim() || undefined;
+        const installed = readInstalled(rc.space, load.entries, projectId);
         json(200, {
           entries: load.entries,
           problems: load.problems,
           stats: catalogStats(load.entries),
-          installed: installedFor(rc.space, load.entries, projectId),
+          installed: installed ?? [],
+          connections: installed === null ? "unavailable" : "ok",
         });
         return true;
       }
@@ -198,9 +206,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const requestedScope = body.scope === "space" || body.scope === "project" || body.scope === "person"
         ? (body.scope as InstallScope)
         : undefined;
+      const inputs = body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)
+        ? (body.inputs as Record<string, unknown>)
+        : undefined;
       const plan = planInstall(entry, {
         ...(typeof body.token === "string" ? { token: body.token } : {}),
         ...(requestedScope ? { scope: requestedScope } : {}),
+        ...(inputs ? { inputs } : {}),
       });
       if (!plan.ok) {
         json(plan.failure === "unknown-entry" ? 404 : 400, {
@@ -209,15 +221,28 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         });
         return true;
       }
+      // Without an open project a project install would land in the whole
+      // Space; say so in the scope it is recorded and reported under.
+      const scope: InstallScope = plan.scope === "project" && !projectId ? "space" : plan.scope;
+      // A second click, or a second tab, must not create a duplicate server.
+      const existing = installedFor(rc.space, load.entries, projectId).find((row) => row.entryId === entry!.id);
+      if (existing) {
+        json(409, {
+          error: "already-installed",
+          message: `${entry!.name} is already connected.`,
+          installed: existing,
+        });
+        return true;
+      }
       try {
-        const created = plan.scope === "person"
+        const created = scope === "person"
           ? await mcp().createPersonal(rc.space, plan.input)
-          : await mcp().create(rc.space, plan.input, plan.scope === "project" ? projectId : undefined);
+          : await mcp().create(rc.space, plan.input, scope === "project" ? projectId : undefined);
         store.add({
           entryId: entry!.id,
           serverId: created.id,
-          scope: plan.scope,
-          ...(plan.scope === "project" && projectId ? { projectId } : {}),
+          scope,
+          ...(scope === "project" && projectId ? { projectId } : {}),
           at: Date.now(),
         });
         json(200, {
@@ -225,7 +250,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
             entryId: entry!.id,
             serverId: created.id,
             name: serverNameFor(entry!),
-            scope: plan.scope,
+            scope,
             revision: created.revision ?? 0,
             enabled: created.enabled !== false,
             catalogManaged: true,

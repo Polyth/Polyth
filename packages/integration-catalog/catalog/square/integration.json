@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "square",
+  "name": "Square",
+  "publisher": "Square",
+  "verified": true,
+  "summary": "Payments, catalog and customers.",
+  "description": "Square's hosted server reads and changes payments, orders, catalog items and customers.",
+  "categories": [
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://squareup.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.squareup.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://squareup.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.squareup.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

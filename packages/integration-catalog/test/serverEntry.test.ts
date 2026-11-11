@@ -45,6 +45,8 @@ interface Harness {
   servers: Array<{ id: string; name: string; revision?: number; enabled?: boolean; projectId?: string }>;
   personal: Array<{ id: string; name: string; revision?: number; enabled?: boolean }>;
   ledger(): Promise<{ installs: Array<{ entryId: string; serverId: string; scope: string }> }>;
+  /** Make the MCP service throw on list, as a Space without MCP does. */
+  failList: boolean;
 }
 
 /** A host with the one service this package uses, a temp Space directory and
@@ -59,8 +61,12 @@ async function harness(t: { after(fn: () => unknown): void }): Promise<Harness> 
   const personal: Harness["personal"] = [];
   let nextId = 1;
 
+  const state = { failList: false };
   const service: CatalogMcpService = {
-    list: (_space, projectId) => servers.filter((server) => !projectId || server.projectId === projectId),
+    list: (_space, projectId) => {
+      if (state.failList) throw Object.assign(new Error("MCP is unavailable"), { code: "storage-unavailable" });
+      return servers.filter((server) => !projectId || server.projectId === projectId);
+    },
     listPersonal: () => personal,
     async create(_space, input, projectId) {
       if (servers.some((server) => server.name === input.name)) {
@@ -109,6 +115,8 @@ async function harness(t: { after(fn: () => unknown): void }): Promise<Harness> 
     removed,
     servers,
     personal,
+    get failList() { return state.failList; },
+    set failList(value: boolean) { state.failList = value; },
     async ledger() {
       const raw = await readFile(join(root, "space-1", "integration-catalog", "installs.json"), "utf8");
       return JSON.parse(raw) as { installs: Array<{ entryId: string; serverId: string; scope: string }> };
@@ -225,28 +233,81 @@ test("a token entry installs personally with the secret the host stores", async 
   assert.equal(installed.scope, "person");
 });
 
-test("a token entry without a token, or an entry that hides its header, is a 400", async (t) => {
+test("a token entry without a token is a 400; an optional-key entry installs without one", async (t) => {
   const h = await harness(t);
   const missing = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "github" } });
   assert.equal(missing.status, 400);
   assert.match((missing.body as { error: string }).error, /token-required/);
-
-  const headerless = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "exa", token: "x" } });
-  assert.equal(headerless.status, 400);
-  assert.match((headerless.body as { error: string }).error, /token-header-missing/);
   assert.equal(h.created.length, 0);
+
+  const keyless = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "exa" } });
+  assert.equal(keyless.status, 200);
+  assert.deepEqual(h.created[0]!.input.transport, { kind: "http", url: "https://mcp.exa.ai/mcp", headersSecretRefs: [] });
+  assert.equal(h.created[0]!.personal, true);
+});
+
+test("an optional key travels in the header the entry declares", async (t) => {
+  const h = await harness(t);
+  const keyed = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "exa", token: "exa-key" } });
+  assert.equal(keyed.status, 200);
+  assert.deepEqual(h.created[0]!.input.secrets, { "x-api-key": "exa-key" });
 });
 
 test("a local entry installs the pinned command", async (t) => {
   const h = await harness(t);
   const result = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "playwright", projectId: "p1" } });
   assert.equal(result.status, 200);
-  assert.deepEqual(h.created[0]!.input.transport, {
-    kind: "stdio",
-    command: "npx",
-    args: ["-y", "@playwright/mcp@0.0.84"],
-    envKeys: [],
-  });
+  const transport = h.created[0]!.input.transport;
+  assert.equal(transport.kind, "stdio");
+  assert.equal(transport.kind === "stdio" ? transport.command : "", "npx");
+  assert.match(transport.kind === "stdio" ? transport.args.join(" ") : "", /^-y @playwright\/mcp@\d+\.\d+\.\d+$/);
+});
+
+test("a chosen site is interpolated, and a value outside the choices is refused", async (t) => {
+  const h = await harness(t);
+  const eu = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "datadog", projectId: "p1", inputs: { site: "datadoghq.eu" } } });
+  assert.equal(eu.status, 200);
+  assert.equal(h.created[0]!.input.transport.kind === "http" ? h.created[0]!.input.transport.url : "", "https://mcp.datadoghq.eu/v1/mcp");
+
+  // A host must never come from free text: this would send the sign-in elsewhere.
+  for (const site of ["evil.example", "datadoghq.com/../x", "datadoghq.com@evil.example"]) {
+    const refused = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "datadog", projectId: "p2", inputs: { site } } });
+    assert.equal(refused.status, 400, site);
+    assert.equal((refused.body as { error: string }).error, "input-invalid");
+  }
+  assert.equal(h.created.length, 1);
+});
+
+test("a free-text input is checked against its pattern before it reaches the command", async (t) => {
+  const h = await harness(t);
+  const empty = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "azure-devops", projectId: "p1" } });
+  assert.equal(empty.status, 400);
+  assert.match((empty.body as { message: string }).message, /Organization is required/);
+  const injected = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "azure-devops", projectId: "p1", inputs: { org: "--yes; rm" } } });
+  assert.equal(injected.status, 400);
+  const ok = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "azure-devops", projectId: "p1", inputs: { org: "contoso" } } });
+  assert.equal(ok.status, 200);
+  const transport = h.created[0]!.input.transport;
+  assert.equal(transport.kind === "stdio" ? transport.args.at(-1) : "", "contoso");
+});
+
+test("without an open project an install is recorded for the whole Space", async (t) => {
+  const h = await harness(t);
+  const result = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "linear" } });
+  assert.equal(result.status, 200);
+  assert.equal((result.body as { installed: InstalledIntegration }).installed.scope, "space");
+  assert.deepEqual((await h.ledger()).installs.map((row) => row.scope), ["space"]);
+});
+
+test("the list says when MCP connections cannot be read", async (t) => {
+  const h = await harness(t);
+  h.failList = true;
+  const payload = (await h.call({ method: "GET", path: ENTRIES_PATH })).body as CatalogPayload;
+  assert.equal(payload.connections, "unavailable");
+  assert.ok(payload.entries.length > 200);
+  h.failList = false;
+  const healthy = (await h.call({ method: "GET", path: ENTRIES_PATH })).body as CatalogPayload;
+  assert.equal(healthy.connections, "ok");
 });
 
 test("an unknown entry is a 404 and a duplicate install is a 409", async (t) => {
@@ -256,6 +317,8 @@ test("an unknown entry is a 404 and a duplicate install is a 409", async (t) => 
   await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "linear", projectId: "p1" } });
   const duplicate = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "linear", projectId: "p1" } });
   assert.equal(duplicate.status, 409);
+  assert.equal((duplicate.body as { error: string }).error, "already-installed");
+  assert.equal((duplicate.body as { installed: InstalledIntegration }).installed.entryId, "linear");
 });
 
 test("the list reports a hand-made server as not catalog-managed", async (t) => {
@@ -307,7 +370,7 @@ test("a brand mark is served from the vendored assets", async (t) => {
   assert.equal(svg.raw?.type, "image/svg+xml");
   assert.match(svg.raw!.bytes.toString("utf8"), /^<svg[\s>]/);
 
-  const png = await h.call({ method: "GET", path: `${LOGO_PATH}/exa` });
+  const png = await h.call({ method: "GET", path: `${LOGO_PATH}/amplitude` });
   assert.equal(png.status, 200);
   assert.equal(png.raw?.type, "image/png");
   assert.equal(png.raw!.bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");

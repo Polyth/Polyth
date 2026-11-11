@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "wix",
+  "name": "Wix",
+  "publisher": "Wix",
+  "verified": true,
+  "summary": "Sites, stores and bookings.",
+  "description": "Wix's hosted server manages sites and their business apps — stores, bookings, blogs — with your Wix account.",
+  "categories": [
+    "design",
+    "business"
+  ],
+  "status": "stable",
+  "homepage": "https://www.wix.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.wix.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.wix.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.wix.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

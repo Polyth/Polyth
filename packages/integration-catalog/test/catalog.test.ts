@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  directorySections,
   authSummary,
   catalogSections,
   catalogStats,
@@ -131,4 +132,20 @@ test("endpoint, local and the connect summary describe the real target", () => {
 
   const withSkill: IntegrationManifest = { ...oauth, skills: [{ source: "o/r", subpath: "s", name: "one" }] };
   assert.deepEqual(componentSummary(withSkill), ["Remote MCP server", "1 skill"]);
+});
+
+test("the directory lists each entry once: connected, featured, then by primary category", () => {
+  const sections = directorySections(entries, new Set(["quiet"]));
+  // notion and linear are featured and quiet is connected, so nothing is left for product.
+  assert.deepEqual(sections.map((section) => section.id), ["connected", "featured", "code"]);
+  assert.deepEqual(sections[0]!.entries.map((item) => item.id), ["quiet"]);
+  assert.deepEqual(sections[1]!.entries.map((item) => item.id), ["linear", "notion"]);
+  // beta-tool is code + quality: it appears under code only, never twice.
+  const ids = sections.flatMap((section) => section.entries.map((item) => item.id));
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(ids.length, entries.length);
+});
+
+test("the directory drops the connected section when nothing is connected", () => {
+  assert.equal(directorySections(entries)[0]!.id, "featured");
 });

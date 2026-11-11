@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "chroma-package-search",
+  "name": "Chroma Package Search",
+  "publisher": "Chroma",
+  "verified": true,
+  "summary": "Search the source of published packages.",
+  "description": "Chroma's hosted index of package source code: the agent can grep and read the code of npm, PyPI and other published packages instead of guessing their behaviour.",
+  "categories": [
+    "code",
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://www.trychroma.com/package-search",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.trychroma.com/package-search/v1",
+      "tokenHeader": {
+        "name": "x-chroma-token"
+      }
+    },
+    "tokenHelpUrl": "https://www.trychroma.com/package-search"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.trychroma.com/package-search",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 3 tools; the vendor documents an API key that the account's tools need, sent in the x-chroma-token header."
+    }
+  }
+}

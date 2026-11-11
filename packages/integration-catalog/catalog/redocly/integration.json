@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "redocly",
+  "name": "Redocly",
+  "publisher": "Redocly",
+  "verified": true,
+  "summary": "Redocly documentation.",
+  "description": "Redocly's documentation server answers questions about Redocly's API tooling and OpenAPI workflows, without signing in.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://redocly.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://redocly.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://redocly.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 3 tools; no sign-in is demanded."
+    }
+  }
+}

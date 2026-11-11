@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "tally",
+  "name": "Tally",
+  "publisher": "Tally",
+  "verified": true,
+  "summary": "Forms and responses.",
+  "description": "Tally's hosted server creates forms and reads their submissions.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://tally.so",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://api.tally.so/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://tally.so",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.tally.so) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

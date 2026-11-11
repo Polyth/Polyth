@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "pg-aiguide",
+  "name": "pg-aiguide",
+  "publisher": "Tiger Data",
+  "verified": true,
+  "summary": "Postgres documentation and skills.",
+  "description": "Tiger Data's server searches Postgres documentation and best-practice guides, without signing in.",
+  "categories": [
+    "data",
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.tigerdata.com",
+  "mcp": {
+    "auth": "none",
+    "remote": {
+      "url": "https://mcp.tigerdata.com/docs"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.tigerdata.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 2 tools; no sign-in is demanded."
+    }
+  }
+}

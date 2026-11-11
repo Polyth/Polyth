@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "azure",
+  "name": "Azure",
+  "publisher": "Microsoft",
+  "verified": true,
+  "summary": "Azure resources, with your Azure sign-in.",
+  "description": "Microsoft's Azure server, run locally: storage, Cosmos DB, Key Vault metadata, monitoring and many more services, using the account signed in with the Azure CLI. It needs Node.js.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://github.com/microsoft/mcp",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "@azure/mcp@3.0.0",
+        "server",
+        "start"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 90000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://github.com/microsoft/mcp",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to @azure/mcp@3.0.0, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

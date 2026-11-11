@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "neon",
+  "name": "Neon",
+  "publisher": "Neon",
+  "verified": true,
+  "summary": "Serverless Postgres and branches.",
+  "description": "Neon's hosted server creates projects and branches, runs SQL and prepares migrations on a branch before they reach the main one.",
+  "categories": [
+    "data"
+  ],
+  "status": "stable",
+  "homepage": "https://neon.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.neon.tech/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://neon.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.neon.tech) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

@@ -5,8 +5,10 @@
   "publisher": "GitHub",
   "verified": true,
   "summary": "Repositories, issues and pull requests.",
-  "description": "GitHub's hosted MCP server, authenticated with a personal access token. The token decides which repositories are reachable, so it is the whole permission boundary; store it in the credential vault rather than in a config file. GitHub also sells a Copilot-hosted variant of the same endpoint.",
-  "categories": ["code", "quality"],
+  "description": "GitHub's hosted MCP server, authenticated with a personal access token. The token decides which repositories are reachable, so it is the whole permission boundary; it is kept write-only in your Credential Vault.",
+  "categories": [
+    "code"
+  ],
   "status": "stable",
   "featured": true,
   "homepage": "https://github.com",
@@ -14,18 +16,22 @@
     "auth": "token",
     "remote": {
       "url": "https://api.githubcopilot.com/mcp/",
-      "tokenHeader": { "name": "Authorization", "valuePrefix": "Bearer " }
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      }
     },
     "tokenHelpUrl": "https://github.com/settings/tokens"
   },
   "evidence": {
-    "checkedAt": "2026-11-06",
-    "source": "https://docs.github.com/en/copilot/customizing-copilot/using-model-context-protocol",
+    "checkedAt": "2026-11-11",
+    "source": "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/use-the-github-mcp-server",
     "probe": {
       "state": "observed",
       "httpStatus": 401,
       "challenge": "bearer-oauth",
-      "note": "Answers 401 asking for a Bearer token. It also advertises github.com/login/oauth as an authorization server with repo, read:org, read:user, gist and notification scopes; this catalog records the token path because that server does not publish dynamic client registration."
+      "registration": "none",
+      "note": "Answers 401 and points to an authorization server (github.com) without dynamic client registration, so one-click OAuth is not available; the catalog connects with the vendor's documented token instead."
     }
   }
 }

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "circleback",
+  "name": "Circleback",
+  "publisher": "Circleback",
+  "verified": true,
+  "summary": "Meeting notes and action items.",
+  "description": "Circleback's hosted server searches meeting notes, transcripts and action items.",
+  "categories": [
+    "product"
+  ],
+  "status": "stable",
+  "homepage": "https://circleback.ai",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://app.circleback.ai/api/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://circleback.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (app.circleback.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

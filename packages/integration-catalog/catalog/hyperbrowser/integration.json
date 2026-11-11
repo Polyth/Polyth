@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "hyperbrowser",
+  "name": "Hyperbrowser",
+  "publisher": "Hyperbrowser",
+  "verified": true,
+  "summary": "Cloud browsers for scraping and agents.",
+  "description": "Hyperbrowser's hosted server scrapes, crawls and runs browser agents in cloud browsers. It needs a Hyperbrowser API key.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://www.hyperbrowser.ai",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://mcp.hyperbrowser.ai/mcp",
+      "tokenHeader": {
+        "name": "x-api-key"
+      }
+    },
+    "tokenHelpUrl": "https://app.hyperbrowser.ai"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.hyperbrowser.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "none",
+      "note": "Answers 401 without OAuth metadata; the key travels in the x-api-key header."
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "hyperping",
+  "name": "Hyperping",
+  "publisher": "Hyperping",
+  "verified": true,
+  "summary": "Monitors, incidents and status pages.",
+  "description": "Hyperping's hosted server manages monitors, maintenance windows, incidents and status pages. It needs a Hyperping API key.",
+  "categories": [
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://hyperping.com",
+  "mcp": {
+    "auth": "token",
+    "remote": {
+      "url": "https://api.hyperping.io/v1/mcp",
+      "tokenHeader": {
+        "name": "Authorization",
+        "valuePrefix": "Bearer "
+      }
+    },
+    "tokenHelpUrl": "https://hyperping.com/mcp"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://hyperping.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 200,
+      "challenge": "none",
+      "note": "Answered initialize without credentials and listed 69 tools; the vendor documents an API key that the account's tools need, sent in the Authorization header."
+    }
+  }
+}

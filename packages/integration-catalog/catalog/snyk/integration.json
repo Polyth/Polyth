@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "snyk",
+  "name": "Snyk",
+  "publisher": "Snyk",
+  "verified": true,
+  "summary": "Scan code, dependencies and IaC.",
+  "description": "The Snyk CLI's MCP mode scans the open project for vulnerable dependencies, code issues and IaC misconfigurations. The first scan asks you to sign in to Snyk. It needs Node.js.",
+  "categories": [
+    "quality",
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://snyk.io",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "snyk@1.1308.4",
+        "mcp",
+        "-t",
+        "stdio"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 90000
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://snyk.io",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's documentation, pinned to snyk@1.1308.4, the newest stable release published on 2026-11-11. The catalog never starts it unpinned."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "semaphore",
+  "name": "Semaphore",
+  "publisher": "Semaphore",
+  "verified": true,
+  "summary": "CI pipelines and jobs.",
+  "description": "Semaphore's hosted server reads pipelines, workflows and job logs so the agent can explain a red build.",
+  "categories": [
+    "cloud"
+  ],
+  "status": "stable",
+  "homepage": "https://semaphore.io",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.semaphoreci.com/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://semaphore.io",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.semaphoreci.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

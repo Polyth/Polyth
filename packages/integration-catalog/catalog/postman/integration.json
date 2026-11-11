@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "postman",
+  "name": "Postman",
+  "publisher": "Postman",
+  "verified": true,
+  "summary": "Collections, environments and APIs.",
+  "description": "Postman's hosted server reads and edits workspaces, collections, environments and API specs.",
+  "categories": [
+    "code"
+  ],
+  "status": "stable",
+  "homepage": "https://www.postman.com",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.postman.com/minimal"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://www.postman.com",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.postman.com) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

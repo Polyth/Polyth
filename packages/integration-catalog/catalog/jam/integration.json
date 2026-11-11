@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "jam",
+  "name": "Jam",
+  "publisher": "Jam",
+  "verified": true,
+  "summary": "Bug reports with replays and logs.",
+  "description": "Jam's hosted server reads bug reports with their screen recording, console logs and network requests, so the agent starts debugging from evidence.",
+  "categories": [
+    "code",
+    "quality"
+  ],
+  "status": "stable",
+  "homepage": "https://jam.dev",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.jam.dev/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://jam.dev",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (api.jam.dev) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}

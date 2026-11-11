@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "mem0",
+  "name": "Mem0",
+  "publisher": "Mem0",
+  "verified": true,
+  "summary": "Long-term memory for agents.",
+  "description": "Mem0's hosted server stores and retrieves memories across sessions.",
+  "categories": [
+    "ai"
+  ],
+  "status": "stable",
+  "homepage": "https://mem0.ai",
+  "mcp": {
+    "auth": "oauth",
+    "remote": {
+      "url": "https://mcp.mem0.ai/mcp"
+    }
+  },
+  "evidence": {
+    "checkedAt": "2026-11-11",
+    "source": "https://mem0.ai",
+    "probe": {
+      "state": "observed",
+      "httpStatus": 401,
+      "challenge": "bearer-oauth",
+      "registration": "dynamic",
+      "note": "Answers an unauthenticated initialize with 401 and publishes OAuth metadata; the authorization server (mcp.mem0.ai) offers dynamic client registration, so a harness can sign in without a pre-registered app. The sign-in itself was not completed by this check."
+    }
+  }
+}
