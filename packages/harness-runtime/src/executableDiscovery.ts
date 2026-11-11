@@ -291,8 +291,23 @@ export const discoverHarnessExecutable = async (
     return { searched };
   }
 
+  // On Windows a copy Polyth installed itself wins over a hand-made `.cmd`
+  // wrapper found earlier (one over another app's bundled CLI): nothing can
+  // update through such a wrapper, and installing Polyth's copy is how a
+  // person hands the CLI over. npm's and pnpm's own shims keep their place.
+  // ponytail: the installed copy's existence is the choice; add a stored
+  // per-harness preference if someone needs to go back to the wrapper.
+  const managed = async (hit: HarnessExecutableSearchHit): Promise<HarnessExecutableSearchHit> => {
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    const localAppData = env.LOCALAPPDATA?.trim();
+    if ((options.platform ?? process.platform) !== "win32" || !localAppData || !/\.(?:cmd|bat)$/i.test(launcher)) return hit;
+    const prefix = join(localAppData, ...WINDOWS_NPM_PREFIX);
+    if (resolve(dirname(launcher)) === resolve(prefix) || await windowsCmdShimFile(launcher)) return hit;
+    return await scanDirectories(binary, [prefix], "well-known", options, []) ?? hit;
+  };
+
   const fromPath = await scanDirectories(binary, splitPath(inheritedPath(env, options.platform ?? process.platform)), "path", options, searched);
-  if (fromPath) return { hit: fromPath, searched };
+  if (fromPath) return { hit: await managed(fromPath), searched };
 
   const fromWellKnown = await scanDirectories(
     binary,
@@ -301,7 +316,7 @@ export const discoverHarnessExecutable = async (
     options,
     searched,
   );
-  if (fromWellKnown) return { hit: fromWellKnown, searched };
+  if (fromWellKnown) return { hit: await managed(fromWellKnown), searched };
 
   const login = await probeHarnessLoginShellPath(options);
   if (!login) return { searched };

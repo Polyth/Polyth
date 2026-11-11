@@ -3,11 +3,11 @@ import type { HarnessSnapshot, HarnessUpdateStatus } from "@polyth/contracts";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import { formatRelativeTime } from "@polyth/web/i18n";
 import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
-import { Button, DownloadIcon, Notice, RefreshIcon } from "../../../apps/web/src/components/ui/index.ts";
+import { Button, DownloadIcon, Icon, InfoIcon, Notice, RefreshIcon } from "../../../apps/web/src/components/ui/index.ts";
 import { ReadonlyRow, Row, Section } from "../../../apps/web/src/components/settings/parts.tsx";
 import { displayVersion } from "./presentation.ts";
 import { failureCopy, machineWords } from "./installPresentation.ts";
-import { onHarnessInstallSettled, startHarnessInstall, useHarnessInstalls } from "./installs.ts";
+import { onHarnessInstallSettled, requestHarnessInstall, startHarnessInstall, useHarnessInstalls } from "./installs.ts";
 import { dismissHarnessUpdateRun, loadHarnessUpdates, reinstallOffer, runHarnessUpdate, useHarnessUpdates } from "./updates.ts";
 
 const api = createApiTransport();
@@ -74,6 +74,9 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
   // The server decides who may run an updater (the instance owner, on this
   // machine); without its answer the attempt is allowed and it explains.
   const mayUpdate = status ? status.canUpdate : Boolean(updateCommand);
+  // A copy another app owns: no updater here can replace it.
+  const external = status?.external;
+  const canInstall = Boolean(snapshot?.setup?.installCommand);
   const installs = useHarnessInstalls(projectId, host);
   const [reinstallId, setReinstallId] = useState<string>();
   const [reinstallError, setReinstallError] = useState("");
@@ -128,7 +131,23 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
       action={<Button size="sm" variant="ghost" iconStart={RefreshIcon} busy={updates.loading} onClick={() => void updates.refresh(true)}>{t("checkUpdates")}</Button>}>
       <ReadonlyRow label={t("installed")} value={installed ?? t("notReported")} />
       <ReadonlyRow label={t("latest")} value={latestRelease(status, updates.loading, t)} />
-      {updateCommand && <Row label={status?.available && latest ? t("updateTo", { version: latest }) : t("update")}
+      {external && <>
+        <div className="pkg-harnesses-install-next pkg-harnesses-external" role="note">
+          <Icon icon={InfoIcon} size="md" />
+          <p>
+            <strong>{external.app ? t("external.title", { name, app: external.app }) : t("external.titleUnknown", { name })}</strong>
+            <span>{t("external.body")}</span>
+          </p>
+        </div>
+        <Row label={t("external.selfLabel")} hint={external.app ? t("external.selfHint", { app: external.app }) : t("external.selfHintUnknown")}>
+          <Button size="sm" iconStart={RefreshIcon} busy={updates.loading} onClick={() => void updates.refresh(true)}>{t("external.checkAgain")}</Button>
+        </Row>
+        {canInstall && <Row label={t("external.switchLabel")} hint={<>{t("external.switchHint", { name })}{!mayUpdate ? ` ${t("external.switchOwnerOnly")}` : ""}</>}>
+          <Button size="sm" variant="primary" iconStart={DownloadIcon} disabled={!mayUpdate} onClick={() => requestHarnessInstall(harnessId)}>{t("external.switchAction")}</Button>
+        </Row>}
+        <details className="pkg-harnesses-update-log"><summary>{t("external.where")}</summary><pre>{[external.launcher, external.location].filter(Boolean).join("\n→ ")}</pre></details>
+      </>}
+      {updateCommand && !external && <Row label={status?.available && latest ? t("updateTo", { version: latest }) : t("update")}
         hint={<>{withCommand(t("updateHint", { command: MARK }), updateCommand)}{!mayUpdate && status?.reason !== "remote" ? ` ${t("updateOwnerOnly")}` : ""}</>}>
         <Button size="sm" iconStart={DownloadIcon} busy={running} disabled={!mayUpdate || running}
           onClick={() => void runHarnessUpdate(harnessId, projectId)}>{running ? t("updating") : status?.available ? t("update") : t("runUpdater")}</Button>

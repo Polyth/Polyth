@@ -211,6 +211,27 @@ test("Windows discovery finds agy and Cursor's agent where their installers put 
   assert.equal((await discoverHarnessExecutable("codex", options)).hit?.executablePath, join(local, "Polyth", "npm", "codex.cmd"));
 });
 
+test("Windows discovery prefers the copy Polyth installed over a hand-made .cmd wrapper", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "polyth-harness-managed-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const local = join(root, "AppData", "Local");
+  const bin = join(root, ".local", "bin");
+  const managed = join(local, "Polyth", "npm");
+  for (const directory of [bin, managed]) await mkdir(directory, { recursive: true });
+  await writeFile(join(bin, "codex.cmd"), "@echo off\r\n\"%CODEX_EXE%\" %*\r\n", "utf8");
+  const options = (path: string) => ({
+    platform: "win32" as const,
+    env: { PATH: path, PATHEXT: ".exe;.cmd", USERPROFILE: root, LOCALAPPDATA: local },
+    home: root,
+    loginShellProbe: false,
+  });
+  // Nothing of Polyth's yet: the wrapper is what there is.
+  assert.equal((await discoverHarnessExecutable("codex", options(bin))).hit?.executablePath, join(bin, "codex.cmd"));
+  await writeFile(join(managed, "codex.cmd"), "", "utf8");
+  assert.equal((await discoverHarnessExecutable("codex", options(bin))).hit?.executablePath, join(managed, "codex.cmd"), "on PATH");
+  assert.equal((await discoverHarnessExecutable("codex", options(""))).hit?.executablePath, join(managed, "codex.cmd"), "well-known");
+});
+
 test("search path merge is stable and removes duplicates", () => {
   assert.deepEqual(
     mergeHarnessSearchPaths(["/one", "/two", "/one"], `/two${delimiter}/three`),

@@ -250,7 +250,21 @@ shim for the package sits in that prefix. A failed self-update through such a
 wrapper adds `It starts: <target>` after the `Program:` line, or `It starts a
 program in: <folder>` for a shim that picks its program at call time (one over
 the Codex desktop app's `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`),
-and says the copy is updated by the app that installed it (`wrapperNote`). A copy npm did not install (a standalone or WinGet
+and says the copy is updated by the app that installed it (`wrapperNote`).
+Settings does not wait for that failure: `GET /api/harnesses/updates` marks such
+a copy `external` (`externalHarnessCopy`: a Windows `.cmd`/`.bat` launcher that
+is neither an npm/pnpm shim nor a wrapper over the package's npm install, with
+`launcher`, what it starts in `location`, and the owning app's name when the
+descriptor's `externalApps` recognises that path). The Runtime tab then replaces
+the Update row with two plain choices: update it in that app and check again, or
+install Polyth's own copy through the ordinary install dialog (which ends in the
+sign-in step when one is needed). The hero's Update button becomes "How to
+update" and opens that tab; the list row offers no update. Once Polyth's copy
+exists in `%LOCALAPPDATA%\Polyth\npm`, `discoverHarnessExecutable` prefers it
+over any `.cmd`/`.bat` launcher that is not an npm/pnpm shim, on PATH or in a
+well-known folder, so every backend runs and updates that copy from then on;
+the other copy is left untouched. There is no stored switch back: removing
+Polyth's copy returns discovery to the wrapper. A copy npm did not install (a standalone or WinGet
 binary) keeps its own updater. An update argv that already runs the package
 manager (DeepSeek's `npm install -g @deepseek-ai/dsh@latest`) is kept and names
 the installed command in `releaseSource.bin`, whose install supplies the

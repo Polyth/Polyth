@@ -115,7 +115,7 @@ export function createCodexProvider(host: ServerPackageHost, account?: ResolvedH
         return resolveRemoteHarnessHost(host, context);
     };
     return {
-        descriptor: { id: harnessId, name: "Codex", integration: "App Server", priority: 50, setupUrl: "https://developers.openai.com/codex/cli/", installCommand: npmCliInstallCommand("@openai/codex", process.platform), signInCommand: "codex login", deviceSignInCommand: "codex login --device-auth", updateCommand: ["codex", "update"], releaseSource: { kind: "npm", package: "@openai/codex" }, remoteHost: { binary: CODEX_REMOTE_BINARY, installCommand: npmCliInstallCommand("@openai/codex"), signInCommand: "codex login --device-auth", ...(account ? {} : { sessions: true }) }, privateSessions: true },
+        descriptor: { id: harnessId, name: "Codex", integration: "App Server", priority: 50, setupUrl: "https://developers.openai.com/codex/cli/", installCommand: npmCliInstallCommand("@openai/codex", process.platform), signInCommand: "codex login", deviceSignInCommand: "codex login --device-auth", updateCommand: ["codex", "update"], releaseSource: { kind: "npm", package: "@openai/codex" }, externalApps: [{ pathIncludes: "\\OpenAI\\Codex\\", name: "Codex" }], remoteHost: { binary: CODEX_REMOTE_BINARY, installCommand: npmCliInstallCommand("@openai/codex"), signInCommand: "codex login --device-auth", ...(account ? {} : { sessions: true }) }, privateSessions: true },
         // Polyth now reproduces the Codex client's semantic metadata turn, so
         // canonical sessions can wait briefly for the native thread name event.
         staticFeatures: { ...CODEX_CAPABILITIES, title: "native" },

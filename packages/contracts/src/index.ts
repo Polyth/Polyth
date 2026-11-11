@@ -4313,6 +4313,9 @@ export interface HarnessDescriptor {
   /** The CLI ships inside the Polyth desktop app and updates with it, so
    *  Settings offers no update of its own. */
   bundled?: boolean;
+  /** Other apps that ship their own copy of this CLI, recognised by a piece
+   *  of the folder that copy lives in, so Settings can name who updates it. */
+  externalApps?: readonly { pathIncludes: string; name: string }[];
   /** Names one of several accounts of the same native harness (for example a
    *  second Claude Code login). The picker keeps the shared logo, gives the
    *  account its own tint and names it on hover. */
@@ -4552,6 +4555,11 @@ export interface HarnessUpdateStatus {
   reason?: "unsupported" | "remote" | "bundled" | "not-installed" | "unavailable" | "unparsed";
   /** The caller may run this harness's own update command from Settings. */
   canUpdate: boolean;
+  /** The copy in use is a launcher over something neither npm nor Polyth
+   *  installed (a wrapper over another app's bundled CLI), so no updater here
+   *  can replace it: `launcher` is the file found, `location` what it starts
+   *  (a file, or the folder it picks from), `app` who owns that when known. */
+  external?: { launcher: string; location?: string; app?: string };
 }
 export interface HarnessContext {
   /** Server-validated context for provider-owned per-Space storage. */

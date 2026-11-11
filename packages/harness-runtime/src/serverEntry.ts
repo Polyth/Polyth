@@ -251,6 +251,30 @@ async function updateNpmPrefix(hit: { executablePath: string; launcherPath?: str
     return cli ? npmGlobalPrefixOf(cli, target.npmPackage) : undefined;
 }
 /**
+ * A Windows copy no updater here can replace: the launcher is a `.cmd`
+ * wrapper that is neither npm's install of the package nor any npm/pnpm shim
+ * (a hand-made shim over the Codex desktop app's bundled CLI). Settings then
+ * explains who updates it and offers Polyth's own install, which discovery
+ * prefers once it exists. Undefined for every copy an updater can handle.
+ */
+export async function externalHarnessCopy(
+    hit: { executablePath: string; launcherPath?: string },
+    descriptor: Pick<HarnessDescriptor, "releaseSource" | "externalApps">,
+    platform: NodeJS.Platform = process.platform,
+    env: NodeJS.ProcessEnv = process.env,
+): Promise<HarnessUpdateStatus["external"]> {
+    const source = descriptor.releaseSource;
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    if (platform !== "win32" || source?.kind !== "npm" || source.bin || !/\.(?:cmd|bat)$/i.test(launcher))
+        return undefined;
+    if (await windowsCmdShimFile(launcher) || await npmGlobalPrefixOf(hit, source.package, platform))
+        return undefined;
+    const location = await windowsCmdWrapperTarget(launcher, env) ?? await windowsCmdWrapperTarget(launcher, env, "folder");
+    const where = (location ?? "").toLowerCase();
+    const app = descriptor.externalApps?.find((entry) => where.includes(entry.pathIncludes.toLowerCase()))?.name;
+    return { launcher, ...(location ? { location } : {}), ...(app ? { app } : {}) };
+}
+/**
  * What a failed update says about a Windows `.cmd` wrapper that is not an npm
  * install: the file it starts, or the folder it picks its program from at
  * call time, and that such a copy is updated by whatever installed it.
@@ -683,7 +707,7 @@ export function harnessRoutes(
             request.json(200, await Promise.all(targets.map(async (provider): Promise<HarnessUpdateStatus> => {
                 const { descriptor } = provider;
                 try {
-                    return await harnessUpdateStatus({
+                    const status = await harnessUpdateStatus({
                         descriptor,
                         snapshot: snapshots.find((row) => row.identity.id === descriptor.id),
                         remote: context.remote,
@@ -691,6 +715,12 @@ export function harnessRoutes(
                         checker: updateChecker,
                         force,
                     });
+                    const binary = descriptor.updateCommand?.[0];
+                    if (context.remote || status.reason === "not-installed" || status.reason === "bundled" || !binary || process.platform !== "win32")
+                        return status;
+                    const { hit } = await discoverHarnessExecutable(binary);
+                    const external = hit ? await externalHarnessCopy(hit, descriptor) : undefined;
+                    return external ? { ...status, external } : status;
                 }
                 catch {
                     return { harnessId: descriptor.id, available: false, reason: "unavailable", canUpdate: false };

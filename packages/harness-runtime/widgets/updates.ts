@@ -136,6 +136,7 @@ export function reinstallOffer(input: {
   return { kind: "offer", command: input.installCommand };
 }
 
-/** A newer release the caller may install from Settings right now. */
+/** A newer release the caller may install from Settings right now. A copy
+ *  another app owns has no updater to run; its page explains the two ways. */
 export const installableUpdate = (status: HarnessUpdateStatus | undefined): status is HarnessUpdateStatus & { latest: string } =>
-  Boolean(status?.available && status.canUpdate && status.latest);
+  Boolean(status?.available && status.canUpdate && status.latest && !status.external);

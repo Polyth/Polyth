@@ -516,6 +516,9 @@ function HarnessDetail({
 }) {
   const account = useHarnessAccountStatus(detail.identity.accounts?.endpoint, detail.identity.id, detail.availability.checkedAt);
   const strip = useTabStripOverflow(activeSection);
+  // A newer release for a copy another app owns: the Runtime tab explains
+  // the two ways to get it, so the hero leads there instead of an updater.
+  const howToUpdate = Boolean(update?.external && update.available && activeSection !== "runtime" && contributed.some((section) => section.id === "runtime"));
   const controls = detail.configuration?.controls?.filter((control) => control.placement === "harness-overview" || control.placement === "harness-settings") ?? [];
   const features = [...runtimeFacts(detail), ...attachmentFacts(detail)];
   const supported = features.filter((fact) => !fact.unsupported && fact.value !== "Not verified").length;
@@ -575,8 +578,9 @@ function HarnessDetail({
         {detail.message && detail.availability.state !== "ready" && !checking && <p className="pkg-harnesses-hero-message">{detail.message}</p>}
       </div>
       <div className="pkg-harnesses-hero-actions">
-        {(needsSetup || installableUpdate(update) || running) && <div className="pkg-harnesses-hero-primary">
+        {(needsSetup || installableUpdate(update) || running || howToUpdate) && <div className="pkg-harnesses-hero-primary">
           {needsSetup ? stepAction(detail)
+            : howToUpdate && !running ? <Button size="sm" variant="primary" onClick={() => onSection("runtime")}>{host.ui.locale.translate("harnessruntime.maintenance.external.how")}</Button>
             : <Button size="sm" variant="primary" iconStart={DownloadIcon} busy={running} onClick={onUpdate}>{running ? t("updatingEllipsis") : displayVersion(update?.latest) ? t("updateTo", { version: displayVersion(update?.latest) ?? "" }) : t("updateToLatest")}</Button>}
         </div>}
         <div className="pkg-harnesses-hero-tools">

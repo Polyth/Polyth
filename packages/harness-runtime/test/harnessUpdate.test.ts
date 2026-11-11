@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { HarnessRegistry, HarnessSnapshot, RouteRequest, SpaceContext } from "@polyth/contracts";
 import { createServerServiceRegistry, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { freeHarnessExecutable, harnessRoutes, npmGlobalPrefixOf, runHarnessUpdate, updateCrashName, wrapperNote } from "../src/serverEntry.ts";
+import { externalHarnessCopy, freeHarnessExecutable, harnessRoutes, npmGlobalPrefixOf, runHarnessUpdate, updateCrashName, wrapperNote } from "../src/serverEntry.ts";
 import { windowsCmdWrapperTarget } from "../src/executableDiscovery.ts";
 
 test("runHarnessUpdate runs the argv without a shell and reports the exit", async () => {
@@ -178,6 +178,14 @@ test("npmGlobalPrefixOf recognizes only a launcher that leads into the npm packa
     assert.match(note, /cannot update it/);
     assert.match(await wrapperNote(join(elsewhere, "native.cmd"), "win32"), /It starts: .*\n/);
     assert.equal(await wrapperNote(exe, "win32"), "", "not a wrapper");
+    // Settings learns the same before anyone presses Update.
+    const codex = { releaseSource: { kind: "npm" as const, package: pi }, externalApps: [{ pathIncludes: join("OpenAI", "Codex"), name: "Codex" }] };
+    assert.deepEqual(await externalHarnessCopy(hit(late), codex, "win32", { APPBIN: bin }), { launcher: late, location: bin, app: "Codex" });
+    assert.deepEqual(await externalHarnessCopy(hit(join(elsewhere, "native.cmd")), codex, "win32"), { launcher: join(elsewhere, "native.cmd"), location: exe });
+    assert.equal(await externalHarnessCopy(hit(join(elsewhere, "shim.cmd")), codex, "win32"), undefined, "a wrapper over the npm install updates through npm");
+    assert.equal(await externalHarnessCopy(hit(shim), codex, "win32"), undefined, "npm's own shim");
+    assert.equal(await externalHarnessCopy(hit(exe), codex, "win32"), undefined, "a native program keeps its own updater");
+    assert.equal(await externalHarnessCopy(hit(late), codex, "linux", { APPBIN: bin }), undefined);
 });
 
 const space = { spaceId: "space-a", spaceSlug: "space-a", userId: "user-a", role: "owner", deployment: "local-trusted", storageDir: "/tmp/polyth-space-a" } as SpaceContext;
