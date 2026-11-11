@@ -3169,7 +3169,11 @@ footer in view pushed the rows below it down at once. On touch
 row of quick actions under every interim answer doubled the activity gaps;
 the turn's final answer keeps its footer. With a mouse, over a block that
 footer *is* the group gap (no top margin, a negative bottom margin of
-`--conversation-group-gap`). On phones prose, thoughts and blocks share one
+`--conversation-group-gap`), in every reveal mode: elsewhere a hover-revealed
+actions-only footer collapses to no height and its bar shows in the message
+gap below, but the group gap is narrower than the icon track, and the block
+(its own stacking context) painted over the revealed icons and took their
+clicks. On phones prose, thoughts and blocks share one
 gap (`--conversation-group-gap` = `--timeline-gap`, 12px); touch block rows
 keep a 44px hit box but lay out as 36px (`--activity-row-trim` pulls the
 block into the gaps around it), and consecutive blocks' hit boxes meet
