@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { HarnessRegistry, HarnessSnapshot, RouteRequest, SpaceContext } from "@polyth/contracts";
 import { createServerServiceRegistry, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { freeHarnessExecutable, harnessRoutes, npmGlobalPrefixOf, runHarnessUpdate, updateCrashName } from "../src/serverEntry.ts";
+import { freeHarnessExecutable, harnessRoutes, npmGlobalPrefixOf, runHarnessUpdate, updateCrashName, wrapperNote } from "../src/serverEntry.ts";
 import { windowsCmdWrapperTarget } from "../src/executableDiscovery.ts";
 
 test("runHarnessUpdate runs the argv without a shell and reports the exit", async () => {
@@ -166,6 +166,18 @@ test("npmGlobalPrefixOf recognizes only a launcher that leads into the npm packa
     writeFileSync(stored, "");
     assert.equal(await npmGlobalPrefixOf(wrapper("store.cmd", `node "${stored}" %*`), pi, "win32"), undefined, "no npm shim owns that folder");
     assert.equal(await windowsCmdWrapperTarget(join(elsewhere, "native.cmd")), exe, "a failed update can name what the wrapper starts");
+    // A shim that picks its program at call time (the Codex desktop app's
+    // `bin\<hash>\codex.exe`): the failure names the folder and says why.
+    const bin = join(elsewhere, "OpenAI", "Codex", "bin");
+    mkdirSync(join(bin, "abc123"), { recursive: true });
+    writeFileSync(join(bin, "abc123", "codex.exe"), "");
+    const late = wrapper("late.cmd", `for /f "delims=" %%D in ('dir /b /ad /o:-d "%APPBIN%" 2^>nul') do set "CODEX_EXE=%APPBIN%\\%%D\\codex.exe"\r\n"%CODEX_EXE%" --no-daemon %*`).launcherPath;
+    assert.equal(await windowsCmdWrapperTarget(late, { APPBIN: bin }), undefined);
+    const note = await wrapperNote(late, "win32", { APPBIN: bin });
+    assert.match(note, /It starts a program in: .*bin\n/);
+    assert.match(note, /cannot update it/);
+    assert.match(await wrapperNote(join(elsewhere, "native.cmd"), "win32"), /It starts: .*\n/);
+    assert.equal(await wrapperNote(exe, "win32"), "", "not a wrapper");
 });
 
 const space = { spaceId: "space-a", spaceSlug: "space-a", userId: "user-a", role: "owner", deployment: "local-trusted", storageDir: "/tmp/polyth-space-a" } as SpaceContext;

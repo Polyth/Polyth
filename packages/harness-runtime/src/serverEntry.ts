@@ -250,6 +250,22 @@ async function updateNpmPrefix(hit: { executablePath: string; launcherPath?: str
     const { hit: cli } = await discoverHarnessExecutable(target.npmBin);
     return cli ? npmGlobalPrefixOf(cli, target.npmPackage) : undefined;
 }
+/**
+ * What a failed update says about a Windows `.cmd` wrapper that is not an npm
+ * install: the file it starts, or the folder it picks its program from at
+ * call time, and that such a copy is updated by whatever installed it.
+ */
+export async function wrapperNote(launcher: string, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+    if (platform !== "win32" || !/\.(?:cmd|bat)$/i.test(launcher))
+        return "";
+    const file = await windowsCmdWrapperTarget(launcher, env);
+    const folder = file ? undefined : await windowsCmdWrapperTarget(launcher, env, "folder");
+    return [
+        "",
+        ...(file ? [`It starts: ${file}`] : folder ? [`It starts a program in: ${folder}`] : []),
+        "This launcher is a wrapper around a copy that npm did not install, so Polyth cannot update it. Update it with the app that installed it, or remove the wrapper and install the CLI from Polyth.",
+    ].join("\n");
+}
 async function runUpdateCommand(command: readonly string[], target: HarnessUpdateNpmTarget): Promise<HarnessUpdateResult> {
     const [binary, ...ownArgs] = command;
     if (!binary)
@@ -283,8 +299,7 @@ async function runUpdateCommand(command: readonly string[], target: HarnessUpdat
     // found on PATH may not be the copy Polyth installed).
     // A `.cmd` wrapper hides the copy it starts; a failure names that too.
     const launcher = hit.launcherPath ?? hit.executablePath;
-    const wrapped = !npm && process.platform === "win32" ? await windowsCmdWrapperTarget(launcher) : undefined;
-    const ran = `Program: ${[launcher, ...(npm ? args : [])].join(" ")}${wrapped ? `\nIt starts: ${wrapped}` : ""}`;
+    const ran = `Program: ${[launcher, ...(npm ? args : [])].join(" ")}${prefix ? "" : await wrapperNote(launcher)}`;
     // npm installs Windows CLIs as `.cmd` shims, which only start through
     // `cmd.exe`; Node refuses them without a shell (spawn EINVAL). The argv is
     // the descriptor's fixed words; the path is quoted because the shell joins

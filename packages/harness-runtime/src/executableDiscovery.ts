@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Stats } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
@@ -408,12 +408,16 @@ const WRAPPER_TOKEN = /"([^"\r\n]+)"|([^\s"&|<>()=]+)/g;
  * (`"C:\Users\me\AppData\Roaming\npm\codex.cmd" %*`). An npm/pnpm shim
  * resolves as `windowsCmdShimFile` does. Undefined when the launcher names no
  * existing file. The result says where a launcher leads; it is never run.
+ * `kind: "folder"` returns the folder the launcher names instead, for one
+ * that picks its program at call time (a shim over the Codex desktop app's
+ * `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`).
  */
 export const windowsCmdWrapperTarget = async (
   shimPath: string,
   env: NodeJS.ProcessEnv = process.env,
+  kind: "file" | "folder" = "file",
 ): Promise<string | undefined> => {
-  const shim = await windowsCmdShimFile(shimPath);
+  const shim = kind === "file" ? await windowsCmdShimFile(shimPath) : undefined;
   if (shim) return shim;
   if (!/\.(?:cmd|bat)$/i.test(shimPath)) return undefined;
   try {
@@ -433,7 +437,8 @@ export const windowsCmdWrapperTarget = async (
         const candidate = expand((match[1] ?? match[2])!.trim());
         if (!isAbsolute(candidate) || WRAPPER_INTERPRETER.test(basename(candidate))) continue;
         if (resolve(candidate) === resolve(shimPath)) continue;
-        if (await stat(candidate).then((entry) => entry.isFile(), () => false)) found = resolve(candidate);
+        const isKind = (entry: Stats): boolean => kind === "file" ? entry.isFile() : entry.isDirectory();
+        if (await stat(candidate).then(isKind, () => false)) found = resolve(candidate);
       }
     }
     return found;
