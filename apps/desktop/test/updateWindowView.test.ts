@@ -77,3 +77,15 @@ test("the next start reports whether the handed-over install happened", () => {
   assert.equal(parsePendingUpdate("not json"), null);
   assert.equal(parsePendingUpdate('{"version":""}'), null);
 });
+
+test("the update window page draws its mark from an inlined image, not a file beside the app", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const html = await readFile(new URL("../src/update-window.html", import.meta.url), "utf8");
+  const build = await readFile(new URL("../build.ts", import.meta.url), "utf8");
+  // The installer removes the old copy's files while "Installing…" is shown,
+  // so the page loads no image by path: build.ts swaps the token for a data: URL.
+  assert.match(html, /<img class="mark" src="__POLYTH_UPDATE_MARK__"/);
+  assert.match(build, /replaceAll\(updateWindowMarkToken, updateWindowMark\)/);
+  assert.match(html, /img-src data:"/);
+  assert.doesNotMatch(html, /src="\.\.?\//);
+});

@@ -104,7 +104,16 @@ await copyFile(
   join(here, "..", "..", "packages", "server", "src", "agentToolsMcp.mjs"),
   join(dist, "agentToolsMcp.mjs"),
 );
-await copyFile(join(here, "src", "update-window.html"), join(dist, "update-window.html"));
+// The update window's mark is inlined: it must still draw while the installer
+// replaces this copy's files, and build/ is not beside dist/ in every layout.
+// The 256px Windows icon is the same re-framed mark, a third of icon.png's size.
+const updateWindowMarkToken = "__POLYTH_UPDATE_MARK__";
+const updateWindowHtml = await readFile(join(here, "src", "update-window.html"), "utf8");
+if (!updateWindowHtml.includes(updateWindowMarkToken)) {
+  throw new Error(`src/update-window.html has no ${updateWindowMarkToken} placeholder for the app mark`);
+}
+const updateWindowMark = `data:image/png;base64,${(await readFile(join(here, "build", "icon-win.png"))).toString("base64")}`;
+await writeFile(join(dist, "update-window.html"), updateWindowHtml.replaceAll(updateWindowMarkToken, updateWindowMark));
 
 // TypeScript is a runtime dependency of the packaged editor language service.
 // Keep it external so its CommonJS implementation is not rewritten into the
