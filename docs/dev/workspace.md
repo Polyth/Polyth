@@ -236,6 +236,14 @@ the missing path. An in-flight publication or corrupt record is kept. A live
 checkout or a branch with unmerged commits is kept too: restore the session to
 merge or discard it.
 
+An active isolate proves its line of work by the recorded base commit in its
+history (`inspectOwned`, `packages/git/src/managedWorktrees.ts`). When the
+target branch itself is rewritten (rebased onto its remote, force-pulled), an
+agent's rebase onto the new target drops that commit; the isolate still counts
+as owned when it meets the target branch at a commit the old base does not
+contain. A branch reset back to history at or before the base, or one sharing
+no history with the target, stays `unowned` with reason `base-mismatch`.
+
 A session that is leaving (deleted, or cleaned up by Settings → Sessions → Cleanup
 when "Skip isolated sessions" is off) proves ownership by its marker, branch name
 and path alone (`sessionLeaving`): an agent's rebase past the recorded base, a

@@ -123,6 +123,48 @@ test("origin mismatch and another session's worktree cannot satisfy ownership", 
   assert.equal((await managed.inspectOwned(root, { ...ref, targetPath: root, targetBranch: "main", baseCommit: wt.head })).status, "owned");
 });
 
+test("an isolate rebased onto a rewritten target branch stays owned", async (t) => {
+  const root = repo(t);
+  const managed = createManagedWorktrees(git);
+  const sessionId = randomUUID();
+  writeFileSync(join(root, "file"), "second\n");
+  run(root, "commit", "-qam", "second");
+  const wt = await managed.create({ root, sessionId, targetPath: root, targetBranch: "main" });
+  const base = wt.head;
+  const ref = { sessionId, worktreePath: wt.path, worktreeBranch: wt.branch, targetPath: root, targetBranch: "main", baseCommit: base };
+  writeFileSync(join(wt.path, "work"), "work\n");
+  run(wt.path, "add", "work");
+  run(wt.path, "commit", "-qm", "work");
+
+  // The target is rewritten: its tip is replaced by an equivalent commit, so
+  // the recorded base leaves the target's history.
+  run(root, "reset", "-q", "--hard", "HEAD~1");
+  writeFileSync(join(root, "file"), "second\n");
+  run(root, "commit", "-qam", "second (rewritten)");
+  const rewritten = run(root, "rev-parse", "HEAD");
+  assert.notEqual(rewritten, base);
+
+  // The agent rebases its work onto the rewritten target.
+  run(wt.path, "rebase", "-q", "--onto", "main", base);
+  assert.equal(await git.isAncestor(root, base, run(wt.path, "rev-parse", "HEAD")), false, "precondition");
+  assert.equal((await managed.inspectOwned(root, ref)).status, "owned");
+
+  // A checkpoint reset back to the rewritten target tip is still the same line.
+  run(wt.path, "reset", "-q", "--mixed", rewritten);
+  assert.equal((await managed.inspectOwned(root, ref)).status, "owned");
+
+  // A branch moved back to history at or before the base fails closed.
+  run(wt.path, "reset", "-q", "--hard", `${rewritten}~1`);
+  assert.deepEqual(await managed.inspectOwned(root, ref), { status: "unowned", reason: "base-mismatch" });
+
+  // So does history the target does not share.
+  run(wt.path, "checkout", "-q", "--orphan", "stray");
+  run(wt.path, "commit", "-qm", "stray", "--allow-empty");
+  run(wt.path, "branch", "-f", wt.branch, "stray");
+  run(wt.path, "checkout", "-q", wt.branch);
+  assert.deepEqual(await managed.inspectOwned(root, ref), { status: "unowned", reason: "base-mismatch" });
+});
+
 test("absent source is not authority to delete a branch or other worktree", async (t) => {
   const root = repo(t);
   const managed = createManagedWorktrees(git);
