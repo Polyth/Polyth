@@ -50,6 +50,26 @@
   width: 100%;
 }
 
+.custom-titles-settings__project {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.custom-titles-settings__project .project-glyph {
+  width: 22px;
+  height: 22px;
+}
+
+.custom-titles-settings__project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 700px) {
   .custom-titles-settings .set-row-control {
     width: 100%;

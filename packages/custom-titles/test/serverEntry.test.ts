@@ -38,6 +38,7 @@ function fixture(t: TestContext, stage?: "context" | "runtime" | "catalog" | "co
   createCustomTitleSettingsStore(spaceStorage).save(space, settings, 0);
   const projections = new Map<string, SessionProjection>([
     ["session", { id: "session", projectId: "project", spaceId: "space", worktreePath: "/project-worktree", title: "Existing title", titleSource: "native", status: "idle", createdAt: 1, updatedAt: 1 }],
+    ["room-session", { id: "room-session", projectId: "room", spaceId: "space", title: "Room title", status: "idle", createdAt: 1, updatedAt: 1 }],
     ["foreign", { id: "foreign", projectId: "foreign-project", spaceId: "foreign-space", title: "Private title", status: "idle", createdAt: 1, updatedAt: 1 }],
   ]);
   let prompt = "Fix title generation";
@@ -71,12 +72,19 @@ function fixture(t: TestContext, stage?: "context" | "runtime" | "catalog" | "co
   let generator!: ServerSessionTitleGenerator;
   const host = {
     store: { projection: async (sessionId: string) => { await pause("context"); return projections.get(sessionId); } },
-    projects: { get: async () => projectAvailable ? { id: "project", path: "/project", spaceId: space.spaceId } : undefined },
+    projects: {
+      get: async (id: string) => !projectAvailable ? undefined
+        : id === "room" ? { id, path: "/room", spaceId: space.spaceId, parentProjectId: "project" }
+        : { id: "project", path: "/project", spaceId: space.spaceId },
+    },
     systemSpaceContext: () => space,
     spaceStorage,
     forSpace(context: SpaceContext) {
       assert.equal(context, space);
-      return { sessions: {
+      return { projects: {
+        // The Space-scoped view: another Space's project is invisible.
+        get: async (id: string) => projectAvailable && id === "project" ? { id, path: "/project", spaceId: space.spaceId } : undefined,
+      }, sessions: {
         snapshot,
         events: async (sessionId: string) => {
           await snapshot(sessionId);
@@ -151,9 +159,77 @@ function fixture(t: TestContext, stage?: "context" | "runtime" | "catalog" | "co
     setPrompt(value: string) { prompt = value; },
     setTitle(title: string) { projections.set("session", { ...projections.get("session")!, title, titleSource: "manual" }); },
     setDraft(draft: string) { projections.set("session", { ...projections.get("session")!, draft }); },
-    saveSettings(value: CustomTitleSettings) { createCustomTitleSettingsStore(spaceStorage).save(space, value, 1); },
+    saveSettings(value: CustomTitleSettings) {
+      const store = createCustomTitleSettingsStore(spaceStorage);
+      store.save(space, value, store.read(space).revision);
+    },
+    async settingsRoute(method: "GET" | "PUT", payload?: unknown) {
+      let status = 0;
+      let data: Record<string, unknown> = {};
+      await pkg.routes!({
+        path: "/api/custom-titles/settings", method, space,
+        body: async () => payload,
+        json(code: number, value: Record<string, unknown>) { status = code; data = value; },
+      } as Parameters<RouteHandler>[0]);
+      return { status, data };
+    },
   };
 }
+
+test("a project with its own rules names its chats by them; other projects keep the shared ones", async (t) => {
+  const f = fixture(t);
+  f.saveSettings({
+    ...DEFAULT_CUSTOM_TITLE_SETTINGS,
+    mode: "always",
+    language: "German",
+    rules: "Shared rule",
+    projectRules: { project: { language: "Ukrainian", style: "Two words", rules: "Project rule" } },
+  });
+  assert.equal(await f.generator.generate({ sessionId: "session", prompt: "Fix title generation" }), "Fix custom title generation");
+  const system = f.completion()!.systemPrompt!;
+  assert.match(system, /Write the title in Ukrainian/);
+  assert.match(system, /Style: Two words\./);
+  assert.match(system, /Additional title rules: Project rule/);
+  assert.doesNotMatch(system, /German|Shared rule/);
+  // A private room inside the project follows the project's own rules.
+  await f.generator.generate({ sessionId: "room-session", prompt: "Fix title generation" });
+  assert.match(f.completion()!.systemPrompt!, /Additional title rules: Project rule/);
+
+  f.saveSettings({
+    ...DEFAULT_CUSTOM_TITLE_SETTINGS,
+    mode: "always",
+    language: "German",
+    rules: "Shared rule",
+    projectRules: { "other-project": { language: "Ukrainian", style: "Two words", rules: "Project rule" } },
+  });
+  await f.generator.generate({ sessionId: "session", prompt: "Fix title generation" });
+  const shared = f.completion()!.systemPrompt!;
+  assert.match(shared, /Write the title in German/);
+  assert.match(shared, /Additional title rules: Shared rule/);
+});
+
+test("saving keeps rules only for the Space's own projects, so a foreign or deleted id is dropped silently", async (t) => {
+  const f = fixture(t);
+  const before = await f.settingsRoute("GET");
+  assert.equal(before.status, 200);
+  const settings = before.data.settings as CustomTitleSettings;
+  assert.deepEqual(settings.projectRules, {});
+  const own = { language: "auto", style: "Short", rules: "Start with a verb" };
+  const saved = await f.settingsRoute("PUT", {
+    expectedRevision: before.data.revision,
+    settings: { ...settings, projectRules: { project: own, "foreign-project": own, deleted: own } },
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((saved.data.settings as CustomTitleSettings).projectRules, { project: own });
+  const reread = await f.settingsRoute("GET");
+  assert.deepEqual((reread.data.settings as CustomTitleSettings).projectRules, { project: own });
+
+  const malformed = await f.settingsRoute("PUT", {
+    expectedRevision: reread.data.revision,
+    settings: { ...settings, projectRules: { project: "loud" } },
+  });
+  assert.equal(malformed.status, 400);
+});
 
 test("disabling Custom Titles cancels pending generation and re-enable permits new titles", async (t) => {
   const f = fixture(t, "catalog");

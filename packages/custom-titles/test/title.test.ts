@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  CUSTOM_TITLE_PROJECT_RULES_MAX,
   DEFAULT_CUSTOM_TITLE_SETTINGS,
+  customTitleRulesFor,
+  customTitleSettingsEqual,
   parseCustomTitleSettings,
 } from "../src/settings.ts";
 import { TITLE_EXAMPLES } from "../src/titleReply.ts";
@@ -20,6 +23,53 @@ test("default Custom Titles policy is a five-second keyless fallback", () => {
   assert.equal(settings.mode, "fallback");
   assert.deepEqual(settings.generator, { kind: "opencode-free" });
   assert.equal(settings.language, "auto");
+});
+
+test("settings saved before project rules existed read as shared-only", () => {
+  const { projectRules: _omitted, ...legacy } = DEFAULT_CUSTOM_TITLE_SETTINGS;
+  const settings = parseCustomTitleSettings({ ...legacy, rules: "Shared" });
+  assert.deepEqual({ ...settings.projectRules }, {});
+  assert.equal(customTitleRulesFor(settings, "any-project").rules, "Shared");
+});
+
+test("a project's own rules replace the shared language, style and rules for it alone", () => {
+  const settings = parseCustomTitleSettings({
+    ...DEFAULT_CUSTOM_TITLE_SETTINGS,
+    language: "German",
+    rules: "Shared",
+    projectRules: { alpha: { language: "Ukrainian", style: "  ", rules: " Own " } },
+  });
+  assert.deepEqual(customTitleRulesFor(settings, "alpha"), {
+    language: "Ukrainian", style: DEFAULT_CUSTOM_TITLE_SETTINGS.style, rules: "Own",
+  });
+  assert.deepEqual(customTitleRulesFor(settings, "beta"), {
+    language: "German", style: DEFAULT_CUSTOM_TITLE_SETTINGS.style, rules: "Shared",
+  });
+  assert.equal(customTitleRulesFor(settings, undefined).rules, "Shared");
+  // An inherited object key is never a project.
+  assert.equal(customTitleRulesFor(settings, "toString").rules, "Shared");
+  assert.equal(customTitleSettingsEqual(settings, parseCustomTitleSettings(settings)), true);
+  assert.equal(customTitleSettingsEqual(settings, { ...settings, projectRules: {} }), false);
+  assert.equal(customTitleSettingsEqual(settings, {
+    ...settings, projectRules: { alpha: { ...settings.projectRules.alpha!, rules: "Changed" } },
+  }), false);
+});
+
+test("project rules are bounded and validated like the shared ones", () => {
+  const base = { ...DEFAULT_CUSTOM_TITLE_SETTINGS };
+  for (const projectRules of [[], "x", { alpha: null }, { alpha: { language: 1, style: "", rules: "" } }, { " alpha": { language: "auto", style: "", rules: "" } }]) {
+    assert.throws(() => parseCustomTitleSettings({ ...base, projectRules }), { code: "invalid-input" });
+  }
+  assert.throws(() => parseCustomTitleSettings({
+    ...base, projectRules: { alpha: { language: "auto", style: "", rules: "x".repeat(2_001) } },
+  }), { code: "invalid-input" });
+  const many = Object.fromEntries(Array.from({ length: CUSTOM_TITLE_PROJECT_RULES_MAX + 1 }, (_, index) => [
+    `p${index}`, { language: "auto", style: "", rules: "" },
+  ]));
+  assert.throws(() => parseCustomTitleSettings({ ...base, projectRules: many }), { code: "invalid-input" });
+  const proto = parseCustomTitleSettings({ ...base, projectRules: JSON.parse('{"__proto__":{"language":"auto","style":"","rules":"P"}}') });
+  assert.equal(customTitleRulesFor(proto, "__proto__").rules, "P");
+  assert.equal(Object.getPrototypeOf(proto.projectRules), null);
 });
 
 test("custom generator requires harness, provider, and model identity", () => {

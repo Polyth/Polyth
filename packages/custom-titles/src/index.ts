@@ -2,11 +2,14 @@ export {
   CUSTOM_TITLES_PACKAGE_ID,
   CUSTOM_TITLES_SETTINGS_VERSION,
   CUSTOM_TITLE_FALLBACK_DELAY_MS,
+  CUSTOM_TITLE_PROJECT_RULES_MAX,
   DEFAULT_CUSTOM_TITLE_SETTINGS,
+  customTitleRulesFor,
   customTitleSettingsEqual,
   parseCustomTitleSettings,
   type CustomTitleGenerator,
   type CustomTitleMode,
+  type CustomTitleRules,
   type CustomTitleSettings,
 } from "./settings.ts";
 export {

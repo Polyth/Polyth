@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { HarnessSelection, ModelRef } from "@polyth/contracts";
+import { rootProjects, type HarnessSelection, type ModelRef } from "@polyth/contracts";
 import ModelPicker from "@polyth/models/model-picker";
 import { useOtherHarnessModels, useRuntimeCatalog } from "@polyth/models/runtime-catalog";
 import {
   DEFAULT_CUSTOM_TITLE_SETTINGS,
+  customTitleRulesFor,
   parseCustomTitleSettings,
+  type CustomTitleRules,
   type CustomTitleSettings,
 } from "@polyth/custom-titles/settings";
 import { ApiError, createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
-import { EmptyState, ErrorState, FormField, PageHead, Row, SaveBar, Section } from "../../../apps/web/src/components/settings/parts.tsx";
+import ProjectGlyph from "../../../apps/web/src/components/ProjectGlyph.tsx";
+import {
+  DisclosureRow, EmptyState, ErrorState, FormField, ItemList, PageHead, Row, SaveBar, Section, Toggle,
+} from "../../../apps/web/src/components/settings/parts.tsx";
 import { useStore } from "../../../apps/web/src/store.ts";
 import { customTitlesStrings } from "./strings.ts";
 
@@ -61,6 +66,8 @@ export default function CustomTitlesSettingsPage({ host }: { host: WebPackageHos
   const [saved, setSaved] = useState(false);
   /** Harness the picker is browsing. Null follows the saved generator route. */
   const [pickerHarness, setPickerHarness] = useState<HarnessSelection | null>(null);
+  /** The project row opened in the Projects list; one at a time. */
+  const [openProject, setOpenProject] = useState<string | null>(null);
   const projectId = useSyncExternalStore(
     host.store.subscribe,
     () => host.store.getSnapshot().activeProjectId,
@@ -70,6 +77,15 @@ export default function CustomTitlesSettingsPage({ host }: { host: WebPackageHos
   const globalAgents = useStore((state) => state.agents);
   const projects = useStore((state) => state.projectRegistry.projects);
   const spaceId = projects.find((project) => project.id === projectId)?.spaceId;
+  // Projects of this Space that can have their own rules. A private room
+  // follows its parent project, so it is not listed on its own.
+  const spaceProjects = useMemo(
+    () => rootProjects(projects)
+      .filter((project) => !spaceId || !project.spaceId || project.spaceId === spaceId)
+      .slice()
+      .sort((left, right) => left.name.localeCompare(right.name, locale)),
+    [projects, spaceId, locale],
+  );
   const storedHarnessId = draft?.generator.kind === "custom" ? draft.generator.harnessId : undefined;
   const pickerHarnessId = pickerHarness?.mode === "pinned" ? pickerHarness.harnessId : storedHarnessId;
   // The composer's own catalog source, so the settings picker offers the same
@@ -122,6 +138,33 @@ export default function CustomTitlesSettingsPage({ host }: { host: WebPackageHos
   const update = (patch: Partial<CustomTitleSettings>) => {
     setSaved(false);
     setDraft((current) => current ? { ...current, ...patch } : current);
+  };
+
+  /** Edits one project's own rules; they must already exist. */
+  const updateProjectRules = (id: string, patch: Partial<CustomTitleRules>) => {
+    setSaved(false);
+    setDraft((current) => {
+      const own = current && Object.hasOwn(current.projectRules, id) ? current.projectRules[id] : undefined;
+      if (!current || !own) return current;
+      return { ...current, projectRules: { ...current.projectRules, [id]: { ...own, ...patch } } };
+    });
+  };
+
+  /** Starts a project's own rules from the shared ones, so nothing changes until edited. */
+  const giveOwnRules = (id: string) => {
+    setSaved(false);
+    setDraft((current) => current
+      ? { ...current, projectRules: { ...current.projectRules, [id]: customTitleRulesFor(current, undefined) } }
+      : current);
+  };
+
+  const dropOwnRules = (id: string) => {
+    setSaved(false);
+    setDraft((current) => {
+      if (!current) return current;
+      const { [id]: _dropped, ...rest } = current.projectRules;
+      return { ...current, projectRules: rest };
+    });
   };
 
   const onPickModel = (model?: ModelRef & { harnessId?: string }) => {
@@ -195,12 +238,55 @@ export default function CustomTitlesSettingsPage({ host }: { host: WebPackageHos
   }
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(snapshot.settings);
-  const language = draft.language.trim() || "auto";
-  const languageOptions = [
-    { value: "auto", label: copy.languageAuto },
-    ...LANGUAGES.map((name) => ({ value: name, label: languageLabel(name, locale) })),
-    ...(language !== "auto" && !LANGUAGES.includes(language) ? [{ value: language, label: language }] : []),
-  ];
+  const shared: CustomTitleRules = customTitleRulesFor(draft, undefined);
+  const ownRulesOf = (id: string): CustomTitleRules | undefined =>
+    Object.hasOwn(draft.projectRules, id) ? draft.projectRules[id] : undefined;
+
+  /** Language, tone and extra rules: the same three fields for every project
+   *  and for one project's own rules. */
+  const rulesFields = (rules: CustomTitleRules, disabled: boolean, change: (patch: Partial<CustomTitleRules>) => void) => {
+    const language = rules.language.trim() || "auto";
+    const languageOptions = [
+      { value: "auto", label: copy.languageAuto },
+      ...LANGUAGES.map((name) => ({ value: name, label: languageLabel(name, locale) })),
+      ...(language !== "auto" && !LANGUAGES.includes(language) ? [{ value: language, label: language }] : []),
+    ];
+    return (
+      <>
+        <Row label={copy.languageLabel} hint={copy.languageHint}>
+          <Select
+            label={copy.languageLabel}
+            ariaLabel={copy.languageAria}
+            value={language}
+            disabled={disabled}
+            options={languageOptions}
+            onChange={(value: unknown) => change({ language: String(value) })}
+          />
+        </Row>
+
+        <div className="custom-titles-settings__fields">
+          <FormField label={copy.styleLabel} hint={copy.styleHint}>
+            <TextInput
+              value={rules.style}
+              disabled={disabled}
+              placeholder={DEFAULT_CUSTOM_TITLE_SETTINGS.style}
+              onChange={(event) => change({ style: event.target.value })}
+            />
+          </FormField>
+
+          <FormField label={copy.rulesLabel} hint={copy.rulesHint} optional>
+            <Textarea
+              value={rules.rules}
+              disabled={disabled}
+              rows={3}
+              placeholder={copy.rulesPlaceholder}
+              onChange={(event: { target: { value: string } }) => change({ rules: event.target.value })}
+            />
+          </FormField>
+        </div>
+      </>
+    );
+  };
 
   return (
     <section className="custom-titles-settings">
@@ -260,39 +346,45 @@ export default function CustomTitlesSettingsPage({ host }: { host: WebPackageHos
         </Row>
       </Section>
 
-      <Section title={copy.sectionStyle} itemId="custom-titles.rules">
-        <Row label={copy.languageLabel} hint={copy.languageHint}>
-          <Select
-            label={copy.languageLabel}
-            ariaLabel={copy.languageAria}
-            value={language}
-            disabled={busy}
-            options={languageOptions}
-            onChange={(value: unknown) => update({ language: String(value) })}
-          />
-        </Row>
-
-        <div className="custom-titles-settings__fields">
-          <FormField label={copy.styleLabel} hint={copy.styleHint}>
-            <TextInput
-              value={draft.style}
-              disabled={busy}
-              placeholder={DEFAULT_CUSTOM_TITLE_SETTINGS.style}
-              onChange={(event) => update({ style: event.target.value })}
-            />
-          </FormField>
-
-          <FormField label={copy.rulesLabel} hint={copy.rulesHint} optional>
-            <Textarea
-              value={draft.rules}
-              disabled={busy}
-              rows={3}
-              placeholder={copy.rulesPlaceholder}
-              onChange={(event: { target: { value: string } }) => update({ rules: event.target.value })}
-            />
-          </FormField>
-        </div>
+      <Section title={copy.sectionStyle} hint={copy.styleSectionHint} itemId="custom-titles.rules">
+        {rulesFields(shared, busy, update)}
       </Section>
+
+      {spaceProjects.length > 0 ? (
+        <Section title={copy.projectsTitle} hint={copy.projectsHint} itemId="custom-titles.projects">
+          <ItemList label={copy.projectsTitle} className="custom-titles-settings__projects">
+            {spaceProjects.map((project) => {
+              const own = ownRulesOf(project.id);
+              return (
+                <DisclosureRow
+                  key={project.id}
+                  rowId={`custom-titles-project-${project.id}`}
+                  open={openProject === project.id}
+                  onToggle={() => setOpenProject((current) => current === project.id ? null : project.id)}
+                  label={(
+                    <span className="custom-titles-settings__project">
+                      <ProjectGlyph project={project} />
+                      <span className="custom-titles-settings__project-name">{project.name}</span>
+                    </span>
+                  )}
+                  value={own ? copy.projectValueOwn : copy.projectValueShared}
+                >
+                  <Row label={copy.projectOwnLabel} hint={copy.projectOwnHint}>
+                    <Toggle
+                      on={own !== undefined}
+                      disabled={busy}
+                      label={copy.projectOwnLabel}
+                      onChange={(on) => on ? giveOwnRules(project.id) : dropOwnRules(project.id)}
+                    />
+                  </Row>
+                  {/* Without its own rules a project shows the shared ones it uses, read-only. */}
+                  {rulesFields(own ?? shared, busy || !own, (patch) => updateProjectRules(project.id, patch))}
+                </DisclosureRow>
+              );
+            })}
+          </ItemList>
+        </Section>
+      ) : null}
 
       <SaveBar
         dirty={dirty}

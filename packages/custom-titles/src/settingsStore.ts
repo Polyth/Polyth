@@ -27,6 +27,9 @@ const cloneGenerator = (generator: CustomTitleSettings["generator"]): CustomTitl
 const cloneSettings = (settings: CustomTitleSettings): CustomTitleSettings => ({
   ...settings,
   generator: cloneGenerator(settings.generator),
+  projectRules: Object.fromEntries(
+    Object.entries(settings.projectRules).map(([id, rules]) => [id, { ...rules }]),
+  ),
 });
 
 const parseDocument = (value: unknown): SettingsDocument => {

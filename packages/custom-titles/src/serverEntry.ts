@@ -9,6 +9,8 @@ import {
 import {
   CUSTOM_TITLE_FALLBACK_DELAY_MS,
   CUSTOM_TITLES_PACKAGE_ID,
+  customTitleRulesFor,
+  parseCustomTitleSettings,
   type CustomTitleSettings,
 } from "./settings.ts";
 import { createCustomTitleSettingsStore } from "./settingsStore.ts";
@@ -83,6 +85,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     space: SpaceContext;
     settings: CustomTitleSettings;
     projectId: string;
+    /** The project whose own title rules apply: a private room follows its parent. */
+    rulesProjectId: string;
     cwd: string;
     projection: SessionProjection;
   }> => {
@@ -97,6 +101,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       space,
       settings: settingsStore.read(space).settings,
       projectId: projection.projectId,
+      rulesProjectId: project.parentProjectId ?? projection.projectId,
       cwd: projection.worktreePath ?? project.path,
       projection,
     };
@@ -109,7 +114,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     timeoutMs: number,
     deadline: number,
   ): Promise<string | undefined> => {
-    const { settings, projectId, cwd, projection } = await sessionContext(sessionId);
+    const { settings, projectId, rulesProjectId, cwd, projection } = await sessionContext(sessionId);
     signal.throwIfAborted();
     const input = titlePromptInput(prompt);
     if (!input) return undefined;
@@ -128,6 +133,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     if (!model) {
       throw Object.assign(new Error("OpenCode exposes no available free text model"), { code: "unavailable" });
     }
+    // The project's own language, style and rules when it has them.
+    const rules = customTitleRulesFor(settings, rulesProjectId);
     const unusable: string[] = [];
     // Reasons only: a reply is derived from the user's message and may echo it.
     const report = (outcome: "recovered" | "gave-up") => console.warn("[polyth] custom title generator reply was not a title", JSON.stringify({
@@ -144,8 +151,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       try {
         ({ text } = await host.smallModelComplete(runtime, {
           cwd,
-          prompt: buildCustomTitlePrompt(prompt, settings, attempt.kind),
-          systemPrompt: buildCustomTitleSystemPrompt(settings, attempt.kind),
+          prompt: buildCustomTitlePrompt(prompt, rules, attempt.kind),
+          systemPrompt: buildCustomTitleSystemPrompt(rules, attempt.kind),
           model,
           maxOutputTokens: attempt.maxOutputTokens,
           timeoutMs: budget,
@@ -197,6 +204,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       controller.signal.removeEventListener("abort", abort);
       generations.delete(controller);
     }
+  };
+
+  /** Keeps only rules for projects the caller's Space owns. A deleted project
+   * and another Space's project look the same and are dropped alike, so saving
+   * neither fails on a stale row nor reveals whether a foreign id exists. */
+  const ownProjectsOnly = async (space: SpaceContext, value: unknown): Promise<CustomTitleSettings> => {
+    const settings = parseCustomTitleSettings(value);
+    const projects = host.forSpace(space).projects;
+    const projectRules = Object.create(null) as CustomTitleSettings["projectRules"];
+    for (const [projectId, rules] of Object.entries(settings.projectRules)) {
+      const project = await projects.get(projectId);
+      if (project && (!project.spaceId || project.spaceId === space.spaceId)) projectRules[projectId] = rules;
+    }
+    return { ...settings, projectRules };
   };
 
   const titleGenerator: ServerSessionTitleGenerator = {
@@ -289,7 +310,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         const input = payload && typeof payload === "object" && !Array.isArray(payload)
           ? payload as Record<string, unknown>
           : {};
-        json(200, settingsStore.save(space, input.settings, Number(input.expectedRevision)));
+        const settings = await ownProjectsOnly(space, input.settings);
+        json(200, settingsStore.save(space, settings, Number(input.expectedRevision)));
       } catch (cause) {
         const error = publicError(cause);
         json(error.status, { error: error.code, message: error.message });
