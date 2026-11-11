@@ -422,6 +422,8 @@ test("roster rows stay hidden until their availability is known, and a reopen pa
   document.body.appendChild(container);
   const render = (root: ReturnType<typeof createRoot>) => act(async () => { root.render(createElement(HarnessTabs, {
     ...props(host({ value: 0 }), "instant-roster"),
+    // A Space this browser has never read: nothing can stand in for the probe.
+    spaceId: "space-instant-roster",
     harnessSelection: { mode: "pinned", harnessId: "codex" },
   })); });
   let root = createRoot(container);
@@ -504,6 +506,60 @@ test("a first open after an invalidation paints the readiness a background read 
   }
 });
 
+test("a project this browser never read paints its Space's last known local readiness at once", async () => {
+  const context = (projectId: string, spaceId: string, remote = false) => ({ projectId, spaceId, cwd: `/work/${projectId}`, remote, revision: "1", fetchedAt: 1 });
+  const unusable = { state: "not-installed", installed: false, healthy: false };
+  const answers: Record<string, unknown[]> = {
+    "seen-local": [
+      { ...snapshot("codex"), context: context("seen-local", "space-a") },
+      { ...snapshot("cursor"), context: context("seen-local", "space-a") },
+    ],
+    // Read later, but its harnesses run on another machine.
+    "seen-remote": [
+      { ...snapshot("codex", undefined, unusable), context: context("seen-remote", "space-a", true) },
+      { ...snapshot("cursor"), context: context("seen-remote", "space-a", true) },
+    ],
+    // Read last, but another Space never lends its rows.
+    "foreign-space": [
+      { ...snapshot("codex", undefined, unusable), context: context("foreign-space", "space-b") },
+      { ...snapshot("cursor", undefined, unusable), context: context("foreign-space", "space-b") },
+    ],
+  };
+  let finishSnapshots: (() => void) | undefined;
+  fetchHandler = async (input) => {
+    const url = new URL(String(input), "http://test");
+    if (url.pathname === "/api/harnesses/roster") return new Response(JSON.stringify(
+      await new Promise(() => { /* the new project's roster is still in flight */ })));
+    const projectId = url.searchParams.get("projectId") ?? "";
+    if (answers[projectId]) return new Response(JSON.stringify(answers[projectId]));
+    return new Response(JSON.stringify(await new Promise((resolve) => {
+      finishSnapshots = () => resolve([
+        { ...snapshot("codex"), context: context(projectId, "space-a") },
+        { ...snapshot("cursor", undefined, unusable), context: context(projectId, "space-a") },
+      ]);
+    })));
+  };
+  const { readHarnessSnapshots } = await import("@polyth/models/runtime-catalog");
+  await readHarnessSnapshots({ projectId: "seen-local", spaceId: "space-a" });
+  await readHarnessSnapshots({ projectId: "seen-remote", spaceId: "space-a" });
+  await readHarnessSnapshots({ projectId: "foreign-space", spaceId: "space-b" });
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(HarnessTabs, props(host({ value: 0 }), "never-opened"))); });
+    assert.deepEqual(tabProviders(container), ["openai", "cursor"],
+      "the new project's harness choices are there before its first probe answers");
+    // Its own answer replaces the borrowed rows.
+    await act(async () => { finishSnapshots?.(); await Promise.resolve(); });
+    assert.deepEqual(tabProviders(container), ["openai"]);
+  } finally {
+    await act(async () => { finishSnapshots?.(); });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("a picker whose harness reads never reached Polyth offers a retry instead of a raw toast", { timeout: 20_000 }, async () => {
   const { CONNECTION_RESTORED_EVENT } = await import("@polyth/contracts/transport-retry");
   const shown: ShownError[] = [];
@@ -521,6 +577,7 @@ test("a picker whose harness reads never reached Polyth offers a retry instead o
   try {
     await act(async () => { root.render(createElement(HarnessTabs, {
       ...props(host({ value: 0 }, shown), "link-down"),
+      spaceId: "space-link-down",
       harnessSelection: { mode: "pinned", harnessId: "codex" },
     })); });
     // Let the shared read retry spend its bounded attempts on the dead link.
@@ -567,6 +624,7 @@ test("only enabled usable harnesses are rendered in the picker", async () => {
   try {
     await act(async () => { root.render(createElement(HarnessTabs, {
       ...props(host({ value: 0 }), "snapshot-filter"),
+      spaceId: "space-snapshot-filter",
       harnessSelection: { mode: "auto" },
     })); });
     await act(async () => { await Promise.resolve(); });

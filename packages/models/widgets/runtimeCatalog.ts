@@ -263,12 +263,23 @@ const rememberHarnessSnapshots = (options: SnapshotRequest, rows: HarnessSnapsho
     keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: context.spaceId, cwd: context.cwd }));
   }
   for (const key of keys) persistedHarnesses.write(key, cached);
-  if (!options.harnessId) for (const key of keys) lastKnownHarnesses.write(key, cached);
+  if (options.harnessId) return;
+  for (const key of keys) lastKnownHarnesses.write(key, cached);
+  // Harness policy is per Space and availability is per host, so the rows a
+  // local project received also describe a local project this browser has
+  // never read in the same Space. A remote project runs its harnesses on
+  // another machine and never stands in for anything else.
+  const spaceId = options.spaceId ?? context?.spaceId;
+  if (spaceId && context?.remote !== true) lastKnownHarnesses.write(spaceLastKnownKey(spaceId), cached);
 };
+const spaceLastKnownKey = (spaceId: string) => JSON.stringify([activeBrowserAccountId(), spaceId, "local-projects"]);
 /** The last availability rows this browser received for the account/Space/
- *  project, even after an invalidation emptied every cache, or undefined. */
+ *  project, even after an invalidation emptied every cache, or undefined. A
+ *  project it has never read falls back to the latest rows of a local project
+ *  in the same account and Space; without a Space id there is no fallback. */
 export function peekLastKnownHarnessSnapshots(options: Pick<SnapshotRequest, "projectId" | "spaceId">): HarnessSnapshot[] | undefined {
-  return lastKnownHarnesses.peek(snapshotPresentationKey({ projectId: options.projectId, spaceId: options.spaceId }));
+  return lastKnownHarnesses.peek(snapshotPresentationKey({ projectId: options.projectId, spaceId: options.spaceId }))
+    ?? (options.spaceId ? lastKnownHarnesses.peek(spaceLastKnownKey(options.spaceId)) : undefined);
 }
 const reusablePersistedSnapshots = (rows: HarnessSnapshot[]): boolean =>
   // Metadata is presentation, not execution authority. An `unknown` native
