@@ -452,6 +452,58 @@ test("roster rows stay hidden until their availability is known, and a reopen pa
   }
 });
 
+test("a first open after an invalidation paints the readiness a background read received, without waiting for the probe", async () => {
+  let rosterIds = ["codex", "cursor", "claude"];
+  let finishSnapshots: (() => void) | undefined;
+  let holdSnapshots = false;
+  const rows = [snapshot("codex"), snapshot("cursor"), snapshot("claude", undefined, { state: "not-installed", installed: false, healthy: false })];
+  fetchHandler = async (input) => {
+    const url = new URL(String(input), "http://test");
+    if (url.pathname === "/api/harnesses/roster") {
+      return new Response(JSON.stringify(rosterIds.map((id, index) => ({
+        identity: { id, name: id, integration: "ACP v1" },
+        policy: { enabled: true, priority: 10 + index, autoSelect: true },
+      }))));
+    }
+    if (!holdSnapshots) return new Response(JSON.stringify(rows));
+    return new Response(JSON.stringify(await new Promise((resolve) => { finishSnapshots = () => resolve(rows); })));
+  };
+  const { readHarnessSnapshots } = await import("@polyth/models/runtime-catalog");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const render = () => act(async () => { root.render(createElement(HarnessTabs, {
+    ...props(host({ value: 0 }), "background-warm"),
+    harnessSelection: { mode: "pinned", harnessId: "codex" },
+  })); });
+  try {
+    // The shell's catalog warm reads availability while the picker is closed;
+    // the picker itself has never mounted in this page.
+    await readHarnessSnapshots({ projectId: "background-warm", spaceId: "space-a" });
+    holdSnapshots = true;
+    await act(async () => { invalidateRuntimeCatalogs(false); });
+    await render();
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(tabProviders(container), ["openai", "cursor"],
+      "the harness choices are there at once, still without the uninstalled one");
+    await act(async () => { finishSnapshots?.(); await Promise.resolve(); });
+    assert.deepEqual(tabProviders(container), ["openai", "cursor"]);
+
+    // A harness the current roster no longer lists is not revived from them.
+    await act(async () => { root.render(null); });
+    rosterIds = ["codex", "claude"];
+    finishSnapshots = undefined;
+    await act(async () => { invalidateRuntimeCatalogs(false); });
+    await render();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    assert.deepEqual(tabProviders(container), ["openai"]);
+  } finally {
+    await act(async () => { finishSnapshots?.(); });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("a picker whose harness reads never reached Polyth offers a retry instead of a raw toast", { timeout: 20_000 }, async () => {
   const { CONNECTION_RESTORED_EVENT } = await import("@polyth/contracts/transport-retry");
   const shown: ShownError[] = [];
