@@ -1,5 +1,6 @@
 // The macOS/Windows harness authority: a crash fence that a Windows Job Object
-// (polyth-job.exe) can lift with kernel proof instead of a reboot.
+// (polyth-job.exe) lifts with kernel proof, and that a tagged process group
+// lifts on macOS, instead of a reboot.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -35,12 +36,14 @@ const crashed = async (file: string, jobs: WindowsJobController | null) => {
   return { authority, state: JSON.parse(readFileSync(file, "utf8")) as { containment?: { job: string }; released: boolean } };
 };
 
-test("without a job a crashed execution stays fenced until reboot", async () => {
+test("a crashed execution recorded without any boundary stays fenced until reboot", async () => {
   const root = directory();
   try {
     const file = join(root, "authority.json");
+    // What a Polyth older than the process-group tag wrote: nothing to look for.
     const { state } = await crashed(file, null);
-    assert.equal(state.containment, undefined);
+    delete state.containment;
+    writeFileSync(file, JSON.stringify(state));
     await assert.rejects(createPortableHarnessAuthority(file, false, null), (error: Error & { code?: string }) =>
       error.code === "outcome-unknown" && /explicitly released or the host is rebooted/.test(error.message));
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -236,4 +239,61 @@ test("a .cmd shim keeps every argument with a space whole", () => {
   });
   // A folder argument ending in a backslash must not escape its closing quote.
   assert.deepEqual(windowsShimInvocation("C:\\npm\\cmd.cmd", ["--skill", "C:\\My Projects\\app\\"]).args, ["--skill", '"C:\\My Projects\\app\\\\"']);
+});
+
+// ------------------------------------------- the POSIX process-group boundary
+
+const posixOnly = { skip: process.platform === "win32" && "POSIX process groups" };
+const idle = "setInterval(()=>{},1e9)";
+
+test("a crashed run's leftover tree is ended and the next generation starts", posixOnly, async () => {
+  const root = directory();
+  try {
+    const file = join(root, "authority.json");
+    const pidFile = join(root, "grandchild");
+    const first = await createPortableHarnessAuthority(file, false, null);
+    assert.equal(first.durable, false, "a process group never unlocks cross-harness switching");
+    // The grandchild leaves the executor's process group, as a harness's tool
+    // commands do; only the inherited tag still names it.
+    const child = first.spawn(process.execPath, ["-e", treeScript(pidFile)]);
+    assert.ok(await until(() => existsSync(pidFile)));
+    const grandchild = Number(readFileSync(pidFile, "utf8"));
+    const state = JSON.parse(readFileSync(file, "utf8")) as { containment: { kind: string; pgid: number } };
+    assert.deepEqual(state.containment, { kind: "process-group", pgid: child.pid });
+    // The first authority is lost without close(), as after a crash.
+    const next = await createPortableHarnessAuthority(file, false, null);
+    assert.equal(next.generation, 2);
+    assert.deepEqual(next.releasedAuthorities, [{ authorityId: first.authorityId, generation: 1 }]);
+    assert.ok(!alive(grandchild), "the process that left the group ended too");
+    assert.ok(await until(() => child.exitCode !== null || child.signalCode !== null), "the executor ended");
+    await next.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an authority that crashed before it started anything does not fence", posixOnly, async () => {
+  const root = directory();
+  try {
+    const file = join(root, "authority.json");
+    await crashed(file, null);
+    const next = await createPortableHarnessAuthority(file, false, null);
+    assert.equal(next.generation, 2);
+    await next.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a recorded group id that now belongs to something else is left alone", posixOnly, async () => {
+  const root = directory();
+  const stranger = spawn(process.execPath, ["-e", idle], { detached: true, stdio: "ignore" });
+  try {
+    const file = join(root, "authority.json");
+    const { state } = await crashed(file, null);
+    writeFileSync(file, JSON.stringify({ ...state, containment: { kind: "process-group", pgid: stranger.pid } }));
+    const next = await createPortableHarnessAuthority(file, false, null);
+    assert.equal(next.generation, 2);
+    assert.ok(alive(stranger.pid!), "an untagged process group is never signalled");
+    await next.close();
+  } finally {
+    stranger.kill("SIGKILL");
+    rmSync(root, { recursive: true, force: true });
+  }
 });
