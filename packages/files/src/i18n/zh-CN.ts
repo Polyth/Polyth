@@ -83,6 +83,7 @@ export const zhCN: FilesMessages = {
   "editor.filepane.fixing": "正在修复…",
   "editor.filepane.fixApplied": "已应用",
   "editor.filepane.fixFailed": "无法应用修复",
+  "editor.filepane.aiToolCall": "模型试图打开文件而不是直接回答。请重试，或在“文件”设置中选择其他模型。",
   "editor.filepane.addExplanationToChat": "将说明添加到聊天",
   "filessettings.explainPrompt": "解释提示词",
   "filessettings.fixPrompt": "修复提示词",

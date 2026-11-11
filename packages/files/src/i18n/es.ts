@@ -83,6 +83,7 @@ export const es: FilesMessages = {
   "editor.filepane.fixing": "Corrigiendo…",
   "editor.filepane.fixApplied": "Aplicado",
   "editor.filepane.fixFailed": "No se pudo aplicar la corrección",
+  "editor.filepane.aiToolCall": "El modelo intentó abrir el archivo en lugar de responder. Inténtalo de nuevo o elige otro modelo en los ajustes de Archivos.",
   "editor.filepane.addExplanationToChat": "Añadir explicación al chat",
   "filessettings.explainPrompt": "Prompt de explicación",
   "filessettings.fixPrompt": "Prompt de corrección",

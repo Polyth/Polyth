@@ -83,6 +83,7 @@ export const ar: FilesMessages = {
   "editor.filepane.fixing": "جارٍ الإصلاح…",
   "editor.filepane.fixApplied": "تم التطبيق",
   "editor.filepane.fixFailed": "تعذّر تطبيق الإصلاح",
+  "editor.filepane.aiToolCall": "حاول النموذج فتح الملف بدلًا من الإجابة. أعد المحاولة أو اختر نموذجًا آخر في إعدادات الملفات.",
   "editor.filepane.addExplanationToChat": "إضافة الشرح إلى المحادثة",
   "filessettings.explainPrompt": "موجّه الشرح",
   "filessettings.fixPrompt": "موجّه الإصلاح",

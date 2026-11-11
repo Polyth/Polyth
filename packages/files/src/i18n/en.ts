@@ -50,6 +50,7 @@ export const en = {
   "editor.filepane.fixing": "Fixing…",
   "editor.filepane.fixApplied": "Applied",
   "editor.filepane.fixFailed": "Could not apply fix",
+  "editor.filepane.aiToolCall": "The model tried to open the file instead of answering. Try again or pick another model in Files settings.",
   "editor.filepane.addExplanationToChat": "Add explanation to chat",
   "filessettings.explainPrompt": "Explain prompt",
   "filessettings.fixPrompt": "Fix prompt",

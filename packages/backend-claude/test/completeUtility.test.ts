@@ -38,7 +38,7 @@ test("an account's request reads only that account's login", async (t) => {
   const seen = JSON.parse(await readFile(log, "utf8")) as { args: string; config: string; cwd: string };
   assert.equal(seen.config, "/accounts/work");
   assert.ok(seen.cwd.endsWith(cwd.split("/").at(-1)!));
-  assert.match(seen.args, /-p .*--model haiku .*--no-session-persistence .*--safe-mode .*--tools/);
+  assert.match(seen.args, /-p .*--model haiku .*--no-session-persistence .*--safe-mode .*--system-prompt .*--tools/);
 });
 
 test("the default login stays the default", async (t) => {

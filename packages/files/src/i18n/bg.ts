@@ -83,6 +83,7 @@ export const bg: FilesMessages = {
   "editor.filepane.fixing": "Поправяне…",
   "editor.filepane.fixApplied": "Приложено",
   "editor.filepane.fixFailed": "Поправката не можа да се приложи",
+  "editor.filepane.aiToolCall": "Моделът се опита да отвори файла, вместо да отговори. Опитайте отново или изберете друг модел в настройките на Файлове.",
   "editor.filepane.addExplanationToChat": "Добавяне на обяснението към чата",
   "filessettings.explainPrompt": "Промпт за обяснение",
   "filessettings.fixPrompt": "Промпт за поправка",

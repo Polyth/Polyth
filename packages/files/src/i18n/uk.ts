@@ -83,6 +83,7 @@ export const uk: FilesMessages = {
   "editor.filepane.fixing": "Виправлення…",
   "editor.filepane.fixApplied": "Застосовано",
   "editor.filepane.fixFailed": "Не вдалося застосувати виправлення",
+  "editor.filepane.aiToolCall": "Модель спробувала відкрити файл замість відповіді. Спробуйте ще раз або виберіть іншу модель у налаштуваннях Файлів.",
   "editor.filepane.addExplanationToChat": "Додати пояснення до чату",
   "filessettings.explainPrompt": "Промпт для пояснення",
   "filessettings.fixPrompt": "Промпт для виправлення",

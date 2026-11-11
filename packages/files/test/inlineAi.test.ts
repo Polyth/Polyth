@@ -9,6 +9,7 @@ import { loadInlineAiSettings, saveInlineAiSettings } from "../src/inlineAi.ts";
 import {
   DEFAULT_EXPLAIN_PROMPT,
   DEFAULT_FIX_PROMPT,
+  INLINE_AI_SYSTEM_PROMPT,
   substituteInlineAiPrompt,
 } from "../src/inlineAiShared.ts";
 import { inlineAiRoutes } from "../src/inlineAiRoutes.ts";
@@ -164,4 +165,49 @@ test("inline AI resolves the selected session checkout and rejects excluded or f
 test("defaults match product prompts", () => {
   assert.match(DEFAULT_EXPLAIN_PROMPT, /\{\{selection\}\}/);
   assert.match(DEFAULT_FIX_PROMPT, /\{\{selection\}\}/);
+});
+
+test("a reply that writes out a tool call is refused instead of shown as the answer", async () => {
+  // Reported reply from Files' Explain on a Markdown file: a Read call as text.
+  const toolCall = '<invoke name="Read">\n<parameter name="file_path">/home/user/notes/recon.md</parameter>\n</invoke>\n\nTool ready';
+  const root = mkdtempSync(join(tmpdir(), "files-ai-tool-call-"));
+  const space = { spaceId: "owner", userId: "owner", storageDir: root } as SpaceContext;
+  const project = { id: "project", name: "Project", spaceId: "owner", path: "/main" };
+  const deps = {
+    projects: { get: async () => project } as unknown as ProjectService,
+    sessions: { snapshot: async () => { throw new Error("no session"); } } as unknown as SessionService,
+  };
+  let reply = toolCall;
+  const systemPrompts: unknown[] = [];
+  const route = inlineAiRoutes({ ...deps,
+    spaceStorage: () => createSpaceStorage(root), smallModel: () => ({ providerID: "test", modelID: "test" }),
+    runtimes: { forProject: async () => ({}) },
+    smallModelComplete: async (_runtime: unknown, input: { systemPrompt?: string }) => {
+      systemPrompts.push(input.systemPrompt);
+      return { text: reply };
+    },
+  } as unknown as Parameters<typeof inlineAiRoutes>[0], deps);
+  const invoke = async (action: "explain" | "fix", selection: string) => {
+    const sent: { status: number; body: unknown }[] = [];
+    await route({
+      path: "/api/files/inline-ai", method: "POST", space,
+      body: async () => ({ action, projectId: "project", path: "notes/recon.md", selection }),
+      json: (status: number, body: unknown) => { sent.push({ status, body }); },
+    } as unknown as RouteRequest);
+    return sent[0]!;
+  };
+
+  const explained = await invoke("explain", "# Recon\nList the hosts first.");
+  assert.equal(explained.status, 502);
+  assert.equal((explained.body as { error: string }).error, "tool-call-reply");
+  const fixed = await invoke("fix", "# Recon\nList the hosts first.");
+  assert.equal(fixed.status, 502, "a tool call never replaces the selection as a fix");
+  assert.deepEqual(systemPrompts, [INLINE_AI_SYSTEM_PROMPT, INLINE_AI_SYSTEM_PROMPT]);
+
+  // Code that already contains such markup keeps its fix.
+  reply = '<parameter name="file_path">a.md</parameter>';
+  const markup = await invoke("fix", '<parameter name="file_path">a.md</parameter');
+  assert.equal(markup.status, 200);
+  reply = "A checklist for the first look at the hosts.";
+  assert.deepEqual(await invoke("explain", "# Recon"), { status: 200, body: { text: reply } });
 });
