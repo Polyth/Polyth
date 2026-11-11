@@ -55,6 +55,7 @@ export const pl: FilesMessages = {
   "editorview.enterOpensAddsToChat": "Enter otwiera · @ dodaje do czatu ·",
   "editorview.enterTheNewValueName": "Wpisz nową nazwę ({kind}).",
   "editorview.files": "Pliki",
+  "editorview.projectRoot": "Folder projektu",
   "editorview.lSendsASelectionToTheSession": "L wysyła wybór do sesji · kliknij prawym przyciskiem myszy, aby wykonać działania na pliku",
   "editorview.newFile": "Nowy plik…",
   "editorview.newFolder": "Nowy folder…",

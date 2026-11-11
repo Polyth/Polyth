@@ -334,3 +334,29 @@ test("a dragged row moves only into another folder that is not inside it", () =>
   assert.deepEqual(sortFlat(flat, "modified").map((item) => item.path), ["b/a.ts", "b/z.ts", "a.ts"]);
   assert.deepEqual(sortFlat(flat, "size").map((item) => item.path), ["a.ts", "b/a.ts", "b/z.ts"]);
 });
+
+test("a chat that chose one repository can still list the multi-repository project's own folder", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "polyth-file-root-"));
+  try {
+    await mkdir(path.join(root, "web"));
+    await writeFile(path.join(root, "README.md"), "stack");
+    await writeFile(path.join(root, "web/app.ts"), "x");
+    const project = { id: "p1", name: "stack", path: root, primaryRepositoryId: "primary", repositories: [
+      { id: "primary", alias: "stack", path: root }, { id: "web", alias: "web", path: path.join(root, "web") },
+    ] };
+    const projects = { get: async (id: string) => id === "p1" ? project : undefined } as unknown as ProjectService;
+    const sessions = { snapshot: async (id: string) => ({ id, projectId: id === "foreign" ? "p2" : "p1", workspace: {
+      mode: "subset", executionRepositoryId: "web", repositories: [{ repositoryId: "web", path: path.join(root, "web") }],
+    } }) } as unknown as SessionService;
+    const route = workspaceRoutes({ projects, sessions, files: createFileService() });
+    const names = (result: { json: unknown }) => ((result.json as { entries?: Array<{ path: string }> }).entries ?? []).map((row) => row.path).sort();
+    // The chat's own selector stays inside its repository.
+    assert.deepEqual(names(await routeCall(route, "/api/files/list?projectId=p1&sessionId=s1&repositoryId=web")), ["app.ts"]);
+    // The project folder is reachable from the chat, holding its repositories.
+    assert.deepEqual(names(await routeCall(route, "/api/files/list?projectId=p1&sessionId=s1&repositoryId=project-root")), ["README.md", "web/app.ts"]);
+    // A session of another project never gets this project's folder.
+    await assert.rejects(routeCall(route, "/api/files/list?projectId=p1&sessionId=foreign&repositoryId=project-root"), { code: "invalid-input" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

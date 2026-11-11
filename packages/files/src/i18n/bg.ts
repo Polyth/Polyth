@@ -55,6 +55,7 @@ export const bg: FilesMessages = {
   "editorview.enterOpensAddsToChat": "Enter отваря · @ добавя към чата ·",
   "editorview.enterTheNewValueName": "Въведете новото име ({kind}).",
   "editorview.files": "Файлове",
+  "editorview.projectRoot": "Папка на проекта",
   "editorview.lSendsASelectionToTheSession": "L изпраща селекция към сесията · щракване с десен бутон за действия с файла",
   "editorview.newFile": "Нов файл…",
   "editorview.newFolder": "Нова папка…",

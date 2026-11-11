@@ -32,6 +32,22 @@ export function sourceControlRepositories(
   return [...rows, ...outside];
 }
 
+/**
+ * The rows Source control can work with. A multi-repository project may be
+ * rooted in a plain folder that holds its repositories; that folder is a
+ * workspace member (chats run there, Files shows it) but has no Git, so it is
+ * dropped from Source control once a status read has said so. When nothing
+ * else is left the rows stay as they are and the view explains the folder.
+ */
+export function sourceControlGitRepositories(
+  rows: readonly SourceControlRepository[],
+  notGitPaths: ReadonlySet<string>,
+): readonly SourceControlRepository[] {
+  if (rows.length < 2 || notGitPaths.size === 0) return rows;
+  const git = rows.filter((row) => !notGitPaths.has(row.path));
+  return git.length > 0 ? git : rows;
+}
+
 /** The repository Source control opens on without a stored choice: one of the
  * chat's own, never one outside it while it has any. The primary wins when the
  * chat has it, then the chat's execution repository. */

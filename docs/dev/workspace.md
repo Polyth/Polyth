@@ -640,6 +640,25 @@ browsing it never edits the chat's workspace or touches its isolation. The
 stored repository choice stays keyed by the open chat. A chat whose workspace
 does not resolve still fails closed.
 
+A multi-repository Project can be rooted in a plain folder that holds its
+repositories: adding repositories keeps that folder as the `primary` row, so it
+stays a workspace member without Git. Source Control never stops on "This folder
+isn't a Git repository" for it. A status read that says `isRepo: false` marks the
+folder (`packages/git/widgets/notGitFolders.ts`, page lifetime, cleared by a
+later read that finds Git). `sourceControlGitRepositories` then drops it, and the
+view, its picker and the *All repositories* overview open on a real repository.
+The Canvas *Recent changes* card does the same for a chat that runs in that
+folder. The empty state remains only when no member has Git.
+
+Files keeps the Project's own folder reachable. When a multi-repository chat's
+workspace leaves out the root folder (it chose some repositories only, or the
+root is no longer registered), Files adds a *Project folder* row with the
+reserved selector `PROJECT_ROOT_FOLDER_ID` (`project-root`,
+`@polyth/contracts/workspace`, `workspaceOmitsProjectRoot`). Only the Files
+routes accept it (`rootOf` in `packages/files/src/serverEntry.ts`, after it has
+checked that the session belongs to the Project). Git, editor and session-edit
+routes still resolve real workspace members, so the row carries no Git status.
+
 Source Control display preferences (`packages/git/widgets/gitPrefs.ts`) are
 account-wide defaults edited under Settings → Source Control → Display and
 synced through `package.git.preferences`: changes as folder tree or list,

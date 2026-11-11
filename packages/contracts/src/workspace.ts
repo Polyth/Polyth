@@ -8,6 +8,28 @@ export interface ProjectRepository {
   path: string;
 }
 
+/** Files' selector for the Project's own folder. A multi-repository Project
+ * may be rooted in a folder that holds its repositories, or a chat may have
+ * chosen only some of them; the folder itself stays browsable either way. It is
+ * never a registered repository id (those are `primary` or UUIDs), and only
+ * file browsing accepts it: Git, editor and session-edit routes keep resolving
+ * real workspace members. */
+export const PROJECT_ROOT_FOLDER_ID = "project-root";
+
+/** Whether Files should offer the Project folder beside a workspace's rows:
+ * only for a multi-repository Project whose root folder is not already one of
+ * them (a chat's own checkout of the root repository counts as shown). */
+export function workspaceOmitsProjectRoot(
+  project: ProjectWorkspaceSource,
+  rows: readonly Pick<WorkspaceRepository, "repositoryId" | "path">[],
+): boolean {
+  if (!project.repositories || project.repositories.length < 2 || rows.length === 0) return false;
+  const registeredRoot = project.repositories.find((repository) => repository.path === project.path);
+  return registeredRoot
+    ? !rows.some((row) => row.repositoryId === registeredRoot.id)
+    : !rows.some((row) => row.path === project.path);
+}
+
 /** The checkout a Session currently exposes for one Project repository. */
 export interface WorkspaceRepository {
   repositoryId: string;

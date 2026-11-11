@@ -87,6 +87,7 @@ export const en = {
   "editorview.enterOpensAddsToChat": "Enter opens · @ adds to chat ·",
   "editorview.enterTheNewValueName": "Enter the new {kind} name.",
   "editorview.files": "Files",
+  "editorview.projectRoot": "Project folder",
   "editorview.lSendsASelectionToTheSession": "L sends a selection to the session · right-click for file actions",
   "editorview.newFile": "New file…",
   "editorview.newFolder": "New folder…",

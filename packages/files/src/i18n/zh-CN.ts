@@ -55,6 +55,7 @@ export const zhCN: FilesMessages = {
   "editorview.enterOpensAddsToChat": "Enter 打开 · @ 添加到聊天 ·",
   "editorview.enterTheNewValueName": "输入新{kind}的名称。",
   "editorview.files": "文件",
+  "editorview.projectRoot": "项目文件夹",
   "editorview.lSendsASelectionToTheSession": "L 将所选内容发送到会话；右键点击可执行文件操作",
   "editorview.newFile": "新建文件…",
   "editorview.newFolder": "新建文件夹…",

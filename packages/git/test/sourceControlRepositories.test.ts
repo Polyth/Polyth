@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultSourceControlRepository, sourceControlRepositories } from "../widgets/sourceControlRepositories.ts";
+import { defaultSourceControlRepository, sourceControlGitRepositories, sourceControlRepositories } from "../widgets/sourceControlRepositories.ts";
 
 const project = {
   id: "p1",
@@ -76,4 +76,30 @@ test("a chat opens on its own repository, not the project's primary outside it",
   assert.equal(defaultSourceControlRepository(rows, "api", "docs"), "api");
   // Without a chat every row is the project's own: the primary wins.
   assert.equal(defaultSourceControlRepository(sourceControlRepositories(project, null)!, "web", undefined), "web");
+});
+
+test("a plain project root without Git drops out once a status read said so", () => {
+  const plain = {
+    id: "p2",
+    name: "Stack",
+    path: "/work/stack",
+    primaryRepositoryId: "primary",
+    repositories: [
+      { id: "primary", alias: "Stack", path: "/work/stack" },
+      { id: "web", alias: "web", path: "/work/stack/web" },
+      { id: "api", alias: "api", path: "/work/stack/api" },
+    ],
+  };
+  const rows = sourceControlRepositories(plain, null)!;
+  assert.equal(sourceControlGitRepositories(rows, new Set()), rows);
+  const git = sourceControlGitRepositories(rows, new Set(["/work/stack"]));
+  assert.deepEqual(git.map((row) => row.repositoryId), ["web", "api"]);
+  // The primary is gone, so the view opens on the first repository instead.
+  assert.equal(defaultSourceControlRepository(git, "primary", undefined), "web");
+  // With nothing left to show, the rows stay and the view explains the folder.
+  const none = new Set(rows.map((row) => row.path));
+  assert.equal(sourceControlGitRepositories(rows, none), rows);
+  // A single-folder project is never filtered.
+  const single = rows.slice(0, 1);
+  assert.equal(sourceControlGitRepositories(single, new Set(["/work/stack"])), single);
 });

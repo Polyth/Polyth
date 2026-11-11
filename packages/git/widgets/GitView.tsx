@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useId, useState, type DragEven
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.ts";
 import { isManagedIsolationBranch, isolationBlocksUserMutation, projectIsolationLevel } from "@polyth/contracts";
-import { defaultSourceControlRepository, sourceControlRepositories, type SourceControlRepository } from "./sourceControlRepositories.ts";
+import { defaultSourceControlRepository, sourceControlGitRepositories, sourceControlRepositories, type SourceControlRepository } from "./sourceControlRepositories.ts";
+import { markGitFolder, useNotGitFolders } from "./notGitFolders.ts";
 import { api, errorCodeOf, errorChangesOf, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "@polyth/session/web-api";
 import { layoutGraph, type GraphRow } from "./git/graph.ts";
 import { getGitRemoteSelection, getGitRepositorySelection, getGitViewState, setGitRemoteSelection, setGitRepositorySelection, setGitPrefs, setGitViewState, useGitPrefs, type GitPrefs, type GitTabId } from "./gitPrefs.ts";
@@ -580,7 +581,11 @@ export default function GitView({
   const viewSession = useStore((state) => state.sessions.find((candidate) => candidate.id === viewSessionId) ?? null);
   const workspace = useMemo(() => project ? sourceControlRepositories(project, viewSession) : null, [project, viewSession]);
   const workspaceInvalid = project !== null && (workspace === null || (viewSessionId !== null && viewSessionId !== undefined && viewSession === null));
-  const repositoryRows: readonly SourceControlRepository[] = workspace ?? EMPTY_REPOSITORIES;
+  const workspaceRows: readonly SourceControlRepository[] = workspace ?? EMPTY_REPOSITORIES;
+  // A plain project root (a folder holding the repositories) is not offered
+  // once a status read says it has no Git: the view opens on a repository.
+  const notGitPaths = useNotGitFolders();
+  const repositoryRows = useMemo(() => sourceControlGitRepositories(workspaceRows, notGitPaths), [notGitPaths, workspaceRows]);
   const outsideGroup = tr("gitview.otherProjectRepositories");
   const repositoryOptions = repositoryRows.map((repository) => ({
     id: repository.repositoryId,
@@ -591,9 +596,9 @@ export default function GitView({
   const primaryRepositoryId = useMemo(() => {
     if (!workspace || !project) return null;
     if (project.primaryRepositoryId) return project.primaryRepositoryId;
-    const root = repositoryRows.find((repository) => repository.path === project.path);
-    return root?.repositoryId ?? (repositoryRows.length === 1 ? repositoryRows[0]!.repositoryId : null);
-  }, [project, repositoryRows, workspace]);
+    const root = workspaceRows.find((repository) => repository.path === project.path);
+    return root?.repositoryId ?? (workspaceRows.length === 1 ? workspaceRows[0]!.repositoryId : null);
+  }, [project, workspaceRows, workspace]);
   const [storedRepositoryId, setStoredRepositoryId] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     setStoredRepositoryId(projectId ? getGitRepositorySelection(projectId, viewSessionId) : undefined);
@@ -675,6 +680,17 @@ export default function GitView({
     return (id && state.worktreeTopology[id]) || 0;
   });
   const status = useGitStatus(projectId, true, sessionId, allRepositoriesSelected ? undefined : repositoryId, !allRepositoriesSelected);
+  // Learn which members of a multi-repository workspace have no Git, so the
+  // view moves on to one that has instead of stopping at an empty state.
+  const statusIsRepo = status ? status.isRepo !== false : null;
+  const selectedRepositoryPath = selectedRepository?.path ?? null;
+  useEffect(() => {
+    if (statusIsRepo === null || !selectedRepositoryPath || workspaceRows.length < 2) return;
+    markGitFolder(selectedRepositoryPath, statusIsRepo);
+  }, [selectedRepositoryPath, statusIsRepo, workspaceRows.length]);
+  // Another member can still be shown: switching is imminent, not a dead end.
+  const switchingFromPlainFolder = status?.isRepo === false
+    && repositoryRows.some((repository) => repository.path !== selectedRepositoryPath && !notGitPaths.has(repository.path));
   const statusRemoteName = status?.upstream?.split("/", 1)[0] ?? null;
   const statusMatchesSelectedRemote = remoteTargetAvailable && (!statusRemoteName || statusRemoteName === selectedRemoteName);
   const prefs = useGitPrefs(gitViewScope);
@@ -903,7 +919,9 @@ export default function GitView({
         return { ...base, status: null, error: friendlyError(tr("gitview.couldntLoadSourceControl"), cause) };
       }
     })).then((entries) => {
-      if (!cancelled && generation === scopeGeneration.current) setOverviewEntries(entries);
+      if (cancelled || generation !== scopeGeneration.current) return;
+      for (const entry of entries) if (entry.status) markGitFolder(entry.path, entry.status.isRepo !== false);
+      setOverviewEntries(entries);
     }).finally(() => {
       if (!cancelled && generation === scopeGeneration.current) setOverviewLoading(false);
     });
@@ -1405,7 +1423,7 @@ export default function GitView({
     );
   }
 
-  if (loading && !status) {
+  if ((loading && !status) || switchingFromPlainFolder) {
     return (
       <div className="git-page" aria-busy="true" aria-label={tr("gitview.loadingSourceControl")}>
         <div className="source-skeleton skeleton-title" />

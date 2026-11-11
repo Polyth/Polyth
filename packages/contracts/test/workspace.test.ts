@@ -5,6 +5,7 @@ import {
   resolveWorkspaceContext,
   workspaceRepository,
   workspaceExecutionPath,
+  workspaceOmitsProjectRoot,
   type ProjectRepository,
 } from "../src/workspace.ts";
 
@@ -208,4 +209,23 @@ test("legacy session root is not redirected when its registration is relocated",
   assert.equal(context.repositories[0]?.state, "missing");
   assert.throws(() => workspaceExecutionPath(project, session), /missing/);
   assert.equal(workspaceExecutionPath(project), "/moved/app");
+});
+
+test("Files offers the project folder only when a multi-repository workspace hides it", () => {
+  const plainRoot = { id: "p", name: "Stack", path: "/stack", primaryRepositoryId: "primary", repositories: [
+    { id: "primary", alias: "Stack", path: "/stack" }, { id: "web", alias: "web", path: "/stack/web" },
+  ] };
+  const all = resolveWorkspaceContext(plainRoot).repositories;
+  assert.equal(workspaceOmitsProjectRoot(plainRoot, all), false);
+  // A chat that chose only `web` still reaches the folder holding it.
+  assert.equal(workspaceOmitsProjectRoot(plainRoot, [{ repositoryId: "web", path: "/stack/web" }]), true);
+  // The chat's own (isolated) checkout of the root repository counts as shown.
+  assert.equal(workspaceOmitsProjectRoot(plainRoot, [{ repositoryId: "primary", path: "/isolate/stack" }]), false);
+  // Single-repository and legacy projects never get a second root entry.
+  assert.equal(workspaceOmitsProjectRoot(legacyProject(), [{ repositoryId: "primary", path: "/isolate/alpha" }]), false);
+  // A root folder that is no longer registered is offered by path.
+  const unregistered = { ...plainRoot, primaryRepositoryId: "web", repositories: [
+    { id: "web", alias: "web", path: "/stack/web" }, { id: "api", alias: "api", path: "/stack/api" },
+  ] };
+  assert.equal(workspaceOmitsProjectRoot(unregistered, resolveWorkspaceContext(unregistered).repositories), true);
 });

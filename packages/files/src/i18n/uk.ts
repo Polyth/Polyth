@@ -55,6 +55,7 @@ export const uk: FilesMessages = {
   "editorview.enterOpensAddsToChat": "Enter — відкрити · @ — додати до чату ·",
   "editorview.enterTheNewValueName": "Введіть нову назву ({kind}).",
   "editorview.files": "Файли",
+  "editorview.projectRoot": "Тека проєкту",
   "editorview.lSendsASelectionToTheSession": "L — надіслати виділене в сесію · клацніть правою кнопкою, щоб побачити дії з файлом",
   "editorview.newFile": "Новий файл…",
   "editorview.newFolder": "Нова папка…",

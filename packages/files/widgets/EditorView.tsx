@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { api, type FileEntry } from "@polyth/session/web-api";
 import type { EditorLocation } from "@polyth/contracts";
-import { resolveWorkspaceContext, type WorkspaceRepository } from "@polyth/contracts/workspace";
+import { PROJECT_ROOT_FOLDER_ID, resolveWorkspaceContext, workspaceOmitsProjectRoot, type WorkspaceRepository } from "@polyth/contracts/workspace";
 import type { SurfaceComponentProps } from "@polyth/web-sdk";
 import { closeWorkspacePane, getState, openEditorFile, setEditorFile, useActiveModel, useStore, workspacePresentationKey, workspaceProjectId } from "../../../apps/web/src/store.ts";
 import {
@@ -258,15 +258,20 @@ export default function EditorView({
       return { repositories: [] as readonly WorkspaceRepository[], error: msg(error) };
     }
   }, [project, session]);
+  // A multi-repository project's own folder stays reachable beside the chat's
+  // repositories: it may hold them, or the chat may have chosen only some.
+  const projectRootRow = useMemo((): WorkspaceRepository | null => project && workspaceOmitsProjectRoot(project, workspace.repositories)
+    ? { repositoryId: PROJECT_ROOT_FOLDER_ID, alias: tr("editorview.projectRoot"), path: project.path, state: "ready" }
+    : null, [project, workspace.repositories]);
   const repositories = workspace.repositories.length > 0
-    ? workspace.repositories
+    ? projectRootRow ? [...workspace.repositories, projectRootRow] : workspace.repositories
     : projectId
       ? [{ repositoryId: "primary", alias: tr("editorview.files"), path: project?.path ?? "", state: "ready" as const }]
       : workspace.repositories;
   const readyRepositories = repositories.filter((repository) => repository.state === "ready");
   const readyRepositoryKey = readyRepositories.map((repository) => `${repository.repositoryId}:${repository.path}:${repository.state}`).join("\u0000");
   const primaryRepositoryId = project?.primaryRepositoryId
-    ?? repositories.find((repository) => repository.path === project?.path)?.repositoryId
+    ?? workspace.repositories.find((repository) => repository.path === project?.path)?.repositoryId
     ?? (repositories.length === 1 ? repositories[0]?.repositoryId : null);
   const [treeRepositoryId, setTreeRepositoryId] = useState<string | null>(null);
   const activeRepository = readyRepositories.find((repository) => repository.repositoryId === treeRepositoryId)
@@ -350,6 +355,8 @@ export default function EditorView({
     if (!projectId || readyRepositories.length === 0) { setRepositoryStatus({}); return; }
     let current = true;
     void Promise.all(readyRepositories.map(async (repository) => {
+      // The project folder is browsed as a folder; its repositories carry Git.
+      if (repository.repositoryId === PROJECT_ROOT_FOLDER_ID) return [repository.repositoryId, { branch: null, changes: 0 }, []] as const;
       try {
         const status = await api.gitStatus(projectId, sessionId ?? undefined, repository.repositoryId);
         const paths = new Set([...status.staged, ...status.unstaged, ...status.untracked, ...status.conflicted].map((entry) => entry.path));
