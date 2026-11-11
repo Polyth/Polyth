@@ -20,8 +20,11 @@ export const INLINE_AI_SYSTEM_PROMPT =
   "The selected text in the request is everything you get, so work from it alone. Reply with the answer itself, " +
   "never with a tool call or markup that imitates one.";
 
-/** Markup a model writes when it tries to call a tool in plain text. */
-const TOOL_CALL_MARKUP = /<\/?(?:antml:)?(?:invoke|function_calls|parameter|tool_call|tool_use)\b/i;
+/**
+ * Markup a model writes when it tries to call a tool in plain text, or invents
+ * the tool's result (`<tool_use_error>`, `<function_results>`) after one.
+ */
+const TOOL_CALL_MARKUP = /<\/?(?:antml:)?(?:invoke|parameter|function_(?:calls|results)|tool_(?:call|use|result)\w*)\b/i;
 
 /**
  * True when a reply contains a tool call written as text that the selection did

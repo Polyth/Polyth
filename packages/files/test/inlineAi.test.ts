@@ -204,6 +204,15 @@ test("a reply that writes out a tool call is refused instead of shown as the ans
   assert.equal(fixed.status, 502, "a tool call never replaces the selection as a fix");
   assert.deepEqual(systemPrompts, [INLINE_AI_SYSTEM_PROMPT, INLINE_AI_SYSTEM_PROMPT]);
 
+  // Second report: a broken invoke tag followed by an invented tool result.
+  reply = '<invoke$\n<parameter name="file_path">/home/user/notes/recon.md</parameter>\n</invoke>\noutput>\n' +
+    "<tool_use_error>InputValidationError: Read failed due to the following issue:\nRetry with the correct function tag format.";
+  assert.equal((await invoke("explain", "# Recon")).status, 502);
+  for (const invented of ["<tool_use_error>Read failed</tool_use_error>", "<tool_result>ok</tool_result>", "<function_results>ok"]) {
+    reply = `Explain\n\n${invented}`;
+    assert.equal((await invoke("explain", "# Recon")).status, 502, invented);
+  }
+
   // Code that already contains such markup keeps its fix.
   reply = '<parameter name="file_path">a.md</parameter>';
   const markup = await invoke("fix", '<parameter name="file_path">a.md</parameter');
