@@ -1,7 +1,7 @@
 // The whole list: a page on a phone, a pane beside Chat on a computer. A row's
 // name goes to its place in the chat and its arrow opens the saved text, the
 // same split as the prompt navigator's rows.
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import {
   BookmarkIcon,
@@ -28,6 +28,7 @@ import {
 } from "../../../apps/web/src/components/ui/index.ts";
 import { dateTimeFormatter, getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
+import { tapFeedback } from "../../../apps/web/src/haptics.ts";
 import { getState, setPaneFullscreen } from "../../../apps/web/src/store.ts";
 import { copyText } from "../../../apps/web/src/utils.ts";
 import type { BookmarkKind, BookmarkView } from "../src/bookmarks.ts";
@@ -44,6 +45,9 @@ import { BOOKMARKS_SURFACE_ID } from "./ids.ts";
 import { deliverMarkdownFile, removeWithUndo, reportFailure, reportMissingPlace, revealBookmark } from "./commands.ts";
 import { BookmarkEditor, NoteComposer } from "./BookmarkEditor.tsx";
 import { LinkRow, SavedText } from "./SavedText.tsx";
+
+/** Press-and-hold that opens a row's menu on touch. */
+const LONG_PRESS_MS = 550;
 
 type Tab = "bookmarks" | "links";
 type Scope = "chat" | "project";
@@ -82,15 +86,63 @@ function BookmarkRow({ host, bookmark, open, active, onToggle, onJump, onCopy, o
 }) {
   const panelId = useId();
   const [editing, setEditing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const mainRef = useRef<HTMLButtonElement>(null);
+  const longPress = useRef<{ timer: ReturnType<typeof setTimeout> | null; opened: boolean }>({ timer: null, opened: false });
+  useEffect(() => () => { if (longPress.current.timer) clearTimeout(longPress.current.timer); }, []);
+  const cancelLongPress = () => {
+    if (longPress.current.timer) clearTimeout(longPress.current.timer);
+    longPress.current.timer = null;
+  };
+  const startLongPress = () => {
+    cancelLongPress();
+    longPress.current.opened = false;
+    longPress.current.timer = setTimeout(() => {
+      longPress.current.timer = null;
+      longPress.current.opened = true;
+      tapFeedback();
+      setMenuOpen(true);
+    }, LONG_PRESS_MS);
+  };
+  const menuEntries: MenuEntry[] = [
+    { id: "copy", label: tr("bookmarks.row.copy"), icon: CopyIcon, onSelect: onCopy },
+    "separator",
+    { id: "remove", label: tr("bookmarks.row.remove"), icon: DeleteIcon, danger: true, onSelect: onRemove },
+  ];
   const reachable = bookmark.chat === "open" && bookmark.eventSeq !== undefined;
   return (
     <li className="bm-item" data-open={open || undefined} data-active={active || undefined} data-bookmark={bookmark.id}>
-      <div className="bm-row">
+      <div
+        className="bm-row"
+        onContextMenu={(event: ReactMouseEvent) => {
+          event.preventDefault();
+          setMenuOpen(true);
+        }}
+      >
         <button
+          ref={mainRef}
           type="button"
           className="bm-row-main"
           // A note or a deleted chat has nowhere to go: the name opens the text.
-          onClick={reachable ? onJump : onToggle}
+          onClick={(event) => {
+            // The click that ends a long press must not also open the row.
+            if (longPress.current.opened) {
+              event.preventDefault();
+              longPress.current.opened = false;
+              return;
+            }
+            (reachable ? onJump : onToggle)();
+          }}
+          onTouchStart={startLongPress}
+          onTouchEnd={cancelLongPress}
+          onTouchCancel={cancelLongPress}
+          onTouchMove={cancelLongPress}
+          onKeyDown={(event: ReactKeyboardEvent) => {
+            if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+              event.preventDefault();
+              setMenuOpen(true);
+            }
+          }}
           {...(reachable ? {} : { "aria-expanded": open, "aria-controls": panelId })}
         >
           <span className="bm-row-glyph" aria-hidden="true"><Icon icon={KIND_ICONS[bookmark.kind]} size="sm" /></span>
@@ -109,6 +161,18 @@ function BookmarkRow({ host, bookmark, open, active, onToggle, onJump, onCopy, o
           aria-controls={panelId}
           onClick={onToggle}
         />
+        <Menu
+          label={bookmark.title}
+          title={bookmark.title}
+          align="end"
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          returnFocusRef={mainRef}
+          anchorRef={mainRef}
+          entries={menuEntries}
+        >
+          {() => null}
+        </Menu>
       </div>
       <div id={panelId} className="bm-row-panel" hidden={!open}>
         {open && (editing ? <BookmarkEditor host={host} bookmark={bookmark} onDone={() => setEditing(false)} /> : (

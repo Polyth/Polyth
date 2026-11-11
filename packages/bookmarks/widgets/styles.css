@@ -99,6 +99,8 @@
 @media (hover: hover) {
   .bm-row-main:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 }
+/* A long press opens the row menu, not the browser's own callout. */
+.bm-row-main { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .bm-row-main:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .bm-row-glyph {
   flex: none;
