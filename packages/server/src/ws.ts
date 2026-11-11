@@ -13,7 +13,7 @@ import type {
   SessionReplayPage,
   SessionService,
 } from "@polyth/contracts";
-import { REMOTE_CAPABILITY, isLocalUiPrincipal } from "@polyth/contracts";
+import { RAIL_STATUS_LIMIT_MAX, REMOTE_CAPABILITY, isLocalUiPrincipal } from "@polyth/contracts";
 import { projectVisibleToUser } from "./accountLimits.ts";
 import type { Broadcaster } from "./sessions.ts";
 import type { SpaceGateway } from "./spaces.ts";
@@ -856,15 +856,18 @@ export function createWsGateway(
               sub.snapshotScope = scope;
               const sent = new Set(list.map((row) => row.id));
               if (selected) sent.add(selected.id);
-              // The project rail shows activity from every project while the
+              // The project rail shows status from every project while the
               // navigator list above stays scoped to the open one. A summary
-              // subscriber therefore also gets the Space's active rows, so a
-              // status dot is correct before its project is opened; live
-              // summary projections keep it current afterwards.
-              if (cur.projectId && cur.summaryProjections && sub.sessions.summaries) {
+              // subscriber therefore also gets the rows the rail draws from
+              // (`railStatus`): every working/waiting/open-request chat plus
+              // each project's newest unread ones. A Space-wide newest-100
+              // "active" page cannot do this: on live data the chats with open
+              // requests ranked far past 100 among rows that only counted as
+              // active because they had no read cursor.
+              if (cur.summaryProjections && sub.sessions.summaries) {
                 try {
-                  const active = (await sub.sessions.summaries({ attentionOnly: true, archived: false, limit: 100 })).sessions
-                    .filter((row) => row.projectId !== cur.projectId);
+                  const active = (await sub.sessions.summaries({ railStatus: true, archived: false, limit: RAIL_STATUS_LIMIT_MAX })).sessions
+                    .filter((row) => !sent.has(row.id));
                   if (closed) return;
                   if (sub.pendingSubscribe) continue subscriptions;
                   if (!requireCap(ws, sub, REMOTE_CAPABILITY.coreSessionsRead)) break subscriptions;

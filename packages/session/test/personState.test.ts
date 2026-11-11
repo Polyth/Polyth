@@ -157,3 +157,45 @@ test("composer recall skips prompts from chats the reader cannot open", async ()
     assert.deepEqual(checked.sort(), ["closed", "open"], "each chat is checked once");
   } finally { await store.close(); }
 });
+
+test("the rail query returns every active chat and each project's newest truly unread ones", async () => {
+  const store = tmpStore();
+  try {
+    const row = (id: string, projectId: string, updatedAt: number, extra: Partial<SessionProjection> = {}): SessionProjection =>
+      ({ ...proj(id), projectId, updatedAt, ...extra });
+    // A reply past the person's read cursor.
+    const unread = async (id: string) => {
+      const seen = await store.append(id, "assistant/message", { text: "seen" });
+      await store.setPersonReadCursor(id, "usr_ann", seen.seq);
+      await store.append(id, "assistant/message", { text: "new" });
+    };
+    // 12 unread chats in "a" (only the newest 10 are needed to show "9+"),
+    // one working chat far older than all of them, and one chat that never had
+    // a cursor: attentionOnly counts it, `unreadFor` does not.
+    for (let i = 0; i < 12; i += 1) {
+      await store.upsertProjection(row(`a${i}`, "a", 100 + i));
+      await unread(`a${i}`);
+    }
+    await store.upsertProjection(row("busy", "b", 1, { status: "working" }));
+    await store.upsertProjection(row("nocursor", "b", 50));
+    await store.append("nocursor", "assistant/message", { text: "x" });
+    await store.upsertProjection(row("sub", "b", 60, { parentId: "nocursor" }));
+    await unread("sub");
+    await store.upsertProjection(row("quiet", "b", 70));
+    await unread("quiet");
+    await store.setPersonMute("quiet", "usr_ann", true);
+    await store.upsertProjection(row("read", "b", 80));
+    const last = await store.append("read", "assistant/message", { text: "x" });
+    await store.setPersonReadCursor("read", "usr_ann", last.seq);
+
+    const rail = async (personId: string) =>
+      (await store.summaries!({ spaceId: "sp", railStatus: true, archived: false, limit: 1000, personId })).sessions.map((r) => r.id).sort();
+    const ann = await rail("usr_ann");
+    assert.deepEqual(ann.filter((id) => id.startsWith("a")), Array.from({ length: 10 }, (_, i) => `a${i + 2}`).sort(),
+      "the ten newest unread chats of a project");
+    for (const id of ["busy"]) assert.ok(ann.includes(id), "a working chat is returned however old");
+    for (const id of ["nocursor", "sub", "quiet", "read"]) assert.equal(ann.includes(id), false, `${id} is not an unread result`);
+    // Someone with no cursor anywhere has nothing unread, only the working chat.
+    assert.deepEqual(await rail("usr_bea"), ["busy"]);
+  } finally { await store.close(); }
+});

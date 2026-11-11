@@ -4615,6 +4615,17 @@ visible, then expands back to Project rail. An older collapsed rail without a
 saved return mode restores Tree once when expanded. Clicking the focused
 project's icon in an expanded rail also hides the sessions column, after the
 double-click window so a double-click cannot trigger it.
+A project icon carries one corner mark from `projectRailMark`
+(`sessionStatus.ts`): amber when any chat needs a person (question, approval,
+waiting), the accent colour when a finished top-level chat has a reply the
+reader has not read, green while chats only work. Subagents and archived chats
+never count. The marks of projects that are not open depend on the WS snapshot,
+which reads `SessionSummaryQuery.railStatus` (internal, never HTTP): every
+working/waiting/open-request chat plus each project's ten newest chats unread by
+the reader's own cursor (a chat without a cursor is read, as in
+`attention.unread`). Do not feed the rail from the Space-wide `attentionOnly`
+page: it counts cursor-less chats as unread and ranks open requests past its
+100-row cap.
 Add project and Settings are not fixed footer buttons: they are the
 `shell.add-project` widget (shown in `sidebar.rail` by default, hidden for an
 account that may not add projects) and the one `shell.settings` widget (in the

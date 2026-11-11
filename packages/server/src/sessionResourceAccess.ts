@@ -1,4 +1,5 @@
 import {
+  RAIL_STATUS_LIMIT_MAX,
   sessionAccessAtLeast,
   type SessionAccessLevel,
   type SessionProjection,
@@ -124,7 +125,7 @@ export function accessControlledSessionService(ctx: SpaceContext, base: SessionS
    *  continuation. */
   const summaries = base.summaries
     ? async (query: SessionSummaryQuery): Promise<SessionSummaryPage> => {
-        const limit = Math.min(100, Math.max(1, Number.isSafeInteger(query.limit) ? query.limit! : 50));
+        const limit = Math.min(query.railStatus ? RAIL_STATUS_LIMIT_MAX : 100, Math.max(1, Number.isSafeInteger(query.limit) ? query.limit! : 50));
         const sessions: SessionProjection[] = [];
         let cursor = query.cursor;
         let page: SessionSummaryPage | undefined;

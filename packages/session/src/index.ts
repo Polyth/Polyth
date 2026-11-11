@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { installWorkspaceReferences, projectionUsesWorkspace, workspaceReferences } from "./workspaceReferences.ts";
 
-import { MODEL_VISIBLE_TYPES, SESSION_SUMMARY_FIELDS, formatBrowserContextForModel, sessionDraftPreview, clampPromptHistoryLimit, normalizeSessionPerson } from "@polyth/contracts";
+import { MODEL_VISIBLE_TYPES, RAIL_STATUS_LIMIT_MAX, RAIL_STATUS_UNREAD_PER_PROJECT, SESSION_SUMMARY_FIELDS, formatBrowserContextForModel, sessionDraftPreview, clampPromptHistoryLimit, normalizeSessionPerson } from "@polyth/contracts";
 import { withImmediateTransaction, type SyncOnly } from "./syncTransaction.ts";
 import type {
   AgentProfile,
@@ -3006,6 +3006,27 @@ export function createStore(dbPath: string): Store {
       conditions.push(`(json_extract(data, '$.status') IN ('working','waiting','reconciling','unknown','epoch-pending') OR EXISTS(SELECT 1 FROM attention_open a WHERE a.session_id = projections.session_id) OR EXISTS(SELECT 1 FROM events e WHERE e.session_id = projections.session_id AND e.type = 'assistant/message' AND e.seq > ${cursor}))`);
       if (input.personId !== undefined) args.push(input.personId);
     }
+    if (input.railStatus) {
+      // Same cursor rule as `unreadFor`: no cursor means read (NULL compares
+      // false), unlike attentionOnly's COALESCE-to-0. Muted chats never count.
+      const own = input.personId !== undefined;
+      const cursor = own
+        ? "COALESCE((SELECT p.read_seq FROM session_person_state p WHERE p.session_id = pr.session_id AND p.user_id = ? AND p.read_seq IS NOT NULL), (SELECT r.seq FROM session_read r WHERE r.session_id = pr.session_id))"
+        : "(SELECT r.seq FROM session_read r WHERE r.session_id = pr.session_id)";
+      const muted = own
+        ? " AND COALESCE((SELECT p.muted FROM session_person_state p WHERE p.session_id = pr.session_id AND p.user_id = ?), 0) = 0"
+        : "";
+      conditions.push(`(json_extract(data, '$.status') IN ('working','waiting','reconciling','unknown','epoch-pending') OR EXISTS(SELECT 1 FROM attention_open a WHERE a.session_id = projections.session_id) OR session_id IN (
+        SELECT session_id FROM (
+          SELECT pr.session_id AS session_id, ROW_NUMBER() OVER (PARTITION BY pr.project_id ORDER BY CAST(json_extract(pr.data, '$.updatedAt') AS INTEGER) DESC, pr.session_id DESC) AS rn
+          FROM projections pr
+          WHERE COALESCE(pr.space_id, '') = ? AND json_extract(pr.data, '$.parentId') IS NULL AND json_extract(pr.data, '$.status') <> 'archived'${muted}
+            AND EXISTS(SELECT 1 FROM events e WHERE e.session_id = pr.session_id AND e.type = 'assistant/message' AND e.seq > ${cursor})
+        ) WHERE rn <= ${RAIL_STATUS_UNREAD_PER_PROJECT}))`);
+      // Placeholders appear in this order: space, muted person, cursor person.
+      args.push(input.spaceId ?? "");
+      if (own) args.push(input.personId!, input.personId!);
+    }
     if (input.pinned) {
       // Mirrors personalizeRow: a person's own choice (pin_position -1 is an
       // explicit unpin) wins over the shared pre-v21 pin.
@@ -3018,7 +3039,7 @@ export function createStore(dbPath: string): Store {
         conditions.push("json_extract(data, '$.pinned') IS NOT NULL");
       }
     }
-    const limit = Math.min(100, Math.max(1, Number.isSafeInteger(input.limit) ? input.limit! : 50));
+    const limit = Math.min(input.railStatus ? RAIL_STATUS_LIMIT_MAX : 100, Math.max(1, Number.isSafeInteger(input.limit) ? input.limit! : 50));
     const sql = `SELECT json_object('isolationSummary', json_extract(data, '$.isolation.kind'), ${fields.map((key) => `'${key}', json_extract(data, '$.${key}')`).join(",")}) AS summary, substr(json_extract(data, '$.draft'), 1, 4096) AS draft FROM projections
       WHERE ${conditions.join(" AND ")} ORDER BY CAST(json_extract(data, '$.updatedAt') AS INTEGER) DESC, session_id DESC LIMIT ?`;
     const rows = sqlitePrepare(sql).all(...args, limit + 1) as Array<{ summary: string; draft: string | null }>;

@@ -815,6 +815,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   background: var(--green);
 }
 .sidebar-project-rail-status.attention { background: var(--amber); }
+/* A finished chat with a reply you have not read. */
+.sidebar-project-rail-status.result { background: var(--accent); }
 /* Every rail control is one tile with one glyph size. The toggle and Settings
    are IconButtons, whose own md box (later in this sheet) and 16px service-bar
    glyph would otherwise win. */

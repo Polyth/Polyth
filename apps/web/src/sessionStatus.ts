@@ -133,3 +133,23 @@ export function resolveSessionStatus(
   }
   return { kind: "regular", glyph: "○", label: tr("sessionStatus.idle") };
 }
+
+export type ProjectRailMark = "attention" | "result" | "working";
+
+/** The one mark a project's rail icon carries, from every chat the client
+ *  holds for it: something that needs a person outranks a finished chat with
+ *  an unread reply, which outranks plain activity. Archived chats and
+ *  delegated subagents (they report into their parent) never count; a chat's
+ *  unread reply only counts once it is not running or waiting itself. */
+export function projectRailMark(sessions: readonly SessionProjection[], now = Date.now()): ProjectRailMark | null {
+  let result = false;
+  let working = false;
+  for (const session of sessions) {
+    if (session.status === "archived") continue;
+    const kind = resolveSessionStatus(session, now).kind;
+    if (kind === "needs-approval" || kind === "needs-reply" || kind === "reconciling" || kind === "unknown") return "attention";
+    if (kind === "working") working = true;
+    else if (kind === "unread" && !session.parentId) result = true;
+  }
+  return result ? "result" : working ? "working" : null;
+}

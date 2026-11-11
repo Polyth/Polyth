@@ -3132,6 +3132,11 @@ export interface SessionReplayPage {
  * failure and a dormant owned epoch as an unexpected runtime change. */
 export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview"] as const satisfies readonly (keyof SessionProjection)[];
 
+/** Unread top-level chats per project the rail query returns; enough to show "9+". */
+export const RAIL_STATUS_UNREAD_PER_PROJECT = 10;
+/** Page cap of a `railStatus` summaries read. */
+export const RAIL_STATUS_LIMIT_MAX = 1000;
+
 export interface SessionSummaryQuery {
   projectId?: string;
   worktreePath?: string;
@@ -3147,6 +3152,13 @@ export interface SessionSummaryQuery {
   query?: string;
   archived?: boolean;
   attentionOnly?: boolean;
+  /** Internal, never read from HTTP: the rows the project rail needs to draw
+   *  its status marks for every project — each chat that is working, waiting,
+   *  or has an open question/permission, plus each project's
+   *  `RAIL_STATUS_UNREAD_PER_PROJECT` newest top-level chats with a reply past
+   *  the reader's own read cursor. A chat with no cursor is read, matching
+   *  `attention.unread`. Raises the page cap to `RAIL_STATUS_LIMIT_MAX`. */
+  railStatus?: boolean;
   /** Only rows the reader pinned: their own pin (v21), else the shared
    *  pre-v21 one. Recency pages never guarantee an old pinned chat. */
   pinned?: boolean;

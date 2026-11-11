@@ -27,6 +27,7 @@ import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { ShellColumnAccount, ShellColumnFoot, ShellColumnHead, ShellDock } from "./ShellDock.tsx";
 import { ProjectRailTools } from "./sidebar/ProjectRailTools.tsx";
 import { useSessionMoveDropZones } from "../sessionMove.ts";
+import { projectRailMark } from "../sessionStatus.ts";
 import { SIDEBAR_RAIL_SLOT } from "../railPlacement.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { useUiSettings } from "../uiPrefs.ts";
@@ -1296,12 +1297,7 @@ export default function Sidebar() {
             >
               {(soloPersonal ? [] : arrangedOrder(orderedProjects)).map((candidate) => {
                 const candidateSessions = sessions.filter((session) => rootProjectId(registry.projects, session.projectId) === candidate.id);
-                const attention = candidateSessions.some((session) => session.status === "waiting"
-                  || session.status === "reconciling"
-                  || session.status === "unknown"
-                  || (session.attention?.questions ?? 0) > 0
-                  || (session.attention?.permissions ?? 0) > 0);
-                const working = candidateSessions.some((session) => session.status === "working");
+                const railMark = projectRailMark(candidateSessions);
                 return (
                   <Menu
                     key={candidate.id}
@@ -1366,8 +1362,8 @@ export default function Sidebar() {
                           }}
                         >
                           <ProjectGlyph project={candidate} />
-                          {(attention || working) && (
-                            <span className={`sidebar-project-rail-status${attention ? " attention" : " working"}`} aria-hidden="true" />
+                          {railMark && (
+                            <span className={`sidebar-project-rail-status ${railMark}`} aria-hidden="true" />
                           )}
                         </button>
                       </Tooltip>
