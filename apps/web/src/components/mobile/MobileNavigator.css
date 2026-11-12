@@ -780,8 +780,12 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 
+/* The pill is the field, so it carries the focus the bare input cannot: the
+   same edge-and-ring the navigator's search shows on desktop. A Look draws
+   its own ring instead (shellLooks.css). */
 .mobile-nav-search:focus-within {
-  border-color: color-mix(in srgb, var(--text) 14%, var(--material-glass-border));
+  border-color: var(--accent-line);
+  box-shadow: var(--material-glass-highlight), 0 0 0 2px var(--accent-wash);
 }
 
 /* ---- list --------------------------------------------------------------- */

@@ -172,6 +172,13 @@ html[data-theme-style="liquid-glass"] body:not([data-glass="off"]) :is(
 ) {
   box-shadow: var(--lg-rim), var(--shadow-sm);
 }
+/* While the navigator search holds focus its material keeps the style's rim
+   and takes the accent ring: the rule above out-specifies the field's base
+   :focus-within state, which otherwise leaves focus to the bare input. */
+html[data-theme-style="liquid-glass"] body:not([data-glass="off"]) .sidebar-search:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: var(--lg-rim), var(--shadow-sm), 0 0 0 2px var(--accent-wash);
+}
 
 /* ---- overlays: menu, popover, tooltip, dialog ---------------------------- */
 html[data-theme-style="liquid-glass"] :is(.ui-popover, .picker-pop, .menu-popup) {

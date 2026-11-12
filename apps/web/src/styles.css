@@ -1069,6 +1069,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-size: calc(var(--ui-font-size, 15px) * .93);
 }
 .sidebar-search input::-webkit-search-cancel-button { display: none; }
+/* A text field matches :focus-visible on every focus, a click included, so the
+   global ring drew a second edge inside the well — an offset outline in the
+   base style, Fluent's 1px ink stroke — which read as a thick dark border just
+   inside the field. The well owns focus (see the glass material's focus state
+   below); the caret marks the field. */
+.sidebar-search input:focus-visible { outline: 0; box-shadow: none; }
 /* The clear button only exists while a query does, so reserve its gap only
    then. 33px matches its real footprint (right: 3px + width: 30px) so query
    text can never slide under the ×. This keeps the toolbar one tight row. */
@@ -20242,6 +20248,13 @@ body:not([data-glass="off"]) :is(
      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent),
      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-edge), transparent));
   box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+}
+/* The navigator's field keeps its glass material and adds the accent ring
+   while it holds focus. The material above out-specifies the well's base
+   :focus-within rule, which otherwise leaves focus to the bare input. */
+body:not([data-glass="off"]) .sidebar-search:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: var(--material-glass-highlight), var(--shadow-sm), 0 0 0 2px var(--accent-wash);
 }
 body:not([data-glass="off"]) .header-brand { border: 0; background: transparent; box-shadow: none; }
 body:not([data-glass="off"]) .header-profile { border: 0; background: transparent; box-shadow: none; }

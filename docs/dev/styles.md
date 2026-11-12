@@ -1468,6 +1468,17 @@ bare `TextInput` and trailing controls (clear, submit). Mark that container
   and exclude `:where(.ui-field-well) *` with zero added specificity, so they
   never draw a second field inside it.
 - Looks paint the well as their field (section 1f) and leave its input bare.
+- A host well that draws its own field with a plain `<input>` (the navigator
+  search, `.sidebar-search`) paints its `:focus-within` state in the same
+  layer as its material. The shared glass material rule paints the field at
+  class strength and otherwise wins the cascade, leaving focus to the bare
+  input's global ring; that ring is suppressed, as it is for
+  `.picker-search` and `.mobile-nav-search` — Fluent's 1px ink stroke read as
+  a thick dark border just inside the field.
+- The phone navigator's pill (`.mobile-nav-search`) is such a well too: its
+  focus state is the desktop field's (accent edge and ring) in the standard
+  styles and the Look's focus ring, drawn over the pill's own material, in a
+  Look — the flatten rule erases the pill's border there.
 
 Without the marker a platform style out-specifies a package's bare-input rule
 and draws a rounded field that starts after the icon. When the input itself is

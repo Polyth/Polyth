@@ -4742,9 +4742,12 @@ nothing shows half-clipped. Its input takes focus inside the tap so iOS
 raises the keyboard. Back, Escape and Android Back fold it into the tool
 again on the quicker `--motion-surface` (contents first, then the pill,
 then the title row returns), clear the query and return focus to the tool —
-quietly after a tap, with the ring after a key. The input draws no focus
-ring (the caret marks it; a text field matches `:focus-visible` on every
-focus), and the bar tools' keyboard ring is their round wash, not the slot.
+quietly after a tap, with the ring after a key. The pill is the field, so it
+carries focus: an accent edge and the accent ring in the standard styles, the
+Look's focus ring over its own material in a Look. Its input draws no ring of
+its own (the caret marks where typing goes; a text field matches
+`:focus-visible` on every focus), and the bar tools' keyboard ring is their
+round wash, not the slot.
 Sort and filter is a circle in the field's round end cap, and a choice
 away from the default puts a dot on the search tool as well. The field is
 the tools' 44px height and ends on the content edge.
@@ -4872,7 +4875,10 @@ width−8, its glyph starts at 16px and every label (New chat, actions,
 projects, chats) sits on the 40px axis. Labels that ellipsize keep an 18px
 line at 13px, because `line-height: 1` clips `g`/`y` descenders under
 `overflow: hidden`. The search field follows Settings → corner rounding
-(`--radius-card`), never the glass capsule.
+(`--radius-card`), never the glass capsule. It is a well, not a boxed input:
+focus edges the well (accent edge plus the accent ring) and the bare input
+inside keeps no ring of its own — Fluent's 1px ink stroke read as a thick dark
+border just inside the field.
 
 While rows are scrolled out above the list, a soft shadow (`--shadow-md`)
 lies under its upper edge, so the pinned rows do not read as the start of the

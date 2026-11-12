@@ -725,6 +725,15 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.sidebar-se
   box-shadow: inset 0 -1px 0 var(--look-field-rule), var(--look-field-edge), 0 0 0 2px var(--look-focus-ring) !important;
 }
 
+/* The phone navigator's search pill is not a Look field (each Look gives it
+   its island, line or rim), but it still has to show focus: a ring in the
+   Look's focus ink, over the pill's own material rather than replacing it.
+   Its input keeps no ring of its own, as on the desktop navigator. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-search:focus-within {
+  outline: 2px solid var(--look-focus-ring);
+  outline-offset: 1px;
+}
+
 /* Phone Settings search: the card shell is the field, its input stays bare. */
 @media (max-width: 700px) {
   body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-nav-search-shell .ui-input.settings-nav-search {
