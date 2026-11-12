@@ -525,6 +525,12 @@ The moved chat stays open if it was open, and the workspace follows it
 gone to another project. The transcript gets a seal, *Moved from A to B*, from the
 names recorded in the event. Mechanics: [architecture](architecture.md#moving-a-chat-to-another-project).
 
+The project row's highlight is the whole row — its glyph and title together
+with the new-chat and ⋮ controls beside them — painted by
+`.project-card-shell::before`, not by the card button: the card occupies only
+the leading grid track, so a highlight scoped to it stops at the title and
+leaves those controls on the bare list.
+
 On touch-capable screens (`any-pointer: coarse`) project row actions stay
 hidden at rest, except on the focused project: its new-chat and ⋮ actions stay
 visible because touch tablets have no hover and iPadOS fires no `contextmenu`

@@ -118,6 +118,17 @@ test("sidebar geometry links worktree and session type while density controls ro
     "the project title keeps the flexible track; actions take only what they need");
   assert.match(css, /\.project-new-session,[\s\S]*?\.project-menu-btn\s*\{[\s\S]*?place-items:\s*center;/,
     "project action glyphs are centered inside their hover targets");
+  // The row's highlight belongs to the shell, which spans the whole row; the
+  // card is only the leading track, so a card-scoped surface stopped at the
+  // title and left the new-chat and ⋮ controls beside it unlit.
+  assert.match(css, /\.project-card-shell::before,\s*\n\.session-worktree-toggle::before,/,
+    "the project row's highlight is the shell's, not the card's");
+  assert.match(css, /\.project-card-shell:hover:where\(:not\(\[data-session-drop-over="true"\]\)\)::before\s*\{[\s\S]*?background:\s*var\(--elevated\);/,
+    "hovering anywhere on the project row paints that full-width highlight");
+  assert.doesNotMatch(css, /\.project-card:hover[^{]*::before/,
+    "the card itself never paints a partial row highlight");
+  assert.match(css, /\.project-actions\s*\{[\s\S]*?position:\s*relative;\s*\n\s*z-index:\s*1;/,
+    "the row's controls sit above the highlight its shell paints");
   assert.doesNotMatch(css, /#root\s*\{[^}]*\bzoom\s*:/,
     "font scaling must not resize layout geometry");
   for (const density of ["compact", "balanced", "comfortable"]) {

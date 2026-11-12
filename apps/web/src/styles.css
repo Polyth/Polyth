@@ -1486,7 +1486,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-align: left;
   cursor: pointer;
 }
-.project-card::before,
+/* The row's highlight lives on the shell, not on the card button: the card is
+   only the leading grid column, so its own surface stopped at the title and
+   left the actions beside it unlit. The shell spans the whole row. */
+.project-card-shell::before,
 .session-worktree-toggle::before,
 .session-btn::before {
   content: "";
@@ -1500,7 +1503,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.project-card::before { left: calc(var(--nav-indent-project) - var(--nav-glyph-inset)); }
+.project-card-shell::before { left: calc(var(--nav-indent-project) - var(--nav-glyph-inset)); }
 /* The glyph column ends where the text axis starts; the 17px folder (or a
    19px project image) sits at its start. */
 .project-card > .project-glyph {
@@ -1510,13 +1513,22 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .project-card > * { position: relative; z-index: 1; }
 @media (hover: hover) {
   .project-card:hover:where(:not(:disabled)) { background: transparent; }
-  .project-card:hover:where(:not(:disabled))::before { background: var(--elevated); opacity: 1; }
+  /* A chat dragged over the row paints its own drop target, so the hover
+     wash stays out of the way. */
+  .project-card-shell:hover:where(:not([data-session-drop-over="true"]))::before {
+    background: var(--elevated);
+    opacity: 1;
+  }
 }
 /* Project actions are contextual: two quiet controls (new session + overflow
    menu) that reveal on row hover/focus with fine pointers and stay persistent
    on coarse pointers and drawer layouts. Opacity — not display — keeps them
    in the tab order so :focus-within reveals them for keyboard users. */
 .project-actions {
+  /* Lifted above the shell's highlight, which paints in the positioned layer
+     below these in-flow controls. */
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   flex: none;
