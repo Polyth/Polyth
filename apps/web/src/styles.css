@@ -13224,7 +13224,15 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   color: var(--text-dim);
 }
 @media (hover: hover) {
-  .context-selector .picker-chip:hover:where(:not(:disabled)) { border-color: var(--hair); background: var(--surface-activity); }
+  .context-selector .picker-chip:hover:where(:not(:disabled)) {
+    border-color: var(--hair);
+    background: var(--surface-activity);
+    transform: none;
+  }
+  /* The shared chip hover recolours its glyphs with the accent; a context
+     chip's glyph already carries the project's own ink (or the branch's
+     quiet grey), so only the surface responds to the pointer. */
+  .context-selector .picker-chip:hover:where(:not(:disabled)) svg { color: var(--faint); }
 }
 .context-selector .picker-trigger-icon {
   flex: none;

@@ -397,7 +397,11 @@ html[data-theme-style="liquid-glass"] .ui-checkbox input:focus-visible + .ui-che
 }
 
 /* Switch: a 40×22 capsule whose white pill knob (24×18) rides on a soft
-   shadow; on, the track takes the accent. */
+   shadow; on, the track takes the accent. The button, track and focus ring
+   share the track's box so the rounded edge is one contour. */
+html[data-theme-style="liquid-glass"] .switch {
+  width: 40px;
+}
 html[data-theme-style="liquid-glass"] .switch-track {
   width: 40px;
   height: 22px;

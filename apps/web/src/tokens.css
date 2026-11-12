@@ -237,8 +237,12 @@
      at every setting: spinners, avatars, radios, status dots. */
   --radius-round: max(calc(14px * var(--corner-radius-scale)), var(--radius-max-pill));
   --radius-circle: 999px;
-  /* A switch track and its thumb square together, on every platform style. */
-  --radius-switch: calc(5.6px * var(--corner-radius-scale));
+  /* A switch track and its thumb: full at the default rounding and at the
+     last notch, and they square together as Rounding drops. 6.25px only
+     becomes the track half-height at the default 1.8 scale; the max floor
+     keeps the switch in the shared last-notch geometry instead of freezing at
+     its own smaller radius. */
+  --radius-switch: max(calc(6.25px * var(--corner-radius-scale)), var(--radius-max-pill));
 
   /* Deprecated radius aliases. Do not use in new CSS. */
   --radius: var(--radius-control);
