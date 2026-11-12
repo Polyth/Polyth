@@ -94,18 +94,33 @@ body[data-shell-layout="columns"] .app > .header:not([data-top-rail-surface="flo
 /* Island: the bar is a transparent frame; its content is one glass capsule
    (the shared .ui-glass-island material) centred over the workspace. */
 body[data-shell-layout="columns"][data-shell-bar="island"] .app > .header {
-  /* The frame spans the whole workspace and pads symmetrically, so the
-     capsule centres on the chat column rather than on what the launcher
-     strip leaves of the workspace. */
-  --shell-bar-pad-left: calc(var(--space-4) + max(var(--shell-bar-reserve-left, 0px), var(--shell-bar-reserve-right, 0px)));
-  --shell-bar-pad-right: var(--shell-bar-pad-left);
+  /* The frame spans the whole workspace. Its two side tracks share what the
+     capsule leaves, so the capsule centres on the chat column rather than on
+     what the launcher strip leaves of the workspace; each track is at least
+     its side's reserve, so a floating window too wide for that moves the
+     capsule into the room beside it (and narrows it there) instead of
+     covering it. Symmetric padding of the larger reserve outgrew the bar
+     under a wide window and pushed the whole capsule beneath it. */
+  --shell-bar-pad-left: 0px;
+  --shell-bar-pad-right: 0px;
+  display: grid;
+  grid-template-columns:
+    minmax(calc(var(--space-4) + var(--shell-bar-reserve-left, 0px)), 1fr)
+    minmax(0, max-content)
+    minmax(calc(var(--space-4) + var(--shell-bar-reserve-right, 0px)), 1fr);
+  column-gap: 0;
   left: var(--shell-bar-left, 0px);
   right: var(--shell-bar-right, 0px);
-  justify-content: center;
   padding-block: 0;
   pointer-events: none;
 }
 .app > .header > .shell-island {
+  grid-column: 2;
+  /* The last resort, when even the narrowed capsule has less room than its
+     title and actions need: they end at its edge, not under the window.
+     Inline only: nothing here is taller than the capsule, and its menus are
+     portals. */
+  overflow-x: clip;
   pointer-events: auto;
   position: relative;
   display: flex;
@@ -122,6 +137,13 @@ body[data-shell-layout="columns"][data-shell-bar="island"] .app > .header {
   flex: none;
   max-width: none;
   gap: var(--space-1);
+}
+/* A capsule narrower than its content gives up the title's width first (it
+   shrinks a hundred times as fast, down to its minimum), then the tools and
+   tabs, which scroll in place (styles.css); the actions keep theirs. */
+.app > .header > .shell-island .header-left-cluster {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .shell-island .header-divider { display: none; }
 /* Inside the capsule every group shares the capsule's surface: no plates or
@@ -144,7 +166,7 @@ body[data-shell-layout="columns"][data-shell-bar="island"] .app > .header {
 .shell-island .desktop-session-status {
   position: relative;
   inset: auto;
-  flex: 0 1 auto;
+  flex: 0 100 auto;
   width: auto;
   min-width: calc(var(--control-h) * 3);
   max-width: calc(var(--chat-measure) * 0.6);

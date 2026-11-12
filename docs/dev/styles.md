@@ -893,6 +893,16 @@ and the absence of colour literals.
 - The island capsule is `div.shell-island.ui-glass-island` — the canonical
   glass primitive — and the header element sets
   `data-top-rail-surface="floating"` so the top-rail slab rules above skip it.
+  Its frame spans the whole workspace as a three-track grid: the side tracks
+  share what the capsule leaves, so it centres on the chat column, and each
+  is at least `--space-4` plus its side's reserve, so a floating window too
+  wide for that moves the capsule into the room beside it instead of covering
+  it. Short of room the capsule narrows: the title first (down to three
+  control heights), then the tools, then the tabs, each scrolling inside its
+  own plate; the actions keep their width and the capsule clips inline as the
+  last resort. The spread bar gives way in the same order inside its leading
+  cluster (`styles.css`, the top-rail block), so tabs never spill over the
+  title. Guard: the last test in `railLauncherStability.test.ts`.
   `bare` does the same; its bar is only a quiet chat title line (and the Space
   switcher with several Spaces), and without either the workspace reaches the
   top.

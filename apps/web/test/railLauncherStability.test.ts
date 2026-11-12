@@ -277,3 +277,73 @@ test("the column's corners never round past half its width, so squaring two leav
   }
   assert.deepEqual(sprung, []);
 });
+
+test("the island bar stands beside a floating window, never under it, and nothing spills out of it", { skip: !CHROME }, async () => {
+  // Header publishes how far a window overlays the workspace's edge
+  // (--shell-bar-reserve-right). The capsule padded both sides by that
+  // reserve to stay centred: under a wide window the two paddings outgrew
+  // the bar and pushed the whole capsule beneath the window.
+  const STRIP = 52;
+  const island = (reserve: number) => page!.evaluate((reserve) => {
+    document.body.dataset.shellBar = "island";
+    document.querySelector(".app")!.insertAdjacentHTML("afterbegin", `
+      <header class="header header-chat" id="bar" data-shell-bar="island" data-top-rail-surface="floating"
+        style="--shell-bar-left: 340px; --shell-bar-right: 0px; --shell-bar-reserve-left: 0px; --shell-bar-reserve-right: ${reserve}px; transition: none">
+        <div class="shell-island ui-glass-island" id="island">
+          <div class="header-left-cluster" id="lead">
+            <div class="workspace-mode-switch-zone customize-zone">
+              <div class="workspace-mode-switch" id="tabs"><button class="active">Chat</button><button>Canvas</button><button>Tasks</button></div>
+            </div>
+            <nav class="view-switcher customize-zone"><div class="view-switcher-pill">
+              <button class="view-icon">a</button><button class="view-icon">b</button><button class="view-icon">c</button>
+            </div></nav>
+          </div>
+          <div class="desktop-session-status" id="title"><div class="desktop-session-status-row">
+            <button class="desktop-session-status-trigger"><span class="desktop-session-status-copy"><span>A session title long enough to want room</span></span></button>
+          </div></div>
+          <span class="header-spacer"></span>
+          <div class="header-trailing-cluster" id="trail">
+            <button class="ui-icon-btn" style="width: 32px">s</button><button class="ui-icon-btn" style="width: 32px">g</button>
+            <button class="ui-icon-btn" style="width: 32px">n</button><button class="ui-icon-btn" style="width: 32px">u</button>
+          </div>
+        </div>
+      </header>`);
+    const box = (id: string) => {
+      const r = document.getElementById(id)!.getBoundingClientRect();
+      return { left: r.left, right: r.right };
+    };
+    return {
+      bar: box("bar"), island: box("island"), lead: box("lead"), tabs: box("tabs"), title: box("title"), trail: box("trail"),
+      clip: getComputedStyle(document.getElementById("island")!).overflowX,
+    };
+  }, reserve);
+  const wrong: string[] = [];
+  for (const look of SHELL_LOOKS) {
+    for (const floating of [false, true]) {
+      const shape: Shape = { look, layout: "columns", floating };
+      // The window leaves the bar 720px, 440px, then 240px and 80px beside
+      // it at this width: the last two are less than a title and the actions
+      // need, so there the capsule only has to hold what it cannot show.
+      for (const reserve of [STRIP, 620, 900, 1100, 1260]) {
+        await load(shape, "idle");
+        const at = await island(reserve);
+        const label = `${name(shape)} reserve ${reserve}`;
+        const end = at.bar.right - reserve;
+        if (at.island.right > end + 0.5) wrong.push(`${label}: the capsule ends at ${at.island.right}, the window starts at ${end}`);
+        if (at.island.left < at.bar.left - 0.5) wrong.push(`${label}: the capsule starts at ${at.island.left}, before the bar at ${at.bar.left}`);
+        if (reserve === STRIP && Math.abs((at.island.left + at.island.right) - (at.bar.left + at.bar.right)) > 1) {
+          wrong.push(`${label}: the capsule ${JSON.stringify(at.island)} is not centred on the workspace ${JSON.stringify(at.bar)}`);
+        }
+        if (at.clip !== "clip") wrong.push(`${label}: the capsule does not clip what it cannot show (${at.clip})`);
+        if (reserve > 900) continue;
+        if (at.lead.left < at.island.left - 0.5 || at.trail.right > at.island.right + 0.5) {
+          wrong.push(`${label}: content ${at.lead.left}..${at.trail.right} leaves the capsule ${at.island.left}..${at.island.right}`);
+        }
+        if (at.tabs.right > at.lead.right + 0.5 || at.lead.right > at.title.left + 0.5 || at.title.right > at.trail.left + 0.5) {
+          wrong.push(`${label}: tabs ..${at.tabs.right}, tools ..${at.lead.right}, title ${at.title.left}..${at.title.right}, actions ${at.trail.left}.. overlap`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(wrong, []);
+});

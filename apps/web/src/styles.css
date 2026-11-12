@@ -11574,7 +11574,7 @@ color: var(--green);
 /* The top rail shows exactly what the person placed there — no implicit
    "More" fold. Short of room it shrinks and scrolls sideways (start-aligned,
    so the first tools stay in place); the session title keeps its 240px. */
-.header .view-switcher { position: static; transform: none; flex: 0 1 auto; min-width: 0; max-width: none; }
+.header .view-switcher { position: static; transform: none; flex: 0 100 auto; min-width: 0; max-width: none; }
 .header:has(.desktop-session-status) .header-left-cluster {
   max-width: max(0px, calc(100% - var(--header-trailing-inline-size, 0px) - 240px - var(--space-2) * 2));
 }
@@ -11582,7 +11582,14 @@ color: var(--green);
 .view-switcher-pill { gap: max(2px, calc(var(--rail-gap, 4px) - 2px)); padding: 1px; overflow-x: auto; overflow-y: hidden; background: var(--surface-overlay); }
 .view-switcher-pill > * { flex: none; }
 .view-switcher-pill .view-icon:focus-visible { outline-offset: -2px; }
-.workspace-mode-switch-zone { display: flex; flex: none; align-items: center; gap: var(--space-1); }
+/* The tab group gives way the same way, once the tools have (they shrink a
+   hundred times as fast): it scrolls inside its own plate, so a bar cut short
+   by a wide package window never spills its tabs over the title. A scroller
+   clips an outset focus ring; the ring sits inside, as in the tools pill. */
+.workspace-mode-switch-zone { display: flex; flex: 0 1 auto; min-width: 0; align-items: center; gap: var(--space-1); }
+.header .workspace-mode-switch { flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.header .workspace-mode-switch::-webkit-scrollbar { display: none; }
+.header .workspace-mode-switch button:focus-visible { outline-offset: -2px; }
 .view-icon { width: 28px; height: 28px; border-radius: calc(var(--radius-control) - 2px); }
 .view-icon.active { color: var(--accent); background: var(--surface-overlay-strong); box-shadow: none; }
 .desktop-session-status {

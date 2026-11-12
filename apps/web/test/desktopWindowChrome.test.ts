@@ -314,13 +314,13 @@ test("nothing renders under the caption zone in the full-height layouts", async 
   assert.match(styles, /body\.desktop-app :is\([^)]*\[role="separator"\]\[aria-valuenow\],[^)]*\)\s*\{\s*-webkit-app-region: no-drag;/s);
   const docks = ":not(.railbar-dock-bottom):not(.railbar-pinned-narrow)";
   for (const [side, dir] of [["right", "ltr"], ["left", "rtl"]] as const) {
-    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar.railbar-open${docks}:not(:has(> .rail-fullscreen))`)), `open window under a ${side} zone`);
-    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar:not(.railbar-open)${docks}`)), `idle strip under a ${side} zone`);
+    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar:is(.railbar-open, [data-rail-motion="exiting"])${docks}:not(:has(> .rail-fullscreen))`)), `open or leaving window under a ${side} zone`);
+    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar:not(.railbar-open):not([data-rail-motion="exiting"])${docks}`)), `idle strip under a ${side} zone`);
     assert.ok(layout.includes(caption(side, dir, ":not(#\\#) .app-shell:dir(DIR) > .railbar:is(.railbar-dock-bottom, .railbar-pinned-narrow) > .rail-icon-col.plugin-strip")), `docked strip under a ${side} zone`);
     assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar[data-rail-motion="exiting"]:not(.railbar-open)${docks}:not(:has(> .rail-fullscreen))`)), `closing tablet window under a ${side} zone`);
   }
-  assert.match(layout, /\.railbar\.railbar-open:not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\):not\(:has\(> \.rail-fullscreen\)\) \{\s*margin-block-start: var\(--desktop-caption-band\) !important;/);
-  assert.match(layout, /\.railbar:not\(\.railbar-open\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\) \{\s*inset-block-start: var\(--desktop-caption-band\) !important;/);
+  assert.match(layout, /\.railbar:is\(\.railbar-open, \[data-rail-motion="exiting"\]\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\):not\(:has\(> \.rail-fullscreen\)\) \{\s*margin-block-start: var\(--desktop-caption-band\) !important;/);
+  assert.match(layout, /\.railbar:not\(\.railbar-open\):not\(\[data-rail-motion="exiting"\]\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\) \{\s*inset-block-start: var\(--desktop-caption-band\) !important;/);
   // A bottom or narrow dock keeps its full-height host: only its strip moves.
   assert.match(layout, /> \.rail-icon-col\.plugin-strip \{\s*inset-block-start: calc\(var\(--desktop-caption-band\) - var\(--shell-edge\)\);\s*height: auto;/);
   // A tablet-band window closes into the cluster below the band, its morph
@@ -329,7 +329,7 @@ test("nothing renders under the caption zone in the full-height layouts", async 
   assert.match(layout, /\.railbar\[data-rail-motion="exiting"\][^{]*\{\s*margin-block-start: var\(--desktop-caption-band\) !important;/);
   assert.match(layout, /\.app-shell:dir\(ltr\) > \.railbar,[^{]*\{\s*--rail-cluster-clear: var\(--desktop-caption-band\);/);
   assert.match(layout, /:not\(\.railbar-open\) > \.rail-icon-col\.plugin-strip \{\s*inset-block-start: var\(--desktop-caption-band\);/);
-  assert.match(layout, /\.app-shell > \.railbar:has\(> \.rail-fullscreen\) \{\s*top: var\(--desktop-caption-band\);/);
+  assert.match(layout, /\.app-shell > \.railbar:has\(> \.rail-fullscreen\) \{\s*--rail-layer-top: var\(--desktop-caption-band\);\s*top: var\(--desktop-caption-band\);/);
   assert.match(layout, /--desktop-caption-band: max\(var\(--shell-bar-block\), var\(--desktop-caption-h\)\)/);
   // Floating columns centre Polyth's Linux caption buttons on their first
   // row; the macOS traffic lights and the Windows caption buttons keep the
