@@ -201,7 +201,6 @@ function TreeLevel({ node, depth, groupId, staged, closed, onToggle, onStageMany
                 <span className={`git-folder-chevron${isClosed ? "" : " expanded"}`} aria-hidden="true"><UiIcon icon={ChevronRightIcon} size="sm" /></span>
                 <UiIcon icon={isClosed ? FolderIcon : FolderOpenIcon} size="sm" className="git-tree-dir-icon" />
                 <span className="git-tree-dir-name">{dir.name}</span>
-                <CountBadge count={dir.total} />
               </button>
               {onStageMany && (
                 <span className="git-tree-dir-actions">

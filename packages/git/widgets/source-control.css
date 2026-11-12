@@ -676,7 +676,10 @@ body[data-desktop-low-resource="true"] .git-page .git-pane-toolbar {
 :dir(rtl) .git-page .git-folder-chevron:not(.expanded) svg { transform: scaleX(-1); }
 
 /* Hover-revealed actions for group and folder heads: the bulk verb sits on
-   the trailing edge and never hides the count it applies to. */
+   the trailing edge (folders carry no count; a group's sits beside its
+   title, so the verb never covers it). The heads are
+   disclosures carrying their own aria-expanded, so no `:has([aria-expanded])`
+   reveal here: it would match every open group/folder and pin the verb on. */
 .git-page .git-change-group-actions,
 .git-page .git-tree-dir-actions {
   position: absolute;
@@ -690,10 +693,8 @@ body[data-desktop-low-resource="true"] .git-page .git-pane-toolbar {
 }
 .git-page .git-change-group-bar:hover .git-change-group-actions,
 .git-page .git-change-group-bar:has(:focus-visible) .git-change-group-actions,
-.git-page .git-change-group-bar:has([aria-expanded="true"]) .git-change-group-actions,
 .git-page .git-tree-dir:hover .git-tree-dir-actions,
-.git-page .git-tree-dir:has(:focus-visible) .git-tree-dir-actions,
-.git-page .git-tree-dir:has([aria-expanded="true"]) .git-tree-dir-actions {
+.git-page .git-tree-dir:has(:focus-visible) .git-tree-dir-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -707,7 +708,6 @@ body[data-desktop-low-resource="true"] .git-page .git-pane-toolbar {
 }
 .git-page .git-tree-dir-icon { flex: none; color: var(--muted); }
 .git-page .git-tree-dir-name { overflow: hidden; font-family: var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.git-page .git-tree-dir-head .source-count { margin-inline-start: auto; background: transparent; }
 
 /* File rows: one scanning line (compact) — filename, directory, size. */
 .git-page .git-file-row {
