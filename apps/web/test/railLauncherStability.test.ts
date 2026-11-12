@@ -85,7 +85,7 @@ async function load(shape: Shape, state: State, at: "end" | "start" = "end", vie
   const shell = `
     <div class="app"${shape.mirror ? ' data-shell-mirror="true"' : ""}>
       <div class="app-shell"${shape.mirror ? ' dir="rtl"' : ""}>
-        <main class="workspace"${shape.mirror ? ' dir="ltr"' : ""}></main>
+        <main class="workspace" id="ws"${shape.mirror ? ' dir="ltr"' : ""}></main>
         <aside class="railbar${open ? " railbar-open" : ""}${dynamic ? " railbar-dynamic" : ""}${state === "bottom" ? " railbar-dock-bottom" : ""}${state === "narrow" ? " railbar-pinned-narrow" : ""}" data-rail-motion="${motion}" id="host">${pane}
           <div class="rail-icon-col plugin-strip customize-zone" id="strip">
             <div class="rail-icon-scroll">
@@ -124,7 +124,31 @@ async function load(shape: Shape, state: State, at: "end" | "start" = "end", vie
     const strip = document.getElementById("strip")!;
     const hostStyle = getComputedStyle(host);
     const stripStyle = getComputedStyle(strip);
+    const pane = document.getElementById("pkg");
+    const paneStyle = pane ? getComputedStyle(pane) : null;
+    // The line a box draws along its top: a border that has a width and a colour.
+    const line = (style: CSSStyleDeclaration) => {
+      const color = style.getPropertyValue("border-block-start-color");
+      return Number.parseFloat(style.getPropertyValue("border-block-start-width")) > 0 && !/^rgba\(0, 0, 0, 0\)$|\/ 0\)$/.test(color) ? color : "none";
+    };
+    // A rim is a gradient painted under the border alone (Obsidian).
+    const rim = (style: CSSStyleDeclaration) => {
+      const clips = style.backgroundClip.split(", ");
+      const layers = style.backgroundImage.split(/, (?=[a-z-]+\()/);
+      return clips.length > 1 && clips[0] === "padding-box" && clips.at(-1) === "border-box" ? layers.at(-1)! : "none";
+    };
     return {
+      workspace: box("ws")!, workspaceFill: getComputedStyle(document.getElementById("ws")!).backgroundColor,
+      paneFill: paneStyle?.backgroundColor ?? "", paneShadow: paneStyle?.boxShadow ?? "",
+      workspaceShadow: getComputedStyle(document.getElementById("ws")!).boxShadow,
+      paneFrame: paneStyle && {
+        edge: line(paneStyle), rim: rim(paneStyle),
+        corner: Number.parseFloat(paneStyle.getPropertyValue("border-start-start-radius")),
+        highlight: /inset/.test(paneStyle.boxShadow) ? paneStyle.boxShadow.split(/, (?=[a-z]+\()/).find((part) => part.includes("inset") && !/rgba\(0, 0, 0, 0\)/.test(part)) ?? "none" : "none",
+      },
+      // The column's own top line: the host's, or the strip's where the host is bare.
+      topLine: line(hostStyle) !== "none" ? line(hostStyle) : line(stripStyle),
+      topRim: rim(hostStyle) !== "none" ? rim(hostStyle) : rim(stripStyle),
       host: box("host")!, strip: box("strip")!, first: box("first")!, second: box("second")!, pane: box("pkg"),
       radii: [hostStyle.borderTopLeftRadius, hostStyle.borderTopRightRadius, hostStyle.borderBottomRightRadius, hostStyle.borderBottomLeftRadius].map(Number.parseFloat),
       frame: {
@@ -276,6 +300,53 @@ test("the column's corners never round past half its width, so squaring two leav
     }
   }
   assert.deepEqual(sprung, []);
+});
+
+test("a full-window layer keeps the floating window's frame, and the launcher card beside it keeps its own", { skip: !CHROME }, async () => {
+  // Entering full screen is the same window at another size. Left in the
+  // base frame, the layer dropped the look's top line (and Obsidian's rim),
+  // took the base corner, and the card beside it lost its frame line.
+  const changed: string[] = [];
+  for (const shape of SHAPES) {
+    const idle = await load(shape, "idle");
+    const floating = await load(shape, "floating");
+    const layer = await load(shape, "layer");
+    const was = floating.paneFrame!;
+    const now = layer.paneFrame!;
+    if (now.edge !== was.edge) changed.push(`${name(shape)}: the window's top line ${was.edge} -> ${now.edge}`);
+    if (now.rim !== was.rim) changed.push(`${name(shape)}: the window's rim ${was.rim.slice(0, 40)} -> ${now.rim.slice(0, 40)}`);
+    if (now.highlight !== was.highlight) changed.push(`${name(shape)}: the window's top highlight ${was.highlight} -> ${now.highlight}`);
+    if (!near(now.corner, was.corner)) changed.push(`${name(shape)}: the window's free corner ${was.corner} -> ${now.corner}`);
+    if (layer.topLine !== idle.topLine) changed.push(`${name(shape)}: the launcher card's top line ${idle.topLine} -> ${layer.topLine}`);
+    if (layer.topRim !== idle.topRim) changed.push(`${name(shape)}: the launcher card's rim ${idle.topRim.slice(0, 40)} -> ${layer.topRim.slice(0, 40)}`);
+    if (shape.floating) {
+      for (const corner of shape.mirror ? [0, 3] : [1, 2]) {
+        if (!near(idle.radii[corner]!, layer.radii[corner]!)) changed.push(`${name(shape)}: the launcher card's far corner ${idle.radii[corner]} -> ${layer.radii[corner]}`);
+      }
+    }
+  }
+  assert.deepEqual(changed, []);
+});
+
+test("in the Monoliths a docked window lies on a plane like the conversation's, not on the backdrop", { skip: !CHROME }, async () => {
+  // Work lies on a sheet (Monolith) or in a well (Reverse); chrome on the
+  // backdrop. A docked window with no material showed its content over the
+  // bare backdrop, beside the conversation's sheet.
+  const off: string[] = [];
+  for (const shape of SHAPES) {
+    if (!shape.look.startsWith("monolith")) continue;
+    const idle = await load(shape, "idle");
+    const docked = await load(shape, "docked");
+    const pane = docked.pane!;
+    if (docked.paneFill !== docked.workspaceFill || /rgba\(0, 0, 0, 0\)/.test(docked.paneFill)) off.push(`${name(shape)}: the window's fill ${docked.paneFill}, the conversation's ${docked.workspaceFill}`);
+    if (docked.paneShadow !== docked.workspaceShadow) off.push(`${name(shape)}: the window's edge ${docked.paneShadow}, the conversation's ${docked.workspaceShadow}`);
+    // One foot line, and the sheet's gap to the strip, which stays chrome.
+    if (!near(pane.bottom, docked.workspace.bottom)) off.push(`${name(shape)}: the window ends at ${pane.bottom}, the conversation at ${docked.workspace.bottom}`);
+    const gap = shape.mirror ? pane.left - docked.strip.right : docked.strip.left - pane.right;
+    if (!near(gap, 8)) off.push(`${name(shape)}: ${gap}px between the window and the launcher strip`);
+    if (!sameBox(idle.first, docked.first)) off.push(`${name(shape)}: a launcher moved ${JSON.stringify(idle.first)} -> ${JSON.stringify(docked.first)}`);
+  }
+  assert.deepEqual(off, []);
 });
 
 test("the island bar stands beside a floating window, never under it, and nothing spills out of it", { skip: !CHROME }, async () => {

@@ -190,22 +190,22 @@ test("screen edges and package-to-launcher seams keep the wrong-side corners squ
   );
   assert.match(
     css,
-    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\)\)\s*\{[^}]*border: 0;/s,
+    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\):not\(\.rail-dock-bottom\):not\(\.rail-pinned-narrow\)\)\s*\{[^}]*border: 0;/s,
     "a docked package does not double the outer rail border",
   );
   assert.match(
     css,
-    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\)\) > \.rail-icon-col\.plugin-strip\s*\{[^}]*border-block: 1px solid var\(--hair\);[^}]*border-inline-start: 1px solid var\(--surface-divider\);/s,
+    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\):not\(\.rail-dock-bottom\):not\(\.rail-pinned-narrow\)\) > \.rail-icon-col\.plugin-strip\s*\{[^}]*border-block: 1px solid var\(--hair\);[^}]*border-inline-start: 1px solid var\(--surface-divider\);/s,
     "the launcher strip completes the package block border and seam",
   );
   assert.match(css, /\.rail-pinned\s*\{[^}]*border-radius: 0;[^}]*border-start-start-radius: var\(--radius-surface\)/s);
   assert.match(css, /\.rail-workspace\.rail-fullscreen\s*\{[^}]*border-radius: 0;/s);
-  assert.match(css, /\.railbar:has\(\.rail-fullscreen\) > \.rail-icon-col\s*\{[^}]*border-block: 1px solid var\(--hair\);[^}]*border-inline: 0;/s);
+  assert.match(css, /\.railbar:has\(\.rail-fullscreen\) > \.rail-icon-col\s*\{[^}]*border-block: 1px solid var\(--hair-solid\);[^}]*border-inline: 0;/s);
   // The seam beside a side window is a line drawn on the strip. A border
   // would narrow the strip and nudge every launcher as a window opens.
   assert.match(
     css,
-    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\) > \.rail-icon-col\.plugin-strip::before\s*\{[^}]*inset-inline-start: 0;[^}]*width: 1px;[^}]*background: var\(--surface-divider\);/s,
+    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\) > \.rail-icon-col\.plugin-strip::before\s*\{[^}]*inset-inline-start: 0;[^}]*width: 1px;[^}]*background: var\(--surface-divider\);/s,
   );
   assert.doesNotMatch(css, /\.railbar:has\(> \.rail-dynamic\) > \.rail-icon-col\.plugin-strip\s*\{[^}]*border-inline-start:/s, "a floating window adds no border to the strip");
   assert.match(css, /\.rail-dock-bottom\s*\{[^}]*border-radius: 0;[^}]*border-start-start-radius: var\(--radius-surface\)/s);
@@ -219,13 +219,14 @@ test("a docked package window and its launcher strip share one frame and one edg
     readFile(new URL("../src/theme.ts", import.meta.url), "utf8"),
   ]);
   const docked = String.raw`:has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\):not\(\.rail-dock-bottom\):not\(\.rail-pinned-narrow\)\)`;
-  const host = css.match(new RegExp(String.raw`\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\)${docked} \{([^}]*)\}`))?.[1] ?? "";
+  // (The wide shell's rule, indented in its query: the base one above it only clears the frame.)
+  const host = css.match(new RegExp(String.raw`\n  \.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\)${docked} \{([^}]*)\}`))?.[1] ?? "";
   assert.match(host, /border-block: 1px solid var\(--hair-solid\);/, "the host keeps the one top/bottom edge");
   assert.match(host, /border-inline-start: 1px solid var\(--hair-solid\);/);
   assert.match(host, /border-start-start-radius: var\(--radius-surface\);/);
   assert.doesNotMatch(host, /border-end-start-radius/, "the frame runs into the window's bottom edge, square");
   assert.match(host, /box-shadow: inset 0 0 0 transparent, var\(--shadow-sm\);/, "the highlight fades with the same list shape");
-  const strip = css.match(new RegExp(String.raw`\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\)${docked} > \.rail-icon-col\.plugin-strip \{([^}]*)\}`))?.[1] ?? "";
+  const strip = css.match(new RegExp(String.raw`\n  \.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\)${docked} > \.rail-icon-col\.plugin-strip \{([^}]*)\}`))?.[1] ?? "";
   assert.match(strip, /border: 0;/, "the strip draws no second top/bottom edge");
   assert.doesNotMatch(strip, /border-inline-start/, "the seam is the strip's line, not a border that would narrow it");
   assert.match(
@@ -299,7 +300,7 @@ test("workspace package hosts never blur Chat", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(
     css,
-    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\)\) > \.rail-icon-col\.plugin-strip/,
+    /\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\):not\(\.rail-dock-bottom\):not\(\.rail-pinned-narrow\)\) > \.rail-icon-col\.plugin-strip/,
     "a hidden keep-alive pane cannot leave the launcher seam styled as open",
   );
   const host = css.match(/\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail-workspace\) \{([^}]*)\}/)?.[1] ?? "";

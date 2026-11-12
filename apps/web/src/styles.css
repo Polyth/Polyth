@@ -18600,7 +18600,9 @@ body .ui-btn .ui-spinner {
     width: auto;
     min-width: 0;
     flex: 1;
-    border: 1px solid var(--hair);
+    /* The floating window's and the idle column's line (--hair-solid), so
+       entering full screen does not swap it for a fainter one. */
+    border: 1px solid var(--hair-solid);
     border-inline-end: 0;
     border-radius: 0;
     border-start-start-radius: var(--radius-surface);
@@ -18618,7 +18620,7 @@ body .ui-btn .ui-spinner {
     background-size: cover;
   }
   .railbar:has(.rail-fullscreen) > .rail-icon-col {
-    border-block: 1px solid var(--hair);
+    border-block: 1px solid var(--hair-solid);
     border-inline: 0;
     background: var(--sidebar-glass-surface, var(--material-glass));
   }
@@ -21584,6 +21586,14 @@ body[data-hide-borders="true"] .railbar {
    the same token then draws two visibly different lines. Clip the gradient to
    the padding box so both sides composite over the same page backdrop. */
 body[data-hide-borders="true"] .railbar:has(> .rail-dynamic) > .rail-dynamic {
+  border-block-color: var(--contour) !important;
+  background-clip: padding-box !important;
+}
+/* A full-window layer is the same window at another size, and the strip
+   beside it paints the launcher card the bare host no longer does: both keep
+   that block edge, so the top line neither vanishes as the window fills the
+   workspace nor stops at the seam. */
+body[data-hide-borders="true"] .railbar:has(> .rail-fullscreen) > :is(.rail-fullscreen, .rail-icon-col.plugin-strip) {
   border-block-color: var(--contour) !important;
   background-clip: padding-box !important;
 }

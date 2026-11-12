@@ -411,6 +411,12 @@ body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app
   margin: 0 !important;
   height: auto !important;
 }
+/* And the launcher card keeps its far corners beside it: a look that squares
+   its flush column (Line, Editorial) squared the floating card too. */
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:has(> .rail-fullscreen) {
+  border-start-end-radius: min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))))) !important;
+  border-end-end-radius: min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))))) !important;
+}
 
 /* ---- the navigator column: docked groups, account -------------------------- */
 /* The account at the foot of a rail is one tile: the avatar alone. */

@@ -812,7 +812,19 @@ at ≥ 6.6:1.
   Only where the host stops being a column (a bottom or narrow dock, a
   full-window layer, a compact sheet) is it bare geometry; beside a layer the
   strip paints the launcher card itself (`--look-strip-card`,
-  `--look-strip-card-shadow`).
+  `--look-strip-card-shadow`, and `--look-strip-card-edge` where the idle
+  card is framed all round: Line and Editorial with floating columns), and
+  the layout restates the card's far corners above the look.
+- A full-window layer is the floating window at another size, so it keeps
+  that window's frame: its edge (`--look-rail-edge`; the theme's contour in
+  borderless Standard, `--hair-solid` with borders), its free corner
+  (`--look-rail-radius`), how the edge composites (`--look-rail-clip`) and
+  only the inset highlight the look's rail carries
+  (`--look-shell-highlight`). Obsidian adds its rim (`--look-rim-column`)
+  under the border, over the window's fill made opaque. Only the fill
+  differs from the floating window: opaque, since the layer covers the
+  conversation. Guard: `railLauncherStability.test.ts` compares the layer
+  with the floating window and the card beside it with the idle column.
 - A floating package window extends that column. It spans the column's full
   height, its top and bottom edges on the host's own (`styles.css`,
   `.rail-dynamic`), in the look's floating material (`--look-rail*`); a look
@@ -827,6 +839,15 @@ at ≥ 6.6:1.
   default, so it sits on the canvas as the idle rail does; Line and Editorial
   keep the rail's hairline down the window's start; Air and Obsidian keep
   their island around window and strip).
+  The Monoliths are the exception, because there work lies on a plane of its
+  own and only chrome on the backdrop: the pane itself is a second plane in
+  the conversation's material (`--look-work`, `--look-work-shadow`,
+  `--look-work-blur`: Monolith's sheet, Reverse's well). The host and the
+  strip stay as they are, so no launcher moves; the plane covers the host's
+  1px frame to end on the sheet's foot line, keeps the sheet's gap to the
+  strip (the seam line goes), and in flush full-height columns keeps the
+  sheet's inset from the window's edges (`--look-work-inset`). Guard:
+  `railLauncherStability.test.ts`.
   A flush column runs square into the header and the window's edge; an island
   closes the frame and rounds. A look that insets the conversation for the idle
   strip (Monolith, Reverse monolith) drops that inset once a window docks, and
