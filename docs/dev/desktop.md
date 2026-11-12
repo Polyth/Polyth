@@ -300,7 +300,7 @@ The default electron-builder provider is `Polyth/Polyth`; external-builder packa
 
 macOS updater releases require Developer ID signing and notarization; the release workflow remains strict and fails if those credentials are missing. `electron-updater` selects the matching x64/arm64 file from the shared `latest-mac.yml` feed. Manual `mac-dmg` builds use the same credentials when available. If they are absent, the manual workflow uses electron-builder ad-hoc signing (`mac.identity=-`) and disables notarization only for that smoke artifact. Ad-hoc DMGs are not trusted distribution artifacts and may require local Gatekeeper approval; they must never be published as a release of the signed `Polyth/Polyth` channel.
 
-**Update channel** (Settings → Desktop; `updateChannel` in `settings.json`) picks Stable, Test or Nightly builds from the external builder feed. A missing value defaults to the channel in the running build's version (`X.Y.N`, `X.Y.N-beta`, `X.Y.N-nightly`). `src/updaterChannel.ts` maps the choice onto electron-updater (`allowPrerelease` + `channel`), and `allowDowngrade` stays off after every switch. See [Release channels](../operations/releases.md#release-channels).
+**Update channel** (Settings → Desktop; `updateChannel` in `settings.json`) picks Stable or Nightly builds from the release feed. A missing value defaults to the channel in the running build's version (`X.Y.N`, `X.Y.N-nightly`); a stored `test` choice and a `-beta` build from the retired Test channel follow Stable. `src/updaterChannel.ts` maps the choice onto electron-updater (`allowPrerelease` + `channel`), and `allowDowngrade` stays off after every switch. See [Release channels](../operations/releases.md#release-channels).
 
 ### macOS 12 build
 

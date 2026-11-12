@@ -1119,8 +1119,8 @@ function rebuildTrayMenu(): void {
     {
       label: "Update channel",
       visible: pinnedUpdates === null,
-      submenu: (["stable", "test", "nightly"] as const).map((channel): MenuItemConstructorOptions => ({
-        label: channel === "stable" ? "Stable" : channel === "test" ? "Test" : "Nightly",
+      submenu: (["stable", "nightly"] as const).map((channel): MenuItemConstructorOptions => ({
+        label: channel === "stable" ? "Stable" : "Nightly",
         type: "radio",
         checked: settings.updateChannel === channel,
         click: () => void persistSettings({ updateChannel: channel }),

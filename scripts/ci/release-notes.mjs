@@ -3,7 +3,7 @@
 // docs/operations/releases.md, "Release channels"). The builder's publish job
 // runs, inside a source checkout with full commit history:
 //
-//   node scripts/ci/release-notes.mjs --channel <stable|test|nightly> \
+//   node scripts/ci/release-notes.mjs --channel <stable|nightly> \
 //     --version <X.Y.N[-id]> --releases <releases.json> --out <notes.md> [--head <rev>]
 //
 // releases.json is the builder repository's `GET /releases` response. The
@@ -21,11 +21,10 @@ import { channelOfVersion, resolveReleaseChannel } from "./update-feed.mjs";
 import { identityKind, parseCoAuthors } from "./commit-identities.mjs";
 
 /** Releases whose changes a channel's notes are measured from. */
-const BASE_CHANNELS = { stable: ["stable"], test: ["test", "stable"], nightly: ["nightly"] };
-const CHANNEL_LABELS = { stable: "Stable", test: "Test", nightly: "Nightly" };
+const BASE_CHANNELS = { stable: ["stable"], nightly: ["nightly"] };
+const CHANNEL_LABELS = { stable: "Stable", nightly: "Nightly" };
 const CHANNEL_BLURBS = {
   stable: "The recommended build for everyone, promoted by hand once it has been tested.",
-  test: "A release candidate, published by hand for testing before it goes stable. Installs on the Test channel also receive stable releases.",
   nightly: "Built automatically every morning from the newest code. Expect rough edges.",
 };
 const SOURCE_MARKER = /<!--\s*polyth-release:[^>]*\bsource=([0-9a-f]{40})\b[^>]*-->/;

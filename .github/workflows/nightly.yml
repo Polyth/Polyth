@@ -4,8 +4,8 @@ run-name: "${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'ni
 # Nightly builds of `devel`, published as `vX.Y.N-nightly` prereleases of this
 # repository for clients on the Nightly update channel (scripts/ci/update-feed.mjs,
 # docs/operations/releases.md#nightly-builds-from-devel). A manual run with
-# channel `test` or `stable` (ref `master`) publishes the update feed's
-# `vX.Y.N-beta` prerelease or `vX.Y.N` Latest release the same way.
+# channel `stable` (ref `master`) publishes the update feed's `vX.Y.N` Latest
+# release the same way.
 #
 # Scheduled and dispatched runs stay off until the repository variable
 # POLYTH_NIGHTLY is `1`; a manual run always works. GitHub delays scheduled
@@ -27,11 +27,11 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: Release channel (test and stable build `master`)
+        description: Release channel (stable builds `master`)
         type: choice
         required: true
         default: nightly
-        options: [nightly, test, stable]
+        options: [nightly, stable]
       ref:
         description: Source branch, tag or commit
         type: string
@@ -50,7 +50,7 @@ permissions:
 env:
   POLYTH_RELEASE_CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'nightly' }}
 
-# One queue per channel: a test or stable run never waits behind (or bumps) a nightly.
+# One queue per channel: a stable run never waits behind (or bumps) a nightly.
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'nightly' }}
   cancel-in-progress: false
@@ -391,7 +391,7 @@ jobs:
           test -n "$TITLE"
           # Stable is the only non-prerelease and the only one marked Latest.
           case "$POLYTH_RELEASE_CHANNEL:$PRERELEASE:$VERSION" in
-            nightly:true:*-nightly|test:true:*-beta) kind=(--prerelease); latest=false ;;
+            nightly:true:*-nightly) kind=(--prerelease); latest=false ;;
             stable:false:*-*) ;;
             stable:false:*) kind=(); latest=true ;;
           esac
@@ -451,16 +451,16 @@ jobs:
             echo "Nightly \`$VERSION\` replaces the workstation assets on \`$host\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Prune old prereleases of the channel
-        if: env.POLYTH_RELEASE_CHANNEL != 'stable'
+      - name: Prune old nightlies
+        if: env.POLYTH_RELEASE_CHANNEL == 'nightly'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          # Keep the three newest nightlies or betas, ordered by version; the
-          # other channels' releases and every stable release are never touched.
-          case "$POLYTH_RELEASE_CHANNEL" in nightly) suffix=-nightly ;; *) suffix=-beta ;; esac
+          # Keep the three newest nightlies, ordered by version; stable releases
+          # are never touched.
+          suffix=-nightly
           gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 --json tagName \
             --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+'"$suffix"'$"))]
               | sort_by(.tagName | ltrimstr("v") | sub("-.*$"; "") | split(".") | map(tonumber)) | reverse | .[3:]

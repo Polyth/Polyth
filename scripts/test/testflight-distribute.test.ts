@@ -15,7 +15,8 @@ const group = (id: string, isInternalGroup: boolean, hasAccessToAllBuilds = fals
 test("only manual test/stable runs reach external testers unless overridden", () => {
   assert.equal(externalTestFlightRequested({ POLYTH_RELEASE_CHANNEL: "nightly" }), false);
   assert.equal(externalTestFlightRequested({}), false);
-  assert.equal(externalTestFlightRequested({ POLYTH_RELEASE_CHANNEL: "test" }), true);
+  // The retired test channel no longer distributes externally.
+  assert.equal(externalTestFlightRequested({ POLYTH_RELEASE_CHANNEL: "test" }), false);
   assert.equal(externalTestFlightRequested({ POLYTH_RELEASE_CHANNEL: "stable" }), true);
   assert.equal(externalTestFlightRequested({ POLYTH_RELEASE_CHANNEL: "stable", POLYTH_IOS_TESTFLIGHT_EXTERNAL: "0" }), false);
   assert.equal(externalTestFlightRequested({ POLYTH_RELEASE_CHANNEL: "nightly", POLYTH_IOS_TESTFLIGHT_EXTERNAL: "true" }), true);

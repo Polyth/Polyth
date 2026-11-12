@@ -72,7 +72,9 @@ test("missing desktop settings use safe defaults", async () => {
 test("the update channel defaults to the running build's channel", async () => {
   const defaults = { ...DEFAULT_DESKTOP_SETTINGS, updateChannel: "nightly" as const };
   assert.equal(normalizeDesktopSettings({}, defaults).updateChannel, "nightly");
-  assert.equal(normalizeDesktopSettings({ updateChannel: "test" }, defaults).updateChannel, "test");
+  assert.equal(normalizeDesktopSettings({ updateChannel: "nightly" }, defaults).updateChannel, "nightly");
+  // The retired test channel follows stable, even when the build's default is nightly.
+  assert.equal(normalizeDesktopSettings({ updateChannel: "test" }, { ...defaults, updateChannel: "nightly" }).updateChannel, "stable");
   const dir = await mkdtemp(join(tmpdir(), "polyth-desktop-settings-"));
   assert.equal((await readDesktopSettings(join(dir, "missing.json"), defaults)).updateChannel, "nightly");
 });

@@ -118,14 +118,16 @@ test("nightlies build devel behind the release gate and promotions verify master
   // Automatic runs stay off until the repository opts in; manual runs always work.
   assert.match(nightly, /vars\.POLYTH_NIGHTLY == '1'/);
   assert.match(nightly, /\|\| 'devel' \}\}/);
-  // Automatic runs are nightlies; only a manual run picks test or stable.
+  // Automatic runs are nightlies; only a manual run picks stable. The test channel is retired.
   assert.match(nightly, /POLYTH_RELEASE_CHANNEL: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.channel \|\| 'nightly' \}\}/);
   assert.match(nightly, /needs: \[plan, verify\]/);
   assert.match(nightly, /node scripts\/ci\/release-quality\.mjs/);
   // A version must match its channel; only stable is marked Latest, and stable releases are never pruned.
   assert.match(nightly, /Refusing to publish \$VERSION as a \$POLYTH_RELEASE_CHANNEL release/);
   assert.match(nightly, /stable:false:\*\) kind=\(\); latest=true ;;/);
-  assert.match(nightly, /if: env\.POLYTH_RELEASE_CHANNEL != 'stable'/);
+  assert.match(nightly, /options: \[nightly, stable\]/);
+  assert.match(nightly, /if: env\.POLYTH_RELEASE_CHANNEL == 'nightly'/);
+  assert.doesNotMatch(nightly, /-beta\b/);
   assert.match(nightly, /test\("\^v\[0-9\]\+\\\\\.\[0-9\]\+\\\\\.\[0-9\]\+'"\$suffix"'\$"\)/);
 
   const promote = read(".github/workflows/promote.yml");

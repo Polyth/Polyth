@@ -20,7 +20,9 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   controlsTheme: "system",
 };
 
-const UPDATE_CHANNELS = new Set<unknown>(["stable", "test", "nightly"]);
+const UPDATE_CHANNELS = new Set<unknown>(["stable", "nightly"]);
+/** The test channel was retired; installs that picked it follow stable. */
+const RETIRED_UPDATE_CHANNELS = new Set<unknown>(["test"]);
 
 /** `defaults` lets the caller supply the running build's own update channel. */
 export function normalizeDesktopSettings(value: unknown, defaults: DesktopSettings = DEFAULT_DESKTOP_SETTINGS): DesktopSettings {
@@ -46,7 +48,7 @@ export function normalizeDesktopSettings(value: unknown, defaults: DesktopSettin
       : defaults.automaticUpdates,
     updateChannel: UPDATE_CHANNELS.has(raw.updateChannel)
       ? raw.updateChannel as DesktopSettings["updateChannel"]
-      : defaults.updateChannel,
+      : RETIRED_UPDATE_CHANNELS.has(raw.updateChannel) ? "stable" : defaults.updateChannel,
     lowResourceMode: typeof raw.lowResourceMode === "boolean"
       ? raw.lowResourceMode
       : defaults.lowResourceMode,

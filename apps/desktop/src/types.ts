@@ -2,7 +2,7 @@ export type DesktopControlPosition = "left" | "right";
 export type DesktopControlTheme = "system" | "dark" | "light";
 export type DesktopWindowAction = "minimize" | "toggle-maximize" | "close";
 /** Release channel the desktop updater follows; see apps/desktop/src/updaterChannel.ts. */
-export type DesktopUpdateChannel = "stable" | "test" | "nightly";
+export type DesktopUpdateChannel = "stable" | "nightly";
 /** When keep-awake holds the app-suspension blocker: only while an agent is
  *  working, or for as long as Polyth runs. */
 export type DesktopKeepAwakeMode = "working" | "always";

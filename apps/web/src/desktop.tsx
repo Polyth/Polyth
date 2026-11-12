@@ -39,14 +39,16 @@ const DEFAULTS: DesktopSettings = {
 
 const UPDATE_CHANNEL_OPTIONS = (): Array<[DesktopSettings["updateChannel"], string]> => [
   ["stable", tr("desktop.settings.channelStable")],
-  ["test", tr("desktop.settings.channelTest")],
   ["nightly", tr("desktop.settings.channelNightly")],
 ];
 const UPDATE_CHANNEL_HINTS: Record<DesktopSettings["updateChannel"], TranslationKey> = {
   stable: "desktop.settings.channelStableHint",
-  test: "desktop.settings.channelTestHint",
   nightly: "desktop.settings.channelNightlyHint",
 };
+
+/** An older desktop shell may still report the retired test channel; it follows stable. */
+const shownUpdateChannel = (channel: string): DesktopSettings["updateChannel"] =>
+  channel === "nightly" ? "nightly" : "stable";
 
 /** The desktop shell marks both <body> (most rules key on it) and <html>:
  *  rules about the document root key on `html[data-desktop-app]` instead of
@@ -690,10 +692,10 @@ function DesktopSettingsPage() {
       ) : (
         <Row
           label={tr("desktop.settings.updateChannel")}
-          hint={tr(UPDATE_CHANNEL_HINTS[settings.updateChannel])}
+          hint={tr(UPDATE_CHANNEL_HINTS[shownUpdateChannel(settings.updateChannel)])}
           itemId="desktop.updateChannel"
         >
-          <Seg value={settings.updateChannel} options={UPDATE_CHANNEL_OPTIONS()} onChange={(value) => save("updateChannel", value)} label={tr("desktop.settings.updateChannel")} />
+          <Seg value={shownUpdateChannel(settings.updateChannel)} options={UPDATE_CHANNEL_OPTIONS()} onChange={(value) => save("updateChannel", value)} label={tr("desktop.settings.updateChannel")} />
         </Row>
       )}
       <Row

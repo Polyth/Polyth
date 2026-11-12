@@ -14,7 +14,8 @@ test("Windows arm64 uses its architecture-specific update channel", () => {
 
 test("a build's version names the release channel it came from", () => {
   assert.equal(updateChannelForVersion("0.1.140"), "stable");
-  assert.equal(updateChannelForVersion("0.1.141-beta"), "test");
+  // The retired test channel's builds follow stable.
+  assert.equal(updateChannelForVersion("0.1.141-beta"), "stable");
   assert.equal(updateChannelForVersion("0.1.142-nightly"), "nightly");
   assert.equal(updateChannelForVersion("0.1.0"), "stable");
   assert.equal(updateChannelForVersion("1.2.3-rc.1"), "stable");
@@ -23,7 +24,6 @@ test("a build's version names the release channel it came from", () => {
 test("each channel maps to electron-updater's GitHub prerelease rules", () => {
   assert.deepEqual(resolveUpdaterConfig("stable", "linux", "x64"), { allowPrerelease: false, channel: "latest" });
   assert.deepEqual(resolveUpdaterConfig("stable", "win32", "arm64"), { allowPrerelease: false, channel: "latest-arm64" });
-  assert.deepEqual(resolveUpdaterConfig("test", "darwin", "arm64"), { allowPrerelease: true, channel: "beta" });
   assert.deepEqual(resolveUpdaterConfig("nightly", "darwin", "arm64"), { allowPrerelease: true, channel: "nightly" });
 });
 
@@ -40,7 +40,7 @@ test("the macOS 12 build follows its own feed only while the Mac runs macOS 12 o
 });
 
 test("the macOS 12 feed is stable-only legacy-mac.yml on every channel", () => {
-  for (const channel of ["stable", "test", "nightly"] as const) {
+  for (const channel of ["stable", "nightly"] as const) {
     assert.deepEqual(resolveUpdaterConfig(channel, "darwin", "x64", "legacy"), { allowPrerelease: false, channel: "legacy" });
   }
   assert.deepEqual(resolveUpdaterConfig("nightly", "darwin", "x64", null), { allowPrerelease: true, channel: "nightly" });
@@ -49,7 +49,7 @@ test("the macOS 12 feed is stable-only legacy-mac.yml on every channel", () => {
 test("the workstation edition is pinned to its stable-only feed on every platform and channel", () => {
   for (const [platform, version] of [["win32", "10.0.26100"], ["darwin", "26.1"], ["darwin", "12.7.6"], ["linux", "6.8.0"]] as const) {
     assert.equal(pinnedUpdaterChannel(WORKSTATION_FLAVOR, platform, version), "workstation");
-    for (const channel of ["stable", "test", "nightly"] as const) {
+    for (const channel of ["stable", "nightly"] as const) {
       assert.deepEqual(resolveUpdaterConfig(channel, platform, "x64", pinnedUpdaterChannel(WORKSTATION_FLAVOR, platform, version)),
         { allowPrerelease: false, channel: "workstation" });
     }

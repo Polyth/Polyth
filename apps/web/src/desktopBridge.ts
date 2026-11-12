@@ -2,7 +2,7 @@ export type DesktopControlPosition = "left" | "right";
 export type DesktopControlTheme = "system" | "dark" | "light";
 export type DesktopWindowAction = "minimize" | "toggle-maximize" | "close";
 /** Release channel the desktop updater follows; see apps/desktop/src/updaterChannel.ts. */
-export type DesktopUpdateChannel = "stable" | "test" | "nightly";
+export type DesktopUpdateChannel = "stable" | "nightly";
 /** Keep-awake holds the blocker only while an agent works, or the whole run. */
 export type DesktopKeepAwakeMode = "working" | "always";
 

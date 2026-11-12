@@ -2,8 +2,8 @@
 // Makes an uploaded iOS build available to every TestFlight tester: waits for
 // App Store Connect to finish processing it, submits it for external beta
 // review and adds it to every beta group that does not already receive every
-// build. `remote-build.mjs` runs this after the upload for manual `test` and
-// `stable` builder runs only (the nightly stays internal so Apple does not
+// build. `remote-build.mjs` runs this after the upload for manual
+// `stable` runs only (the nightly stays internal so Apple does not
 // review a build every night), and on its own for the builder's distribute-only
 // `testflight` target, which takes the newest upload. Uses the App Store Connect API directly
 // (ES256 JWT from node:crypto) because codemagic-cli-tools only takes group
@@ -16,12 +16,12 @@ import { fileURLToPath } from "node:url";
 const API = "https://api.appstoreconnect.apple.com";
 const DEFAULT_LOCALE = "en-US";
 
-/** Manual test/stable builder runs go to external testers; nightly does not. */
+/** Manual stable runs go to external testers; nightly does not. */
 export function externalTestFlightRequested(env) {
   const override = (env.POLYTH_IOS_TESTFLIGHT_EXTERNAL ?? "").trim().toLowerCase();
   if (override === "1" || override === "true") return true;
   if (override === "0" || override === "false") return false;
-  return ["test", "stable"].includes((env.POLYTH_RELEASE_CHANNEL ?? "").trim());
+  return (env.POLYTH_RELEASE_CHANNEL ?? "").trim() === "stable";
 }
 
 export function appStoreConnectToken({ issuerId, keyId, privateKey }, now = Date.now()) {

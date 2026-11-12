@@ -526,7 +526,7 @@ function buildSignedIpa() {
   // --testflight flag: that submits for external beta review, which must not
   // happen unattended every night.
   run("app-store-connect", ["publish", "--path", ipas[0]]);
-  // Manual test/stable runs also go to every beta group, external included,
+  // Manual stable runs also go to every TestFlight group, external included,
   // and are submitted for beta review.
   if (externalTestFlightRequested(process.env)) {
     run(process.execPath, ["scripts/ci/testflight-distribute.mjs"], { env: versions });
