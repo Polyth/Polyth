@@ -52,6 +52,11 @@ const INPUT_KEYS = [
     "destination",
 ] as const;
 
+/** Input fields a timeline row already reads as the call's subject. */
+const SELF_DESCRIBING_KEYS = [
+    "description", "command", "cmd", "path", "filePath", "file_path", "pattern", "query", "url",
+] as const;
+
 export interface AcpToolCallOptions {
     /** The agent's `title` is its own tool name and `kind` is generic. */
     toolNameFromTitle?: boolean;
@@ -157,9 +162,11 @@ export function formatAcpToolInput(state: AcpToolCallState, options: AcpToolCall
             if (Array.isArray(raw[key])) input[key] = raw[key];
         }
     }
+    // A prose title ("Stopping shell session", "Using skill: review") is the
+    // only readable account of a call whose input does not describe itself.
     const title = state.title;
     const titleIsName = acpToolName(state, options) === title;
-    if (title && !titleIsName && !isGenericTitle(title) && Object.keys(input).length === 0) input.description = title;
+    if (title && !titleIsName && !isGenericTitle(title) && !SELF_DESCRIBING_KEYS.some((key) => key in input)) input.description = title;
     return input;
 }
 

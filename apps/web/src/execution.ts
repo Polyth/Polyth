@@ -253,7 +253,8 @@ export function classifyTool(rawTool: string, rawInput: JsonObject): ExecutionKi
   );
   const action = firstString(input, ["action"]);
   if (value === "polyth" && action === "agent.spawn") return "subagent";
-  const shell = /^(bash|shell|shell_command|run_shell|exec|terminal)$/.test(value);
+  // `execute` is ACP's standard kind for a shell call (Copilot, DeepSeek, …).
+  const shell = /^(bash|shell|shell_command|run_shell|exec|execute|terminal)$/.test(value);
   const command = firstString(input, ["command", "cmd"]);
   // Some native runtimes expose repository work through one command transport.
   // Keep that transport in history, but present the operation's semantic intent.
@@ -311,7 +312,8 @@ function displayLabel(kind: ExecutionKind, tool: string): string {
     subagent: "Subagent",
     test: "Test",
     git: "Git",
-    tool: tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+    // ACP's catch-all kind `other` names no tool.
+    tool: tool.toLowerCase() === "other" ? "Tool" : tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
   }[kind];
 }
 

@@ -271,3 +271,22 @@ test("formatAcpToolOutput shows a result once when rawOutput repeats the content
     });
     assert.match(formatAcpToolOutput(other).text, /^done\n.*2 files changed/s);
 });
+
+test("a prose title describes a call whose input says nothing readable", () => {
+    // Shapes from Copilot CLI 1.0.109 (`stop_bash`, `skill`, `bash`, `view`).
+    const stop = state();
+    mergeAcpToolCallUpdate(stop, { kind: "execute", title: "Stopping shell session", rawInput: { shellId: "0" } });
+    assert.deepEqual(formatAcpToolInput(stop, { toolNameFromTitle: true }), { shellId: "0", description: "Stopping shell session" });
+
+    const skill = state();
+    mergeAcpToolCallUpdate(skill, { kind: "other", title: "Using skill: review", rawInput: { skill: "review" } });
+    assert.deepEqual(formatAcpToolInput(skill, { toolNameFromTitle: true }), { skill: "review", description: "Using skill: review" });
+
+    const shell = state();
+    mergeAcpToolCallUpdate(shell, { kind: "execute", title: "List files", rawInput: { command: "ls -la" } });
+    assert.deepEqual(formatAcpToolInput(shell, { toolNameFromTitle: true }), { command: "ls -la" });
+
+    const view = state();
+    mergeAcpToolCallUpdate(view, { kind: "read", title: "Viewing ...src/a.ts", rawInput: { path: "/w/src/a.ts" } });
+    assert.deepEqual(formatAcpToolInput(view, { toolNameFromTitle: true }), { path: "/w/src/a.ts" });
+});

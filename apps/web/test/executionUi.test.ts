@@ -184,6 +184,23 @@ test("shell-backed repository inspection is presented by semantic action", () =>
   assert.match(acpRead.preview, /execution\.ts/);
 });
 
+test("ACP tool kinds read as what the call did, not as the kind's name", () => {
+  // Copilot CLI reports its shell tools under ACP's `execute` kind.
+  const command = executionPresentation(tool({ tool: "execute", input: { command: "ls -la", description: "List files" } }));
+  assert.equal(command.kind, "shell");
+  assert.equal(command.label, "Shell");
+  assert.equal(command.preview, executionPresentation(tool({ tool: "bash", input: { command: "ls -la" } })).preview);
+  assert.equal(executionPresentation(tool({ tool: "execute", input: { command: "git status --short" } })).kind, "git");
+
+  const stop = executionPresentation(tool({ tool: "execute", input: { shellId: "0", description: "Stopping shell session" } }));
+  assert.equal(stop.label, "Shell");
+  assert.equal(stop.preview, "Stopping shell session");
+
+  const other = executionPresentation(tool({ tool: "other", input: { skill: "review", description: "Using skill: review" } }));
+  assert.equal(other.label, "Tool");
+  assert.equal(other.preview, "Using skill: review");
+});
+
 test("shell-backed tests use human summaries across harness command shapes", () => {
   const direct = executionPresentation(tool({
     input: { command: "node --experimental-strip-types --test --test-name-pattern=\"Files keeps its draft\" apps/web/test/responsiveOverlays.test.ts" },
