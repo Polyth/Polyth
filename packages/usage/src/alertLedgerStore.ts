@@ -59,13 +59,18 @@ export function readPersonAlertLedgers(dir: string, userId: string): PersonAlert
   return view(readPeople(dir)[userId]);
 }
 
-/** Merges `incoming` into the person's stored ledgers and returns the result. */
+/**
+ * Merges `incoming` into the person's stored ledgers and returns the result,
+ * with `previous`, the copy this write found. A device shows an alert only when
+ * `previous` had not announced it yet, so the first of two devices that judged
+ * the same limit at once is the one that shows it.
+ */
 export function mergePersonAlertLedgers(
   dir: string,
   userId: string,
   incoming: Partial<Record<AlertLedgerSlot, UsageAlertLedger>>,
   now: number,
-): PersonAlertLedgers {
+): PersonAlertLedgers & { previous: PersonAlertLedgers } {
   // Read and write without yielding, so two requests cannot interleave here.
   const people = readPeople(dir);
   const current = people[userId];
@@ -82,5 +87,5 @@ export function mergePersonAlertLedgers(
     .slice(0, MAX_PEOPLE);
   mkdirSync(dir, { recursive: true });
   atomicWriteSync(join(dir, FILE), JSON.stringify({ version: 1, people: Object.fromEntries(kept) }));
-  return view(next);
+  return { ...view(next), previous: view(current) };
 }

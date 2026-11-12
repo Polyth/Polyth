@@ -10,6 +10,9 @@ export interface RemoteAlertLedgers {
   spaceId?: string;
   host: UsageAlertLedger | null;
   space: UsageAlertLedger | null;
+  /** On a write's answer only: the stored copy that write found, before its
+   * merge. An older server leaves it out. */
+  previous?: { host: UsageAlertLedger | null; space: UsageAlertLedger | null };
 }
 
 export interface RemoteAlertLedgersUpdate {
@@ -20,13 +23,23 @@ export interface RemoteAlertLedgersUpdate {
 
 const ENDPOINT = "/api/usage/alerts/ledger";
 
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+
 const parse = (value: unknown): RemoteAlertLedgers => {
-  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const raw = record(value);
+  const previous = raw.previous && typeof raw.previous === "object" ? record(raw.previous) : null;
   return {
     ...(typeof raw.serverInstanceId === "string" ? { serverInstanceId: raw.serverInstanceId } : {}),
     ...(typeof raw.spaceId === "string" ? { spaceId: raw.spaceId } : {}),
     host: raw.host ? parseAlertLedger(raw.host) : null,
     space: raw.space ? parseAlertLedger(raw.space) : null,
+    ...(previous ? {
+      previous: {
+        host: previous.host ? parseAlertLedger(previous.host) : null,
+        space: previous.space ? parseAlertLedger(previous.space) : null,
+      },
+    } : {}),
   };
 };
 
