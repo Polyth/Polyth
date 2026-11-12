@@ -730,6 +730,16 @@ export function harnessRoutes(
         }
         // A host install runs as the connection's SSH identity: only for a
         // person allowed to use that connection (Spaces §14.6), like a chat.
+        /** For setup, a remote project whose connection runs this harness on
+         *  this machine is a local one: that is where the CLI is installed
+         *  and signed in (`SshConnectionDto.harnessPlacement`). */
+        const setupProject = <P extends Pick<Project, "remote">>(descriptor: HarnessDescriptor, project: P | undefined): P | undefined => {
+            if (project?.remote?.kind !== "ssh" || descriptor.remoteHost?.localPlacement !== true) return project;
+            const ssh = host.services.get(serverServiceKey<{ get?(id: string): { harnessPlacement?: Record<string, string> } | undefined }>("ssh"));
+            return ssh?.get?.(project.remote.connectionId)?.harnessPlacement?.[descriptor.id] === "local"
+                ? { ...project, remote: undefined }
+                : project;
+        };
         const sshUsable = (connectionId: string): boolean => {
             const ssh = host.services.get(serverServiceKey<{ usable?(id: string, principal: unknown): boolean }>("ssh"));
             return !ssh?.usable || ssh.usable(connectionId, {
@@ -753,14 +763,14 @@ export function harnessRoutes(
             // would set it up.
             if (project?.remote?.kind === "ssh" && !sshUsable(project.remote.connectionId)) {
                 request.json(200, providers().flatMap((provider) => {
-                    const key = installKey(provider.descriptor, project);
+                    const key = installKey(provider.descriptor, setupProject(provider.descriptor, project));
                     const job = key.startsWith("local:") ? installs.get(key) : undefined;
                     return job ? [job] : [];
                 }));
                 return true;
             }
             request.json(200, providers().flatMap((provider) => {
-                const job = installs.get(installKey(provider.descriptor, project));
+                const job = installs.get(installKey(provider.descriptor, setupProject(provider.descriptor, project)));
                 return job ? [job] : [];
             }));
             return true;
@@ -778,7 +788,7 @@ export function harnessRoutes(
                 throw editionUnavailable(`${descriptor.name} installation`);
             const input = request.method === "POST" ? await request.body() : {};
             const projectId = request.method === "POST" ? input.projectId : request.url.searchParams.get("projectId");
-            const project = typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined;
+            const project = setupProject(descriptor, typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined);
             if (projectId && !project)
                 throw harnessError("not-found", "project not found");
             requireSetupAuthority(request, descriptor, "install");
@@ -852,7 +862,7 @@ export function harnessRoutes(
             const input = request.method === "POST" ? await request.body() : {};
             const action = readSetupAction(request.method === "POST" ? input.action : request.url.searchParams.get("action"));
             const projectId = request.method === "POST" ? input.projectId : request.url.searchParams.get("projectId");
-            const project = typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined;
+            const project = setupProject(provider.descriptor, typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined);
             if (projectId && !project)
                 throw harnessError("not-found", "project not found");
             requireSetupAuthority(request, provider.descriptor, action);

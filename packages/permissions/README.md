@@ -106,6 +106,22 @@ Server seam: the package publishes `serverServiceKey<PermissionScopeCheck>("perm
 session service calls it only when Auto-Approve would answer, before the request
 event is persisted, so the held reason lands in the canonical preview.
 
+## Workspace tool policy — `@polyth/permissions/workspace-policy`
+
+For shell and file tools Polyth runs on a workspace itself (a project on an SSH
+host worked on by a harness on this machine; see
+[multi-harness](../../docs/architecture/multi-harness.md#harness-here-tools-on-the-host)).
+A harness's native rules do not reach such tools, so `decideWorkspaceToolCall`
+answers each call before it runs: `allow` for a read that stays inside the
+workspace and names no secret (file tools, and a short list of read-only shell
+commands read with the same parser as `risk.ts`), `deny` for a matching rule or
+any change in plan mode, `ask` otherwise, under the harness's native permission
+name so the decision point above treats it like a local request. Rules use
+Claude Code's settings syntax (`Bash(rm:*)`, `Read(./secrets/**)`); only `deny`
+and `ask` lists exist, because a workspace's own files may narrow what an agent
+does there, never widen it. Pure, no Node imports; the same limits as the risk
+assessment apply: it sees what a command names, not what a script does.
+
 ## Verification
 
 ```sh

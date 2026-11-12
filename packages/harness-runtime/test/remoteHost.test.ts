@@ -28,3 +28,26 @@ test("readRemoteFileBytes returns a host file's exact bytes and enforces its cap
   await assert.rejects(readRemoteFileBytes(host, "image.png", { cwd: dir, maxBytes: 4 }), { code: "too-large" });
   await assert.rejects(readRemoteFileBytes(host, "image.png", { cwd: join(dir, "missing"), maxBytes: 64 }), { code: "runtime-unavailable" });
 });
+
+test("a harness runs on the host unless its connection places it on this machine", async () => {
+  const { remoteHarnessPlacement } = await import("../src/remoteHost.ts");
+  const projects = new Map<string, unknown>([
+    ["remote", { id: "remote", remote: { kind: "ssh", connectionId: "c1" } }],
+    ["other", { id: "other", remote: { kind: "ssh", connectionId: "c2" } }],
+    ["local", { id: "local" }],
+  ]);
+  const ssh = { host: () => host, get: (id: string) => id === "c1" ? { harnessPlacement: { claude: "local" } } : {} };
+  const server = {
+    projects: { get: async (id: string) => projects.get(id) },
+    forSpace: () => server,
+    services: { get: () => ssh },
+  } as never;
+  assert.equal(await remoteHarnessPlacement(server, { projectId: "remote" }, "claude"), "local");
+  assert.equal(await remoteHarnessPlacement(server, { projectId: "remote" }, "codex"), "host");
+  assert.equal(await remoteHarnessPlacement(server, { projectId: "other" }, "claude"), "host");
+  assert.equal(await remoteHarnessPlacement(server, { projectId: "local" }, "claude"), "host");
+  assert.equal(await remoteHarnessPlacement(server, { projectId: "missing" }, "claude"), "host");
+  // Without the SSH package nothing can be placed anywhere but the default.
+  const bare = { projects: { get: async (id: string) => projects.get(id) }, forSpace: () => bare, services: { get: () => undefined } } as never;
+  assert.equal(await remoteHarnessPlacement(bare, { projectId: "remote" }, "claude"), "host");
+});

@@ -1534,3 +1534,7 @@ export function describeBlastRadius(
     truncated: truncated || state.effects.length > MAX_EFFECTS,
   };
 }
+
+/** The parsing behind the assessment, for the workspace tool policy
+ * (`workspacePolicy.ts`), so one command is read the same way by both. */
+export const riskParsing = { parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base };

@@ -4383,6 +4383,10 @@ export interface HarnessRemoteHostSupport {
   /** The backend can bring this machine's configuration to the host when it
    *  starts there (non-secret, except Pi's API keys on a host with none). */
   localConfig?: boolean;
+  /** The backend can run the harness on THIS machine for a remote project,
+   *  on this machine's sign-in, with its shell and file tools executed on the
+   *  host. The host then needs neither the CLI nor a login. */
+  localPlacement?: boolean;
 }
 /** Where the account list of one multi-account harness family is managed. */
 export interface HarnessAccountsRef {
@@ -4441,6 +4445,10 @@ export interface HarnessProbe {
   message?: string;
   /** Legacy providers may omit this; the registry derives it conservatively. */
   state?: HarnessAvailabilityState;
+  /** For a remote project: the harness runs on THIS machine and only its
+   *  tools reach the host (`SshHarnessPlacement` `local`), so it is installed
+   *  and signed in here. */
+  runsHere?: boolean;
 }
 /** How close a harness sign-in is to its end. `soon` starts 10 days ahead,
  *  as Claude Code's own warning does; `imminent` in the last 48 hours. */
@@ -5783,8 +5791,18 @@ export interface SshConnectionDto {
   /** Per-harness configuration source on this host. Only exceptions are
    *  stored; a harness that is not listed uses `local`. */
   harnessConfig?: Record<string, SshHarnessConfigSource>;
+  /** Per-harness placement on this host. Only exceptions are stored; a
+   *  harness that is not listed runs on the `host`. */
+  harnessPlacement?: Record<string, SshHarnessPlacement>;
   createdAt: number;
 }
+
+/** Where a harness runs for a project on an SSH host. `host` runs its CLI
+ * there, on the host's own sign-in. `local` runs it on this machine, on this
+ * machine's sign-in, and only its shell and file tools reach the host: nothing
+ * has to be installed or signed in there. Honoured by backends that declare
+ * `HarnessRemoteHostSupport.localPlacement`. */
+export type SshHarnessPlacement = "host" | "local";
 
 /** Where a harness on an SSH host takes its configuration from. `local`
  * layers this machine's non-secret configuration (models, providers, agents)
@@ -5803,6 +5821,8 @@ export interface SshConnectionInput {
   identityFile?: string;
   /** Replaces the stored exceptions; `local` entries are dropped. */
   harnessConfig?: Record<string, SshHarnessConfigSource>;
+  /** Replaces the stored exceptions; `host` entries are dropped. */
+  harnessPlacement?: Record<string, SshHarnessPlacement>;
 }
 
 /** One enabled harness as found on an SSH host. */
@@ -5821,6 +5841,10 @@ export interface SshRemoteHarnessDto {
   configSource: SshHarnessConfigSource;
   /** Whether `local` configuration is actually forwarded for this harness. */
   localConfig: boolean;
+  /** Where its conversations run for this connection's projects. */
+  placement: SshHarnessPlacement;
+  /** Whether the harness can run on this machine with its tools on the host. */
+  localPlacement: boolean;
   setupUrl?: string;
   message?: string;
 }

@@ -4,6 +4,7 @@ import type {
   SshConnectionInput,
   SshConnectionState,
   SshHarnessConfigSource,
+  SshHarnessPlacement,
   SshRemoteHarnessDto,
 } from "@polyth/contracts";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
@@ -96,7 +97,9 @@ export function remoteBasename(path: string): string {
 }
 
 /** Short status for a harness row; the tone backs the leading dot only. */
-export function harnessStatus(harness: Pick<SshRemoteHarnessDto, "installed" | "version">): StateBadge {
+export function harnessStatus(harness: Pick<SshRemoteHarnessDto, "installed" | "version"> & Partial<Pick<SshRemoteHarnessDto, "placement">>): StateBadge {
+  // What is installed on the server no longer matters for this harness.
+  if (harness.placement === "local") return { text: tr("ssh.sshui.runsHere"), tone: "ok" };
   if (harness.installed === true) {
     return {
       text: harness.version
@@ -119,6 +122,19 @@ export function nextHarnessConfig(
 ): Record<string, SshHarnessConfigSource> {
   const next: Record<string, SshHarnessConfigSource> = { ...current };
   if (source === "remote") next[harnessId] = "remote";
+  else delete next[harnessId];
+  return next;
+}
+
+/** Next stored exceptions after choosing where one harness runs. `host` is
+ *  the default and is never stored. */
+export function nextHarnessPlacement(
+  current: SshConnectionDto["harnessPlacement"],
+  harnessId: string,
+  placement: SshHarnessPlacement,
+): Record<string, SshHarnessPlacement> {
+  const next: Record<string, SshHarnessPlacement> = { ...current };
+  if (placement === "local") next[harnessId] = "local";
   else delete next[harnessId];
   return next;
 }

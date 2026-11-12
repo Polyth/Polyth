@@ -1492,7 +1492,7 @@ resume over SSH. Such a remote leg runs on the host's own sign-in and native
 configuration: local account directories, API keys and env never cross —
 only SDK protocol markers (`CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_AGENT_SDK_*`) —
 except for Pi's `local` configuration below.
-Extra accounts of a multi-account family stay local-only. Limits
+Extra accounts of a multi-account family stay local-only on such a leg. Limits
 (source-inspected and fixture-tested with a local stand-in host, not
 live-verified against a real SSH server): no Polyth capability delivery
 (MCP bridge, instructions) to these legs, no local print-mode utility
@@ -1500,6 +1500,73 @@ completion, no native-history import for Claude/Cursor/Pi, no Command Code attac
 release proof (a switch away is withdrawn at once with that error rather than
 guessed, and the chat stays on the remote leg), and a remote CLI that ignores
 stdin EOF can outlive a killed local client.
+
+### Harness here, tools on the host
+
+A connection can instead keep a harness on this machine
+(`SshConnectionDto.harnessPlacement`, `host` by default; Settings → SSH remotes
+→ a server → *Which copy runs*). It is offered for backends that declare
+`remoteHost.localPlacement`; today that is Claude Code. The CLI then runs
+locally on this machine's sign-in (the default one or an extra account), and
+only its shell and file tools reach the host, so the host needs no harness, no
+Node and no login. `remoteHarnessPlacement` answers the question for a backend;
+a probe reports `runsHere`, and install and sign-in then target this machine.
+
+- **Tools.** `@polyth/harness-runtime/remote-workspace` runs `bash`, `read`,
+  `write`, `edit`, `grep` and `glob` on the host, each as one bounded POSIX
+  command over `RemoteHost.processCommand` with every value passed as a
+  positional parameter. An edit is computed here and written with a SHA-256
+  compare-and-swap; writes are atomic and keep the file mode. `bash`, `grep`
+  and `glob` run behind a guard: the script's stdin is a lifeline, and when the
+  local client goes away (cancel, timeout, closed session) the guard ends the
+  command's process group on the host. Without `setsid` on the host only the
+  command itself is ended.
+- **Launch.** Claude Code runs in an empty placeholder directory under the
+  package's Space storage (one per project path, so transcripts group and
+  resume). Its native shell, file, worktree and plan-mode tools are disallowed,
+  and the six tools are served in-process as `mcp__workspace__*`
+  (`backend-claude/src/sdkMcpServer.ts`, a minimal JSON-RPC server, so the
+  package needs neither zod nor the MCP SDK of its own).
+- **Command policy.** Claude Code's rules, plan mode and edit modes do not
+  reach tools it did not ship: it asks about every call, and neither a
+  `Bash(rm:*)` deny nor plan mode applies. `@polyth/permissions/workspace-policy`
+  decides instead, in a `PreToolUse` hook and again in `canUseTool`: a read
+  that stays inside the workspace (or a temp directory) and names no secret
+  path is allowed without a question, including a short list of read-only
+  shell commands; `deny` and `ask` rules in Claude Code's settings syntax are
+  applied, from the person's own settings on this machine and from the
+  project's `.claude/settings.json` and `settings.local.json` on the host;
+  while Claude Code is in plan mode every change is refused. Everything else
+  is asked through the session's ordinary permission flow under the native
+  name (`Bash` with the command, `Edit`/`Write`/`Read` with the absolute host
+  path, and the host as metadata), so rules, the risk assessment, Auto-Approve
+  and Judgment treat it like a local call. `allow` rules from either settings
+  file are never read: a project's files may narrow what an agent does, not
+  widen it.
+- **Delivery bridge.** `backend-claude/src/remoteBridge.ts` reads the
+  project's own Claude Code files on the host at each native session start
+  (one round trip, plus one per level of `@imports`, three levels at most).
+  `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and their imports join the
+  system prompt; a nested `CLAUDE.md` joins the first tool result that touches
+  its folder; skills are listed with their host paths and read with the remote
+  tools; command hooks for `SessionStart`, `UserPromptSubmit`, `PreToolUse` and
+  `PostToolUse` run on the host in the project, with the native tool name and
+  absolute paths in their input. A hook can refuse a call (exit 2, `deny`,
+  `block`) or hand it to a person (`ask`); its `allow` is ignored. Nothing from
+  the project runs on this machine.
+
+Limits: `.claude/commands`, `agents`, `rules`, `.mcp.json`, other hook events
+and non-command hooks are not delivered (logged once per session start); a
+skill is read by the model, so there is no Skill tool call, slash invocation or
+`allowed-tools` for it; a `UserPromptSubmit` hook cannot take a prompt back,
+its objection reaches the model as context; a search rooted above a denied
+folder still reads it; Polyth's own capability delivery stays off for remote
+projects, as does native-history import and cross-harness release proof; the
+host's global `~/.claude` is not read, this machine's is. Unit-tested with a
+local stand-in host and live-verified on 2026-11-12 against one SSH host
+without Claude Code (Haiku, five turns through `createClaudeRuntime`); the
+Settings control and the provider's placement lookup are covered by unit tests
+and a rendered screenshot, not by a live server run.
 
 Each connection stores per-harness configuration exceptions
 (`SshConnectionDto.harnessConfig`); a harness that is not listed uses `local`.

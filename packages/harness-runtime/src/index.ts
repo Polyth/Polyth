@@ -439,7 +439,7 @@ export function createHarnessRegistry() {
                             // A remote project's row describes its SSH host when
                             // its chats run there; set it up there, not here.
                             const descriptor = provider.descriptor;
-                            const remote = context.remote === true && descriptor.remoteHost?.sessions === true;
+                            const remote = context.remote === true && descriptor.remoteHost?.sessions === true && probe.runsHere !== true;
                             const installCommand = remote ? descriptor.remoteHost?.installCommand : descriptor.installCommand;
                             const signInCommand = remote ? descriptor.remoteHost?.signInCommand : descriptor.signInCommand;
                             return installCommand || signInCommand || descriptor.setupUrl || descriptor.updateCommand?.length
