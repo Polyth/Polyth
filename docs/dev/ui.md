@@ -1527,7 +1527,13 @@ registered through the request's Space-scoped project service; if registration
 fails the fresh checkout is removed so the clone can be retried. Agent shells
 and Terminal still use the machine's Git credentials (§14.4 "Not covered"). If remote inspection is unsafe or
 no remote is configured, keep local editing available and disable remote actions
-until a safe target is available. Source control presents remote failures and
+until a safe target is available. Push, Pull and Sync always use the
+checked-out branch's same-named branch on the selected remote: a missing
+tracking ref, or one that names a different branch (a branch started from
+`origin/main`), is published under the local branch name and its tracking ref
+retargeted instead of failing with Git's own "upstream branch of your current
+branch does not match" refusal.
+Source control presents remote failures and
 working-tree conflicts in one recovery region above its tabs, with one set of
 agent draft actions. The failure reason and remote stay together; conflict
 counts remain visible alongside the recovery hint. Without a remote failure,

@@ -1056,12 +1056,19 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
   const configValue = async (root: string, key: string): Promise<string> =>
     (await run(root, ["config", "--local", "--get", key], true)).stdout.trim();
 
+  // Pull and rebase act on `${remote}/<branch>`, so that is the tracking ref
+  // Polyth keeps. A differently named upstream (a branch started from
+  // `origin/main`, or a previously selected remote) is retargeted once the
+  // same-named remote-tracking ref exists; nothing is written for a branch
+  // that has no counterpart on the selected remote yet.
   const retargetUpstream = async (root: string, remote: string, branch: string): Promise<void> => {
+    const target = `${remote}/${branch}`;
     const upstream = await run(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], true);
-    const upstreamRemote = upstream.code === 0 ? upstream.stdout.trim().split("/")[0] : "";
-    if (upstreamRemote !== remote) {
-      await run(root, ["branch", "--set-upstream-to", `${remote}/${branch}`]);
-    }
+    const upstreamRef = upstream.code === 0 ? upstream.stdout.trim() : "";
+    if (upstreamRef === target) return;
+    const exists = await run(root, ["rev-parse", "--verify", `refs/remotes/${target}`], true);
+    if (exists.code !== 0) return;
+    await run(root, ["branch", "--set-upstream-to", target]);
   };
 
   const commitTree = async (
@@ -1689,15 +1696,21 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     async push(root, remote = "origin") {
       if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
-      // On a normal branch with no tracking ref yet, `git push` aborts with
-      // "has no upstream branch". Publish the branch and set upstream so the
-      // first push (and every sync after) just works.
+      // Polyth pushes the checked-out branch to the same-named branch of the
+      // selected remote, so that is the tracking ref it wants. A bare
+      // `git push` refuses two ordinary setups: no tracking ref at all ("has
+      // no upstream branch"), and a tracking ref pointing at a different
+      // branch name — typically a branch created from `origin/main`, which
+      // fails with "The upstream branch of your current branch does not match
+      // the name of your current branch". Publish the branch under its own
+      // name and set tracking so the first push (and every sync after) just
+      // works instead of asking the person to resolve it.
       const branchRef = await run(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], true);
       const branch = branchRef.code === 0 ? branchRef.stdout.trim() : "";
       if (branch) {
         const upstream = await run(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], true);
-        const upstreamRemote = upstream.code === 0 ? upstream.stdout.trim().split("/")[0] : "";
-        if (!upstreamRemote || upstreamRemote !== remote) {
+        const upstreamRef = upstream.code === 0 ? upstream.stdout.trim() : "";
+        if (upstreamRef !== `${remote}/${branch}`) {
           try {
             await run(root, ["push", "--set-upstream", remote, branch]);
           } catch (error) {
