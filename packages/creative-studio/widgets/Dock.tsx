@@ -69,7 +69,7 @@ export default function Dock({ host, t, working, scope, focusRequest, onClearSco
           <span className="cs-dock-scope">
             <b>{scope.index + 1}</b>
             <span>{scope.scene.title}</span>
-            <button type="button" aria-label={t.dockClearScope} title={t.dockClearScope} onClick={onClearScope}><CloseGlyph /></button>
+            <IconButton icon={CloseGlyph} label={t.dockClearScope} size="sm" variant="quiet" className="cs-dock-scope-clear" onClick={onClearScope} />
           </span>
         )}
         <Textarea

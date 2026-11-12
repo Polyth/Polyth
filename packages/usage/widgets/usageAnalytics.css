@@ -1636,7 +1636,7 @@
 
 .usage-limit-summary-stat > strong {
   color: var(--text);
-  font-size: 17px;
+  font-size: var(--font-heading);
   font-weight: 680;
   font-variant-numeric: tabular-nums;
 }
@@ -1812,7 +1812,7 @@
 .usage-limit-window-head small {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
 }
 
 .usage-limit-window-value {
@@ -1881,7 +1881,7 @@
   gap: 3px 10px;
   margin-top: 7px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
 }
 
 .usage-limit-pace {
@@ -1938,7 +1938,7 @@
 .usage-limit-balance > span {
   overflow: hidden;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-meta);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

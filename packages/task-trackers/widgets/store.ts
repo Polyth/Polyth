@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import type { WebPackageHost } from "@polyth/web-sdk";
+import { bindHostUi, type WebPackageHost } from "@polyth/web-sdk";
 import { tt } from "./i18n.ts";
 import { api } from "./api.ts";
 import {
@@ -41,6 +41,10 @@ export function setTaskTrackerHost(value: WebPackageHost | null): void {
 export function taskTrackerHost(): WebPackageHost | null {
   return host;
 }
+
+/** Host UI parts for feature modules, resolved from the configured host on
+ *  every render (`host.ui` is the only door; the package never imports the shell). */
+export const hostUi = bindHostUi(taskTrackerHost, "Task trackers");
 
 export function friendly(action: string, cause: unknown): string {
   if (host) return host.errors.friendly(action, cause);

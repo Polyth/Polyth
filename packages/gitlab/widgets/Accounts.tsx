@@ -94,7 +94,7 @@ export function GitlabIdentity({ host, projectId }: { host: WebPackageHost; proj
   const Menu = host.ui.components.Menu;
   const entries = context.accounts.map(a => ({
     id: a.id, label: `@${a.username}`, detail: `${a.instanceId}${remote && applicable(a, remote) ? "" : ` · ${t("anotherInstance")}`}`,
-    kind: "radio", checked: context.binding?.accountId === a.id, disabled: busy || !remote || !applicable(a, remote),
+    kind: "radio" as const, checked: context.binding?.accountId === a.id, disabled: busy || !remote || !applicable(a, remote),
     onSelect: async () => {
       if (!remote || busy) return;
       const gen = generation.current;

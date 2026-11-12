@@ -160,6 +160,10 @@ export interface RailSurfaceComponentProps {
   /** Canonical shell-owned project/session identity. */
   projectId?: string | null;
   sessionId?: string | null;
+  /** The window's last explicit `openWorkspacePane(id, resource)` request
+   *  (store `paneResource`); absent when it was opened without one. */
+  resource?: string | null;
+  resourceSeq?: number;
 }
 
 export interface RailSurface {
@@ -230,6 +234,12 @@ export function registerSurface(surface: RailSurface): () => void {
 export function hasSurfaceRegistration(id: string): boolean {
   if (registry.has(id)) return true;
   return id.startsWith("slot:") && hasSlotRegistration("workspace.right.tabs", id.slice("slot:".length));
+}
+
+/** Public `host.surfaces.has`: a package window that is registered and
+ *  relevant to the current project, so a way into it can be offered. */
+export function hasPackageWindow(id: string): boolean {
+  return registry.has(id) && isSurfaceProjectRelevant(id);
 }
 
 /** Project relevance probe without content-driven visibility. */

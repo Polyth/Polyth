@@ -25,7 +25,9 @@
   text-align: start;
   cursor: pointer;
 }
-.session-move-row:hover { background: var(--surface-overlay-hover); }
+@media (hover: hover) {
+  .session-move-row:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
 .session-move-row:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;

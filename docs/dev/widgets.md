@@ -490,6 +490,13 @@ placement and visibility mutations still go through `widgetLayout.ts`.
   service) with an interactive canvas: folder picker, lazy grid, a lightbox
   with zoom/pan and normalized point/zone annotations, and a send flow that
   attaches the selected images to the active session for a chosen model.
+  Its controls are host primitives (`Menu` folder picker, `Button`,
+  `IconButton`, `Checkbox`, `Textarea`, `EmptyState`); the lightbox is a
+  `host.ui.Dialog` (`size="full"`) that paints `--scrim-media` as its own
+  bottom layer (shell looks re-skin every dialog backdrop) and floats its
+  controls on glass islands inside the safe areas, like the host attachment
+  viewer. Grid tiles are visible without their entrance animation, so reduced
+  motion never hides them.
 
 ## 14. Checklist (widget work)
 

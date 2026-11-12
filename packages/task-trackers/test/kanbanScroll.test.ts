@@ -22,6 +22,8 @@ if (!CHROME && process.env.POLYTH_REQUIRE_CHROMIUM === "1") {
 }
 
 register("../../../apps/web/test/tsxHooks.mjs", import.meta.url);
+const { installTestHost } = await import("./hostUi.ts");
+installTestHost();
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { KanbanBoard } = await import("../widgets/kanban.tsx");

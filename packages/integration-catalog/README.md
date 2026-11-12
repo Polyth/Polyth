@@ -2,10 +2,10 @@
 
 A curated, typed list of outside services the agent can be connected to: the
 MCP endpoint, how it authenticates, and what was actually verified about it —
-plus the page that shows the list in place of Chat.
+plus the Integrations window that shows it.
 
 **Preview.** 212 services, each probed by this repository, with its own brand
-tile, a mobile-first page and connecting through the host's existing MCP
+tile, a package window that adapts to its pane and connecting through the host's existing MCP
 service. Probing on a schedule, importing from an upstream registry and a
 generated skill per entry are the next slices.
 
@@ -25,7 +25,7 @@ answer every path alike. Candidates that failed, and why, are in
 
 The install plumbing already exists and is owned by the host: `mcp.json` +
 Space secrets, project overrides, person-owned servers, the probe and the MCP
-page. A catalog is data plus a page over those seams, which is what makes
+page. A catalog is data plus a window over those seams, which is what makes
 breadth cheap: one folder per service, one screen that reads them.
 
 ## Files
@@ -45,73 +45,75 @@ breadth cheap: one folder per service, one screen that reads them.
 | `assets/logos/` | The vendored tiles, `sources.json` (where each comes from) and `CREDITS.md`. |
 | `scripts/probe-endpoint.mjs` | Probe remote endpoints without credentials and print the evidence. |
 | `scripts/build-marks.py` | Build the tiles and `src/brandMarks.ts` from `sources.json` (Pillow). |
-| `widgets/` | The page (`pages.register`) and the capability that opens it. |
+| `widgets/` | The workspace surface (`surfaces.register`), its capability and palette command. |
 
-## The page
+## The window
 
-Mobile first: the base stylesheet is the phone, and container queries on the
-page's own width add the rest. `widgets/IntegrationsPage.tsx` owns the state;
-`widgets/styles.css` owns the geometry, on the host's tokens only.
+The catalog is a tool, so it is a workspace surface (`surfaces.register`, id
+`integration-catalog`), opened with `openWorkspacePane`. The host `ModuleView`
+owns the title, description, Back/Close, safe areas, the phone layer, resize
+and fullscreen; the package owns only the content (`contentMode: "workspace"`,
+edge to edge with its own `--space-3` gutter). `widgets/IntegrationsView.tsx`
+owns the state; `widgets/styles.css` owns the geometry, on the host's tokens
+only, and composes the host `TextInput`, `Tabs`, `Button` and `EmptyState`.
 
-- **Phone (under 900px of page width).** One screen at a time: the directory,
-  or one service with a way back. The search and the category chips stay
-  pinned while 200 rows scroll under them; the chips are one swipeable row that
-  runs to the screen edges. Every row leads to its own screen (a chevron says
-  so). Opening a service starts it at the top with focus on the way back;
-  going back restores the directory's scroll position and focus. The
-  connection card sits right under the service's head, so the action is on the
-  first screen without a pinned action bar (a filled bar reads as a foreign
-  card on glass looks), and the action is full width at
-  `max(--control-h-lg, --hit-min)`.
-- **640px.** Facts sit in two columns and the action moves to the card's
-  bottom-inline-end, the one place it has for every entry.
-- **900px.** The directory (360px) and the chosen service sit side by side and
-  scroll separately.
+- **Narrow pane (under 720px of pane width).** One view at a time: the
+  directory, or one service with a quiet "All integrations" button back.
+  The search and the category filter (the host `Tabs` strip, which scrolls
+  sideways and fades the edge that hides tabs) stay above the list while it
+  scrolls. Going back restores the directory's scroll position and focus.
+- **720px of pane width** (`@container icat`). The directory (280–360px) and the
+  chosen service sit side by side and scroll separately; the selected row
+  gets the calm `--surface-overlay-strong` wash. The width is the pane's, not
+  the viewport's: a docked window on a wide screen is as narrow as a phone.
 - The directory lists each service once: what is connected, then the featured
-  ones, then everything under its primary category. A "Connected" chip appears
+  ones, then everything under its primary category. A "Connected" tab appears
   as soon as anything is.
-- Pinned strips are painted with the shell's own fill plus a backdrop blur;
-  everything separates with a fill or an inset shadow, and glyphs (magnifier,
-  chevrons, back arrow) are drawn with shadows, because borderless appearance
-  is on by default and clears every border colour.
-- Fixed geometry, never `--density-scale`. Fields use at least 16px text so iOS
-  does not zoom on focus. Hover styles live behind `(hover: hover)`, and touch
-  gets an `:active` state instead of a hover that sticks after a tap.
-- Text direction is per block (`unicode-bidi: plaintext`); chevrons and arrows
-  flip in RTL.
+- Rows are about 52px with hairline separators: the brand tile (32px), the name
+  with Beta/Local tags, one ellipsised line of summary and a "Connected" word.
+  Hover lives behind `(hover: hover)`; touch gets `:active` only, so no row
+  keeps a tint after a tap.
+- The service reads as a document, not a form: heading, the connection facts,
+  the action (host `Button`, `busy` while it runs), then About, What it
+  installs and What was observed under hairlines.
+- Escape steps back one level (confirmation → service → search) and stops
+  there; otherwise the window closes. `/` focuses search; arrows walk the list.
 
 ### States
 
-| State | What the page does |
+| State | What the window does |
 | --- | --- |
-| Loading | A skeleton of the directory (and, wide, the document). |
-| Load failed | The reason and Try again; offline says so and reloads by itself when the network returns. |
-| Broken manifests | An amber strip with every reason, next to the healthy entries. |
+| Loading | Still placeholder rows (no shimmer). |
+| Load failed | Host `EmptyState` with the reason and Try again; offline says so and reloads by itself when the network returns. |
+| Broken manifests | A collapsed note with every reason, above the healthy entries. |
 | Connections unreadable | The route reports `connections: "unavailable"`; a notice says connected services may look unconnected. |
 | No search result | The query and Clear search; inside a category, Search all categories. |
 | Needs inputs | A site picker (native select) or a checked text field; the endpoint preview fills in as you type. |
 | Needs a key | Connect waits for the key and says why; an optional key says Optional. |
-| Connecting / disconnecting | A spinner in the button; the rest of the page stays usable. |
-| Connected | A pill, a green dot in the row, the Connected section and chip. |
-| Connected, switched off | A ring instead of a dot, the reason, and a way to MCP settings. |
+| Connecting / disconnecting | The button's own busy spinner; the rest of the window stays usable. |
+| Connected | A "Connected" tag, the word in the row, the Connected section and tab. |
+| Connected, switched off | "Connected, turned off", the reason, and a way to MCP settings. |
 | Connected by hand | No Disconnect (the catalog never removes what it did not add); a way to MCP settings. |
 | Disconnecting a personal key | One in-place confirmation, because the stored key is deleted. |
 | Already connected elsewhere | A 409 from a second tab refreshes to the connected state instead of an error. |
 | No project open | "The whole Space — no project is open", and the install is recorded that way. |
 | Install refused | The server's own message (an unpinned command, a local server on a sandboxed host, a bad input). |
 
-`openPage("integration-catalog", "<entry id>")` opens one service directly.
+`openWorkspacePane("integration-catalog", "<entry id>")` opens one service
+directly: the host hands the content `resource` and `resourceSeq`. On a phone
+the window's own Back returns from a service to the directory
+(`host.ui.useWindowBack`), so the content draws no second back control there.
 
 ## Ways in
 
 The catalog is a place people reach for a reason, so it has more than a
-navigator row. Every owner below keeps the link as a plain page id; none
-imports this package, and a disabled catalog removes the link with the page.
+rail tile. Every owner below keeps the link as a plain surface id; none
+imports this package, and a disabled catalog removes the link with the window.
 
 | Where | Moment | Mechanism |
 | --- | --- | --- |
-| Settings → MCP | "I need a server" | `harness-runtime` asks `host.pages.has("integration-catalog")` and opens the page. |
-| Command palette | a verb, not a page name | `integrations.connect`, keyworded by service and in both languages. |
+| Settings → MCP | "I need a server" | `harness-runtime` asks `host.surfaces.has("integration-catalog")` and opens the window with `openWorkspacePane`. A host without `surfaces.has` gets no button. |
+| Command palette | a verb, not a window name | `integrations.connect`, keyworded by service and in both languages. |
 | Capability and rail | browsing | capability `integrations`, right rail for `general`/`engineering`. |
 
 ## The manifest
@@ -128,7 +130,7 @@ normalize into this shape later.
   prerequisites, a startup timeout for a first-run download).
 - `mcp.auth: "token"` requires `mcp.tokenHelpUrl` — a person must know where
   the key comes from. `tokenOptional: true` means it works without one.
-- `categories`: one or two from `CATEGORY_ORDER` (the page's filter order); the
+- `categories`: one or two from `CATEGORY_ORDER` (the window's filter order); the
   first is the primary one the directory files it under.
 - `mcp.inputs`: values the endpoint interpolates where it says `{id}` — a
   Datadog site, an Azure DevOps organization. Each is bounded by `choices` or an
@@ -147,8 +149,8 @@ normalize into this shape later.
   `checkedAt` is an ISO date, `source` is where the claim comes from.
 
 A bad manifest is not silently skipped: the loader reports every reason, the
-route returns them next to the healthy entries, and the page shows them in a
-warning strip. A broken entry must never look like an absent one.
+route returns them next to the healthy entries, and the window lists them in a
+collapsed note above the directory. A broken entry must never look like an absent one.
 
 ## Adding an entry
 
@@ -171,7 +173,7 @@ warning strip. A broken entry must never look like an absent one.
 
    The probe never registers a client: dynamic client registration leaves a
    real client at the vendor. `--catalog [id…]` re-probes shipped entries.
-3. Run the checks below. Then the page shows it.
+3. Run the checks below. Then the window shows it.
 
 ## Connecting
 
@@ -217,12 +219,12 @@ its scope; a server a person created by hand with the same name is reported as
 
 Each entry shows the service's own mark, served from `assets/logos/` by
 `GET /api/integration-catalog/logo/<id>`. The marks are vendored, not fetched
-from a vendor CDN when the page renders: a page of favicon requests would tell
+from a vendor CDN when the window renders: a list of favicon requests would tell
 two hundred third parties which integrations somebody is browsing, and it would
 break on an offline or restricted network.
 
 Every file is a finished square tile, so it reads the same in a light and a
-dark theme and the page only rounds it and draws a hairline: 104 are
+dark theme and the window only rounds it and draws a hairline: 104 are
 simple-icons glyphs (CC0) on their brand colour — white on a strong colour, the
 colour itself on a dark tile when it cannot hold white — and the rest are the
 vendor's own app icon (touch icon, manifest icon, the icon its MCP server
@@ -259,7 +261,7 @@ Probed on 2026-11-11 and left out, so they are not retried blind:
   manifest shape plus a review queue.
 - **A generated skill per entry**, so the agent knows the tools' semantics
   instead of only their names.
-- **Twelve locales.** The page is English with Ukrainian overrides in
+- **Twelve locales.** The window is English with Ukrainian overrides in
   `strings.ts` (the Glance pattern). The full locale catalog is a promotion
   cost, not a preview cost.
 
@@ -272,5 +274,5 @@ node scripts/test/packageRemovability.test.ts
 node --experimental-strip-types apps/web/buildPackages.ts
 ```
 
-The last two prove the package stays one removable folder and that its page
+The last two prove the package stays one removable folder and that its window
 builds as a package bundle.

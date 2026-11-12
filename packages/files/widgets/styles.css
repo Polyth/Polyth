@@ -1134,7 +1134,7 @@ min-height: var(--ft-row-min-height);
 }
 .editor-csv-table .numeric .editor-csv-sort { justify-content: flex-end; }
 .editor-csv-sort > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.editor-csv-sort-mark { flex: none; min-width: 1ch; color: var(--accent); font-size: 9px; }
+.editor-csv-sort-mark { flex: none; min-width: 1ch; color: var(--accent); font-size: var(--font-meta); }
 @media (hover: hover) { .editor-csv-sort:hover:where(:not(:disabled)) { background: var(--elevated); } }
 .editor-csv-table .editor-csv-ln {
   position: sticky; inset-inline-start: 0; min-width: 4ch; padding: 3px var(--space-2);

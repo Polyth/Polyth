@@ -202,7 +202,7 @@ test("the checker flags unguarded and touch-reachable button hovers only", () =>
 test("every button hover and press in the shell and packages is guarded and hover-only", () => {
   const roots = sourceRoots();
   const buttons = buttonClasses(roots.flatMap((dir) => files(dir, (name) => /\.tsx?$/.test(name) && !name.endsWith(".d.ts"))));
-  assert.ok(["memory-row-main", "chip", "gallery-send-button"].every((name) => buttons.has(name)), "the source scan finds button classes");
+  assert.ok(["memory-row-main", "chip", "gallery-tile-open"].every((name) => buttons.has(name)), "the source scan finds button classes");
   const stylesheets = roots.flatMap((dir) => files(dir, (name) => name.endsWith(".css")));
   assert.ok(stylesheets.length > 80, "every shell and package stylesheet is audited");
   const found = stylesheets.flatMap((file) => {

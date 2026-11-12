@@ -1,17 +1,14 @@
 import { useMemo } from "react";
 import type { TaskTrackerPersonDto } from "@polyth/contracts";
-import Picker from "../../../apps/web/src/components/Picker.tsx";
-import {
-  CloseIcon,
-  IconButton,
-  LayersIcon,
-  Menu,
-  SharedIcon,
-  type MenuEntry,
-} from "../../../apps/web/src/components/ui/index.ts";
+import type { WebMenuEntry } from "@polyth/web-sdk";
 import { PersonAvatar, UnassignedAvatar } from "./glyphs.tsx";
 import { tt } from "./i18n.ts";
 import { assigneeSummary, ME, UNASSIGNED, type PersonOption } from "./people.ts";
+import { hostUi } from "./store.ts";
+
+const { IconButton, Menu, Picker } = hostUi.components;
+const { CloseIcon, LayersIcon, SharedIcon } = hostUi.iconSet;
+type MenuEntry = WebMenuEntry;
 
 /** Faces shown as one-tap filters before the full list. */
 const QUICK_PEOPLE = 5;

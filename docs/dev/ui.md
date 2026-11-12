@@ -3737,15 +3737,35 @@ host.surfaces.register({
 cannot register workspace surfaces into it. A package home (a tool) always uses
 `host.surfaces.register` and opens with `host.navigation.openWorkspacePane(id)`;
 this guarantees the shared header, actions, resize frame, focus handling, and
-dynamic/pinned/fullscreen state machine.
+dynamic/pinned/fullscreen state machine. A directory or catalog a person
+browses (the Integrations catalog, for one) is a tool, so it is a surface, not
+a page. A package that offers a way into another package's surface (Settings →
+MCP "Add from catalog") feature-detects `host.surfaces.has?.(id)` (registered
+and relevant to the current project) and renders nothing while it is absent
+or unanswerable.
+
+- **Resource.** `openWorkspacePane(id, resource)` hands `resource` to the
+  window's content as a prop, with `resourceSeq`, which grows per request, so
+  asking for the same item again after the person moved away inside still
+  lands. The request is presentation state (store `paneResource`), cleared on
+  a project switch; reopening from the rail passes none, so a directory starts
+  at its home. Files (`file:<path>`) and Git (`changes:<path>`) keep their
+  dedicated channels. Pinned by `apps/web/test/packageWindowSeams.test.ts`.
+- **One Back.** On a phone `ModuleView` draws the window's Back. Content with
+  an inner level (a list and one item) calls
+  `host.ui.useWindowBack?.(inItem ? backToList : null)`: while it returns
+  true the window's Back steps back to the list and the content hides its own
+  back control; it returns false on a wide window or outside one, and the
+  content keeps its control. The edge swipe stays the window's pop and rests
+  while the content holds the Back (`components/ui/windowBack.ts`).
 
 A package **page** is different: it is an object of the navigator that opens
 *in place of Chat*, the way a chat does — an agent's own screen. Register it
 with `host.pages.register({ id, title, component })` and open it with
 `host.navigation.openPage(id, resource?, { projectId? })`; `closePage()`
 returns the canvas to Chat. `host.pages.has(id)` answers whether a page is
-registered right now: a package that only offers a way in (a settings page
-with "Browse the catalog", a capability that links elsewhere) asks first and
+registered right now: a package that only offers a way in (a capability that
+links to an agent's screen) asks first and
 renders no control while the page is absent, instead of a button that does
 nothing. A host without `has` is an older host, and `undefined` there means
 unknown, not absent. The store holds `activePage { pageId, resource }`

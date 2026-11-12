@@ -8,18 +8,6 @@ import type {
   TaskTrackerProvider,
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
-import {
-  AddIcon,
-  Button,
-  CloseIcon,
-  IconButton,
-  ImageIcon,
-  Notice,
-  SendIcon,
-  Switch,
-  TextInput,
-  Textarea,
-} from "../../../apps/web/src/components/ui/index.ts";
 import { MOD } from "../../../apps/web/src/format.ts";
 import { useStore } from "../../../apps/web/src/store.ts";
 import ModelPicker from "@polyth/models/model-picker";
@@ -27,9 +15,12 @@ import { useHarnessColors, useOtherHarnessModels, useRuntimeCatalog } from "@pol
 import { api, type TaskTrackerDispatchInput } from "./api.ts";
 import { PROVIDER_LABELS, ProviderMark, providerNouns } from "./brand.tsx";
 import { tt } from "./i18n.ts";
-import { friendly, TASK_TRACKER_CHANGED, taskTrackerHost } from "./store.ts";
+import { friendly, hostUi, TASK_TRACKER_CHANGED, taskTrackerHost } from "./store.ts";
 import type { TaskTrackerDispatchResultDto, TaskTrackerTaskLinkDto } from "../src/types.ts";
 import { isImeComposing } from "@polyth/web-sdk";
+
+const { Button, IconButton, Notice, Switch, TextInput, Textarea } = hostUi.components;
+const { AddIcon, CloseIcon, ImageIcon, SendIcon } = hostUi.iconSet;
 
 /**
  * Task work: create tasks, send them to agents in new sessions, and show which
@@ -292,7 +283,7 @@ export function TaskStartOptionsFields({ projectId, disabled = false }: { projec
       </div>
       <div className="tt-start-row">
         <span id={`${id}-workspace`}>{tt("tasktrackers.start.workspace")}</span>
-        <div className="tt-target" role="radiogroup" aria-labelledby={`${id}-workspace`}>
+        <div className="seg tt-target" role="radiogroup" aria-labelledby={`${id}-workspace`}>
           {([[false, tt("tasktrackers.start.shared")], [true, tt("tasktrackers.start.isolated")]] as const).map(([isolated, label]) => (
             <button
               key={label}

@@ -49,6 +49,8 @@ Object.defineProperty(globalThis, "getComputedStyle", {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
+const { hostUi, installTestHost } = await import("./hostUi.ts");
+installTestHost();
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -138,7 +140,7 @@ function harness() {
   };
   resetNotifications();
   configureTaskTrackerHost({
-    ui: { icons: {} },
+    ui: hostUi,
     notifications,
     errors: { friendly: (action: string, cause: unknown) => `${action}: ${(cause as Error)?.message ?? ""}` },
     store: { subscribe: () => () => {}, getSnapshot: () => ({ activeProjectId: "project-1", activeSessionId: null }) },
@@ -331,7 +333,7 @@ test("the installer mirrors the board selection through the host preference seam
         return () => { unregistered++; };
       },
     },
-    ui: { icons: {} },
+    ui: hostUi,
     errors: { friendly: (action: string) => action },
   } as unknown as WebPackageHost;
   try {
@@ -453,7 +455,7 @@ test("the board of one project opens its own boards and tracker; another project
     scope.setProjectTracker("beta", "trello");
     await view.unmount();
     view = await mountBoard(key, "beta");
-    assert.equal(view.container.querySelector('[data-provider="trello"]')?.getAttribute("aria-selected"), "true");
+    assert.equal(view.container.querySelector('[data-provider="trello"]')?.closest('[role="tab"]')?.getAttribute("aria-selected"), "true");
   } finally {
     await view.unmount();
     run.restore();

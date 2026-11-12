@@ -34,9 +34,7 @@
 }
 
 .tt-task-card,
-.tt-list-row,
-.tt-provider-tabs button,
-.tt-view-toggle button {
+.tt-list-row {
   min-height: max(var(--control-h-sm), var(--hit-min));
   touch-action: manipulation;
 }
@@ -76,61 +74,21 @@
   align-items: center;
 }
 
-/* Provider and view switches match the shared `.ui-tabs` segmented control. */
 .tt-provider-tabs,
 .tt-view-toggle {
   flex: none;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--hair);
-  border-radius: var(--radius-control);
-  background: var(--surface-overlay);
 }
 
-.tt-provider-tabs button,
-.tt-view-toggle button {
+.tt-provider-tab,
+.tt-view-tab {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  justify-content: center;
   gap: var(--space-2);
-  min-height: max(28px, var(--hit-min));
-  padding: 0 var(--control-pad-x-sm);
-  border: 0;
-  border-radius: calc(var(--radius-control) - 2px);
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--font-meta);
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
-}
-
-@media (hover: hover) {
-  .tt-provider-tabs button:hover:where(:not(:disabled)):not(.active),
-  .tt-view-toggle button:hover:where(:not(:disabled)):not(.active) {
-    color: var(--text);
-    background: var(--surface-overlay-hover);
-  }
-}
-
-.tt-provider-tabs button.active,
-.tt-view-toggle button.active {
-  color: var(--text);
-  background: var(--elevated);
-  box-shadow: var(--shadow-sm);
-}
-
-.tt-provider-tabs button:focus-visible,
-.tt-view-toggle button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 
 /* Connection state: a small dot after the name, never a corner badge. */
-.tt-provider-tabs button > i {
+.tt-provider-tab > i {
   width: 6px;
   height: 6px;
   flex: none;
@@ -138,13 +96,8 @@
   background: var(--faint);
 }
 
-.tt-provider-tabs button > i.configured {
-  background: var(--green);
-}
-
-.tt-provider-tabs button > i.demo {
-  background: var(--amber);
-}
+.tt-provider-tab > i.configured { background: var(--green); }
+.tt-provider-tab > i.demo { background: var(--amber); }
 
 .tt-provider-mark {
   display: inline-grid;
@@ -253,7 +206,6 @@
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
-  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-demo-banner strong {
@@ -409,7 +361,6 @@
   flex-direction: column;
   border-radius: calc(var(--radius-card) + var(--tt-lane-inset));
   background: var(--surface-overlay-hover);
-  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-column.pending {
@@ -446,10 +397,6 @@
   border-radius: var(--radius-circle);
   background: var(--faint);
 }
-
-.tt-column.todo .tt-column-dot { background: var(--faint); }
-.tt-column.in_progress .tt-column-dot { background: var(--blue); }
-.tt-column.done .tt-column-dot { background: var(--green); }
 
 /* The column menu stays quiet until the column is pointed at or focused;
    touch has no hover, so it is always there. */
@@ -514,35 +461,8 @@
 }
 
 .tt-column-add-button {
-  display: flex;
   width: 100%;
-  min-height: max(40px, var(--hit-min));
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--radius-surface);
-  color: var(--muted);
-  background: transparent;
-  font: inherit;
-  font-size: var(--font-meta);
-  font-weight: 550;
-  text-align: start;
-  text-decoration: none;
-  cursor: pointer;
-  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
-}
-
-@media (hover: hover) {
-  .tt-column-add-button:hover:where(:not(:disabled)) {
-    color: var(--text);
-    background: var(--surface-overlay);
-  }
-}
-
-.tt-column-add-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  justify-content: flex-start;
 }
 
 .tt-column-cards {
@@ -582,11 +502,7 @@
   font: inherit;
   text-align: start;
   cursor: pointer;
-  transition:
-    border-color var(--motion-fast) var(--motion-ease),
-    background var(--motion-fast) var(--motion-ease),
-    box-shadow var(--motion-normal) var(--motion-ease),
-    translate var(--motion-normal) var(--motion-ease);
+  transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -594,13 +510,7 @@
     border-color: var(--hair-strong);
     background: var(--raised);
     box-shadow: var(--shadow-md);
-    translate: 0 -1px;
   }
-}
-
-.tt-task-card:active:where(:not(:disabled)) {
-  translate: 0 0;
-  box-shadow: var(--shadow-sm);
 }
 
 .tt-task-card:focus-visible,
@@ -776,7 +686,6 @@
   padding-inline-start: var(--space-1);
 }
 
-
 .tt-task-key {
   flex: none;
   color: var(--muted);
@@ -793,7 +702,6 @@
   color: var(--muted);
   background: var(--surface-overlay-hover);
 }
-
 
 .tt-due {
   min-height: 20px;
@@ -830,14 +738,14 @@
   min-height: 52px;
   padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
-  border-top-color: var(--hair);
   border-radius: var(--radius-control);
   color: var(--text);
   background: transparent;
+  box-shadow: inset 0 1px 0 var(--borderless-edge);
   font: inherit;
   text-align: start;
   cursor: pointer;
-  transition: border-color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+  transition: background var(--motion-fast) var(--motion-ease);
 }
 
 @media (hover: hover) {
@@ -854,12 +762,13 @@
 .tt-list-row.selected + .tt-list-row,
 .tt-list-row.picked,
 .tt-list-row.picked + .tt-list-row {
-  border-top-color: transparent;
+  box-shadow: none;
 }
+
 @media (hover: hover) {
   .tt-list-row:hover:where(:not(:disabled)),
   .tt-list-row:hover:where(:not(:disabled)) + .tt-list-row {
-    border-top-color: transparent;
+    box-shadow: none;
   }
 }
 
@@ -933,11 +842,6 @@
 .dialog-panel.tt-task-modal {
   width: min(940px, 94vw);
   max-height: min(90vh, calc(var(--visual-vh, 100dvh) - var(--space-6)));
-  animation: tt-modal-in var(--motion-surface) var(--motion-ease) both;
-}
-
-.dialog-backdrop:has(> .tt-task-modal) {
-  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-task-modal:focus-visible {
@@ -960,13 +864,6 @@
   flex: 1;
   flex-direction: column;
   container: task-tracker-modal / inline-size;
-}
-
-@keyframes tt-modal-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(.985);
-  }
 }
 
 .tt-detail-header {
@@ -1061,7 +958,6 @@
   border-radius: var(--radius-control);
   object-fit: contain;
   box-shadow: var(--shadow-md);
-  transition: scale var(--motion-surface) var(--motion-ease);
 }
 
 .tt-modal-cover > .tt-image-fallback {
@@ -1078,12 +974,6 @@
   object-fit: cover;
   filter: blur(26px) saturate(1.25);
   opacity: .55;
-}
-
-@media (hover: hover) {
-  .tt-modal-cover:hover:where(:not(:disabled)) > img:not(.tt-modal-cover-glow) {
-    scale: 1.015;
-  }
 }
 
 .tt-modal-cover:focus-visible {
@@ -1156,14 +1046,6 @@
   gap: var(--space-1);
   color: var(--muted);
   font-size: var(--font-meta);
-  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
-}
-
-.tt-detail-loading .tt-button-spinner {
-  width: 11px;
-  height: 11px;
-  flex-basis: 11px;
-  border-width: 1.5px;
 }
 
 .tt-description {
@@ -1297,9 +1179,7 @@
 }
 
 .tt-task-card:disabled,
-.tt-list-row:disabled,
-.tt-provider-tabs button:disabled,
-.tt-view-toggle button:disabled {
+.tt-list-row:disabled {
   cursor: not-allowed;
   opacity: .5;
 }
@@ -1331,9 +1211,12 @@
   transform: translate(-50%, -50%);
 }
 
-.tt-external:hover {
-  color: var(--text);
-  background: var(--surface-overlay-hover);
+@media (hover: hover) {
+  .tt-external:hover,
+  .tt-file-download-link:hover {
+    color: var(--text);
+    background: var(--surface-overlay-hover);
+  }
 }
 
 .tt-external:focus-visible {
@@ -1369,15 +1252,14 @@
 .tt-board-error {
   position: absolute;
   z-index: 8;
-  right: 12px;
-  bottom: max(12px, var(--safe-bottom));
-  left: 12px;
+  inset-inline: var(--space-3);
+  bottom: max(var(--space-3), var(--safe-bottom));
   display: flex;
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 9px 10px 9px 12px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
   border-radius: var(--radius-surface);
   color: var(--text);
@@ -1391,31 +1273,10 @@
   overflow-wrap: anywhere;
 }
 
-.tt-board-error button {
-  min-width: 70px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--sunken);
-}
-
 .tt-board-error > div {
   display: flex;
   flex: none;
-  gap: 6px;
-}
-
-.tt-button-spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
-}
-
-.tt-button-spinner {
-  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: tt-spin .75s linear infinite;
+  gap: var(--space-1);
 }
 
 .tt-empty,
@@ -1426,73 +1287,9 @@
   flex: 1;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
-  gap: 9px;
-  padding: 24px;
-  text-align: center;
-}
-
-.tt-empty {
-  width: min(100%, 460px);
-  align-self: center;
-  margin: auto;
-}
-
-.tt-empty-icon {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  place-items: center;
-  border-radius: var(--radius-surface);
-  color: var(--accent);
-  background: var(--accent-wash);
-}
-
-.tt-empty-icon svg {
-  width: 21px;
-  height: 21px;
-}
-
-.tt-empty strong {
-  font-size: var(--font-label);
-  font-weight: 600;
-}
-
-.tt-empty p {
-  max-width: 42ch;
-  margin: 0;
-  overflow-wrap: anywhere;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
   color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: 1.55;
-}
-
-.tt-empty > button {
-  margin-top: 3px;
-  padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--elevated);
-}
-
-.tt-spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid color-mix(in srgb, var(--accent) 20%, var(--border));
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: tt-spin .75s linear infinite;
-}
-
-@keyframes tt-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes tt-rise {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
 }
 
 .tt-linked-widget,
@@ -1632,12 +1429,6 @@
   color: color-mix(in srgb, var(--red) 82%, var(--text));
 }
 
-.tt-linked-load-error button {
-  min-height: 44px;
-  padding: 0 12px;
-  background: var(--elevated);
-}
-
 /* Narrow board: the open task (or the new-task composer) replaces the
    tasks and the toolbar instead of floating over them, so it stays in the
    normal flow — a page scrolls it, a widget scrolls its body. */
@@ -1657,17 +1448,12 @@
 }
 
 @container task-tracker (max-width: 560px) {
-  .tt-view-toggle .ui-btn-label,
+  .tt-view-toggle .tt-view-text,
   .tt-board-picker-actions .ui-btn-label {
     display: none;
   }
 
   .tt-board-picker-actions .ui-btn {
-    min-width: max(32px, var(--hit-min));
-    padding: 0;
-  }
-
-  .tt-view-toggle button {
     min-width: max(32px, var(--hit-min));
     padding: 0;
   }
@@ -1708,13 +1494,7 @@
 
   .tt-empty {
     min-height: 0;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4) var(--space-5);
-  }
-
-  .tt-empty-icon {
-    width: 40px;
-    height: 40px;
+    padding: var(--space-3) 0 var(--space-5);
   }
 }
 
@@ -1726,19 +1506,6 @@
   .tt-linked-actions .picker {
     grid-column: 1 / -1;
   }
-}
-
-/* ---- Staggered card entrance ------------------------------------------- */
-
-.tt-task-card {
-  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
-  animation-delay: calc(var(--tt-i, 0) * 28ms);
-}
-
-.tt-empty-hint {
-  max-width: 42ch;
-  color: var(--muted);
-  font-size: var(--font-meta);
 }
 
 /* ---- Package page ------------------------------------------------------- */
@@ -1777,7 +1544,6 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-page-scroll {
@@ -1838,38 +1604,13 @@
   font: inherit;
   text-align: start;
   cursor: pointer;
-  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
-  animation-delay: calc(var(--tt-i, 0) * 60ms + 40ms);
-  transition:
-    transform var(--motion-normal) var(--motion-ease),
-    border-color var(--motion-fast) var(--motion-ease),
-    box-shadow var(--motion-normal) var(--motion-ease);
-}
-
-.tt-choice::after {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(120% 80% at 0% 0%, var(--accent-wash), transparent 60%);
-  content: "";
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-normal) var(--motion-ease);
+  transition: border-color var(--motion-fast) var(--motion-ease);
 }
 
 @media (hover: hover) {
   .tt-choice:hover:not(:disabled) {
     border-color: var(--accent-line);
-    box-shadow: var(--shadow-md);
-    transform: translateY(-2px);
   }
-
-  .tt-choice:hover:not(:disabled)::after {
-    opacity: 1;
-  }
-}
-
-.tt-choice:active:not(:disabled) {
-  transform: translateY(0) scale(.99);
 }
 
 .tt-choice:focus-visible {
@@ -1894,10 +1635,6 @@
 }
 
 /* ---- Management --------------------------------------------------------- */
-
-.tt-settings-page {
-  min-width: 0;
-}
 
 .tt-manage {
   display: grid;
@@ -1932,7 +1669,6 @@
   line-height: var(--font-meta-lh);
 }
 
-.tt-setting-copy small,
 .tt-service-title small,
 .tt-service-hint,
 .tt-account-row small,
@@ -1961,21 +1697,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.tt-manage-section {
-  display: grid;
-  min-width: 0;
-  gap: var(--space-3);
-}
-
-/* Matches the shared settings Section title (sentence case, label size). */
-.tt-manage-section h3 {
-  margin: 0;
-  color: var(--text);
-  font-size: var(--font-label);
-  font-weight: 650;
-  line-height: 1.3;
-}
-
 .tt-manage-skeleton {
   display: grid;
   gap: var(--space-3);
@@ -1995,15 +1716,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-surface);
   background: var(--elevated);
-  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
-  transition:
-    border-color var(--motion-normal) var(--motion-ease),
-    background-color var(--motion-normal) var(--motion-ease),
-    opacity var(--motion-normal) var(--motion-ease);
-}
-
-.tt-service-card + .tt-service-card {
-  animation-delay: 60ms;
 }
 
 .tt-service-card[data-state="connected"] {
@@ -2024,10 +1736,6 @@
   min-width: 0;
   align-items: center;
   gap: var(--space-3);
-}
-
-.tt-service-head .tt-provider-mark {
-  transition: filter var(--motion-normal) var(--motion-ease), opacity var(--motion-normal) var(--motion-ease);
 }
 
 .tt-service-title {
@@ -2093,7 +1801,6 @@
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-card);
   background: var(--surface-overlay);
-  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-account-row > span:not(.tt-avatar) {
@@ -2149,7 +1856,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  animation: tt-fade var(--motion-fast) var(--motion-ease) both;
 }
 
 .tt-confirm span {
@@ -2160,7 +1866,6 @@
 .tt-inline-message {
   margin: 0;
   font-size: var(--font-meta);
-  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-inline-message.success { color: var(--success); }
@@ -2173,43 +1878,12 @@
   border-radius: var(--radius-surface);
 }
 
-.tt-setting-row {
-  display: flex;
-  min-width: 0;
-  min-height: max(56px, var(--hit-min));
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  transition: background-color var(--motion-normal) var(--motion-ease);
-}
-
-.tt-setting-row + .tt-setting-row {
-  border-top: 1px solid var(--border-soft);
-}
-
-.tt-setting-row:hover {
-  background: var(--surface-overlay);
-}
-
-.tt-setting-copy {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 2px;
-}
-
-.tt-setting-row.off .tt-setting-copy strong {
-  color: var(--text-dim);
-}
-
 /* ---- Agent automation --------------------------------------------------- */
 
 .tt-automation {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4) var(--space-4);
-  border-top: 1px solid var(--border-soft);
-  background: var(--surface-overlay);
+  padding-block: var(--space-2) var(--space-3);
 }
 
 .tt-automation-column {
@@ -2231,21 +1905,6 @@
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
   margin-top: var(--space-1);
-}
-
-.tt-automation-kind {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-meta);
-  cursor: pointer;
-}
-
-.tt-automation-kind input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
 }
 
 /* ---- Connect wizard ----------------------------------------------------- */
@@ -2307,7 +1966,6 @@
 .tt-stepper li.current .tt-stepper-dot {
   border-color: var(--accent);
   color: var(--accent);
-  transform: scale(1.12);
 }
 
 .tt-stepper li.done .tt-stepper-dot {
@@ -2343,11 +2001,6 @@
 
 .tt-wizard-step {
   min-width: 0;
-  animation: tt-step-forward var(--motion-surface) var(--motion-ease) both;
-}
-
-.tt-wizard-stage[data-direction="back"] .tt-wizard-step {
-  animation-name: tt-step-back;
 }
 
 .tt-wizard-fields {
@@ -2374,10 +2027,6 @@
 /* The label is bold; what the user types is not. */
 .tt-field :is(.ui-input, .ui-textarea) {
   font-weight: 400;
-}
-
-.tt-reveal {
-  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-site-preview {
@@ -2463,31 +2112,17 @@
   grid-column: 1 / -1;
 }
 
-.tt-authorize.waiting .tt-provider-mark {
-  animation: tt-pulse 1.4s var(--motion-ease) infinite;
-}
-
 .tt-disclosure {
   justify-self: start;
-  min-height: max(32px, var(--hit-min));
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: var(--font-meta);
-  cursor: pointer;
 }
 
 .tt-disclosure::after {
-  display: inline-block;
-  margin-inline-start: 6px;
+  margin-inline-start: var(--space-1);
   content: "\203A";
-  transition: transform var(--motion-normal) var(--motion-ease);
 }
 
 .tt-disclosure[aria-expanded="true"]::after {
-  transform: rotate(90deg);
+  rotate: 90deg;
 }
 
 .tt-verify {
@@ -2512,16 +2147,6 @@
   place-items: center;
 }
 
-.tt-verify-orbit::before {
-  position: absolute;
-  inset: 0;
-  border: 2px solid var(--accent-wash);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  content: "";
-  animation: tt-spin .9s linear infinite;
-}
-
 .tt-verify-account {
   display: flex;
   align-items: center;
@@ -2530,7 +2155,6 @@
   border-radius: var(--radius-round);
   background: var(--surface-overlay);
   text-align: start;
-  animation: tt-rise var(--motion-surface) var(--motion-ease) 260ms both;
 }
 
 .tt-verify-account > span:last-child {
@@ -2542,6 +2166,8 @@
   font-size: var(--font-meta);
 }
 
+.tt-success-check circle { opacity: .35; }
+
 .tt-success-check {
   width: 56px;
   height: 56px;
@@ -2550,20 +2176,6 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 3;
-  animation: tt-pop var(--motion-surface) var(--motion-ease) both;
-}
-
-.tt-success-check circle {
-  stroke-dasharray: 145;
-  stroke-dashoffset: 145;
-  opacity: .35;
-  animation: tt-draw 520ms var(--motion-ease) forwards;
-}
-
-.tt-success-check path {
-  stroke-dasharray: 36;
-  stroke-dashoffset: 36;
-  animation: tt-draw 300ms var(--motion-ease) 380ms forwards;
 }
 
 /* ---- Overview widget ---------------------------------------------------- */
@@ -2602,8 +2214,6 @@
   padding: var(--space-2);
   border-radius: var(--radius-card);
   background: var(--surface-overlay);
-  animation: tt-rise var(--motion-surface) var(--motion-ease) both;
-  animation-delay: calc(var(--tt-i, 0) * 50ms);
 }
 
 .tt-overview-name {
@@ -2659,12 +2269,6 @@
 .tt-overview-bar i.in_progress { background: var(--accent); }
 .tt-overview-bar i.todo { background: color-mix(in srgb, var(--muted) 55%, transparent); }
 
-.tt-overview-bar.loading {
-  background: linear-gradient(90deg, var(--surface-overlay-strong), var(--surface-overlay), var(--surface-overlay-strong));
-  background-size: 200% 100%;
-  animation: tt-shimmer 1.2s linear infinite;
-}
-
 .tt-overview-foot {
   display: flex;
   justify-content: flex-end;
@@ -2693,93 +2297,9 @@
     flex: none;
   }
 
-  .tt-service-card,
-  .tt-setting-row {
+  .tt-service-card {
     padding-inline: var(--space-3);
   }
-}
-
-@keyframes tt-fade {
-  from { opacity: 0; }
-}
-
-@keyframes tt-step-forward {
-  from {
-    opacity: 0;
-    transform: translateX(24px);
-  }
-}
-
-@keyframes tt-step-back {
-  from {
-    opacity: 0;
-    transform: translateX(-24px);
-  }
-}
-
-@keyframes tt-draw {
-  to { stroke-dashoffset: 0; }
-}
-
-@keyframes tt-pop {
-  from { transform: scale(.6); opacity: 0; }
-  60% { transform: scale(1.06); opacity: 1; }
-}
-
-@keyframes tt-pulse {
-  50% { transform: scale(1.08); }
-}
-
-@keyframes tt-shimmer {
-  to { background-position: -200% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tt-task-card,
-  .tt-list-row,
-  .tt-detail,
-  .tt-choice,
-  .tt-service-card,
-  .tt-collapse,
-  .tt-collapse-inner,
-  .tt-wizard-step,
-  .tt-stepper-track i,
-  .tt-stepper-dot,
-  .tt-verify-account,
-  .tt-overview li,
-  .tt-overview-bar i,
-  .tt-page-panel,
-  .tt-reveal,
-  .tt-column,
-  .tt-column-menu,
-  .tt-column-add-button,
-  .tt-demo-banner,
-  .tt-provider-tabs button,
-  .tt-view-toggle button {
-    transition: none;
-    animation: none;
-  }
-
-  .tt-spinner,
-  .tt-button-spinner,
-  .tt-verify-orbit::before,
-  .tt-authorize.waiting .tt-provider-mark,
-  .tt-overview-bar.loading {
-    animation: none;
-  }
-
-  .tt-success-check,
-  .tt-success-check circle,
-  .tt-success-check path {
-    animation: none;
-    stroke-dashoffset: 0;
-  }
-}
-
-/* Host "reduce animations" / low-resource modes drop every animation; the
-   drawn check must still end fully visible. */
-:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .tt-success-check :is(circle, path) {
-  stroke-dashoffset: 0;
 }
 
 /* ---------------------------------------------------------------- task work
@@ -2844,58 +2364,6 @@
   background: color-mix(in srgb, var(--accent) 7%, var(--elevated));
 }
 
-.tt-header-actions > .ui-btn.active {
-  color: var(--text);
-  background: var(--elevated);
-}
-
-.tt-target {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--hair);
-  border-radius: var(--radius-control);
-  background: var(--surface-overlay);
-}
-
-.tt-target button {
-  min-height: max(28px, var(--hit-min));
-  border: 0;
-  border-radius: calc(var(--radius-control) - 2px);
-  color: var(--muted);
-  background: transparent;
-  font: inherit;
-  font-size: var(--font-meta);
-  font-weight: 600;
-  cursor: pointer;
-  touch-action: manipulation;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
-}
-
-@media (hover: hover) {
-  .tt-target button:hover:not(.active):not(:disabled) {
-    color: var(--text);
-    background: var(--surface-overlay-hover);
-  }
-}
-
-.tt-target button.active {
-  color: var(--text);
-  background: var(--elevated);
-  box-shadow: var(--shadow-sm);
-}
-
-.tt-target button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
-.tt-target button:disabled {
-  cursor: not-allowed;
-  opacity: .5;
-}
-
 /* Where a started agent works, and whether the app follows it there. */
 .tt-start-options {
   display: grid;
@@ -2918,13 +2386,9 @@
   line-height: var(--font-meta-lh);
 }
 
-.tt-start-row .tt-target {
+.tt-target {
   flex: 0 1 auto;
-  grid-template-columns: repeat(2, auto);
-}
-
-.tt-start-row .tt-target button {
-  padding: 0 var(--space-3);
+  flex-wrap: nowrap;
 }
 
 /* The model chip keeps its own size; a long model name truncates. The chip's
@@ -3015,7 +2479,6 @@
 .tt-agent-sessions i.working {
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
-  animation: tt-pulse 1.6s var(--motion-ease) infinite;
 }
 
 .tt-agent-sessions i.idle,
@@ -3067,7 +2530,6 @@
   background: var(--elevated);
   box-shadow: var(--shadow-md);
   font-size: var(--font-meta);
-  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-dispatch-row {
@@ -3341,7 +2803,6 @@
   border: 1px solid var(--hair);
   border-radius: var(--radius-control);
   background: var(--sunken);
-  animation: tt-compose-image-in var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-compose-images img {
@@ -3371,13 +2832,6 @@
   .tt-compose-images li:hover .ui-icon-btn,
   .tt-compose-images .ui-icon-btn:focus-visible {
     opacity: 1;
-  }
-}
-
-@keyframes tt-compose-image-in {
-  from {
-    opacity: 0;
-    transform: scale(.94);
   }
 }
 
@@ -3527,15 +2981,11 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  transition: background-color var(--motion-normal) var(--motion-ease);
 }
 
+/* A drawn line, so it survives "Hide interface borders". */
 .tt-scope-row + .tt-scope-row {
-  border-top: 1px solid var(--border-soft);
-}
-
-.tt-scope-row:hover {
-  background: var(--surface-overlay);
+  box-shadow: inset 0 1px 0 var(--borderless-edge);
 }
 
 .tt-scope-row > .ui-checkbox,
@@ -3594,9 +3044,11 @@
   cursor: inherit;
 }
 
-.tt-default-radio:hover:not(.disabled) {
-  color: var(--text);
-  border-color: var(--text-dim);
+@media (hover: hover) {
+  .tt-default-radio:hover:not(.disabled) {
+    color: var(--text);
+    border-color: var(--text-dim);
+  }
 }
 
 .tt-default-radio.on {
@@ -3647,16 +3099,6 @@
   .tt-dispatch-row .ui-input {
     grid-column: 1 / -1;
     grid-row: 2;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tt-dispatch-bar,
-  .tt-pick,
-  .tt-target button,
-  .tt-agent-sessions i.working {
-    transition: none;
-    animation: none;
   }
 }
 
@@ -3732,13 +3174,6 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: scale var(--motion-surface) var(--motion-ease);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .tt-task-card:hover:where(:not(:disabled)) .tt-card-cover img {
-    scale: 1.03;
-  }
 }
 
 /* Over a photo, not on a theme surface: a fixed dark chip stays legible. */
@@ -3852,19 +3287,12 @@
   font: inherit;
   text-align: start;
   cursor: zoom-in;
-  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
-  animation-delay: calc(var(--tt-i, 0) * 30ms);
-  transition:
-    border-color var(--motion-fast) var(--motion-ease),
-    box-shadow var(--motion-normal) var(--motion-ease),
-    translate var(--motion-normal) var(--motion-ease);
+  transition: border-color var(--motion-fast) var(--motion-ease);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .tt-attachment-thumb-card:hover:where(:not(:disabled)) {
     border-color: var(--accent-line);
-    box-shadow: var(--shadow-md);
-    translate: 0 -1px;
   }
 }
 
@@ -3886,13 +3314,6 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: scale var(--motion-surface) var(--motion-ease);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .tt-attachment-thumb-card:hover:where(:not(:disabled)) .tt-thumb-media img {
-    scale: 1.04;
-  }
 }
 
 .tt-thumb-cover-badge {
@@ -4006,11 +3427,6 @@
   transform: translate(-50%, -50%);
 }
 
-.tt-file-download-link:hover {
-  color: var(--text);
-  background: var(--surface-overlay-hover);
-}
-
 /* Files dragged anywhere over the open card. */
 .tt-modal-drop {
   position: absolute;
@@ -4025,7 +3441,6 @@
   background: color-mix(in srgb, var(--elevated) 82%, var(--accent-wash));
   color: var(--accent);
   pointer-events: none;
-  animation: tt-fade var(--motion-fast) var(--motion-ease) both;
 }
 
 .tt-modal-drop strong {
@@ -4051,7 +3466,6 @@
   grid-template-columns: 28px minmax(0, 1fr);
   align-items: start;
   gap: var(--space-2) var(--space-3);
-  animation: tt-rise var(--motion-normal) var(--motion-ease) both;
 }
 
 .tt-comment-content {
@@ -4149,147 +3563,6 @@
 .tt-comment-form-actions {
   display: flex;
   justify-content: flex-end;
-  animation: tt-fade var(--motion-fast) var(--motion-ease) both;
-}
-
-/* ---- Image Lightbox ----------------------------------------------------- */
-
-/* The preview is a dark viewer above everything, the task modal included:
-   the picture is the content, so its chrome is fixed light-on-dark (like the
-   brand colours, a documented exception to theme tokens). */
-.tt-lightbox-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-overlay) + 20);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: max(var(--space-4), var(--safe-top)) max(var(--space-4), var(--safe-right)) max(var(--space-4), var(--safe-bottom)) max(var(--space-4), var(--safe-left));
-  background: rgba(8, 9, 12, 0.86);
-  /* Horizontal swipes page the images; vertical pans and pinch stay native. */
-  touch-action: pan-y pinch-zoom;
-  animation: tt-fade var(--motion-normal) var(--motion-ease) both;
-}
-
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .tt-lightbox-overlay {
-    background: rgba(8, 9, 12, 0.74);
-    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur, 18px) * .5));
-    backdrop-filter: blur(calc(var(--material-glass-blur, 18px) * .5));
-  }
-}
-
-.tt-lightbox-content {
-  position: relative;
-  display: flex;
-  width: 100%;
-  max-width: min(96vw, 1200px);
-  height: 100%;
-  max-height: 100%;
-  flex-direction: column;
-  gap: var(--space-2);
-  color: #f4f5f7;
-}
-
-.tt-lightbox-header {
-  display: flex;
-  flex: none;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.tt-lightbox-title {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: var(--space-2);
-  overflow: hidden;
-  font-size: var(--font-label);
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.tt-lightbox-title span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tt-lightbox-title small {
-  flex: none;
-  color: rgba(244, 245, 247, 0.6);
-  font-size: var(--font-meta);
-  font-weight: 400;
-}
-
-.tt-lightbox-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.tt-lightbox-actions .ui-icon-btn,
-.tt-lightbox-button {
-  color: rgba(244, 245, 247, 0.82);
-}
-
-.tt-lightbox-button {
-  display: inline-grid;
-  width: var(--control-h-sm);
-  height: var(--control-h-sm);
-  place-items: center;
-  border-radius: var(--radius-control);
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
-}
-
-@media (hover: hover) {
-  .tt-lightbox-actions .ui-icon-btn:hover:where(:not(:disabled)),
-  .tt-lightbox-button:hover:where(:not(:disabled)) {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.12);
-  }
-}
-
-.tt-lightbox-image-wrap {
-  position: relative;
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-}
-
-.tt-lightbox-image {
-  display: flex;
-  max-width: 100%;
-  max-height: 100%;
-  align-items: center;
-  justify-content: center;
-  animation: tt-lightbox-in var(--motion-surface) var(--motion-ease) both;
-}
-
-@keyframes tt-lightbox-in {
-  from {
-    opacity: 0;
-    transform: scale(.97);
-  }
-}
-
-.tt-lightbox-image img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(var(--visual-vh, 100dvh) - 140px);
-  border-radius: var(--radius-card);
-  object-fit: contain;
-  box-shadow: 0 24px 64px -24px rgba(0, 0, 0, 0.7);
-}
-
-.tt-lightbox-image .tt-image-fallback {
-  width: 160px;
-  height: 120px;
-  border-radius: var(--radius-card);
 }
 
 /* A picture the tracker refused or no longer has. */
@@ -4301,60 +3574,6 @@
   justify-content: center;
   background: var(--surface-overlay-strong);
   color: var(--muted);
-}
-
-.tt-lightbox-nav {
-  position: absolute;
-  top: 50%;
-  z-index: 2;
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  transform: translateY(-50%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: var(--radius-round);
-  background: rgba(20, 22, 28, 0.62);
-  color: #fff;
-  cursor: pointer;
-  transition: background var(--motion-fast) var(--motion-ease), scale var(--motion-fast) var(--motion-ease);
-}
-
-@media (hover: hover) {
-  .tt-lightbox-nav:hover:where(:not(:disabled)) {
-    background: rgba(20, 22, 28, 0.9);
-  }
-}
-
-.tt-lightbox-nav:active:where(:not(:disabled)) {
-  scale: .94;
-}
-
-.tt-lightbox-nav:focus-visible {
-  outline: 2px solid #fff;
-  outline-offset: 2px;
-}
-
-.tt-lightbox-nav.prev {
-  inset-inline-start: var(--space-2);
-}
-
-.tt-lightbox-nav.next {
-  inset-inline-end: var(--space-2);
-}
-
-html[dir="rtl"] .tt-lightbox-nav svg {
-  transform: scaleX(-1);
-}
-
-.tt-lightbox-footer {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  color: rgba(244, 245, 247, 0.62);
-  font-size: var(--font-meta);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ---- Phone: the task opens as a full-screen sheet ------------------------ */
@@ -4371,7 +3590,6 @@ html[dir="rtl"] .tt-lightbox-nav svg {
     max-height: var(--visual-vh, 100dvh);
     border: 0;
     border-radius: 0;
-    animation-name: tt-sheet-in;
   }
 
   .tt-task-modal .tt-detail-header {
@@ -4382,53 +3600,6 @@ html[dir="rtl"] .tt-lightbox-nav svg {
   .tt-detail-layout {
     padding-inline: max(var(--space-4), var(--safe-left)) max(var(--space-4), var(--safe-right));
   }
-}
-
-@keyframes tt-sheet-in {
-  from {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-}
-
-/* ---- Motion and performance preferences --------------------------------- */
-
-@media (prefers-reduced-motion: reduce) {
-  .dialog-panel.tt-task-modal,
-  .dialog-backdrop:has(> .tt-task-modal),
-  .tt-modal-drop,
-  .tt-lightbox-overlay,
-  .tt-lightbox-image,
-  .tt-attachment-thumb-card,
-  .tt-comment-item,
-  .tt-comment-form-actions,
-  .tt-detail-loading {
-    animation: none;
-  }
-
-  .tt-task-card,
-  .tt-task-card .tt-card-cover img,
-  .tt-attachment-thumb-card,
-  .tt-thumb-media img,
-  .tt-modal-cover > img {
-    transition: none;
-  }
-}
-
-:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) :is(
-  .dialog-panel.tt-task-modal,
-  .dialog-backdrop:has(> .tt-task-modal),
-  .tt-modal-drop,
-  .tt-lightbox-overlay,
-  .tt-lightbox-image,
-  .tt-attachment-thumb-card,
-  .tt-comment-item,
-  .tt-comment-form-actions,
-  .tt-task-card,
-  .tt-column,
-  .tt-detail-loading
-) {
-  animation: none;
 }
 
 /* Low-resource mode also drops the blurred cover copy (a large filtered
@@ -4451,7 +3622,7 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
   border-radius: var(--radius-circle);
   color: var(--accent);
   background: var(--accent-wash);
-  font-size: 10px;
+  font-size: var(--font-meta);
   font-weight: 650;
   line-height: 1;
   letter-spacing: 0;
@@ -4461,13 +3632,13 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
 .tt-person-avatar.xs {
   width: 20px;
   height: 20px;
-  font-size: 9px;
+  font-size: var(--font-meta);
 }
 
 .tt-person-avatar.md {
   width: 28px;
   height: 28px;
-  font-size: 11px;
+  font-size: var(--font-meta);
 }
 
 .tt-person-avatar img {
@@ -4511,7 +3682,7 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
   box-shadow: 0 0 0 2px var(--elevated);
   color: var(--muted);
   background: var(--surface-overlay-strong);
-  font-size: 9px;
+  font-size: var(--font-meta);
   font-weight: 650;
 }
 
@@ -4676,7 +3847,6 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
 }
 
 .tt-people-chip:focus-visible,
-.tt-filter-clear:focus-visible,
 .tt-list-group-head:focus-visible,
 .tt-pager-item:focus-visible {
   outline: 2px solid var(--focus-ring);
@@ -4705,17 +3875,6 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
   color: var(--text);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
-}
-
-.tt-filter-clear {
-  min-height: max(24px, var(--hit-min));
-  padding: 0;
-  border: 0;
-  color: var(--accent);
-  background: none;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 .tt-board-note {
@@ -4784,21 +3943,6 @@ body[data-desktop-low-resource="true"] .tt-modal-cover-glow {
 
 :dir(rtl) .tt-list-group-head[aria-expanded="false"] .tt-list-group-chevron {
   rotate: 90deg;
-}
-
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .tt-list-group-head {
-    background: var(--material-glass-strong);
-    -webkit-backdrop-filter: blur(calc(var(--material-glass-blur) * .6)) saturate(var(--material-glass-saturation));
-    backdrop-filter: blur(calc(var(--material-glass-blur) * .6)) saturate(var(--material-glass-saturation));
-  }
-}
-
-body[data-glass="off"] .tt-list-group-head,
-body[data-desktop-low-resource="true"] .tt-list-group-head {
-  background: var(--panel);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 
 /* On the package page the window body scrolls the list, so the surface must
@@ -4882,8 +4026,6 @@ body[data-desktop-low-resource="true"] .tt-list-group-head {
 }
 
 .tt-pager-item .tt-column-dot { width: 7px; height: 7px; }
-.tt-pager-item.in_progress .tt-column-dot { background: var(--blue); }
-.tt-pager-item.done .tt-column-dot { background: var(--green); }
 
 .tt-pager-count {
   color: var(--faint);
@@ -4905,17 +4047,13 @@ body[data-desktop-low-resource="true"] .tt-list-group-head {
 @container task-tracker (max-width: 560px) {
   /* Only the open tracker keeps its name; the others are their marks, still
      named for assistive technology. */
-  .tt-provider-tabs button:not(.active) .tt-provider-name {
+  .tt-provider-tabs [aria-selected="false"] .tt-provider-name {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-
-  .tt-provider-tabs button:not(.active) {
-    padding-inline: var(--space-2);
   }
 
   .tt-filters .tt-search {
@@ -5040,10 +4178,3 @@ body[data-desktop-low-resource="true"] .tt-list-group-head {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .tt-people-chip,
-  .tt-pager-item,
-  .tt-list-group-chevron {
-    transition: none;
-  }
-}

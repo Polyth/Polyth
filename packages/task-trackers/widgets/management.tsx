@@ -1,13 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
 import type { TaskTrackerProvider, TaskTrackerProviderDto } from "@polyth/contracts";
-import {
-  Badge,
-  Button,
-  Notice,
-  Skeleton,
-  Switch,
-  TextInput,
-} from "../../../apps/web/src/components/ui/index.ts";
 import { api } from "./api.ts";
 import {
   AccountAvatar,
@@ -22,7 +14,7 @@ import {
 } from "./brand.tsx";
 import { tt } from "./i18n.ts";
 import { ConnectWizard } from "./connect.tsx";
-import { applyManagement, friendly, loadManagement, updatePreferences, useManagement } from "./store.ts";
+import { applyManagement, friendly, hostUi, loadManagement, updatePreferences, useManagement } from "./store.ts";
 import {
   TASK_TRACKER_AGENT_STOPS,
   TASK_TRACKER_PROVIDERS,
@@ -33,6 +25,18 @@ import {
   type TaskTrackerPreferencesPatch,
   type TaskTrackerWidgetId,
 } from "../src/types.ts";
+
+const {
+  Badge,
+  Button,
+  Checkbox,
+  Notice,
+  SettingsRow: Row,
+  SettingsSection: Section,
+  Skeleton,
+  Switch,
+  TextInput,
+} = hostUi.components;
 
 const WIDGET_KEYS = {
   "task-trackers.board": { title: "tasktrackers.widget.board.title", body: "tasktrackers.widget.board.body" },
@@ -80,16 +84,11 @@ export function SettingRow({
   onChange: (value: boolean) => void;
   children?: ReactNode;
 }) {
-  const id = useId();
   return (
-    <div className={`tt-setting-row${checked ? "" : " off"}`}>
+    <Row label={title} hint={body}>
       {children}
-      <span className="tt-setting-copy">
-        <strong id={id}>{title}</strong>
-        <small>{body}</small>
-      </span>
-      <Switch checked={checked} disabled={disabled} labelledBy={id} onChange={onChange} />
-    </div>
+      <Switch checked={checked} disabled={disabled} label={title} onChange={onChange} />
+    </Row>
   );
 }
 
@@ -132,9 +131,7 @@ function AutomationSettings({
       },
     });
   return (
-    <section className="tt-manage-section" aria-labelledby="tt-manage-automation">
-      <h3 id="tt-manage-automation">{tt("tasktrackers.automation.title")}</h3>
-      <div className="tt-setting-list">
+    <Section title={tt("tasktrackers.automation.title")}>
         <SettingRow
           title={tt("tasktrackers.automation.enabled")}
           body={tt("tasktrackers.automation.body")}
@@ -166,21 +163,18 @@ function AutomationSettings({
             <small className="tt-automation-hint">{tt("tasktrackers.automation.columnHint")}</small>
             <div className="tt-automation-kinds" role="group" aria-label={tt("tasktrackers.automation.title")}>
               {TASK_TRACKER_AGENT_STOPS.map((kind) => (
-                <label className="tt-automation-kind" key={kind}>
-                  <input
-                    type="checkbox"
-                    checked={automation.on.includes(kind)}
-                    disabled={disabled}
-                    onChange={() => toggle(kind)}
-                  />
-                  <span>{label(kind)}</span>
-                </label>
+                <Checkbox
+                  key={kind}
+                  label={label(kind)}
+                  checked={automation.on.includes(kind)}
+                  disabled={disabled}
+                  onChange={() => toggle(kind)}
+                />
               ))}
             </div>
           </div>
         )}
-      </div>
-    </section>
+    </Section>
   );
 }
 
@@ -494,8 +488,7 @@ export function TaskTrackerManagement({ intro = true }: { intro?: boolean }) {
       )}
       {error && <Notice tone="error">{error}</Notice>}
 
-      <section className="tt-manage-section" aria-labelledby="tt-manage-services">
-        <h3 id="tt-manage-services">{tt("tasktrackers.manage.services")}</h3>
+      <Section title={tt("tasktrackers.manage.services")}>
         <div className="tt-service-grid">
           {TASK_TRACKER_PROVIDERS.map((provider) => (
             <ServiceCard
@@ -513,11 +506,9 @@ export function TaskTrackerManagement({ intro = true }: { intro?: boolean }) {
             />
           ))}
         </div>
-      </section>
+      </Section>
 
-      <section className="tt-manage-section" aria-labelledby="tt-manage-features">
-        <h3 id="tt-manage-features">{tt("tasktrackers.manage.features")}</h3>
-        <div className="tt-setting-list">
+      <Section title={tt("tasktrackers.manage.features")}>
           {FEATURE_KEYS.map((feature) => (
             <SettingRow
               key={feature.key}
@@ -537,9 +528,8 @@ export function TaskTrackerManagement({ intro = true }: { intro?: boolean }) {
               onChange={(value) => { setPolicyError(""); void setAgentPolicy(value); }}
             />
           )}
-        </div>
         {policyError && <p className="tt-inline-message error" role="alert">{policyError}</p>}
-      </section>
+      </Section>
 
       <AutomationSettings
         preferences={preferences}
@@ -547,9 +537,7 @@ export function TaskTrackerManagement({ intro = true }: { intro?: boolean }) {
         onPatch={(patch) => void updatePreferences(patch)}
       />
 
-      <section className="tt-manage-section" aria-labelledby="tt-manage-widgets" data-settings-item="task-trackers-widgets">
-        <h3 id="tt-manage-widgets">{tt("tasktrackers.manage.widgets")}</h3>
-        <div className="tt-setting-list">
+      <Section title={tt("tasktrackers.manage.widgets")} itemId="task-trackers-widgets">
           {WIDGET_IDS.map((id) => (
             <SettingRow
               key={id}
@@ -560,8 +548,7 @@ export function TaskTrackerManagement({ intro = true }: { intro?: boolean }) {
               onChange={(value) => void updatePreferences({ widgets: { [id]: value } })}
             />
           ))}
-        </div>
-      </section>
+      </Section>
 
       {connecting && (
         <ConnectWizard

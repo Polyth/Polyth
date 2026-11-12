@@ -64,7 +64,7 @@
     inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
   }
 
-  .workspace-panel-sheet :is(.workspace-edit-add, .workspace-edit-done):active { scale: .92; }
+  .workspace-panel-sheet :is(.workspace-edit-add, .workspace-edit-done):active:where(:not(:disabled)) { scale: .92; }
 
   /* What a mode switch brings into the header settles in; Back included. */
   .workspace-panel-sheet .workspace-edit-bar > *,
@@ -293,7 +293,7 @@
   inset: calc((var(--icon-xl) - var(--tap)) / 2);
 }
 
-.workspace-panel-sheet .workspace-panel-remove:active { scale: .82; }
+.workspace-panel-sheet .workspace-panel-remove:active:where(:not(:disabled)) { scale: .82; }
 .workspace-panel-sheet .workspace-panel-remove .ui-icon { stroke-width: 3; }
 
 @keyframes workspace-badge-in {
@@ -328,7 +328,7 @@
   inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
 }
 
-.workspace-panel-sheet .workspace-panel-size:active { background: color-mix(in srgb, var(--text) 14%, transparent); }
+.workspace-panel-sheet .workspace-panel-size:active:where(:not(:disabled)) { background: color-mix(in srgb, var(--text) 14%, transparent); }
 
 .workspace-panel-size > span {
   display: inline-block;
@@ -462,7 +462,7 @@
   inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
 }
 
-.workspace-panel-sheet .workspace-panel-edit-entry:active {
+.workspace-panel-sheet .workspace-panel-edit-entry:active:where(:not(:disabled)) {
   scale: .95;
   background: color-mix(in srgb, var(--text) 13%, transparent);
 }
@@ -533,7 +533,7 @@
   inset: calc((var(--control-h) - var(--tap)) / 2) 0;
 }
 
-.workspace-panel-sheet .workspace-edit-undo:active { scale: .96; }
+.workspace-panel-sheet .workspace-edit-undo:active:where(:not(:disabled)) { scale: .96; }
 
 @keyframes workspace-dock-in {
   from { opacity: 0; transform: translateY(40%) scale(.96); }

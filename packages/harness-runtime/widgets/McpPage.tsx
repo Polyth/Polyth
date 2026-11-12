@@ -64,17 +64,20 @@ import {
 const api = createApiTransport();
 const SERVER_FILTER_THRESHOLD = 5;
 
-/** The catalog page's public id, owned by the `integration-catalog` package.
- *  A string on purpose: offering a way into a package must not import that
- *  package's code, and when it is disabled the way in simply disappears. */
-const CATALOG_PAGE_ID = "integration-catalog";
+/** The catalog window's public surface id, owned by the `integration-catalog`
+ *  package. A string on purpose: offering a way into a package must not import
+ *  that package's code, and when it is disabled the way in simply disappears. */
+const CATALOG_SURFACE_ID = "integration-catalog";
 
 /** Only the host seams this page needs, so the page (and its tests) never
  *  stand in a whole package host to offer one link. */
 export interface McpCatalogHost {
-  pages?: { has?(pageId: string): boolean };
+  /** `has` is optional: a host that cannot answer gets no catalog button.
+   *  `object &` keeps today's host (whose `surfaces` has no `has` yet)
+   *  assignable instead of tripping TypeScript's weak-type check. */
+  surfaces?: object & { has?(surfaceId: string): boolean };
   navigation?: {
-    openPage?(pageId: string, resource?: string | null, options?: { projectId?: string }): boolean;
+    openWorkspacePane?(surfaceId: string, resource?: string): boolean;
   };
 }
 
@@ -1057,9 +1060,10 @@ export default function McpPage({ host }: { host?: McpCatalogHost } = {}) {
   const showList = canManage && !loading && servers.length > 0;
   // Ask the host instead of guessing: a disabled or absent catalog means the
   // control is not there at all, rather than a button that does nothing.
-  const catalogAvailable = host?.pages?.has?.(CATALOG_PAGE_ID) === true;
+  // A host without `surfaces.has` cannot answer, so the control stays away.
+  const catalogAvailable = host?.surfaces?.has?.(CATALOG_SURFACE_ID) === true;
   const openCatalog = () => {
-    host?.navigation?.openPage?.(CATALOG_PAGE_ID);
+    host?.navigation?.openWorkspacePane?.(CATALOG_SURFACE_ID);
   };
 
   const openInstall = (mode: InstallMode) => {

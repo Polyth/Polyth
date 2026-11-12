@@ -613,6 +613,11 @@ export interface AppState {
   editorLocation: EditorLocation | null;
   /** File requested by a changed-file jump into the Changes rail. */
   gitDiffPath: string | null;
+  /** The last explicit `openWorkspacePane(id, resource)` request for a package
+   *  window without a dedicated channel (Files and Git have their own). `seq`
+   *  grows per request so the same resource asked again still lands.
+   *  Presentation only: never history, cleared on project switch. */
+  paneResource: { surfaceId: string; resource: string; seq: number } | null;
   /** Server-resolved runtime feature surface keyed by session id. */
   runtimeFeatures: Record<string, RuntimeFeaturesState | undefined>;
   /** Per-project git worktree topology revision. The server bumps one project
@@ -659,6 +664,7 @@ let state: AppState = {
   editorOpenRequest: null,
   editorLocation: null,
   gitDiffPath: null,
+  paneResource: null,
   runtimeFeatures: {},
   worktreeTopology: {},
 };
@@ -989,6 +995,7 @@ export function applyProjectAdded(project: Project): void {
     editorRepositoryId: null,
     editorLocation: null,
     gitDiffPath: null,
+    paneResource: null,
   });
   persistClientNavigation(project.id, null);
   setWorkspaceModeProject(project.id);
@@ -1018,6 +1025,7 @@ export function applyProjectRemoved(id: string): void {
     editorRepositoryId: null,
     editorLocation: null,
     gitDiffPath: null,
+    paneResource: null,
   });
   persistClientNavigation(activeProjectId, null);
   setWorkspaceModeProject(activeProjectId);
@@ -1356,6 +1364,14 @@ function applyPaneResource(surfaceId: string, resource: string): Partial<AppStat
   return {};
 }
 
+/** Any other package window receives an explicit request as its `resource`
+ *  prop. A remembered resource is not replayed: reopening a directory from
+ *  the rail starts at its home, not at the last thing it showed. */
+function packagePaneResource(surfaceId: string, resource: string | undefined): Partial<AppState> {
+  if (resource === undefined || surfaceId === "files" || surfaceId === "git") return {};
+  return { paneResource: { surfaceId, resource, seq: (state.paneResource?.seq ?? 0) + 1 } };
+}
+
 /** Open (or keep open) a workspace pane beside Chat. Returns false when the
  *  surface is not a registered, enabled workspace surface. Docked versus
  *  full-screen is decided by the pane host from measured geometry. */
@@ -1380,6 +1396,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
     // the session view. Reopening the active surface reuses the instance.
     activeView: "session",
     ...(selectedResource !== undefined ? applyPaneResource(surfaceId, selectedResource) : {}),
+    ...packagePaneResource(surfaceId, resource),
   });
   saveActiveView("session");
   workbenchOpenSurface(surfaceId);

@@ -122,7 +122,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-source:hover { background: var(--surface-overlay-hover); }
+  .skills-source:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 }
 .skills-source:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .skills-source.is-selected {
@@ -259,7 +259,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-card:hover {
+  .skills-card:hover:where(:not(:disabled)) {
     background: var(--surface-overlay-hover);
     box-shadow: var(--shadow-sm);
     transform: translateY(-1px);
@@ -369,7 +369,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-chip:hover { background: var(--surface-overlay); }
+  .skills-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay); }
 }
 .skills-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .skills-chip[aria-pressed="true"] {
@@ -408,7 +408,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-harness-chip:hover { background: var(--surface-overlay-hover); color: var(--text); }
+  .skills-harness-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
 }
 .skills-harness-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .skills-harness-chip[aria-pressed="true"] {
@@ -484,7 +484,7 @@
   cursor: pointer;
 }
 @media (hover: hover) {
-  .skills-back:hover { background: var(--surface-overlay); color: var(--text); }
+  .skills-back:hover:where(:not(:disabled)) { background: var(--surface-overlay); color: var(--text); }
 }
 .skills-back:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
@@ -708,7 +708,7 @@ html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
   transition: background-color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-file-head:hover { background: var(--raised); }
+  .skills-file-head:hover:where(:not(:disabled)) { background: var(--raised); }
 }
 .skills-file-head:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus-ring); }
 .skills-file-path {

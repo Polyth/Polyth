@@ -1,32 +1,47 @@
 import "./styles.css";
 import { createElement } from "react";
-import { defineWebPackage } from "@polyth/web-sdk";
+import { defineWebPackage, type SurfaceComponentProps } from "@polyth/web-sdk";
+import { withSurfaceContent } from "@polyth/web-sdk/surface-content";
 import { catalogStrings } from "../src/strings.ts";
-import IntegrationsPage from "./IntegrationsPage.tsx";
+import IntegrationsView from "./IntegrationsView.tsx";
 
-/** The page that shows the catalog in place of Chat. */
-export const CATALOG_PAGE_ID = "integration-catalog";
+/** The catalog's workspace surface. Other packages name it by this string only
+ *  (`openWorkspacePane("integration-catalog", "<entry id>")`). */
+export const CATALOG_SURFACE_ID = "integration-catalog";
 
 export default defineWebPackage((host) => () => {
   const strings = () => catalogStrings(host.ui.locale.get());
+  const open = () => { host.navigation.openWorkspacePane(CATALOG_SURFACE_ID); };
   const disposers = [
-    // Feature-detected: an older host has no package pages, and the page then
-    // simply does not exist instead of breaking the package.
-    ...(host.pages
-      ? [host.pages.register({
-        id: CATALOG_PAGE_ID,
-        title: strings().title,
-        component: ({ projectId, resource }) => createElement(IntegrationsPage, {
-          projectId,
-          // `openPage("integration-catalog", "<entry id>")` opens one service.
-          resource,
-          locale: host.ui.locale.get(),
-          // The page itself must not import the host: it is handed the one
-          // route it needs to send a person to where a manual server lives.
-          onOpenMcpSettings: () => host.navigation.openSettingsPage("mcp"),
-        }),
-      })]
-      : []),
+    // A tool, so a package window: the host ModuleView owns the title, Back and
+    // Close, safe areas, the phone layer, resize and fullscreen. The content
+    // owns its own split, so it runs edge to edge.
+    host.surfaces.register({
+      id: CATALOG_SURFACE_ID,
+      title: strings().title,
+      description: strings().subtitle,
+      capabilityId: "integrations",
+      order: 43,
+      // `resource` is an entry id: `openWorkspacePane(id, entryId)` opens one service.
+      component: (props: SurfaceComponentProps) => createElement(IntegrationsView, {
+        ui: host.ui,
+        projectId: props.projectId ?? null,
+        resource: props.resource ?? null,
+        resourceSeq: props.resourceSeq ?? 0,
+        locale: host.ui.locale.get(),
+        // The content must not import the host: it is handed the one route it
+        // needs, to where a manually added server lives.
+        onOpenMcpSettings: () => host.navigation.openSettingsPage("mcp"),
+      }),
+      presentation: withSurfaceContent({
+        kind: "workspace",
+        defaultRatio: 0.5,
+        minWidth: 340,
+        preferredMaxWidth: 1100,
+        keepAlive: true,
+        escape: "close",
+      }, "workspace"),
+    }),
     host.capabilities.register({
       id: "integrations",
       label: strings().title,
@@ -42,16 +57,11 @@ export default defineWebPackage((host) => () => {
       // A home on the rail, not only the command palette: a directory you have
       // to remember a shortcut for is a directory nobody opens.
       defaultRails: { general: "right", engineering: "right" },
-      open: () => {
-        host.navigation.openPage?.(CATALOG_PAGE_ID);
-      },
-      // Honest answer, not a guess: a host that can say whether the page is
-      // registered does; an older host only tells us it has pages at all.
-      available: () => typeof host.navigation.openPage === "function"
-        && (host.pages?.has?.(CATALOG_PAGE_ID) ?? host.pages !== undefined),
+      open,
+      available: () => true,
     }),
-    // The palette entry says what the person wants to do, not what the page is
-    // called: a directory is found by the verb, not the noun.
+    // The palette entry says what the person wants to do, not what the window
+    // is called: a directory is found by the verb, not the noun.
     host.slots.register({
       slot: "commandPalette.commands",
       id: "integrations.palette-commands",
@@ -68,9 +78,7 @@ export default defineWebPackage((host) => () => {
             "jira", "datadog", "vercel", "cloudflare", "zapier",
             "підключити", "інтеграції", "конектор",
           ],
-          run: () => {
-            host.navigation.openPage?.(CATALOG_PAGE_ID);
-          },
+          run: open,
         }],
       },
     }),

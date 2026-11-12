@@ -1,16 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { TaskTrackerProvider } from "@polyth/contracts";
 import type { TaskTrackersMessageKey } from "../src/i18n/en.ts";
-import {
-  Button,
-  Dialog,
-  Notice,
-  TextInput,
-} from "../../../apps/web/src/components/ui/index.ts";
 import { api } from "./api.ts";
 import { AccountAvatar, PROVIDER_LABELS, ProviderMark, SuccessCheck } from "./brand.tsx";
 import { tt } from "./i18n.ts";
-import { applyManagement, friendly } from "./store.ts";
+import { applyManagement, friendly, hostUi } from "./store.ts";
 import {
   JIRA_TOKEN_PAGE,
   LINEAR_KEY_PAGE,
@@ -21,6 +15,8 @@ import {
   type TaskTrackerConnectionDto,
   type TaskTrackerConnectionScope,
 } from "../src/types.ts";
+
+const { Button, Dialog, Notice, TextInput } = hostUi.components;
 
 type Step = 0 | 1 | 2;
 
@@ -344,9 +340,9 @@ export function ConnectWizard({ provider, scope = "space", existing, onClose, on
             {waiting ? tt("tasktrackers.connect.authorizing") : tt("tasktrackers.connect.authorizeTrello")}
           </Button>
         </div>
-        <button type="button" className="tt-disclosure" aria-expanded={manual} onClick={() => setManual((value) => !value)}>
+        <Button type="button" variant="quiet" size="sm" className="tt-disclosure" aria-expanded={manual} onClick={() => setManual((value) => !value)}>
           {tt("tasktrackers.connect.pasteInstead")}
-        </button>
+        </Button>
         {manual && (
           <label className="tt-field tt-reveal">
             <span>{tt("tasktrackers.connect.trelloToken")}</span>

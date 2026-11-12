@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type ComponentType } from "react";
 import type { JsonObject, ModelDescriptor, RuntimeFeaturesDto } from "@polyth/contracts";
 import { effectiveAttachmentSupport, harnessModels } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
@@ -8,7 +8,6 @@ import {
   GALLERY_DEFAULT_INSTRUCTION,
   GALLERY_MAX_ATTACHMENTS,
   buildGalleryMessage,
-  galleryPathCrumbs,
   normalizeGalleryPath,
   type GalleryAnnotation,
   type GalleryImage,
@@ -51,7 +50,6 @@ export function GalleryWidget({ host, projectId, sessionId, editing, config, upd
   const [activePath, setActivePath] = useState<string | null>(null);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [tool, setTool] = useState<AnnotationTool>("off");
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
@@ -272,7 +270,6 @@ export function GalleryWidget({ host, projectId, sessionId, editing, config, upd
   }, [projectId, sessionId, attached, byImage, folder, instruction, effectiveModel, harnessId, host, session?.status, t]);
 
   const changeFolder = useCallback((next: string) => {
-    setPickerOpen(false);
     setActivePath(null);
     setSelectedPaths(new Set());
     updateConfig({ ...config, folder: next });
@@ -283,80 +280,67 @@ export function GalleryWidget({ host, projectId, sessionId, editing, config, upd
   }, [images]);
   const clearSelection = useCallback(() => setSelectedPaths(new Set()), []);
 
+  const { Button, Checkbox, EmptyState, IconButton, Menu, Textarea } = host.ui.components;
+  const icons = host.ui.icons;
+
   if (!projectId) {
     return (
       <div className="gallery-widget" data-editing={editing || undefined}>
-        <p className="gallery-empty">{t("gallery.chooseProject")}</p>
+        <div className="gallery-center"><EmptyState title={t("gallery.title")} description={t("gallery.chooseProject")} /></div>
       </div>
     );
   }
 
   const folderOptions = listing?.folders ?? [];
+  const parent = folder !== "" ? listing?.parent ?? null : null;
+  const folderEntries = [
+    ...(folder !== "" ? [{ id: "root", label: t("gallery.projectRoot"), icon: icons.home, onSelect: () => changeFolder("") }] : []),
+    ...(parent !== null && parent !== "" ? [{ id: "up", label: t("gallery.back"), icon: icons.back, onSelect: () => changeFolder(parent) }] : []),
+    ...(folder !== "" && folderOptions.length > 0 ? ["separator" as const] : []),
+    ...folderOptions.map((entry) => ({ id: `folder:${entry.path}`, label: entry.name, icon: icons.files, onSelect: () => changeFolder(entry.path) })),
+  ];
+  const TriggerButton = Button as unknown as ComponentType<Record<string, unknown>>;
 
   return (
     <div className={`gallery-widget${editing ? " is-editing" : ""}`} data-editing={editing || undefined}>
       <div className="gallery-toolbar">
-        <div className="gallery-folder-control">
-          <button
-            type="button"
-            className="gallery-folder-trigger"
-            onClick={() => setPickerOpen((open) => !open)}
-            aria-haspopup="menu"
-            aria-expanded={pickerOpen}
-            disabled={editing}
-          >
-            <span className="gallery-folder-label">{folder || t("gallery.projectRoot")}</span>
-            <span aria-hidden="true">▾</span>
-          </button>
-          {pickerOpen && (
-            <>
-              <button type="button" className="gallery-picker-backdrop" aria-label={t("gallery.close")} onClick={() => setPickerOpen(false)} />
-              <div className="gallery-folder-menu" role="menu">
-                {folder !== "" && listing?.parent !== null && listing?.parent !== undefined && (
-                  <button type="button" role="menuitem" onClick={() => changeFolder(listing.parent ?? "")}>
-                    ↩ {t("gallery.back")}
-                  </button>
-                )}
-                <div className="gallery-crumbs">
-                  <button type="button" onClick={() => changeFolder("")}>{t("gallery.projectRoot")}</button>
-                  {galleryPathCrumbs(folder).map((crumb) => (
-                    <button key={crumb.path} type="button" onClick={() => changeFolder(crumb.path)}>
-                      / {crumb.label}
-                    </button>
-                  ))}
-                </div>
-                {folderOptions.map((entry) => (
-                  <button key={entry.path} type="button" role="menuitem" onClick={() => changeFolder(entry.path)}>
-                    {entry.name}
-                  </button>
-                ))}
-                {folderOptions.length === 0 && <span className="gallery-folder-menu-empty">{t("gallery.openFolder")}</span>}
-              </div>
-            </>
+        <Menu label={t("gallery.folderPicker")} entries={folderEntries}>
+          {(trigger) => (
+            <TriggerButton
+              {...trigger}
+              className="gallery-folder-trigger"
+              size="sm"
+              variant="ghost"
+              iconStart={icons.files}
+              iconEnd={icons.chevronDown}
+              title={folder || t("gallery.projectRoot")}
+              disabled={editing || folderEntries.length === 0}
+            >
+              <span className="gallery-folder-label">{folder || t("gallery.projectRoot")}</span>
+            </TriggerButton>
           )}
-        </div>
+        </Menu>
         <span className="gallery-count">{t("gallery.count", { count: images.length })}</span>
-        <button type="button" className="gallery-text-button" onClick={() => setReloadToken((value) => value + 1)} disabled={editing}>
-          {t("gallery.refresh")}
-        </button>
-        <label className="gallery-recursive">
-          <input
-            type="checkbox"
-            checked={recursive}
-            disabled={editing}
-            onChange={(event) => updateConfig({ ...config, recursive: event.target.checked })}
-          />
-          {t("gallery.recursive")}
-        </label>
+        <IconButton icon={icons.refresh} label={t("gallery.refresh")} size="sm" variant="quiet" disabled={editing} onClick={() => setReloadToken((value) => value + 1)} />
+        <Checkbox
+          className="gallery-recursive"
+          checked={recursive}
+          disabled={editing}
+          label={t("gallery.recursive")}
+          onChange={(checked: boolean) => updateConfig({ ...config, recursive: checked })}
+        />
       </div>
 
       <div className="gallery-scroll">
-        {loading && <p className="gallery-status">{t("gallery.loading")}</p>}
-        {!loading && error && <p className="gallery-status is-error">{t("gallery.error")}: {error}</p>}
+        {loading && <p className="gallery-status" role="status">{t("gallery.loading")}</p>}
+        {!loading && error && (
+          <div className="gallery-center">
+            <EmptyState title={t("gallery.error")} description={error} actionLabel={t("gallery.refresh")} onAction={() => setReloadToken((value) => value + 1)} />
+          </div>
+        )}
         {!loading && !error && images.length === 0 && (
-          <div className="gallery-empty">
-            <strong>{t("gallery.empty")}</strong>
-            <span>{t("gallery.emptyHint")}</span>
+          <div className="gallery-center">
+            <EmptyState title={t("gallery.empty")} description={t("gallery.emptyHint")} />
           </div>
         )}
         {!loading && !error && images.length > 0 && (
@@ -377,13 +361,15 @@ export function GalleryWidget({ host, projectId, sessionId, editing, config, upd
 
       <div className="gallery-send">
         <div className="gallery-send-row">
-          <textarea
+          <Textarea
             className="gallery-instruction"
             value={instruction}
             placeholder={t("gallery.instructionPlaceholder")}
             aria-label={t("gallery.instruction")}
-            rows={2}
-            onChange={(event) => setInstruction(event.target.value)}
+            autoGrow
+            minRows={2}
+            maxRows={6}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInstruction(event.target.value)}
           />
           <div className="gallery-model">
             <span>{t("gallery.model")}</span>
@@ -403,26 +389,28 @@ export function GalleryWidget({ host, projectId, sessionId, editing, config, upd
           </div>
         </div>
         <div className="gallery-send-actions">
-          <button type="button" className="gallery-text-button" onClick={selectAllVisible}>{t("gallery.select")}</button>
-          {selectedPaths.size > 0 && <button type="button" className="gallery-text-button" onClick={clearSelection}>✕</button>}
+          <Button size="sm" variant="quiet" iconStart={icons.select} disabled={images.length === 0} onClick={selectAllVisible}>{t("gallery.select")}</Button>
+          {selectedPaths.size > 0 && <IconButton icon={icons.close} label={t("gallery.clearSelection")} size="sm" variant="quiet" onClick={clearSelection} />}
           <span className="gallery-attach-count">
             {t("gallery.selected", { count: selectedPaths.size })} · {t("gallery.attachCount", { count: attached.length })}
           </span>
-          <button
-            type="button"
-            className="gallery-send-button"
+          <Button
+            size="sm"
+            variant="primary"
+            iconStart={icons.send}
+            busy={sending}
             onClick={() => void send()}
             disabled={sending || attached.length === 0 || imageModels.length === 0}
-            title={!sessionId ? t("gallery.noSession") : undefined}
+            {...(!sessionId ? { title: t("gallery.noSession") } : {})}
           >
             {sending ? t("gallery.sending") : t("gallery.send")}
-          </button>
+          </Button>
         </div>
         {overflow && <p className="gallery-status">{t("gallery.attachOverflow", { count: GALLERY_MAX_ATTACHMENTS })}</p>}
         {catalog.length > 0 && imageModels.length === 0 && <p className="gallery-status">{t("gallery.modelOtherHarness")}</p>}
         {!sessionId && <p className="gallery-status">{t("gallery.noSession")}</p>}
-        {notice && <p className="gallery-status is-ok">{notice}</p>}
-        {sendError && <p className="gallery-status is-error">{sendError}</p>}
+        {notice && <p className="gallery-status is-ok" role="status">{notice}</p>}
+        {sendError && <p className="gallery-status is-error" role="alert">{sendError}</p>}
       </div>
 
       {activeIndex >= 0 && activeImage && (
@@ -442,6 +430,7 @@ export function GalleryWidget({ host, projectId, sessionId, editing, config, upd
           onUpdateComment={updateComment}
           onDeleteAnnotation={deleteAnnotation}
           onClose={closeLightbox}
+          host={host}
           t={t}
         />
       )}

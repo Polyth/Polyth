@@ -1,14 +1,15 @@
 import { useState, useSyncExternalStore } from "react";
 import type { JsonObject, TaskTrackerProvider } from "@polyth/contracts";
 import type { WebPackageHost } from "@polyth/web-sdk";
-import { Button, TabPanel, Tabs } from "../../../apps/web/src/components/ui/index.ts";
+import { hostUi, updatePreferences, useManagement } from "./store.ts";
 import { connectCopy, PROVIDER_LABELS, ProviderMark, providerBlurb, providerState } from "./brand.tsx";
 import { tt } from "./i18n.ts";
 import { ConnectWizard } from "./connect.tsx";
 import { TaskTrackerManagement } from "./management.tsx";
 import { TaskTrackerBoard } from "./plugin.tsx";
-import { updatePreferences, useManagement } from "./store.ts";
 import { TASK_TRACKER_PROVIDERS } from "../src/types.ts";
+
+const { Button, TabPanel, Tabs } = hostUi.components;
 
 /** Device-local window state: view options and the tab last open. The board
  * selection is remembered under `MEMORY_KEY` by the board itself. */

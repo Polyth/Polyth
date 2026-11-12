@@ -82,7 +82,7 @@ border-color: color-mix(in srgb, var(--red) 40%, var(--border));
 }
 .workflow-run-stages { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
 .workflow-run-stage { min-width: 0; display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr); gap: var(--space-3); align-items: start; }
-.workflow-run-stage-label { padding-top: 10px; color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.workflow-run-stage-label { padding-top: 10px; color: var(--faint); font-size: var(--font-meta); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
 .workflow-run-units { margin: 0; padding: 0; list-style: none; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--surface-divider); }
 .workflow-run-unit { min-width: 0; display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--surface-divider); transition: background var(--motion-fast) var(--motion-ease); }
 .workflow-run-unit.status-running { background: linear-gradient(to right, var(--accent-wash), transparent 60%); }
@@ -196,7 +196,7 @@ width: 100%; max-height: 260px; margin: var(--space-1) 0 0; padding: 10px; overf
 .workflow-card-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .workflow-card-title { min-width: 0; display: flex; align-items: center; gap: 6px; }
 .workflow-card-title strong { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--font-label); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-card-badge { flex: none; padding: 1px 6px; border: 1px solid var(--hair-strong); border-radius: var(--radius-round); color: var(--muted); font-size: 11px; font-weight: 600; line-height: 16px; white-space: nowrap; }
+.workflow-card-badge { flex: none; padding: 1px 6px; border: 1px solid var(--hair-strong); border-radius: var(--radius-round); color: var(--muted); font-size: var(--font-meta); font-weight: 600; line-height: 16px; white-space: nowrap; }
 .workflow-card-description { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .workflow-card-meta { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 2px; color: var(--faint); font-size: var(--font-meta); line-height: var(--font-meta-lh); font-variant-numeric: tabular-nums; }
 .workflow-card-copy-action { position: absolute; inset-block-start: var(--space-2); inset-inline-end: var(--space-2); }
@@ -236,11 +236,11 @@ width: 100%; max-height: 260px; margin: var(--space-1) 0 0; padding: 10px; overf
 .workflow-canvas-stages { min-width: max-content; display: flex; align-items: stretch; gap: var(--space-2); }
 .workflow-canvas-stage-group { display: contents; }
 .workflow-canvas-stage { min-width: 168px; display: flex; flex-direction: column; gap: var(--space-2); }
-.workflow-canvas-stage-label { color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.workflow-canvas-stage-label { color: var(--faint); font-size: var(--font-meta); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .workflow-canvas-stage-nodes { min-width: 0; display: flex; flex: 1; flex-direction: column; justify-content: center; gap: var(--space-2); }
 .workflow-canvas-group { display: flex; flex-direction: column; gap: var(--space-2); }
 .workflow-canvas-group-controls { display: flex; align-items: center; justify-content: center; gap: var(--space-2); }
-.workflow-canvas-connector-list { min-width: 28px; display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); color: var(--accent); font-size: 18px; text-align: center; }
+.workflow-canvas-connector-list { min-width: 28px; display: flex; flex-direction: column; justify-content: center; gap: var(--space-2); color: var(--accent); font-size: var(--font-heading); text-align: center; }
 .workflow-canvas-connector { display: block; min-height: 24px; line-height: 24px; }
 .workflow-canvas:dir(rtl) .workflow-canvas-connector { transform: rotate(180deg); }
 .workflow-canvas[data-layout="phone"] { overflow-x: hidden; overflow-y: visible; }
@@ -258,7 +258,7 @@ width: 100%; max-height: 260px; margin: var(--space-1) 0 0; padding: 10px; overf
 .workflow-canvas-node strong, .workflow-canvas-node small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-canvas-node small { color: var(--muted); font-size: var(--font-meta); }
 .workflow-canvas-node em { color: var(--accent); font-size: var(--font-meta); font-style: normal; }
-.workflow-node-kind { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.workflow-node-kind { color: var(--accent); font-size: var(--font-meta); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .workflow-canvas-node .workflow-node-gate { display: inline-flex; align-items: center; gap: 4px; color: var(--amber-on-wash); }
 .workflow-node-gate svg { width: 12px; height: 12px; }
 .workflow-desktop-inspector { min-width: 0; margin-top: var(--space-3); padding: var(--space-3); border: 1px solid var(--hair); border-radius: var(--radius-card); background: var(--panel); }

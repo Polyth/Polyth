@@ -6870,6 +6870,59 @@ img.attachment-preview-media { cursor: zoom-in; user-select: none; -webkit-user-
 .attachment-preview-stage[data-zoomed] img.attachment-preview-media:active { cursor: grabbing; }
 img.attachment-preview-media[data-zoom-settling] { transition: transform var(--motion-surface) var(--motion-ease); }
 
+/* A package overlay (host.ui MediaViewer renderOverlay) covers exactly the
+   rendered image: the frame takes the measured fitted size and is what zooms. */
+.attachment-preview-frame { position: relative; flex: none; overflow: hidden; cursor: zoom-in; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.attachment-preview-frame:not([data-measured]) { visibility: hidden; }
+.attachment-preview-frame-image { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+.attachment-preview-overlay { position: absolute; inset: 0; }
+.attachment-preview-stage[data-zoomed] .attachment-preview-frame { cursor: grab; }
+.attachment-preview-stage[data-zoomed] .attachment-preview-frame:active { cursor: grabbing; }
+.attachment-preview-frame[data-zoom-settling] { transition: transform var(--motion-surface) var(--motion-ease); }
+.attachment-preview-content[data-gestures-off] :is(.attachment-preview-frame, img.attachment-preview-media) { cursor: default; }
+
+/* Package controls: a centred row of glass islands under the stage. */
+.attachment-preview-actions {
+  flex: none; position: relative; z-index: 2;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-2);
+  padding: var(--space-2) calc(var(--space-4) + var(--safe-right)) 0 calc(var(--space-4) + var(--safe-left));
+}
+.attachment-preview-actions > * {
+  display: flex; align-items: center; gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-round);
+  background: var(--material-glass-strong);
+  color: var(--text);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+}
+.attachment-preview-actions .ui-btn { border-radius: var(--radius-round); }
+.attachment-preview-dialog:not(:has(.attachment-preview-strip)) .attachment-preview-actions { padding-bottom: calc(var(--space-4) + var(--safe-bottom)); }
+
+/* A package panel beside the stage; it starts under the floating bar. */
+.attachment-preview-content[data-aside] {
+  --preview-aside: clamp(260px, 30vw, 360px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--preview-aside);
+  grid-template-rows: minmax(0, 1fr) auto auto;
+}
+.attachment-preview-content[data-aside] > .attachment-preview-stage { grid-column: 1; grid-row: 1; }
+.attachment-preview-content[data-aside] > .attachment-preview-actions { grid-column: 1; grid-row: 2; }
+.attachment-preview-content[data-aside] > .attachment-preview-strip { grid-column: 1; grid-row: 3; justify-self: center; }
+.attachment-preview-aside {
+  position: relative; z-index: 2;
+  grid-column: 2; grid-row: 1 / span 3;
+  min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-y;
+  margin: calc(var(--control-h-lg) + var(--space-5) + var(--safe-top)) calc(var(--space-4) + var(--safe-right)) calc(var(--space-4) + var(--safe-bottom)) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-island);
+  background: var(--material-glass-strong);
+  color: var(--text);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+}
+.attachment-preview-content[data-aside] .attachment-preview-nav--next { inset-inline-end: calc(var(--preview-aside) + var(--space-4) + var(--safe-right)); }
+
 /* text / pdf: a document sheet centred on the scrim. */
 .attachment-preview-doc {
   display: flex; flex-direction: column;
@@ -7014,6 +7067,15 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
 @media (max-width: 700px) {
   .attachment-preview-media { border-radius: var(--radius-control); }
   .attachment-preview-doc { width: 100%; }
+  /* The aside stacks under the controls and scrolls inside a bounded band. */
+  .attachment-preview-content[data-aside] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto auto; }
+  .attachment-preview-content[data-aside] > .attachment-preview-aside {
+    grid-column: 1; grid-row: 3;
+    max-height: 38dvh;
+    margin: var(--space-2) calc(var(--space-3) + var(--safe-right)) 0 calc(var(--space-3) + var(--safe-left));
+  }
+  .attachment-preview-content[data-aside] > .attachment-preview-strip { grid-row: 4; }
+  .attachment-preview-dialog:not(:has(.attachment-preview-strip)) .attachment-preview-aside { margin-bottom: calc(var(--space-3) + var(--safe-bottom)); }
 }
 
 .editor-file-download { margin-top: var(--space-3); color: var(--accent); }
@@ -15189,7 +15251,10 @@ width: 100%;
 .module-view-desc {
   display: none;
 }
-.module-view-title:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+/* The title takes focus only so a newly pushed window owns it (ModuleView).
+   It is not a control, so it never draws a ring, even when the browser
+   counts that programmatic focus as visible. */
+.module-view-title:focus { outline: none; }
 .module-view-actions { flex: none; min-width: 0; display: flex; align-items: center; gap: var(--space-1); overflow: hidden; }
 .module-view-close {
   flex: none;

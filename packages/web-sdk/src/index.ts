@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ChangeEvent, ComponentType, FocusEvent, InputHTMLAttributes, KeyboardEvent, ReactNode } from "react";
+import type { ComponentPropsWithRef, ComponentType, ReactNode, Ref, RefObject } from "react";
 import type {
   DraftExecutionConfig,
   JsonObject,
@@ -312,6 +312,14 @@ export interface SurfaceComponentProps {
    * ids over importing or reconstructing navigation state themselves. */
   projectId?: string | null;
   sessionId?: string | null;
+  /** What the window was last asked to show, as passed to
+   *  `openWorkspacePane(id, resource)` (for example a catalog entry id); null
+   *  when it was opened without one. Presentation only, never persisted. */
+  resource?: string | null;
+  /** Grows on every `openWorkspacePane(id, resource)` request, so asking for
+   *  the same resource again (after the person navigated away inside the
+   *  window) still reaches the content. */
+  resourceSeq?: number;
 }
 
 /** Props of a package page shown in place of Chat. */
@@ -957,9 +965,328 @@ export interface HandoffTargetRegistration {
  * through this bounded component handle.
  */
 export type WebUiComponent<Props extends object = Record<string, unknown>> = ComponentType<Props>;
-export interface WebButtonProps extends Pick<ButtonHTMLAttributes<HTMLButtonElement>, "type"> { children?: ReactNode; className?: string; size?: "sm" | "md" | "lg"; variant?: "primary" | "ghost" | "quiet" | "danger"; busy?: boolean; disabled?: boolean; title?: string; "aria-label"?: string; iconStart?: () => ReactNode; onClick?: () => void; "aria-pressed"?: boolean; }
-export interface WebInputProps extends Pick<InputHTMLAttributes<HTMLInputElement>, "autoComplete" | "required" | "type"> { value?: string; placeholder?: string; className?: string; disabled?: boolean; "aria-label"?: string; onChange?: (event: ChangeEvent<HTMLInputElement>) => void; onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; onBlur?: (event: FocusEvent<HTMLInputElement>) => void; }
-export interface WebEmptyStateProps { title: string; description?: string; actionLabel?: string; onAction?: () => void; }
+/** A glyph a control draws: an `iconSet` component or a legacy `icons` mark. */
+export type WebGlyph = WebIconComponent | (() => ReactNode);
+/** The host `Button`: every native button attribute plus the shared look. */
+export interface WebButtonProps extends Omit<ComponentPropsWithRef<"button">, "children"> {
+  children?: ReactNode;
+  size?: "sm" | "md" | "lg";
+  variant?: "primary" | "ghost" | "quiet" | "danger";
+  busy?: boolean;
+  /** Full-width in its container. */
+  block?: boolean;
+  iconStart?: WebGlyph;
+  iconEnd?: WebGlyph;
+}
+/** The host `IconButton`: a glyph-only button whose `label` is its name. */
+export interface WebIconButtonProps extends Omit<ComponentPropsWithRef<"button">, "children" | "aria-label"> {
+  icon: WebGlyph;
+  label: string;
+  variant?: "quiet" | "ghost" | "danger";
+  size?: "sm" | "md" | "lg";
+  busy?: boolean;
+  /** Toggle state (sets aria-pressed). */
+  pressed?: boolean;
+}
+export interface WebTextareaProps extends ComponentPropsWithRef<"textarea"> {
+  invalid?: boolean;
+  autoGrow?: boolean;
+  minRows?: number;
+  maxRows?: number;
+}
+export interface WebCheckboxProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: ReactNode;
+  description?: ReactNode;
+  disabled?: boolean;
+  className?: string;
+}
+export interface WebTabItem { id: string; label: ReactNode; disabled?: boolean }
+export interface WebTabsProps {
+  tabs: readonly WebTabItem[];
+  value: string;
+  onChange: (id: string) => void;
+  /** Accessible name of the tab list. */
+  label: string;
+  /** Ids for `TabPanel` (see `host.ui.tabIds`). */
+  idBase?: string;
+  size?: "sm" | "md";
+  className?: string;
+}
+export interface WebSelectProps {
+  label: string;
+  value?: string;
+  options: readonly WebSelectOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  ariaLabel?: string;
+  mobileSheet?: boolean;
+  searchable?: boolean;
+  align?: "start" | "center" | "end";
+}
+/** What a `Menu` hands its trigger: spread it on the opening button. */
+export interface WebMenuTriggerProps {
+  ref: Ref<HTMLButtonElement>;
+  onClick: () => void;
+  "aria-haspopup": "menu" | "dialog";
+  "aria-expanded": boolean;
+}
+export interface WebMenuProps {
+  /** Accessible name; also the phone-sheet title unless `title` is set. */
+  label: string;
+  title?: string;
+  entries: readonly WebMenuEntry[];
+  children: (trigger: WebMenuTriggerProps) => ReactNode;
+  align?: "start" | "center" | "end";
+  className?: string;
+  phonePresentation?: "sheet" | "popover";
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  anchorRef?: RefObject<HTMLElement | null>;
+  header?: ReactNode;
+  footer?: ReactNode;
+  renderContent?: (context: { close: () => void; sheet: boolean }) => ReactNode;
+}
+/** The host `TextInput`: every native input attribute (id, ref, aria-*,
+ *  enterKeyHint, autoCapitalize…) plus the shared invalid state and size. */
+export interface WebInputProps extends Omit<ComponentPropsWithRef<"input">, "size"> {
+  /** Visual + accessible invalid state (sets aria-invalid). */
+  invalid?: boolean;
+  uiSize?: "sm" | "md";
+}
+export interface WebEmptyStateProps { title: string; description?: string; actionLabel?: string; onAction?: () => void; variant?: "page" | "panel" | "compact"; }
+
+/** A host action glyph (the curated Lucide set): sized by `size` in px or the
+ *  surrounding control, coloured by `currentColor`. */
+export interface WebIconGlyphProps {
+  size?: number | string;
+  strokeWidth?: number | string;
+  className?: string;
+  "aria-hidden"?: boolean | "true" | "false";
+  "aria-label"?: string;
+}
+export type WebIconComponent = (props: WebIconGlyphProps) => ReactNode;
+
+/** The legacy domain marks every host carries in `host.ui.icons` (15px line
+ *  glyphs). Other keys may exist on newer hosts; read those as optional. */
+export const WEB_LEGACY_ICON_NAMES = [
+  "workflow", "gear", "palette", "chat", "coach", "bell", "keyboard", "widgets", "package", "plug", "link",
+  "home", "puzzle", "plus", "question", "search", "tree", "files", "globe", "context", "usage", "compare",
+  "fuse", "term", "events", "clock", "paperclip", "focus", "send", "stop", "github", "gitlab", "mic",
+  "speaker", "book", "pencil", "shield", "copy", "markdown", "json", "fork", "rewind", "check", "select",
+  "list", "hierarchy", "filter", "sort", "target", "sync", "fetch", "pull", "push", "shuffle", "branch",
+  "worktree", "pullRequest", "stage", "unstage", "trash", "discard", "close", "chevronDown", "chevronUp",
+  "chevronRight", "back", "commit", "session", "more", "external", "refresh", "sliders", "image", "bookmark",
+  "pin", "regenerate", "fileEdit", "text", "download", "brain", "plan", "newSession", "multirun", "video",
+  "file",
+] as const;
+export type WebLegacyIconName = (typeof WEB_LEGACY_ICON_NAMES)[number];
+export type WebLegacyIcons = Readonly<Record<WebLegacyIconName, () => ReactNode>> & Readonly<Record<string, (() => ReactNode) | undefined>>;
+
+/** Action glyphs the host promises to packages (`host.ui.iconSet`). One action
+ *  always uses one glyph, so packages pick from here instead of drawing their
+ *  own. `FitIcon` frames the whole image (a viewer's "fit to screen"). */
+export const WEB_ICON_NAMES = [
+  "AddIcon", "ArchiveIcon", "AttachmentIcon", "BackIcon", "BoardViewIcon", "ChatIcon",
+  "CheckIcon", "ChevronDownIcon", "ChevronLeftIcon", "ChevronRightIcon", "ChevronUpIcon", "CloseIcon",
+  "CopyIcon", "DeleteIcon", "DockSideIcon", "DownloadIcon", "EditIcon", "ExternalLinkIcon", "FileIcon",
+  "FilterIcon", "FitIcon", "ImageIcon", "LayersIcon", "LinkIcon", "ListViewIcon", "MinusIcon", "MoreIcon",
+  "NewChatIcon", "PlusIcon", "RefreshIcon", "SearchIcon", "SendIcon", "SettingsIcon", "SharedIcon",
+  "TasksIcon", "UploadIcon", "ViewOptionsIcon", "ZoomInIcon", "ZoomOutIcon",
+] as const;
+export type WebIconName = (typeof WEB_ICON_NAMES)[number];
+export type WebIconSet = Readonly<Record<WebIconName, WebIconComponent>>;
+
+/** The design-system dialog: header with title and close, a scrolling body
+ *  and an action row pinned under it (`footer`). `ui.Dialog` stays the bare
+ *  modal engine for surfaces that draw their own frame. */
+export interface WebFramedDialogProps {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  /** Action row pinned under the body (Buttons, usually end-aligned). */
+  footer?: ReactNode;
+  size?: "sm" | "md" | "lg" | "full";
+  className?: string;
+  initialFocus?: string;
+  /** Hide the visible header when the content owns its heading. */
+  hideHeader?: boolean;
+  resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+  ariaDescribedBy?: string;
+}
+
+export interface WebSwitchProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  /** Accessible name; required unless an external <label> is wired. */
+  label?: string;
+  labelledBy?: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+export interface WebSpinnerProps {
+  size?: "sm" | "md" | "lg";
+  /** Accessible status text (e.g. "Loading boards"). */
+  label?: string;
+  className?: string;
+}
+
+export interface WebBadgeProps {
+  tone?: "neutral" | "accent" | "success" | "warning" | "danger" | "info";
+  children: ReactNode;
+  /** Leading status dot. */
+  dot?: boolean;
+  className?: string;
+}
+
+export interface WebNoticeProps extends Omit<ComponentPropsWithRef<"div">, "children"> {
+  tone?: "error" | "warning" | "success" | "info";
+  heading?: ReactNode;
+  children: ReactNode;
+  actions?: ReactNode;
+  leading?: ReactNode;
+  icon?: ReactNode;
+  iconPosition?: "leading" | "trailing";
+}
+
+export interface WebSkeletonProps {
+  shape?: "text" | "block" | "circle";
+  width?: string | number;
+  height?: string | number;
+  className?: string;
+}
+
+/** The panel a `Tabs` tab controls; ids come from `ui.tabIds`. */
+export interface WebTabPanelProps {
+  idBase: string;
+  tabId: string;
+  active: boolean;
+  children: ReactNode;
+  className?: string;
+}
+
+/** A glyph from `iconSet` at a token size step (18px control glyph default). */
+export interface WebIconProps {
+  icon: WebIconComponent;
+  size?: "sm" | "md" | "lg" | "xl";
+  /** Accessible name. Omit for decorative icons (they become aria-hidden). */
+  label?: string;
+  className?: string;
+}
+
+export interface WebMenuAction {
+  id: string;
+  label: string;
+  icon?: WebIconComponent | (() => ReactNode);
+  detail?: string;
+  danger?: boolean;
+  disabled?: boolean;
+  kind?: "action" | "radio" | "checkbox" | "switch";
+  checked?: boolean;
+  /** Small color dot for label-style entries (a literal color is data). */
+  swatch?: string;
+  keywords?: readonly string[];
+  /** Drill-in list opened in place of the menu; `onSelect` is not called. */
+  entries?: readonly WebMenuEntry[];
+  value?: string;
+  onSelect: () => void;
+}
+export type WebMenuEntry = WebMenuAction | { heading: string } | "separator";
+
+export interface WebSelectOption { value: string; label: string; group?: string; detail?: string }
+
+export interface WebPickerItem { id: string; label: string; group: string; detail?: string; keywords?: readonly string[] }
+
+/** The host's searchable chip picker (single or multi-select). */
+export interface WebPickerProps {
+  label: string;
+  items: WebPickerItem[];
+  value?: string;
+  /** Multi-select mode: toggles stay open, the chip shows a count. */
+  values?: readonly string[];
+  onPick: (id: string) => void;
+  onOpen?: () => void;
+  placeholder?: string;
+  searchPlaceholder?: string;
+  direction?: "up" | "down";
+  disabled?: boolean;
+  searchable?: boolean;
+  align?: "start" | "center" | "end";
+  className?: string;
+  popoverClassName?: string;
+  ariaLabel?: string;
+  triggerIcon?: ReactNode;
+  displayValue?: ReactNode;
+  itemIcon?: (item: WebPickerItem) => ReactNode;
+  emptyMessage?: string;
+  emptyAction?: { label: string; run: () => void };
+  footerAction?: { label: string; run: () => void; stayOpen?: boolean; disabledReason?: string };
+  mobileSheet?: boolean;
+}
+
+/** One labelled setting row of a settings page (`SettingsSection` child). */
+export interface WebSettingsRowProps {
+  label?: ReactNode;
+  hint?: ReactNode;
+  /** Stable id for settings search / reveal. */
+  itemId?: string;
+  children: ReactNode;
+  layout?: "inline" | "stacked";
+  top?: boolean;
+  /** Dims the copy; the control itself must still be disabled by the page. */
+  disabled?: boolean;
+}
+
+/** A titled group of settings rows, laid out like the host Settings window. */
+export interface WebSettingsSectionProps {
+  title: ReactNode;
+  hint?: ReactNode;
+  action?: ReactNode;
+  itemId?: string;
+  tone?: "danger";
+  children: ReactNode;
+}
+
+/** One item of the host media viewer. A missing or `image/*` mime shows an
+ *  image; video, audio, PDF and text render inline; anything else is a card
+ *  with a download action. */
+export interface WebMediaItem {
+  id: string;
+  name: string;
+  url: string;
+  mime?: string;
+}
+
+/** The host full-screen media viewer: swipe/arrow paging, pinch/wheel/double
+ *  tap zoom, pull to dismiss, the thumbnail strip and glass chrome. Packages
+ *  extend it instead of copying it. */
+export interface WebMediaViewerProps {
+  items: readonly WebMediaItem[];
+  /** First item shown when the viewer manages its own position. */
+  start?: number;
+  /** Controlled position; pair with `onIndexChange`. */
+  index?: number;
+  onIndexChange?: (index: number) => void;
+  onClose: () => void;
+  /** Drawn over the shown image, inside the zoomed frame and sized to the
+   *  rendered image box, so percentage coordinates land on image pixels. */
+  renderOverlay?: (item: WebMediaItem, index: number) => ReactNode;
+  /** A package panel beside the stage (below it on phones). */
+  aside?: ReactNode;
+  /** Accessible name of the aside region. */
+  asideLabel?: string;
+  /** Package controls in a row under the stage (tools, toggles). */
+  actions?: ReactNode;
+  /** Suspend zoom, paging and pull-to-dismiss gestures (e.g. while the
+   *  person draws on the overlay). Buttons, keys and the strip still work. */
+  gesturesDisabled?: boolean;
+  className?: string;
+}
 
 export interface ConversationSeed {
   title?: string;
@@ -1133,6 +1460,11 @@ export interface WebPackageHost {
   };
   surfaces: {
     register(definition: SurfaceDefinition): Unregister;
+    /** Whether a package window with this id is registered right now, so a
+     *  package that only offers a way into another package's window renders
+     *  no control while it is absent. Optional for older hosts; a missing
+     *  answer means unknown. */
+    has?(surfaceId: string): boolean;
   };
   /** Package pages shown in place of Chat. Optional for older hosts. */
   pages?: {
@@ -1297,18 +1629,18 @@ export interface WebPackageHost {
     };
   };
   ui: {
-    icons: Readonly<Record<string, () => ReactNode>>;
+    icons: WebLegacyIcons;
     Dialog: ComponentType<WebDialogProps>;
     Slot: ComponentType<{ slot: UiSlot; context?: Record<string, unknown>; customizable?: boolean }>;
     components: Readonly<{
       Button: WebUiComponent<WebButtonProps>;
-      IconButton: WebUiComponent<Record<string, unknown>>;
-      Menu: WebUiComponent<Record<string, unknown>>;
-      Tabs: WebUiComponent<Record<string, unknown>>;
+      IconButton: WebUiComponent<WebIconButtonProps>;
+      Menu: WebUiComponent<WebMenuProps>;
+      Tabs: WebUiComponent<WebTabsProps>;
       TextInput: WebUiComponent<WebInputProps>;
-      Textarea: WebUiComponent<Record<string, unknown>>;
-      Checkbox: WebUiComponent<Record<string, unknown>>;
-      Select: WebUiComponent<Record<string, unknown>>;
+      Textarea: WebUiComponent<WebTextareaProps>;
+      Checkbox: WebUiComponent<WebCheckboxProps>;
+      Select: WebUiComponent<WebSelectProps>;
       EmptyState: WebUiComponent<WebEmptyStateProps>;
       MarkdownDoc: WebUiComponent<Record<string, unknown>>;
       FolderPicker?: WebUiComponent<WebFolderPickerProps>;
@@ -1318,11 +1650,40 @@ export interface WebPackageHost {
        *  popping the composer; it keeps its last content while it closes.
        *  Optional for older hosts. */
       ComposerNoticeRow?: WebUiComponent<{ open: boolean; children?: ReactNode }>;
+      /** The framed dialog with a footer row. Optional for older hosts. */
+      Dialog?: WebUiComponent<WebFramedDialogProps>;
+      Switch?: WebUiComponent<WebSwitchProps>;
+      Spinner?: WebUiComponent<WebSpinnerProps>;
+      Badge?: WebUiComponent<WebBadgeProps>;
+      Notice?: WebUiComponent<WebNoticeProps>;
+      Skeleton?: WebUiComponent<WebSkeletonProps>;
+      TabPanel?: WebUiComponent<WebTabPanelProps>;
+      Icon?: WebUiComponent<WebIconProps>;
+      Picker?: WebUiComponent<WebPickerProps>;
+      SettingsRow?: WebUiComponent<WebSettingsRowProps>;
+      SettingsSection?: WebUiComponent<WebSettingsSectionProps>;
+      MediaViewer?: WebUiComponent<WebMediaViewerProps>;
     }>;
+    /** Action glyph components (see `WEB_ICON_NAMES`). Optional for older
+     *  hosts; `icons` keeps the legacy domain marks. */
+    iconSet?: WebIconSet;
+    /** The ids `Tabs` gives a tab and its panel for one `idBase`. */
+    tabIds?: {
+      tab(idBase: string, id: string): string;
+      panel(idBase: string, id: string): string;
+    };
+    /** The host confirmation alert; resolves true when the person confirms. */
+    confirm?(message: string, options?: { title?: string; confirmLabel?: string; destructive?: boolean }): Promise<boolean>;
     syntax: {
       highlight(code: string, language: string): string;
       languageForPath(path: string): string;
     };
+    /** React hook for a package window with an inner level (a list and one
+     *  item). Pass the step back to the list while the item is shown, else
+     *  null. Returns true when the window's own Back (the phone layer) now
+     *  performs that step: hide the content's back control then. Returns
+     *  false outside a window or on a wide layout. Optional for older hosts. */
+    useWindowBack?(handler: (() => void) | null): boolean;
     locale: {
       get(): string;
       translate(key: string, values?: Record<string, string | number>): string;

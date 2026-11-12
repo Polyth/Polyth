@@ -4,6 +4,8 @@ import { register } from "node:module";
 import type { WebPackageHost, WidgetPlugin } from "@polyth/web-sdk";
 
 register("./tsxHooks.mjs", import.meta.url);
+const { hostUi, installTestHost } = await import("./hostUi.ts");
+installTestHost();
 
 const {
   TASK_TRACKER_WIDGET_PLUGIN,
@@ -35,7 +37,7 @@ test("task tracker web entry installs and disposes through the bounded host", ()
         return () => { disposals++; };
       },
     },
-    ui: { icons: {} },
+    ui: hostUi,
     errors: { friendly: (action: string) => action },
   } as unknown as WebPackageHost;
 
@@ -122,7 +124,7 @@ test("task tracker web package registers Tasks workbench profile, surface and ca
         return true;
       },
     },
-    ui: { icons: {} },
+    ui: hostUi,
     errors: { friendly: (action: string) => action },
   } as unknown as WebPackageHost;
 

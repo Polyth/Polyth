@@ -713,16 +713,7 @@
 }
 .creative-studio .cs-dock-scope b { font-weight: 650; font-variant-numeric: tabular-nums; }
 .creative-studio .cs-dock-scope span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.creative-studio .cs-dock-scope button {
-  display: grid; place-items: center; flex-shrink: 0;
-  inline-size: 22px; block-size: 22px; padding: 0;
-  border: 0; border-radius: var(--radius-round);
-  background: none; color: var(--text-dim); cursor: pointer;
-}
-.creative-studio .cs-dock-scope button svg { inline-size: 14px; block-size: 14px; }
-@media (hover: hover) {
-  .creative-studio .cs-dock-scope button:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
-}
+.creative-studio .cs-dock-scope-clear.ui-icon-btn { flex-shrink: 0; border-radius: var(--radius-round); color: var(--text-dim); }
 .creative-studio .cs-dock-notice {
   position: absolute; inset-block-end: calc(100% - var(--space-1)); inset-inline: var(--cs-gutter);
   justify-self: center;

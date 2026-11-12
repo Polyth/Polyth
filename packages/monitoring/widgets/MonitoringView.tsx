@@ -275,7 +275,7 @@ export function MonitoringView({ host, active = true, projectId: scopeProjectId,
       {machines.length > 1
         ? <Menu label={t("Machine", "Комп’ютер")} entries={machines.map((item) => ({ id: item.id, kind: "radio", checked: item.projectId === machine?.projectId,
           label: item.kind === "ssh" ? item.name : t("This machine", "Цей комп’ютер"), ...(item.kind === "ssh" ? { detail: "SSH" } : {}), onSelect: () => switchMachine(item) }))}>
-          {(trigger: Record<string, unknown>) => <button type="button" className="pkg-monitoring-host" {...trigger}>{hostName}</button>}
+          {(trigger) => <button type="button" className="pkg-monitoring-host" {...trigger}>{hostName}</button>}
         </Menu>
         : <span className="pkg-monitoring-host">{hostName}</span>}
       <span className="pkg-monitoring-where">{!reading ? where : `${where} · ${snapshot.error

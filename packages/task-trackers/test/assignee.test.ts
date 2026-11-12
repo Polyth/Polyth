@@ -55,6 +55,8 @@ Object.defineProperty(globalThis, "getComputedStyle", {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
+const { hostUi, installTestHost } = await import("./hostUi.ts");
+installTestHost();
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -195,7 +197,7 @@ function harness(options: {
     };
   };
   configureTaskTrackerHost({
-    ui: { icons: {} },
+    ui: hostUi,
     errors: { friendly: (action: string, cause: unknown) => `${action}: ${(cause as Error)?.message ?? ""}` },
     store: {
       subscribe: () => () => {},
@@ -394,7 +396,7 @@ test("Linear connects with a personal API key and speaks in teams, projects and 
       root.render(createElement(TaskTrackerBoard, { sessionId: null, config: {}, updateConfig: () => {} }));
     });
     await settle(6);
-    const tab = container.querySelector<HTMLButtonElement>('[role="tab"][data-provider="linear"]');
+    const tab = container.querySelector('[data-provider="linear"]')?.closest<HTMLButtonElement>('[role="tab"]') ?? null;
     assert.ok(tab, "Linear has its own tab");
     assert.equal(tab.querySelector(".tt-provider-name")?.textContent, "Linear");
     await click(tab, "Linear tab");

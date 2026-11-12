@@ -490,7 +490,7 @@ function Studio({ host, t, client, scope, state, studio, session, agent, active,
               { id: "files", label: t.menuFiles, icon: ClapperGlyph, onSelect: () => host.navigation.revealResource({ scheme: "file", locator: studioPaths(state.id).state, projectId: scope.projectId, sessionId: scope.sessionId }) },
             ]}
           >
-            {(trigger: Record<string, unknown>) => <IconButton icon={MoreGlyph} label={t.menuLabel} variant="ghost" size="md" {...trigger} />}
+            {(trigger) => <IconButton icon={MoreGlyph} label={t.menuLabel} variant="ghost" size="md" {...trigger} />}
           </Menu>
         </header>
         <Pipeline t={t} state={state} agent={agent} onOpen={() => setView("progress")} />

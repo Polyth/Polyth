@@ -16,20 +16,20 @@ import type {
 } from "@polyth/contracts";
 import { PROVIDER_LABELS, providerNouns } from "./brand.tsx";
 import { tt } from "./i18n.ts";
-import {
+import { isImeComposing } from "@polyth/web-sdk";
+import { hostUi } from "./store.ts";
+
+const { Button, IconButton, Menu, TextInput } = hostUi.components;
+const {
   ArchiveIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   DeleteIcon,
   EditIcon,
   ExternalLinkIcon,
-  IconButton,
-  Menu,
   MoreIcon,
   PlusIcon,
-  TextInput,
-} from "../../../apps/web/src/components/ui/index.ts";
-import { isImeComposing } from "@polyth/web-sdk";
+} = hostUi.iconSet;
 
 /** One kanban column with the tasks shown in it. `column` is absent for a
  *  lane made only from task statuses: the board's columns are unknown, or a
@@ -290,7 +290,7 @@ function ColumnPager({ lanes, scroller }: { lanes: readonly KanbanLane[]; scroll
             if (target && scroller.current) scrollInlineTo(scroller.current, target, !reducedMotion());
           }}
         >
-          <span className="tt-column-dot" aria-hidden="true" />
+          <span className={`tt-column-dot ${lane.category}`} aria-hidden="true" />
           <span className="tt-pager-name">{lane.name}</span>
           <span className="tt-pager-count" aria-hidden="true">{lane.tasks.length}</span>
         </button>
@@ -379,7 +379,7 @@ export function KanbanBoard({
                 setColumnMenu(column.id);
               } : undefined}
             >
-              <span className="tt-column-dot" />
+              <span className={`tt-column-dot ${lane.category}`} aria-hidden="true" />
               {column && renaming === column.id ? (
                 <ColumnNameField
                   initial={column.name}
@@ -477,10 +477,9 @@ export function KanbanBoard({
               onCancel={() => setAdding(false)}
             />
           ) : (
-            <button type="button" className="tt-column-add-button" onClick={() => setAdding(true)}>
-              <PlusIcon aria-hidden="true" size={16} />
-              <span>{tt("tasktrackers.kanban.addColumn")}</span>
-            </button>
+            <Button type="button" variant="ghost" size="sm" iconStart={PlusIcon} className="tt-column-add-button" onClick={() => setAdding(true)}>
+              {tt("tasktrackers.kanban.addColumn")}
+            </Button>
           )}
         </div>
       )}

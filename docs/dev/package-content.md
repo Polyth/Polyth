@@ -37,6 +37,16 @@ Legacy core surfaces that do not use the package adapter retain their host-provi
 
 Use the actual shared `host.ui.components.Button`, `Tabs`, inputs, selects, dialogs and other supported UI primitives for their semantics, geometry, focus, disabled and busy states. Do not recreate a Button by copying its CSS. Navigation between different surfaces keeps `nav` and `aria-current="page"`; it is not an ARIA tablist without corresponding tabpanels. Markets uses shared Buttons for all ten section destinations.
 
+The full package UI kit (`packages/web-sdk/src/index.ts`, wired in `apps/web/src/packages/hostUiParts.tsx`):
+
+- `host.ui.components`: `Button`, `IconButton`, `Menu`, `Tabs` + `TabPanel` (ids from `host.ui.tabIds`), `TextInput`, `Textarea`, `Checkbox`, `Switch`, `Select`, `Picker`, `Badge`, `Spinner`, `Skeleton`, `Notice`, `EmptyState`, `Icon`, `Dialog` (the framed dialog: header, scrolling body, `footer` action row; `host.ui.Dialog` stays the bare modal engine), `SettingsSection` / `SettingsRow` (the Settings window layout) and `MediaViewer`.
+- `host.ui.iconSet`: the action glyphs listed in `WEB_ICON_NAMES` (including `ZoomInIcon`, `ZoomOutIcon`, `FitIcon`, `BackIcon`). Add a name there and to the host map instead of drawing a package SVG. `host.ui.icons` keeps the legacy domain marks, typed by name (`WEB_LEGACY_ICON_NAMES`); other keys read as optional.
+- `host.ui.confirm(message, options)`: the host confirmation alert.
+- `MediaViewer` is the attachment viewer (paging, swipe, pinch/wheel zoom, pull to dismiss, strip). A package extends it rather than copying it: `index`/`onIndexChange` for a controlled position, `renderOverlay` for marks drawn over exactly the fitted image inside the zoomed frame (percentages map to image pixels), `aside` for a side panel (stacked under the stage on phones), `actions` for a row of package controls (each direct child becomes a glass island) and `gesturesDisabled` while the person draws on the overlay. Gallery's annotation viewer is the reference.
+- A package whose files import UI at module scope binds it once with `bindHostUi(getHost, owner)` from `@polyth/web-sdk` (Task trackers: `hostUi` in `widgets/store.ts`); parts resolve from the configured host at render time. Never re-export shell components from `apps/web`.
+
+Every control is typed with its real props (`WebButtonProps`, `WebIconButtonProps`, `WebMenuProps`, `WebTabsProps`, `WebSelectProps`, …); let a `Menu` trigger take its type from `children` instead of annotating it `Record<string, unknown>`. A contract change here is checked with each consuming package's own `tsconfig.json` (`apps/web` does not typecheck package widgets as strictly). Every member past the original controls is optional on `WebPackageHost` for older hosts; `apps/web/test/packageUiParts.test.ts` proves the current host supplies them.
+
 Keep scrolling on the stable `.rail-body` / `.wb-surface-mount`, not the frame shared by several tabs. Workbench state capture includes the mount node's own offsets in addition to descendant scrollers. Hidden/inert surfaces must stay hidden. Never key a component on layout mode, dimensions, saving status or placement.
 
 ## Regression checks

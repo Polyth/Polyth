@@ -27,7 +27,7 @@ display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 4px 12p
 .provider-expand {
 flex: 1 1 12rem; min-width: 0; display: flex; align-items: center; gap: 8px;
   border: none; background: transparent; padding: 8px; text-align: left;
-  font-size: 13px; color: var(--text); border-radius: var(--radius-control);
+  font-size: var(--font-label); color: var(--text); border-radius: var(--radius-control);
 }
 @media (hover: hover) {
   .provider-expand:hover:where(:not(:disabled)) {
@@ -35,7 +35,7 @@ flex: 1 1 12rem; min-width: 0; display: flex; align-items: center; gap: 8px;
   }
 }
 .provider-chevron {
-display: inline-block; color: var(--muted); font-size: 14px; transition: transform var(--motion-fast) var(--motion-ease);
+display: inline-block; color: var(--muted); font-size: var(--font-tool-label); transition: transform var(--motion-fast) var(--motion-ease);
 }
 .provider-chevron.open {
 transform: rotate(90deg);

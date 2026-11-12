@@ -66,13 +66,10 @@ const RULE_KEYS = Object.keys(defaultSpec().rules) as Array<keyof MediaRules>;
 const AUDIO_ACCEPT = "audio/*,.mp3,.wav,.m4a,.flac,.ogg,.opus";
 const clampLength = (seconds: number) => Math.max(5, Math.min(600, Math.round(seconds)));
 
-type FieldInput = WebUiComponent<WebInputProps & { id?: string; invalid?: boolean; spellCheck?: boolean }>;
-
 /** The new-video flow: one question per screen on a phone, a live poster
  * beside it on a wide window, one primary action at the bottom. */
 export default function Wizard({ host, sessionId, busy, error, onStart }: Props) {
-  const { Button, Checkbox, IconButton, Textarea } = host.ui.components;
-  const TextInput = host.ui.components.TextInput as FieldInput;
+  const { Button, Checkbox, IconButton, Textarea, TextInput } = host.ui.components;
   const t = wizardStrings(host.ui.locale.get());
   const id = useId();
   const [level, setLevelState] = useState<UserLevel>(() => readLevel());
@@ -625,7 +622,7 @@ function ChoiceCards<T extends string>({ label, name, value, options, onChange }
   );
 }
 
-function PathField({ TextInput, label, hint, value, placeholder, invalid, onChange }: { TextInput: FieldInput; label: string; hint?: string; value: string; placeholder?: string; invalid?: boolean; onChange(value: string): void }) {  const id = useId();
+function PathField({ TextInput, label, hint, value, placeholder, invalid, onChange }: { TextInput: WebUiComponent<WebInputProps>; label: string; hint?: string; value: string; placeholder?: string; invalid?: boolean; onChange(value: string): void }) {  const id = useId();
   return (
     <div className="cs-field">
       <label className="cs-field-label" htmlFor={id}>{label}</label>

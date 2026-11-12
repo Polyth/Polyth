@@ -209,3 +209,70 @@ test("a mouse click zooms into the point, a second click returns, and the wheel 
     await view.unmount();
   }
 });
+
+// The package seams (host.ui.components.MediaViewer): a controlled position,
+// a package overlay over exactly the image, an aside, a controls row, and
+// gestures a package can suspend while the person draws on its overlay.
+test("a package viewer keeps its own position, overlay, aside and controls", async () => {
+  const container = doc.createElement("div");
+  doc.body.appendChild(container);
+  const root = createRoot(container);
+  const picked: number[] = [];
+  const render = (props: Record<string, unknown>) => act(async () => {
+    root.render(createElement(AttachmentPreview, {
+      attachments,
+      start: 0,
+      onClose: () => {},
+      onIndexChange: (index: number) => { picked.push(index); },
+      renderOverlay: (attachment: { id: string }) => createElement("span", { className: "probe-overlay" }, attachment.id),
+      aside: createElement("textarea", { className: "probe-note" }),
+      asideLabel: "Notes",
+      actions: createElement("div", { className: "probe-tools" }, "tools"),
+      ...props,
+    }));
+  });
+  const box = Object.getOwnPropertyDescriptors(dom.HTMLElement.prototype);
+  Object.defineProperty(dom.HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1000 });
+  Object.defineProperty(dom.HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 500 });
+  const count = () => doc.querySelector(".attachment-preview-count")?.textContent;
+  try {
+    await render({ index: 1 });
+    assert.equal(count(), "2 / 3", "the controlled index picks the first item");
+    assert.equal(doc.querySelector(".attachment-preview-aside")?.getAttribute("aria-label"), "Notes");
+    assert.ok(doc.querySelector(".attachment-preview-actions .probe-tools"), "package controls sit in the controls row");
+
+    const image = doc.querySelector<HTMLImageElement>(".attachment-preview-frame .attachment-preview-frame-image")!;
+    assert.ok(image, "an overlay viewer draws the image inside a zoomable frame");
+    Object.defineProperty(image, "naturalWidth", { configurable: true, value: 2000 });
+    Object.defineProperty(image, "naturalHeight", { configurable: true, value: 500 });
+    await act(async () => { image.dispatchEvent(new dom.Event("load") as unknown as Event); });
+    const frame = doc.querySelector<HTMLElement>(".attachment-preview-frame")!;
+    assert.equal(frame.hasAttribute("data-measured"), true);
+    assert.equal(frame.style.width, "1000px", "the frame is the fitted image box");
+    assert.equal(frame.style.height, "250px");
+    assert.equal(doc.querySelector(".attachment-preview-overlay .probe-overlay")?.textContent, "b");
+
+    await act(async () => { doc.querySelector<HTMLButtonElement>(".attachment-preview-nav--next")!.click(); });
+    assert.deepEqual(picked, [2], "paging reports the new position");
+    await render({ index: 0 });
+    assert.equal(count(), "1 / 3", "a position moved from outside follows");
+
+    const note = doc.querySelector<HTMLTextAreaElement>(".probe-note")!;
+    await act(async () => {
+      note.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }) as unknown as Event);
+    });
+    assert.equal(count(), "1 / 3", "arrow keys typed in the aside stay in the field");
+
+    await render({ index: 0, gesturesDisabled: true });
+    await gesture({ x: 700, y: 400 }, { x: 300, y: 402 });
+    assert.equal(count(), "1 / 3", "suspended gestures do not page");
+    assert.deepEqual(picked, [2]);
+  } finally {
+    for (const key of ["clientWidth", "clientHeight"] as const) {
+      if (box[key]) Object.defineProperty(dom.HTMLElement.prototype, key, box[key]);
+      else delete (dom.HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+    }
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
