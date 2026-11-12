@@ -103,6 +103,13 @@ function workspaceSurfaceOfCapability(id: string) {
     ?? (getCapability(id)?.ownerPackageId === id ? surfaces.find((surface) => surface.id === id) : undefined);
 }
 
+/** Whether pressing this capability's launcher opens a workspace window. With
+ *  one already open, `toggleCapability` then swaps the window's content in one
+ *  step, so a floating window need not be dismissed first (ContextRail). */
+export function capabilityOpensWindow(id: string): boolean {
+  return workspaceSurfaceOfCapability(id) !== undefined;
+}
+
 function keepsPinnedFrame(id: string, current: AppState): boolean {
   const pinned = current.paneMode === "pinned"
     || (current.paneMode === "fullscreen" && current.panePreviousMode === "pinned");

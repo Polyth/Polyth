@@ -90,5 +90,5 @@ test("ContextRail morphs between presentations instead of replaying an entry", a
     "size is never a CSS transition: it would start from an unmeasured commit's width");
   // A leaving window is still on screen: it keeps rendering as the active one.
   assert.match(rail, /const shown = active \|\| leaving;/);
-  assert.match(rail, /<s\.component active=\{shown\}/);
+  assert.match(rail, /<s\.component\s+active=\{shown\}/);
 });

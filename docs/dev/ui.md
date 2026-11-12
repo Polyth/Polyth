@@ -3589,10 +3589,15 @@ host.surfaces.register({
 - **Launcher toggle:** every launcher — top rail, right rail strip and placed
   `capability:*` launcher widgets — routes through `toggleCapability()` and
   marks itself `data-pane-launcher=<capability id>`. Pressing a launcher whose
-  capability is active (`isCapabilityActive`, so a package home counts while
-  one of its pages is open) is not an outside click for a dynamic window;
-  otherwise pointerdown dismisses the window and the click reopens it. A new
-  launcher surface must carry the attribute.
+  own click decides what happens to the open window is not an outside click
+  for a dynamic window (`pathBelongsToPackageWindow`): the launcher of the
+  active capability (`isCapabilityActive`, so a package home counts while one
+  of its pages is open) toggles the window closed, and a launcher that opens
+  another window (`capabilityOpensWindow`) swaps the content in one step, so
+  the frame stays where it is and resizes to the next package (Window morph,
+  below). Dismissing on pointerdown made the window leave and the next one
+  arrive a moment later. A launcher that opens no window (a command) is still
+  an outside click. A new launcher surface must carry the attribute.
 - **A floating window resizes from one edge only:** its inline start (the
   side facing Chat), by pointer and keyboard (`ContextRail`,
   `.package-window-resize--w`). The inline-end edge carries the scrollbar: a
@@ -3668,15 +3673,34 @@ host.surfaces.register({
 - **Nothing steps at a seam.** The first frame of any window motion is the
   frame before the click, and its last frame is the settled layout. Three
   rules keep that true and new CSS must follow them:
-  - The launcher column never changes when a window opens, pins or leaves.
-    The rail host keeps its idle frame (box, border widths, far corners)
-    under a floating window; only its glass moves to the strip, because a
-    filtered host would bound the window's own backdrop. The strip then
-    paints the same launcher chrome the idle host paints
+  - The launcher column never changes when a window opens, pins, fills the
+    workspace or leaves: no launcher moves, in any interface style, window
+    layout or platform (`railLauncherStability.test.ts` measures them in
+    Chromium). The rail host keeps its idle frame (box, border widths, far
+    corners) under a floating window, and the window's top and bottom edges
+    are the host's own, so one line runs from the rail across the window.
+    The host must not filter while it holds a window (a filtered host would
+    bound the window's own backdrop). In the base shell its glass moves to
+    the strip, which paints the same launcher chrome the idle host paints
     (`--sidebar-glass-surface`, falling back to `--material-glass`) with the
-    host's inherited corners, while the window keeps `--material-glass`. The
-    seam beside a side window is a 1px line on the strip (`::before`), never
-    a border, which would narrow the strip and nudge every launcher.
+    host's inherited corners, while the window keeps `--material-glass`. An
+    interface style goes further and keeps fill, edge and shadow on the host
+    in every state, with only the blur on the strip (styles.md, "The
+    launcher column is the same thing"). The seam beside a side window is a
+    1px line on the strip (`::before`), never a border, which would narrow
+    the strip and nudge every launcher. Beside a full-window layer the strip
+    stays on the column's line even where the layer steps down for the bar
+    or the desktop caption band (`--rail-column-top`, `--rail-layer-top`).
+    A rule that rounds the whole column caps its radius at half the column's
+    width (`--rail-host-radius-cap`): past that the browser scales all four
+    radii down together, so squaring the two corners a window attaches to
+    let the far two spring out to twice their size.
+  - In the 961–1400px band the launchers do move, as the cluster grows into
+    the column, but never in a step: the first frame of the arrival and the
+    last of the departure are the idle cluster. The morph's keyframes state
+    the cluster's own strip width and gutters (`--rail-cluster-gutter`), and
+    the full-height layouts drop an island look's margins from the idle
+    cluster as they do from the full-height strip.
   - An idle rule on `.railbar` is written
     `:not(.railbar-open):not([data-rail-motion="exiting"])` and an open rule
     `:is(.railbar-open, [data-rail-motion="exiting"])`: a leaving window keeps
@@ -5364,7 +5388,13 @@ thumbnail strip.
   content's fixed width, one clock per window, RTL, a moved window, the
   focused split's rail side, reduced motion), `packageWindowExitMounted.test.ts`
   (kept-alive panes stay mounted through an exit), `packageWindow.test.ts`
-  (the CSS and `ContextRail` contract).
+  (the CSS and `ContextRail` contract), `railLauncherStability.test.ts`
+  (Chromium, every interface style × window layout × Floating columns, plus
+  borders, a mirrored shell and the desktop caption band: no launcher moves
+  when a window opens, pins, fills the workspace or leaves; a floating
+  window's top and bottom edges are the column's own; the host keeps its
+  frame; the tablet cluster's morph starts and ends on the idle cluster; the
+  column's corners survive the largest Corner rounding).
 - Surface motion: `surfaceMotion.test.ts` (Chromium: exit ghosts, phone
   Settings arrival edge, stages and dismissal, the covered Navigator, sheet and
   dialog edges, the toast, the RTL-mirrored tablet drawer; plus the exit

@@ -9,16 +9,21 @@ export function usePackageWindowOwner(): string | null {
 }
 
 /** Every launcher (top rail, right rail, placed launcher widgets) marks itself
- * with `data-pane-launcher=<capability id>`. Pressing the launcher of the open
- * window is not an outside click: its own click toggles the window closed. If
- * pointerdown dismissed it first, that click would see it inactive and reopen
- * it. Launcher ids are capability ids, which need not equal the surface id
- * (a package home stays active while one of its pages is open), so callers
- * pass the same active rule the launchers render with. */
+ * with `data-pane-launcher=<capability id>`. Pressing one whose own click
+ * decides what happens to the open window is not an outside click:
+ * - the open window's launcher toggles it closed (if pointerdown dismissed it
+ *   first, that click would see it inactive and reopen it). Launcher ids are
+ *   capability ids, which need not equal the surface id (a package home stays
+ *   active while one of its pages is open);
+ * - another window's launcher swaps the content in one step, so the frame
+ *   stays where it is and only resizes (railMorph.ts). Dismissing on
+ *   pointerdown made the window leave and the next one arrive a moment later.
+ * Callers pass that rule as `ownsWindow`; a launcher that opens no window (a
+ * command) stays an outside click. */
 export function pathBelongsToPackageWindow(
   path: readonly EventTarget[],
   id: string,
-  isActiveLauncher: (launcherId: string) => boolean = (launcherId) => launcherId === id,
+  ownsWindow: (launcherId: string) => boolean = (launcherId) => launcherId === id,
 ): boolean {
   if (isForeignOverlay(path)) return true;
   return path.some((node) => {
@@ -29,7 +34,7 @@ export function pathBelongsToPackageWindow(
     const role = element.getAttribute?.("role");
     const launcher = element.getAttribute?.("data-pane-launcher");
     return element.getAttribute?.("data-package-window-owner") === id
-      || (typeof launcher === "string" && (launcher === id || isActiveLauncher(launcher)))
+      || (typeof launcher === "string" && (launcher === id || ownsWindow(launcher)))
       || role === "dialog" || role === "menu" || role === "listbox"
       || element.classList?.contains("dialog-backdrop") === true
       || element.classList?.contains("ui-popover") === true

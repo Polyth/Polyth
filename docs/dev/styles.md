@@ -762,7 +762,10 @@ at ≥ 6.6:1.
   draws on purpose restate their colour.
 - The wallpaper glass keeps its blur on `.sidebar`/`.railbar` with a stronger
   selector, so the reset there uses double id strength. Looks that want those
-  panels frosted set `--look-shell-blur`.
+  panels frosted set `--look-shell-blur`. The navigator takes it itself; the
+  launcher host never filters (it holds package windows, and a filtered
+  element bounds the backdrop of the glass inside it), so its strip carries
+  the blur instead, in every state.
 - Quiet text uses the theme's contrast-checked inks: `--look-ink-dim`
   (`--text-dim`) for idle rows and `--look-ink-quiet` (`--muted`) for meta
   text. Never use an alpha of `--text` or `opacity` on text, because both fall
@@ -791,19 +794,39 @@ at ≥ 6.6:1.
   gutter wider (`--space-2` on both sides), mirroring the navigator's rail.
   With Floating columns the workspace ends at the columns' bottom
   (`--shell-edge`).
-- A floating package window extends the launcher rail (shellLooks.css §1d).
-  It spans the column's full height (`styles.css`, `.rail-dynamic`); a
-  look whose idle strip is a short island grows it into the column as the
-  window opens. Once the host holds a window it has no fill, edge, shadow or
-  filter of its own. The window and the strip share one material
-  (`--look-rail*`) and are parted by a seam. The foot squares where the column
-  runs into the window's edge and rounds on an island
-  (`--look-rail-island`, `--package-window-foot`). Only its width resizes,
-  from the inline-start edge (ui.md).
-- A pinned (docked) window is part of the rail column (shellLooks.css §1e). It
-  and the strip take the idle rail's material (`--look-dock*`: none by default,
-  so they sit on the canvas as the idle rail does; Line and Editorial keep the
-  rail's hairline down the window's start; Air and Obsidian keep their island).
+- **The launcher column is the same thing with a window as without one**
+  (shellLooks.css §1d). A look shapes the launcher host idle (an island, a
+  hairline column, a capsule) and the host keeps exactly that while a side
+  window is open, pinned or leaving: the same box, edge, fill, shadow and far
+  corners. No look rule may restyle the host or the strip for an open window;
+  a launcher that moves by a pixel or a column that repaints is a defect
+  (`railLauncherStability.test.ts` measures every look and layout in
+  Chromium). Three consequences shape how a look is written:
+  - The strip has no fill or edge of its own. It carries the shell blur and
+    the inset highlight that must stay above it (`--look-shell-highlight`,
+    which the look then leaves out of the host's own shadow).
+  - Padding at an island's ends is `--look-strip-pad`, applied to the strip,
+    never `padding` on the host: the strip fills the host's whole frame.
+  - The seam beside a window is the line `styles.css` draws on the strip
+    (`::before`, coloured by `--look-rail-seam`), never a border.
+  Only where the host stops being a column (a bottom or narrow dock, a
+  full-window layer, a compact sheet) is it bare geometry; beside a layer the
+  strip paints the launcher card itself (`--look-strip-card`,
+  `--look-strip-card-shadow`).
+- A floating package window extends that column. It spans the column's full
+  height, its top and bottom edges on the host's own (`styles.css`,
+  `.rail-dynamic`), in the look's floating material (`--look-rail*`); a look
+  whose idle strip is a short island grows it into the column as the window
+  opens. The corners the window attaches to square off on the window's clock.
+  The foot squares where the column runs into the window's edge and rounds on
+  an island (`--look-rail-island`, `--package-window-foot`). Only its width
+  resizes, from the inline-start edge (ui.md).
+- A pinned (docked) window is part of the rail column (shellLooks.css §1e):
+  the host, still the idle frame, grows around it, so the window has no
+  material of its own. It sits in the rail's fill, edge and shadow (none by
+  default, so it sits on the canvas as the idle rail does; Line and Editorial
+  keep the rail's hairline down the window's start; Air and Obsidian keep
+  their island around window and strip).
   A flush column runs square into the header and the window's edge; an island
   closes the frame and rounds. A look that insets the conversation for the idle
   strip (Monolith, Reverse monolith) drops that inset once a window docks, and

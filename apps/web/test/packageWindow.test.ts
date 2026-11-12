@@ -73,6 +73,24 @@ test("pressing the active launcher is never an outside click, whatever its id", 
   assert.equal(pathBelongsToPackageWindow([launcher("git")], "markets.crypto", active), false);
 });
 
+test("pressing another window's launcher swaps the open window instead of dismissing it", async () => {
+  const launcher = (id: string): EventTarget => ({
+    getAttribute: (attribute: string) => attribute === "data-pane-launcher" ? id : null,
+  }) as unknown as EventTarget;
+  // The rule ContextRail passes: the active launcher, or one that opens a window.
+  const ownsWindow = (id: string) => id === "files" || id === "git";
+  assert.equal(pathBelongsToPackageWindow([launcher("git")], "files", ownsWindow), true);
+  // A command launcher opens no window: pressing it is still an outside click.
+  assert.equal(pathBelongsToPackageWindow([launcher("new-chat")], "files", ownsWindow), false);
+  const [rail, capabilities] = await Promise.all([
+    readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/builtinCapabilities.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(rail, /\(launcherId\) => isCapabilityActive\(launcherId\) \|\| capabilityOpensWindow\(launcherId\)/);
+  // The swap itself is one synchronous step in the launcher's click.
+  assert.match(capabilities, /if \(current\.railPlugin !== null && !keepsPinnedFrame\(id, current\)\) setRailPlugin\(null\);\s*open\(\);/);
+});
+
 test("every desktop launcher marks itself so its second click closes the window", async () => {
   // pointerdown outside a dynamic window dismisses it; an unmarked launcher's
   // click then saw it inactive and reopened it (Home Assistant, Browser).
@@ -82,7 +100,7 @@ test("every desktop launcher marks itself so its second click closes the window"
   ]);
   assert.match(widgets, /data-pane-launcher=\{id\}\s*onClick=\{\(\) => toggleCapability\(id, capability\.open\)\}/);
   assert.match(rail, /"data-pane-launcher": s\.id/);
-  assert.match(rail, /pathBelongsToPackageWindow\(event\.composedPath\(\), id, \(launcherId\) => isCapabilityActive\(launcherId\)\)/);
+  assert.match(rail, /pathBelongsToPackageWindow\(\s*event\.composedPath\(\),\s*id,/);
 });
 
 test("top workspace launchers close their package window on a second click", async () => {

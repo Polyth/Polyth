@@ -15400,14 +15400,16 @@ width: 100%;
 .rail-workspace.rail-pinned:not(.rail-fullscreen):not(.rail-dock-bottom) {
   animation: rail-window-open-inline var(--motion-window) var(--motion-window-ease) both;
 }
-/* A package pane and its launcher strip share one border while docked. The
-   pane owns the outer corners; the strip completes the block edges and seam. */
-.railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen)) {
+/* A package pane and its launcher strip share one border while docked at the
+   side. The pane owns the outer corners; the strip completes the block edges
+   and seam. (A bottom or narrow dock keeps the idle column's box instead:
+   "Deliberate bottom dock" below.) */
+.railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) {
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
-.railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen)) > .rail-icon-col.plugin-strip {
+.railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .rail-icon-col.plugin-strip {
   border-block: 1px solid var(--hair);
   border-inline-start: 1px solid var(--surface-divider);
   border-inline-end: 0;
@@ -15661,9 +15663,9 @@ width: 100%;
   /* The seam between a side window and the strip is a line drawn on the
      strip, not a border: a border would narrow the strip and nudge every
      launcher sideways as a window opens, pins or leaves. It fades with the
-     window. Borderless appearance and the interface styles draw no such
-     line (shellLooks.css parts window and strip itself). */
-  .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) > .rail-icon-col.plugin-strip::before {
+     window. Borderless appearance draws no such line; an interface style
+     colours it (--look-rail-seam, shellLooks.css 1d). */
+  .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail-icon-col.plugin-strip::before {
     content: "";
     position: absolute;
     inset-block: 0;
@@ -15678,7 +15680,7 @@ width: 100%;
   .railbar[data-rail-motion="exiting"]:not(.railbar-dock-bottom):not(.railbar-pinned-narrow) > .rail-icon-col.plugin-strip::before {
     animation: rail-seam-line-out var(--motion-window-exit) var(--motion-window-exit-ease) both;
   }
-  body:is([data-hide-borders="true"], [data-shell-look]:not([data-shell-look="standard"])) .railbar > .rail-icon-col.plugin-strip::before {
+  body[data-hide-borders="true"]:is(:not([data-shell-look]), [data-shell-look="standard"]) .railbar > .rail-icon-col.plugin-strip::before {
     display: none;
   }
   .railbar:has(.rail-dynamic) > .rail-dynamic {
@@ -15725,17 +15727,25 @@ html[data-package-window-resizing="true"] :is(.rail-workspace, .app-shell:has(.r
 }
 .app-shell:has(.rail-pinned-narrow) > .sidebar { grid-column: 1; grid-row: 1 / 3; }
 .app-shell:has(.rail-pinned-narrow) > .workspace { grid-column: 2; grid-row: 1; }
+/* The host fills its grid area less its margins (stretched, not 100%: a
+   percentage size ignores the margins a full-height layout gives it and ran
+   past the shell's edge by them) and keeps the idle column's block and
+   inline-end edge widths, colourless. The strip is then placed in exactly the
+   box it has idle, so no launcher moves as a window docks here or leaves. */
 .app-shell:has(.rail-pinned-narrow) > .railbar {
   position: relative; inset: auto; z-index: var(--z-shell);
   grid-column: 2; grid-row: 1 / 3;
-  width: 100%; min-width: 0; height: 100%; margin: 0;
-  border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+  width: auto; min-width: 0; height: auto; margin: 0;
+  align-self: stretch; justify-self: stretch;
+  border-color: transparent; border-inline-start-width: 0;
+  border-radius: 0; box-shadow: none; overflow: visible;
   background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none;
   pointer-events: none;
 }
 .app-shell:has(.rail-pinned-narrow) > .railbar > .rail-pinned-narrow {
   position: absolute;
-  inset-block-end: 0;
+  /* On the host's outer foot line, as a floating window is on its top. */
+  inset-block-end: calc(-1 * var(--rail-host-foot-edge, 0px));
   inset-inline-start: 0;
   inset-inline-end: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   width: auto; height: var(--workspace-pinned-narrow-row-size); margin: 0;
@@ -15745,7 +15755,11 @@ html[data-package-window-resizing="true"] :is(.rail-workspace, .app-shell:has(.r
   position: absolute; inset-block: 0; inset-inline-end: 0;
   width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   height: 100%; flex: none;
-  border-top: 0; border-inline-start: 1px solid var(--surface-divider);
+  /* The seam is the strip's ::before line: a border would narrow the strip. */
+  border: 0;
+  /* The column's frame, which the host draws idle: lines just outside the
+     strip's box, on the rows the host's edge holds, taking no room. */
+  box-shadow: 0 -1px 0 var(--rail-frame-line, var(--hair-solid)), 0 1px 0 var(--rail-frame-line, var(--hair-solid));
   pointer-events: auto;
 }
 .rail-pinned-narrow {
@@ -15780,14 +15794,16 @@ html[data-package-window-resizing="true"] :is(.rail-workspace, .app-shell:has(.r
 .app-shell:has(.rail-dock-bottom) > .railbar {
   position: relative; inset: auto; z-index: var(--z-shell);
   grid-column: 2; grid-row: 1 / 3;
-  width: 100%; min-width: 0; height: 100%; margin: 0;
-  border: 0; border-radius: 0; box-shadow: none; overflow: visible;
+  width: auto; min-width: 0; height: auto; margin: 0;
+  align-self: stretch; justify-self: stretch;
+  border-color: transparent; border-inline-start-width: 0;
+  border-radius: 0; box-shadow: none; overflow: visible;
   background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none;
   pointer-events: none;
 }
 .app-shell:has(.rail-dock-bottom) > .railbar > .rail-dock-bottom {
   position: absolute;
-  inset-block-end: 0;
+  inset-block-end: calc(-1 * var(--rail-host-foot-edge, 0px));
   inset-inline-start: 0;
   inset-inline-end: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   width: auto;
@@ -15802,8 +15818,10 @@ html[data-package-window-resizing="true"] :is(.rail-workspace, .app-shell:has(.r
   width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   height: 100%;
   flex: none;
-  border-top: 0;
-  border-inline-start: 1px solid var(--surface-divider);
+  border: 0;
+  /* The column's frame, which the host draws idle: lines just outside the
+     strip's box, on the rows the host's edge holds, taking no room. */
+  box-shadow: 0 -1px 0 var(--rail-frame-line, var(--hair-solid)), 0 1px 0 var(--rail-frame-line, var(--hair-solid));
   pointer-events: auto;
 }
 .rail-dock-bottom {
@@ -18443,6 +18461,14 @@ body .ui-btn .ui-spinner {
     border-start-start-radius: var(--radius-card);
     box-shadow: var(--material-glass-highlight), var(--shadow-sm);
     overflow: visible;
+    /* Half the column's width: the most a corner of the column may round.
+       Past it the browser scales all four radii down together, so squaring
+       the two a window attaches to would let the far two spring out to twice
+       their size (visible from the default Corner rounding up). Every rule
+       that rounds the whole column caps its radius with this. */
+    --rail-host-radius-cap: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) / 2);
+    /* The host's own foot edge, which a bottom or narrow dock's pane sits on. */
+    --rail-host-foot-edge: 1px;
     /* The host re-frames itself as a window opens beside it, on the window's
        clock, so its corners square off in step with the strip's seam. */
     transition: border-radius var(--motion-window) var(--motion-window-ease);
@@ -18626,8 +18652,8 @@ body .ui-btn .ui-spinner {
    into the open layout for the rest of the session. See surfaces.keptSurfaces. */
 @container app-shell (min-width: 961px) and (max-width: 1400px) {
   .railbar:not(.railbar-open):not([data-rail-motion="exiting"]) {
-    --rail-strip-gutter-start: calc(var(--space-3) / 2);
-    --rail-strip-gutter-end: calc(var(--space-3) / 2);
+    --rail-strip-gutter-start: var(--rail-cluster-gutter, calc(var(--space-3) / 2));
+    --rail-strip-gutter-end: var(--rail-cluster-gutter, calc(var(--space-3) / 2));
     inset-block: var(--space-3) auto;
     inset-inline-end: var(--space-3);
     height: auto;
@@ -18730,11 +18756,28 @@ body .ui-btn .ui-spinner {
 @keyframes rail-seam-line-out {
   to { opacity: 0; }
 }
+/* The cluster's strip is as wide as its tiles and splits its gutters evenly
+   (--rail-cluster-gutter: whoever restates the strip's gutters for every
+   state names the cluster's too); the column's strip has its own width and
+   gutters. Both ends of the morph state the cluster's, so no launcher steps
+   sideways in the first frame of an arrival or the last of a departure. */
 @keyframes rail-strip-dock {
-  from { border-radius: calc(var(--radius-card) - 1px); border-inline-start-color: transparent; }
+  from {
+    border-radius: calc(var(--radius-card) - 1px); border-inline-start-color: transparent;
+    padding-inline: var(--rail-cluster-gutter, calc(var(--space-3) / 2));
+    width: calc(var(--rail-icon-size-right, var(--control-h-sm)) + 2 * var(--rail-cluster-gutter, calc(var(--space-3) / 2)));
+    min-width: calc(var(--rail-icon-size-right, var(--control-h-sm)) + 2 * var(--rail-cluster-gutter, calc(var(--space-3) / 2)));
+    flex-basis: calc(var(--rail-icon-size-right, var(--control-h-sm)) + 2 * var(--rail-cluster-gutter, calc(var(--space-3) / 2)));
+  }
 }
 @keyframes rail-strip-undock {
-  to { border-radius: calc(var(--radius-card) - 1px); border-inline-start-color: transparent; }
+  to {
+    border-radius: calc(var(--radius-card) - 1px); border-inline-start-color: transparent;
+    padding-inline: var(--rail-cluster-gutter, calc(var(--space-3) / 2));
+    width: calc(var(--rail-icon-size-right, var(--control-h-sm)) + 2 * var(--rail-cluster-gutter, calc(var(--space-3) / 2)));
+    min-width: calc(var(--rail-icon-size-right, var(--control-h-sm)) + 2 * var(--rail-cluster-gutter, calc(var(--space-3) / 2)));
+    flex-basis: calc(var(--rail-icon-size-right, var(--control-h-sm)) + 2 * var(--rail-cluster-gutter, calc(var(--space-3) / 2)));
+  }
 }
 
 /* ---- conversation hierarchy ------------------------------------------------ */
@@ -21456,6 +21499,7 @@ body[data-hide-borders="true"] .rail-dock-bottom {
 }
 
 body[data-hide-borders="true"] .railbar {
+  --rail-frame-line: var(--contour);
   /* The same frame as the left rail, whether or not a package window is open:
      the block edges and the workspace-facing seam. Without a window the host's
      own glass sits behind them, so it is clipped to the padding box too. */

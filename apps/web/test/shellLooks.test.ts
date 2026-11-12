@@ -181,21 +181,40 @@ test("picking a look keeps the background the person chose", async () => {
   assert.equal(/setBackground|LOOK_BACKGROUNDS|backgroundPresetArt/.test(picker), false, "a look still carries a background");
 });
 
-test("a docked window takes the rail's idle material and Monolith's sheet gives up the strip lane", async () => {
+test("the launcher column keeps its idle frame under a window, and a docked window sits inside it", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
+  const prefix = String.raw`body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\):not\(#\\#\)`;
   const dock = String.raw`\.railbar:is\(\[data-rail-motion="open"\], \[data-rail-motion="exiting"\]\):has\(> \.rail:not\(\.rail-dynamic\):not\(\.rail-fullscreen\):not\(\.rail-dock-bottom\):not\(\.rail-pinned-narrow\)\)`;
-  // Pane and strip share one material, the look's idle rail (--look-dock*).
-  assert.match(css, new RegExp(`${dock} > :is\\(\\.rail, \\.plugin-strip\\) \\{[^}]*background: var\\(--look-dock\\) !important;[^}]*backdrop-filter: var\\(--look-dock-blur\\) !important;`));
-  assert.match(css, new RegExp(`${dock} > \\.rail \\{[^}]*border: 0 solid var\\(--look-dock-edge\\) !important;`));
-  assert.match(css, new RegExp(`${dock} > \\.plugin-strip \\{[^}]*border-inline-start: 1px solid var\\(--look-rail-seam\\) !important;`));
-  // By default the docked window sits on the canvas, as the idle rail does.
-  assert.match(css, /:where\(body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\)\) \{[^}]*--look-dock: transparent;[^}]*--look-dock-blur: none;/);
-  // Islands keep their island; hairline looks keep the rail's start line.
-  for (const look of ["air", "obsidian"]) {
-    assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\{[^}]*--look-dock: var\\(`), look);
+  // No rule strips the host's frame for a side window: only a host that is
+  // not a column (bottom or narrow dock, layer, sheet) becomes bare geometry.
+  const flattened = [...css.matchAll(/\n([^{}\n]*\.railbar[^{}\n]*) \{[^}]*box-shadow: none !important;[^}]*\}/g)]
+    .map((match) => match[1]!)
+    .filter((selector) => /railbar-open|data-rail-motion/.test(selector));
+  assert.ok(flattened.length > 0);
+  for (const selector of flattened) {
+    assert.match(selector, /:is\(\.railbar-dock-bottom, \.railbar-pinned-narrow, :has\(> :is\(\.rail-fullscreen, \.panel-sheet\)\)\)|:has\(> :is\(\.rail-fullscreen, \.panel-sheet\)\)/, selector);
   }
+  // The host never filters; the strip carries the shell blur in every state
+  // and neither a fill nor an edge of its own beside a side window.
+  assert.match(css, new RegExp(`${prefix}:not\\(#\\\\#\\) :is\\(\\.sidebar\\.sidebar--rail-collapsed, \\.railbar\\) \\{\\s*backdrop-filter: none !important;`));
+  assert.match(css, new RegExp(`${prefix} \\.railbar > \\.plugin-strip \\{\\s*backdrop-filter: var\\(--look-shell-blur, none\\) !important;`));
+  const column = String.raw`\.railbar:not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\):not\(:has\(> :is\(\.rail-fullscreen, \.panel-sheet\)\)\) > \.plugin-strip`;
+  assert.match(css, new RegExp(`${prefix} ${column} \\{[^}]*background: transparent !important;[^}]*border: 0 !important;[^}]*border-radius: inherit !important;`));
+  // The seam is the line styles.css draws on the strip, in the look's colour:
+  // a border there would nudge every launcher.
+  assert.match(css, new RegExp(`${prefix} \\.railbar > \\.plugin-strip::before \\{\\s*background: var\\(--look-rail-seam\\);`));
+  assert.equal(/plugin-strip \{[^}]*border-inline-start: 1px/.test(css), false, "the strip draws its seam as a border again");
+  // A docked window needs no material: it sits in the frame the rail has idle.
+  assert.match(css, new RegExp(`${dock} > \\.rail \\{[^}]*background: transparent !important;[^}]*backdrop-filter: var\\(--look-shell-blur, none\\) !important;[^}]*border: 0 !important;`));
+  assert.equal(css.includes("--look-dock"), false, "the docked window has a material of its own again");
+  // An island's end padding sits on the strip, so the strip fills the frame.
+  for (const look of ["air", "obsidian"]) {
+    assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\{[^}]*--look-strip-pad: \\d+px;[^}]*--look-strip-card: `), look);
+    assert.equal(new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\.railbar \\{[^}]*padding-block:`).test(css), false, look);
+  }
+  // Hairline looks keep their floating card's frame with a window in it.
   for (const look of ["line", "editorial"]) {
-    assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\{[^}]*--look-dock-edge: var\\(--look-line\\);`), look);
+    assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]\\[data-shell-floating="true"\\]:not\\(#\\\\#\\) :is\\(\\.sidebar, \\.railbar\\) \\{`), look);
   }
   for (const look of ["monolith", "monolith-reverse"]) {
     // One :has() (CSS forbids nesting it): the host and its docked pane.

@@ -41,7 +41,7 @@ import { useShellMode } from "../responsiveShell.ts";
 import { useSideSafeStrip } from "../sideSafeStrip.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { useResolvedCapabilities, type ResolvedCapability } from "../capabilities.ts";
-import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
+import { capabilityOpensWindow, isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
 import { uniquePackageLaunchers } from "../packageLaunchers.ts";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import {
@@ -1111,7 +1111,12 @@ export default function ContextRail() {
     const outside = (event: PointerEvent) => {
       const modal = document.querySelector<HTMLElement>('[aria-modal="true"]');
       if (modal && modal !== paneRef.current) return;
-      const owned = pathBelongsToPackageWindow(event.composedPath(), id, (launcherId) => isCapabilityActive(launcherId));
+      // A launcher's own click closes this window or swaps its content.
+      const owned = pathBelongsToPackageWindow(
+        event.composedPath(),
+        id,
+        (launcherId) => isCapabilityActive(launcherId) || capabilityOpensWindow(launcherId),
+      );
       if (!owned) closePaneFromOutside();
     };
     document.addEventListener("pointerdown", outside, true);
