@@ -754,6 +754,16 @@
   margin-block-end: var(--space-2);
 }
 
+/* Under the navigator's Agents row (placement "action"): the row is the
+   header, so the group is only its rows, and folded only the summary that
+   rides the row's trailing edge. */
+.agent-nav[data-placement="action"] { margin-block-end: 0; }
+.agent-nav[data-placement="action"][data-summary] {
+  display: inline-flex;
+  align-items: center;
+  z-index: auto;
+}
+
 /* Group header: folds the agents away. Quiet: it labels, it does not compete
    with the rows. */
 .agent-nav .agent-nav-head {

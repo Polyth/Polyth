@@ -2152,6 +2152,7 @@ export const en = {
   "sidebar.navigatorActions": "Quick actions",
   "sidebar.editNavigatorActions": "Edit quick actions",
   "sidebar.navigatorActionsMore": "More…",
+  "sidebar.showInList": "Show in list",
   "sidebar.navigatorActionsReset": "Reset to default",
   "sidebar.serverConnectionDetails": "Server connection details",
   "sidebar.serverConnectionValue": "Server connection: {syncStatus}",

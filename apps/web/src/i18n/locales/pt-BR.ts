@@ -2149,6 +2149,7 @@ export const ptBR: AppMessages = {
   "sidebar.navigatorActions": "Ações rápidas",
   "sidebar.editNavigatorActions": "Editar ações rápidas",
   "sidebar.navigatorActionsMore": "Mais…",
+  "sidebar.showInList": "Mostrar na lista",
   "sidebar.navigatorActionsReset": "Restaurar padrão",
   "sidebar.serverConnectionDetails": "Detalhes da conexão com o servidor",
   "sidebar.serverConnectionValue": "Conexão com o servidor: {syncStatus}",

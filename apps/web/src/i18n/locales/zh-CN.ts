@@ -2149,6 +2149,7 @@ export const zhCN: AppMessages = {
   "sidebar.navigatorActions": "快捷操作",
   "sidebar.editNavigatorActions": "编辑快捷操作",
   "sidebar.navigatorActionsMore": "更多…",
+  "sidebar.showInList": "在列表中显示",
   "sidebar.navigatorActionsReset": "恢复默认",
   "sidebar.serverConnectionDetails": "服务器连接详情",
   "sidebar.serverConnectionValue": "服务器连接：{syncStatus}",

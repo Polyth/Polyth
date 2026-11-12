@@ -1224,11 +1224,62 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .sidebar-nav-actions-edit svg { width: 14px; height: 14px; }
 .sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-row:first-child { padding-inline-end: 34px; }
+/* An action row that owns a package section (agents): the row opens the
+   capability, a chevron on its trailing edge unfolds the section under it,
+   and folded the row carries the section's short summary. On the first row
+   the chevron steps inside the block's edit button. */
+.sidebar-nav-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sidebar-nav-item > .sidebar-nav-row { padding-inline-end: 34px; }
+.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item:first-child > .sidebar-nav-row { padding-inline-end: 64px; }
+.sidebar-nav-item[data-empty] > .sidebar-nav-row { padding-inline-end: 10px; }
+.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item[data-empty]:first-child > .sidebar-nav-row { padding-inline-end: 34px; }
+.sidebar-nav-summary {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-inline-start: var(--space-2);
+  font-weight: 450;
+}
+.sidebar-nav-item > .sidebar-nav-disclosure {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 2px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  color: var(--muted);
+}
+.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item:first-child > .sidebar-nav-disclosure { inset-inline-end: 32px; }
+.sidebar-nav-disclosure svg {
+  width: 14px;
+  height: 14px;
+  transform: rotate(90deg);
+  transition: transform var(--motion-normal) var(--motion-ease);
+}
+.sidebar-nav-disclosure[aria-expanded="false"] svg { transform: none; }
+.sidebar-nav-disclosure[aria-expanded="false"]:dir(rtl) svg { transform: scaleX(-1); }
+/* The block sits above the scrolling list, so a long section scrolls in
+   place instead of pushing the chats away. */
+.sidebar-nav-section {
+  max-height: min(40vh, 320px);
+  padding-block-start: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-nav-disclosure svg { transition: none; }
+}
 @media (hover: hover) {
   .sidebar-nav-new:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
   .sidebar-nav-action:hover:where(:not(:disabled)),
   .sidebar-nav-action[aria-expanded="true"] { background: var(--elevated); color: var(--text); }
-  .sidebar-nav-actions-edit:hover:where(:not(:disabled)) { background: var(--elevated); color: var(--text); }
+  .sidebar-nav-actions-edit:hover:where(:not(:disabled)),
+  .sidebar-nav-disclosure:hover:where(:not(:disabled)) { background: var(--elevated); color: var(--text); }
 }
 @media (hover: hover) and (pointer: fine) {
   .sidebar-nav-actions-edit { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
@@ -1742,7 +1793,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    sits --session-pill-inset inside it, and the title follows one gap later. */
 .session-org,
 .private-room-row,
-.private-room-chats {
+.private-room-chats,
+/* A package section unfolded under its action row keeps the list's rows. */
+.sidebar-nav-section {
   --session-lead-size: calc(var(--nav-session-size, 15px) * .94);
   /* The state mark starts at the glyph inset and the title on the text axis. */
   --session-lead-gap: calc(var(--nav-text-inset) - var(--nav-glyph-inset) - var(--session-lead-size));

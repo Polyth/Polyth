@@ -6276,6 +6276,8 @@ export const UI_SLOTS = [
   "sidebar.sessions.bulk.actions",
   // Package rows at the top of a project's session list, above pinned chats
   // (for example agents). Context: projectId, activeSessionId, onNavigate?.
+  // `meta.navigatorSection` (NavigatorSectionSlotMeta in @polyth/web-sdk)
+  // makes it hideable and lets it unfold from its capability's action row.
   "sidebar.project.leading",
   // Package-owned floating layers over the whole shell, mounted once (for
   // example transient result cards). A contribution renders nothing until it

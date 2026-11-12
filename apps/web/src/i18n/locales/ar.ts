@@ -2149,6 +2149,7 @@ export const ar: AppMessages = {
   "sidebar.navigatorActions": "إجراءات سريعة",
   "sidebar.editNavigatorActions": "تعديل الإجراءات السريعة",
   "sidebar.navigatorActionsMore": "المزيد…",
+  "sidebar.showInList": "إظهار في القائمة",
   "sidebar.navigatorActionsReset": "إعادة التعيين إلى الافتراضي",
   "sidebar.serverConnectionDetails": "تفاصيل اتصال الخادم",
   "sidebar.serverConnectionValue": "اتصال الخادم: {syncStatus}",

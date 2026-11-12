@@ -1889,6 +1889,19 @@ click, the ⋮ trigger, long press and Shift+F10/ContextMenu. A row that opens a
 package page is current exactly while `store.getSnapshot().activePage` names
 it. The Agents package draws its agents here as a foldable group (see
 `docs/dev/architecture.md`, `schedule`).
+A contribution with `meta.navigatorSection` (`NavigatorSectionSlotMeta` in
+`@polyth/web-sdk`: `label`, optional `capability`) is a *section*: the list
+options (desktop filter menu and phone sort/filter menu) list it under "Show in
+list" and hide it from every list, and while its capability's row is among the
+wide navigator's header rows it leaves that project's list and unfolds from the
+row instead (a chevron on the row's trailing edge; folded, the row carries the
+section's summary). There it renders with `placement: "action"`, `folded` and
+`reportContent(hasContent)` (`NavigatorSectionSlotContext`); `false` drops the
+chevron. Both choices are device-local under `polyth.sidebar.navigatorSections`
+(`{hidden, folded}`, `navigatorState.ts`); the host never names the package
+(`apps/web/src/components/sidebar/navigatorSections.ts`, covered by
+`apps/web/test/navigatorSections.test.ts`). Agents declares one for capability
+`schedule`.
 `host.sessions.claimListing(purpose)` lets a package present the sessions of
 one `purpose` (and their delegated children) in its own UI instead of the
 ordinary lists — an agent's runs are read from its diary. Claims are
@@ -4691,7 +4704,9 @@ the chosen package actions, each a full-width row with its icon and label
 (`Quick actions`; capability rows from `useResolvedCapabilities()`, default
 Agents `schedule` then `planner`, capped at four plus a `More…` row, edited from
 the block's pencil or the list options and stored device-locally under
-`polyth.sidebar.navigatorActions`). The Project rail starts from its project
+`polyth.sidebar.navigatorActions`). A row whose capability owns a package
+section (`meta.navigatorSection`, e.g. Agents) unfolds that section under
+itself, so the project's list does not repeat it. The Project rail starts from its project
 row instead and drops the collapse toggle, which lives in the rail. The
 compact drawer keeps its own single toolbar.
 

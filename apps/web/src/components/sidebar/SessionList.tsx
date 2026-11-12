@@ -779,6 +779,7 @@ export default function SessionList({
   searchMode = false,
   searchProjectName = "",
   dateFilter = EMPTY_SESSION_DATE_FILTER,
+  leadingExclude,
 }: {
   projectId: string;
   query?: string;
@@ -789,6 +790,9 @@ export default function SessionList({
   searchMode?: boolean;
   searchProjectName?: string;
   dateFilter?: SessionDateFilter;
+  /** `sidebar.project.leading` contributions not drawn here (hidden, or
+   *  shown under their action row). */
+  leadingExclude?: readonly string[];
 }) {
   const sessionsRaw = useStore((st) => st.sessions);
   const pendingSends = useStore((st) => st.pendingSends);
@@ -1237,11 +1241,13 @@ export default function SessionList({
     <div className="session-org">
       <SlotHost
         slot="sidebar.project.leading"
+        {...(leadingExclude ? { exclude: leadingExclude } : {})}
         context={{
           projectId,
           activeSessionId: currentSessionId,
           query: needle,
           attentionOnly,
+          placement: "project",
           // As a chat row does, an opened row closes the compact drawer.
           onNavigate: () => { if (getState().sidebarOpen) setSidebarOpen(false); },
         }}

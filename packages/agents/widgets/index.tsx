@@ -1,6 +1,6 @@
 import "./styles.css";
 import { createElement } from "react";
-import { defineWebPackage } from "@polyth/web-sdk";
+import { defineWebPackage, type NavigatorSectionSlotMeta } from "@polyth/web-sdk";
 import AgentsPage from "./AgentsPage.tsx";
 import AgentNavSection, { type AgentNavContext } from "./AgentNavSection.tsx";
 import MakeAgentAction from "./MakeAgentAction.tsx";
@@ -44,11 +44,19 @@ export default defineWebPackage((host) => () => {
         render: () => <AgentsPage host={host} resource={null} />,
       }],
     }),
-    // Agents live among a project's sessions, above its pinned chats.
+    // Agents live among a project's sessions, above its pinned chats. The list
+    // options can hide them; while the Agents row (capability `schedule`) is
+    // shown above the list they unfold from that row instead.
     host.slots.register({
       slot: "sidebar.project.leading",
       id: "schedule.agents",
       order: 10,
+      meta: {
+        navigatorSection: {
+          label: () => tr("agents.navSection"),
+          capability: "schedule",
+        } satisfies NavigatorSectionSlotMeta,
+      },
       render: (context) => createElement(AgentNavSection, { host, context: context as AgentNavContext }),
     }),
     // An agent's own session, opened in Chat, names its agent in the header.

@@ -64,6 +64,7 @@ import { useModalSurface } from "../a11y/Dialog.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import Badge from "../ui/Badge.tsx";
 import SlotHost from "../slots/SlotHost.ts";
+import { excludedSections, useNavigatorSections } from "../sidebar/navigatorSections.ts";
 import {
   AddProjectIcon,
   ArchiveIcon,
@@ -120,6 +121,7 @@ import {
   readNavigatorState,
   SHOW_ALL_PROJECTS_KEY,
   writeNavigatorState,
+  setNavigatorSectionHidden,
 } from "../../navigatorState.ts";
 import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../../workspaceArrange.ts";
 import "./MobileNavigator.css";
@@ -869,6 +871,10 @@ export default function MobileNavigator() {
   const grouping = useSessionGrouping();
   const sessionSort = useSessionSortMode();
   const arrangementEntries = useSessionArrangementEntries();
+  // Package sections (agents) the list options can hide. The phone has no
+  // action rows, so nothing moves under one.
+  const navSections = useNavigatorSections();
+  const hiddenSections = excludedSections(navSections.sections, navSections.state, []);
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => loadExpanded(activeProjectId));
   const [showAllProjects, setShowAllProjects] = useState<ReadonlySet<string>>(loadShowAll);
   const [expandedSubagents, setExpandedSubagents] = useState<ReadonlySet<string>>(new Set());
@@ -1259,6 +1265,20 @@ export default function MobileNavigator() {
       onSelect: () => setAttentionOnly((value) => !value),
     },
     ...arrangementEntries,
+    ...(navSections.sections.length === 0 ? [] : [
+      "separator" as const,
+      { heading: tr("sidebar.showInList") },
+      ...navSections.sections.map((section): MenuEntry => {
+        const shown = !navSections.state.hidden.includes(section.id);
+        return {
+          id: `navigator-section:${section.id}`,
+          label: section.label,
+          kind: "checkbox",
+          checked: shown,
+          onSelect: () => setNavigatorSectionHidden(section.id, shown),
+        };
+      }),
+    ]),
   ];
 
   // Sort and filters live in the search field; a choice away from the default
@@ -1688,7 +1708,8 @@ export default function MobileNavigator() {
                     {!searchMode && (
                       <SlotHost
                         slot="sidebar.project.leading"
-                        context={{ projectId: project.id, activeSessionId, surface: "phone", onNavigate: () => setSidebarOpen(false) }}
+                        exclude={hiddenSections}
+                        context={{ projectId: project.id, activeSessionId, surface: "phone", placement: "project", onNavigate: () => setSidebarOpen(false) }}
                       />
                     )}
                     {pinned.length > 0 && (

@@ -104,6 +104,29 @@ export interface MessageActionSlotContext {
   messageActionAnchor: () => HTMLElement | null;
 }
 
+/** `meta.navigatorSection` on a `sidebar.project.leading` contribution: a
+ *  section the person can hide from the navigator's list options. With
+ *  `capability`, while that capability's action row is shown above the list
+ *  the section leaves the project's list and unfolds from the row instead.
+ *  There it renders with `NavigatorSectionSlotContext`. */
+export interface NavigatorSectionSlotMeta {
+  /** The section's name in the list options. */
+  label: string | (() => string);
+  /** Capability id whose navigator action row owns the section. */
+  capability?: string;
+}
+
+/** Extra context a `meta.navigatorSection` contribution gets. `placement` is
+ *  "project" in a project's list. Under its action row it is "action": draw
+ *  only the rows (the row is the header), or, while `folded`, only a short
+ *  inline summary. Call `reportContent(false)` when there is nothing to show,
+ *  so the row drops its disclosure. */
+export interface NavigatorSectionSlotContext {
+  placement: "project" | "action";
+  folded?: boolean;
+  reportContent?: (hasContent: boolean) => void;
+}
+
 /** `meta.promptTab` on a `session.prompt.tabs` contribution: a tab beside the
  *  prompt list in the chat's bookmark popover. */
 export interface PromptTabSlotMeta {

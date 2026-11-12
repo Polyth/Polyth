@@ -81,7 +81,7 @@ test("sidebar geometry links worktree and session type while density controls ro
   // Horizontal rhythm (one grid with the header rows): the pill starts at the
   // row box, the state mark one glyph inset in and the title on the text
   // axis. Children, rename text and "show more" all share the title axis.
-  assert.match(css, /\.session-org,\s*\.private-room-row,\s*\.private-room-chats\s*\{[\s\S]*?--session-lead-gap:\s*calc\(var\(--nav-text-inset\) - var\(--nav-glyph-inset\) - var\(--session-lead-size\)\);[\s\S]*?--session-pill-inset:\s*var\(--nav-glyph-inset\);/);
+  assert.match(css, /\.session-org,\s*\.private-room-row,\s*\.private-room-chats,[^{]*?\.sidebar-nav-section\s*\{[\s\S]*?--session-lead-gap:\s*calc\(var\(--nav-text-inset\) - var\(--nav-glyph-inset\) - var\(--session-lead-size\)\);[\s\S]*?--session-pill-inset:\s*var\(--nav-glyph-inset\);/);
   assert.match(css, /\.session-row\s*\{[\s\S]*?--session-body-start:\s*var\(--nav-session-row-indent, var\(--nav-indent-session\)\);/);
   assert.match(css, /\.session-subagent-children\s*\{[\s\S]*?--nav-session-row-indent:\s*calc\(var\(--nav-indent-session\) \+ var\(--session-lead-size\) \+ var\(--session-lead-gap\)\);/,
     "a child's state mark sits under its parent's title");

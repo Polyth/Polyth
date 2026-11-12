@@ -35,6 +35,12 @@ export interface AgentNavContext {
   onNavigate?: unknown;
   /** "phone": the phone navigator, whose rows have their own metrics. */
   surface?: unknown;
+  /** "action": under the navigator's Agents row, which is the header
+   *  (NavigatorSectionSlotContext in @polyth/web-sdk). */
+  placement?: unknown;
+  /** Under the row and folded: only the short summary. */
+  folded?: unknown;
+  reportContent?: unknown;
 }
 
 // ---- collapsed groups --------------------------------------------------------
@@ -380,6 +386,10 @@ export default function AgentNavSection({ host, context }: { host: WebPackageHos
   const attentionOnly = context.attentionOnly === true;
   const onNavigate = typeof context.onNavigate === "function" ? context.onNavigate as () => void : undefined;
   const phone = context.surface === "phone";
+  const underRow = context.placement === "action";
+  const reportContent = typeof context.reportContent === "function"
+    ? context.reportContent as (hasContent: boolean) => void
+    : undefined;
   const { agents } = useAgents();
   const collapsed = useCollapsed(projectId);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -398,8 +408,40 @@ export default function AgentNavSection({ host, context }: { host: WebPackageHos
     .map((agent) => ({ agent, live: agentLive(agent) }))
     .filter(({ live }) => !attentionOnly || ["needs-you", "working", "alert", "stopped", "review"].includes(live.phase)),
   [all, query, attentionOnly]);
+  // The Agents row drops its chevron while there is nothing to unfold.
+  const hasContent = rows.length > 0;
+  const reportRef = useRef(reportContent);
+  reportRef.current = reportContent;
+  useEffect(() => { reportRef.current?.(hasContent); }, [hasContent]);
 
   if (!rows.length) return null;
+  const rowList = (
+    <div className="agent-nav-rows">
+      {rows.map(({ agent, live }) => (
+        <AgentRow
+          key={agent.id}
+          host={host}
+          agent={agent}
+          live={live}
+          active={activeAgentId === agent.id}
+          phone={phone}
+          {...(onNavigate ? { onNavigate } : {})}
+        />
+      ))}
+    </div>
+  );
+  if (underRow) {
+    // The navigator's Agents row is the header: it opens every agent, its
+    // chevron folds the group, and folded it carries this summary.
+    if (context.folded === true) {
+      return <span className="agent-nav" data-placement="action" data-summary=""><FoldedSummary rows={rows} /></span>;
+    }
+    return (
+      <div className="agent-nav" role="group" aria-label={tr("agents.navSection")} data-placement="action">
+        {rowList}
+      </div>
+    );
+  }
   // A search or the attention filter shows matches even in a folded group.
   const folded = collapsed && !query && !attentionOnly;
   const toggle = (everywhere: boolean): void => {
@@ -463,21 +505,7 @@ export default function AgentNavSection({ host, context }: { host: WebPackageHos
           </Menu>
         </span>
       </div>
-      {!folded && (
-        <div className="agent-nav-rows">
-          {rows.map(({ agent, live }) => (
-            <AgentRow
-              key={agent.id}
-              host={host}
-              agent={agent}
-              live={live}
-              active={activeAgentId === agent.id}
-              phone={phone}
-              {...(onNavigate ? { onNavigate } : {})}
-            />
-          ))}
-        </div>
-      )}
+      {!folded && rowList}
     </div>
   );
 }

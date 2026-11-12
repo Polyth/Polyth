@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
+  createElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent, type ReactNode, type TouchEvent as ReactTouchEvent,
 } from "react";
@@ -22,7 +22,7 @@ import { useShellMode } from "../responsiveShell.ts";
 import { useLaneSessions, useWorkbenchShellPresentation } from "../workbench/profileNavigation.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { isImeComposing } from "./input/editorCore.ts";
-import SlotHost from "./slots/SlotHost.ts";
+import SlotHost, { SlotBoundary, type SlotContext } from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { ShellColumnAccount, ShellColumnFoot, ShellColumnHead, ShellDock } from "./ShellDock.tsx";
 import { ProjectRailTools } from "./sidebar/ProjectRailTools.tsx";
@@ -36,8 +36,12 @@ import { swipeZoneInHost } from "../shellSwipe.ts";
 import { guardedProjectAddAllowed, limitedProjectAddAllowed, useAccountLimits, useGuardrails } from "../guardrails.ts";
 import {
   DEFAULT_NAVIGATOR_ACTIONS, EXPANDED_PROJECTS_KEY, NAVIGATOR_ACTIONS_VISIBLE_MAX,
-  readNavigatorActions, readNavigatorState, subscribeNavigatorActions, writeNavigatorActions, writeNavigatorState,
+  readNavigatorActions, readNavigatorState, setNavigatorSectionFolded, setNavigatorSectionHidden,
+  subscribeNavigatorActions, writeNavigatorActions, writeNavigatorState,
 } from "../navigatorState.ts";
+import {
+  excludedSections, NAVIGATOR_SECTION_SLOT, useNavigatorSections, type NavigatorSection,
+} from "./sidebar/navigatorSections.ts";
 import { useResolvedCapabilities, type CapabilityDescriptor } from "../capabilities.ts";
 import { railIconFor } from "../railIcons.ts";
 import { commandHint, listCommands } from "../commands.ts";
@@ -51,7 +55,7 @@ import {
 import { useOrderedProjects } from "../projectRecency.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
-  CloseIcon, ComposeIcon, EditIcon, FilterIcon, IconButton, Menu, MoreIcon, PlusIcon,
+  ChevronRightIcon, CloseIcon, ComposeIcon, EditIcon, FilterIcon, IconButton, Menu, MoreIcon, PlusIcon,
   SearchIcon, SelectIcon, SidebarCollapseIcon, SidebarExpandIcon, SortIcon, Tooltip,
   type MenuEntry,
 } from "./ui/index.ts";
@@ -216,10 +220,77 @@ function NavigatorNewChat({ label, onStart }: { label: string; onStart: () => vo
   );
 }
 
+/** A package section (`meta.navigatorSection`) that unfolds from its
+ *  capability's action row instead of sitting in the project's list. */
+export interface AttachedNavigatorSection {
+  section: NavigatorSection;
+  folded: boolean;
+  /** The project list's own context (projectId, attentionOnly, onNavigate…). */
+  context: SlotContext;
+}
+
+/** An action row that owns a section: the row opens the capability, the
+ *  chevron unfolds the section's rows under it. Folded, the row carries the
+ *  section's short summary. A section that reports nothing to show drops the
+ *  chevron. */
+function NavigatorSectionItem({ descriptor, attached, onOpen }: {
+  descriptor: CapabilityDescriptor;
+  attached: AttachedNavigatorSection;
+  onOpen: () => void;
+}) {
+  const { section, folded, context } = attached;
+  const [hasContent, setHasContent] = useState(true);
+  const reportContent = useCallback((value: boolean) => setHasContent(value), []);
+  const regionId = useId();
+  const Mark = railIconFor(descriptor.id);
+  const content = createElement(SlotBoundary, {
+    slot: NAVIGATOR_SECTION_SLOT,
+    item: section.item,
+    context: { ...context, placement: "action", folded, reportContent },
+  });
+  const toggleLabel = tr(folded ? "contextrail.expandValue" : "contextrail.collapseValue", { value: section.label });
+  return (
+    <div className="sidebar-nav-item" data-folded={folded || undefined} data-empty={hasContent ? undefined : ""}>
+      <button
+        type="button"
+        className="sidebar-nav-row sidebar-nav-action"
+        data-capability={descriptor.id}
+        onClick={onOpen}
+      >
+        <span className="sidebar-nav-glyph" aria-hidden="true"><Mark /></span>
+        <span className="sidebar-nav-label">{descriptor.label}</span>
+        {folded && <span className="sidebar-nav-summary">{content}</span>}
+      </button>
+      {hasContent && (
+        <IconButton
+          icon={ChevronRightIcon}
+          label={toggleLabel}
+          className="sidebar-nav-disclosure"
+          aria-expanded={!folded}
+          {...(folded ? {} : { "aria-controls": regionId })}
+          onClick={() => setNavigatorSectionFolded(section.id, !folded)}
+          onKeyDown={(event: ReactKeyboardEvent) => {
+            if ((event.key === "ArrowLeft" && !folded) || (event.key === "ArrowRight" && folded)) {
+              event.preventDefault();
+              setNavigatorSectionFolded(section.id, !folded);
+            }
+          }}
+        />
+      )}
+      {!folded && <div id={regionId} className="sidebar-nav-section">{content}</div>}
+    </div>
+  );
+}
+
 /** One row per chosen capability (capped, with More…), and the block's edit
  *  menu. Draws nothing when nothing is chosen; the list options keep the same
  *  edit list so the block can always come back. */
-function NavigatorActions({ model, onOpened }: { model: NavigatorActionsModel; onOpened: () => void }) {
+function NavigatorActions({ model, onOpened, attached }: {
+  model: NavigatorActionsModel;
+  onOpened: () => void;
+  /** The section a capability's row owns, if any. */
+  attached?: (capabilityId: string) => AttachedNavigatorSection | null;
+}) {
   if (model.shown.length === 0) return null;
   const open = (descriptor: CapabilityDescriptor) => {
     descriptor.open();
@@ -228,6 +299,17 @@ function NavigatorActions({ model, onOpened }: { model: NavigatorActionsModel; o
   return (
     <div className="sidebar-nav-actions" role="group" aria-label={tr("sidebar.navigatorActions")}>
       {model.shown.map((descriptor) => {
+        const section = attached?.(descriptor.id);
+        if (section) {
+          return (
+            <NavigatorSectionItem
+              key={descriptor.id}
+              descriptor={descriptor}
+              attached={section}
+              onOpen={() => open(descriptor)}
+            />
+          );
+        }
         const Mark = railIconFor(descriptor.id);
         return (
           <button
@@ -333,6 +415,7 @@ export default function Sidebar() {
   }), []);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const navActions = useNavigatorActions();
+  const navSections = useNavigatorSections();
   const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
   // Newest session activity per project, for the shared "recent" ordering.
   const latestProjectActivity = useCallback((projectId: string) => sessions.reduce(
@@ -887,6 +970,47 @@ export default function Sidebar() {
         }]
       : []),
   ];
+  // Package sections (agents): hidden from the list options, or moved under
+  // their capability's action row while that row is shown above the list.
+  const sectionFilterEntries: MenuEntry[] = navSections.sections.length === 0 ? [] : [
+    "separator",
+    { heading: tr("sidebar.showInList") },
+    ...navSections.sections.map((section): MenuEntry => {
+      const shown = !navSections.state.hidden.includes(section.id);
+      return {
+        id: `navigator-section:${section.id}`,
+        label: section.label,
+        kind: "checkbox",
+        checked: shown,
+        onSelect: () => setNavigatorSectionHidden(section.id, shown),
+      };
+    }),
+  ];
+  // The rows under New chat belong to `project` and only the wide navigator
+  // draws them.
+  const actionRowsProjectId = !compact && project ? project.id : null;
+  const attachedCapabilities = actionRowsProjectId ? navActions.shown.map((descriptor) => descriptor.id) : [];
+  const leadingExclude = (projectId: string): string[] => excludedSections(
+    navSections.sections,
+    navSections.state,
+    projectId === actionRowsProjectId ? attachedCapabilities : [],
+  );
+  const attachedSection = (capabilityId: string): AttachedNavigatorSection | null => {
+    const section = navSections.sections.find((candidate) => candidate.capability === capabilityId
+      && !navSections.state.hidden.includes(candidate.id));
+    if (!section || !actionRowsProjectId) return null;
+    return {
+      section,
+      folded: navSections.state.folded.includes(section.id),
+      context: {
+        projectId: actionRowsProjectId,
+        activeSessionId,
+        query: "",
+        attentionOnly,
+        onNavigate: closeDrawer,
+      },
+    };
+  };
   const filterEntries: MenuEntry[] = [
     { heading: tr("sidebarprefs.sessions") },
     {
@@ -897,6 +1021,7 @@ export default function Sidebar() {
       onSelect: () => setAttentionOnly((value) => !value),
     },
     ...arrangementEntries,
+    ...sectionFilterEntries,
   ];
   /** Desktop list options (layout, sort, filters), in the toolbar row or the
    *  rail header row. */
@@ -1090,6 +1215,7 @@ export default function Sidebar() {
       {(roomId) => (
         <SessionList
           projectId={roomId}
+          leadingExclude={leadingExclude(roomId)}
           attentionOnly={attentionOnly}
           dateFilter={dateFilter}
           selectMode={selectMode}
@@ -1603,7 +1729,7 @@ export default function Sidebar() {
                 closeDrawer();
               }}
             />
-            <NavigatorActions model={navActions} onOpened={closeDrawer} />
+            <NavigatorActions model={navActions} onOpened={closeDrawer} attached={attachedSection} />
           </div>
         )}
         <div
@@ -1699,6 +1825,7 @@ export default function Sidebar() {
                 <div key={p.id} data-project-id={p.id} className="sidebar-focused-sessions">
                   <SessionList
                     projectId={p.id}
+                    leadingExclude={leadingExclude(p.id)}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
@@ -1714,6 +1841,7 @@ export default function Sidebar() {
                 <div key={p.id} data-project-id={p.id} className="sidebar-focused-sessions">
                   <SessionList
                     projectId={p.id}
+                    leadingExclude={leadingExclude(p.id)}
                     attentionOnly={attentionOnly}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
@@ -1742,6 +1870,7 @@ export default function Sidebar() {
                   <div className="project-tree-sessions" data-arrange-control="">
                     <SessionList
                       projectId={p.id}
+                      leadingExclude={leadingExclude(p.id)}
                       query={projectQuery}
                       attentionOnly={attentionOnly}
                       dateFilter={dateFilter}

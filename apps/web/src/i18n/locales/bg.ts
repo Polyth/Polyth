@@ -2149,6 +2149,7 @@ export const bg: AppMessages = {
   "sidebar.navigatorActions": "Бързи действия",
   "sidebar.editNavigatorActions": "Редактиране на бързите действия",
   "sidebar.navigatorActionsMore": "Още…",
+  "sidebar.showInList": "Показване в списъка",
   "sidebar.navigatorActionsReset": "Възстановяване по подразбиране",
   "sidebar.serverConnectionDetails": "Подробности за връзката със сървъра",
   "sidebar.serverConnectionValue": "Връзка със сървъра: {syncStatus}",

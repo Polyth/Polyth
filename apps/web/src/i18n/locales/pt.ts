@@ -2149,6 +2149,7 @@ export const pt: AppMessages = {
   "sidebar.navigatorActions": "Ações rápidas",
   "sidebar.editNavigatorActions": "Editar ações rápidas",
   "sidebar.navigatorActionsMore": "Mais…",
+  "sidebar.showInList": "Mostrar na lista",
   "sidebar.navigatorActionsReset": "Repor predefinições",
   "sidebar.serverConnectionDetails": "Detalhes da ligação com o servidor",
   "sidebar.serverConnectionValue": "Ligação ao servidor: {syncStatus}",
