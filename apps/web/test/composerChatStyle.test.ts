@@ -124,6 +124,8 @@ test("the agent status above the composer is a borderless line, not glass", () =
   assert.match(css, /\.conversation-composer-dock:has\(\.agent-status-dock, \.pending-changes-bar, \.subagent-island\) > \.composer \{\s*padding-block-start: 0;\s*\}/);
   assert.match(dock, /@media \(max-width: 600px\) \{\s*\.agent-status-dock \.agent-status-dock-secondary \{ display: none; \}/);
   assert.match(dock, /@media \(prefers-reduced-motion: reduce\) \{\s*\.agent-status-dock-state \{ animation: none;/);
+  // An actionable status line shares the pending stack's subtle overlay hover, not the generic elevated button plate.
+  assert.match(dock, /button\.agent-status-dock:hover:where\(:not\(:disabled\)\)\s*\{[^}]*background:\s*var\(--surface-overlay-hover\);[^}]*border-color:\s*transparent;/s);
 });
 
 test("conversation chrome shares one horizontal frame", () => {
@@ -348,11 +350,11 @@ test("assistant identity panel renders once per turn, after the turn completes",
   assert.match(css, /\.timeline\s*>\s*\.msg\.assistant\s*\+\s*\.activity-group/);
   // Touch shows no actions-only footer (it doubled the activity gaps); the
   // final answer keeps its own. With a mouse, over a block the footer is the
-  // group gap itself, not a blank band on top of it; a hover-collapsed one
-  // keeps none.
+  // group gap itself, not a blank band on top of it. A hover bar keeps that
+  // box too: collapsed, it revealed into the block, which painted over it.
   assert.match(chrome, /@media \(hover: none\), \(pointer: coarse\) \{\s*\.chat-response-footer\[data-actions-only\] \{ display: none; \}/);
-  assert.match(chrome, /\.timeline > \.msg\.assistant\.progress-update > \.chat-response-footer\[data-actions-only\] \{\s*margin-block: 0 calc\(-1 \* var\(--conversation-group-gap\)\);\s*\}/);
-  assert.match(chrome, /\.progress-update > \.chat-response-footer\[data-actions-only\]:has\(\.chat-action-bar\[data-reveal="hover"\]\) \{\s*margin-block-end: 0;\s*\}/);
+  assert.match(chrome, /\.timeline > \.msg\.assistant\.progress-update > \.chat-response-footer\[data-actions-only\] \{\s*height: auto;\s*margin-block: 0 calc\(-1 \* var\(--conversation-group-gap\)\);\s*\}/);
+  assert.doesNotMatch(chrome, /\.progress-update > \.chat-response-footer\[data-actions-only\]:has\(\.chat-action-bar\[data-reveal="hover"\]\)/);
   // A thought keeps prose's ink gap: offsets from the timeline gap (not the
   // desktop message gap, which squeezed it to 4px on phones), less its pad.
   assert.match(css, /\.timeline > \.msg\.assistant\.reasoning-row \{\s*--reasoning-head-pad: var\(--space-1\);\s*margin-block:\s*calc\(var\(--conversation-group-gap\) - var\(--timeline-gap\) - var\(--reasoning-head-pad\)\)\s*calc\(-1 \* var\(--reasoning-head-pad\)\);/);

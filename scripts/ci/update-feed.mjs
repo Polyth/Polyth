@@ -21,10 +21,12 @@
 // separate set, published onto the newest stable release so the edition tracks
 // devel (`update-feed.mjs workstation <productsDir> <feedDir>`).
 //
-// POLYTH_RELEASE_CHANNEL picks the release channel (stable | test | nightly,
-// default stable). Test and nightly versions carry a semver prerelease id
-// (X.Y.N-beta, X.Y.N-nightly) and are published as GitHub prereleases; the
-// desktop updater (apps/desktop/src/updaterChannel.ts) keys on that id.
+// POLYTH_RELEASE_CHANNEL picks the release channel (stable | nightly, default
+// stable). Nightly versions carry a semver prerelease id (X.Y.N-nightly) and
+// are published as GitHub prereleases; the desktop updater
+// (apps/desktop/src/updaterChannel.ts) keys on that id. The test channel
+// (X.Y.N-beta) is retired; stable releases still carry beta*.yml so installs
+// that followed it keep updating.
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,7 +43,9 @@ const MAC_ARCHITECTURES = ["x64", "arm64"];
 export const REQUIRED_METADATA = ["latest.yml", "latest-linux.yml", "latest-mac.yml"];
 
 /** Release channel → semver prerelease id. Stable versions carry none. */
-export const CHANNEL_PRERELEASE_IDS = { stable: null, test: "beta", nightly: "nightly" };
+export const CHANNEL_PRERELEASE_IDS = { stable: null, nightly: "nightly" };
+/** Updater channel of the retired test channel; stable releases keep its metadata. */
+export const RETIRED_TEST_METADATA_ID = "beta";
 export const RELEASE_CHANNELS = Object.keys(CHANNEL_PRERELEASE_IDS);
 
 /** POLYTH_RELEASE_CHANNEL → channel; unset is stable, the builder's original behaviour. */
@@ -53,7 +57,7 @@ export function resolveReleaseChannel(value) {
   return raw;
 }
 
-/** Channel a feed version belongs to: X.Y.N → stable, X.Y.N-beta → test, X.Y.N-nightly → nightly. */
+/** Channel a feed version belongs to: X.Y.N → stable, X.Y.N-nightly → nightly; anything else (the retired X.Y.N-beta) → null. */
 export function channelOfVersion(version) {
   const id = /^\d+\.\d+\.\d+(?:-([0-9A-Za-z-]+)(?:\.[0-9A-Za-z.-]+)?)?$/.exec(version ?? "")?.[1] ?? null;
   return RELEASE_CHANNELS.find((channel) => CHANNEL_PRERELEASE_IDS[channel] === id) ?? null;
@@ -61,12 +65,13 @@ export function channelOfVersion(version) {
 
 /**
  * Extra metadata names a channel's release carries. electron-updater reads
- * `<prerelease id>*.yml` from a prerelease, and an updater set to the test
- * channel (`beta`) also reads `beta*.yml` from the stable releases it accepts.
+ * `<prerelease id>*.yml` from a prerelease. Installs still set to the retired
+ * test channel (updater channel `beta`) read `beta*.yml` from the stable
+ * releases they accept, so stable keeps publishing it.
  */
 export function channelMetadataAliases(channel) {
   const id = CHANNEL_PRERELEASE_IDS[resolveReleaseChannel(channel)];
-  return id ? [id] : [CHANNEL_PRERELEASE_IDS.test];
+  return id ? [id] : [RETIRED_TEST_METADATA_ID];
 }
 
 export function macPartialMetadataName(arch) {
@@ -89,7 +94,7 @@ export function resolveFeedRepository(value) {
  * see a newer release. The builder's run number becomes the patch component:
  * X.Y.Z + build N → X.Y.N. N must exceed Z so a feed build never sorts below
  * the manifest version it was built from. Run numbers are shared by every
- * channel, so versions never collide; test and nightly append their id.
+ * channel, so versions never collide; nightly appends its id.
  */
 export function resolveBuildVersion(baseVersion, buildNumber, channel = "stable") {
   const raw = buildNumber?.trim();

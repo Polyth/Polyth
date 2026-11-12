@@ -10,8 +10,8 @@ import { createCapabilityProvisioningController } from "../src/capabilityProvisi
 import { createMcpConfigService } from "../src/mcp.ts";
 import { mockHarnessRegistry } from "./harnessRegistryMock.ts";
 
-const provider = (id: string, seen: string[][]): HarnessProvider => ({
-  descriptor: { id, name: id, priority: 0, integration: "test" },
+const provider = (id: string, seen: string[][], family?: string): HarnessProvider => ({
+  descriptor: { id, name: id, priority: 0, integration: "test", ...(family ? { accounts: { family, endpoint: `/api/${family}/accounts` } } : {}) },
   probe: async () => ({ harnessId: id, installed: true, authenticated: true, healthy: true }),
   createRuntime: async () => ({ dispose: async () => {} }) as AgentRuntime,
   provisioner: {
@@ -132,4 +132,47 @@ test("a capability withheld from one harness still reaches every other, includin
   assert.ok(claudePlans.at(-1)?.includes("commands.skill.pdf"));
   assert.equal(codexPlans.at(-1)?.includes("commands.skill.pdf"), false);
   assert.ok(laterPlans.at(-1)?.includes("commands.skill.pdf"));
+});
+
+test("a harness rule targets accounts through their family, and a harness rule wins", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-ruled-capability-"));
+  const space = {
+    spaceId: "space-a",
+    spaceSlug: "space-a",
+    userId: "user-a",
+    role: "owner",
+    deployment: "local-trusted",
+    storageDir: dir,
+  } as SpaceContext;
+  const context = { spaceId: space.spaceId, projectId: "p", cwd: join(dir, "project"), space };
+  const contributions = createCapabilityContributionRegistry();
+  contributions.register("commands", {
+    descriptor: {
+      id: "commands.skill-always.pdf",
+      kind: "instruction",
+      owner: "commands",
+      scope: "space",
+      revision: "1",
+      text: "Always.",
+      harnessRule: { default: false, families: { claude: true }, harnesses: { "claude-work": false } },
+    },
+  });
+  const plans = { claude: [] as string[][], work: [] as string[][], home: [] as string[][], codex: [] as string[][] };
+  const claude = provider("claude", plans.claude, "claude");
+  const work = provider("claude-work", plans.work, "claude");
+  const home = provider("claude-home", plans.home, "claude");
+  const codex = provider("codex", plans.codex);
+  const controller = createCapabilityProvisioningController({
+    contributions,
+    harnesses: mockHarnessRegistry(claude, work, home, codex),
+    behavior: createBehaviorService({ file: join(dir, "behavior.md") }),
+    mcp: createMcpConfigService({ dataDir: dir, deployment: "local-trusted", defaultSpaceId: space.spaceId }),
+    file: join(dir, "status.json"),
+  });
+  for (const item of [claude, work, home, codex]) await controller.reconcile(item, context);
+
+  assert.ok(plans.claude.at(-1)?.includes("commands.skill-always.pdf"));
+  assert.ok(plans.home.at(-1)?.includes("commands.skill-always.pdf"), "an account added later follows its family");
+  assert.equal(plans.work.at(-1)?.includes("commands.skill-always.pdf"), false, "its own rule wins over the family");
+  assert.equal(plans.codex.at(-1)?.includes("commands.skill-always.pdf"), false, "the default is off");
 });

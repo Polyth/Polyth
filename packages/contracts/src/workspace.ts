@@ -8,6 +8,28 @@ export interface ProjectRepository {
   path: string;
 }
 
+/** Files' selector for the Project's own folder. A multi-repository Project
+ * may be rooted in a folder that holds its repositories, or a chat may have
+ * chosen only some of them; the folder itself stays browsable either way. It is
+ * never a registered repository id (those are `primary` or UUIDs), and only
+ * file browsing accepts it: Git, editor and session-edit routes keep resolving
+ * real workspace members. */
+export const PROJECT_ROOT_FOLDER_ID = "project-root";
+
+/** Whether Files should offer the Project folder beside a workspace's rows:
+ * only for a multi-repository Project whose root folder is not already one of
+ * them (a chat's own checkout of the root repository counts as shown). */
+export function workspaceOmitsProjectRoot(
+  project: ProjectWorkspaceSource,
+  rows: readonly Pick<WorkspaceRepository, "repositoryId" | "path">[],
+): boolean {
+  if (!project.repositories || project.repositories.length < 2 || rows.length === 0) return false;
+  const registeredRoot = project.repositories.find((repository) => repository.path === project.path);
+  return registeredRoot
+    ? !rows.some((row) => row.repositoryId === registeredRoot.id)
+    : !rows.some((row) => row.path === project.path);
+}
+
 /** The checkout a Session currently exposes for one Project repository. */
 export interface WorkspaceRepository {
   repositoryId: string;
@@ -36,6 +58,74 @@ export interface SessionWorkspace {
     /** Package-owned managed checkout evidence; never accepted from HTTP. */
     isolation?: SessionIsolation;
   }>;
+}
+
+/** Navigator-safe repository scope of a subset session: registration ids
+ * only, never paths, branches or isolation evidence. Absent means the
+ * session works on the whole Project. */
+export interface SessionRepositoryScope {
+  repositoryIds: string[];
+}
+
+/** Longest repository id a scope or a summary filter carries. */
+export const REPOSITORY_SCOPE_ID_MAX = 200;
+/** Most ids a derived scope keeps; a Project registers far fewer. */
+const REPOSITORY_SCOPE_IDS_MAX = 64;
+
+const scopeId = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= REPOSITORY_SCOPE_ID_MAX;
+
+/** The repository subset a session is scoped to, or undefined for a
+ * whole-project session. One rule for every producer and reader:
+ *
+ * - a workspace snapshot with mode `all`, or no workspace at all, is the
+ *   whole Project;
+ * - an explicit snapshot (mode `subset`, or the older absent mode) is a
+ *   subset of the ids it lists;
+ * - when the caller knows the Project's current registrations, a subset that
+ *   lists every one of them is the whole Project again.
+ *
+ * Accepts a full projection (`workspace`) or a navigator summary
+ * (`repositoryScope`). A summary row (`summary: true`) answers from its derived
+ * field only, so a stale cached `workspace` merged under it never wins. */
+export function sessionRepositoryScope(
+  source: {
+    summary?: boolean;
+    workspace?: Pick<SessionWorkspace, "mode" | "repositories"> | null;
+    repositoryScope?: { repositoryIds?: readonly unknown[] } | null;
+  } | null | undefined,
+  projectRepositoryIds?: readonly string[],
+): SessionRepositoryScope | undefined {
+  if (!source) return undefined;
+  let raw: readonly unknown[] | undefined;
+  const workspace = source.summary === true ? undefined : source.workspace;
+  if (workspace && typeof workspace === "object") {
+    if (workspace.mode === "all" || !Array.isArray(workspace.repositories)) return undefined;
+    raw = workspace.repositories.map((row) => (row && typeof row === "object" ? row.repositoryId : undefined));
+  } else if (source.repositoryScope && Array.isArray(source.repositoryScope.repositoryIds)) {
+    raw = source.repositoryScope.repositoryIds;
+  }
+  if (!raw) return undefined;
+  const ids: string[] = [];
+  for (const value of raw) {
+    if (!scopeId(value) || ids.includes(value)) continue;
+    ids.push(value);
+    if (ids.length >= REPOSITORY_SCOPE_IDS_MAX) break;
+  }
+  if (ids.length === 0) return undefined;
+  if (projectRepositoryIds && projectRepositoryIds.length > 0
+    && projectRepositoryIds.every((id) => ids.includes(id))) return undefined;
+  return { repositoryIds: ids };
+}
+
+/** Whether a session belongs under one repository's filter: its explicit
+ * subset includes `repositoryId`. Whole-project sessions never match. */
+export function sessionInRepositoryScope(
+  source: Parameters<typeof sessionRepositoryScope>[0],
+  repositoryId: string,
+  projectRepositoryIds?: readonly string[],
+): boolean {
+  return sessionRepositoryScope(source, projectRepositoryIds)?.repositoryIds.includes(repositoryId) === true;
 }
 
 /** Omitted repositoryIds selects all repositories at the time of mutation.

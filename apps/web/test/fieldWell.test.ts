@@ -25,6 +25,7 @@ before(async () => {
   // The cascade order main.tsx loads: base, platform styles, then Looks.
   const css = (await Promise.all([
     "../src/tokens.css", "../src/styles.css",
+    "../src/components/mobile/MobileNavigator.css",
     "../src/fluentTheme.css", "../src/macosTheme.css", "../src/liquidGlassTheme.css",
     "../src/shellLooks.css",
   ].map(read))).join("\n");
@@ -35,6 +36,8 @@ before(async () => {
     <form class="ui-field-frame" id="frame"><textarea class="ui-textarea" id="framed" rows="1"></textarea></form>
     <textarea class="ui-textarea" id="area" rows="6"></textarea>
     <div class="ui-field-well" id="areaWell"><textarea class="ui-textarea" rows="5"></textarea></div>
+    <div class="sidebar-service-bar"><div class="sidebar-search" id="navWell"><span>⌕</span><input type="search" id="navInput" placeholder="Search sessions…"></div></div>
+    <div class="mobile-navigator"><div class="mobile-nav-toolbar is-searching"><div class="mobile-nav-search-bar"><div class="mobile-nav-search" id="phoneWell"><span>⌕</span><input type="search" id="phoneInput" placeholder="Search sessions…"></div></div></div></div>
   </body></html>`);
 });
 
@@ -44,7 +47,7 @@ after(async () => {
 
 const paint = (selector: string) => page!.locator(selector).evaluate((element) => {
   const style = getComputedStyle(element);
-  return { background: style.backgroundColor, shadow: style.boxShadow, border: style.borderTopWidth, outline: style.outlineStyle, radius: parseFloat(style.borderTopLeftRadius) };
+  return { background: style.backgroundColor, shadow: style.boxShadow, border: style.borderTopWidth, borderColor: style.borderTopColor, outline: style.outlineStyle, radius: parseFloat(style.borderTopLeftRadius) };
 });
 
 test("platform styles and Looks paint a field well, never the input inside it", { skip: !CHROME }, async () => {
@@ -93,6 +96,70 @@ test("platform styles and Looks paint a field well, never the input inside it", 
       const focused = await paint("#bare");
       assert.equal(focused.outline, "none", `${label}: focus rings the well, not the input`);
       assert.equal(focused.shadow, "none", `${label}: focus adds no inner halo`);
+    }
+  }
+});
+
+test("the navigator search keeps its focus edge on the well, never on the bare input", { skip: !CHROME }, async () => {
+  // The glass material paints the field at class strength, so the well's own
+  // :focus-within state has to be painted beside it. Without it the only cue
+  // was the input's global ring: Fluent's 1px ink stroke inside the field read
+  // as a thick black border.
+  for (const themeStyle of ["classic", "liquid-glass", "fluent"] as const) {
+    const vars = themeCssVars(withThemeStyle(adaptThemeAppearance(DEFAULT_THEME, "light"), themeStyle));
+    await page!.evaluate(({ style, vars }) => {
+      const root = document.documentElement;
+      root.removeAttribute("style");
+      for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+      if (style === "classic") delete root.dataset.themeStyle;
+      else root.dataset.themeStyle = style;
+      delete document.body.dataset.shellLook;
+      document.body.removeAttribute("data-glass");
+    }, { style: themeStyle, vars });
+    await page!.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    const resting = await paint("#navWell");
+    await page!.focus("#navInput");
+    const input = await paint("#navInput");
+    assert.equal(input.outline, "none", `${themeStyle}: the input in the navigator well has no ring`);
+    assert.equal(input.shadow, "none", `${themeStyle}: the input in the navigator well adds no inner halo`);
+    const focused = await paint("#navWell");
+    assert.notEqual(focused.borderColor, resting.borderColor, `${themeStyle}: focus edges the navigator well`);
+    assert.match(focused.shadow, /0px 0px 0px 2px/, `${themeStyle}: focus adds the well's ring`);
+  }
+});
+
+test("the phone navigator's search pill shows focus itself, never its input", { skip: !CHROME }, async () => {
+  // Without a Look the pill's own :focus-within state firms its edge. A Look
+  // gives the pill its island, line or rim instead and flattens that border,
+  // so focus has to ring the pill in the Look's focus ink; the bare input
+  // inside keeps no ring either way.
+  for (const themeStyle of ["classic", "liquid-glass", "fluent"] as const) {
+    for (const look of ["standard", "air", "obsidian", "paper"] as const) {
+      const label = `${themeStyle} × ${look}`;
+      const vars = themeCssVars(withThemeStyle(adaptThemeAppearance(DEFAULT_THEME, "light"), themeStyle));
+      await page!.evaluate(({ style, look, vars }) => {
+        const root = document.documentElement;
+        root.removeAttribute("style");
+        for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+        if (style === "classic") delete root.dataset.themeStyle;
+        else root.dataset.themeStyle = style;
+        document.body.dataset.shellLook = look;
+        document.body.removeAttribute("data-glass");
+      }, { style: themeStyle, look, vars });
+      await page!.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      const resting = await paint("#phoneWell");
+      await page!.focus("#phoneInput");
+      const input = await paint("#phoneInput");
+      assert.equal(input.outline, "none", `${label}: the input in the phone pill has no ring`);
+      assert.equal(input.shadow, "none", `${label}: the input in the phone pill adds no halo`);
+      const focused = await paint("#phoneWell");
+      if (look === "standard") {
+        assert.notEqual(focused.borderColor, resting.borderColor, `${label}: focus edges the pill`);
+        assert.match(focused.shadow, /0px 0px 0px 2px/, `${label}: focus rings the pill`);
+      } else {
+        assert.equal(focused.outline, "solid", `${label}: a Look rings the focused pill`);
+        assert.equal(focused.shadow, resting.shadow, `${label}: the pill keeps its Look material`);
+      }
     }
   }
 });

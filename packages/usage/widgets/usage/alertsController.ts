@@ -7,8 +7,9 @@
 // and the ledger keeps a reload, another tab or a later visit from repeating an
 // alert for the same limit period. localStorage holds this browser's copy; the
 // server keeps the person's copy (alertLedgerClient.ts), which is merged in
-// before every evaluation, so another device or the phone app (whose shell
-// starts with empty localStorage on every launch) does not repeat it either.
+// before every evaluation and claimed before an alert is shown (`evaluate`), so
+// another device or the phone app (whose shell starts with empty localStorage
+// on every launch) does not repeat it either, even when both judge at once.
 // Host-wide sources share one ledger; a per-Space source (limitsIdentity.ts)
 // keeps its own ledger under its server and Space, so one Space never
 // suppresses or re-arms another's alerts.
@@ -216,9 +217,15 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
     await store.load().then(adoptRemote, () => undefined);
   };
 
-  const saveRemote = (update: RemoteAlertLedgersUpdate) => {
-    // Not awaited: a lost write is sent again by the next evaluation.
-    void deps.ledgerStore?.save(update).then(adoptRemote, () => undefined);
+  /** Writes the update; resolves with the server's answer, or null when the
+   * write failed or the server keeps no ledger. */
+  const saveRemote = (update: RemoteAlertLedgersUpdate): Promise<RemoteAlertLedgers | null> => {
+    const store = deps.ledgerStore;
+    if (!store) return Promise.resolve(null);
+    return store.save(update).then((saved) => {
+      adoptRemote(saved);
+      return saved;
+    }, () => null);
   };
 
   const remoteLedger = (slot: "host" | "space", identity: UsageLimitsIdentity | null): UsageAlertLedger | null => {
@@ -244,40 +251,79 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
     });
   };
 
-  const evaluate = (response: UsageLimitsResponse) => {
+  /**
+   * Judges the snapshot and shows what is news. With the person's ledger on the
+   * server, an alert is first claimed there: the write answers with the copy it
+   * found, and only an alert that copy had not announced yet is shown. Writes
+   * are serialized on the server, so of two devices (or a reopened app) that
+   * judged the same limit at once, only the first shows it, and an alert is
+   * never on screen before it is kept with the person. When the write fails or
+   * the server does not say what it found, the alert is shown: a missed limit
+   * notice costs more than a repeated one.
+   */
+  const evaluate = (response: UsageLimitsResponse): Promise<void> => {
     // Until it has read the person's ledger, a page would take every limit as
     // news, and a fresh shell origin would repeat what was already shown.
-    if (remote.state === "pending") return;
+    if (remote.state === "pending") return Promise.resolve();
+    const at = now();
     const alertPrefs = prefs.alerts();
+    const limitPrefs = prefs.limits();
     const identity = limitsIdentity(response);
     const groups: Array<{ key: string; slot: "host" | "space"; providers: UsageLimitSnapshotDto[] }> = [
       { key: ALERT_LEDGER_KEY, slot: "host", providers: hostWideLimits(response.providers) },
     ];
     const scoped = spaceScopedLimits(response);
     if (identity && scoped.length) groups.push({ key: spaceAlertLedgerKey(identity), slot: "space", providers: scoped });
-    const alerts: UsageAlert[] = [];
+    const judged: Array<{ slot: "host" | "space"; providers: UsageLimitSnapshotDto[]; stored: UsageAlertLedger; alerts: UsageAlert[] }> = [];
     const update: RemoteAlertLedgersUpdate = {};
     for (const { key, slot, providers } of groups) {
       // Another tab, or another device, may have alerted since this one last looked.
       const stored = storage ? readLedger(key) : memoryLedgers.get(key) ?? emptyAlertLedger();
       const kept = remoteLedger(slot, identity);
       const ledger = kept ? mergeAlertLedgers(stored, kept) : stored;
-      const result = evaluateLimitAlerts({ providers, prefs: alertPrefs, limits: prefs.limits(), ledger, now: now() });
+      const result = evaluateLimitAlerts({ providers, prefs: alertPrefs, limits: limitPrefs, ledger, now: at });
       memoryLedgers.set(key, result.ledger);
       writeLedger(key, result.ledger);
       // A source that works again takes its sign-in/key notice off the screen.
       for (const providerId of Object.keys(ledger.sources)) {
         if (!result.ledger.sources[providerId]) deps.notifications.dismiss(`source:${providerId}`);
       }
-      alerts.push(...result.alerts);
+      judged.push({ slot, providers, stored, alerts: result.alerts });
       // Only a change in what was announced is worth a write.
       if (remote.state === "ready" && alertLedgerAnnouncements(result.ledger) !== alertLedgerAnnouncements(kept ?? emptyAlertLedger())) {
         if (slot === "host") update.host = result.ledger;
         else if (identity) update.space = { ledger: result.ledger, identity };
       }
     }
-    for (const alert of collapseAlertBurst(alerts)) showAlert(alert, alertPrefs);
-    if (update.host || update.space) saveRemote(update);
+    const show = (alerts: UsageAlert[]) => {
+      for (const alert of collapseAlertBurst(alerts)) showAlert(alert, alertPrefs);
+    };
+    const alerts = judged.flatMap((group) => group.alerts);
+    if (!update.host && !update.space) {
+      show(alerts);
+      return Promise.resolve();
+    }
+    const saving = saveRemote(update);
+    if (!alerts.length) return saving.then(() => undefined);
+    return saving.then((saved) => {
+      if (disposed) return;
+      const found = saved?.previous;
+      if (!saved || !found) {
+        show(alerts);
+        return;
+      }
+      // Judge again against what the server held when this write reached it:
+      // an alert another device announced first is no longer news here.
+      show(judged.flatMap(({ slot, providers, stored, alerts: mine }) => {
+        const prior = slot === "host"
+          ? found.host
+          : identity && sameLimitsIdentity(saved, identity) ? found.space : null;
+        if (!prior) return mine;
+        const again = evaluateLimitAlerts({ providers, prefs: alertPrefs, limits: limitPrefs, ledger: mergeAlertLedgers(stored, prior), now: at });
+        const news = new Set(again.alerts.map((alert) => `${alert.rule}:${alert.id}`));
+        return mine.filter((alert) => news.has(`${alert.rule}:${alert.id}`));
+      }));
+    });
   };
 
   /** The earlier snapshot's values that may be compared with `next`'s. */
@@ -293,8 +339,9 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
     checking = Promise.all([deps.loadLimits(), loadRemote()])
       .then(([response]) => {
         if (disposed) return;
-        if (visible() && limitRulesOn(prefs.alerts())) evaluate(response);
         lastResponse = response;
+        // Held until the claim is answered, so this page never judges twice at once.
+        if (visible() && limitRulesOn(prefs.alerts())) return evaluate(response);
       }, () => undefined)
       .finally(() => {
         checking = null;
@@ -325,7 +372,7 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
     }
     // A rule just switched on (or a pause ended early): judge the snapshot we have.
     const cached = deps.cachedLimits();
-    if (cached && visible()) evaluate(cached);
+    if (cached && visible()) void evaluate(cached);
     schedule();
   };
 
@@ -378,7 +425,7 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
     if (disposed) return;
     const providers = response ? attributableLimits(response) : [];
     const before = remainingByWindow(response ? comparable(previous, response) : []);
-    if (response && visible() && limitRulesOn(prefs.alerts()) && providers.length) evaluate(response);
+    if (response && visible() && limitRulesOn(prefs.alerts()) && providers.length) void evaluate(response);
     if (response && providers.length) lastResponse = response;
     if (!wantSummary) return;
     const usage = usageFromEvents(deps.sessions.events(session.id), data.turnId) ?? pending;

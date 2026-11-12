@@ -1,19 +1,22 @@
 // One skill, read before it is used. The same page serves a catalog skill being
 // considered and a skill already in the library: what it says, what it brings,
 // and which of your harnesses have it.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   CapabilityInstallationScope,
   SkillCatalogDetailDto,
   SkillFileDto,
   SkillFilePreviewDto,
   SkillHarnessDto,
+  SkillHarnessMode,
   SkillLibraryDetailDto,
   SkillLibraryDto,
   SkillLibraryEntryDto,
+  SkillReachDefault,
+  SkillReachInput,
 } from "@polyth/contracts/capability-installations";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
-import { ErrorState, SettingsTabs } from "../../../apps/web/src/components/settings/parts.tsx";
+import { ErrorState, Seg, SettingsTabs } from "../../../apps/web/src/components/settings/parts.tsx";
 import {
   BackIcon,
   Badge,
@@ -28,10 +31,19 @@ import {
   Spinner,
   Switch,
 } from "../../../apps/web/src/components/ui/index.ts";
-import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { MarkdownDoc } from "../../../apps/web/src/markdown.tsx";
 import { SkillMark, harnessStyle } from "./SkillParts.tsx";
-import { availabilityOf, defaultInstallScope, formatBytes, reachOf, type HarnessAvailability } from "./skillModel.ts";
+import { familyMode, skillReach } from "../src/skillReach.ts";
+import {
+  availabilityOf,
+  defaultInstallScope,
+  formatBytes,
+  harnessGroups,
+  reachOf,
+  tokenEstimate,
+  type HarnessAvailability,
+} from "./skillModel.ts";
 import { skillsApi } from "./skillsApi.ts";
 
 export type SkillDetailTarget =
@@ -60,13 +72,168 @@ function stateLabel(row: HarnessAvailability, blocked: boolean): string {
   }
 }
 
-function AvailabilityList({ entry, harnesses, canWrite, canControlNative, busy, onManaged, onNative }: {
+/** What one change to a managed skill's reach says. */
+export type ReachChange = Pick<SkillReachInput, "default" | "family" | "harness">;
+
+const MODE_LABEL: Record<SkillHarnessMode, () => string> = {
+  off: () => tr("settings.skills.reach.modeOff"),
+  on: () => tr("settings.skills.reach.modeOn"),
+  always: () => tr("settings.skills.reach.modeAlways"),
+};
+const REACH_HINT: Record<SkillReachDefault, () => string> = {
+  all: () => tr("settings.skills.reach.hintAll"),
+  some: () => tr("settings.skills.reach.hintSome"),
+  none: () => tr("settings.skills.reach.hintNone"),
+};
+
+const formatTokens = (count: number): string =>
+  new Intl.NumberFormat(getLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(count);
+
+/** Where a managed skill works: one default for every harness, then families
+ *  and accounts that differ. Every switch says only what Polyth can deliver. */
+function ReachPanel({ entry, harnesses, instructions, canWrite, busy, onReach }: {
+  entry: SkillLibraryEntryDto & { managed: NonNullable<SkillLibraryEntryDto["managed"]> };
+  harnesses: readonly SkillHarnessDto[];
+  /** The skill's text, to say what "always" costs. */
+  instructions: string | undefined;
+  canWrite: boolean;
+  busy: string;
+  onReach: (change: ReachChange) => void;
+}) {
+  const reach = skillReach(entry.managed);
+  const rows = availabilityOf(entry, harnesses);
+  const groups = harnessGroups(rows);
+  const blocked = Boolean(entry.managed.disallowedTools?.length);
+  const tokens = instructions?.trim() ? formatTokens(tokenEstimate(instructions)) : undefined;
+  const nowhere = reach.default === "none";
+  const locked = !canWrite || busy === "reach";
+  const deliverable = rows.filter((row) => row.mode !== undefined);
+  const working = deliverable.filter((row) => row.mode !== "off").length;
+  const options = (["off", "on", "always"] as const)
+    // Its text in every chat would skip the tool block the skill relies on.
+    .filter((mode) => mode !== "always" || !blocked)
+    .map((mode) => ({
+      value: mode,
+      label: MODE_LABEL[mode](),
+      ...(mode === "always" && tokens ? { detail: tr("settings.skills.reach.alwaysDetail", { tokens }) } : {}),
+    }));
+  const modeSelect = (label: string, value: SkillHarnessMode, onChange: (mode: SkillHarnessMode) => void) => (
+    <Select
+      className="skills-mode"
+      label={label}
+      value={value}
+      options={options}
+      searchable={false}
+      align="end"
+      disabled={locked || nowhere}
+      onChange={(next) => onChange(next as SkillHarnessMode)}
+    />
+  );
+
+  const harnessRow = (row: HarnessAvailability, member: boolean) => {
+    const name = member ? row.harness.accountLabel ?? tr("settings.skills.reach.mainAccount") : row.harness.name;
+    if (row.mode === undefined) {
+      return (
+        <li key={row.harness.id} className={`skills-harness is-quiet${member ? " is-member" : ""}`}>
+          <span className="skills-harness-name">
+            {row.harness.color && <span className="skills-harness-dot" style={harnessStyle(row.harness)} aria-hidden="true" />}
+            {name}
+          </span>
+          <span className="skills-harness-state">{stateLabel(row, blocked)}</span>
+          <span className="skills-harness-control">
+            {row.native?.locked && row.state === "own" ? <span className="skills-harness-locked">{tr("settings.skills.state.locked")}</span> : null}
+          </span>
+        </li>
+      );
+    }
+    // Off for Polyth, but the harness still loads a copy of its own: say so.
+    const ownCopy = row.native?.enabled ? stateLabel({ ...row, state: "own" }, blocked) : "";
+    const delivery = row.mode === "always"
+      ? (tokens ? tr("settings.skills.reach.alwaysDetail", { tokens }) : tr("settings.skills.reach.modeAlways"))
+      : row.mode === "on" && !nowhere ? stateLabel(row, blocked) : ownCopy;
+    const differs = member && row.source === "harness";
+    return (
+      <li key={row.harness.id} className={`skills-harness${row.mode === "off" || nowhere ? " is-quiet" : ""}${member ? " is-member" : ""}`}>
+        <span className="skills-harness-name">
+          {row.harness.color && <span className="skills-harness-dot" style={harnessStyle(row.harness)} aria-hidden="true" />}
+          {name}
+        </span>
+        <span className="skills-harness-state">
+          {delivery}
+          {differs && (
+            <span className="skills-reach-differs">
+              {delivery ? " · " : ""}{tr("settings.skills.reach.differs")}
+              {!locked && !nowhere && (
+                <button type="button" className="skills-reset" onClick={() => onReach({ harness: { id: row.harness.id, mode: null } })}>
+                  {tr("settings.skills.reach.reset")}
+                </button>
+              )}
+            </span>
+          )}
+        </span>
+        <span className="skills-harness-control">
+          {modeSelect(
+            tr("settings.skills.detail.harnessSwitch", { skill: entry.title, harness: row.harness.name }),
+            row.mode,
+            (mode) => onReach({ harness: { id: row.harness.id, mode } }),
+          )}
+        </span>
+      </li>
+    );
+  };
+
+  return (
+    <>
+      <div className="skills-reach">
+        <Seg<SkillReachDefault>
+          label={tr("settings.skills.reach.label")}
+          value={reach.default}
+          options={[
+            ["all", tr("settings.skills.reach.all")],
+            ["some", tr("settings.skills.reach.some")],
+            ["none", tr("settings.skills.reach.none")],
+          ]}
+          disabled={locked}
+          onChange={(next) => { if (next !== reach.default) onReach({ default: next }); }}
+        />
+        <p className="skills-tab-hint">{REACH_HINT[reach.default]()}</p>
+      </div>
+      <ul className={`skills-harnesses is-reach${nowhere ? " is-nowhere" : ""}`}>
+        {groups.map((group) => {
+          const controllable = group.rows.filter((row) => row.mode !== undefined);
+          if (group.rows.length < 2) return harnessRow(group.rows[0]!, false);
+          return (
+            <Fragment key={group.family}>
+              <li className={`skills-harness is-family${nowhere ? " is-quiet" : ""}`}>
+                <span className="skills-harness-name">{group.name}</span>
+                <span className="skills-harness-state">{tr("settings.skills.reach.accounts", { count: group.rows.length })}</span>
+                <span className="skills-harness-control">
+                  {controllable.length > 0 && modeSelect(
+                    tr("settings.skills.detail.harnessSwitch", { skill: entry.title, harness: group.name }),
+                    familyMode(reach, group.family).mode,
+                    (mode) => onReach({ family: { id: group.family, mode } }),
+                  )}
+                </span>
+              </li>
+              {group.rows.map((row) => harnessRow(row, true))}
+            </Fragment>
+          );
+        })}
+      </ul>
+      {deliverable.length > 0 && (
+        <p className="skills-reach-summary">{tr("settings.skills.reach.summary", { count: nowhere ? 0 : working, total: deliverable.length })}</p>
+      )}
+    </>
+  );
+}
+
+/** A skill only harnesses have: each harness's own copy, and the switch Polyth
+ *  has over it where the harness takes one. */
+function AvailabilityList({ entry, harnesses, canControlNative, busy, onNative }: {
   entry: SkillLibraryEntryDto;
   harnesses: readonly SkillHarnessDto[];
-  canWrite: boolean;
   canControlNative: boolean;
   busy: string;
-  onManaged: (harnessId: string, enabled: boolean) => void;
   onNative: (harnessId: string, nativeName: string, enabled: boolean) => void;
 }) {
   const rows = availabilityOf(entry, harnesses);
@@ -77,16 +244,7 @@ function AvailabilityList({ entry, harnesses, canWrite, canControlNative, busy, 
       {rows.filter((row) => row.state !== "absent").map((row) => {
         const quiet = row.state === "off" || row.state === "muted" || row.state === "unsupported";
         let control: ReactNode = null;
-        if (entry.managed && (row.state === "polyth" || row.state === "off")) {
-          control = (
-            <Switch
-              label={tr("settings.skills.detail.harnessSwitch", { skill: entry.title, harness: row.harness.name })}
-              checked={row.state === "polyth"}
-              disabled={!canWrite || busy === row.harness.id}
-              onChange={(enabled) => onManaged(row.harness.id, enabled)}
-            />
-          );
-        } else if (!entry.managed && row.native && !row.native.locked && row.harness.inherits) {
+        if (!entry.managed && row.native && !row.native.locked && row.harness.inherits) {
           control = (
             <Switch
               label={tr("settings.skills.detail.harnessSwitch", { skill: entry.title, harness: row.harness.name })}
@@ -312,17 +470,43 @@ function SkillDetailBody({ target, library, projectId, projectName, onBack, onCh
   const managed = entry?.managed;
 
   const canWriteManaged = Boolean(access && managed && (managed.scope === "space" ? access.space : access.project));
-  const setManagedHarness = (harnessId: string, enabled: boolean) => {
+  const setReach = (change: ReachChange) => {
     if (!managed || !entry) return;
-    setBusy(harnessId);
+    setBusy("reach");
     setFailure("");
-    void skillsApi.availability({
+    void skillsApi.reach({
       name: entry.name,
       scope: managed.scope as CapabilityInstallationScope,
       ...(managed.projectId ? { projectId: managed.projectId } : {}),
-      harnessId,
-      enabled,
+      ...change,
     }).then(() => onChanged()).catch((cause: unknown) => setFailure(message(cause))).finally(() => setBusy(""));
+  };
+  const harnessesTab = (shownEntry: SkillLibraryEntryDto, instructions: string | undefined, ownHint: string) => {
+    if (!library) return null;
+    if (shownEntry.managed) {
+      return (
+        <ReachPanel
+          entry={shownEntry as SkillLibraryEntryDto & { managed: NonNullable<SkillLibraryEntryDto["managed"]> }}
+          harnesses={library.harnesses}
+          instructions={instructions}
+          canWrite={canWriteManaged}
+          busy={busy}
+          onReach={setReach}
+        />
+      );
+    }
+    return (
+      <>
+        <p className="skills-tab-hint">{ownHint}</p>
+        <AvailabilityList
+          entry={shownEntry}
+          harnesses={library.harnesses}
+          canControlNative={access?.nativePolicy ?? false}
+          busy={busy}
+          onNative={setNativeHarness}
+        />
+      </>
+    );
   };
   const setNativeHarness = (harnessId: string, nativeName: string, enabled: boolean) => {
     setBusy(harnessId);
@@ -505,20 +689,7 @@ function SkillDetailBody({ target, library, projectId, projectName, onBack, onCh
         >
           {tab === "instructions" && <div className="skills-reading"><MarkdownDoc text={catalogDetail.instructions} keyBase={`skill-${skill.id}`} /></div>}
           {tab === "files" && <FilesPanel files={catalogDetail.files} load={(path) => skillsApi.catalogFile(skill.id, path)} />}
-          {tab === "harnesses" && entry && library && (
-            <>
-              <p className="skills-tab-hint">{tr("settings.skills.detail.availableHint")}</p>
-              <AvailabilityList
-                entry={entry}
-                harnesses={library.harnesses}
-                canWrite={canWriteManaged}
-                canControlNative={access?.nativePolicy ?? false}
-                busy={busy}
-                onManaged={setManagedHarness}
-                onNative={setNativeHarness}
-              />
-            </>
-          )}
+          {tab === "harnesses" && entry && harnessesTab(entry, catalogDetail.instructions, tr("settings.skills.detail.availableHintOwn"))}
         </SettingsTabs>
       </article>
     );
@@ -610,20 +781,7 @@ function SkillDetailBody({ target, library, projectId, projectName, onBack, onCh
           ...(detail.files.length ? [{ id: "files", label: tr("settings.skills.detail.tabFiles", { count: detail.files.length }) }] : []),
         ]}
       >
-        {tab === "harnesses" && library && (
-          <>
-            <p className="skills-tab-hint">{shown.managed ? tr("settings.skills.detail.availableHint") : tr("settings.skills.detail.availableHintOwn")}</p>
-            <AvailabilityList
-              entry={shown}
-              harnesses={library.harnesses}
-              canWrite={canWriteManaged}
-              canControlNative={access?.nativePolicy ?? false}
-              busy={busy}
-              onManaged={setManagedHarness}
-              onNative={setNativeHarness}
-            />
-          </>
-        )}
+        {tab === "harnesses" && harnessesTab(shown, detail.instructions, tr("settings.skills.detail.availableHintOwn"))}
         {tab === "instructions" && (detail.instructions
           ? <div className="skills-reading"><MarkdownDoc text={detail.instructions} keyBase={`skill-${shown.name}`} /></div>
           : <p className="skills-file-note">{tr("settings.skills.detail.noInstructions")}</p>)}

@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
     AgentCapabilityContribution,
@@ -32,7 +32,7 @@ import {
     requireInstanceOwnerAuthority,
 } from "@polyth/contracts/instance-authority";
 import { localOnlyRemoteAccess, packageDataDir, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { discoverHarnessExecutable, harnessExecutableChildEnv } from "./executableDiscovery.ts";
+import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimFile, windowsCmdWrapperTarget } from "./executableDiscovery.ts";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
 import { createNativePluginRoutes } from "./nativePluginRoutes.ts";
 import { readNativeSkillPatch } from "./nativeSkills.ts";
@@ -148,12 +148,23 @@ export async function freeHarnessExecutable(
 }
 export type HarnessUpdateResult = { ok: boolean; exitCode: number | null; output: string; versions?: HarnessVersionPrune };
 
+/** The npm package a harness CLI was installed from, and the command it
+ *  installs when the update argv runs a package manager (default: `[0]`). */
+export type HarnessUpdateNpmTarget = {
+    npmPackage?: string;
+    npmBin?: string;
+    npmDistTag?: string;
+    /** The npm to run instead of the one discovery finds. */
+    npmCommand?: string;
+};
 /** Run a harness CLI's own self-update argv: resolved like the harness
- *  executable, no shell, stdin closed, bounded time and output. After a
- *  successful update of a side-by-side install, the old versions no running
+ *  executable, no shell, stdin closed, bounded time and output. A CLI that
+ *  npm installed (`npmPackage`) is updated by npm instead, into the npm
+ *  prefix it lives in (`npm install -g <package>@<tag>`). After
+ *  a successful update of a side-by-side install, the old versions no running
  *  process uses are removed (`versionStore`). */
-export async function runHarnessUpdate(command: readonly string[], versionStore?: HarnessVersionStore): Promise<HarnessUpdateResult> {
-    const result = await runUpdateCommand(command);
+export async function runHarnessUpdate(command: readonly string[], versionStore?: HarnessVersionStore, options: HarnessUpdateNpmTarget = {}): Promise<HarnessUpdateResult> {
+    const result = await runUpdateCommand(command, options);
     if (!result.ok || !versionStore) return result;
     // The update moved the launcher to the new version; resolve it again.
     const { hit } = await discoverHarnessExecutable(command[0]!);
@@ -177,14 +188,142 @@ export const updateCrashName = (signal: unknown, exitCode: number | null): strin
     const status = exitCode === null ? undefined : WINDOWS_CRASH_STATUS[exitCode >>> 0];
     return status ? `${status} (0x${(exitCode! >>> 0).toString(16).toUpperCase()})` : undefined;
 };
-async function runUpdateCommand(command: readonly string[]): Promise<HarnessUpdateResult> {
-    const [binary, ...args] = command;
+const isFile = (path: string): Promise<boolean> => stat(path).then((entry) => entry.isFile(), () => false);
+/**
+ * The npm global prefix a CLI launcher belongs to, when npm installed
+ * `packageName` there: `<prefix>\<bin>.cmd` beside `<prefix>\node_modules`
+ * on Windows, `<prefix>/bin/<bin>` beside `<prefix>/lib/node_modules`
+ * elsewhere. The launcher must lead into that package, so a standalone
+ * binary next to a stale npm copy is not mistaken for it.
+ */
+export async function npmGlobalPrefixOf(
+    hit: { executablePath: string; launcherPath?: string },
+    packageName: string,
+    platform: NodeJS.Platform = process.platform,
+    hops = 2,
+): Promise<string | undefined> {
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    const launcherDir = dirname(launcher);
+    const prefix = platform === "win32" ? launcherDir : dirname(launcherDir);
+    const packageDir = join(prefix, ...(platform === "win32" ? [] : ["lib"]), "node_modules", ...packageName.split("/"));
+    if (await isFile(join(packageDir, "package.json"))) {
+        // A Windows npm launcher is a `.cmd` shim; follow it to the script it runs.
+        const target = platform === "win32" ? await windowsCmdShimFile(launcher) : hit.executablePath;
+        const [real, root] = target
+            ? await Promise.all([realpath(target).catch(() => undefined), realpath(packageDir).catch(() => undefined)])
+            : [];
+        if (real && root && real.startsWith(`${root}${sep}`))
+            return prefix;
+    }
+    if (platform !== "win32" || hops <= 0)
+        return undefined;
+    // Not npm's own shim: a `.cmd` wrapper on PATH (`~\.local\bin\codex.cmd`)
+    // that starts the npm copy installed somewhere else. The CLI's updater
+    // cannot tell how it was installed from there; the wrapper's target can.
+    const target = await windowsCmdWrapperTarget(launcher);
+    if (!target)
+        return undefined;
+    if (/\.(?:cmd|bat)$/i.test(target))
+        return npmGlobalPrefixOf({ executablePath: target, launcherPath: target }, packageName, platform, hops - 1);
+    // A file inside `<prefix>\node_modules\<package>`: that prefix counts only
+    // when npm's shim for the package sits in it (not pnpm's or bun's store).
+    const real = await realpath(target).catch(() => target);
+    const at = real.indexOf([ "", "node_modules", ...packageName.split("/"), "" ].join(sep));
+    if (at <= 0)
+        return undefined;
+    const candidate = real.slice(0, at);
+    for (const entry of await readdir(candidate).catch(() => [] as string[])) {
+        if (!/\.cmd$/i.test(entry))
+            continue;
+        const shim = join(candidate, entry);
+        if (await npmGlobalPrefixOf({ executablePath: shim, launcherPath: shim }, packageName, platform, 0) === candidate)
+            return candidate;
+    }
+    return undefined;
+}
+/** The npm prefix the update must install into, from the CLI's own install. */
+async function updateNpmPrefix(hit: { executablePath: string; launcherPath?: string }, target: HarnessUpdateNpmTarget): Promise<string | undefined> {
+    if (!target.npmPackage)
+        return undefined;
+    if (!target.npmBin)
+        return npmGlobalPrefixOf(hit, target.npmPackage);
+    const { hit: cli } = await discoverHarnessExecutable(target.npmBin);
+    return cli ? npmGlobalPrefixOf(cli, target.npmPackage) : undefined;
+}
+/**
+ * A Windows copy no updater here can replace: the launcher is a `.cmd`
+ * wrapper that is neither npm's install of the package nor any npm/pnpm shim
+ * (a hand-made shim over the Codex desktop app's bundled CLI). Settings then
+ * explains who updates it and offers Polyth's own install, which discovery
+ * prefers once it exists. Undefined for every copy an updater can handle.
+ */
+export async function externalHarnessCopy(
+    hit: { executablePath: string; launcherPath?: string },
+    descriptor: Pick<HarnessDescriptor, "releaseSource" | "externalApps">,
+    platform: NodeJS.Platform = process.platform,
+    env: NodeJS.ProcessEnv = process.env,
+): Promise<HarnessUpdateStatus["external"]> {
+    const source = descriptor.releaseSource;
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    if (platform !== "win32" || source?.kind !== "npm" || source.bin || !/\.(?:cmd|bat)$/i.test(launcher))
+        return undefined;
+    if (await windowsCmdShimFile(launcher) || await npmGlobalPrefixOf(hit, source.package, platform))
+        return undefined;
+    const location = await windowsCmdWrapperTarget(launcher, env) ?? await windowsCmdWrapperTarget(launcher, env, "folder");
+    const where = (location ?? "").toLowerCase();
+    const app = descriptor.externalApps?.find((entry) => where.includes(entry.pathIncludes.toLowerCase()))?.name;
+    return { launcher, ...(location ? { location } : {}), ...(app ? { app } : {}) };
+}
+/**
+ * What a failed update says about a Windows `.cmd` wrapper that is not an npm
+ * install: the file it starts, or the folder it picks its program from at
+ * call time, and that such a copy is updated by whatever installed it.
+ */
+export async function wrapperNote(launcher: string, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<string> {
+    if (platform !== "win32" || !/\.(?:cmd|bat)$/i.test(launcher))
+        return "";
+    const file = await windowsCmdWrapperTarget(launcher, env);
+    const folder = file ? undefined : await windowsCmdWrapperTarget(launcher, env, "folder");
+    return [
+        "",
+        ...(file ? [`It starts: ${file}`] : folder ? [`It starts a program in: ${folder}`] : []),
+        "This launcher is a wrapper around a copy that npm did not install, so Polyth cannot update it. Update it with the app that installed it, or remove the wrapper and install the CLI from Polyth.",
+    ].join("\n");
+}
+async function runUpdateCommand(command: readonly string[], target: HarnessUpdateNpmTarget): Promise<HarnessUpdateResult> {
+    const [binary, ...ownArgs] = command;
     if (!binary)
         throw harnessError("unsupported", "this harness has no update command");
-    const { hit } = await discoverHarnessExecutable(binary);
-    if (!hit)
+    const { hit: found } = await discoverHarnessExecutable(binary);
+    if (!found)
         throw harnessError("not-found", `${binary} is not installed`);
+    // A CLI's self-updater runs `npm install -g`, which installs into npm's
+    // configured prefix, not the one the CLI lives in. Polyth installs into
+    // its own (`%LOCALAPPDATA%\Polyth\npm`, `~/.local`): Pi then refuses
+    // ("not managed by a global npm install") and Codex would install a copy
+    // nothing runs; a plain `npm install -g` (DeepSeek's dsh) the same.
+    const prefix = await updateNpmPrefix(found, target);
+    // A CLI that npm installed is updated the way it was installed: npm
+    // itself, into that prefix. Each self-updater has its own idea of how it
+    // was installed (Pi asks `npm root -g`, Codex wants its launcher's
+    // environment) and refuses when that guess fails; Polyth already knows.
+    // (An argv that already runs the package manager, `npmBin`, stays as is.)
+    const npm = prefix && target.npmPackage && !target.npmBin ? (await discoverHarnessExecutable(target.npmCommand ?? "npm")).hit : undefined;
+    const hit = npm ?? found;
+    const args = npm ? ["install", "-g", `${target.npmPackage}@${target.npmDistTag ?? "latest"}`] : ownArgs;
     const env = await harnessExecutableChildEnv(hit.executablePath);
+    // Without an npm to run, the self-updater still gets the right prefix.
+    if (prefix) {
+        for (const key of Object.keys(env))
+            if (key.toLowerCase() === "npm_config_prefix")
+                delete env[key];
+        env.npm_config_prefix = prefix;
+    }
+    // Which program ran is the first question about a failed update (a CLI
+    // found on PATH may not be the copy Polyth installed).
+    // A `.cmd` wrapper hides the copy it starts; a failure names that too.
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    const ran = `Program: ${[launcher, ...(npm ? args : [])].join(" ")}${prefix ? "" : await wrapperNote(launcher)}`;
     // npm installs Windows CLIs as `.cmd` shims, which only start through
     // `cmd.exe`; Node refuses them without a shell (spawn EINVAL). The argv is
     // the descriptor's fixed words; the path is quoted because the shell joins
@@ -200,13 +339,13 @@ async function runUpdateCommand(command: readonly string[]): Promise<HarnessUpda
                 // prints nothing; name the crash so the failure is legible.
                 const crash = error ? updateCrashName((error as { signal?: unknown }).signal, exitCode) : undefined;
                 const crashed = crash ? `${binary} stopped with ${crash}` : "";
-                resolve({ ok: !error, exitCode, output: [output || (error && !crashed ? error.message : ""), crashed].filter(Boolean).join("\n") });
+                resolve({ ok: !error, exitCode, output: [output || (error && !crashed ? error.message : ""), crashed, error ? ran : ""].filter(Boolean).join("\n") });
             });
             child.stdin?.end();
         }
         catch (error) {
             // A launch Node refuses up front is a failed update, not a server error.
-            resolve({ ok: false, exitCode: null, output: error instanceof Error ? error.message : String(error) });
+            resolve({ ok: false, exitCode: null, output: [error instanceof Error ? error.message : String(error), ran].join("\n") });
         }
     });
 }
@@ -568,7 +707,7 @@ export function harnessRoutes(
             request.json(200, await Promise.all(targets.map(async (provider): Promise<HarnessUpdateStatus> => {
                 const { descriptor } = provider;
                 try {
-                    return await harnessUpdateStatus({
+                    const status = await harnessUpdateStatus({
                         descriptor,
                         snapshot: snapshots.find((row) => row.identity.id === descriptor.id),
                         remote: context.remote,
@@ -576,6 +715,12 @@ export function harnessRoutes(
                         checker: updateChecker,
                         force,
                     });
+                    const binary = descriptor.updateCommand?.[0];
+                    if (context.remote || status.reason === "not-installed" || status.reason === "bundled" || !binary || process.platform !== "win32")
+                        return status;
+                    const { hit } = await discoverHarnessExecutable(binary);
+                    const external = hit ? await externalHarnessCopy(hit, descriptor) : undefined;
+                    return external ? { ...status, external } : status;
                 }
                 catch {
                     return { harnessId: descriptor.id, available: false, reason: "unavailable", canUpdate: false };
@@ -585,6 +730,16 @@ export function harnessRoutes(
         }
         // A host install runs as the connection's SSH identity: only for a
         // person allowed to use that connection (Spaces §14.6), like a chat.
+        /** For setup, a remote project whose connection runs this harness on
+         *  this machine is a local one: that is where the CLI is installed
+         *  and signed in (`SshConnectionDto.harnessPlacement`). */
+        const setupProject = <P extends Pick<Project, "remote">>(descriptor: HarnessDescriptor, project: P | undefined): P | undefined => {
+            if (project?.remote?.kind !== "ssh" || descriptor.remoteHost?.localPlacement !== true) return project;
+            const ssh = host.services.get(serverServiceKey<{ get?(id: string): { harnessPlacement?: Record<string, string> } | undefined }>("ssh"));
+            return ssh?.get?.(project.remote.connectionId)?.harnessPlacement?.[descriptor.id] === "local"
+                ? { ...project, remote: undefined }
+                : project;
+        };
         const sshUsable = (connectionId: string): boolean => {
             const ssh = host.services.get(serverServiceKey<{ usable?(id: string, principal: unknown): boolean }>("ssh"));
             return !ssh?.usable || ssh.usable(connectionId, {
@@ -608,14 +763,14 @@ export function harnessRoutes(
             // would set it up.
             if (project?.remote?.kind === "ssh" && !sshUsable(project.remote.connectionId)) {
                 request.json(200, providers().flatMap((provider) => {
-                    const key = installKey(provider.descriptor, project);
+                    const key = installKey(provider.descriptor, setupProject(provider.descriptor, project));
                     const job = key.startsWith("local:") ? installs.get(key) : undefined;
                     return job ? [job] : [];
                 }));
                 return true;
             }
             request.json(200, providers().flatMap((provider) => {
-                const job = installs.get(installKey(provider.descriptor, project));
+                const job = installs.get(installKey(provider.descriptor, setupProject(provider.descriptor, project)));
                 return job ? [job] : [];
             }));
             return true;
@@ -633,7 +788,7 @@ export function harnessRoutes(
                 throw editionUnavailable(`${descriptor.name} installation`);
             const input = request.method === "POST" ? await request.body() : {};
             const projectId = request.method === "POST" ? input.projectId : request.url.searchParams.get("projectId");
-            const project = typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined;
+            const project = setupProject(descriptor, typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined);
             if (projectId && !project)
                 throw harnessError("not-found", "project not found");
             requireSetupAuthority(request, descriptor, "install");
@@ -658,6 +813,7 @@ export function harnessRoutes(
                 sources: installSources(chosen.command),
                 browserOnMachine: !remote && browserOnServer(request),
                 ...(descriptor.setupUrl ? { setupUrl: descriptor.setupUrl } : {}),
+                ...(workstationEdition() ? { manualOnly: true as const } : {}),
             };
             if (request.method === "GET") {
                 request.json(200, { preview, job: installs.get(key) ?? null });
@@ -706,7 +862,7 @@ export function harnessRoutes(
             const input = request.method === "POST" ? await request.body() : {};
             const action = readSetupAction(request.method === "POST" ? input.action : request.url.searchParams.get("action"));
             const projectId = request.method === "POST" ? input.projectId : request.url.searchParams.get("projectId");
-            const project = typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined;
+            const project = setupProject(provider.descriptor, typeof projectId === "string" && projectId ? await scoped.projects.get(projectId) : undefined);
             if (projectId && !project)
                 throw harnessError("not-found", "project not found");
             requireSetupAuthority(request, provider.descriptor, action);
@@ -768,7 +924,8 @@ export function harnessRoutes(
             if (!provider.descriptor.updateCommand?.length)
                 throw harnessError("unsupported", "this harness has no update command");
             await freeHarnessExecutable(host, provider.descriptor);
-            const result = await runHarnessUpdate(provider.descriptor.updateCommand, provider.versionStore);
+            const source = provider.descriptor.releaseSource;
+            const result = await runHarnessUpdate(provider.descriptor.updateCommand, provider.versionStore, source?.kind === "npm" ? { npmPackage: source.package, ...(source.bin ? { npmBin: source.bin } : {}), ...(source.distTag ? { npmDistTag: source.distTag } : {}) } : {});
             invalidateModels();
             if (result.ok && provider.descriptor.releaseSource)
                 updateChecker.forget(provider.descriptor.releaseSource);

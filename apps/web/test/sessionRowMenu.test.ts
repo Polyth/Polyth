@@ -513,6 +513,61 @@ test("right-click Copy session ID writes the exact row id to the clipboard", asy
   }
 });
 
+test("the state column shows a resting pin, live state wins, and an empty column lets the pill hug the title", async () => {
+  activateProject("p1");
+  setSessions("p1", [
+    session({ id: "pin-idle", title: "Pinned idle", pinned: { position: 0 } }),
+    session({ id: "pin-run", title: "Pinned working", status: "working", lastTurnAt: Date.now() - 5_000, pinned: { position: 1 } }),
+    session({ id: "plain-idle", title: "Plain idle" }),
+    session({ id: "plain-unread", title: "Plain unread", attention: { unread: 1 } } as Partial<SessionProjection>),
+  ]);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(SessionList, { projectId: "p1" })); });
+    const pinIdle = rowOf(container, "Pinned idle");
+    const lead = pinIdle.querySelector(".session-lead");
+    assert.ok(lead?.querySelector(".session-lead-pin svg"), "a pinned chat at rest shows its pin in the state column");
+    assert.equal(lead?.querySelector(".session-lead-pin")?.getAttribute("aria-hidden"), "true", "the lead pin is decorative");
+    assert.equal(pinIdle.querySelector(".session-pin-icon"), null, "no trailing pin");
+    assert.equal(pinIdle.querySelector(".session-identity .session-lead-pin"), null);
+    assert.equal(pinIdle.dataset.lead, "mark", "the pin fills the column, so the pill keeps the state-column start");
+    // Pinned-ness stays in the accessible description, whatever the column shows.
+    for (const row of [pinIdle, rowOf(container, "Pinned working")]) {
+      const ids = row.querySelector(".session-btn")?.getAttribute("aria-describedby")?.split(" ") ?? [];
+      const described = ids.map((id) => row.querySelector(`[id="${id}"]`)?.textContent ?? "").join(" ");
+      assert.match(described, /Pinned/, "the row is described as pinned");
+    }
+
+    const pinRun = rowOf(container, "Pinned working");
+    assert.ok(pinRun.querySelector(".session-lead .session-lead-spinner"), "working wins the state column");
+    assert.equal(pinRun.querySelector(".session-lead-pin"), null, "no pin while live state shows");
+    assert.equal(pinRun.dataset.lead, "mark");
+
+    const plainIdle = rowOf(container, "Plain idle");
+    assert.equal(plainIdle.dataset.lead, "empty", "an idle unpinned row leaves the column empty");
+    assert.equal(plainIdle.querySelector(".session-lead")?.querySelector("[aria-hidden]"), null);
+
+    const plainUnread = rowOf(container, "Plain unread");
+    assert.ok(plainUnread.querySelector(".session-lead .session-lead-dot"));
+    assert.equal(plainUnread.dataset.lead, "mark", "an unread dot is a mark");
+
+    // The pin returns when the live state clears.
+    await act(async () => {
+      setSessions("p1", [
+        session({ id: "pin-idle", title: "Pinned idle", pinned: { position: 0 } }),
+        session({ id: "pin-run", title: "Pinned working", status: "idle", pinned: { position: 1 } }),
+        session({ id: "plain-idle", title: "Plain idle" }),
+      ]);
+    });
+    assert.ok(rowOf(container, "Pinned working").querySelector(".session-lead .session-lead-pin"), "the pin returns once the state clears");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("pinned chats are first across worktrees and their menu offers Unpin", async () => {
   activateProject("p1");
   setSessions("p1", [
@@ -529,7 +584,11 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
     assert.ok(org && pinned, "pinned section is rendered");
     assert.equal(org!.firstElementChild, pinned, "pinned chats lead the worktree groups");
     assert.doesNotMatch(pinned!.textContent ?? "", /feature\/pinned/, "active state outranks the narrow worktree pill");
-    assert.ok(pinned!.querySelector(".session-pin-icon"), "pinned chat shows a pin icon");
+    // Live state wins the state column: a working pinned chat shows its
+    // spinner and no pin; the trailing pin is gone for good.
+    assert.ok(pinned!.querySelector(".session-lead .session-lead-spinner"), "working pinned chat shows its spinner");
+    assert.equal(pinned!.querySelector(".session-lead-pin"), null, "live state hides the lead pin");
+    assert.equal(pinned!.querySelector(".session-pin-icon"), null, "no trailing pin");
     // The full branch lives in the row's hover card (focus reveals it at once).
     const pinnedButton = pinned!.querySelector<HTMLButtonElement>(".session-btn");
     assert.ok(pinnedButton);

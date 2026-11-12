@@ -12,7 +12,16 @@ import type {
   TaskTrackerColumnDto,
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
-import {
+import type { WebIconComponent } from "@polyth/web-sdk";
+import { useStore } from "../../../apps/web/src/store.ts";
+import { copyText } from "../../../apps/web/src/utils.ts";
+import { PROVIDER_LABELS } from "./brand.tsx";
+import { tt } from "./i18n.ts";
+import type { TaskTrackerTaskLinkDto } from "../src/types.ts";
+import { hostUi } from "./store.ts";
+
+const { Icon, Menu } = hostUi.components;
+const {
   ArchiveIcon,
   BoardViewIcon,
   ChatIcon,
@@ -24,19 +33,12 @@ import {
   DockSideIcon,
   EditIcon,
   ExternalLinkIcon,
-  Icon,
   LinkIcon,
-  Menu,
   NewChatIcon,
   SendIcon,
   TasksIcon,
-  type LucideIcon,
-} from "../../../apps/web/src/components/ui/index.ts";
-import { useStore } from "../../../apps/web/src/store.ts";
-import { copyText } from "../../../apps/web/src/utils.ts";
-import { PROVIDER_LABELS } from "./brand.tsx";
-import { tt } from "./i18n.ts";
-import type { TaskTrackerTaskLinkDto } from "../src/types.ts";
+} = hostUi.iconSet;
+type LucideIcon = WebIconComponent;
 
 /**
  * Right-click (long-press on touch, Shift+F10 / the Menu key) menu for one

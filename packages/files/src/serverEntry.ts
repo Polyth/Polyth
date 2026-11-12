@@ -13,7 +13,7 @@ import type {
 import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import { hasInstanceOwnerAuthority, requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import type { SessionOutputCache } from "@polyth/session/output-cache";
-import { resolveWorkspaceContext, workspaceExecutionPath, workspaceRepository } from "@polyth/contracts/workspace";
+import { PROJECT_ROOT_FOLDER_ID, resolveWorkspaceContext, workspaceExecutionPath, workspaceRepository } from "@polyth/contracts/workspace";
 import {
   packageDataDir,
   serverServiceKey,
@@ -333,6 +333,8 @@ export function workspaceRoutes(deps: {
     if (!repositoryId) {
       return session ? workspaceExecutionPath(project, session) : project.path;
     }
+    // The Project's own folder, after the session was proven to belong to it.
+    if (repositoryId === PROJECT_ROOT_FOLDER_ID) return project.path;
     const context = resolveWorkspaceContext(project, session);
     const repository = workspaceRepository(context, repositoryId);
     if (repository.state === "missing") {

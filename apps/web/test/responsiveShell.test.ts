@@ -215,7 +215,8 @@ test("drawer opens existing sessions but new chat defers session creation", asyn
   assert.match(list, /openSession\(id\)\.then\(/, "close happens after openSession resolves");
   const sidebar = await read("../src/components/Sidebar.tsx");
   // startFreshSession enters the unsaved composer (restoring a shelved draft).
-  assert.ok(sidebar.includes("startFreshSession(p.id)"), "project plus enters the unsaved composer surface");
+  // Under a repository chip it starts on that repository (repositoryFilter.ts).
+  assert.ok(sidebar.includes("startFreshSession(p.id, newChatOptions(p))"), "project plus enters the unsaved composer surface");
   assert.ok(
     list.includes('startFreshSession(projectId, key === "__main__" ? {} : { worktreePath: key })'),
     "worktree plus enters the unsaved composer with its contextual target",

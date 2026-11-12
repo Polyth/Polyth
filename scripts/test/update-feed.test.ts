@@ -57,17 +57,17 @@ test("the builder run number becomes a newer patch version", () => {
 test("each release channel versions its builds distinctly", () => {
   assert.equal(resolveReleaseChannel(undefined), "stable");
   assert.equal(resolveReleaseChannel(" nightly "), "nightly");
-  assert.throws(() => resolveReleaseChannel("beta"), /stable, test, nightly/);
+  assert.throws(() => resolveReleaseChannel("beta"), /stable, nightly/);
+  // The test channel is retired: a run asking for it fails instead of publishing.
+  assert.throws(() => resolveReleaseChannel("test"), /stable, nightly/);
   assert.equal(resolveBuildVersion("0.1.0", "140", "stable"), "0.1.140");
-  assert.equal(resolveBuildVersion("0.1.0", "141", "test"), "0.1.141-beta");
   assert.equal(resolveBuildVersion("0.1.0", "142", "nightly"), "0.1.142-nightly");
   assert.equal(channelOfVersion("0.1.140"), "stable");
-  assert.equal(channelOfVersion("0.1.141-beta"), "test");
+  assert.equal(channelOfVersion("0.1.141-beta"), null);
   assert.equal(channelOfVersion("0.1.142-nightly"), "nightly");
   assert.equal(channelOfVersion("0.1.142-rc.1"), null);
   assert.deepEqual(channelMetadataAliases("nightly"), ["nightly"]);
-  assert.deepEqual(channelMetadataAliases("test"), ["beta"]);
-  // Test-channel updaters also accept stable releases and read beta*.yml there.
+  // Installs still on the retired test channel read beta*.yml from stable releases.
   assert.deepEqual(channelMetadataAliases("stable"), ["beta"]);
 });
 

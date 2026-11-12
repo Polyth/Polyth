@@ -56,6 +56,8 @@ Object.defineProperty(globalThis, "getComputedStyle", {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
+const { hostUi, installTestHost } = await import("./hostUi.ts");
+installTestHost();
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -168,7 +170,7 @@ test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-ar
     }
     return css.slice(start);
   };
-  assert.match(css, /\.tt-task-card,\n\.tt-list-row,[\s\S]*?min-height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)/);
+  assert.match(css, /\.tt-task-card,\n\.tt-list-row \{[^}]*min-height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)/);
   assert.match(css, /\.tt-search \.ui-input[\s\S]*width:\s*100%/);
   assert.match(block("480px"), /\.tt-empty[\s\S]*min-height:\s*0/);
   // The board sits on the window's material: no opaque fill of its own.
@@ -180,7 +182,7 @@ test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-ar
   assert.doesNotMatch(narrow, /position:\s*absolute|svh/);
   assert.doesNotMatch(block("1099px"), /position:\s*absolute|svh/);
   // Icon-only view switch keeps its icons; labels hide only when narrow.
-  assert.match(block("560px"), /\.tt-view-toggle \.ui-btn-label/);
+  assert.match(block("560px"), /\.tt-view-toggle \.tt-view-text/);
   assert.match(css, /\.tt-task-surface[\s\S]*overflow:\s*auto/);
   assert.match(css, /\.tt-board-content \{[^}]*overflow:\s*clip/);
   assert.match(css, /env\(safe-area-inset-bottom/);
@@ -356,8 +358,8 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     assert.match(container.textContent ?? "", /Fix mobile overflow/);
     assert.ok(container.querySelector(".tt-kanban"), "scrum board starts in kanban view");
 
-    const jiraTab = container.querySelector<HTMLButtonElement>('[role="tab"][data-provider="jira"]');
-    const trelloTab = container.querySelector<HTMLButtonElement>('[role="tab"][data-provider="trello"]');
+    const jiraTab = container.querySelector('[data-provider="jira"]')?.closest<HTMLButtonElement>('[role="tab"]') ?? null;
+    const trelloTab = container.querySelector('[data-provider="trello"]')?.closest<HTMLButtonElement>('[role="tab"]') ?? null;
     assert.ok(jiraTab);
     assert.ok(trelloTab);
     assert.equal(jiraTab.tabIndex, 0);
@@ -380,7 +382,7 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     assert.equal(jiraTab.getAttribute("aria-selected"), "true");
 
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('button[title="List view"]')?.click();
+      container.querySelector('[title="List view"]')?.closest<HTMLButtonElement>('[role="tab"]')?.click();
     });
     assert.ok(container.querySelector(".tt-list"));
     assert.equal(configs.at(-1)?.defaultView, "list");

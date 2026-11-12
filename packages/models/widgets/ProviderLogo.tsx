@@ -73,7 +73,7 @@ function findProviderKey(value: string): ProviderKey | undefined {
 
 /** Harness families that register extra native logins as `<family>-<account>`
  *  harnesses. The account part is user text, so it must never pick the mark. */
-const ACCOUNT_FAMILIES = new Set(["antigravity", "claude", "codex", "commandcode", "cursor", "deepseek", "grok", "omp", "pi"]);
+const ACCOUNT_FAMILIES = new Set(["antigravity", "claude", "codex", "commandcode", "copilot", "cursor", "deepseek", "grok", "omp", "pi"]);
 const accountFamily = (value: string | undefined): string | undefined => {
   const match = /^([a-z]+)-[a-z0-9][a-z0-9-]*$/.exec(value?.trim().toLowerCase() ?? "");
   return match && ACCOUNT_FAMILIES.has(match[1]!) ? match[1] : undefined;

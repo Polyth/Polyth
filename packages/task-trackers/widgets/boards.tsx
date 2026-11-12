@@ -4,14 +4,6 @@ import type {
   TaskTrackerProjectDto,
   TaskTrackerProvider,
 } from "@polyth/contracts";
-import {
-  Button,
-  Checkbox,
-  Dialog,
-  Notice,
-  Select,
-  TextInput,
-} from "../../../apps/web/src/components/ui/index.ts";
 import { api } from "./api.ts";
 import { PROVIDER_LABELS, ProviderMark, providerNouns } from "./brand.tsx";
 import { tt } from "./i18n.ts";
@@ -24,7 +16,9 @@ import {
   useProviderScope,
   type ProviderBoardScope,
 } from "./scope.ts";
-import { friendly } from "./store.ts";
+import { friendly, hostUi } from "./store.ts";
+
+const { Button, Checkbox, Dialog, Notice, Select, Spinner, TextInput } = hostUi.components;
 
 /**
  * Board scope: which projects/workspaces and boards one person sees in a
@@ -221,7 +215,7 @@ export function BoardScopeDialog({
         <section className="tt-scope-section" aria-label={tt("tasktrackers.boards.sectionBoards")} aria-busy={boards === null}>
           <h4>{tt("tasktrackers.boards.sectionBoards")}</h4>
           {boards === null && !error ? (
-            <p className="tt-inline-hint" role="status"><span className="tt-spinner" /> {tt("tasktrackers.boards.loading")}</p>
+            <p className="tt-inline-hint" role="status"><Spinner size="sm" /> {tt("tasktrackers.boards.loading")}</p>
           ) : groups.length === 0 ? (
             <p className="tt-inline-hint">{tt("tasktrackers.boards.empty")}</p>
           ) : groups.map((group) => {

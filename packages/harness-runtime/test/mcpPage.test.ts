@@ -152,11 +152,11 @@ const server = (over: Partial<McpInstallationDto> = {}): McpInstallationDto => (
   ...over,
 });
 
-const mount = async () => {
+const mount = async (host?: import("../widgets/McpPage.tsx").McpCatalogHost) => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => { root.render(createElement(McpPage)); });
+  await act(async () => { root.render(createElement(McpPage, host ? { host } : {})); });
   await flush();
   return {
     container,
@@ -802,6 +802,44 @@ test("empty scope offers quick-start installs that preselect the transport", asy
     assert.equal(requests.some((item) => item.path.includes("projectId=") && item.method !== "GET"), false);
   } finally {
     await view.unmount();
+  }
+});
+
+test("the catalog is offered only while its window exists, and opens it", async () => {
+  requests.length = 0;
+  seedProjects();
+  servers = [];
+  const opened: string[] = [];
+  const host = (exists: boolean) => ({
+    surfaces: { has: (surfaceId: string) => exists && surfaceId === "integration-catalog" },
+    navigation: { openWorkspacePane: (surfaceId: string) => { opened.push(surfaceId); return true; } },
+  });
+
+  const absent = await mount(host(false));
+  try {
+    assert.match(absent.container.textContent ?? "", /No MCP servers for this project/);
+    assert.equal(labeledButton(absent.container, "Add from catalog"), undefined, "a disabled catalog leaves no dead button");
+  } finally {
+    await absent.unmount();
+  }
+
+  // A host that cannot say whether the window exists gets no control either.
+  const unknown = await mount({ navigation: { openWorkspacePane: () => true } });
+  try {
+    assert.equal(labeledButton(unknown.container, "Add from catalog"), undefined, "an unanswerable host leaves no dead button");
+  } finally {
+    await unknown.unmount();
+  }
+
+  const present = await mount(host(true));
+  try {
+    await click(present.container, "Add from catalog");
+    assert.deepEqual(opened, ["integration-catalog"], "the catalog opens as a workspace window");
+    assert.equal(requests.length > 0, true, "the MCP page keeps its own requests");
+    assert.equal(requests.some((request) => request.path.includes("integration-catalog")), false,
+      "this package never calls the catalog's routes itself");
+  } finally {
+    await present.unmount();
   }
 });
 

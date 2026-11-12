@@ -238,10 +238,12 @@ function classifyMcpCall(call: McpCall): ExecutionKind {
   return "mcp";
 }
 
-export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
-  // Every harness's MCP naming (wrappers included) is classified by the call it carries.
-  const mcpCall = effectiveToolCall(tool, input).mcp;
-  if (mcpCall) return classifyMcpCall(mcpCall);
+export function classifyTool(rawTool: string, rawInput: JsonObject): ExecutionKind {
+  // Every harness's MCP naming (wrappers included) is classified by the call it
+  // carries; native argument shapes (Antigravity's `run_command`) by their meaning.
+  const effective = effectiveToolCall(rawTool, rawInput);
+  if (effective.mcp) return classifyMcpCall(effective.mcp);
+  const { tool, input } = effective;
   // OpenCode prefixes project-provisioned package tools with the MCP server
   // name. "polyth-agent-tools" describes the bridge, not a delegated agent;
   // classify the contributed tool itself so ordinary package actions do not
@@ -251,7 +253,8 @@ export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
   );
   const action = firstString(input, ["action"]);
   if (value === "polyth" && action === "agent.spawn") return "subagent";
-  const shell = /^(bash|shell|shell_command|run_shell|exec|terminal)$/.test(value);
+  // `execute` is ACP's standard kind for a shell call (Copilot, DeepSeek, …).
+  const shell = /^(bash|shell|shell_command|run_shell|exec|execute|terminal)$/.test(value);
   const command = firstString(input, ["command", "cmd"]);
   // Some native runtimes expose repository work through one command transport.
   // Keep that transport in history, but present the operation's semantic intent.
@@ -309,7 +312,8 @@ function displayLabel(kind: ExecutionKind, tool: string): string {
     subagent: "Subagent",
     test: "Test",
     git: "Git",
-    tool: tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
+    // ACP's catch-all kind `other` names no tool.
+    tool: tool.toLowerCase() === "other" ? "Tool" : tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tool",
   }[kind];
 }
 

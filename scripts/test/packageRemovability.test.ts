@@ -74,6 +74,7 @@ const SHARED_ROOT_WRITERS: Readonly<Record<string, string>> = {
   "backend-claude": "passes the root to harness-runtime",
   "backend-codex": "passes the root to harness-runtime",
   "backend-commandcode": "passes the root to harness-runtime",
+  "backend-copilot": "passes the root to harness-runtime",
   "backend-cursor": "passes the root to harness-runtime",
   "backend-deepseek": "passes the root to harness-runtime",
   "backend-grok": "passes the root to harness-runtime",

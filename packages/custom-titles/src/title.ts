@@ -1,5 +1,5 @@
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
-import type { CustomTitleSettings } from "./settings.ts";
+import type { CustomTitleRules } from "./settings.ts";
 import { CUSTOM_TITLE_MAX_CHARS, TITLE_EXAMPLES } from "./titleReply.ts";
 
 export { CUSTOM_TITLE_MAX_CHARS, readGeneratedTitle, sanitizeGeneratedTitle, type GeneratedTitle, type TitleRejection } from "./titleReply.ts";
@@ -57,7 +57,7 @@ export function selectOpenCodeFreeModel(models: readonly ModelDescriptor[]): Mod
  * a model that ignored them: a bare few-shot pattern it only has to continue. */
 export type CustomTitleAttempt = "standard" | "strict";
 
-const languageRule = (settings: CustomTitleSettings): string =>
+const languageRule = (settings: CustomTitleRules): string =>
   settings.language.trim().toLowerCase() === "auto"
     ? "Use the same language as the user's request."
     : `Write the title in ${settings.language.trim()}, even when the request is written in another language.`;
@@ -65,7 +65,7 @@ const languageRule = (settings: CustomTitleSettings): string =>
 // Shown rather than only stated: with "auto" one pair is Ukrainian so "same
 // language as the message" is demonstrated; an explicit language is shown for
 // English and Ukrainian and otherwise stated by the rule and the final cue.
-const examplePairs = (settings: CustomTitleSettings): Array<{ message: string; title: string }> => {
+const examplePairs = (settings: CustomTitleRules): Array<{ message: string; title: string }> => {
   const language = settings.language.trim().toLowerCase();
   const fixed = language === "auto" ? undefined : /^(?:uk|ukrainian|українська)$/u.test(language) ? "uk" : "en";
   return TITLE_EXAMPLES.map((example) => ({
@@ -74,11 +74,11 @@ const examplePairs = (settings: CustomTitleSettings): Array<{ message: string; t
   }));
 };
 
-const rulesLine = (settings: CustomTitleSettings): string[] =>
+const rulesLine = (settings: CustomTitleRules): string[] =>
   settings.rules.trim() ? [`Additional title rules: ${settings.rules.trim()}`] : [];
 
 export function buildCustomTitleSystemPrompt(
-  settings: CustomTitleSettings,
+  settings: CustomTitleRules,
   attempt: CustomTitleAttempt = "standard",
 ): string {
   if (attempt === "strict") {
@@ -120,7 +120,7 @@ export function titlePromptInput(prompt: string, maxChars = CUSTOM_TITLE_INPUT_M
  * message, because a model acts on whatever it read most recently. */
 export function buildCustomTitlePrompt(
   message: string,
-  settings: CustomTitleSettings,
+  settings: CustomTitleRules,
   attempt: CustomTitleAttempt = "standard",
 ): string {
   const language = settings.language.trim();

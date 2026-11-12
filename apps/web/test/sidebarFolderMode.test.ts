@@ -154,8 +154,10 @@ for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact 
         }
       }
       if (presentation.includes("rail")) {
+        // Wide rails start chats from the full-width New chat row under the
+        // project row; the compact drawer keeps its toolbar compose button.
         const compose = container.querySelector<HTMLButtonElement>(presentation === "compact rail"
-          ? ".sidebar-drawer-tool-compose" : ".sidebar-focused-project .sidebar-header-compose")!;
+          ? ".sidebar-drawer-tool-compose" : ".sidebar-main .sidebar-nav-block .sidebar-nav-new")!;
         assert.equal(compose.getAttribute("aria-label"), "New chat in beta");
         await act(async () => { click(compose); });
         assert.equal(store.getState().activeProjectId, "beta", "explicit new chat opens the browsed project");
@@ -173,6 +175,57 @@ for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact 
     }
   });
 }
+
+test("a multi-repository project's header counts its repositories only while its chip row is closed", async () => {
+  const multi: Project = {
+    ...project("multi"),
+    repositories: [{ id: "api", alias: "api", path: "/work/multi" }, { id: "web", alias: "web", path: "/work/multi/web" }],
+    primaryRepositoryId: "api",
+  };
+  // This file's fetch stub has no summary pages; answer them as the server
+  // does so the multi project's list loads empty instead of a junk row.
+  const baseFetch = (globalThis as { fetch?: unknown }).fetch as (url: string) => Promise<unknown>;
+  (globalThis as { fetch?: unknown }).fetch = async (url: string) => {
+    if (new URL(String(url), "http://localhost:3000").pathname !== "/api/sessions/summaries") return baseFetch(url);
+    const body = { sessions: [], complete: true, revision: 0 };
+    return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
+  };
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [multi, project("alpha")]);
+  store.activateProject("multi");
+  store.setSessions("multi", []);
+  setSidebarViewMode("tree");
+  localStorage.setItem("polyth.sidebar.expandedProjects", "[]");
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+    const card = () => container.querySelector<HTMLButtonElement>('[data-project-id="multi"] .project-card')!;
+    const count = () => card().querySelector(".project-repository-count");
+    // The active project opens with its list.
+    assert.equal(card().getAttribute("aria-expanded"), "true");
+    const chips = [...container.querySelectorAll<HTMLButtonElement>('[data-project-id="multi"] .repository-filter-chip')];
+    assert.ok(chips.length === 3, "the open project shows its chip row");
+    assert.equal(count(), null, "and its header drops the count the chips repeat");
+    assert.match(chips[0]!.title, /api · \/work\/multi\nweb · \/work\/multi\/web/, "All's tooltip lists every alias and path");
+    assert.match(chips[2]!.title, /\n\/work\/multi\/web$/, "a chip's tooltip names its path");
+
+    await act(async () => { click(card()); });
+    assert.equal(card().getAttribute("aria-expanded"), "false");
+    assert.equal(count()?.textContent, "2 repos", "a closed project says how many repositories it has");
+    assert.match(count()?.getAttribute("title") ?? "", /api · \/work\/multi\nweb · \/work\/multi\/web/);
+
+    await act(async () => { click(card()); });
+    assert.equal(count(), null, "open again, the count goes");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    (globalThis as { fetch?: unknown }).fetch = baseFetch;
+    store.setSessions("multi", []);
+    localStorage.removeItem("polyth.sidebar.expandedProjects");
+  }
+});
 
 test("parseSidebarViewMode starts fresh installs on the project tree; setter persists and round-trips", () => {
   assert.equal(parseSidebarViewMode(null), "tree", "a rail with no project icon is an empty strip");
@@ -483,7 +536,9 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-focused-project")), 0);
     assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-service-bar")), -1,
       "the rail has no toolbar row of its own while the project row is shown");
-    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("side-scroll")), 1);
+    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("sidebar-nav-block")), 1,
+      "New chat and the package actions follow the project row");
+    assert.equal(railMainChildren.findIndex((child) => child.classList.contains("side-scroll")), 2);
 
     const sessionIntent = store.getState().newSessionIntent;
     await act(async () => { click(focused!.querySelector(".project-card")!); });
@@ -1044,9 +1099,11 @@ test("desktop rail: the project row is the header and search opens in its place"
         // The toolbar's Customize pencil shows only in Edit mode / Shift.
         .filter((button) => !button.classList.contains("zone-customize-trigger"))
         .map((button) => button.getAttribute("aria-label")),
-      ["Search projects, worktrees, and sessions", "New chat in alpha", "More sidebar actions", "Actions for alpha"],
-      "search, new chat, list options, then the project's ⋮",
+      ["Search projects, worktrees, and sessions", "More sidebar actions", "Actions for alpha"],
+      "search, list options, then the project's ⋮; New chat is the row below",
     );
+    const newChat = container.querySelector<HTMLButtonElement>(".sidebar-focused-project + .sidebar-nav-block > .sidebar-nav-new");
+    assert.equal(newChat?.getAttribute("aria-label"), "New chat in alpha", "the full-width New chat row follows the project row");
     assert.ok(
       header()!.querySelector('.sidebar-header-tools > .zone-customize-trigger[aria-label="Customize Sidebar"]'),
       "the sessions toolbar keeps its own editor; the rail's pencil edits the rail",
@@ -1063,6 +1120,9 @@ test("desktop rail: the project row is the header and search opens in its place"
     assert.equal(document.activeElement, input, "the field takes focus as it opens");
     assert.ok(bar()!.querySelector(".sidebar-search-clear"), "an open field can always be closed");
     assert.equal(bar()!.querySelector(".sidebar-select-toggle"), null);
+    assert.equal(bar()!.querySelector(".sidebar-new-session"), null, "the wide search row has no compose button");
+    assert.ok(container.querySelector(".sidebar-service-bar[data-rail] + .sidebar-nav-block"),
+      "the New chat row stays under the search row, so the list does not jump");
     await act(async () => { typeQuery(input, "beta"); });
     assert.match(container.querySelector(".sidebar-search-results")?.textContent ?? "", /Beta session/);
     await act(async () => {

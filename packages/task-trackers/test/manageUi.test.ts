@@ -53,6 +53,8 @@ Object.defineProperty(globalThis, "getComputedStyle", {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
+const { hostUi, installTestHost } = await import("./hostUi.ts");
+installTestHost();
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -132,7 +134,7 @@ test("widget preferences narrow the registered catalog and the installer follows
   let disposed = 0;
   const host = {
     widgets: { registerPlugin: (plugin: WidgetPlugin) => { registered.push(plugin); return () => { disposed++; }; } },
-    ui: { icons: {} },
+    ui: hostUi,
     errors: { friendly: (action: string) => action },
   } as unknown as WebPackageHost;
   try {
@@ -191,7 +193,7 @@ test("management page toggles services, features, and widgets through the settin
     assert.deepEqual(patches[0], { providers: { trello: false } });
     assert.equal(view.container.querySelector(".tt-service-card.trello .tt-collapse")?.getAttribute("data-open"), "false");
 
-    const switches = [...view.container.querySelectorAll<HTMLButtonElement>('.tt-setting-row [role="switch"]')];
+    const switches = [...view.container.querySelectorAll<HTMLButtonElement>('.set-row [role="switch"]')];
     assert.equal(switches.length, 7, "three features, agent automation and three widgets");
     await act(async () => { switches[0]!.click(); });
     await settle();
@@ -322,7 +324,7 @@ test("a personal account toggles per Space and admins set the agent policy", asy
     await settle();
     assert.equal(view.container.querySelector('[aria-label="Use Ada Dev in this Space"]')?.getAttribute("aria-checked"), "true");
 
-    const row = [...view.container.querySelectorAll(".tt-setting-row")]
+    const row = [...view.container.querySelectorAll(".set-row")]
       .find((item) => /Agents may use the Space account/.test(item.textContent ?? ""));
     const policy = row?.querySelector<HTMLButtonElement>('[role="switch"]');
     assert.equal(policy?.getAttribute("aria-checked"), "false", "off by default");

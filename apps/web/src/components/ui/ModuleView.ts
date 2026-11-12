@@ -13,7 +13,7 @@
 // createElement-based (a .ts file, not .tsx) so the DOM-free node:test suite
 // and the createElement-only WorkspaceHost can import it without the tsx
 // loader — the same rule ViewErrorBoundary.ts follows.
-import { createElement, useEffect, useRef, type ReactNode } from "react";
+import { createElement, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { surfaceContentMode, type SurfaceContentMode } from "@polyth/web-sdk/surface-content";
 import { listSurfaces } from "../../surfaces.ts";
 import { tr } from "../../i18n/index.ts";
@@ -26,6 +26,7 @@ import {
   rememberMobileWorkspacePackage,
   showMobileWorkspaceHome,
 } from "../../mobileWorkspaceNavigation.ts";
+import { WindowBackContext, type WindowBackSeam } from "./windowBack.ts";
 import { BackIcon, CloseIcon, CollapseIcon, DockBottomIcon, DockSideIcon, ExpandIcon, PinIcon } from "./icons.ts";
 
 export type ModuleViewVariant = "main" | "rail";
@@ -153,7 +154,27 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
   // first, so the layer beneath is already the foreground target when this
   // frame starts to leave. The reverse order would let one render see neither
   // layer wanted and begin to close the Workspace.
+  // Content with an inner level (a list and one item) lends it to this Back
+  // (`useWindowBack`), so a phone window never shows two arrows.
+  const innerBack = useRef<(() => void) | null>(null);
+  const [innerBackClaimed, setInnerBackClaimed] = useState(false);
+  const windowBack = useMemo<WindowBackSeam>(() => ({
+    drawsBack: phone,
+    claim: (handler) => {
+      innerBack.current = handler;
+      setInnerBackClaimed(true);
+      return () => {
+        if (innerBack.current !== handler) return;
+        innerBack.current = null;
+        setInnerBackClaimed(false);
+      };
+    },
+  }), [phone]);
   const phoneBack = () => {
+    if (innerBack.current) {
+      innerBack.current();
+      return;
+    }
     showMobileWorkspaceHome();
     onClose();
   };
@@ -171,7 +192,9 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
   // horizontally keeps its own touches (swipeSurface.ts).
   const swipeZone = swipeZoneInHost(useUiSettings().swipeNavigation);
   useEdgeSwipeBack({
-    enabled: phone && presented && swipeZone !== null,
+    // The swipe moves the whole layer away, so it stays the window's pop and
+    // rests while the Back button steps inside the content.
+    enabled: phone && presented && swipeZone !== null && !innerBackClaimed,
     ...(swipeZone ? { zone: swipeZone } : {}),
     layer: () => rootRef.current?.closest<HTMLElement>(".rail-fullscreen, .panel-sheet, .module-view--main") ?? rootRef.current,
     under: () => document.querySelector<HTMLElement>('.sheet-backdrop[data-stack="covered"]'),
@@ -228,7 +251,7 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
       createElement(
         "div",
         { className: `module-view-content module-view-content--${resolvedContentMode}` },
-        children,
+        createElement(WindowBackContext.Provider, { value: windowBack }, children),
       ),
     ),
   );

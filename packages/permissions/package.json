@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./risk": "./src/risk.ts",
+    "./workspace-policy": "./src/workspacePolicy.ts",
     "./i18n": "./src/i18n/index.ts",
     "./widgets": "./widgets/index.tsx",
     "./i18n/*": "./src/i18n/*.ts"

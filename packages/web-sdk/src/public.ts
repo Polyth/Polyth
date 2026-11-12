@@ -21,3 +21,5 @@ declare module "./index.ts" {
 }
 
 export * from "./index.ts";
+
+export * from "./hostUi.ts";

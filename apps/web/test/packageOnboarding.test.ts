@@ -102,14 +102,6 @@ const descriptors = new Map<string, PackageDescriptorDto>([
     enabled: true,
     hasSettings: true,
   }],
-  ["integrations", {
-    id: "integrations",
-    name: "Integrations",
-    description: "External integrations.",
-    core: false,
-    enabled: true,
-    hasSettings: true,
-  }],
   ["ssh", {
     id: "ssh",
     name: "SSH Remotes",
@@ -318,7 +310,7 @@ test("every built-in package surface has a substantial onboarding tour", async (
     "about", "git", "terminal", "browser", "goals",
     "multirun", "workflow", "fusion", "walkthrough", "agents",
     "secure-safe", "mcp",
-    "commands", "plugins", "integrations", "packages",
+    "commands", "plugins", "packages",
     // Catalog-only: production BUILTIN_PACKAGES does not advertise `roles`.
     // The tour stays registered for a future Roles surface and must not be
     // confused with a live package descriptor from /api/packages.

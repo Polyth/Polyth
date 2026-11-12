@@ -15,6 +15,7 @@ import {
 } from "@polyth/harness-runtime";
 import {claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache, peekClaudeModels, CLAUDE_ULTRACODE_VARIANT} from "./discovery.ts";
 import { claudeOverlays, removeClaudeMcpConfigFiles, writeClaudeMcpConfigFile } from "./provisioner.ts";
+import type { RemoteHandsSession } from "./remoteHands.ts";
 import { CLAUDE_QUESTION_DISMISSED, CLAUDE_QUESTION_TOOL, CLAUDE_QUESTION_UNREADABLE, claudeQuestionAnswers, claudeQuestionItems, parseClaudeQuestions, type ClaudeQuestion } from "./questions.ts";
 
 /** How many unadmitted model events may pass before the native loop is
@@ -28,6 +29,14 @@ const UNADMITTED_SETTLE_MS = 10_000;
  *  the agent waits for it. The cron tools make the same promise of a later
  *  prompt and go with it. */
 const NATIVE_SCHEDULING_TOOLS = ["ScheduleWakeup", "CronCreate", "CronDelete", "CronList"];
+/** Claude Code (2.1.3xx) leaves TodoWrite/TaskCreate out for current models
+ *  (Opus/Sonnet 5.x, Fable) unless this is set. Polyth renders those native
+ *  todos in the timeline, status and island, and its todo rule names them, so
+ *  without the opt-in the agent has to ToolSearch for the deferred
+ *  `polyth_todo` MCP tool first. An operator's explicit value wins. */
+export function claudeChildEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+    return env.CLAUDE_CODE_ENABLE_TODO_TOOLS === undefined ? { ...env, CLAUDE_CODE_ENABLE_TODO_TOOLS: "true" } : env;
+}
 /** A `/compact` reports its outcome in a status message; the CLI's closing
  *  `result` normally follows at once. Stop waiting for it after this long. */
 const COMPACTION_RESULT_GRACE_MS = 5_000;
@@ -259,6 +268,19 @@ export interface ClaudeRuntimeOptions {
     /** Space preferences read when a native query starts. Absent means
      * Polyth's defaults: suggestions on, no inherited native skills. */
     launchPreferences?: () => Promise<ClaudeLaunchPreferences>;
+    /** The project is on an SSH host while this runtime runs here: Claude Code
+     *  works in a local placeholder directory and reaches the project through
+     *  Polyth's remote workspace tools (remoteHands.ts). */
+    remoteWorkspace?: ClaudeRemoteWorkspace;
+}
+export interface ClaudeRemoteWorkspace {
+    /** Local, empty directory the CLI runs in; its transcripts key on it. */
+    localCwd: string;
+    /** Opens the host tools, policy and delivery bridge for one native
+     *  session; `resume` tells the project's SessionStart hooks which it is. */
+    open(nativeSessionId: string, start: { resume: boolean }): Promise<RemoteHandsSession>;
+    /** A project file's bytes on the host (attachments live there). */
+    readFile(path: string): Promise<Uint8Array>;
 }
 export interface ClaudeLaunchPreferences {
     /** Ask Claude Code for a predicted next prompt after each turn. */
@@ -301,6 +323,10 @@ export function claudeSkillLaunchOptions(
 export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, authority: Awaited<ReturnType<typeof createProcessAuthority>>, options: ClaudeRuntimeOptions = {}): Promise<AgentRuntime> {
     const harnessId = options.harnessId ?? "claude";
     const authFingerprint = options.authFingerprint ?? claudeAuthFingerprint();
+    /** Where the CLI itself runs: the project, or its local placeholder when
+     *  the project is on an SSH host. */
+    const sdkCwd = options.remoteWorkspace?.localCwd ?? context.cwd;
+    let remoteHands: RemoteHandsSession | undefined;
     let query: Query | undefined;
     const protectedMcpConfigFiles = new Set<string>();
     let nativeId = "";
@@ -544,7 +570,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     const nativeTitle = async (id: string): Promise<string | undefined> => {
         // A private session has no transcript for Claude Code to title.
         if (context.privateSession) return undefined;
-        const info = await sdk.getSessionInfo(id, { dir: context.cwd });
+        const info = await sdk.getSessionInfo(id, { dir: sdkCwd });
         const title = info?.customTitle?.trim();
         return title && !isPlaceholderTitle(title, id) ? title : undefined;
     };
@@ -632,8 +658,12 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         };
         appliedAutoCompact = desiredAutoCompact;
         let stderrTail = "";
+        // Reads the project's own instructions, skills and hooks on the host;
+        // an unreachable host fails the start here, before any process runs.
+        const hands = options.remoteWorkspace ? await options.remoteWorkspace.open(id, { resume }) : undefined;
+        const append = [overlay?.append, hands?.append].filter(Boolean).join("\n\n");
         try {
-            query = sdk.query({ prompt: prompts(), options: { cwd: context.cwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: true,
+            query = sdk.query({ prompt: prompts(), options: { cwd: sdkCwd, ...(resume ? { resume: id } : { sessionId: id }), pathToClaudeCodeExecutable: claudeExecutable(), permissionMode: "default", includePartialMessages: true,
                     // A private session leaves no transcript in
                     // `<config>/projects`; Polyth's history is its only copy.
                     ...(context.privateSession ? { persistSession: false } : {}),
@@ -642,11 +672,17 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     // Delegation belongs to canonical Polyth child sessions.
                     // Agent beta keeps read/browser interaction available but
                     // removes every native workspace mutation escape hatch.
-                    disallowedTools: agentBetaEnabled()
-                        ? ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS, "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
-                        : ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS],
-                    ...(overlay?.append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append: overlay.append } } : {}),
-                    ...(overlay?.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
+                    disallowedTools: [
+                        ...(agentBetaEnabled()
+                            ? ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS, "Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"]
+                            : ["Agent", "Task", ...NATIVE_SCHEDULING_TOOLS]),
+                        // The native shell and file tools would act on this
+                        // machine, not on the project's host.
+                        ...(hands?.disallowedTools ?? []),
+                    ],
+                    ...(append ? { systemPrompt: { type: "preset" as const, preset: "claude_code" as const, append } } : {}),
+                    ...(overlay?.mcpServers || hands ? { mcpServers: { ...(overlay?.mcpServers ?? {}), ...(hands?.mcpServers ?? {}) } } : {}),
+                    ...(hands ? { hooks: hands.hooks } : {}),
                     ...(overlay?.plugins ? { plugins: overlay.plugins } : {}),
                     pluginDelivery: "initialize",
                     ...skillOptions,
@@ -656,7 +692,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     promptSuggestions: preferences.promptSuggestions,
                     spawnClaudeCodeProcess(options) {
                         const args = protectClaudeMcpConfigArgs(context, options.args, protectedMcpConfigFiles);
-                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: options.env, signal: options.signal });
+                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: claudeChildEnv(options.env), signal: options.signal });
                         // Drained as before; only a bounded tail is kept.
                         child.stderr!.on("data", (chunk: Buffer | string) => {
                             stderrTail = (stderrTail + String(chunk)).slice(-STDERR_TAIL_CHARS);
@@ -674,10 +710,21 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             const items = claudeQuestionItems(parsed);
                             return new Promise<PermissionResult>(resolve => { questions.set(requestId, { resolve, input, questions: parsed, items }); emit({ type: "question/asked", requestId, questions: items }, requestId); options.signal.addEventListener("abort", () => { questions.delete(requestId); resolve({ behavior: "deny", message: "Cancelled" }); }, { once: true }); });
                         }
-                        return new Promise<PermissionResult>(resolve => { permissions.set(requestId, { resolve, input, tool }); emit({ type: "permission/requested", requestId, permission: tool, patterns: [String(input.command ?? input.file_path ?? tool)] }, requestId); options.signal.addEventListener("abort", () => { permissions.delete(requestId); resolve({ behavior: "deny", message: "Cancelled" }); }, { once: true }); });
+                        // A remote workspace tool is answered by Polyth's own
+                        // policy, and asked about under the native name
+                        // (`Bash`, `Edit`…) with the command or path, so the
+                        // session's rules and risk assessment apply to it.
+                        const remote = hands?.permissionFor(tool, input, requestId);
+                        if (remote?.kind === "allow") return { behavior: "allow", updatedInput: input };
+                        if (remote?.kind === "deny") return { behavior: "deny", message: remote.message };
+                        const asked = remote
+                            ? { permission: remote.permission, patterns: remote.patterns, metadata: remote.metadata }
+                            : { permission: tool, patterns: [String(input.command ?? input.file_path ?? tool)] };
+                        return new Promise<PermissionResult>(resolve => { permissions.set(requestId, { resolve, input, tool }); emit({ type: "permission/requested", requestId, ...asked }, requestId); options.signal.addEventListener("abort", () => { permissions.delete(requestId); resolve({ behavior: "deny", message: "Cancelled" }); }, { once: true }); });
                     },
                 } });
             initialization = await query.initializationResult();
+            remoteHands = hands;
             if (launch.effort) appliedEffort = launch.effort;
             appliedUltracode = launch.ultracode;
             // A fresh query starts with no extra roots. A resumed native
@@ -685,6 +732,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             appliedWorkspaceDirectories = resume ? undefined : [];
         }
         catch (error) {
+            hands?.close();
             if (staged) {
                 releaseCapabilityLaunch({
                     target: launchTarget,
@@ -1172,7 +1220,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         if (query) return claudeModelDescriptors(await query.supportedModels());
         return discoverClaudeModels({
             query: sdk.query as Parameters<typeof discoverClaudeModels>[0]["query"],
-            cwd: context.cwd,
+            cwd: sdkCwd,
             executable: claudeExecutable(),
             authFingerprint,
         });
@@ -1216,7 +1264,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         models: () => catalog(), agents: async () => [],
         createSessionOperation: create, resetSessionOperation: create,
         async ensureSession(input) { if (input.sessionId) sid = input.sessionId; if (!input.backendSessionId)
-            throw Object.assign(new Error("Operation-aware creation required"), { code: "unsupported" }); const info = context.privateSession ? undefined : await sdk.getSessionInfo(input.backendSessionId, { dir: context.cwd }); await initialize(input.backendSessionId, Boolean(info)); return nativeId; },
+            throw Object.assign(new Error("Operation-aware creation required"), { code: "unsupported" }); const info = context.privateSession ? undefined : await sdk.getSessionInfo(input.backendSessionId, { dir: sdkCwd }); await initialize(input.backendSessionId, Boolean(info)); return nativeId; },
         // The server polls this list for a native title while a first turn runs,
         // so read Claude's persisted title rather than waiting for a result.
         sessions: async () => Promise.all(Object.entries(authority.receipts).map(async ([operationId, id]) => ({
@@ -1268,7 +1316,11 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             const workspaceRootsNeedApply = request.workspace !== undefined
                 || appliedWorkspaceDirectories === undefined
                 || appliedWorkspaceDirectories.length > 0;
-            if (typeof query.applyFlagSettings === "function") {
+            if (remoteHands) {
+                // The roots are on the host: they widen what the remote tools
+                // may read without asking, and mean nothing to the local CLI.
+                remoteHands.setExtraRoots(workspaceAccess.additionalDirectories);
+            } else if (typeof query.applyFlagSettings === "function") {
                 if (workspaceRootsNeedApply) {
                     try {
                         await applyWorkspaceRoots(workspaceAccess.additionalDirectories, request.workspace !== undefined);
@@ -1282,6 +1334,11 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
             const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
             const delivered = composeTurnPrompt(request.text, request.attachments);
             const readBytes = (path: string) => readFile(isAbsolute(path) ? path : join(context.cwd, path));
+            // Project files and staged uploads of a remote project are on its
+            // host; browser captures (`delivered.images`) stay on this machine.
+            const readAttachment = async (path: string): Promise<Buffer> => options.remoteWorkspace
+                ? Buffer.from(await options.remoteWorkspace.readFile(path))
+                : readBytes(path);
             for (const image of delivered.images) {
                 const data = await readBytes(image.localPath);
                 content.push({ type: "image", source: { type: "base64", media_type: image.mime, data: data.toString("base64") } });
@@ -1292,12 +1349,12 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     if (ref.mime?.startsWith("image/")) {
                         const path = ref.path;
                         if (!path) return { kind: "rejected", code: "invalid-attachment", message: "Image attachment requires a materialized path" };
-                        const data = await readBytes(path);
+                        const data = await readAttachment(path);
                         content.push({ type: "image", source: { type: "base64", media_type: ref.mime ?? "image/png", data: data.toString("base64") } });
                     } else if (ref.mime === "application/pdf") {
                         const path = ref.path;
                         if (!path) return { kind: "rejected", code: "invalid-attachment", message: "PDF attachment requires a materialized path" };
-                        const data = await readBytes(path);
+                        const data = await readAttachment(path);
                         content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: data.toString("base64") } });
                     } else {
                         // Text files arrive as a projected prompt section, so
@@ -1412,6 +1469,8 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         async dispose() {
             connected = false;
             wake?.();
+            // Commands still running on the project's host stop with the session.
+            remoteHands?.close();
             // End the SDK query before releasing Polyth's process containment.
             // The containment release SIGKILLs descendants, and killing Claude
             // Code while it holds the shared ~/.claude/.oauth_refresh.lock

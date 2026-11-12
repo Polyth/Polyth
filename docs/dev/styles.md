@@ -130,6 +130,7 @@ these inks.
 | `--accent-ink` | Text or glyph on a solid accent. |
 | `--accent-hi` | Highlight end of an accent treatment. |
 | `--accent-text` | The accent as small text: `theme.ts` moves its lightness (hue kept) only until it holds 4.5:1 on `--bg`, `--panel` and `--elevated`. `--accent` is tuned as a fill under `--accent-ink` and can be unreadable as text (macOS 27's dark blue is 3.5:1 on its window), and any accent colour can be chosen. |
+| `--accent-on-wash` | Accent text or glyph on its own `--accent-wash` (the navigator's New chat row). `theme.ts` moves its lightness until it holds 4.5:1 on the 18% hover wash over `--bg`, `--panel` and `--elevated`; `--accent-text` is measured on bare surfaces and slips under 4.5:1 once the wash sits behind it. |
 | `--accent-wash` | Subtle accent background. |
 | `--accent-line` | Accent-tinted boundary. |
 | `--focus-wash` | Outer focus halo. |
@@ -218,6 +219,7 @@ when the locale switches between LTR and RTL.
 | `--package-window-header-h` | Shared compact package-window header height. |
 | `--package-window-resize-hit` | In-frame resize hit area; host-owned, never package-overridden. |
 | `--hit-min` | Density seam: extra hit-area floor. 0px on fine pointers; core raises it to `--tap` under coarse pointers. Use in `max()` with the control's visual size. |
+| `--nav-pill-air` | Navigator highlight pills (chat, agent and action rows; the phone row fill): the air between the pill edge and its first and last content, the same on both sides. Desktop pills reach it by growing outward into the list gutters, so content never moves. |
 | `--nav-tool-step` | Phone Navigator only (set on `.mobile-navigator`): width of the toolbar's inner tools: the full `--tap` floor, so each tool keeps a 44px box. Their glyphs are placed by ink (`--nav-tool-gap`), not centred in it. |
 
 Controls use the smallest visual height appropriate to their density while
@@ -317,7 +319,7 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 | `--radius-bubble` | Chat bubbles of people talking in a session. |
 | `--radius-round` | A pill: chips, tags, tracks, capsule and icon buttons. Full at the default rounding on macOS 27, squares with the setting, and each platform style sets its reach (Fluent 8px, Big Sur 12px, macOS 27 25px), so a pill keeps its neighbours' corner. Fully round at the last notch. |
 | `--radius-circle` | A shape that carries meaning and stays round at every setting: spinners, avatars, radios, status dots, swatches. Not for anything a person reads as a button. |
-| `--radius-switch` | A switch's track and thumb: full at the default rounding on every platform style, and they square together. |
+| `--radius-switch` | A switch's track and thumb: full at the default rounding and at the last notch on every platform style, and they square together as Rounding drops. |
 | `--look-pill-radius` | An interface style's pill (Air, Obsidian). Squares with the setting the same way. |
 | `--radius` | Deprecated alias of `--radius-control`. |
 | `--radius-sm` | Deprecated alias of `--radius-control`. |
@@ -762,7 +764,10 @@ at ≥ 6.6:1.
   draws on purpose restate their colour.
 - The wallpaper glass keeps its blur on `.sidebar`/`.railbar` with a stronger
   selector, so the reset there uses double id strength. Looks that want those
-  panels frosted set `--look-shell-blur`.
+  panels frosted set `--look-shell-blur`. The navigator takes it itself; the
+  launcher host never filters (it holds package windows, and a filtered
+  element bounds the backdrop of the glass inside it), so its strip carries
+  the blur instead, in every state.
 - Quiet text uses the theme's contrast-checked inks: `--look-ink-dim`
   (`--text-dim`) for idle rows and `--look-ink-quiet` (`--muted`) for meta
   text. Never use an alpha of `--text` or `opacity` on text, because both fall
@@ -791,19 +796,60 @@ at ≥ 6.6:1.
   gutter wider (`--space-2` on both sides), mirroring the navigator's rail.
   With Floating columns the workspace ends at the columns' bottom
   (`--shell-edge`).
-- A floating package window extends the launcher rail (shellLooks.css §1d).
-  It opens over the column's full height (`ContextRail.tsx`, `railHeight`); a
-  look whose idle strip is a short island grows it into the column as the
-  window opens. Once the host holds a window it has no fill, edge, shadow or
-  filter of its own. The window and the strip share one material
-  (`--look-rail*`) and are parted by a seam. The foot squares where the column
-  runs into the window's edge and rounds on an island
-  (`--look-rail-island`, `--package-window-foot`). A height set by a resize
-  lasts until the window closes.
-- A pinned (docked) window is part of the rail column (shellLooks.css §1e). It
-  and the strip take the idle rail's material (`--look-dock*`: none by default,
-  so they sit on the canvas as the idle rail does; Line and Editorial keep the
-  rail's hairline down the window's start; Air and Obsidian keep their island).
+- **The launcher column is the same thing with a window as without one**
+  (shellLooks.css §1d). A look shapes the launcher host idle (an island, a
+  hairline column, a capsule) and the host keeps exactly that while a side
+  window is open, pinned or leaving: the same box, edge, fill, shadow and far
+  corners. No look rule may restyle the host or the strip for an open window;
+  a launcher that moves by a pixel or a column that repaints is a defect
+  (`railLauncherStability.test.ts` measures every look and layout in
+  Chromium). Three consequences shape how a look is written:
+  - The strip has no fill or edge of its own. It carries the shell blur and
+    the inset highlight that must stay above it (`--look-shell-highlight`,
+    which the look then leaves out of the host's own shadow).
+  - Padding at an island's ends is `--look-strip-pad`, applied to the strip,
+    never `padding` on the host: the strip fills the host's whole frame.
+  - The seam beside a window is the line `styles.css` draws on the strip
+    (`::before`, coloured by `--look-rail-seam`), never a border.
+  Only where the host stops being a column (a bottom or narrow dock, a
+  full-window layer, a compact sheet) is it bare geometry; beside a layer the
+  strip paints the launcher card itself (`--look-strip-card`,
+  `--look-strip-card-shadow`, and `--look-strip-card-edge` where the idle
+  card is framed all round: Line and Editorial with floating columns), and
+  the layout restates the card's far corners above the look.
+- A full-window layer is the floating window at another size, so it keeps
+  that window's frame: its edge (`--look-rail-edge`; the theme's contour in
+  borderless Standard, `--hair-solid` with borders), its free corner
+  (`--look-rail-radius`), how the edge composites (`--look-rail-clip`) and
+  only the inset highlight the look's rail carries
+  (`--look-shell-highlight`). Obsidian adds its rim (`--look-rim-column`)
+  under the border, over the window's fill made opaque. Only the fill
+  differs from the floating window: opaque, since the layer covers the
+  conversation. Guard: `railLauncherStability.test.ts` compares the layer
+  with the floating window and the card beside it with the idle column.
+- A floating package window extends that column. It spans the column's full
+  height, its top and bottom edges on the host's own (`styles.css`,
+  `.rail-dynamic`), in the look's floating material (`--look-rail*`); a look
+  whose idle strip is a short island grows it into the column as the window
+  opens. The corners the window attaches to square off on the window's clock.
+  The foot squares where the column runs into the window's edge and rounds on
+  an island (`--look-rail-island`, `--package-window-foot`). Only its width
+  resizes, from the inline-start edge (ui.md).
+- A pinned (docked) window is part of the rail column (shellLooks.css §1e):
+  the host, still the idle frame, grows around it, so the window has no
+  material of its own. It sits in the rail's fill, edge and shadow (none by
+  default, so it sits on the canvas as the idle rail does; Line and Editorial
+  keep the rail's hairline down the window's start; Air and Obsidian keep
+  their island around window and strip).
+  The Monoliths are the exception, because there work lies on a plane of its
+  own and only chrome on the backdrop: the pane itself is a second plane in
+  the conversation's material (`--look-work`, `--look-work-shadow`,
+  `--look-work-blur`: Monolith's sheet, Reverse's well). The host and the
+  strip stay as they are, so no launcher moves; the plane covers the host's
+  1px frame to end on the sheet's foot line, keeps the sheet's gap to the
+  strip (the seam line goes), and in flush full-height columns keeps the
+  sheet's inset from the window's edges (`--look-work-inset`). Guard:
+  `railLauncherStability.test.ts`.
   A flush column runs square into the header and the window's edge; an island
   closes the frame and rounds. A look that insets the conversation for the idle
   strip (Monolith, Reverse monolith) drops that inset once a window docks, and
@@ -870,6 +916,16 @@ and the absence of colour literals.
 - The island capsule is `div.shell-island.ui-glass-island` — the canonical
   glass primitive — and the header element sets
   `data-top-rail-surface="floating"` so the top-rail slab rules above skip it.
+  Its frame spans the whole workspace as a three-track grid: the side tracks
+  share what the capsule leaves, so it centres on the chat column, and each
+  is at least `--space-4` plus its side's reserve, so a floating window too
+  wide for that moves the capsule into the room beside it instead of covering
+  it. Short of room the capsule narrows: the title first (down to three
+  control heights), then the tools, then the tabs, each scrolling inside its
+  own plate; the actions keep their width and the capsule clips inline as the
+  last resort. The spread bar gives way in the same order inside its leading
+  cluster (`styles.css`, the top-rail block), so tabs never spill over the
+  title. Guard: the last test in `railLauncherStability.test.ts`.
   `bare` does the same; its bar is only a quiet chat title line (and the Space
   switcher with several Spaces), and without either the workspace reaches the
   top.
@@ -933,6 +989,28 @@ red/amber, amber, green, green/blue, blue, purple, red/purple — and
 `--person-tone-ink` (`--bg`) for a monogram's letters on it. Any element that
 names a person sets the attribute (`personIdentity.ts` picks the tone) and
 reads `var(--person-tone)`; never hard-code a person's colour.
+A repository of a multi-repository Project uses the same eight signal-derived
+tones: `[data-repository-tone="0"…"7"]` sets `--repository-tone`, assigned by
+the repository's position in the Project (primary first: blue, amber, purple,
+green, teal, rose, orange, red; `repositoryFilter.ts`). A `.repository-dot`
+must stay vivid and keep at least 3:1 against every row fill (rest, hover,
+selected, pinned) in every look and platform style. In dark modes it is the
+tone lifted 12% toward white in oklch (hue kept). Light signal tokens are dark
+text colours (Mist's `--amber` is `#785400`), so mixing them toward `--text`
+or black turns amber brown and blue navy; a light dot instead takes only the
+token's hue (`oklch(from var(--repository-tone) L C h)`) at a per-tone
+lightness and chroma inside sRGB (`--repository-dot-l` / `-c`, amber's hue
+turned 10° toward orange by `--repository-dot-dh`), tuned on the darkest
+light selected fill (luminance about 0.67, Mist + monolith / macOS). Measured
+in Chromium over 10 presets × light/dark × every platform style × every look ×
+rest/hover/selected/pinned × glass matte/off/clear, the lowest dot-to-fill
+ratio is 3.21:1 in light (selected amber) and 3.59:1 in dark (macOS 27 hover
+blue). Without relative colour support it falls back to the tone
+deepened 8% toward black. Mist light, for example, paints red `#cc342c`,
+orange `#b95113`, amber `#a06605`, green `#25811c`, teal `#097e84`, blue
+`#0f71c2`, purple `#8652d2`, rose `#bd3a80`. A repository chip's chosen state is
+an accent fill, accent ink and weight (no border needed, so it reads with
+borders hidden).
 
 ### Terminal
 
@@ -1042,7 +1120,7 @@ Polyth's contrast rules it is adjusted and the source is named:
 | Aspect | macOS 27 value |
 | --- | --- |
 | Palette | Both appearances hand-authored (`counterpart`): window / content `--bg` (#ffffff / #1e1e1e), sidebar `--panel` (#f2f2f2 / #2a2a2a), grouped-form card `--raised` (#f7f7f7 / #252525), form row separator `--border-soft`, label ink at 85% (#262626 / #dfdfdf). Secondary ink is darker (lighter) than secondaryLabelColor so it holds 4.5:1 on every surface. `--accent` is the kit's menu and selection highlight #0069f9 in both appearances (the brighter system blue #0088ff holds only 3.5:1 under white), `--accent-hi` its emphasized list selection #0065e2. The signals are the kit's system colours (green #34c759, orange #ff8d28, red #ff383c, blue #0088ff, purple #cb30e0 and their dark values) with the lightness moved just enough to hold 4.5:1 as text on every surface (the dark red a step further, #ff7476, so it also reads over a wallpaper wash); `blue` is the link colour. |
-| Radius | 8px controls, fields and rows; 12px cards and menus; 16px popovers, panels and Settings; 22px alerts, sheets, docks and the composer; 18px chat bubbles; 6px help tags. Push buttons, segmented controls and tabs, search fields and toolbar items are capsules (`--lg-radius-capsule`, 22px, a capsule for every control up to 44px). Menu highlights are concentric (menu radius − 5px inset). *Rounding* scales them by `--lg-round` (scale ÷ 1.8): the default 9 draws these radii, 0 squares everything except true pills (switch), the last notch is 1.5×. |
+| Radius | 8px controls, fields and rows; 12px cards and menus; 16px popovers, panels and Settings; 22px alerts, sheets, docks and the composer; 18px chat bubbles; 6px help tags. Push buttons, segmented controls and tabs, search fields and toolbar items are capsules (`--lg-radius-capsule`, 22px, a capsule for every control up to 44px). Menu highlights are concentric (menu radius − 5px inset). *Rounding* scales them by `--lg-round` (scale ÷ 1.8): the default 9 draws these radii, 0 squares everything, the last notch is 1.5×. The switch is a full pill at the default and at the last notch and squares with the rest as Rounding drops. |
 | Proportions | Push buttons 28px (`--control-h-sm`, the kit's large size), fields and medium controls 32px, large 36px, with capsule side padding (10 / 14px); menu rows 26px with no gap, 5px menu inset, 10px text inset. Check box 16px; switch 40×22 with a 22×18 pill knob. |
 | Strokes | No control outlines: controls are flat fills. Fields keep a 0.5px ring (12% ink). The contour (`--contour`) is the glass stroke, 7% black / 10% white: every glass surface and shell control draws it (both rails, header capsules and glyph buttons, the session title, menus, popovers, help tags, alerts, the composer and the sessions peek), with a specular rim (`--lg-rim`, a bright top edge and a faint inner ring); a focused composer firms it to the strong stroke. Separators are 8% label ink (`--hair`). *Hide interface borders* keeps the contour and the rims. |
 | Materials | Liquid Glass on transient surfaces: the elevated tint at 82% (Clear 66%) over a 28px blur at 190% saturation, no grain. Chrome (sidebar, header, rail host, status bar): 88% of `--panel` over a 44px blur. Toolbar items (session title, view switcher, header view tabs, header glyphs, sidebar search) are glass capsules and circles with the rim and a small shadow; segments inside a toolbar capsule are capsules too, and the selected view tab is a neutral plate rather than the accent segment. The sidebar's sessions peek is a panel on the contour, the glass highlight and shadow. *Glass: Off* is the solid fallback, as macOS with Reduce transparency. Settings is a window on the sidebar colour. |
@@ -1391,6 +1469,17 @@ bare `TextInput` and trailing controls (clear, submit). Mark that container
   and exclude `:where(.ui-field-well) *` with zero added specificity, so they
   never draw a second field inside it.
 - Looks paint the well as their field (section 1f) and leave its input bare.
+- A host well that draws its own field with a plain `<input>` (the navigator
+  search, `.sidebar-search`) paints its `:focus-within` state in the same
+  layer as its material. The shared glass material rule paints the field at
+  class strength and otherwise wins the cascade, leaving focus to the bare
+  input's global ring; that ring is suppressed, as it is for
+  `.picker-search` and `.mobile-nav-search` — Fluent's 1px ink stroke read as
+  a thick dark border just inside the field.
+- The phone navigator's pill (`.mobile-nav-search`) is such a well too: its
+  focus state is the desktop field's (accent edge and ring) in the standard
+  styles and the Look's focus ring, drawn over the pill's own material, in a
+  Look — the flatten rule erases the pill's border there.
 
 Without the marker a platform style out-specifies a package's bare-input rule
 and draws a rounded field that starts after the icon. When the input itself is

@@ -247,3 +247,46 @@ test("eventsFromAcpToolCallUpdate reports terminal-only execute output honestly"
         output: "Output streamed to terminal term-7",
     });
 });
+
+test("formatAcpToolOutput shows a result once when rawOutput repeats the content text", () => {
+    // Copilot CLI 1.0.109 sends a finished shell call in both forms.
+    const call = state();
+    mergeAcpToolCallUpdate(call, {
+        kind: "execute",
+        status: "completed",
+        content: [{ type: "content", content: { type: "text", text: "hi\n<shellId: 0 completed with exit code 0>" } }],
+        rawOutput: {
+            content: "hi\n<shellId: 0 completed with exit code 0>",
+            detailedContent: "hi\n<shellId: 0 completed with exit code 0>",
+            contents: [{ type: "shell_exit", shellId: "0", exitCode: 0 }],
+            structuredContent: { shellId: "0" },
+        },
+    });
+    assert.equal(formatAcpToolOutput(call).text, "hi\n<shellId: 0 completed with exit code 0>");
+    // A rawOutput that says something else is still appended.
+    const other = state();
+    mergeAcpToolCallUpdate(other, {
+        content: [{ type: "content", content: { type: "text", text: "done" } }],
+        rawOutput: { message: "2 files changed" },
+    });
+    assert.match(formatAcpToolOutput(other).text, /^done\n.*2 files changed/s);
+});
+
+test("a prose title describes a call whose input says nothing readable", () => {
+    // Shapes from Copilot CLI 1.0.109 (`stop_bash`, `skill`, `bash`, `view`).
+    const stop = state();
+    mergeAcpToolCallUpdate(stop, { kind: "execute", title: "Stopping shell session", rawInput: { shellId: "0" } });
+    assert.deepEqual(formatAcpToolInput(stop, { toolNameFromTitle: true }), { shellId: "0", description: "Stopping shell session" });
+
+    const skill = state();
+    mergeAcpToolCallUpdate(skill, { kind: "other", title: "Using skill: review", rawInput: { skill: "review" } });
+    assert.deepEqual(formatAcpToolInput(skill, { toolNameFromTitle: true }), { skill: "review", description: "Using skill: review" });
+
+    const shell = state();
+    mergeAcpToolCallUpdate(shell, { kind: "execute", title: "List files", rawInput: { command: "ls -la" } });
+    assert.deepEqual(formatAcpToolInput(shell, { toolNameFromTitle: true }), { command: "ls -la" });
+
+    const view = state();
+    mergeAcpToolCallUpdate(view, { kind: "read", title: "Viewing ...src/a.ts", rawInput: { path: "/w/src/a.ts" } });
+    assert.deepEqual(formatAcpToolInput(view, { toolNameFromTitle: true }), { path: "/w/src/a.ts" });
+});

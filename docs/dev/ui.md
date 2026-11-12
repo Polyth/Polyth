@@ -512,7 +512,7 @@ itself. One drop listener on the navigator serves every row
 (`useSessionMoveDropZones`, `apps/web/src/sessionMove.ts`).
 
 The row menu's *Move to project…* is the keyboard and touch way, in both navigators
-and the phone's ⋮ menu: `MoveSessionDialog` lists the projects (a Sheet on the phone).
+and the phone's ⋯ menu: `MoveSessionDialog` lists the projects (a Sheet on the phone).
 Both ways end at the same `requestSessionMove`: it asks for the server's preview
 first, words a refusal from its stable reason, and otherwise confirms with
 `confirmAlert`, which says what can't be seen from the navigator: subagents coming
@@ -524,6 +524,12 @@ The moved chat stays open if it was open, and the workspace follows it
 (`followActiveSessionTo`, on this device and any other), unless the person has already
 gone to another project. The transcript gets a seal, *Moved from A to B*, from the
 names recorded in the event. Mechanics: [architecture](architecture.md#moving-a-chat-to-another-project).
+
+The project row's highlight is the whole row — its glyph and title together
+with the new-chat and ⋮ controls beside them — painted by
+`.project-card-shell::before`, not by the card button: the card occupies only
+the leading grid track, so a highlight scoped to it stops at the title and
+leaves those controls on the bare list.
 
 On touch-capable screens (`any-pointer: coarse`) project row actions stay
 hidden at rest, except on the focused project: its new-chat and ⋮ actions stay
@@ -594,6 +600,11 @@ workspace-composition saves close their dialog at once through
 Project defaults in Settings → Projects (harness, model, model memory,
 isolation) go through `saveProjectDefaultsOptimistic`; `null` clears a default
 in the preview exactly as on the server.
+Settings → Projects also lists every page a package registers with
+`host.projectSettings.register` (Repositories, Git identity, Memory,
+Approvals…) under *Project settings*, for the project picked on that page; each
+Open button shows that page in the same project settings dialog the project
+menu uses, so the host names no package page.
 A person's own default harness (Settings → Harnesses → *My default*, Spaces
 §13) outranks project defaults for chats they start: while it is usable and
 nothing was chosen for the new chat (`newChatRouteChosen` in
@@ -1154,7 +1165,9 @@ Edit mode reveals the pencils on touch tablets too (`min-width: 481px` with a
 coarse pointer); the transient Shift reveal stays mouse-only. Settings →
 Appearance → Layout → Rail size and spacing → *Set each rail* → **Icon spacing** (`ui.railSpacing`, 0–20 px,
 default 6; records saved before the setting existed keep 4) publishes `--rail-gap`, the gap of the left, right and top rails;
-coarse pointers never go below 8 px.
+coarse pointers never go below 8 px. The left rail applies it between its
+groups too (project list, placed icons, Settings dock, account;
+`--rail-tile-gap`), so every tile sits one spacing from the next.
 
 ### 3.3 First-open interface tour
 
@@ -1520,7 +1533,13 @@ registered through the request's Space-scoped project service; if registration
 fails the fresh checkout is removed so the clone can be retried. Agent shells
 and Terminal still use the machine's Git credentials (§14.4 "Not covered"). If remote inspection is unsafe or
 no remote is configured, keep local editing available and disable remote actions
-until a safe target is available. Source control presents remote failures and
+until a safe target is available. Push, Pull and Sync always use the
+checked-out branch's same-named branch on the selected remote: a missing
+tracking ref, or one that names a different branch (a branch started from
+`origin/main`), is published under the local branch name and its tracking ref
+retargeted instead of failing with Git's own "upstream branch of your current
+branch does not match" refusal.
+Source control presents remote failures and
 working-tree conflicts in one recovery region above its tabs, with one set of
 agent draft actions. The failure reason and remote stay together; conflict
 counts remain visible alongside the recovery hint. Without a remote failure,
@@ -1625,7 +1644,12 @@ a link to change it. Search items: `git.personProfile`, `git.personAccounts`,
 `git.authentication`, `git.commitMessageModel`, `git.branchTemplate`,
 `git.conflictAgentTarget`, `git.display`, `git.servicePolicy`. The identity
 dialog's label/field grid becomes one column in narrow containers.
-The former Integrations settings route is a hidden compatibility redirect.
+
+There is no separate "Integrations" settings page: the stub route that only
+redirected here is gone, and an old `?settings=integrations` link falls back to
+the first settings page like any other unknown route. Service integrations now
+live where they are used (this page for hosting accounts, Settings → MCP for
+servers).
 
 Git action errors in the package go through `reportGitError`
 (`packages/git/widgets/gitRefusal.ts`): the friendly toast plus, for
@@ -1779,17 +1803,64 @@ The command palette
   A session whose isolated branch was merged shows a green branch icon
   instead, from the durable `isolationMerge` receipt (a navigator summary
   field) — it outranks the lock while post-merge cleanup is still pending.
-  The phone host renders its pin, runtime status, and unread mark separately;
-  it must not add a second isolation lock.
+  The phone host renders its runtime status, unread mark and resting pin in
+  the row's status slot; it must not add a second isolation lock.
 - **Desktop session row geometry:** the open button (`.session-btn`) is an
   empty, full-row hit surface; `.session-row-body` paints above it with
   `pointer-events: none` in three fixed columns — a state mark reserved on
-  every row (running, needs reply/approval, failed, unread; empty when idle),
-  the title followed directly by the subagent disclosure (a real button,
+  every row (running, needs reply/approval, failed, unread; a pinned chat at
+  rest shows its pin there; empty when an unpinned chat is idle), the title
+  followed directly by the subagent disclosure (a real button,
   ArrowRight/ArrowLeft on the row also toggles it), then meta: worktree pill,
-  running clock, and the identity group (`session.list.badges`, then pin) at
-  the trailing edge so those icons line up down the list. The row hover card
-  spells out the state the mark shows.
+  running clock, and the identity group (`session.list.badges`) at the
+  trailing edge so those icons line up down the list. Live state always wins
+  the state column; the pin returns when it clears, the row stays in the
+  Pinned section, and the row's description names it pinned (the lead pin is
+  `aria-hidden`). Pinning is a place, not a state, so the lead pin stays below
+  the live marks that replace it: on desktop it is the trailing pin's size
+  (`--icon-sm - 3px`), centred, in `color-mix(in oklab, var(--accent) 65%,
+  var(--muted))` in the standard look (≥ 3:1 against the pinned, hover and
+  selected fills in every preset, light and dark, measured in Chromium);
+  shell looks use their quiet ink. Desktop and phone both draw the Pinned
+  divider's slanted glyph (`Icon.pin`) in that same ink; the phone sizes it
+  `--icon-sm` like its other status marks. One decision, `sessionLeadMark` (`apps/web/src/sessionLead.ts`),
+  renders the mark and sets the row's `data-lead` (`mark` / `empty` /
+  `select`) on desktop and phone alike, so the two cannot drift. The highlight
+  pill (`.session-btn::before`: hover, press, selection, keyboard focus, the
+  pinned resting fill, Fluent's accent bar) keeps `--nav-pill-air` (10px,
+  `tokens.css`) between its edge and the content on both sides: it starts at
+  `--session-pill-start`, `--session-pill-inset` (= the air) before the state
+  mark or, for `data-lead="empty"`, before the title
+  (`--session-title-start - --session-pill-inset`), and ends
+  `--session-pill-end` (`--nav-trailing-inset - --nav-pill-air`, -6px) past
+  the row box, 10px after the trailing marks. Every state shares that one
+  extent; only paint differs (focus is a 2px ring inside the pill). The pill
+  grows outward into the list gutters (`--nav-pill-outset-start/-end` on
+  `.sidebar`: 2px into the 8px start gutter, 6px into the end gutter), so no
+  title or mark moves; 10px is the most the end side affords while staying
+  2px clear of the scrollbar. Agent rows under the navigator's Agents action
+  (`--agent-nav-pill`/`--agent-nav-pill-end`) and the action rows (New chat
+  included; their own box is the pill, reaching the outsets with negative
+  margins and padding them back) share those extents, and the unfolded
+  section's scroll box reaches out the same way so it does not cut them. On
+  coarse pointers the swipe clip is a `clip-path` widened by the outsets
+  instead of the row box. Only the pill's start moves between the two
+  starts, sliding with `--motion-fast` (off under reduced motion and the
+  reduce-animations/low-resource settings); the columns never shift. Themes
+  and shell looks restyle the pill's paint, never its extent. The phone row
+  paints its fill (current, selected, failed) on
+  `.mobile-nav-session-row::before` with the same rule: the same air before
+  the status mark (or the title when the slot is empty) and after the ⋯
+  glyph, reaching `--nav-fill-outset` past the row box (at most 2px short of
+  the list edge, so 9px on phones up to 360px wide, and not at all where the
+  grid already gives that air, as in Air's islands); the swipe clip
+  (`.mobile-nav-session-swipe`) reaches out with it and pads back. Trailing
+  marks end on `--nav-trailing-inset` (4px inside the row box), shared with
+  the agent rows; the never-scrolling header block (`.sidebar-nav-block`)
+  reserves the same scrollbar gutter as the scrolling chat list, so agent
+  and chat marks end on one axis with classic
+  and overlay scrollbars alike. The row hover card spells out the state the
+  mark shows.
 - **Delegated children (desktop and phone):** a session with a `parentId`
   (an `agent.spawn` subagent, a workflow unit) is listed only inside its
   listed parent's disclosure, pinned parents included, and never takes a row
@@ -1830,11 +1901,11 @@ the interaction. A footer contribution is unmounted with its menu, so content
 that must outlive the dropdown (a dialog, a panel) belongs in `app.layers`.
 
 **Navigator multi-select.** A select toggle (`SelectIcon`, `aria-pressed`)
-sits immediately left of the session search field in the desktop service
-bar, right after the search tool in the phone navigator header, and beside
-the list filter in the compact drawer toolbar. It enters and leaves selection
-(project `⋯` → Select sessions remains as a second entry); Escape, and Android
-Back through the escape stack, end it. Desktop rows show checkboxes and a click
+sits beside the list filter in the compact drawer toolbar and right after the
+search tool in the phone navigator header. On a wide navigator it lives in the
+list options (Sessions select toggle removed from the header row); project `⋯`
+→ Select sessions remains as a second entry. It enters and leaves selection;
+Escape, and Android Back through the escape stack, end it. Desktop rows show checkboxes and a click
 on the row title toggles the row instead of opening it (double-click rename and
 long-press menu are off); phone rows turn their status slot into a check mark
 and a tap toggles the row (swipe and long-press are off while selecting). `SessionSelectionBar` shows the count and
@@ -1877,6 +1948,19 @@ click, the ⋮ trigger, long press and Shift+F10/ContextMenu. A row that opens a
 package page is current exactly while `store.getSnapshot().activePage` names
 it. The Agents package draws its agents here as a foldable group (see
 `docs/dev/architecture.md`, `schedule`).
+A contribution with `meta.navigatorSection` (`NavigatorSectionSlotMeta` in
+`@polyth/web-sdk`: `label`, optional `capability`) is a *section*: the list
+options (desktop filter menu and phone sort/filter menu) list it under "Show in
+list" and hide it from every list, and while its capability's row is among the
+wide navigator's header rows it leaves that project's list and unfolds from the
+row instead (a chevron on the row's trailing edge; folded, the row carries the
+section's summary). There it renders with `placement: "action"`, `folded` and
+`reportContent(hasContent)` (`NavigatorSectionSlotContext`); `false` drops the
+chevron. Both choices are device-local under `polyth.sidebar.navigatorSections`
+(`{hidden, folded}`, `navigatorState.ts`); the host never names the package
+(`apps/web/src/components/sidebar/navigatorSections.ts`, covered by
+`apps/web/test/navigatorSections.test.ts`). Agents declares one for capability
+`schedule`.
 `host.sessions.claimListing(purpose)` lets a package present the sessions of
 one `purpose` (and their delegated children) in its own UI instead of the
 ordinary lists — an agent's runs are read from its diary. Claims are
@@ -1895,6 +1979,62 @@ not inherited by forks or delegated children. The Agents runner sets it on an
 agent's own sessions (label = agent name) and Monitoring on its incident chats
 (`monitoring`/`alert`/"Monitoring"). Lists use it to leave automation out on
 request and to draw it as automation rather than as a person's chat.
+
+**Repository chips (multi-repository Projects).** A Project with two or more
+registered repositories shows one chip row at the top of its open session
+list in the desktop sidebar (`SessionList`, tree and rail), and in the phone
+navigator below the project's leading groups (agents) and directly above its
+chats (pinned caption or first chat row), because the chips filter chats
+only. On the phone the chips sit one 8px step from whatever is above (project
+header, folded or open agents group) and below (a caption's text or the first
+chat row), at every density. While the chip row is shown the desktop project
+header drops its "N repos" count; the count (and its alias · path tooltip)
+returns when the project is closed or replaced by a search, and the chips'
+tooltips carry the paths (All lists every alias · path, a chip its own). Chips:
+All, then each repository in project order with the primary first,
+each a coloured dot and its alias (`components/sidebar/RepositoryFilter.tsx`;
+rules in `apps/web/src/repositoryFilter.ts`). One-repository Projects and
+private rooms show nothing and their layout does not change. The row is a
+`role="toolbar"` of `aria-pressed` buttons with one tab stop (arrow keys,
+Home/End, mirrored in RTL); it never wraps or shrinks and scrolls sideways
+without a scrollbar. Chips carry no counts: loaded pages are partial. A chip
+lists the chats whose explicit repository subset includes it
+(`sessionRepositoryScope`, [workspace.md](workspace.md)); whole-project chats,
+and subsets covering every current repository, show only under All. Delegated
+children follow their parent. The pinned section, worktree groups, Group by,
+the date and Needs attention filters combine with it; under a chip a linked
+worktree with no matching chat is hidden. The desktop list sends the chip as
+`repositoryId` with its project's summary pages; the phone, whose own pages
+span every project, reads one extra filtered page set for a project under a
+chip and offers more once its loaded matches are shown. A search keeps a
+chosen chip and shows its row so it can be undone; with All a search shows no
+chips. The phone project's status pills still count every chat. The choice is
+a device preference per project (`polyth.sidebar.repositoryFilter`, navigator
+state, never history or synced settings); a chip whose repository is no longer
+registered reads as All and its entry is cleared. A project's New chat actions
+(sidebar project row, New chat row, compact drawer, rail and the phone's New
+chat) start under the chip (`newChatOptions` → `startFreshSession`'s
+`repositoryFilter`): an unsent chat without content takes `[id]`, or no scope
+under All; a restored draft with its own scope keeps it, one without a scope
+takes the chip. A subset chat's row carries a mark in its meta column: up to
+three whole dots side by side (a 2px gap, never overlapping: overlapping dots
+read as a half-moon status glyph) then `+n`, and the aliases joined by `+`
+(`role="img"`, "Repository: api" / "Repositories: api, web", also in the row's
+hover card and its button's description); whole-project rows carry none. Under
+a chip the list already names its repository, so a column of identical dots
+would only be noise: a row scoped to that repository alone draws no mark, and
+a wider scope draws only its other repositories after a plus, with their
+aliases (`+ • api` under `web`, `+ •• api, infra` for two; dots capped at three
+then `+n`; `repositoryMarkParts`). The aliases follow the same narrow-width
+rules as under All, so a tight row degrades to `+ •`. The accessible name, the
+hover card and the button's description still list the full scope; with no
+mark drawn the description is a hidden element. Phone chips are drawn at the
+small-control height (28px in the macOS styles) with a transparent `::after`
+making a 36px target inside the chip row's block padding. In a narrow sidebar the title keeps the room: below
+17.5rem of list width the aliases drop when the worktree pill, running clock,
+draft mark or subagent count shares the row, below 14.5rem always (container `session-list`); on
+phones the aliases are capped at 9ch and drop for a running clock or draft on
+screens up to 380px. Covered by `apps/web/test/repositoryFilter.test.ts`.
 
 Session grouping and order live in the list options' **Sessions** section as
 two drill-in rows, **Group by** and **Sort by**, each naming its current
@@ -1917,7 +2057,8 @@ presentation, synced in `core.sidebar` (`grouping`, `sessionSort`); the former
 written for older clients. Packages contribute groupings with
 `host.sessions.registerGrouping({ id, label, keyOf, labelOf?, rankOf?,
 subscribe? })` — pure functions of a session and the package's own state; the
-host draws headings and rows. A stored package grouping waits for its package
+host draws headings and rows. When every chat in a list has the empty key (no
+marker, no agent…), that lone group draws no heading. A stored package grouping waits for its package
 to register and reads as None meanwhile. Chat markers add "Marker".
 
 `session.selection.actions` adds an action to a transcript selection, beside
@@ -2219,11 +2360,27 @@ the *attachment tray* — between the model line and the editor, in a new chat
 and an open one alike (never above the project row). `AttachmentPills` draws
 quiet cards: a file names its type with its extension in a neutral glyph (the
 accent stays on Send), a previewable image is a bare tile, and remove shows
-on hover or keyboard focus with a fine pointer (always on touch). The row does
+on hover or keyboard focus with a fine pointer (always on touch). Remove sits
+inside the card's top-end corner, clear of the middle a click to open the file
+aims at (never hung off the corner: the scrolling row would crop it); on a
+phone a card gives it a whole tap target as its own end zone and a picture
+tile its top-end quarter. A removed file keeps its place for 8 s
+(`ATTACHMENT_RESTORE_MS`) as a *restore slot*: a dashed button of the card's
+exact width, so nothing shifts under the pointer and a slip is one click to
+take back, at the place the file had. The draft drops the file at once
+(`detachAttachment`; a send never carries a slot) and the slot's click puts it
+back (`insertAttachment`); a browser capture is discarded only when its slot
+goes. A click within 400 ms of the removal is the same double click and is
+ignored. A slot waits while the pointer rests on the row or the keyboard's
+focus is in it (focus moves from remove to the slot's button and, on restore,
+back to the card), then collapses out of the row; a send, a recalled prompt or
+another chat takes the slots with the files. The row does
 not wrap: cards narrow to a readable name, then the row scrolls sideways and
 fades into the edge it is scrolled away from (`data-overflow-start|end`); a
 card that arrives past the visible end scrolls into view. The first file
-*opens* the tray and removing the last one *closes* it over that card
+*opens* the tray and a row left with only restore slots *closes* over them
+once the newest has had its time; until then the slot holds the row (and a
+phone row's engagement) as the file did
 (`useAttachmentTray`, `apps/web/src/composer/attachmentTray.ts`;
 composerAdaptive.css "Attachment tray"): the row's track eases between `0fr`
 and `1fr` (`--motion-surface` open, `--motion-normal` close), so the card
@@ -2245,7 +2402,8 @@ files until the next tap or keystroke. The field steps its selection away and
 back in one task (an empty field steps its value), only on an engine that
 supports `-webkit-touch-callout`, only while focused and not composing.
 `apps/web/test/composerAttachmentTray.test.ts` scrubs the real Composer
-through both changes and counts the caret refresh.
+through both changes, removes and restores files in place, and counts the
+caret refresh.
 
 **Context pie:** an open session also shows its context-window share as a
 quiet pie on the model line, right after the thinking-effort chip (after the
@@ -3159,7 +3317,11 @@ footer in view pushed the rows below it down at once. On touch
 row of quick actions under every interim answer doubled the activity gaps;
 the turn's final answer keeps its footer. With a mouse, over a block that
 footer *is* the group gap (no top margin, a negative bottom margin of
-`--conversation-group-gap`). On phones prose, thoughts and blocks share one
+`--conversation-group-gap`), in every reveal mode: elsewhere a hover-revealed
+actions-only footer collapses to no height and its bar shows in the message
+gap below, but the group gap is narrower than the icon track, and the block
+(its own stacking context) painted over the revealed icons and took their
+clicks. On phones prose, thoughts and blocks share one
 gap (`--conversation-group-gap` = `--timeline-gap`, 12px); touch block rows
 keep a 44px hit box but lay out as 36px (`--activity-row-trim` pulls the
 block into the gaps around it), and consecutive blocks' hit boxes meet
@@ -3560,16 +3722,22 @@ host.surfaces.register({
 - **Launcher toggle:** every launcher — top rail, right rail strip and placed
   `capability:*` launcher widgets — routes through `toggleCapability()` and
   marks itself `data-pane-launcher=<capability id>`. Pressing a launcher whose
-  capability is active (`isCapabilityActive`, so a package home counts while
-  one of its pages is open) is not an outside click for a dynamic window;
-  otherwise pointerdown dismisses the window and the click reopens it. A new
-  launcher surface must carry the attribute.
-- **A floating window never resizes from its content edge:** its width handle
-  is the inline-start edge (the side facing Chat), with the top/bottom edges
-  and the start corners; the inline-end edge carries the scrollbar and is not
-  a resize edge. A hit area there intercepted wheel and touch scrolling and
-  grew an empty strip beside the window. Pointer and keyboard resizing both
-  use the same start-edge handle (`ContextRail` `RESIZE_EDGES`).
+  own click decides what happens to the open window is not an outside click
+  for a dynamic window (`pathBelongsToPackageWindow`): the launcher of the
+  active capability (`isCapabilityActive`, so a package home counts while one
+  of its pages is open) toggles the window closed, and a launcher that opens
+  another window (`capabilityOpensWindow`) swaps the content in one step, so
+  the frame stays where it is and resizes to the next package (Window morph,
+  below). Dismissing on pointerdown made the window leave and the next one
+  arrive a moment later. A launcher that opens no window (a command) is still
+  an outside click. A new launcher surface must carry the attribute.
+- **A floating window resizes from one edge only:** its inline start (the
+  side facing Chat), by pointer and keyboard (`ContextRail`,
+  `.package-window-resize--w`). The inline-end edge carries the scrollbar: a
+  hit area there intercepted wheel and touch scrolling and grew an empty strip
+  beside the window. The height is not adjustable: the window spans the
+  launcher column and only one is open at a time, so a shorter window only
+  left dead space under it. Revisit if several side windows may stack.
 - **Keep the pinned window** (Settings → Behavior → *Package windows*,
   `UiSettings.sharedPinnedWindow`, on by default; a record saved before
   `sharedPinnedWindowVersion` 2 was written while it was opt-in, so its
@@ -3635,6 +3803,67 @@ host.surfaces.register({
   open-state authority; reduced-motion/low-resource modes skip the hold. A
   hidden keep-alive pane must not retain pane borders, geometry-host materials,
   or launcher-seam styles after the exit.
+- **Nothing steps at a seam.** The first frame of any window motion is the
+  frame before the click, and its last frame is the settled layout. Three
+  rules keep that true and new CSS must follow them:
+  - The launcher column never changes when a window opens, pins, fills the
+    workspace or leaves: no launcher moves, in any interface style, window
+    layout or platform (`railLauncherStability.test.ts` measures them in
+    Chromium). The rail host keeps its idle frame (box, border widths, far
+    corners) under a floating window, and the window's top and bottom edges
+    are the host's own, so one line runs from the rail across the window.
+    The host must not filter while it holds a window (a filtered host would
+    bound the window's own backdrop). In the base shell its glass moves to
+    the strip, which paints the same launcher chrome the idle host paints
+    (`--sidebar-glass-surface`, falling back to `--material-glass`) with the
+    host's inherited corners, while the window keeps `--material-glass`. An
+    interface style goes further and keeps fill, edge and shadow on the host
+    in every state, with only the blur on the strip (styles.md, "The
+    launcher column is the same thing"). The seam beside a side window is a
+    1px line on the strip (`::before`), never a border, which would narrow
+    the strip and nudge every launcher. Beside a full-window layer the strip
+    stays on the column's line even where the layer steps down for the bar
+    or the desktop caption band (`--rail-column-top`, `--rail-layer-top`).
+    A rule that rounds the whole column caps its radius at half the column's
+    width (`--rail-host-radius-cap`): past that the browser scales all four
+    radii down together, so squaring the two corners a window attaches to
+    let the far two spring out to twice their size.
+  - In the 961–1400px band the launchers do move, as the cluster grows into
+    the column, but never in a step: the first frame of the arrival and the
+    last of the departure are the idle cluster. The morph's keyframes state
+    the cluster's own strip width and gutters (`--rail-cluster-gutter`), and
+    the full-height layouts drop an island look's margins from the idle
+    cluster as they do from the full-height strip.
+  - An idle rule on `.railbar` is written
+    `:not(.railbar-open):not([data-rail-motion="exiting"])` and an open rule
+    `:is(.railbar-open, [data-rail-motion="exiting"])`: a leaving window keeps
+    the open box until it is gone. The leaving surface also keeps rendering as
+    the active one (`active` stays true for its component), so its content
+    does not blank in the first exit frame.
+  - A side-docked window that leaves gives Chat back the strip's lane too
+    (idle, the strip floats over Chat): `playRailRelease` grows Chat over that
+    lane on the exit clock, so the hand-over to the idle layout moves nothing.
+- **Window morph (`railMorph.ts`).** An open window that changes presentation
+  (pin, unpin, full screen and back) or package did not arrive, so no entry
+  animation replays (`data-rail-entry="morph"` switches them off). Its frame
+  really resizes from the box it had to the box it gets, on the window clock:
+  `ContextRail` reads the old frame in render, before React commits the new
+  presentation, and starts the morph once the new geometry is measured. A
+  floating frame animates its width; a docked one animates width against a
+  matching negative inline-start margin, so its footprint in the row stays at
+  the final width and Chat's room is animated once, by its own margin on the
+  launcher's side (physical: a mirrored shell flips the shell's direction, not
+  Chat's); a layer is held at the old width by its inline-start
+  margin. The content's inline-start edge stays put whichever element draws
+  the frame's edge, the seam gutter closes with the motion, and a veil of the
+  previous material fades under the content when window glass turns into the
+  opaque layer or back. Content reflows live, as under a drag: nothing is
+  scaled or cross-faded. While a morph runs, the dock measurement and the
+  layout guard wait (transitional widths are nobody's choice) and run once on
+  the settled layout; a new presentation cancels a running morph and measures
+  at once. Size is never a CSS transition on `.rail`. Bottom and narrow docks
+  re-grid the shell and keep their own entry. Reduced motion and low-resource
+  mode skip the morph.
 - **Fullscreen frame (wide shells):** the fullscreen layer keeps the pinned
   window's frame — a hairline border and a rounded top corner on the side
   facing the navigator (`--radius-surface`, so the user's corner scale
@@ -3678,13 +3907,38 @@ host.surfaces.register({
 cannot register workspace surfaces into it. A package home (a tool) always uses
 `host.surfaces.register` and opens with `host.navigation.openWorkspacePane(id)`;
 this guarantees the shared header, actions, resize frame, focus handling, and
-dynamic/pinned/fullscreen state machine.
+dynamic/pinned/fullscreen state machine. A directory or catalog a person
+browses (the Integrations catalog, for one) is a tool, so it is a surface, not
+a page. A package that offers a way into another package's surface (Settings →
+MCP "Add from catalog") feature-detects `host.surfaces.has?.(id)` (registered
+and relevant to the current project) and renders nothing while it is absent
+or unanswerable.
+
+- **Resource.** `openWorkspacePane(id, resource)` hands `resource` to the
+  window's content as a prop, with `resourceSeq`, which grows per request, so
+  asking for the same item again after the person moved away inside still
+  lands. The request is presentation state (store `paneResource`), cleared on
+  a project switch; reopening from the rail passes none, so a directory starts
+  at its home. Files (`file:<path>`) and Git (`changes:<path>`) keep their
+  dedicated channels. Pinned by `apps/web/test/packageWindowSeams.test.ts`.
+- **One Back.** On a phone `ModuleView` draws the window's Back. Content with
+  an inner level (a list and one item) calls
+  `host.ui.useWindowBack?.(inItem ? backToList : null)`: while it returns
+  true the window's Back steps back to the list and the content hides its own
+  back control; it returns false on a wide window or outside one, and the
+  content keeps its control. The edge swipe stays the window's pop and rests
+  while the content holds the Back (`components/ui/windowBack.ts`).
 
 A package **page** is different: it is an object of the navigator that opens
 *in place of Chat*, the way a chat does — an agent's own screen. Register it
 with `host.pages.register({ id, title, component })` and open it with
 `host.navigation.openPage(id, resource?, { projectId? })`; `closePage()`
-returns the canvas to Chat. The store holds `activePage { pageId, resource }`
+returns the canvas to Chat. `host.pages.has(id)` answers whether a page is
+registered right now: a package that only offers a way in (a capability that
+links to an agent's screen) asks first and
+renders no control while the page is absent, instead of a button that does
+nothing. A host without `has` is an older host, and `undefined` there means
+unknown, not absent. The store holds `activePage { pageId, resource }`
 (presentation-only navigation, never history); `activeSessionId` keeps the
 chat the canvas returns to. `WorkspaceHost` renders the page component with
 `{ resource, projectId }` inside `.page-canvas` behind its own
@@ -4190,7 +4444,20 @@ is what only this page can answer. Facts are plain type, not pills. Every harnes
 row states how the skill reaches it: *Native skill*, *Read when needed*, or the
 harness's own copy, and harnesses without it collapse to one line. Switches appear
 only where Polyth can truly act; a harness that loads its own skills says *Always
-on*. The page says what installing does and does not do, and warns only for
+on*.
+
+A managed skill's *Harnesses* tab opens with its reach: a `Seg` of *All
+harnesses / Only chosen / Nowhere* with one sentence on what that means for
+harnesses added later. Below it, accounts of one harness are one group: a family
+row (name, account count, its own mode) with each account indented under it.
+Every row that Polyth can deliver to has a mode `Select` (*Off / When needed /
+Always*; *Always* names its cost as an estimated token count and is absent for a
+skill that blocks tools), with the delivery or cost on a second meta line. An
+account whose own rule differs from its family says so with a *Reset* text
+button. A row that is off for Polyth but still loads the harness's own copy says
+so instead of a bare *Off*. *Nowhere* keeps every row visible but disabled, and
+a closing line counts where the skill works and says changes apply to new chats
+(`ReachPanel`, `.skills-reach`, `.skills-harnesses.is-reach`). The page says what installing does and does not do, and warns only for
 invisible characters.
 
 Source pictures come through the server as checked data URLs, never from the
@@ -4414,8 +4681,8 @@ readable stub and the pills that do not fit drop whole from the end (the
 group's label still lists every count). An expanded project with nothing to
 list says "No sessions".
 A project header opens and closes on the whole line: its open button's plate
-(`.mobile-nav-project-main::before`) spans the header from the mark to ⋮ and
-the mark lets taps through to it, while New chat and ⋮ keep their own press
+(`.mobile-nav-project-main::before`) spans the header from the mark to ⋯ and
+the mark lets taps through to it, while New chat and ⋯ keep their own press
 circles above it. A press lights that plate at once in the row's corner and
 fades it on release; the button opts out of the system tap highlight and the
 shared button press (the .98 settle and inset washes), which painted only
@@ -4424,40 +4691,38 @@ material, edge, corner and reach are `--nav-press*`; an interface style sets
 them from its `--look-row-press*` (Air lights the whole island of a closed
 project and the head of an open one, square where its chats begin). The
 keyboard ring is the same plate.
-The phone Navigator is one grid (`MobileNavigator.css`, pinned by
-`mobileNavigatorLayout.test.ts` at 320–430px, every density and RTL). Most
-rows leave the leading column empty and every row ends in ⋮, so both edge
-columns are kept to what their marks need. Project marks are 24px tiles on a
-content edge that is the ⋮ glyph's own edge (the end axis less half a glyph,
-`--nav-gutter`, 15px on a standard phone), so the empty margin measures the
-same at both ends of a row; a session's state mark is centred in the same
-leading column, and search's Back glyph on that column's centre. Names,
-titles, pagination and the empty text share one start
-edge 47px in (gutter + mark + 8px). On the end side project ⋯ and session ⋯ glyphs share one
-column 24px from the screen (`--nav-axis`): the thumb aims at the glyph and a
-phone's rounded edge and case lip make the last few points hard to press, so
-the axis sits clear of the screen's rounded edge while every target still
-runs out to the edge. Close's × ends where those ⋮ dots do (see the toolbar
-below). The toolbar's `--nav-bar-axis` is `--nav-axis` unless an
-interface style floats the rows in from the edge (Air insets it with its
-islands, so close moves in with their ⋮; inside an island Air also gives the rows
-their own `--nav-row-inset`, so a mark sits as far in from the island's side
-as from its top and names, chats, Add project and the title follow it). A chat row's ⋮ draws a 28px press circle centred on that
-axis (`--nav-dots-wash`), whatever the axis; a project's New chat and ⋮ use
-the toolbar tools' 32px circle. A row's trailing marks (isolation, merge,
-running clock, an agent's next wake) are spaced by ink like a project's
-cluster: the last mark stands as far from the ⋮ dots as the dots from the
-screen edge (22.6px on the 24px axis), so marks end two axes in
-(`--nav-mark-end`, 48px from the screen), on the column where a project's
-New chat bubble ends. The body runs `--nav-mark-tuck` into the ⋮ control's
-44px target. A title with no marks runs to that same edge (the row grid has
-no column gap; the first present mark brings a 12px lead-in from the title,
+The phone Navigator is one grid whose two ends mirror (`MobileNavigator.css`,
+pinned by `mobileNavigatorLayout.test.ts` at 320–430px, every density and
+RTL). Each end has an edge column whose centre stands `--nav-axis` from its
+own screen edge (24px on a standard phone): the leading column holds a
+session's state mark, a project's mark and search's Back glyph; the trailing
+one holds every ⋯ and the toolbar's ×. The leading column is one 18px mark
+wide and starts on `--nav-gutter`, the ⋯ glyph's own box edge (the axis less
+half a glyph, 15px); a project mark is a 22px tile (`--nav-project-mark`)
+centred on it, overhanging evenly. Names, titles, pagination and the empty
+text share one start edge 41px in (`--nav-title-start`: gutter + column +
+8px), and a title with no marks ends on the same line measured from the
+other edge (`--nav-title-end`), so text keeps the same distance from both
+edge columns. The thumb aims at the glyph and a phone's rounded edge and
+case lip make the last few points hard to press, so the axis sits clear of
+the screen's rounded edge while every target still runs out to the edge.
+The toolbar's `--nav-bar-axis` is `--nav-axis` unless an interface style
+floats the rows in from the edge. Air does: its islands stand 8px from the
+screen and both edge columns 21px inside an island (29px from the screen,
+titles from 46px), and the toolbar, Add project and the place title follow.
+A chat row's ⋯ draws a 28px press circle centred on the axis
+(`--nav-dots-wash`), whatever the axis; a project's New chat and ⋯ use the
+toolbar tools' 32px circle. A row's trailing marks (isolation, merge,
+sharing, an agent's next wake) stand in fixed columns: the last mark is
+centred under a project's New chat (`--nav-mark-axis`) and each earlier one
+a mark and 8px before it, so a lock or a branch never moves when another
+mark joins the row; a running clock ends on that column's edge. The body
+runs `--nav-mark-tuck` into the ⋯ control's 44px target. The row grid has
+no column gap: the first present mark brings a 12px lead-in from the title,
 the next ones 8px each, and in the Pinned group the hidden pin leaves none
-behind), so the last few pixels of a
-long title sit over the ⋮ target; only a subagent pill, a real control,
-stays clear of it. Rows keep a 6px edge for the current row's rounded wash.
-Small phones (≤360px) use an 11px content edge, a 20px end column and a 4px
-edge.
+behind. A subagent pill, a real control, stays clear of the ⋯ target. Rows
+keep a 6px edge for the current row's rounded wash. Small phones (≤360px)
+use an 11px content edge, a 20px axis and a 4px edge.
 The toolbar is the title and four tools. The title is the active Space's
 name on the content edge, at a project name's size and a firmer weight; in
 the native app it opens the native server menu (the separate Switch server
@@ -4477,46 +4742,45 @@ nothing shows half-clipped. Its input takes focus inside the tap so iOS
 raises the keyboard. Back, Escape and Android Back fold it into the tool
 again on the quicker `--motion-surface` (contents first, then the pill,
 then the title row returns), clear the query and return focus to the tool —
-quietly after a tap, with the ring after a key. The input draws no focus
-ring (the caret marks it; a text field matches `:focus-visible` on every
-focus), and the bar tools' keyboard ring is their round wash, not the slot.
+quietly after a tap, with the ring after a key. The pill is the field, so it
+carries focus: an accent edge and the accent ring in the standard styles, the
+Look's focus ring over its own material in a Look. Its input draws no ring of
+its own (the caret marks where typing goes; a text field matches
+`:focus-visible` on every focus), and the bar tools' keyboard ring is their
+round wash, not the slot.
 Sort and filter is a circle in the field's round end cap, and a choice
 away from the default puts a dot on the search tool as well. The field is
 the tools' 44px height and ends on the content edge.
-A project's New chat and ⋮ are the row's primary controls and are drawn
+A project's New chat and ⋯ are the row's primary controls and are drawn
 like the toolbar's tools: a full 44px box each and the toolbar's 20px glyph
-(`--icon-lg`, stroke `--nav-action-stroke`), ⋮ on the axis. The cluster is
-spaced by visible ink, not by boxes: the screen edge, the ⋮ dots, New
-chat's bubble and the status pills (or the name) stand one
-`--nav-cluster-gap` apart, which is the air between the screen edge and the
-dots (22.4px on a 24px axis). Even 20px boxes do not give even air, because
-the dots are about 3px of ink with 8px of empty box on each side. On the
-narrowest 20px axis that gap would squeeze a target under 44px, so there
-the two inner gaps share the extra (about 24px each, 18.4px at the edge).
+(`--icon-lg`, stroke `--nav-action-stroke`), ⋯ on the axis. The cluster is
+spaced by visible ink, not by boxes: the three dots span 16 of the glyph's
+24 units, so their ink starts about 16.6px from the screen on a 24px axis.
+New chat's bubble and the status pills (or the name) then stand one
+`--nav-cluster-gap` apart: that edge air, or what two 44px targets need
+when it is more (about 19px on a standard phone, 21px on the narrowest).
 The toolbar's tools are the bar's primary controls and each keeps a full
-44px box (close's runs out to the screen edge and half a gap past its ×).
-Their glyphs are spaced by ink the same way: the bar's edge, close's ×,
-the Settings gear, Select's box and Search's lens stand one
-`--nav-tool-gap` apart. That gap is the project cluster's edge air, so the
-× ends where the ⋮ dots below it do and the whole end side shares one
-22.4px rhythm; its centre sits about 4px inside the ⋮ column because the ×
-is wider. On the narrowest axis four 44px targets need a wider gap, so the
-toolbar's gaps are all about 20.8px there. The glyphs' ink spans are
+44px box (close's runs out to the screen edge). Close's × is centred on the
+edge column, over every ⋯ below it; the Settings gear, Select's box and
+Search's lens then stand one `--nav-tool-gap` of ink apart, the cluster's
+edge air unless the 44px targets need more. The glyphs' ink spans are
 recorded on Lucide's 24-unit grid in `MobileNavigator.css`; Select's box
 and the lens are not symmetric, so their end-side insets swap in RTL. The
-closed search pill and the filter dot follow the lens. Every phone row ⋮ is the stroked vertical ellipsis
-(`MoreVerticalIcon`; the session island's menu trigger is the horizontal `MoreIcon`), whose dots stay legible at row size. Their press wash
-is a circle round the glyph and their targets are the full row height. Search's Back and a row's ⋮ keep a 44px target that runs out
-to the edge through a transparent `::after`; press rules set
-`background-color` only.
+closed search pill and the filter dot follow the lens. Every phone row menu
+is the stroked horizontal ellipsis (`MoreIcon`), the session island's menu
+trigger included; the desktop sidebar keeps `MoreVerticalIcon`, and the
+Agents group draws whichever its host does. Their press wash is a circle
+round the glyph and their targets are the full row height. Search's Back
+and a row's ⋯ keep a 44px target that runs out to the edge through a
+transparent `::after`; press rules set `background-color` only.
 Hierarchy is size and weight together: a project name uses the user's
 subheading size at 650, its chats the activity-title role at 500, so a chat
 title never outranks its project; a subagent count is metadata caliber.
 What repeats on every row steps back without leaving: session, project and
-agent ⋮ use the quiet ink (`--nav-quiet-ink`, at least 3:1 on every theme)
+agent ⋯ use the quiet ink (`--nav-quiet-ink`, at least 3:1 on every theme)
 and identity marks (isolation, merge, sharing) the matching
 `--nav-quiet-mark` opacity, while the pin keeps its accent and the current
-row's ⋮ is one step firmer. Pinned chats are grouped by their caption
+row's ⋯ is one step firmer. Pinned chats are grouped by their caption
 alone: no row tint (it read as a second current row) and no pin glyph inside
 the group. Captions (dates, Pinned, the Agents header) share one faint voice;
 only the Pinned glyph keeps the accent. A failed row keeps a faint red wash,
@@ -4529,7 +4793,7 @@ only through a zero-specificity reset, so a control's own type role wins.
 Slot content inside a project joins the same grid: the Agents group
 (`agents` package, pinned by its `hostPhoneAgentNavLayout.test.ts`) puts
 its chevron and agent marks in the leading column, its label and agent names
-on the title edge, ⋮ in the trailing column (the same circle and target) and
+on the title edge, ⋯ in the trailing column (the same circle and target) and
 its trailing measure, a long name included, where session marks end, at a
 session row's height. Its header is a caption in the
 navigator's date-divider style; folded it is one more line of the list, open
@@ -4557,6 +4821,17 @@ visible, then expands back to Project rail. An older collapsed rail without a
 saved return mode restores Tree once when expanded. Clicking the focused
 project's icon in an expanded rail also hides the sessions column, after the
 double-click window so a double-click cannot trigger it.
+A project icon carries one corner mark from `projectRailMark`
+(`sessionStatus.ts`): amber when any chat needs a person (question, approval,
+waiting), the accent colour when a finished top-level chat has a reply the
+reader has not read, green while chats only work. Subagents and archived chats
+never count. The marks of projects that are not open depend on the WS snapshot,
+which reads `SessionSummaryQuery.railStatus` (internal, never HTTP): every
+working/waiting/open-request chat plus each project's ten newest chats unread by
+the reader's own cursor (a chat without a cursor is read, as in
+`attention.unread`). Do not feed the rail from the Space-wide `attentionOnly`
+page: it counts cursor-less chats as unread and ranks open requests past its
+100-row cap.
 Add project and Settings are not fixed footer buttons: they are the
 `shell.add-project` widget (shown in `sidebar.rail` by default, hidden for an
 account that may not add projects) and the one `shell.settings` widget (in the
@@ -4570,19 +4845,48 @@ not the sessions toolbar; while that editor is open the whole rail stays live
 icons still drag and sort. The sessions column's header row carries the
 `sidebar.toolbar` pencil. The sidebar does not show a server connection status control.
 In the wide shell's Project rail the focused project's row is the sessions
-column's only header row: name and path, then Search, New chat, the list
-options and ⋮. Widgets placed in `sidebar.toolbar` sit before Search. There is
-no separate toolbar row. Search opens the field in that row's place at the same
-height, so the list does not move. Escape or × clears and closes the field and
+column's first header row: name and path, then Search, the list options and ⋮.
+Widgets placed in `sidebar.toolbar` sit before Search. There is no separate
+toolbar row. Search opens the field in that row's place at the same height, so
+the list does not move. Escape or × clears and closes the field and
 returns focus to Search. An empty field also closes when focus moves outside
 its row. The toolbar row stays while a query is typed, or while a filter hides
 the focused project, so the list options stay reachable. Selection lives in
-the project's ⋮ menu there. The tree keeps its toolbar row with the select
-toggle. The list-options button lights only for a filter (Needs attention or a
-date filter). The layout, sort and grouping choices in the same menu do not
+the project's ⋮ menu there. The list-options button lights only for a filter
+(Needs attention or a date filter). The layout, sort and grouping choices in the same menu do not
 light it.
 The compact drawer's sort button lights only for a non-default sort. Covered
 by `apps/web/test/sidebarFolderMode.test.ts`.
+
+**Navigator header rows.** On a wide navigator the header is two rows, not
+one: `[collapse 28] [search] [filter 32]`, then a full-width New chat row, then
+the chosen package actions, each a full-width row with its icon and label
+(`Quick actions`; capability rows from `useResolvedCapabilities()`, default
+Agents `schedule` then `planner`, capped at four plus a `More…` row, edited from
+the block's pencil or the list options and stored device-locally under
+`polyth.sidebar.navigatorActions`). A row whose capability owns a package
+section (`meta.navigatorSection`, e.g. Agents) unfolds that section under
+itself, so the project's list does not repeat it. The Project rail starts from its project
+row instead and drops the collapse toggle, which lives in the rail. The
+compact drawer keeps its own single toolbar.
+
+Every row — header and list — shares one grid: the pill runs from 8px to
+width−8, its glyph starts at 16px and every label (New chat, actions,
+projects, chats) sits on the 40px axis. Labels that ellipsize keep an 18px
+line at 13px, because `line-height: 1` clips `g`/`y` descenders under
+`overflow: hidden`. The search field follows Settings → corner rounding
+(`--radius-card`), never the glass capsule. It is a well, not a boxed input:
+focus edges the well (accent edge plus the accent ring) and the bare input
+inside keeps no ring of its own — Fluent's 1px ink stroke read as a thick dark
+border just inside the field.
+
+While rows are scrolled out above the list, a soft shadow (`--shadow-md`)
+lies under its upper edge, so the pinned rows do not read as the start of the
+list. `Sidebar.tsx` sets `data-scrolled` on `.side-scroll` from its scroll
+handler (no state, no re-render) together with `--side-scroll-pad`, the list's
+measured top padding, and `.side-scroll::before` casts the shadow from the
+list's very edge; at the top of the list there is none.
+
 Each project tile carries a live status dot: green while any of that project's
 sessions works, amber when one needs attention. The socket keeps active rows
 from every project current as summary projections, so the dot appears and
@@ -5091,6 +5395,17 @@ click everywhere else.
   writer's single newlines (`white-space: pre-line`); file preview keeps
   CommonMark soft breaks. A quote renders `blockquote.md-quote` and a rule
   `hr.md-hr` on every surface (styles in `styles.css`, not per package).
+- **Provider bodies.** Change-request and issue descriptions and comments
+  (GitHub, GitLab) render through `HostingBody`
+  (`packages/code-hosting/widgets/HostingBody.tsx`), which splits the text and
+  hands each part to `MarkdownDoc`. Providers send Markdown plus literal HTML —
+  Dependabot's release notes are `<details>`/`<p>`/`<blockquote>`/`<ul>` blocks
+  — so `bodyHtml.ts` converts the subset the providers themselves render into
+  Markdown (links and images keep the Markdown URL policy, unknown tags are
+  dropped, code spans and fenced blocks stay verbatim, an unterminated
+  `<details>` stays text) and keeps every `<details>` a real disclosure
+  (`.pr-details`). It only produces text, so no HTML string reaches the DOM;
+  bare Markdown without tags keeps its exact bytes.
 - **Videos.** `isVideoSource` (`markdown/sanitize.ts`) recognises video files.
   An image-syntax destination that is a video renders as a `<video controls>`
   player instead of a thumbnail, under the same image URL policy (an unsafe
@@ -5212,7 +5527,13 @@ thumbnail strip.
   content's fixed width, one clock per window, RTL, a moved window, the
   focused split's rail side, reduced motion), `packageWindowExitMounted.test.ts`
   (kept-alive panes stay mounted through an exit), `packageWindow.test.ts`
-  (the CSS and `ContextRail` contract).
+  (the CSS and `ContextRail` contract), `railLauncherStability.test.ts`
+  (Chromium, every interface style × window layout × Floating columns, plus
+  borders, a mirrored shell and the desktop caption band: no launcher moves
+  when a window opens, pins, fills the workspace or leaves; a floating
+  window's top and bottom edges are the column's own; the host keeps its
+  frame; the tablet cluster's morph starts and ends on the idle cluster; the
+  column's corners survive the largest Corner rounding).
 - Surface motion: `surfaceMotion.test.ts` (Chromium: exit ghosts, phone
   Settings arrival edge, stages and dismissal, the covered Navigator, sheet and
   dialog edges, the toast, the RTL-mirrored tablet drawer; plus the exit

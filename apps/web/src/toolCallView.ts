@@ -102,7 +102,7 @@ export function mcpCallOf(tool: string, input: JsonObject): McpCall | undefined 
   }
   const qualified = name.match(/^mcp__(.+?)__(.+)$/);
   if (qualified) return { server: qualified[1]!, tool: qualified[2]!, args: input };
-  const polyth = name.match(/^(?:mcp__?)?polyth-agent-tools(?:__|_)(.+)$/);
+  const polyth = name.match(/^(?:mcp__?)?polyth-agent-tools(?:__|_|-)(.+)$/);
   if (polyth) return { server: POLYTH_MCP_SERVER, tool: polyth[1]!, args: input };
   // Antigravity's `mcp_<server>_<tool>`: only a hyphenated server splits unambiguously.
   const single = name.match(/^mcp_([a-z0-9]+(?:-[a-z0-9]+)+)_(.+)$/i);
@@ -122,10 +122,52 @@ export function canonicalMcpToolName(call: McpCall): string {
   return call.server ? `mcp__${call.server}__${call.tool}` : call.tool;
 }
 
+/**
+ * Antigravity's native tools take PascalCase arguments (`run_command`
+ * `{CommandLine, Cwd}`, `read_file` `{Path, StartLine, EndLine}`, `view_file`
+ * `{AbsolutePath}`, `write_to_file` `{TargetFile}`). Fold them into the shape
+ * other harnesses use so a row reads as the command or file, not the transport.
+ * The native keys stay alongside, so nothing the row already understood is lost.
+ */
+function nativeToolCall(tool: string, input: JsonObject): { tool: string; input: JsonObject } {
+  const name = tool.trim().toLowerCase();
+  const command = str(input.CommandLine);
+  if (name === "run_command" && command) {
+    const cwd = str(input.Cwd);
+    return { tool: "bash", input: { ...input, command, ...(cwd && input.cwd === undefined ? { cwd } : {}) } };
+  }
+  const path = str(input.Path) ?? str(input.AbsolutePath) ?? str(input.TargetFile) ?? str(input.DirectoryPath) ?? str(input.SearchPath);
+  if ((name === "read_file" || name === "view_file") && path) {
+    const start = typeof input.StartLine === "number" ? input.StartLine : undefined;
+    const end = typeof input.EndLine === "number" ? input.EndLine : undefined;
+    return {
+      tool: "read",
+      input: {
+        ...input,
+        file_path: path,
+        ...(start !== undefined ? { offset: start } : {}),
+        ...(start !== undefined && end !== undefined && end >= start ? { limit: end - start + 1 } : {}),
+      },
+    };
+  }
+  const url = str(input.Url);
+  const query = str(input.Query);
+  if (path === undefined && url === undefined && query === undefined) return { tool, input };
+  return {
+    tool,
+    input: {
+      ...input,
+      ...(path && input.path === undefined ? { path } : {}),
+      ...(url && input.url === undefined ? { url } : {}),
+      ...(query && input.query === undefined ? { query } : {}),
+    },
+  };
+}
+
 /** The tool a row is really about: an MCP wrapper is replaced by the call it carries. */
 export function effectiveToolCall(tool: string, input: JsonObject): { tool: string; input: JsonObject; mcp?: McpCall } {
   const mcp = mcpCallOf(tool, input);
-  return mcp ? { tool: canonicalMcpToolName(mcp), input: mcp.args, mcp } : { tool, input };
+  return mcp ? { tool: canonicalMcpToolName(mcp), input: mcp.args, mcp } : nativeToolCall(tool, input);
 }
 
 export const isPolythMcpCall = (call: McpCall): boolean =>

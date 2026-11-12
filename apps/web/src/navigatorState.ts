@@ -30,6 +30,15 @@ export const PROJECT_SORT_KEY = "polyth.sidebar.projectSort";
 export const PROJECT_ORDER_KEY = "polyth.sidebar.projectOrder";
 /** Phone composer button arrangements, one entry per Space + project (JSON object). */
 export const MOBILE_RAIL_MAP_KEY = "polyth.composer.mobile-rail.v2";
+/** Wide navigator: capability ids shown as action rows under New chat (JSON array). */
+export const NAVIGATOR_ACTIONS_KEY = "polyth.sidebar.navigatorActions";
+/** Package sections at the top of a project's list (`sidebar.project.leading`
+ *  with `meta.navigatorSection`): which are hidden, and which are folded under
+ *  their action row (JSON object). */
+export const NAVIGATOR_SECTIONS_KEY = "polyth.sidebar.navigatorSections";
+/** Repository chip chosen per multi-repository project (JSON object of
+ *  project id → repository id; absent = All). */
+export const REPOSITORY_FILTER_KEY = "polyth.sidebar.repositoryFilter";
 
 export type NavigatorStateKey =
   | typeof EXPANDED_PROJECTS_KEY
@@ -37,7 +46,10 @@ export type NavigatorStateKey =
   | typeof SESSION_VISIBLE_COUNTS_KEY
   | typeof PROJECT_SORT_KEY
   | typeof PROJECT_ORDER_KEY
-  | typeof MOBILE_RAIL_MAP_KEY;
+  | typeof MOBILE_RAIL_MAP_KEY
+  | typeof NAVIGATOR_ACTIONS_KEY
+  | typeof NAVIGATOR_SECTIONS_KEY
+  | typeof REPOSITORY_FILTER_KEY;
 
 const RECORD_KIND: Record<NavigatorStateKey, string> = {
   [EXPANDED_PROJECTS_KEY]: "navigator-open-projects",
@@ -46,6 +58,9 @@ const RECORD_KIND: Record<NavigatorStateKey, string> = {
   [PROJECT_SORT_KEY]: "navigator-project-sort",
   [PROJECT_ORDER_KEY]: "navigator-project-order",
   [MOBILE_RAIL_MAP_KEY]: "mobile-composer-rail",
+  [NAVIGATOR_ACTIONS_KEY]: "navigator-actions",
+  [NAVIGATOR_SECTIONS_KEY]: "navigator-sections",
+  [REPOSITORY_FILTER_KEY]: "navigator-repository-filter",
 };
 const KEYS = Object.keys(RECORD_KIND) as NavigatorStateKey[];
 
@@ -109,6 +124,121 @@ export async function hydrateNavigatorState(
 export function subscribeNavigatorStateHydrated(listener: () => void): () => void {
   hydratedListeners.add(listener);
   return () => { hydratedListeners.delete(listener); };
+}
+
+// ---- navigator action rows ----------------------------------------------------
+// The wide navigator lists a few package actions (capabilities) as full-width
+// rows under New chat. Only the chosen ids are stored; whether a capability
+// exists, its label and its mark stay with the capability registry.
+
+/** Agents (capability `schedule`) then Planner, until the person edits the block. */
+export const DEFAULT_NAVIGATOR_ACTIONS: readonly string[] = ["schedule", "planner"];
+/** Rows drawn before the rest fold into a More… row. */
+export const NAVIGATOR_ACTIONS_VISIBLE_MAX = 4;
+
+const actionListeners = new Set<() => void>();
+let actionsCache: { raw: string | null; ids: readonly string[] } | null = null;
+
+/** Pure: the stored ids, deduplicated; anything unreadable is the default. */
+export function parseNavigatorActions(raw: string | null): readonly string[] {
+  if (raw === null) return DEFAULT_NAVIGATOR_ACTIONS;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) return DEFAULT_NAVIGATOR_ACTIONS;
+    return [...new Set(value.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 200))];
+  } catch {
+    return DEFAULT_NAVIGATOR_ACTIONS;
+  }
+}
+
+export function readNavigatorActions(): readonly string[] {
+  const raw = readNavigatorState(NAVIGATOR_ACTIONS_KEY);
+  if (actionsCache?.raw !== raw) actionsCache = { raw, ids: parseNavigatorActions(raw) };
+  return actionsCache.ids;
+}
+
+export function writeNavigatorActions(ids: readonly string[]): void {
+  writeNavigatorState(NAVIGATOR_ACTIONS_KEY, JSON.stringify([...new Set(ids)]));
+  for (const listener of [...actionListeners]) listener();
+}
+
+/** Re-render source for the action rows: local edits and the mobile restore. */
+export function subscribeNavigatorActions(listener: () => void): () => void {
+  actionListeners.add(listener);
+  const offHydrated = subscribeNavigatorStateHydrated(listener);
+  return () => {
+    actionListeners.delete(listener);
+    offHydrated();
+  };
+}
+
+// ---- package sections ----------------------------------------------------------
+// A package can put a section at the top of each project's list (agents). The
+// person hides it from the list options, and, while the section's own action
+// row is shown above, unfolds it under that row instead. Only contribution ids
+// are stored; the label and the owning capability stay with the package.
+
+export interface NavigatorSectionsState {
+  /** Sections the list options turned off. */
+  hidden: readonly string[];
+  /** Sections folded under their action row. Unfolded is the default. */
+  folded: readonly string[];
+}
+
+const EMPTY_SECTIONS: NavigatorSectionsState = { hidden: [], folded: [] };
+const sectionListeners = new Set<() => void>();
+let sectionsCache: { raw: string | null; state: NavigatorSectionsState } | null = null;
+
+function idList(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 200))];
+}
+
+/** Pure: anything unreadable is "nothing hidden, nothing folded". */
+export function parseNavigatorSections(raw: string | null): NavigatorSectionsState {
+  if (raw === null) return EMPTY_SECTIONS;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object") return EMPTY_SECTIONS;
+    const record = value as { hidden?: unknown; folded?: unknown };
+    return { hidden: idList(record.hidden), folded: idList(record.folded) };
+  } catch {
+    return EMPTY_SECTIONS;
+  }
+}
+
+export function readNavigatorSections(): NavigatorSectionsState {
+  const raw = readNavigatorState(NAVIGATOR_SECTIONS_KEY);
+  if (sectionsCache?.raw !== raw) sectionsCache = { raw, state: parseNavigatorSections(raw) };
+  return sectionsCache.state;
+}
+
+function toggled(ids: readonly string[], id: string, on: boolean): readonly string[] {
+  return on ? [...new Set([...ids, id])] : ids.filter((candidate) => candidate !== id);
+}
+
+function writeNavigatorSections(next: NavigatorSectionsState): void {
+  writeNavigatorState(NAVIGATOR_SECTIONS_KEY, JSON.stringify(next));
+  for (const listener of [...sectionListeners]) listener();
+}
+
+export function setNavigatorSectionHidden(id: string, hidden: boolean): void {
+  const current = readNavigatorSections();
+  writeNavigatorSections({ ...current, hidden: toggled(current.hidden, id, hidden) });
+}
+
+export function setNavigatorSectionFolded(id: string, folded: boolean): void {
+  const current = readNavigatorSections();
+  writeNavigatorSections({ ...current, folded: toggled(current.folded, id, folded) });
+}
+
+export function subscribeNavigatorSections(listener: () => void): () => void {
+  sectionListeners.add(listener);
+  const offHydrated = subscribeNavigatorStateHydrated(listener);
+  return () => {
+    sectionListeners.delete(listener);
+    offHydrated();
+  };
 }
 
 /** Test seam: forget the hydrated scope so the next test starts unhydrated. */

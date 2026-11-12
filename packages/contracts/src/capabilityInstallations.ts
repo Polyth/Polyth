@@ -104,9 +104,26 @@ export interface SkillInstallationDto {
   bundle?: { files: number; bytes: number };
   /** The instructions were edited after this copy was taken. */
   modified?: boolean;
-  /** Harnesses this skill is withheld from. Any other harness, including one
-   * added later, receives it. */
-  offHarnesses?: string[];
+  /** Which harnesses receive this managed skill, and how. Absent means every
+   * harness, on demand, including one added later. */
+  reach?: SkillReachDto;
+}
+
+/** How one harness gets a managed skill: not at all, on demand (the harness
+ * offers it as a skill), or always (its instructions join every session). */
+export type SkillHarnessMode = "off" | "on" | "always";
+
+/** What a harness no rule names gets. `all`: on demand, including harnesses
+ * added later. `some`: nothing; only the harnesses and families named below.
+ * `none`: no harness at all, while the choices below are kept for later. */
+export type SkillReachDefault = "all" | "some" | "none";
+
+/** A managed skill's reach. The most specific rule wins: a harness, then its
+ * family (`SkillHarnessDto.family`), then the default. */
+export interface SkillReachDto {
+  default: SkillReachDefault;
+  families?: Record<string, SkillHarnessMode>;
+  harnesses?: Record<string, SkillHarnessMode>;
 }
 
 /** Provenance of a managed copy. `contentHash` covers every file of the copy,
@@ -254,6 +271,14 @@ export type SkillDelivery = "native" | "prompt" | "none";
 export interface SkillHarnessDto {
   id: string;
   name: string;
+  /** The accounts of one native harness share a family, named by its default
+   * harness id (`claude` for `claude` and `claude-work`). A harness with one
+   * account is a family of its own. */
+  family: string;
+  /** The family's own name, without an account. */
+  familyName: string;
+  /** Names this account inside its family. Absent on the default account. */
+  accountLabel?: string;
   /** `#rrggbb`. */
   color?: string;
   delivery: SkillDelivery;
@@ -319,12 +344,17 @@ export interface SkillAdoptInput {
   replace?: boolean;
 }
 
-export interface SkillAvailabilityInput {
+/** One change to a managed skill's reach: exactly one of `default`, `family`
+ * or `harness`. A `null` mode removes that rule, so the next broader one
+ * applies. Choosing `some` keeps the skill where it works now; choosing `all`
+ * clears every `off`. */
+export interface SkillReachInput {
   name: string;
   scope: CapabilityInstallationScope;
   projectId?: string;
-  harnessId: string;
-  enabled: boolean;
+  default?: SkillReachDefault;
+  family?: { id: string; mode: SkillHarnessMode | null };
+  harness?: { id: string; mode: SkillHarnessMode | null };
 }
 
 export interface SkillInstallationInput {

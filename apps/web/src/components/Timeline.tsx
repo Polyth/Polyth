@@ -1857,7 +1857,9 @@ function RateLimitNotice({ sessionId, limit, turnError }: { sessionId: string; l
   return (
     <Notice
       tone="warning"
-      className={refusedRequest ? "turn-rate-limit turn-rate-limit--retry" : "turn-rate-limit"}
+      // The same glass dock as the isolation card it stacks with, so every
+      // theme, look and glass setting dresses both alike.
+      className={refusedRequest ? "turn-rate-limit turn-rate-limit--retry ui-glass-dock" : "turn-rate-limit ui-glass-dock"}
       role="status"
       aria-live="polite"
       heading={heading}

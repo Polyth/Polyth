@@ -166,6 +166,36 @@
   }
 }
 
+/* The native app's WebView itself ends at the keyboard (the plugin resizes it
+   on iOS, the window insets on Android), so there the WebView's own edges are
+   the band and a full-height layer needs no frame arithmetic: it keeps
+   `top: 0; bottom: 0`. Placing it by the published frame instead lost the
+   layer in the iOS app — a package window (Terminal, GitHub search) shrank to
+   its status-bar padding and the chat showed in its place while the window's
+   field still held the keyboard (device report 2026-11-10), although the chat
+   chain on the same frame stood right. For the ~0.45 s before the deferred
+   iOS resize lands the layer's foot sits behind the keyboard; that is where
+   the old closed-state box was too. */
+@media (max-width: 1024px), (max-height: 480px) and (pointer: coarse) {
+  body:not(.desktop-app)[data-keyboard="open"][data-keyboard-source="native"] :is(.scrim.settings-scrim, .mobile-navigator) {
+    top: 0;
+    bottom: 0;
+    height: auto;
+  }
+}
+/* The layers that are only fixed on narrow shells, as in the band block. */
+@media (max-width: 960px), (max-height: 480px) and (pointer: coarse) {
+  body:not(.desktop-app)[data-keyboard="open"][data-keyboard-source="native"] :is(
+    .sidebar,
+    .module-view--main,
+    .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> :is(.rail-fullscreen, .panel-sheet))
+  ) {
+    top: 0;
+    bottom: 0;
+    height: auto;
+  }
+}
+
 /* A bottom sheet that holds a search field (the widget catalog) is pinned with
    `bottom: 0`, so it sits behind a keyboard that a Safari pan left uncovered in
    the layout. A percentage `bottom` resolves against the containing block's

@@ -137,6 +137,21 @@ test("widget plugin id stays semantic while owner is host-bound", () => {
   }
 });
 
+test("a package can ask whether another package's page exists, and registers its own under its owner", () => {
+  const activation = createPackageActivation("catalog-link", webPackageHost);
+  try {
+    // The query crosses packages (a settings page offering a way into another
+    // package's page); registration stays owned by the asking package.
+    assert.equal(activation.host.pages?.has?.("no-such-page"), false);
+    activation.host.pages?.register({ id: "catalog-link.page", title: "Page", component: () => null });
+    assert.equal(activation.host.pages?.has?.("catalog-link.page"), true);
+    assert.equal(webPackageHost.pages?.has?.("catalog-link.page"), true, "the query answers for the real registry");
+  } finally {
+    activation.dispose();
+  }
+  assert.equal(webPackageHost.pages?.has?.("catalog-link.page"), false, "disposing removes the page and the answer");
+});
+
 test("cross-owner widget collisions throw for direct and plugin registration", () => {
   const core = registerWidget({
     id: "core.collision-chat",

@@ -615,6 +615,7 @@ export const zhCN: GitMessages = {
   "gitview.identity": "身份",
   "gitview.aheadValue": "领先 {count}",
   "gitview.allRepositories": "所有仓库",
+  "gitview.otherProjectRepositories": "项目的其他仓库",
   "gitview.backToChanges": "返回更改",
   "gitview.backToLog": "返回日志",
   "gitview.behindValue": "落后 {count}",

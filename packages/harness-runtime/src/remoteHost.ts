@@ -11,7 +11,7 @@
 // host with none of its own (Pi: backend-pi/src/remoteConfig.ts).
 import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
-import type { HarnessContext, HarnessProbe, RemoteHost, SshHarnessConfigSource } from "@polyth/contracts";
+import type { HarnessContext, HarnessProbe, RemoteHost, SshHarnessConfigSource, SshHarnessPlacement } from "@polyth/contracts";
 import { serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 
 /** A remote host that can launch raw-stdio processes. */
@@ -24,7 +24,7 @@ type SshPrincipal =
 interface SshTransportService {
   host(connectionId: string): RemoteHost;
   /** The stored connection; carries per-harness configuration exceptions. */
-  get?(connectionId: string): { harnessConfig?: Record<string, string> } | undefined;
+  get?(connectionId: string): { harnessConfig?: Record<string, string>; harnessPlacement?: Record<string, string> } | undefined;
   /** Connection ownership (Spaces §14.6); absent on older transports. */
   usable?(connectionId: string, principal: SshPrincipal): boolean;
 }
@@ -91,6 +91,21 @@ export async function remoteHarnessConfigSource(
   if (project?.remote?.kind !== "ssh") return "remote";
   const ssh = host.services.get(serverServiceKey<SshTransportService>("ssh"));
   return ssh?.get?.(project.remote.connectionId)?.harnessConfig?.[harnessId] === "remote" ? "remote" : "local";
+}
+
+/** Where `harnessId` runs for a remote project (`SshConnectionDto.harnessPlacement`):
+ * on the `host` unless the connection lists it as `local`. A backend that
+ * declares `remoteHost.localPlacement` asks this before it launches. */
+export async function remoteHarnessPlacement(
+  host: Pick<ServerPackageHost, "projects" | "services" | "forSpace">,
+  context: Pick<HarnessContext, "projectId" | "space">,
+  harnessId: string,
+): Promise<SshHarnessPlacement> {
+  const projects = context.space ? host.forSpace(context.space).projects : host.projects;
+  const project = await projects.get(context.projectId);
+  if (project?.remote?.kind !== "ssh") return "host";
+  const ssh = host.services.get(serverServiceKey<SshTransportService>("ssh"));
+  return ssh?.get?.(project.remote.connectionId)?.harnessPlacement?.[harnessId] === "local" ? "local" : "host";
 }
 
 /** Local spawn arguments for `argv` running in `cwd` on the host. The local

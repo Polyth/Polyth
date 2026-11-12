@@ -93,12 +93,17 @@ test("the route keeps each person's ledger in their Space and merges writes", as
   assert.deepEqual(empty, { status: 200, body: { serverInstanceId: "server-1", spaceId: "space-a", host: null, space: null } });
 
   const phone = ledger({ "claude/5h": { remaining: 0, exhausted: true, low: 5, pace: 2, resetsAt: NOW + HOUR, at: NOW } });
-  assert.equal((await call(route, ana, "PUT", { host: phone })).status, 200);
+  const first = await call(route, ana, "PUT", { host: phone });
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.body.previous, { host: null, space: null }, "the first write found nothing announced");
   const desktop = ledger({ "codex/7d": { remaining: .1, low: 10, resetsAt: NOW + 90 * HOUR, at: NOW + 1_000 } }, {}, NOW + 1_000);
   const merged = await call(route, ana, "PUT", { host: desktop });
   const host = merged.body.host as UsageAlertLedger;
   assert.equal(host.windows["claude/5h"]?.exhausted, true, "a second device's write keeps the first one's announcement");
   assert.equal(host.windows["codex/7d"]?.low, 10);
+  const found = (merged.body.previous as { host: UsageAlertLedger }).host;
+  assert.equal(found.windows["claude/5h"]?.exhausted, true, "and tells it what was already announced");
+  assert.equal(found.windows["codex/7d"], undefined);
 
   // Another person, and the same person in another Space, start from nothing.
   assert.equal((await call(route, spaceFor("ben"), "GET")).body.host, null);

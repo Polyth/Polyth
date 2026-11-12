@@ -89,6 +89,9 @@ const baseOf = (p: string) => p.split("/").pop() ?? p;
 /** "⌘L" on Apple platforms, "Ctrl+L" elsewhere. */
 const shortcut = (key: string) => (MOD === "⌘" ? `⌘${key}` : `${MOD}+${key}`);
 const msg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+/** Explain/Fix failure text; a reply that was a written-out tool call has its own translated line. */
+const inlineAiError = (err: unknown) =>
+  (err as { code?: unknown })?.code === "tool-call-reply" ? tr("editor.filepane.aiToolCall") : msg(err);
 /** Above this many lines, fall back to a plain block (no per-line rows). */
 const MAX_ROWED_LINES = 8000;
 const FILE_REFRESH_MS = 8_000;
@@ -594,7 +597,7 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
       setExplainPanel((panel) => panel ? {
         ...panel,
         loading: false,
-        error: msg(err),
+        error: inlineAiError(err),
       } : null);
     }
   };
@@ -620,7 +623,7 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
       setInlineStatus(applied ? tr("editor.filepane.fixApplied") : tr("editor.filepane.fixFailed"));
     } catch (err) {
       if (request !== inlineRequest.current) return;
-      setInlineStatus(msg(err));
+      setInlineStatus(inlineAiError(err));
     }
     if (inlineStatusTimer.current) clearTimeout(inlineStatusTimer.current);
     inlineStatusTimer.current = setTimeout(() => { if (request === inlineRequest.current) setInlineStatus(""); }, 2400);

@@ -11,7 +11,7 @@
 // drags to zoom (mediaZoom.ts); while it is zoomed the paging and the pull
 // stand aside. The stage takes no native panning (`touch-action: none`), so
 // the browser never scrolls or bounces the page under these drags.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import A11yDialog from "./a11y/Dialog.tsx";
 import {
@@ -120,10 +120,65 @@ function FileCard({ attachment, kind }: { attachment: AttachmentRef; kind: Previ
   );
 }
 
-function AttachmentContent({ attachment, kind }: { attachment: AttachmentRef; kind: PreviewKind }) {
+/** An image with a package overlay over exactly its rendered box: the frame
+ *  is sized from the image's natural size and the slide's content box (not
+ *  object-fit letterboxing, which would offset every overlay coordinate), and
+ *  the frame, not the image, is what zooms. */
+function FramedImage({ attachment, overlay }: { attachment: AttachmentRef; overlay: ReactNode }) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    // A cached image can finish before React attaches onLoad; read it back.
+    const image = imageRef.current;
+    setNatural(image?.complete && image.naturalWidth > 0 ? { w: image.naturalWidth, h: image.naturalHeight } : null);
+  }, [attachment.url]);
+
+  useEffect(() => {
+    const slide = frameRef.current?.parentElement;
+    if (!slide) return;
+    const measure = () => {
+      const style = window.getComputedStyle(slide);
+      const px = (value: string) => parseFloat(value) || 0;
+      const w = slide.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
+      const h = slide.clientHeight - px(style.paddingTop) - px(style.paddingBottom);
+      setBox(w > 0 && h > 0 ? { w, h } : null);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(slide);
+    return () => observer.disconnect();
+  }, []);
+
+  const scale = natural && box ? Math.min(box.w / natural.w, box.h / natural.h, 1) : 0;
+  return (
+    <div
+      ref={frameRef}
+      className="attachment-preview-media attachment-preview-frame"
+      style={scale > 0 ? { width: `${Math.max(1, Math.round(natural!.w * scale))}px`, height: `${Math.max(1, Math.round(natural!.h * scale))}px` } : undefined}
+      data-measured={scale > 0 ? "" : undefined}
+    >
+      <img
+        ref={imageRef}
+        className="attachment-preview-frame-image"
+        src={attachment.url}
+        alt={attachment.name}
+        draggable={false}
+        onLoad={(event) => setNatural({ w: event.currentTarget.naturalWidth, h: event.currentTarget.naturalHeight })}
+      />
+      {scale > 0 && <div className="attachment-preview-overlay">{overlay}</div>}
+    </div>
+  );
+}
+
+function AttachmentContent({ attachment, kind, overlay }: { attachment: AttachmentRef; kind: PreviewKind; overlay?: ReactNode }) {
   if (!attachment.url || kind === "audio" || kind === "link" || kind === "unsupported") {
     return <FileCard attachment={attachment} kind={kind} />;
   }
+  if (kind === "image" && overlay !== undefined) return <FramedImage attachment={attachment} overlay={overlay} />;
   if (kind === "image") return <img className="attachment-preview-media" src={attachment.url} alt={attachment.name} draggable={false} />;
   if (kind === "video") return <video className="attachment-preview-media" src={attachment.url} controls preload="metadata" />;
   if (kind === "pdf") {
@@ -132,12 +187,43 @@ function AttachmentContent({ attachment, kind }: { attachment: AttachmentRef; ki
   return <div className="attachment-preview-doc"><TextPreview attachment={attachment} /></div>;
 }
 
-export default function AttachmentPreview({ attachments, start, onClose }: {
+export interface AttachmentPreviewProps {
   attachments: AttachmentRef[];
   start: number;
   onClose: () => void;
-}) {
-  const [index, setIndex] = useState(Math.min(Math.max(start, 0), Math.max(attachments.length - 1, 0)));
+  /** Controlled position (a package viewer that keeps it); pair with onIndexChange. */
+  index?: number;
+  onIndexChange?: (index: number) => void;
+  /** Drawn over the shown image inside the zoomed frame (a package's marks). */
+  renderOverlay?: (attachment: AttachmentRef, index: number) => ReactNode;
+  /** A package panel beside the stage (below it on phones). */
+  aside?: ReactNode;
+  asideLabel?: string;
+  /** Package controls in a row under the stage. */
+  actions?: ReactNode;
+  /** Suspend zoom, paging and pull-to-dismiss (the person draws on the overlay). */
+  gesturesDisabled?: boolean;
+  className?: string;
+}
+
+const isTypingTarget = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement && (target.isContentEditable || /^(?:INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+
+export default function AttachmentPreview({
+  attachments,
+  start,
+  onClose,
+  index: controlledIndex,
+  onIndexChange,
+  renderOverlay,
+  aside,
+  asideLabel,
+  actions,
+  gesturesDisabled = false,
+  className,
+}: AttachmentPreviewProps) {
+  const clampIndex = (value: number) => Math.min(Math.max(value, 0), Math.max(attachments.length - 1, 0));
+  const [index, setIndex] = useState(clampIndex(controlledIndex ?? start));
   const [direction, setDirection] = useState<"prev" | "next" | null>(null);
   /** The last page change came from a swipe: the next item rides in from the far edge. */
   const [swiped, setSwiped] = useState(false);
@@ -153,9 +239,11 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
   }, [index]);
 
   const go = (target: number, dir: "prev" | "next", bySwipe = false) => {
+    const next = ((target % count) + count) % count;
     setDirection(dir);
     setSwiped(bySwipe);
-    setIndex(((target % count) + count) % count);
+    setIndex(next);
+    onIndexChange?.(next);
   };
   const goRef = useRef(go);
   goRef.current = go;
@@ -163,12 +251,27 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
   indexRef.current = index;
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const gesturesOffRef = useRef(gesturesDisabled);
+  gesturesOffRef.current = gesturesDisabled;
   const hasNavigation = count > 1;
+
+  // A controlled position that moves from outside (the package's own list)
+  // follows here without an inbound swipe.
+  useEffect(() => {
+    if (controlledIndex === undefined) return;
+    const next = clampIndex(controlledIndex);
+    if (next === indexRef.current) return;
+    setDirection(next < indexRef.current ? "prev" : "next");
+    setSwiped(false);
+    setIndex(next);
+  }, [controlledIndex]);
 
   useEffect(() => {
     const zoom = attachMediaZoom({
       surface: () => stageRef.current,
-      media: () => slideRef.current?.querySelector<HTMLElement>("img.attachment-preview-media") ?? null,
+      media: () => (gesturesOffRef.current
+        ? null
+        : slideRef.current?.querySelector<HTMLElement>("img.attachment-preview-media, .attachment-preview-frame[data-measured]") ?? null),
       onScale: setScale,
     });
     zoomRef.current = zoom;
@@ -188,7 +291,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
   useEffect(() => attachSheetDrag({
     sheet: () => slideRef.current,
     origin: () => "bottom",
-    enabled: () => Boolean(slideRef.current && !slideRef.current.hasAttribute("data-swiping") && !zoomRef.current?.engaged()),
+    enabled: () => Boolean(slideRef.current && !gesturesOffRef.current && !slideRef.current.hasAttribute("data-swiping") && !zoomRef.current?.engaged()),
     onProgress: (progress) => {
       const dialog = stageRef.current?.closest<HTMLElement>(".attachment-preview-dialog");
       if (!dialog) return;
@@ -208,7 +311,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
       surface: () => stageRef.current,
       direction: swipe,
       zone: () => "surface",
-      enabled: () => Boolean(slideRef.current && !slideRef.current.hasAttribute("data-dragging") && !zoomRef.current?.engaged()),
+      enabled: () => Boolean(slideRef.current && !gesturesOffRef.current && !slideRef.current.hasAttribute("data-dragging") && !zoomRef.current?.engaged()),
       motion: "--motion-stack",
       begin: ({ rtl }) => {
         const slide = slideRef.current;
@@ -253,6 +356,7 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
   const attachment = attachments[index];
   if (!attachment) return null;
   const kind = previewKind(attachment);
+  const overlay = renderOverlay && kind === "image" ? renderOverlay(attachment, index) : undefined;
   const previous = () => go(index - 1, "prev");
   const next = () => go(index + 1, "next");
 
@@ -260,15 +364,17 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
     <A11yDialog
       title={attachment.name}
       size="full"
-      className={`attachment-preview-dialog attachment-preview-dialog--${kind}`}
+      className={`attachment-preview-dialog attachment-preview-dialog--${kind}${className ? ` ${className}` : ""}`}
       backdropClassName="attachment-preview-backdrop"
       onClose={onClose}
       initialFocus=".attachment-preview-stage"
     >
       <div
         className="attachment-preview-content"
+        data-aside={aside ? "" : undefined}
+        data-gestures-off={gesturesDisabled ? "" : undefined}
         onKeyDown={(event) => {
-          if (!hasNavigation) return;
+          if (!hasNavigation || isTypingTarget(event.target)) return;
           if (event.key === "ArrowLeft") { event.preventDefault(); previous(); }
           if (event.key === "ArrowRight") { event.preventDefault(); next(); }
         }}
@@ -287,9 +393,12 @@ export default function AttachmentPreview({ attachments, start, onClose }: {
             data-swiped={swiped ? "" : undefined}
             onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
           >
-            <AttachmentContent attachment={attachment} kind={kind} />
+            <AttachmentContent attachment={attachment} kind={kind} overlay={overlay} />
           </div>
         </div>
+
+        {aside && <aside className="attachment-preview-aside" aria-label={asideLabel}>{aside}</aside>}
+        {actions && <div className="attachment-preview-actions">{actions}</div>}
 
         <div className="attachment-preview-bar">
           {hasNavigation && <span className="attachment-preview-count">{index + 1} / {count}</span>}

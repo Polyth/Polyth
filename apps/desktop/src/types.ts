@@ -2,7 +2,7 @@ export type DesktopControlPosition = "left" | "right";
 export type DesktopControlTheme = "system" | "dark" | "light";
 export type DesktopWindowAction = "minimize" | "toggle-maximize" | "close";
 /** Release channel the desktop updater follows; see apps/desktop/src/updaterChannel.ts. */
-export type DesktopUpdateChannel = "stable" | "test" | "nightly";
+export type DesktopUpdateChannel = "stable" | "nightly";
 /** When keep-awake holds the app-suspension blocker: only while an agent is
  *  working, or for as long as Polyth runs. */
 export type DesktopKeepAwakeMode = "working" | "always";
@@ -21,7 +21,29 @@ export interface DesktopSettings {
   softwareRendering: boolean;
   reduceAnimations: boolean;
   controlsPosition: DesktopControlPosition;
+  /** Linux: take the side, order and set of caption buttons from the desktop
+   *  environment (GNOME/KDE/XFCE button layout) instead of controlsPosition,
+   *  which stays the manual choice older renderers read. */
+  controlsFollowSystem: boolean;
   controlsTheme: DesktopControlTheme;
+}
+
+export type DesktopCaptionButton = "minimize" | "maximize" | "close";
+
+/** The caption-button layout the Linux desktop environment uses. */
+export interface DesktopSystemControls {
+  side: DesktopControlPosition;
+  /** In on-screen order, left to right. */
+  buttons: DesktopCaptionButton[];
+}
+
+/** Where the OS-drawn caption controls sit, in CSS px of the page (page zoom
+ *  applied): the macOS traffic-light group as the window placed it. */
+export interface DesktopCaptionGeometry {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export type DesktopUpdatePhase =
@@ -105,6 +127,9 @@ export interface DesktopWindowState {
   fullscreen: boolean;
   visible: boolean;
   focused: boolean;
+  /** Linux: the desktop environment's caption-button layout, or null when it
+   *  cannot be read. Absent on other platforms. */
+  systemControls?: DesktopSystemControls | null;
 }
 
 /** Colors (`#rrggbb`) and CSS-px height the native Windows caption overlay
@@ -194,6 +219,7 @@ export interface PolythDesktopApi {
   windowAction(action: DesktopWindowAction): Promise<DesktopWindowState>;
   getWindowState(): Promise<DesktopWindowState>;
   setTitleBarAppearance(appearance: DesktopTitleBarAppearance): Promise<void>;
+  syncCaptionControls(band: number): Promise<DesktopCaptionGeometry | null>;
   revealPath(path: string): Promise<void>;
   openPath(path: string): Promise<void>;
   openDataFolder(): Promise<void>;

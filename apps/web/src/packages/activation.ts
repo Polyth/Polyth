@@ -150,6 +150,9 @@ export function createPackageActivation(
         if (disposed) return reject("surfaces.register");
         return track(host.surfaces.register({ ...definition, ownerPackageId }));
       },
+      // A read, not a grant: a package offering a way into another package's
+      // window has to know whether that window exists.
+      ...(host.surfaces.has ? { has: (surfaceId: string) => host.surfaces.has!(surfaceId) } : {}),
     },
     ...(pages
       ? {
@@ -158,6 +161,9 @@ export function createPackageActivation(
               if (disposed) return reject("pages.register");
               return track(pages.register({ ...definition, ownerPackageId }));
             },
+            // A read, not a grant: a package that offers a way into another
+            // package's page has to know whether that page exists yet.
+            ...(pages.has ? { has: (pageId: string) => pages.has!(pageId) } : {}),
           },
         }
       : {}),

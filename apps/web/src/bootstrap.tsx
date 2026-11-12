@@ -20,6 +20,7 @@ import { installNativeConnectionCommands, isLinkClientPage, returnToConnectionHu
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
 import { setNativeKeyboardInset, setNativeKeyboardMotion, startMobileViewport } from "./mobileViewport.ts";
+import { startViewportProbe } from "./viewportProbe.ts";
 import {
   closePackageWindow,
   closeWorkspacePane,
@@ -89,6 +90,8 @@ applyBackgroundToDom();
 // The native app's WebView ends at the keyboard, so its frame can be the
 // WebView's own dynamic viewport (docs/dev/mobile-viewport.md).
 startMobileViewport({ nativeFrame: isNativeMobile() });
+// TEMPORARY: three-finger tap shows the layer geometry (viewportProbe.ts).
+if (isNativeMobile()) startViewportProbe();
 exposeSlots();
 exposeSurfaces();
 exposeCapabilities();

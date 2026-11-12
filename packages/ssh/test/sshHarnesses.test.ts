@@ -22,7 +22,7 @@ import {
   type RemoteHarnessTarget,
 } from "../src/harnesses.ts";
 import { sshRoutes } from "../src/serverEntry.ts";
-import { connectionSummary, harnessStatus, nextHarnessConfig } from "../widgets/ssh/sshUi.ts";
+import { connectionSummary, harnessStatus, nextHarnessConfig, nextHarnessPlacement } from "../widgets/ssh/sshUi.ts";
 
 const tempService = (runner: SshRunner = async () => ({ code: 0, stdout: "", stderr: "" })) => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-ssh-harness-"));
@@ -74,12 +74,14 @@ const connection = (over: Partial<SshConnectionDto> = {}): SshConnectionDto => (
 
 const opencode: RemoteHarnessTarget = {
   harnessId: "opencode", name: "OpenCode", binary: "opencode",
-  installCommand: "curl -fsSL https://opencode.ai/v2/install | bash", sessions: true, localConfig: true,
+  installCommand: "curl -fsSL https://opencode.ai/v2/install | bash", sessions: true, localConfig: true, localPlacement: false,
 };
 const claude: RemoteHarnessTarget = {
   harnessId: "claude", name: "Claude Code", binary: "claude",
-  installCommand: "curl -fsSL https://claude.ai/install.sh | bash", sessions: false, localConfig: false,
+  installCommand: "curl -fsSL https://claude.ai/install.sh | bash", sessions: false, localConfig: false, localPlacement: false,
 };
+/** A harness that can also run on this machine with its tools on the host. */
+const placeable: RemoteHarnessTarget = { ...claude, sessions: true, localPlacement: true };
 
 test("connections store only `remote` configuration exceptions and persist them", () => {
   const { ssh, file } = tempService();
@@ -91,6 +93,37 @@ test("connections store only `remote` configuration exceptions and persist them"
   assert.deepEqual(reopened.get(created.id)?.harnessConfig, { opencode: "remote" });
   const cleared = ssh.update(created.id, { harnessConfig: { opencode: "local" } });
   assert.equal(cleared.harnessConfig, undefined);
+});
+
+test("connections store only `local` placement exceptions and persist them", () => {
+  const { ssh, file } = tempService();
+  const created = ssh.create({ host: "box", harnessPlacement: { claude: "local", opencode: "host" } });
+  assert.deepEqual(created.harnessPlacement, { claude: "local" });
+  const renamed = ssh.update(created.id, { name: "Renamed", harnessConfig: { opencode: "remote" } });
+  assert.deepEqual(renamed.harnessPlacement, { claude: "local" }, "omitted harnessPlacement keeps the stored one");
+  assert.deepEqual(renamed.harnessConfig, { opencode: "remote" });
+  const reopened = createSshService({ file, socketDir: join(file, "..", "sock2") });
+  assert.deepEqual(reopened.get(created.id)?.harnessPlacement, { claude: "local" });
+  const cleared = ssh.update(created.id, { harnessPlacement: { claude: "host" } });
+  assert.equal(cleared.harnessPlacement, undefined);
+  assert.deepEqual(cleared.harnessConfig, { opencode: "remote" }, "placement and configuration are stored apart");
+
+  assert.throws(() => ssh.create({ host: "box", harnessPlacement: { claude: "here" as never } }), /"host" or "local"/);
+  assert.throws(() => ssh.create({ host: "box", harnessPlacement: { "../x": "local" } }), /invalid harness id/);
+  assert.throws(() => ssh.create({ host: "box", harnessPlacement: ["local"] as never }), /must be an object/);
+});
+
+test("a harness lists its placement only when it can run on this machine", async () => {
+  const { host } = fakeHost(() => ({ code: 0, stdout: "" }));
+  const stored = connection({ harnessPlacement: { claude: "local", opencode: "local" } });
+  const listed = await listRemoteHarnesses({ connection: stored, host, targets: [opencode, placeable], probe: false });
+  assert.deepEqual(listed.items.map((item) => [item.harnessId, item.localPlacement, item.placement]), [
+    // A stored exception for a harness that cannot run here changes nothing.
+    ["opencode", false, "host"],
+    ["claude", true, "local"],
+  ]);
+  const plain = await listRemoteHarnesses({ connection: connection(), host, targets: [placeable], probe: false });
+  assert.equal(plain.items[0]!.placement, "host");
 });
 
 test("connections reject malformed harness configuration", () => {
@@ -193,7 +226,7 @@ test("install failures explain themselves; a harness without an installer refuse
   );
   const manual = fakeHost(() => ({ code: 0, stdout: "" }));
   await assert.rejects(
-    installRemoteHarness({ connection: connection(), host: manual.host, target: { harnessId: "fx", name: "fx", sessions: false, localConfig: false } }),
+    installRemoteHarness({ connection: connection(), host: manual.host, target: { harnessId: "fx", name: "fx", sessions: false, localConfig: false, localPlacement: false } }),
     (error: Error & { code?: string }) => error.code === "unsupported",
   );
   assert.equal(manual.commands.length, 0);
@@ -262,6 +295,13 @@ test("UI helpers: status text, stored exceptions and the row summary", () => {
   assert.equal(harnessStatus({ installed: "unknown" }).tone, "muted");
   assert.deepEqual(nextHarnessConfig(undefined, "opencode", "remote"), { opencode: "remote" });
   assert.deepEqual(nextHarnessConfig({ opencode: "remote", pi: "remote" }, "opencode", "local"), { pi: "remote" });
+  // A harness that runs on this machine is fine whatever the server has installed.
+  assert.deepEqual(
+    [harnessStatus({ installed: false, placement: "local" }).tone, harnessStatus({ installed: false, placement: "host" }).tone],
+    ["ok", "muted"],
+  );
+  assert.deepEqual(nextHarnessPlacement(undefined, "claude", "local"), { claude: "local" });
+  assert.deepEqual(nextHarnessPlacement({ claude: "local", pi: "local" }, "claude", "host"), { pi: "local" });
   assert.deepEqual(connectionSummary({ authMode: "agent" }, 0), ["SSH agent"]);
   assert.deepEqual(connectionSummary({ authMode: "identity-file" }, 2), ["Key file", "2 projects"]);
 });

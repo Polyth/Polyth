@@ -18,7 +18,6 @@ import type {
   CapabilityInstallationScope,
   HarnessNativeSkillListDto,
   SkillAdoptInput,
-  SkillAvailabilityInput,
   SkillDelivery,
   SkillFileDto,
   SkillFilePreviewDto,
@@ -28,9 +27,12 @@ import type {
   SkillLibraryDto,
   SkillLibraryEntryDto,
   SkillLibraryNativeDto,
+  SkillReachInput,
 } from "@polyth/contracts/capability-installations";
+import { harnessFamilyOf } from "@polyth/contracts";
 import { parseSkillFile, skillDescription, skillListField, skillTextField } from "@polyth/harness-runtime/native-skills";
 import { humanizeSkillName, type SkillCatalog } from "./skillCatalog.ts";
+import { applyReachPatch, skillReach, type ReachPatch } from "./skillReach.ts";
 import {
   bundleContentHash,
   previewFile,
@@ -66,7 +68,9 @@ export interface SkillLibrary {
   file(space: SpaceContext, projectId: string | undefined, name: string, path: string, visible: HarnessVisibility): Promise<SkillFilePreviewDto>;
   /** Copies a skill out of one harness so Polyth delivers it to every harness. */
   adopt(space: SpaceContext, input: SkillAdoptInput, visible: HarnessVisibility): Promise<SkillInstallationDto>;
-  setAvailability(space: SpaceContext, input: SkillAvailabilityInput): Promise<SkillInstallationDto>;
+  /** Changes which harnesses get a managed skill. Choosing `some` keeps the
+   * skill where it works now, which takes the harnesses this person can see. */
+  setReach(space: SpaceContext, input: SkillReachInput, visible: HarnessVisibility): Promise<SkillInstallationDto>;
   /** Takes the source's current copy, whichever kind of source it is. */
   update(space: SpaceContext, scope: CapabilityInstallationScope, name: string, projectId: string | undefined, visible: HarnessVisibility): Promise<SkillInstallationDto>;
 }
@@ -244,13 +248,18 @@ export function createSkillLibrary(deps: SkillLibraryDeps): SkillLibrary {
     const added = await addedHarnesses(context, visible);
     const lists = await Promise.all(added.map(({ provider }) =>
       nativeList(provider, context, fresh === true || fresh === provider.descriptor.id)));
+    const rosterNames = new Map(added.map(({ row }) => [row.identity.id, row.identity.name]));
     const harnesses: SkillHarnessDto[] = await Promise.all(added.map(async ({ provider, row }, index) => {
       const list = lists[index];
+      const family = harnessFamilyOf(row.identity);
       return {
         id: row.identity.id,
         name: row.identity.accountLabel && !row.identity.name.includes(row.identity.accountLabel)
           ? `${row.identity.name} · ${row.identity.accountLabel}`
           : row.identity.name,
+        family,
+        familyName: rosterNames.get(family) ?? deps.registry()?.get(family)?.descriptor.name ?? row.identity.defaultName ?? row.identity.name,
+        ...(row.identity.accountLabel ? { accountLabel: row.identity.accountLabel } : {}),
         ...(row.identity.color ? { color: row.identity.color } : {}),
         ...await deliveryOf(provider, context),
         nativeSkills: !list?.supported ? "none" as const : list.control === "none" ? "listed" as const : "controlled" as const,
@@ -412,8 +421,22 @@ export function createSkillLibrary(deps: SkillLibraryDeps): SkillLibrary {
       }, input.projectId);
     },
 
-    setAvailability(space, input) {
-      return deps.skills.setHarnessEnabled(space, input.scope, input.name, input.harnessId, input.enabled, input.projectId);
+    async setReach(space, input, visible) {
+      const patches = [input.default !== undefined, input.family !== undefined, input.harness !== undefined].filter(Boolean).length;
+      if (patches !== 1) throw fail("invalid-input", "change one of default, family or harness");
+      const projectId = input.scope === "project" ? input.projectId : undefined;
+      const stored = deps.skills.listManaged(space, projectId).find((skill) =>
+        skill.name === input.name && skill.scope === input.scope && (input.scope === "space" || skill.projectId === projectId));
+      if (!stored) throw fail("not-found", "skill not found");
+      const context = await contextOf(space, projectId);
+      const harnesses = (await addedHarnesses(context, visible)).map(({ row }) => ({ id: row.identity.id, family: harnessFamilyOf(row.identity) }));
+      const patch: ReachPatch = input.default !== undefined
+        ? { default: input.default }
+        : input.family !== undefined
+          ? { family: input.family }
+          : { harness: input.harness! };
+      const reach = applyReachPatch(skillReach(stored), patch, harnesses);
+      return deps.skills.setReach(space, input.scope, input.name, reach, input.projectId, stored.revision);
     },
 
     async update(space, scope, name, projectId, visible) {

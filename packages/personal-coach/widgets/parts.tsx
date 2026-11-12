@@ -127,12 +127,12 @@ export function ActionControls({ item, client, ui, compact = false }: {
   return <div className={`coach-row-actions${compact ? " coach-row-actions--compact" : ""}`}>
     <Button size="sm" disabled={pending} onClick={() => void client.complete(item.id)}>{t("coach.action.done")}</Button>
     <Menu label={t("coach.action.moveFor", { title: item.title })} title={t("coach.action.move")} entries={moveEntries}>
-      {(trigger: Record<string, unknown>) => (
+      {(trigger) => (
         <Button {...trigger} size="sm" variant="ghost" disabled={pending}>{t("coach.action.move")}</Button>
       )}
     </Menu>
     <Menu label={t("coach.action.moreFor", { title: item.title })} title={t("coach.action.more")} entries={moreEntries}>
-      {(trigger: Record<string, unknown>) => (
+      {(trigger) => (
         <Button {...trigger} size="sm" variant="ghost" disabled={pending}>{t("coach.action.more")}</Button>
       )}
     </Menu>

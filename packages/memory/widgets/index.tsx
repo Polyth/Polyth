@@ -2,10 +2,13 @@ import "./styles.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import MemorySettings from "./MemorySettings.tsx";
 import { ChatMemoryScope, InvitationNotice, ShareOffer, type Notify } from "./MyNotes.tsx";
+import { MemoryUiContext, type MemoryUi } from "./ui.tsx";
 
 export default defineWebPackage((host) => () => {
   const translate = host.ui.locale.translate;
   const notify: Notify = (input) => host.notifications?.show(input);
+  // The page is drawn with the shell's own controls.
+  const ui: MemoryUi = { components: host.ui.components, icons: host.ui.icons };
   const slots = [
     host.slots.register({
       id: "memory.chat-scope",
@@ -52,16 +55,18 @@ export default defineWebPackage((host) => () => {
     icon: "brain",
     visible: () => true,
     render: ({ projectId, project, mobile, onBack, onClose }) => (
-      <MemorySettings
-        projectId={projectId}
-        project={project}
-        mobile={mobile}
-        locale={host.ui.locale.get()}
-        translate={host.ui.locale.translate}
-        notify={notify}
-        onBack={onBack}
-        onClose={onClose}
-      />
+      <MemoryUiContext.Provider value={ui}>
+        <MemorySettings
+          projectId={projectId}
+          project={project}
+          mobile={mobile}
+          locale={host.ui.locale.get()}
+          translate={host.ui.locale.translate}
+          notify={notify}
+          onBack={onBack}
+          onClose={onClose}
+        />
+      </MemoryUiContext.Provider>
     ),
   });
   return () => {

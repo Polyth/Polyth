@@ -127,10 +127,11 @@ test("in the full-height layouts the layout's column geometry outranks every loo
   strong(`${full} > .workspace`, "margin-block-start: var(--shell-bar-block) !important");
   strong(`${full} > .sidebar`, "margin-block: var(--shell-edge) !important");
   strong(`${full} > .sidebar`, "height: auto !important");
-  strong(`${full} > .railbar.railbar-open:not(:has(> .rail-fullscreen))`, "margin-block: var(--shell-edge) !important");
+  // A leaving window keeps the open box until it is gone.
+  strong(`${full} > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(:has(> .rail-fullscreen))`, "margin-block: var(--shell-edge) !important");
   // Air and Obsidian start-align their classic strip; the full-height strip
   // stretches whatever the look says.
-  strong(`${full} > .railbar:not(.railbar-open)`, "align-self: stretch !important");
+  strong(`${full} > .railbar:not(.railbar-open):not([data-rail-motion="exiting"])`, "align-self: stretch !important");
   strong(
     'body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\\#) .app-shell > .sidebar',
     "border-radius: var(--look-column-radius, var(--radius-surface)) !important",

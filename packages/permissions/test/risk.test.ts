@@ -311,7 +311,7 @@ test("session todo-list tools are recognized by permission name only", () => {
   for (const name of [
     "TodoWrite", "todowrite", "update_plan", "write_todos", "TaskCreate", "TaskUpdate",
     "polyth_todo", "mcp__polyth-agent-tools__polyth_todo", "polyth-agent-tools_polyth_todo",
-    "mcp_polyth-agent-tools_polyth_todo",
+    "mcp_polyth-agent-tools_polyth_todo", "polyth-agent-tools-polyth_todo",
   ]) assert.equal(plan(name), true, name);
   // Another MCP server's "todo" tool, a lookalike and other Polyth tools still ask.
   for (const name of [

@@ -33,12 +33,15 @@ import {
   CHAT_FLOOR, clampDockWidth, commitFocusedChatWidth, decideDock, decideFocusedSplit, FOCUSED_WORK_MAX, FOCUSED_WORK_MIN, keptSurfaces, listSurfaces, paneDockEdge, paneDockOptions, paneWindowLayout, slotSurfaces, useSurfaceVersion, visibleSurfaces,
   type DockDecision, type DockGeometry, type FocusedSplitDecision, type RailSurface, type RailSurfaceContext, type WorkspacePaneDock, type WorkspacePaneMode,
 } from "../surfaces.ts";
+import {
+  playRailMorph, playRailRelease, railExitTiming, railMorphTiming, readRailFrame, type RailFrameLayout, type RailFrameReading, type RailMorphHandle,
+} from "../railMorph.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useSideSafeStrip } from "../sideSafeStrip.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { useResolvedCapabilities, type ResolvedCapability } from "../capabilities.ts";
-import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
+import { capabilityOpensWindow, isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
 import { uniquePackageLaunchers } from "../packageLaunchers.ts";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import {
@@ -89,6 +92,8 @@ const SEPARATOR_FALLBACK = 6;
  *  window departure — the desktop --motion-window-exit and the full-screen
  *  phone travel (--motion-stack) — plus its composited tail. */
 const PANE_EXIT_FALLBACK_MS = 420;
+/** How long past its duration a frame morph may run before it is dropped. */
+const FRAME_MORPH_GRACE_MS = 160;
 const RESIZE_STEP = 16;
 const RESIZE_STEP_LARGE = 64;
 /** Bottom-dock (presentation.dock === "bottom") height bounds. The floor keeps
@@ -96,13 +101,12 @@ const RESIZE_STEP_LARGE = 64;
  *  vertical pixels (matches the row-1 `minmax(240px, 1fr)` in styles.css). */
 const BOTTOM_DOCK_MIN = 160;
 const BOTTOM_DOCK_CHAT_FLOOR = 240;
-type ResizeEdge = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
-/** Draggable edges of a floating package window. The inline end is omitted:
- *  that edge carries the window's scrollbar, so a resize hit area there
- *  swallowed wheel/touch scrolling and grew an empty strip beside it. A
- *  floating window resizes from the inline start (and its corners) and from
- *  the top/bottom edges, never from the content's trailing edge. */
-const RESIZE_EDGES: ResizeEdge[] = ["n", "nw", "w", "sw", "s"];
+/* A floating package window resizes from ONE edge: its inline start, the side
+ * facing Chat. The inline end carries the window's scrollbar, so a hit area
+ * there swallowed wheel/touch scrolling and grew an empty strip beside it.
+ * The height is not adjustable either: the window extends the launcher column
+ * and only one is open at a time, so a shorter window only left dead space
+ * under it. */
 
 // Small count badge on strip buttons.
 function Badge({ n }: { n: number }) {
@@ -258,6 +262,7 @@ export default function ContextRail() {
   useStore((s) => s.activePage);
   const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
+  const paneResource = useStore((s) => s.paneResource);
   const paneMode = useStore((s) => s.paneMode);
   const panePreviousMode = useStore((s) => s.panePreviousMode);
   const resolved = useResolvedCapabilities();
@@ -399,8 +404,23 @@ export default function ContextRail() {
   const shellDirection = useShellDirection();
   const separatorRef = useRef<HTMLDivElement>(null);
   const bottomSeparatorRef = useRef<HTMLDivElement>(null);
+  // While railMorph.ts resizes the frame, Chat and the window pass through
+  // widths nobody chose. The dock measurement and the layout guard must not
+  // judge those: they wait, and run once on the settled layout.
+  const frameMorphingRef = useRef(false);
+  const frameMorphRef = useRef<RailMorphHandle | null>(null);
+  const frameMorphTimerRef = useRef<number | null>(null);
+  const measuredKeyRef = useRef("");
+  const [frameSettled, setFrameSettled] = useState(0);
+  const endFrameMorph = () => {
+    frameMorphRef.current?.cancel();
+    frameMorphRef.current = null;
+    frameMorphingRef.current = false;
+    if (frameMorphTimerRef.current !== null) window.clearTimeout(frameMorphTimerRef.current);
+    frameMorphTimerRef.current = null;
+  };
   const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneMode}`;
-  const [geometry, setGeometry] = useState<{ key: string; width: number; height: number; railHeight: number; windowWidth: number }>({ key: "", width: 0, height: 0, railHeight: 0, windowWidth: 0 });
+  const [geometry, setGeometry] = useState<{ key: string; width: number; height: number; windowWidth: number }>({ key: "", width: 0, height: 0, windowWidth: 0 });
   // Docked-in-flow width remembered per shell box, so the layer's wider Chat box
   // cannot re-admit a dock that the docked box rejects (dockGeometry.ts).
   const dockedWidthRef = useRef<DockedWidthMemory | null>(null);
@@ -409,9 +429,6 @@ export default function ContextRail() {
   const layerInsetRef = useRef<number | null>(null);
   const workspaceWidth = geometry.key === geometryKey ? geometry.width : 0;
   const workspaceHeight = geometry.key === geometryKey ? geometry.height : 0;
-  // The launcher column a floating window extends: in the full-height window
-  // layouts it is taller than the workspace, which steps down for the bar.
-  const railHeight = geometry.key === geometryKey ? geometry.railHeight : 0;
   const windowWidth = geometry.key === geometryKey ? geometry.windowWidth : 0;
   const chatElOf = () =>
     railbarRef.current?.closest(".app")?.querySelector(":scope > .app-shell > .workspace") ?? null;
@@ -423,6 +440,13 @@ export default function ContextRail() {
 
   useLayoutEffect(() => {
     const measure = () => {
+      if (frameMorphingRef.current) {
+        // A settled presentation waits for its morph. A new one must be
+        // measured now: drop the old motion and read the final layout.
+        if (measuredKeyRef.current === geometryKey) return;
+        endFrameMorph();
+      }
+      measuredKeyRef.current = geometryKey;
       const chat = chatElOf();
       const paneEl = paneRef.current;
       const dockedInFlow = Boolean(presentation && paneEl
@@ -462,12 +486,11 @@ export default function ContextRail() {
       dockedWidthRef.current = admission.memory;
       const width = admission.width;
       const height = Math.round((chatRect?.height ?? 0) + paneH);
-      const railHeight = Math.round(railbarRef.current?.getBoundingClientRect().height ?? 0);
       const viewport = Math.round(window.innerWidth);
       setGeometry((current) =>
         current.key === geometryKey && current.width === width && current.height === height
-          && current.railHeight === railHeight && current.windowWidth === viewport
-          ? current : { key: geometryKey, width, height, railHeight, windowWidth: viewport });
+          && current.windowWidth === viewport
+          ? current : { key: geometryKey, width, height, windowWidth: viewport });
     };
     measure();
     if (typeof ResizeObserver !== "function") return;
@@ -482,7 +505,7 @@ export default function ContextRail() {
     if (railbarRef.current) ro.observe(railbarRef.current);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geometryKey, presentation]);
+  }, [geometryKey, presentation, frameSettled]);
 
   // The fullscreen layer is a sibling of the persistent navigator. Publish
   // the measured workspace edge so it starts at that seam instead of covering
@@ -640,14 +663,11 @@ export default function ContextRail() {
   const [, setSplitPrefsRevision] = useState(0);
   // Live (uncommitted) drag width; preferred width persists on commit only.
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
-  const [liveHeight, setLiveHeight] = useState<number | null>(null);
-  // Live bottom-dock strip height (kept apart from the dynamic-window height
-  // so a drag in one mode never leaks a stale value into the other).
+  // Live bottom-dock strip height.
   const [liveDockHeight, setLiveDockHeight] = useState<number | null>(null);
   const [livePosition, setLivePosition] = useState({ x: 0, y: 0 });
   useEffect(() => {
     setLiveWidth(null);
-    setLiveHeight(null);
     setLiveDockHeight(null);
     setLivePosition({ x: 0, y: 0 });
   }, [open?.id, projectId]);
@@ -794,6 +814,7 @@ export default function ContextRail() {
       setGuardPromoted(true);
     };
     const check = () => {
+      if (frameMorphingRef.current) return;
       const cur = guardLatchRef.current;
       if (cur !== null && cur.promoted) return;
       // "pending" (Chat mid-render) is NOT a failure: promoting on a
@@ -844,7 +865,7 @@ export default function ContextRail() {
       if (raf !== 0) cancelAnimationFrame(raf);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardInputs, workspaceWidth, dockWidth, pinned, pinnedNarrow, isWorkspacePane, measured]);
+  }, [guardInputs, workspaceWidth, dockWidth, pinned, pinnedNarrow, isWorkspacePane, measured, frameSettled]);
 
   // Publish presentation truth so App can make hidden Chat inert. On phone a
   // contextual sheet also fully covers the session, so it counts too.
@@ -1019,61 +1040,38 @@ export default function ContextRail() {
   const dynamicMaxWidth = Math.max(1, workspaceWidth - 32);
   const dynamicMinWidth = Math.min(presentation?.minWidth ?? 240, dynamicMaxWidth);
   const dynamicWidth = clampPaneDimension(liveWidth ?? remembered ?? Math.min(presentation?.preferredMaxWidth ?? 640, workspaceWidth * (presentation?.defaultRatio ?? 0.55)), dynamicMinWidth, workspaceWidth);
-  // A floating window opens as tall as the launcher column it extends, so the
-  // two read as one surface (styles.css, `.rail-dynamic`); only a resize in
-  // this opening gives it a height of its own, until it closes.
-  const dynamicMaxHeight = Math.max(1, railHeight || workspaceHeight);
-  const dynamicMinHeight = Math.min(presentation?.minHeight ?? 240, dynamicMaxHeight);
-  const dynamicHeight = clampPaneDimension(liveHeight ?? dynamicMaxHeight, dynamicMinHeight, dynamicMaxHeight);
+  // A floating window is as tall as the launcher column it extends, so the two
+  // read as one surface (styles.css, `.rail-dynamic`); only its width resizes.
 
-  const onDynamicResizeDown = (edge: ResizeEdge, e: ReactPointerEvent) => {
+  const onDynamicResizeDown = (e: ReactPointerEvent) => {
     if (!dynamic || open === null) return;
     e.preventDefault();
     e.stopPropagation();
     const seamPadding = seamPaddingOf(paneRef.current);
     const start = {
-      x: e.clientX, y: e.clientY, width: dynamicWidth, height: dynamicHeight,
+      x: e.clientX, width: dynamicWidth,
       position: livePosition,
       bounds: chatElOf()?.getBoundingClientRect() ?? null,
-      // The window spans the launcher column, which may start above Chat.
-      column: railbarRef.current?.getBoundingClientRect() ?? null,
       box: paneRef.current?.getBoundingClientRect() ?? null,
     };
     document.documentElement.dataset.packageWindowResizing = "true";
-    // Edges are logical ("e" = the frame's inline end, beside the launcher
-    // strip): in an RTL locale or a mirrored shell the window is anchored on
-    // its left, so pointer travel and the anchoring translation flip.
+    // The handle is the frame's logical inline start (the side facing Chat):
+    // in an RTL locale or a mirrored shell the window is anchored on its
+    // left, so pointer travel flips.
     const rtl = paneRtl();
     const move = (event: PointerEvent) => {
       const dx = (event.clientX - start.x) * (rtl ? -1 : 1);
-      const dy = event.clientY - start.y;
-      const width = edge.includes("e")
-        ? Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, start.width + dx))
-        : edge.includes("w")
-          ? Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, start.width - dx))
-          : start.width;
-      const height = edge.includes("s")
-        ? Math.min(dynamicMaxHeight, Math.max(dynamicMinHeight, start.height + dy))
-        : edge.includes("n")
-          ? Math.min(dynamicMaxHeight, Math.max(dynamicMinHeight, start.height - dy))
-          : start.height;
-      if (edge.includes("e") || edge.includes("w")) setLiveWidth(width);
-      if (edge.includes("n") || edge.includes("s")) setLiveHeight(height);
+      const width = Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, start.width - dx));
+      setLiveWidth(width);
+      if (!start.bounds) return;
+      // Keep the frame inside Chat's box while it grows toward Chat.
       const frameWidth = width + seamPadding;
-      const proposedX = start.position.x + (edge.includes("e") ? (width - start.width) * (rtl ? -1 : 1) : 0);
-      const proposedY = start.position.y + (edge.includes("n") ? start.height - height : 0);
       const baseLeft = start.box
         ? (rtl ? start.box.left - start.position.x : start.box.right - start.position.x - frameWidth)
         : 0;
-      const baseTop = start.box ? start.box.top - start.position.y : 0;
-      const vertical = start.column ?? start.bounds;
       setLivePosition({
-        x: start.bounds
-          ? Math.min(start.bounds.right - baseLeft - frameWidth, Math.max(start.bounds.left - baseLeft, proposedX))
-          : proposedX,
-        y: vertical
-          ? Math.min(vertical.bottom - baseTop - height, Math.max(vertical.top - baseTop, proposedY))
-          : proposedY,
+        x: Math.min(start.bounds.right - baseLeft - frameWidth, Math.max(start.bounds.left - baseLeft, start.position.x)),
+        y: start.position.y,
       });
     };
     const up = () => {
@@ -1090,30 +1088,19 @@ export default function ContextRail() {
     window.addEventListener("pointercancel", up, { once: true });
   };
 
-  const onDynamicResizeKey = (edge: ResizeEdge, e: ReactKeyboardEvent) => {
+  const onDynamicResizeKey = (e: ReactKeyboardEvent) => {
     if (!dynamic || open === null) return;
     const step = e.shiftKey ? RESIZE_STEP_LARGE : RESIZE_STEP;
-    if (edge === "w" || edge === "e") {
-      // Growing away from the inline start moves left in LTR and right in RTL.
-      const grow = (edge === "w") !== paneRtl() ? "ArrowLeft" : "ArrowRight";
-      const next = e.key === "Home" ? dynamicMinWidth
-        : e.key === "End" ? dynamicMaxWidth
-          : e.key === "ArrowLeft" || e.key === "ArrowRight" ? dynamicWidth + (e.key === grow ? step : -step) : null;
-      if (next === null) return;
-      e.preventDefault();
-      const width = Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, next));
-      setLiveWidth(width);
-      commitWidth(width);
-      return;
-    }
-    if (edge !== "s") return;
-    const next = e.key === "Home" ? dynamicMinHeight
-      : e.key === "End" ? dynamicMaxHeight
-        : e.key === "ArrowUp" ? dynamicHeight - step
-          : e.key === "ArrowDown" ? dynamicHeight + step : null;
+    // Growing away from the inline start moves left in LTR and right in RTL.
+    const grow = paneRtl() ? "ArrowRight" : "ArrowLeft";
+    const next = e.key === "Home" ? dynamicMinWidth
+      : e.key === "End" ? dynamicMaxWidth
+        : e.key === "ArrowLeft" || e.key === "ArrowRight" ? dynamicWidth + (e.key === grow ? step : -step) : null;
     if (next === null) return;
     e.preventDefault();
-    setLiveHeight(Math.min(dynamicMaxHeight, Math.max(dynamicMinHeight, next)));
+    const width = Math.min(dynamicMaxWidth, Math.max(dynamicMinWidth, next));
+    setLiveWidth(width);
+    commitWidth(width);
   };
 
   // Package-owned portal surfaces carry the owner id through React context,
@@ -1124,7 +1111,12 @@ export default function ContextRail() {
     const outside = (event: PointerEvent) => {
       const modal = document.querySelector<HTMLElement>('[aria-modal="true"]');
       if (modal && modal !== paneRef.current) return;
-      const owned = pathBelongsToPackageWindow(event.composedPath(), id, (launcherId) => isCapabilityActive(launcherId));
+      // A launcher's own click closes this window or swaps its content.
+      const owned = pathBelongsToPackageWindow(
+        event.composedPath(),
+        id,
+        (launcherId) => isCapabilityActive(launcherId) || capabilityOpensWindow(launcherId),
+      );
       if (!owned) closePaneFromOutside();
     };
     document.addEventListener("pointerdown", outside, true);
@@ -1154,10 +1146,6 @@ export default function ContextRail() {
   const paneStyle: CSSProperties = open
     ? ({
         "--rail-w": `${dynamic ? dynamicWidth : dockWidth}px`,
-        // Unset, the window spans the launcher column and squares its foot
-        // where the column meets the window's edge (styles.css); a window
-        // resized clear of that edge rounds it.
-        ...(liveHeight !== null ? { "--package-window-h": `${dynamicHeight}px`, "--package-window-foot": "1" } : {}),
         "--package-window-x": `${livePosition.x}px`,
         "--package-window-y": `${livePosition.y}px`,
         ...(geometryPending ? { visibility: "hidden", pointerEvents: "none" } : {}),
@@ -1167,6 +1155,74 @@ export default function ContextRail() {
   // Compact contextual surfaces use the A390 modal sheet. Canonical workspace
   // surfaces retain the pane model's full-screen layer and launcher strip.
   const compactContext = compact && open !== null && !isWorkspacePane;
+
+  // ---- window morph ---------------------------------------------------------
+  // An open window that changes presentation (pin, full screen, back) or
+  // package keeps its frame: railMorph.ts resizes it from the box it had to
+  // the box it gets, instead of replaying an entry. The box it had is read
+  // here, in render, while the DOM still shows it; the morph starts once the
+  // new geometry is measured. Bottom and narrow docks re-grid the shell, so
+  // they keep their own entry.
+  const frameLayout: RailFrameLayout | null = open === null || compact
+    ? null
+    : dynamic ? "floating" : layered ? "layer" : bottomDock || pinnedNarrow ? null : "docked";
+  const frameKey = open === null || compact ? null : `${open.id}:${frameLayout ?? (bottomDock ? "bottom" : "narrow")}`;
+  const frameRef = useRef<{ key: string | null; layout: RailFrameLayout | null; projectId: string | null; entry: "enter" | "morph" }>(
+    { key: null, layout: null, projectId: null, entry: "enter" },
+  );
+  const frameBeforeRef = useRef<{ key: string; reading: RailFrameReading } | null>(null);
+  const frameEntry: "enter" | "morph" = frameKey === null
+    ? "enter"
+    : frameRef.current.key === frameKey
+      ? frameRef.current.entry
+      : frameRef.current.layout !== null && frameLayout !== null && frameRef.current.projectId === projectId
+        ? "morph"
+        : "enter";
+  if (frameKey !== null && frameEntry === "morph" && frameRef.current.key !== frameKey && frameBeforeRef.current?.key !== frameKey) {
+    // A reading that no morph has used yet is still the last frame the person
+    // saw (a pin the geometry promotes to the layer passes through an
+    // unmeasured docked commit): keep it and only aim it at the new target.
+    frameBeforeRef.current = frameBeforeRef.current !== null
+      ? { key: frameKey, reading: frameBeforeRef.current.reading }
+      : { key: frameKey, reading: readRailFrame({ pane: paneRef.current, workspace: chatElOf() as HTMLElement | null }) };
+  }
+  useLayoutEffect(() => {
+    if (frameKey === null) {
+      endFrameMorph();
+      frameBeforeRef.current = null;
+      frameRef.current = { key: null, layout: null, projectId, entry: "enter" };
+      return;
+    }
+    // The first commit of a presentation is unmeasured (and hidden): wait.
+    if (geometryPending || frameRef.current.key === frameKey) return;
+    frameRef.current = { key: frameKey, layout: frameLayout, projectId, entry: frameEntry };
+    const before = frameBeforeRef.current;
+    frameBeforeRef.current = null;
+    endFrameMorph();
+    if (frameEntry !== "morph" || frameLayout === null || before === null || before.key !== frameKey) return;
+    if (document.documentElement.dataset.packageWindowResizing === "true") return;
+    const railbar = railbarRef.current;
+    if (railbar === null) return;
+    const morph = playRailMorph(
+      { pane: paneRef.current, workspace: chatElOf() as HTMLElement | null },
+      before.reading,
+      frameLayout,
+      railMorphTiming(railbar),
+    );
+    if (morph === null) return;
+    frameMorphRef.current = morph;
+    frameMorphingRef.current = true;
+    const settle = () => {
+      if (frameMorphRef.current !== morph) return;
+      endFrameMorph();
+      setFrameSettled((revision) => revision + 1);
+    };
+    void morph.finished.then(settle);
+    // A timeline that never ends (a hidden tab, a paused debugger) must not
+    // leave the dock unmeasured.
+    frameMorphTimerRef.current = window.setTimeout(settle, morph.duration + FRAME_MORPH_GRACE_MS);
+  });
+  useEffect(() => endFrameMorph, []);
 
   // The store closes immediately; this short presentation-only presence keeps
   // the painted window mounted long enough to collapse toward the launcher.
@@ -1246,6 +1302,34 @@ export default function ContextRail() {
     : surfaces.filter((surface) => surface.id === exitPaneMotion.surface.id || kept.includes(surface));
   const exiting = open === null && exitPaneMotion !== null;
 
+  // A side-docked window sits in the row with the launcher strip; idle, the
+  // strip floats over Chat instead. As such a window leaves, Chat takes that
+  // lane back on the exit's clock (railMorph.ts), so the hand-over is still.
+  const releaseRef = useRef<RailMorphHandle | null>(null);
+  const dockedExit = exiting && !paneCompactContext && !paneDynamic && !paneLayered && !paneBottomDock && !panePinnedNarrow;
+  useLayoutEffect(() => {
+    if (!dockedExit) return;
+    const railbar = railbarRef.current;
+    const shell = railbar?.closest<HTMLElement>(".app-shell");
+    const workspace = chatElOf() as HTMLElement | null;
+    const pane = paneRef.current;
+    if (!railbar || !shell || !workspace || !pane) return;
+    if (getComputedStyle(railbar).position === "absolute") return;
+    const shellBox = shell.getBoundingClientRect();
+    const chatBox = workspace.getBoundingClientRect();
+    const rtl = getComputedStyle(shell).direction === "rtl";
+    // What is left between Chat and the shell's edge once the window's own
+    // width is gone: the strip, its frame and the gaps around them.
+    const gap = rtl ? chatBox.left - shellBox.left : shellBox.right - chatBox.right;
+    const lane = gap - pane.getBoundingClientRect().width;
+    const release = playRailRelease(workspace, lane, railExitTiming(railbar));
+    releaseRef.current = release;
+    return () => {
+      release?.cancel();
+      if (releaseRef.current === release) releaseRef.current = null;
+    };
+  }, [dockedExit]);
+
   // The tablet band morphs the floating launcher cluster into the docked
   // column and back; both ends of that motion need the cluster's height,
   // which only exists while idle. Measure it at each open/close edge.
@@ -1301,6 +1385,7 @@ export default function ContextRail() {
       <aside
         className={`railbar${open ? " railbar-open" : ""}${panePinnedNarrow ? " railbar-pinned-narrow" : ""}${paneBottomDock ? " railbar-dock-bottom" : ""}${railDynamic ? " railbar-dynamic" : ""}`}
         data-rail-motion={exiting ? "exiting" : open ? "open" : "idle"}
+        data-rail-entry={open !== null && frameEntry === "morph" ? "morph" : undefined}
         data-rail-strip={showStrip ? undefined : "none"}
         data-side-strip={sideStripShown ? safeAreaStrip ?? undefined : undefined}
         ref={railbarRef}
@@ -1323,6 +1408,7 @@ export default function ContextRail() {
           data-geometry-ready={open !== null ? !geometryPending : true}
           data-rail-motion={exiting ? "exiting" : open !== null ? "open" : "closed"}
           data-geometry-flip={open !== null && geometryFlipped ? "true" : undefined}
+          data-rail-entry={open !== null && frameEntry === "morph" ? "morph" : undefined}
           onAnimationEnd={(event) => {
             if (exiting && exitPaneMotion !== null && event.target === event.currentTarget) {
               paneMotionRef.current = null;
@@ -1362,24 +1448,20 @@ export default function ContextRail() {
               aria-valuenow={bottomDockNow}
             />
           )}
-          {!exiting && paneDynamic && RESIZE_EDGES.map((edge) => (
+          {!exiting && paneDynamic && (
             <div
-              key={edge}
-              className={`package-window-resize package-window-resize--${edge}`}
-              aria-hidden={edge === "w" || edge === "s" ? undefined : true}
-              {...(edge === "w" || edge === "s" ? {
-                tabIndex: 0,
-                role: "separator",
-                "aria-orientation": edge === "w" ? "vertical" as const : "horizontal" as const,
-                "aria-label": tr("contextrail.resizeValue", { value: paneSurface?.title ?? tr("contextrail.panel") }),
-                "aria-valuemin": edge === "w" ? dynamicMinWidth : dynamicMinHeight,
-                "aria-valuemax": edge === "w" ? dynamicMaxWidth : dynamicMaxHeight,
-                "aria-valuenow": edge === "w" ? dynamicWidth : dynamicHeight,
-                onKeyDown: (event: ReactKeyboardEvent) => onDynamicResizeKey(edge, event),
-              } : {})}
-              onPointerDown={(event) => onDynamicResizeDown(edge, event)}
+              className="package-window-resize package-window-resize--w"
+              tabIndex={0}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={tr("contextrail.resizeValue", { value: paneSurface?.title ?? tr("contextrail.panel") })}
+              aria-valuemin={dynamicMinWidth}
+              aria-valuemax={dynamicMaxWidth}
+              aria-valuenow={dynamicWidth}
+              onKeyDown={onDynamicResizeKey}
+              onPointerDown={onDynamicResizeDown}
             />
-          ))}
+          )}
           <ModuleView
             id={paneSurface?.id ?? "panel"}
             title={paneSurface?.title ?? ""}
@@ -1406,6 +1488,10 @@ export default function ContextRail() {
           {renderedSurfaces.map((s) => {
             const active = !exiting && s.id === paneSurface?.id;
             const leaving = exiting && s.id === paneSurface?.id;
+            // The leaving surface is inert, but it is still on screen: it keeps
+            // rendering as the active one until the exit ends, so its content
+            // does not blank out in the first frame of the departure.
+            const shown = active || leaving;
             return (
               <div
                 key={s.id}
@@ -1416,9 +1502,14 @@ export default function ContextRail() {
                 aria-hidden={!active || undefined}
               >
                 <PackageWindowContext.Provider value={s.id}>
-                  <PaneVisibilityContext.Provider value={active}>
+                  <PaneVisibilityContext.Provider value={shown}>
                     <ViewErrorBoundary inline resetKey={`${s.id}:${projectId ?? ""}`}>
-                      <s.component active={active} projectId={projectId} sessionId={sessionId} />
+                      <s.component
+                        active={shown}
+                        projectId={projectId}
+                        sessionId={sessionId}
+                        {...(paneResource?.surfaceId === s.id ? { resource: paneResource.resource, resourceSeq: paneResource.seq } : {})}
+                      />
                     </ViewErrorBoundary>
                   </PaneVisibilityContext.Provider>
                 </PackageWindowContext.Provider>

@@ -131,3 +131,22 @@ test("assistant response header carries identity, timing, and configured actions
   assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}/,
     "the identity panel renders once per completed turn, on the terminal answer only");
 });
+
+test("the session list shows an edge shadow while rows are scrolled out above it", async () => {
+  const [sidebar, styles] = await Promise.all([
+    source("../src/components/Sidebar.tsx"),
+    source("../src/styles.css"),
+  ]);
+  // The flag is set on the node from the scroll handler, not through state:
+  // scrolling the list must not re-render the navigator.
+  assert.match(sidebar, /toggleAttribute\("data-scrolled", scrolled\)/);
+  // The caster sits on the list's edge, not under its top padding.
+  assert.match(sidebar, /setProperty\("--side-scroll-pad", getComputedStyle\(list\)\.paddingTop\)/);
+  assert.match(styles, /top: calc\(-1 \* \(var\(--side-scroll-edge-h\) \+ var\(--side-scroll-pad, 0px\)\)\);/);
+  const caster = styles.match(/\.side-scroll::before \{[^}]*\}/)?.[0] ?? "";
+  assert.match(caster, /position: sticky/);
+  assert.match(caster, /box-shadow: var\(--shadow-md\)/, "the edge uses the elevation token");
+  assert.match(caster, /opacity: 0/, "no shadow at the top of the list");
+  assert.match(caster, /pointer-events: none/);
+  assert.match(styles, /\.side-scroll\[data-scrolled\]::before \{ opacity: 1; \}/);
+});

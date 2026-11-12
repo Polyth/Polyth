@@ -3,7 +3,8 @@ import type { HarnessContext, HarnessProbe, HarnessProvider, HarnessRegistry, Ha
 import { acknowledgeCapabilityApplication, releaseHarnessProcessExecution, type RpcPeer } from "@polyth/harness-runtime";
 import { probeRemoteHarness, remoteHarnessLaunch, resolveRemoteHarnessHost } from "@polyth/harness-runtime/remote-host";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { ACP_STATIC_FEATURES, connectAcp, createAcpRuntime, type AcpClientMethodTranslator, type AcpProfile } from "./index.ts";
+import { rm } from "node:fs/promises";
+import { ACP_STATIC_FEATURES, connectAcp, createAcpRuntime, isAcpStdioMcpServer, type AcpClientMethodTranslator, type AcpProfile } from "./index.ts";
 import { discoverAcpModels, invalidateAcpDiscovery } from "./discovery.ts";
 import { acpOverlays, createAcpProvisioner } from "./provisioner.ts";
 import { configureAcpCapabilityDelivery } from "./capabilityDelivery.ts";
@@ -208,7 +209,24 @@ export function createAcpProvider(host: ServerPackageHost, profile: RegisteredAc
                 throw Object.assign(new Error(availability.message ?? `${profile.descriptor.name} is unavailable`), { code: "runtime-unavailable" });
             }
             const launch = await remoteLaunch(context);
-            const connection = await connectAcp(profile, context, stateFile(context), undefined, launch);
+            // Capabilities are staged before a runtime is created, so the
+            // stdio servers of this launch are already known here. A remote
+            // leg has none (capabilities are not delivered to SSH hosts).
+            const launchMcpFile = profile.launchStdioMcp && !launch ? stateFile(context).replace(/\.json$/, ".mcp.json") : undefined;
+            const launchProfile = launchMcpFile
+                ? {
+                    ...profile,
+                    args: [...profile.args, ...await profile.launchStdioMcp!({
+                        servers: (acpOverlays.peek(context, profile.descriptor.id)?.value.mcpServers ?? []).filter(isAcpStdioMcpServer),
+                        file: launchMcpFile,
+                    })],
+                }
+                : profile;
+            const removeLaunchMcpFile = async () => { if (launchMcpFile) await rm(launchMcpFile, { force: true }).catch(() => {}); };
+            const connection = await connectAcp(launchProfile, context, stateFile(context), undefined, launch).catch(async (error) => {
+                await removeLaunchMcpFile();
+                throw error;
+            });
             try {
                 configureAcpClientRequestHandling(connection.rpc, profile.clientRequest);
                 configureAcpCapabilityDelivery(connection.rpc, context, profile.descriptor.id, connection.agentCapabilities, {
@@ -234,6 +252,8 @@ export function createAcpProvider(host: ServerPackageHost, profile: RegisteredAc
                         ...(profile.settleTurn && !launch ? { settleTurn: profile.settleTurn, reportsUsage: profile.reportsUsage === true } : {}),
                         ...(profile.probeAdmission && !launch ? { probeAdmission: profile.probeAdmission } : {}),
                         ...(profile.mcpServerFailure ? { mcpServerFailure: profile.mcpServerFailure } : {}),
+                        ...(profile.agentNotice ? { agentNotice: profile.agentNotice } : {}),
+                        ...(launchMcpFile ? { stdioMcpAtLaunch: true } : {}),
                     },
                 );
                 // Stateless utility inference (commit messages, auditors)
@@ -247,9 +267,18 @@ export function createAcpProvider(host: ServerPackageHost, profile: RegisteredAc
                 if (utility) {
                     runtime.completeSmallModel = (request) => utility.complete(request);
                 }
+                if (launchMcpFile) {
+                    // The file names the servers' secrets; it lives no longer
+                    // than the process that read it.
+                    const dispose = runtime.dispose.bind(runtime);
+                    runtime.dispose = async () => {
+                        try { await dispose(); } finally { await removeLaunchMcpFile(); }
+                    };
+                }
                 return runtime;
             } catch (error) {
                 await connection.rpc.close().catch(() => {});
+                await removeLaunchMcpFile();
                 throw error;
             }
         },

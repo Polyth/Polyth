@@ -9,6 +9,7 @@ import type {
   DesktopLocalSetupResult,
   DesktopSettings,
   DesktopSetupClaim,
+  DesktopCaptionGeometry,
   DesktopTitleBarAppearance,
   DesktopUpdateState,
   DesktopWindowAction,
@@ -67,6 +68,8 @@ const api: PolythDesktopApi = {
   getWindowState: () => ipcRenderer.invoke("desktop:window:get") as Promise<DesktopWindowState>,
   setTitleBarAppearance: (appearance: DesktopTitleBarAppearance) =>
     ipcRenderer.invoke("desktop:window:titlebar", appearance) as Promise<void>,
+  syncCaptionControls: (band: number) =>
+    ipcRenderer.invoke("desktop:window:caption", band) as Promise<DesktopCaptionGeometry | null>,
   revealPath: (path) => ipcRenderer.invoke("desktop:path:reveal", path) as Promise<void>,
   openPath: (path) => ipcRenderer.invoke("desktop:path:open", path) as Promise<void>,
   openDataFolder: () => ipcRenderer.invoke("desktop:data:open") as Promise<void>,

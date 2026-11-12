@@ -57,6 +57,8 @@ Object.defineProperty(globalThis, "getComputedStyle", {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
+const { hostUi, installTestHost } = await import("./hostUi.ts");
+installTestHost();
 
 
 const { act, createElement } = await import("react");
@@ -217,7 +219,7 @@ function harness(options: { role?: "admin" | "member" | "viewer" } = {}): Harnes
   ]);
   resetNotifications();
   configureTaskTrackerHost({
-    ui: { icons: {} },
+    ui: hostUi,
     notifications,
     errors: { friendly: (action: string, cause: unknown) => `${action}: ${(cause as Error)?.message ?? ""}` },
     store: {
@@ -547,7 +549,27 @@ test("task detail starts an agent in a new session and lists the task's agent se
     assert.match(sessions?.textContent ?? "", /POL-1 · Fix mobile overflow.*Agent working/);
     await act(async () => { (sessions!.querySelector("button") as HTMLButtonElement).click(); });
     assert.deepEqual(run.opened, ["s-1"]);
+    assert.equal(document.querySelector(".tt-detail") === null, true, "the task window closes behind the opened session");
   } finally {
+    await view.unmount();
+    run.restore();
+  }
+});
+
+test("a start that opens the session closes the task window with it", async () => {
+  const run = harness();
+  const view = await mountBoard();
+  try {
+    await act(async () => { work.setTaskStartOptions({ open: true }); });
+    await act(async () => { view.container.querySelector<HTMLButtonElement>('[aria-label^="Open POL-1:"]')!.click(); });
+    await settle();
+    const detail = document.querySelector(".tt-detail")!;
+    await act(async () => { button(detail, "Start agent in new session")!.click(); });
+    await settle(4);
+    assert.deepEqual(run.opened, ["s-1"], "the app switches to the started session");
+    assert.equal(document.querySelector(".tt-detail") === null, true, "the task window does not stay over the new chat");
+  } finally {
+    work.resetTaskStartOptions();
     await view.unmount();
     run.restore();
   }
@@ -937,7 +959,7 @@ test("task cards lead with a Trello-style cover that opens the task; the task's 
     // Like Trello, the cover is part of the card: it opens the task.
     await act(async () => { (cover as HTMLElement).click(); });
     await settle();
-    assert.ok(!document.querySelector(".tt-lightbox-overlay"), "the card cover does not jump to a preview");
+    assert.ok(!document.querySelector(".attachment-preview-dialog"), "the card cover does not jump to a preview");
     const detail = document.querySelector(".tt-detail")!;
     assert.ok(detail, "the cover opened the task");
     assert.equal(detail.closest(".dialog-backdrop")?.parentElement, document.body, "the task opens as a modal over the board");
@@ -946,17 +968,18 @@ test("task cards lead with a Trello-style cover that opens the task; the task's 
     await act(async () => { band!.click(); });
     await settle();
 
-    const lightbox = document.querySelector(".tt-lightbox-overlay");
+    // The host's shared image viewer (the one chat attachments open in).
+    const lightbox = document.querySelector(".attachment-preview-dialog");
     assert.ok(lightbox, "lightbox opened");
-    assert.equal(lightbox.querySelector<HTMLImageElement>(".tt-lightbox-image img")?.src, "https://example.com/diagram.png");
-    assert.equal(lightbox.parentElement, document.body, "the overlay escapes the board's layout");
-    assert.match(lightbox.textContent ?? "", /2 of 2/, "the preview pages through the task's images");
+    assert.equal(lightbox.querySelector<HTMLImageElement>("img.attachment-preview-media")?.src, "https://example.com/diagram.png");
+    assert.equal(lightbox.closest(".attachment-preview-backdrop")?.parentElement, document.body, "the overlay escapes the board's layout");
+    assert.match(lightbox.querySelector(".attachment-preview-count")?.textContent ?? "", /2 \/ 2/, "the preview pages through the task's images");
 
     await act(async () => {
-      lightbox.querySelector<HTMLButtonElement>('button[aria-label="Close preview"]')!.click();
+      lightbox.querySelector<HTMLButtonElement>(".attachment-preview-close")!.click();
     });
     await settle();
-    assert.equal(document.querySelector(".tt-lightbox-overlay"), null, "lightbox closed");
+    assert.equal(document.querySelector(".attachment-preview-dialog"), null, "lightbox closed");
     assert.ok(document.querySelector(".tt-detail"), "closing the preview keeps the task open");
 
     // Escape in the preview closes only the preview, not the open task.
@@ -965,12 +988,12 @@ test("task cards lead with a Trello-style cover that opens the task; the task's 
     assert.match(thumb.textContent ?? "", /Cover/, "the thumbnail that is the cover says so");
     await act(async () => { thumb.click(); });
     await settle();
-    assert.ok(document.querySelector(".tt-lightbox-overlay"));
+    assert.ok(document.querySelector(".attachment-preview-dialog"));
     await act(async () => {
-      document.querySelector(".tt-lightbox-overlay")!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      document.querySelector(".attachment-preview-dialog")!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     await settle();
-    assert.equal(document.querySelector(".tt-lightbox-overlay"), null, "preview closed");
+    assert.equal(document.querySelector(".attachment-preview-dialog"), null, "preview closed");
     assert.ok(document.querySelector(".tt-detail"), "task detail stays open");
     assert.match(document.querySelector(".tt-detail")!.textContent ?? "", /notes\.txt/, "other files are listed");
 

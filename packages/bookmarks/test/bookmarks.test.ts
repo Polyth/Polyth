@@ -140,3 +140,11 @@ test("an export file name is safe on every system", () => {
   assert.equal(bookmarkExportFileName("Огляд / бекапів: restic?", at), "bookmarks-огляд-бекапів-restic-2026-11-06.md");
   assert.equal(bookmarkExportFileName("../..", at), "bookmarks-2026-11-06.md");
 });
+
+test("hostile marks and names stay linear", () => {
+  assert.equal(deriveBookmarkTitle("See ![logo](a.png) and [docs](https://x.dev/a_(b))"), "See logo and docs)");
+  const started = performance.now();
+  for (const line of ["![\\".repeat(40_000), "![](".repeat(40_000), "[](".repeat(40_000)]) deriveBookmarkTitle(line);
+  assert.equal(bookmarkExportFileName(`a${"-".repeat(100_000)}`, Date.UTC(2026, 10, 6)), "bookmarks-a-2026-11-06.md");
+  assert.ok(performance.now() - started < 1_000, "quadratic regex is back");
+});

@@ -49,7 +49,7 @@ without a repository. When `GITHUB_ENV` or `GITHUB_OUTPUT` is set the script exp
 | Branch | Holds | Receives | Builds |
 |---|---|---|---|
 | `devel` | Every package, previews included | Pull requests and direct development | [Nightly](#nightly-builds-from-devel) prereleases |
-| `master` | The release line: every package except the unfinished previews | Only promotions from `devel` (and the release workflow's version bump) | Test and stable releases (`release.yml`, the external builder) |
+| `master` | The release line: every package except the unfinished previews | Only promotions from `devel` (and the release workflow's version bump) | Stable releases (`release.yml`, `nightly.yml` channel `stable`) |
 
 A package's place is decided by `polyth.descriptor.maturity` in its manifest
 ([package structure](../../.agents/skills/polyth-packages/package-structure.md#2-one-source-of-truth-per-fact-dry-rules)):
@@ -89,7 +89,7 @@ There are five permanent GitHub Actions workflows:
 |---|---|---|
 | `ci.yml` | Push to `devel`/`master`, pull request to them, manual | Repository validation |
 | `promote.yml` | Manual only | Rebuild `master` from `devel`, verify, fast-forward |
-| `nightly.yml` | Schedule/dispatch once enabled, manual | `devel` nightly prereleases; manual `test`/`stable` update-feed releases |
+| `nightly.yml` | Schedule/dispatch once enabled, manual | `devel` nightly prereleases; manual `stable` update-feed releases |
 | `build-apps.yml` | Manual only | Unpublished smoke/download artifacts |
 | `release.yml` | Manual only, enforced `master` | Signed/publishable release artifacts and GitHub Release |
 
@@ -254,8 +254,8 @@ Set all five or none; a partial set fails the build instead of silently shipping
 an unsigned archive.
 
 The nightly does **not** submit for external beta review — that would send a build
-to Apple review every night. To reach external testers, run a manual `test` (or
-`stable`) builder run; `POLYTH_IOS_TESTFLIGHT_EXTERNAL=1`/`0` in the job environment
+to Apple review every night. To reach external testers, run a manual `stable`
+run; `POLYTH_IOS_TESTFLIGHT_EXTERNAL=1`/`0` in the job environment
 overrides the channel rule. Apple reviews one build per version at a time: while
 an earlier build is waiting for beta review, the submission fails with
 `ANOTHER_BUILD_IN_REVIEW` (the job names the blocking build; internal groups still
@@ -298,10 +298,10 @@ own runners; no deploy key or second repository is involved.
   builder's newest build number (set at the cutover), because installed builder builds never
   downgrade; every scheduled slot, skipped or not, consumes a run number.
 - **Publication.** Only a full (`all`) run publishes: draft, upload, then public prerelease, never
-  marked Latest. The three newest nightlies are kept; stable and test releases are never pruned here.
-- **Test and stable.** A manual run with `channel` `test` or `stable` (set `ref` to `master`) builds
-  the same way and publishes `vX.Y.N-beta` (prerelease; the three newest are kept) or `vX.Y.N`
-  (marked **Latest**, never pruned), sharing the build-number sequence, so every channel's build is
+  marked Latest. The three newest nightlies are kept; stable releases are never pruned.
+- **Stable.** A manual run with `channel` `stable` (set `ref` to `master`) builds
+  the same way and publishes `vX.Y.N` (marked **Latest**, never pruned), sharing the
+  build-number sequence, so every channel's build is
   newer than the last. These runs do not submit to TestFlight external testing; `release.yml` stays
   the signed manifest-versioned release path.
 - **Signing.** The same secrets as the builder sign macOS (`CSC_LINK`, `CSC_KEY_PASSWORD`,
@@ -317,7 +317,7 @@ Until `Polyth/Polyth` became public (2026-10-31), its GitHub Releases could not 
 |---|---|
 | `POLYTH_UPDATE_REPOSITORY` | `owner/repo`; electron-builder `publish` → GitHub provider for that repository, baked into the packaged `app-update.yml`. The desktop jobs also collect `latest.yml`, `latest-linux.yml`, a per-architecture `latest-mac.<arch>.partial.yml`, the macOS update `.zip` and blockmaps, and fail if any is missing. |
 | `POLYTH_BUILD_NUMBER` | The workflow run number becomes the packaged patch version: manifest `X.Y.Z` + run `N` → `X.Y.N` (N must exceed Z). Every build is therefore newer than the previous one, whatever its channel. `release-version.mjs` applies the same rule, so the iOS marketing version and the Android `versionName`/`versionCode` move with it. The manifests themselves are not changed. |
-| `POLYTH_RELEASE_CHANNEL` | `stable` (default), `test` or `nightly`; see [Release channels](#release-channels). Test and nightly append a semver prerelease id to the version: `X.Y.N-beta`, `X.Y.N-nightly`. |
+| `POLYTH_RELEASE_CHANNEL` | `stable` (default) or `nightly`; see [Release channels](#release-channels). Nightly appends a semver prerelease id to the version: `X.Y.N-nightly`. `test` (the retired test channel) is refused. |
 | `POLYTH_GOOGLE_BUILTIN_CLIENT_ID`, `POLYTH_GOOGLE_BUILTIN_CLIENT_SECRET` | Polyth's own Google app (a Desktop OAuth client). `apps/desktop/build.ts` bakes them into the packaged server, so users connect Google without a Google Cloud client of their own; see [Google OAuth clients](../../packages/google/README.md#oauth-clients). Unset = no built-in app. The builder workflow does not pass them yet: it needs repository secrets of these names mapped into the desktop jobs' environment. |
 
 With both variables unset, `remote-build.mjs` produces the same plain smoke artifacts as before.
@@ -341,15 +341,15 @@ Every **stable** release also carries the [workstation edition](../security/work
 | Channel | Trigger | Version / tag | GitHub release | Desktop metadata |
 |---|---|---|---|---|
 | Nightly | Automatic: `nightly.yml` schedule 03:17/07:47/12:17 UTC or `repository_dispatch` (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
-| Test | Manual: **Actions → Nightly → Run workflow**, channel `test`, ref `master` | `X.Y.N-beta` | prerelease | `latest*.yml` + `beta*.yml` |
 | Stable | Manual: **Actions → Nightly → Run workflow**, channel `stable`, ref `master` | `X.Y.N` | release, marked **Latest** | `latest*.yml` + `beta*.yml` |
 
-The manual form also takes `ref` (default `devel`; use `master` for `test` and `stable`) and `target`; only `target=all` publishes a release. A manual `nightly` run is for retrying a failed nightly and is not deduplicated. Every channel's `ios-app` job uploads to TestFlight; only the external builder's `test` and `stable` runs also distributed to external testers ([iOS / TestFlight](#ios--testflight)). Releases from before the channel split (`v0.1.132`–`v0.1.137`, plain `X.Y.N`) count as stable.
+The manual form also takes `ref` (default `devel`; use `master` for `stable`) and `target`; only `target=all` publishes a release. A manual `nightly` run is for retrying a failed nightly and is not deduplicated. Every channel's `ios-app` job uploads to TestFlight; only `stable` runs also distribute to external testers ([iOS / TestFlight](#ios--testflight)). Releases from before the channel split (`v0.1.132`–`v0.1.137`, plain `X.Y.N`) count as stable.
+
+**The Test channel (`X.Y.N-beta`) was retired on 2026-11-12.** Nothing publishes `-beta` releases any more and the scripts refuse `channel=test`. Stable releases still carry `beta*.yml`, so an install that followed Test (updater channel `beta`) keeps receiving stable releases; current builds read a stored `test` choice and a `-beta` version as Stable.
 
 The desktop app follows the channel chosen in **Settings → Desktop → Update channel**; until the user picks one, a build follows the channel it was published on (its version's prerelease id; `apps/desktop/src/updaterChannel.ts`). electron-updater's GitHub provider gives the channels their semantics:
 
 - **Stable** — prereleases off; reads `/releases/latest`, which only a stable release becomes.
-- **Test** — prereleases on, updater channel `beta`: the newest `-beta` *or* stable release in the releases Atom feed. Stable releases carry `beta*.yml` for these clients.
 - **Nightly** — prereleases on, custom channel `nightly`: only `-nightly` releases.
 
 Downgrades stay off, so switching to a channel whose newest build is older waits for that channel's next release. Installs built before the split (`0.1.137` and older) only check stable and stay put until the first stable release. The Atom feed lists about ten releases; per-channel pruning to three keeps every channel's newest release in it. Windows arm64 keeps its `latest-arm64` metadata on stable only; the builder does not produce Windows arm64. The macOS 12 build (`legacy-mac.yml`) follows stable releases only, whatever its channel setting says; see [Desktop](../dev/desktop.md#macos-12-build).
@@ -368,11 +368,11 @@ Create it from **Agents → Templates → Nightly release captain** (or start em
 
 `node scripts/ci/release-notes.mjs` writes each release's body (and `title=Polyth X.Y.N · <Channel>` to `$GITHUB_OUTPUT`); the publish job fetches the source with full blob-less history for it.
 
-- **Range**: from the previous release of the channel (nightly → nightly; test → test or stable; stable → stable; a channel's first release → the newest older release of any channel) up to the built commit. Each body ends with a hidden `<!-- polyth-release: channel=… source=<sha> -->` marker, which gives the next release its exact range. Without a usable marker it falls back to the previous release's publication date, then to the newest 50 commits.
+- **Range**: from the previous release of the channel (nightly → nightly; stable → stable; retired `-beta` releases are never a base; a channel's first release → the newest older release of any channel) up to the built commit. Each body ends with a hidden `<!-- polyth-release: channel=… source=<sha> -->` marker, which gives the next release its exact range. Without a usable marker it falls back to the previous release's publication date, then to the newest 50 commits.
 - **Sections**: ✨ New, 🚀 Improvements, 🐛 Fixes and a collapsed 🧰 Under the hood, from the conventional-commit type (`feat`, `fix`, `perf`, `docs`, `ci`…), else the subject's leading verb (`Add`, `Fix`/`Stop`/`Keep`, `Document`/`Type`…, Ukrainian `Додай`/`Виправ…` too), else Improvements. A commit that touches only docs, tests, `.agents`, `.github` or Markdown is Under the hood. Each entry carries the first sentence of the commit body. Merge, WIP and `fixup!` commits and repeated subjects are dropped.
 - **Contributors**: every human author and `Co-authored-by` trailer, merged by email or exact name through the repository `.mailmap`, counted once per commit, most active first. A `users.noreply.github.com` address becomes an @-mention. Bot identities and AI agents (Claude, Cursor, Codex, OpenCode, Gemini, Copilot…) are skipped, including any trailer naming a model or harness, so a release credits people only. Add new contributor addresses to `.mailmap` to merge identities or get an @-mention.
 
-The builder only sees **pushed** source: `devel` for nightlies, `master` for test and stable runs. Push the source changes before relying on a new builder workflow: an older source has no `update-feed.mjs`, so its publish job fails.
+The builder only sees **pushed** source: `devel` for nightlies, `master` for stable runs. Push the source changes before relying on a new builder workflow: an older source has no `update-feed.mjs`, so its publish job fails.
 
 Platform behaviour of feed builds:
 
@@ -409,4 +409,4 @@ Exports:
 5. Confirm desktop/macOS/Windows signing secrets before release.
 6. Choose Android Play and npm publication explicitly.
 7. Leave `draft=false` for a real release; this is the moment desktop auto-update becomes visible.
-8. Monitor the nightly run (the external builder's until the cutover) and TestFlight processing; promote with a manual `test`, then `stable`, builder run.
+8. Monitor the nightly run (the external builder's until the cutover) and TestFlight processing; promote with a manual `stable` run.

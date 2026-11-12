@@ -13,7 +13,9 @@ import { allowedHarnessesFor, hasInstanceOwnerAuthority } from "@polyth/contract
 import type {
   CapabilityInstallationScope,
   SkillCatalogInstallInput,
+  SkillHarnessMode,
   SkillInstallationInput,
+  SkillReachDefault,
 } from "@polyth/contracts/capability-installations";
 import {
   localOnlyRemoteAccess,
@@ -198,17 +200,28 @@ export function skillRoutes(deps: {
       }, visible));
       return true;
     }
-    if (path === "/api/skills/library/availability") {
-      if (typeof input.enabled !== "boolean") {
-        throw Object.assign(new Error("enabled must be true or false"), { code: "invalid-input" });
+    if (path === "/api/skills/library/reach") {
+      const rule = (value: unknown, name: string): { id: string; mode: SkillHarnessMode | null } | undefined => {
+        if (value === undefined) return undefined;
+        const item = value as { id?: unknown; mode?: unknown } | null;
+        if (!item || typeof item.id !== "string" || !(item.mode === null || item.mode === "off" || item.mode === "on" || item.mode === "always")) {
+          throw Object.assign(new Error(`${name} needs an id and a mode of off, on, always or null`), { code: "invalid-input" });
+        }
+        return { id: item.id, mode: item.mode };
+      };
+      if (input.default !== undefined && input.default !== "all" && input.default !== "some" && input.default !== "none") {
+        throw Object.assign(new Error("default must be all, some or none"), { code: "invalid-input" });
       }
-      json(200, await library.setAvailability(space, {
+      const family = rule(input.family, "family");
+      const harness = rule(input.harness, "harness");
+      json(200, await library.setReach(space, {
         name: required(input.name, "name"),
         scope: scopeFrom(input.scope),
-        harnessId: required(input.harnessId, "harnessId"),
-        enabled: input.enabled,
         ...owner,
-      }));
+        ...(input.default !== undefined ? { default: input.default as SkillReachDefault } : {}),
+        ...(family ? { family } : {}),
+        ...(harness ? { harness } : {}),
+      }, visible));
       return true;
     }
     if (path === "/api/skills/library/update") {

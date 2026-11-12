@@ -229,6 +229,34 @@ test("signal foregrounds meet 4.5:1 on their actual 18% tinted washes", () => {
   }
 });
 
+// The navigator's New chat row paints the accent as text on its own wash
+// (13%/12% at rest, 18% under the pointer). Raw --accent fell to ~2.4:1 there
+// (macOS 27 dark blue on the dark sidebar); --accent-on-wash holds 4.5:1 for
+// every palette, appearance, style and accent swatch.
+test("accent text on the accent wash meets 4.5:1 for every palette, style and swatch", () => {
+  for (const preset of PRESET_THEMES) {
+    for (const appearance of ["dark", "light"] as const) {
+      const adapted = adaptThemeAppearance(preset, appearance);
+      const variants: [string, ThemeSpec][] = [["default", adapted]];
+      for (const style of THEME_STYLE_CHOICES) {
+        for (const swatch of ACCENT_SWATCHES[style]) {
+          variants.push([`${style}/${swatch.id}`, resolveTheme(preset.id, appearance, { style, accent: swatch.source })]);
+        }
+      }
+      for (const [label, theme] of variants) {
+        const vars = themeCssVars(theme);
+        const foreground = vars["--accent-on-wash"]!;
+        assert.match(foreground, HEX, `${preset.id}/${appearance}/${label}`);
+        for (const surface of [theme.tokens.bg, theme.tokens.panel, theme.tokens.elevated]) {
+          const wash = blend(theme.tokens.accent, surface, 0.18);
+          const ratio = contrast(foreground, wash);
+          assert.ok(ratio >= 4.5, `${preset.id}/${appearance}/${label} accent on ${wash} is ${ratio.toFixed(2)}:1`);
+        }
+      }
+    }
+  }
+});
+
 test("parseCustomThemes drops invalid entries, dedupes ids, survives garbage", () => {
   const good = validTheme();
   const dupe = { ...validTheme(), name: "Duplicate" };

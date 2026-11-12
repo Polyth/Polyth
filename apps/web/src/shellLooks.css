@@ -106,25 +106,32 @@
   --look-option-edge: var(--look-line);
   --look-scrim: color-mix(in srgb, var(--bg) 55%, transparent);
   --look-scrim-blur: none;
-  /* The launcher rail once it holds a floating window (1d): one material for
-     the window and the strip. The window covers the conversation, so its
-     fill takes the overlay floor. --look-rail-island is 1 where the rail
-     column is a card of its own (an island, floating columns) rather than a
-     column that runs into the window's edges. */
+  /* A floating window on the launcher rail (1d). It covers the conversation,
+     so its fill takes the overlay floor. --look-rail-island is 1 where the
+     rail column is a card of its own (an island, floating columns) rather
+     than a column that runs into the window's edges. */
   --look-rail: color-mix(in srgb, var(--look-float) var(--look-overlay-a), transparent);
+  --look-rail-clip: border-box;
   --look-rail-blur: var(--look-float-blur);
   --look-rail-edge: var(--look-line);
   --look-rail-seam: var(--look-line);
   --look-rail-shadow: none;
   --look-rail-radius: 0px;
   --look-rail-island: 0;
-  /* A docked window (1e) is part of the rail column, so it takes the idle
-     rail's own material: by default none (it sits on the canvas, as the
-     idle rail does), with the rail's start edge where the look draws one. */
-  --look-dock: transparent;
-  --look-dock-blur: none;
-  --look-dock-shadow: none;
-  --look-dock-edge: transparent;
+  /* The launcher strip (1d): the inset highlight a look's rail material
+     carries, redrawn above the strip's blur, and the padding a look gives
+     the ends of its island. */
+  --look-shell-highlight: 0 0 transparent;
+  --look-strip-pad: 0px;
+  /* The launcher card's own fill and shadow, for the states where the strip
+     has to paint it: beside a full-window layer, over a bottom or narrow
+     dock. */
+  --look-strip-card: transparent;
+  --look-strip-card-shadow: 0 0 transparent;
+  /* The card's frame line, where the idle host draws one all round (Line and
+     Editorial with floating columns): beside a layer the strip and the
+     host's far edge keep it. */
+  --look-strip-card-edge: transparent;
   /* Phone layers (1h). The navigator and the Workspace panel are one
      full-screen material over the conversation. A phone navigator row runs
      the screen's width, so its current chat may differ from the desktop
@@ -239,7 +246,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.ac
 
 /* Pinning is a place, not a state: the pinned section and its pins stay in
    quiet ink so accent is left for what is live (a running session's timer). */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-pinned-divider, .session-pin-icon) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-pinned-divider, .session-lead-pin, .mobile-nav-lead-pin) {
   color: var(--look-ink-quiet);
 }
 
@@ -362,6 +369,11 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.attachment
   border: 1px solid var(--look-option-edge) !important;
   box-shadow: none !important;
 }
+/* A removed attachment's restore slot stays an emptied, dashed outline. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .attachment-pill.att-removed {
+  background: transparent !important;
+  border-style: dashed !important;
+}
 
 /* Push buttons. The default (quiet) button is the look's option and a
    destructive one its red wash, without the platform style's plate or the
@@ -422,24 +434,69 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-sugge
 }
 
 /* 1d. The launcher rail and its windows.
-   Idle, a look shapes the launcher host itself (an island, a hairline
-   column, a capsule). Once the host holds a window it is only geometry, as
-   in the base shell: the whole column, with no fill, edge, shadow or filter
-   of its own. A floating window then extends the rail: it spans the column
-   (styles.css), and the window and the strip share one material — fill,
-   outer edge and shadow — parted by a seam, the window's free corners in the
-   look's radius. Where the column is a card of its own (--look-rail-island)
-   the strip closes the frame on the far side and the foot rounds. Each
-   shadow is clipped on the seam side so neither falls across the other;
-   --stack-dir puts that side right in a mirrored shell. */
+   The launcher column is one thing whether or not it holds a window. Idle, a
+   look shapes the launcher host (an island, a hairline column, a capsule),
+   and the host keeps exactly that while a side window is open, pinned or
+   leaving: the same box, edge, fill, shadow and far corners. No rule here
+   may restyle the host or the strip for an open window: a launcher that
+   moves by a pixel, or a column that repaints, is the defect this section
+   exists to prevent (docs/dev/ui.md, "Nothing steps at a seam").
+   Two things follow from the window, and only these:
+   - The host never filters. An element with a backdrop filter bounds the
+     backdrop of the glass it holds, so the look's shell blur lives on the
+     strip instead, in every state, with the highlight that must stay above
+     it (--look-shell-highlight). The strip has no fill or edge of its own.
+   - The corners a floating window attaches to square off, on the window's
+     clock (the host's own border-radius transition, styles.css).
+   A floating window extends the column: it spans it (styles.css), its top and
+   bottom edges on the host's own, in the look's floating material
+   (--look-rail*), its free corners in the look's radius, parted from the
+   strip by a seam line the strip draws without taking room. The window's
+   shadow is clipped on the seam side so it does not fall across the strip;
+   --stack-dir puts that side right in a mirrored shell.
+   A host that is not a column (a bottom or narrow dock re-grids it across the
+   conversation, a layer or a sheet fills it) is bare geometry. */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is(.railbar-open, [data-rail-motion="exiting"]) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is(.railbar-open, [data-rail-motion="exiting"]):is(.railbar-dock-bottom, .railbar-pinned-narrow, :has(> :is(.rail-fullscreen, .panel-sheet))) {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
-  border-radius: 0 !important;
   padding-block: 0 !important;
   align-self: stretch !important;
+}
+
+/* Beside a layer the strip draws the column's block edges itself
+   (styles.css), so the host gives up the ones a look restated for it idle:
+   kept, they would push every launcher down a pixel. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is(.railbar-open, [data-rail-motion="exiting"]):has(> .rail-fullscreen) {
+  border-block-width: 0 !important;
+  border-inline-start-width: 0 !important;
+  /* The far edge is still the host's: it keeps the card's line. */
+  border-inline-end-color: var(--look-strip-card-edge) !important;
+}
+
+/* A bottom or narrow dock places the strip by the host's block and
+   inline-end edges, which stay as the look has them idle; the start edge
+   would only inset the docked window (styles.css). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is(.railbar-open, [data-rail-motion="exiting"]):is(.railbar-dock-bottom, .railbar-pinned-narrow) {
+  border-inline-start-width: 0 !important;
+}
+
+/* (A layer's host keeps its corners: the strip beside the layer inherits the
+   far ones, shellLayout.css, so the launcher card keeps its shape.) */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is(.railbar-open, [data-rail-motion="exiting"]):is(.railbar-dock-bottom, .railbar-pinned-narrow, :has(> .panel-sheet)) {
+  border-radius: 0 !important;
+}
+
+/* A look whose idle strip is a short island (Air, Obsidian) stretches it
+   into the column for a side window (and grows there, below). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow):not(:has(> :is(.rail-fullscreen, .panel-sheet))) {
+  align-self: stretch !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar.railbar-open.railbar-dynamic {
+  border-start-start-radius: 0 !important;
+  border-end-start-radius: 0 !important;
 }
 
 /* A compact shell shows a package window as a full-screen layer and floats no
@@ -452,15 +509,59 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railb
   body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:not([data-side-strip]) {
     border-width: 0 !important;
   }
+  /* The island's end padding sits on the strip in the wide shell (below). */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar {
+    padding-block: var(--look-strip-pad, 0px);
+  }
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > :is(.rail-dynamic, .plugin-strip) {
-  background: var(--look-rail) !important;
-  backdrop-filter: var(--look-rail-blur) !important;
-  box-shadow: var(--look-rail-shadow) !important;
+/* The strip: the shell blur and its highlight, in the host's corners. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar > .plugin-strip {
+  backdrop-filter: var(--look-shell-blur, none) !important;
+}
+
+@media (min-width: 961px) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:not(.railbar-dock-bottom):not(.railbar-pinned-narrow):not(:has(> :is(.rail-fullscreen, .panel-sheet))) > .plugin-strip {
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: inherit !important;
+    box-shadow: var(--look-shell-highlight, 0 0 transparent) !important;
+    clip-path: none !important;
+  }
+  /* A look pads its island's ends (--look-strip-pad). The padding sits on the
+     strip, so the strip fills the host's whole frame and its blur reaches the
+     island's ends. */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar > .plugin-strip {
+    padding-block: calc(var(--space-2) + var(--look-strip-pad, 0px));
+  }
+  /* Beside a full-window layer, or over a bottom or narrow dock, the host is
+     bare geometry across the whole workspace, so there the strip paints the
+     launcher card itself (--look-strip-card*): the launchers and the card
+     under them stay put while the workspace changes behind them. */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is(.railbar-dock-bottom, .railbar-pinned-narrow, :has(> .rail-fullscreen)) > .plugin-strip {
+    background: var(--look-strip-card, transparent) !important;
+    border-color: transparent !important;
+    box-shadow: var(--look-shell-highlight, 0 0 transparent), var(--look-strip-card-shadow, 0 0 transparent) !important;
+  }
+  /* (A dock's strip draws its frame as outer shadows, shellLayout.css.) */
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:has(> .rail-fullscreen) > .plugin-strip {
+    border-block-color: var(--look-strip-card-edge) !important;
+  }
+}
+
+/* The seam between a side window and the strip (styles.css draws the line). */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar > .plugin-strip::before {
+  background: var(--look-rail-seam);
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > .rail.rail-dynamic {
+  background: var(--look-rail) !important;
+  /* Where the rail's frame is a line on the page (Line, Editorial), the
+     window's edge is too: under it the fill would tint the same token a
+     different colour, and the shared top line would change at the seam. */
+  background-clip: var(--look-rail-clip, border-box) !important;
+  backdrop-filter: var(--look-rail-blur) !important;
+  box-shadow: var(--look-rail-shadow) !important;
   border: 1px solid var(--look-rail-edge) !important;
   border-inline-end-width: 0 !important;
   border-radius: 0 !important;
@@ -469,14 +570,18 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railba
   clip-path: inset(-4rem calc((var(--stack-dir, 1) - 1) * 2rem) -4rem calc((-1 - var(--stack-dir, 1)) * 2rem)) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar.railbar-dynamic > .plugin-strip {
-  border-block: 1px solid var(--look-rail-edge) !important;
-  border-inline-start: 1px solid var(--look-rail-seam) !important;
-  border-inline-end: calc(var(--look-rail-island) * 1px) solid var(--look-rail-edge) !important;
-  border-radius: 0 !important;
-  border-start-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
-  border-end-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
-  clip-path: inset(-4rem calc((-1 - var(--stack-dir, 1)) * 2rem) -4rem calc((var(--stack-dir, 1) - 1) * 2rem)) !important;
+/* A full-window layer is that window at another size: it keeps the window's
+   frame (edge, free corner, how the edge composites) and only its fill stays
+   the opaque panel, since it covers the conversation. Left in the base frame
+   it lost the look's top line and took the base corner the moment the window
+   filled the workspace. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:has(> .rail-fullscreen) > .rail-fullscreen {
+  border-color: var(--look-rail-edge) !important;
+  border-start-start-radius: var(--look-rail-radius) !important;
+  background-clip: var(--look-rail-clip, border-box) !important;
+  /* The base window's inset highlight is not every look's: only the one the
+     look's own rail material carries, as on the strip beside it. */
+  box-shadow: var(--look-shell-highlight) !important;
 }
 
 /* Full-height layouts own the column (shellLayout.css): flush columns run
@@ -488,6 +593,11 @@ body[data-shell-look]:not([data-shell-look="standard"])[data-shell-floating="fal
 body[data-shell-look]:not([data-shell-look="standard"])[data-shell-floating="true"]:not(#\#) {
   --look-rail-island: 1;
   --look-rail-radius: var(--look-column-radius, var(--radius-surface));
+}
+
+/* Line and Editorial close the floating column's frame on every side. */
+body:is([data-shell-look="line"], [data-shell-look="editorial"])[data-shell-floating="true"]:not(#\#) {
+  --look-strip-card-edge: var(--look-line);
 }
 
 /* A look whose idle strip is a short island (Air, Obsidian) grows it into
@@ -515,38 +625,78 @@ body[data-shell-look]:not([data-shell-look="standard"])[data-shell-floating="tru
 
 /* 1e. Docked windows.
    A pinned window docks in flow beside the conversation as part of the rail
-   column. It and the strip take the rail's idle material (--look-dock*) and
-   are parted by the seam; the idle rail's start edge runs down the window's
-   start. Where the column is a card of its own (--look-rail-island: an
-   island look, floating columns) the edge closes the frame on every side and
-   the corners round; a flush column runs square into the header and the
-   window's edge. The host stays the bare geometry 1d leaves it. */
+   column: the host, still the idle frame, grows around it. So the window
+   needs no material of its own. It sits inside the frame the look gave the
+   rail (the rail's fill, edge and shadow, the hairline down its start), with
+   the shell blur and highlight the strip carries, parted from the strip by
+   the seam line. Where the column is a card of its own (--look-rail-island:
+   an island look, floating columns) the frame's start corners round in the
+   look's radius; a flush column runs square into the header and the window's
+   edge. */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > :is(.rail, .plugin-strip) {
-  background: var(--look-dock) !important;
-  backdrop-filter: var(--look-dock-blur) !important;
-  box-shadow: var(--look-dock-shadow) !important;
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) {
+  border-start-start-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
+  border-end-start-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .rail {
-  border: 0 solid var(--look-dock-edge) !important;
-  border-block-width: calc(var(--look-rail-island) * 1px) !important;
-  border-inline-start-width: 1px !important;
+  background: transparent !important;
+  backdrop-filter: var(--look-shell-blur, none) !important;
+  box-shadow: var(--look-shell-highlight, 0 0 transparent) !important;
+  border: 0 !important;
   border-radius: 0 !important;
-  border-start-start-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
-  border-end-start-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
-  clip-path: inset(-4rem calc((var(--stack-dir, 1) - 1) * 2rem) -4rem calc((-1 - var(--stack-dir, 1)) * 2rem)) !important;
+  border-start-start-radius: max(0px, calc(var(--look-rail-island) * var(--look-rail-radius) - 1px)) !important;
+  border-end-start-radius: max(0px, calc(var(--look-rail-island) * var(--look-rail-radius) - 1px)) !important;
+  clip-path: none !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .plugin-strip {
-  border: 0 solid var(--look-dock-edge) !important;
-  border-block-width: calc(var(--look-rail-island) * 1px) !important;
-  border-inline-end-width: calc(var(--look-rail-island) * 1px) !important;
-  border-inline-start: 1px solid var(--look-rail-seam) !important;
-  border-radius: 0 !important;
-  border-start-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
-  border-end-end-radius: calc(var(--look-rail-island) * var(--look-rail-radius)) !important;
-  clip-path: inset(-4rem calc((-1 - var(--stack-dir, 1)) * 2rem) -4rem calc((var(--stack-dir, 1) - 1) * 2rem)) !important;
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .plugin-strip {
+  border-start-start-radius: 0 !important;
+  border-end-start-radius: 0 !important;
+}
+
+/* The Monoliths put work on a plane of its own (a raised sheet, a recessed
+   well) and leave the chrome on the backdrop. A docked window is work, not
+   chrome: with no material it lay on the backdrop (over a wallpaper, on the
+   bare image) beside the conversation's sheet. There the pane itself is a
+   second plane in the conversation's material (--look-work*). The host and
+   the strip are untouched, so the column keeps its idle frame and no
+   launcher moves. The plane covers the host's 1px frame, so it ends on the
+   sheet's foot line; it keeps the sheet's gap to the strip, which stays
+   chrome (so the seam line goes); and in flush columns it keeps the sheet's
+   inset from the window's edges. */
+body[data-shell-look="monolith"]:not(#\#) {
+  --look-work: var(--look-sheet);
+  --look-work-shadow: var(--look-sheet-shadow);
+  --look-work-blur: var(--look-blur);
+}
+
+body[data-shell-look="monolith-reverse"]:not(#\#) {
+  --look-work: var(--look-well);
+  --look-work-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 6px -2px rgba(0, 0, 0, 0.35);
+  --look-work-blur: none;
+}
+
+html.light body[data-shell-look="monolith-reverse"]:not(#\#) {
+  --look-work-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 5px -2px rgba(0, 0, 0, 0.12);
+}
+
+body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):is([data-shell-layout="columns"], [data-shell-layout="bare"])[data-shell-floating="false"]:not(#\#) {
+  --look-work-inset: var(--space-2);
+}
+
+body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow) {
+  background: var(--look-work) !important;
+  backdrop-filter: var(--look-work-blur) !important;
+  box-shadow: var(--look-work-shadow) !important;
+  border-radius: calc(14px * var(--look-round)) !important;
+  margin-block: calc(var(--look-work-inset, 0px) - 1px) !important;
+  margin-inline: -1px var(--space-2) !important;
+  height: calc(100% + 2px - 2 * var(--look-work-inset, 0px)) !important;
+}
+
+body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not(#\#) .railbar:has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) {
+  --look-rail-seam: transparent;
 }
 
 /* 1f. Fields. Every text field and select is the look's field: the
@@ -573,6 +723,15 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(textarea.ui
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.sidebar-search:focus-within, .picker-search:focus-within, .ui-field-well:focus-within, .ui-input:focus, .ui-textarea:focus, .sel select:focus, .theme-picker-current:focus-visible):not(:is(.sidebar-search, .picker-search, .ui-field-well, .palette-field, .lock-field, .ui-field-frame) *) {
   box-shadow: inset 0 -1px 0 var(--look-field-rule), var(--look-field-edge), 0 0 0 2px var(--look-focus-ring) !important;
+}
+
+/* The phone navigator's search pill is not a Look field (each Look gives it
+   its island, line or rim), but it still has to show focus: a ring in the
+   Look's focus ink, over the pill's own material rather than replacing it.
+   Its input keeps no ring of its own, as on the desktop navigator. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-search:focus-within {
+  outline: 2px solid var(--look-focus-ring);
+  outline-offset: 1px;
 }
 
 /* Phone Settings search: the card shell is the field, its input stays bare. */
@@ -614,16 +773,21 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-navigat
   backdrop-filter: var(--look-phone-layer-blur) !important;
 }
 
+/* The row's fill layer (::before) starts where MobileNavigator.css puts it:
+   before the status mark, or before the title when the slot is empty. */
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active:not(.is-selected) {
-  background: var(--look-phone-select);
-  box-shadow: var(--look-phone-select-edge);
+  --mobile-nav-fill: var(--look-phone-select);
   border-radius: var(--look-select-radius);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active:not(.is-selected)::before {
+  box-shadow: var(--look-phone-select-edge);
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active::after {
   content: "";
   position: absolute;
-  inset-inline-start: 0;
+  inset-inline-start: var(--mobile-nav-fill-start, 0px);
   top: 50%;
   width: 3px;
   height: calc(var(--icon-md) + 2px);
@@ -844,13 +1008,13 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.scrim.s
   backdrop-filter: var(--look-scrim-blur) !important;
 }
 
-/* 3b. In-flow cards: agent question, isolated-changes card. The lines above
-   the composer (agent status, its subagents, edited files) take their shape
-   from Chat settings → Status above the composer, not from the look: a line
-   stays a line, a capsule one pill, and the tab a row of the composer's
-   header stack in the look's composer material (3c). */
+/* 3b. In-flow cards: agent question, isolated-changes card, provider-limit
+   notice. The lines above the composer (agent status, its subagents, edited
+   files) take their shape from Chat settings → Status above the composer, not
+   from the look: a line stays a line, a capsule one pill, and the tab a row of
+   the composer's header stack in the look's composer material (3c). */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .empty-state--compact, .empty-state--panel) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .turn-rate-limit, .empty-state--compact, .empty-state--panel) {
   background: var(--look-card) !important;
   backdrop-filter: var(--look-card-blur, none) !important;
   border: 1px solid var(--look-card-edge) !important;
@@ -955,15 +1119,16 @@ html:is(.light[data-background-tone="light"], :not(.light)[data-background-tone=
    it, so a filtered host would leave the glass it holds blurring nothing and
    the conversation would show sharp through it. The panels that hold glass of
    their own therefore never filter: the rail-collapsed navigator (its sessions
-   peek) and the launcher host once it holds a window (1d). For the same
+   peek) and the launcher host, whose strip carries the blur instead so the
+   column looks the same with a window as without one (1d). For the same
    reason a look frosts its canvas on a layer under the shell (--look-canvas-
    blur, painted below .app's own veil), never on .app itself. */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) :is(.sidebar, .railbar) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .sidebar {
   backdrop-filter: var(--look-shell-blur, none) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) :is(.sidebar.sidebar--rail-collapsed, .railbar:is(.railbar-open, [data-rail-motion="exiting"])) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) :is(.sidebar.sidebar--rail-collapsed, .railbar) {
   backdrop-filter: none !important;
 }
 
@@ -1100,7 +1265,7 @@ body[data-shell-look="paper"]:not(#\#) .execution-status-icon {
 
 /* Agent question / isolated changes: a passage under a rule, options as plain rows. */
 
-body[data-shell-look="paper"]:not(#\#) :is(.question-card, .isolation-card) {
+body[data-shell-look="paper"]:not(#\#) :is(.question-card, .isolation-card, .turn-rate-limit) {
   border-top: 1px solid var(--look-line) !important;
   padding-inline: 0 !important;
 }
@@ -1118,7 +1283,7 @@ body[data-shell-look="paper"]:not(#\#) .question-actions {
   border-top: 1px solid var(--look-line) !important;
 }
 
-body[data-shell-look="paper"]:not(#\#) .isolation-card :is(.ui-btn--quiet) {
+body[data-shell-look="paper"]:not(#\#) :is(.isolation-card, .turn-rate-limit) :is(.ui-btn--quiet, .picker-chip) {
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -1196,6 +1361,8 @@ body[data-shell-look="paper"]:not(#\#) .mobile-navigator .project-glyph:not(:has
    Over a wallpaper the grid stays, the fields between the lines go frosted. */
 
 body[data-shell-look="line"]:not(#\#) {
+  /* The floating window's edge is a line on the page, like the rail's frame. */
+  --look-rail-clip: padding-box;
   /* Fields (1f): the navigator's search sets the field for every input. */
   --look-field: transparent;
   --look-field-edge: inset 0 0 0 1px var(--look-line);
@@ -1204,8 +1371,6 @@ body[data-shell-look="line"]:not(#\#) {
   --look-column-radius: calc(6px * var(--look-round));
   --look-line: color-mix(in srgb, var(--text) 13%, transparent);
   --look-line-strong: color-mix(in srgb, var(--text) 22%, transparent);
-  /* A docked window keeps the rail's hairline down its start (1e). */
-  --look-dock-edge: var(--look-line);
   --look-r: calc(6px * var(--look-round));
   --look-hover: color-mix(in srgb, var(--text) 4%, transparent);
   --look-select: transparent;
@@ -1296,7 +1461,7 @@ body[data-shell-look="line"]:not(#\#) .railbar {
 /* Floating full-height columns (shellLayout.css; App sets
    data-shell-floating only in those layouts) are hairline cards: the frame
    closes on every side instead of the one seam the flush grid draws. */
-body[data-shell-look="line"][data-shell-floating="true"]:not(#\#) :is(.sidebar, .railbar:not(.railbar-open)) {
+body[data-shell-look="line"][data-shell-floating="true"]:not(#\#) :is(.sidebar, .railbar) {
   border: 1px solid var(--look-line) !important;
 }
 
@@ -1360,6 +1525,12 @@ body[data-shell-look="line"]:not(#\#) :is(.question-actions, .isolation-card-act
 }
 
 body[data-shell-look="line"]:not(#\#) .ui-btn--quiet {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--look-line-strong) !important;
+}
+
+/* The provider-limit model chip stands with those quiet buttons. */
+body[data-shell-look="line"]:not(#\#) .turn-rate-limit .picker-chip {
   background: transparent !important;
   box-shadow: inset 0 0 0 1px var(--look-line-strong) !important;
 }
@@ -1505,9 +1676,9 @@ body[data-shell-look="air"]:not(#\#) {
   --look-rail-shadow: var(--look-shadow);
   --look-rail-radius: calc(22px * var(--look-round));
   --look-rail-island: 1;
-  --look-dock: var(--look-island);
-  --look-dock-blur: var(--look-blur);
-  --look-dock-shadow: var(--look-shadow);
+  --look-strip-pad: 6px;
+  --look-strip-card: var(--look-island);
+  --look-strip-card-shadow: var(--look-shadow);
   /* Phone (1h): the pale field; projects, launchers and widgets are islands. */
   --look-phone-layer: color-mix(in srgb, var(--look-field) var(--look-overlay-a), transparent);
   --look-tile: var(--look-island);
@@ -1549,11 +1720,12 @@ body[data-shell-look="air"]:not(#\#) .sidebar {
 body[data-shell-look="air"]:not(#\#) .railbar {
   --rail-strip-gutter-start: calc(var(--space-3) / 2);
   --rail-strip-gutter-end: calc(var(--space-3) / 2);
+  --rail-cluster-gutter: calc(var(--space-3) / 2);
+  border-radius: min(calc(22px * var(--look-round)), var(--rail-host-radius-cap, calc(22px * var(--look-round)))) !important;
   margin-block: 0 10px !important;
   margin-inline: 0 10px !important;
   height: auto !important;
   align-self: flex-start;
-  padding-block: 6px;
 }
 
 body[data-shell-look="air"]:not(#\#) .desktop-session-status-trigger {
@@ -1661,8 +1833,21 @@ body[data-shell-look="air"]:not(#\#) .composer-card {
 /* Phone. */
 
 /* Every project is an island on the field; its mark is a soft accent disc. */
+/* Islands stand --space-2 in from the screen (the list's own edge inset
+   counts toward it), and inside one both edge columns stand 21px from its
+   sides: the navigator's mirrored grid, measured from the island. */
+body[data-shell-look="air"]:not(#\#) .mobile-navigator {
+  --nav-axis: calc(21px + var(--nav-edge));
+  --nav-gutter: calc(var(--nav-axis) - var(--icon-md) / 2);
+  --nav-row-inset: calc(var(--nav-gutter) - var(--nav-edge));
+  --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
+  --nav-title-end: calc(var(--nav-gutter) + var(--nav-lead-col) + var(--nav-lead-gap));
+  --nav-mark-tuck: calc(var(--nav-edge) + var(--tap) - var(--nav-title-end));
+  --nav-island-inset: calc(var(--space-2) - var(--nav-edge));
+}
+
 body[data-shell-look="air"]:not(#\#) .mobile-nav-project {
-  margin: 0 var(--space-2) var(--space-3);
+  margin: 0 var(--nav-island-inset) var(--space-3);
   padding-block: var(--space-1);
   border-radius: calc(22px * var(--look-round));
   background: var(--look-island);
@@ -1682,29 +1867,21 @@ body[data-shell-look="air"]:not(#\#) .mobile-nav-project.is-expanded > .mobile-n
   --nav-press-radius: calc(22px * var(--look-round)) calc(22px * var(--look-round)) 0 0;
 }
 
-/* Inside an island the mark sits as far in from its side as from its top,
-   and names and chats keep their edge after it; a current chat's pill still
-   spans the island. The lifted copy of a project keeps the same inset. */
-body[data-shell-look="air"]:not(#\#) :is(.mobile-nav-project, .mobile-navigator .workspace-arrange-ghost-body) {
-  --nav-row-inset: var(--space-4);
-  --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
-}
-
 /* Rows on the field after the islands (Add project, the next remote page)
    keep the islands' mark and name columns. */
 body[data-shell-look="air"]:not(#\#) .mobile-nav-scroll > :is(.mobile-nav-add-project, .mobile-nav-more-sessions) {
-  --nav-row-inset: calc(var(--space-2) + var(--space-4));
+  --nav-row-inset: calc(var(--nav-gutter) - var(--nav-edge) + var(--nav-island-inset));
   --nav-title-start: calc(var(--nav-row-inset) + var(--nav-lead-col) + var(--nav-lead-gap));
 }
 
 /* The toolbar steps in with the islands: the title starts where their marks
    do (the islands' edge plus that inset) and close sits on their ⋮ column. */
 body[data-shell-look="air"]:not(#\#) .mobile-nav-toolbar {
-  --nav-bar-axis: calc(var(--nav-axis) + var(--space-2));
+  --nav-bar-axis: calc(var(--nav-axis) + var(--nav-island-inset));
 }
 
 body[data-shell-look="air"]:not(#\#) .mobile-nav-place {
-  padding-inline-start: calc(var(--nav-edge) + var(--space-2) + var(--space-4));
+  padding-inline-start: calc(var(--nav-gutter) + var(--nav-island-inset));
 }
 
 body[data-shell-look="air"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
@@ -2062,12 +2239,10 @@ body[data-shell-look="monolith-reverse"]:not(#\#) .workspace {
   /* The strip moves in with Floating columns (--shell-edge), so the well's
      gap to it matches the sidebar's gap to the well. */
   margin-inline: 0 calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-2) + var(--shell-edge, 0px));
-  box-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 6px -2px rgba(0, 0, 0, 0.35) !important;
+  /* (--look-work-shadow, with the docked window's plane in 1e: lighter in a
+     light theme.) */
+  box-shadow: var(--look-work-shadow) !important;
   overflow: hidden;
-}
-
-html.light body[data-shell-look="monolith-reverse"]:not(#\#) .workspace {
-  box-shadow: inset 0 0 0 1px var(--look-edge), inset 0 2px 5px -2px rgba(0, 0, 0, 0.12) !important;
 }
 
 /* As in Monolith: the launcher column and its window end on the well's foot. */
@@ -2219,6 +2394,15 @@ body[data-shell-look="obsidian"]:not(#\#) {
       color-mix(in srgb, var(--text) 4%, transparent) 38%,
       color-mix(in srgb, var(--text) 3%, transparent) 70%,
       color-mix(in srgb, var(--accent) 34%, transparent));
+  /* The same rim lit from straight above, for the launcher column and the
+     windows that extend it: its top edge is then one even line across the
+     rail and a window of any width, where the slanted rim would fade along
+     a wide window and start over at the seam. */
+  --look-rim-column: linear-gradient(180deg,
+      color-mix(in srgb, var(--text) 34%, transparent),
+      color-mix(in srgb, var(--text) 4%, transparent) 38%,
+      color-mix(in srgb, var(--text) 3%, transparent) 70%,
+      color-mix(in srgb, var(--accent) 34%, transparent));
   --look-rim-accent: linear-gradient(135deg,
       color-mix(in srgb, var(--accent-hi) 75%, transparent),
       color-mix(in srgb, var(--text) 8%, transparent) 35%,
@@ -2226,7 +2410,9 @@ body[data-shell-look="obsidian"]:not(#\#) {
       color-mix(in srgb, var(--purple) 55%, transparent));
   --look-glass-blur: blur(24px) saturate(1.4);
   --look-shell-blur: var(--look-glass-blur);
-  --look-glass-shadow: 0 1px 0 0 color-mix(in srgb, white 7%, transparent) inset, 0 18px 40px -24px rgba(0, 0, 0, 0.6);
+  --look-glass-highlight: 0 1px 0 0 color-mix(in srgb, white 7%, transparent) inset;
+  --look-glass-drop: 0 18px 40px -24px rgba(0, 0, 0, 0.6);
+  --look-glass-shadow: var(--look-glass-highlight), var(--look-glass-drop);
   --look-float-radius: calc(18px * var(--look-round));
   --look-scrim: color-mix(in srgb, black 40%, transparent);
   --look-scrim-blur: blur(10px) saturate(1.2);
@@ -2236,17 +2422,20 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-select-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
   --look-select-radius: var(--look-pill-radius);
   --look-control-radius: var(--look-pill-radius);
-  --look-rail: var(--look-fill-overlay);
+  /* A floating window is rimmed glass like the rail it extends, so their
+     shared top and bottom edges are one kind of line. */
+  --look-rail: linear-gradient(var(--look-fill-overlay), var(--look-fill-overlay)) padding-box, var(--look-rim-column) border-box;
+  --look-rail-clip: padding-box, border-box;
   --look-rail-blur: var(--look-glass-blur);
-  --look-rail-edge: color-mix(in srgb, var(--text) 12%, transparent);
+  --look-rail-edge: transparent;
   --look-rail-seam: color-mix(in srgb, var(--text) 8%, transparent);
   --look-rail-shadow: var(--look-glass-shadow);
   --look-rail-radius: calc(18px * var(--look-round));
   --look-rail-island: 1;
-  --look-dock: var(--look-fill);
-  --look-dock-blur: var(--look-glass-blur);
-  --look-dock-shadow: var(--look-glass-shadow);
-  --look-dock-edge: color-mix(in srgb, var(--text) 12%, transparent);
+  --look-shell-highlight: var(--look-glass-highlight);
+  --look-strip-pad: 8px;
+  --look-strip-card: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim-column) border-box;
+  --look-strip-card-shadow: var(--look-glass-drop);
   /* Phone (1h): dark glass; launchers and widgets are glass with the rim, and
      only the launcher under a finger takes the accent rim and the glow. */
   --look-phone-layer: color-mix(in srgb, color-mix(in srgb, var(--bg) 70%, black) var(--look-overlay-a), transparent);
@@ -2311,7 +2500,7 @@ html:not([data-background="none"]) body[data-shell-look="obsidian"][data-glass="
 
 /* Rimmed glass: shell surfaces, floating surfaces and in-flow cards share it. */
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card, .turn-rate-limit) {
   border: 1px solid transparent !important;
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
@@ -2330,7 +2519,7 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.dialog-panel, .modal.settings-she
   background: linear-gradient(var(--look-fill-overlay), var(--look-fill-overlay)) padding-box, var(--look-rim) border-box !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card, .turn-rate-limit) {
   border-radius: calc(18px * var(--look-round)) !important;
 }
 
@@ -2341,15 +2530,27 @@ body[data-shell-look="obsidian"]:not(#\#) .sidebar {
   height: calc(100% - 10px) !important;
 }
 
+/* The layer is rimmed like the window it grew from and the strip beside it,
+   so the rim's top line runs on across both; under the rim its fill is the
+   window's, made opaque over the page. */
+body[data-shell-look="obsidian"]:not(#\#):not(#\#) .railbar:has(> .rail-fullscreen) > .rail-fullscreen {
+  background:
+    linear-gradient(color-mix(in srgb, var(--panel) var(--look-overlay-a), var(--bg)), color-mix(in srgb, var(--panel) var(--look-overlay-a), var(--bg))) padding-box,
+    var(--look-rim-column) border-box !important;
+}
+
 body[data-shell-look="obsidian"]:not(#\#) .railbar {
   --rail-strip-gutter-start: calc(var(--space-3) / 2);
   --rail-strip-gutter-end: calc(var(--space-3) / 2);
-  border-radius: var(--look-pill-radius) !important;
+  --rail-cluster-gutter: calc(var(--space-3) / 2);
+  /* The strip redraws the highlight above its blur (1d). */
+  box-shadow: var(--look-glass-drop) !important;
+  background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim-column) border-box !important;
+  border-radius: min(var(--look-pill-radius), var(--rail-host-radius-cap, var(--look-pill-radius))) !important;
   margin-block: 0 10px !important;
   margin-inline: 0 10px !important;
   height: auto !important;
   align-self: flex-start;
-  padding-block: 8px;
 }
 
 body[data-shell-look="obsidian"]:not(#\#) .desktop-session-status-copy {
@@ -2480,6 +2681,8 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.mobile-navigator, .context-select
    wallpaper the page becomes frosted vellum (--look-veil). */
 
 body[data-shell-look="editorial"]:not(#\#) {
+  /* The floating window's edge is a line on the page, like the rail's frame. */
+  --look-rail-clip: padding-box;
   /* Fields (1f): the navigator's search sets the field for every input. */
   --look-field: transparent;
   --look-field-rule: var(--look-line);
@@ -2490,8 +2693,6 @@ body[data-shell-look="editorial"]:not(#\#) {
   --look-paper-solid: color-mix(in srgb, color-mix(in srgb, var(--bg) 86%, var(--amber)) 82%, white);
   --look-paper: color-mix(in srgb, var(--look-paper-solid) var(--look-veil), transparent);
   --look-line: color-mix(in srgb, var(--text) 16%, transparent);
-  /* A docked window keeps the rail's hairline down its start (1e). */
-  --look-dock-edge: var(--look-line);
   --look-hover: color-mix(in srgb, var(--text) 4%, transparent);
   --look-select: transparent;
   --look-select-radius: calc(3px * var(--look-round));
@@ -2597,7 +2798,7 @@ body[data-shell-look="editorial"]:not(#\#) .railbar {
 /* Floating full-height columns (shellLayout.css; App sets
    data-shell-floating only in those layouts) are hairline cards: the frame
    closes on every side instead of the one seam the flush grid draws. */
-body[data-shell-look="editorial"][data-shell-floating="true"]:not(#\#) :is(.sidebar, .railbar:not(.railbar-open)) {
+body[data-shell-look="editorial"][data-shell-floating="true"]:not(#\#) :is(.sidebar, .railbar) {
   border: 1px solid var(--look-line) !important;
 }
 
@@ -2647,13 +2848,19 @@ body[data-shell-look="editorial"]:not(#\#) .execution-status-icon {
 
 /* Question / isolation / dialogs: set between rules, serif heads. */
 
-body[data-shell-look="editorial"]:not(#\#) :is(.question-card, .isolation-card) {
+body[data-shell-look="editorial"]:not(#\#) :is(.question-card, .isolation-card, .turn-rate-limit) {
   border-top: 1px solid var(--look-line) !important;
   border-bottom: 1px solid var(--look-line) !important;
   padding-inline: 0 !important;
 }
 
 body[data-shell-look="editorial"]:not(#\#) :is(.question-item-title, .isolation-card-title, .isolation-card h3, .ui-dialog-title, .dialog-panel h2, .settings-pane-head h2, .notify-title, .hero h2) {
+  font-family: var(--look-serif) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .turn-rate-limit .ui-notice-heading {
   font-family: var(--look-serif) !important;
   font-weight: 600 !important;
   letter-spacing: -0.005em;

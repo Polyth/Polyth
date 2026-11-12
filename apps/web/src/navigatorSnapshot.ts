@@ -6,6 +6,7 @@
 // summary fields: no transcript, no session detail, no archived chats. The
 // branch label rides along, so the composer's chip needs no git read first.
 import { SESSION_SUMMARY_FIELDS, type Project, type SessionProjection } from "@polyth/contracts";
+import { sessionRepositoryScope } from "@polyth/contracts/workspace";
 import { hydrateClientRecord, writeClientPreference, type PersistenceScope } from "./clientPersistence.ts";
 
 const KIND = "navigator-snapshot-v1";
@@ -35,6 +36,10 @@ function summaryRow(session: SessionProjection): SessionProjection {
     const value = session[key];
     if (value !== undefined) row[key] = value;
   }
+  // A full row knows its scope only through `workspace`, which stays out.
+  const repositoryScope = sessionRepositoryScope(session);
+  if (repositoryScope) row.repositoryScope = repositoryScope;
+  else delete row.repositoryScope;
   row.summary = true;
   return row as unknown as SessionProjection;
 }

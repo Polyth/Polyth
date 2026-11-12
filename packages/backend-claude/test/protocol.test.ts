@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RuntimeEvent } from "@polyth/contracts";
-import { createClaudeRuntime } from "../src/index.ts";
+import { claudeChildEnv, createClaudeRuntime } from "../src/index.ts";
 import {
     setCapabilityLaunchSink,
     setCapabilityReceiptSink,
@@ -234,14 +234,16 @@ test("Claude keeps MCP config secrets out of process argv and removes the privat
         return { async *[Symbol.asyncIterator]() {}, initializationResult: async () => ({}), supportedModels: async () => [], setModel: async () => {}, interrupt: async () => {}, close() {} } as any;
     }, getSessionInfo: async () => undefined, getSessionMessages: async () => [] };
     let spawnedArgs: string[] = [];
+    let spawnedEnv: Record<string, string | undefined> = {};
     const receipts: Record<string, string> = {};
     const authority = {
         authorityId: "owned",
         generation: 1,
         receipts,
         releasedAuthorities: [],
-        spawn(_command: string, args: string[]) {
+        spawn(_command: string, args: string[], spawnOptions: { env: Record<string, string | undefined> }) {
             spawnedArgs = args;
+            spawnedEnv = spawnOptions.env;
             return { stderr: new EventEmitter() } as any;
         },
         receipt: async (operationId: string, id: string) => { receipts[operationId] = id; },
@@ -265,6 +267,8 @@ test("Claude keeps MCP config secrets out of process argv and removes the privat
             signal: new AbortController().signal,
         });
         assert.doesNotMatch(JSON.stringify(spawnedArgs), new RegExp(secret));
+        // Current models get native TodoWrite/TaskCreate only with this opt-in.
+        assert.equal(spawnedEnv.CLAUDE_CODE_ENABLE_TODO_TOOLS, "true");
         const configIndex = spawnedArgs.indexOf("--mcp-config");
         assert.ok(configIndex >= 0);
         const configPath = spawnedArgs[configIndex + 1]!;
@@ -961,4 +965,10 @@ test("Claude TodoWrite publishes a canonical task snapshot beside the admitted t
     assert.ok(latest?.type === "task/snapshot" && latest.revision > (snapshots[0]!.type === "task/snapshot" ? snapshots[0]!.revision : 0));
     closed = true;
     await rt.dispose?.();
+});
+
+test("claudeChildEnv opts into native todo tools but keeps an operator's explicit value", () => {
+    assert.equal(claudeChildEnv({ PATH: "/bin" }).CLAUDE_CODE_ENABLE_TODO_TOOLS, "true");
+    assert.equal(claudeChildEnv({ PATH: "/bin" }).PATH, "/bin");
+    assert.equal(claudeChildEnv({ CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" }).CLAUDE_CODE_ENABLE_TODO_TOOLS, "0");
 });

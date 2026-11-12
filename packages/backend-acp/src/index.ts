@@ -40,6 +40,10 @@ import {
     type SmallModelCliRunner,
 } from "@polyth/harness-runtime";
 import { acpOverlays, type AcpLaunchOverlay, type AcpMcpServer } from "./provisioner.ts";
+/** A stdio entry of {@link AcpMcpServer}. */
+export type AcpStdioMcpServer = Extract<AcpMcpServer, { command: string }>;
+export const isAcpStdioMcpServer = (server: AcpMcpServer): server is AcpStdioMcpServer =>
+    typeof (server as { command?: unknown }).command === "string";
 import {
     acpModelDescriptors,
     applyConfigOptionUpdate,
@@ -102,6 +106,17 @@ export interface AcpProfile {
     mcpServerFailure?: AcpRuntimeOptions["mcpServerFailure"];
     /** Stdio MCP commands must be absolute paths for this agent. */
     absoluteMcpCommands?: boolean;
+    /** See {@link AcpRuntimeOptions.agentNotice}. */
+    agentNotice?: AcpRuntimeOptions["agentNotice"];
+    /**
+     * For an agent that takes stdio MCP servers only from its own launch
+     * configuration and refuses them on `session/new`. Called before each
+     * local launch with the staged stdio servers (possibly none) and a file
+     * path private to that runtime; the returned arguments are appended to
+     * `args`, and stdio servers are then left out of the session requests.
+     * The file is removed when the runtime is disposed.
+     */
+    launchStdioMcp?(input: { servers: AcpStdioMcpServer[]; file: string }): Promise<string[]>;
 }
 
 /** A definite JSON-RPC error answer to `session/prompt`, as the agent sent it. */
@@ -120,6 +135,15 @@ export interface AcpPromptFailure {
     code?: RuntimeErrorCode;
     retry?: RateLimitRetryHint;
 }
+/**
+ * What a profile makes of an `agent_message_chunk` its CLI wrote itself (a
+ * status or failure line) instead of the model.
+ */
+export type AcpAgentNotice =
+    /** Not part of the answer; nothing is shown. */
+    | { kind: "drop" }
+    /** The turn failed for this reason; the prompt still ends normally. */
+    | { kind: "error"; message: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint };
 export interface AcpAgentCapabilities {
     loadSession?: boolean;
     sessionCapabilities?: {
@@ -265,6 +289,17 @@ export interface AcpRuntimeOptions {
      * capability is recorded as failed. `undefined` keeps the refusal.
      */
     mcpServerFailure?(error: AcpPromptError & { data?: unknown }, servers: readonly AcpMcpServer[]): number | undefined;
+    /**
+     * For agents that report their own status and failures as ordinary
+     * message chunks and then end the prompt with `end_turn`: classify one
+     * `agent_message_chunk` update. `undefined` keeps it as assistant text.
+     * An `error` notice closes the turn as failed once the prompt returns,
+     * unless the turn was cancelled.
+     */
+    agentNotice?(update: Record<string, unknown>): AcpAgentNotice | undefined;
+    /** Stdio MCP servers were given to the agent when it was launched (see
+     *  {@link AcpProfile.launchStdioMcp}); session requests carry the rest. */
+    stdioMcpAtLaunch?: boolean;
 }
 
 const ADMISSION_POLL_MS = 300;
@@ -362,6 +397,8 @@ export function createAcpRuntime(
     let resolveAdmission: ((outcome: MutationOutcome<{ admissionId: string }>) => void) | undefined;
     let promptWatchdog: ReturnType<typeof setTimeout> | undefined;
     let lastTitle = "";
+    /** A failure the agent announced as a notice during the active turn. */
+    let noticedFailure: Extract<AcpAgentNotice, { kind: "error" }> | undefined;
     // The agent's own session controls, as advertised. Selection is
     // session-scoped, so it is re-applied after a load/resume.
     let sessionConfig: AcpSessionConfig = {};
@@ -610,6 +647,13 @@ export function createAcpRuntime(
             return;
         }
         if (update.sessionUpdate === "agent_message_chunk") {
+            const notice = options.agentNotice?.(update as Record<string, unknown>);
+            if (notice) {
+                // The agent took the prompt; its own line is not dialogue.
+                markAccepted();
+                if (notice.kind === "error") noticedFailure = notice;
+                return;
+            }
             if (update.content?.type === "text") {
                 markAccepted();
                 const partId = currentMessagePartId();
@@ -669,7 +713,10 @@ export function createAcpRuntime(
             ? [tracked.rawInput.command, tracked.rawInput.file_path, tracked.rawInput.filePath, tracked.rawInput.path, tracked.rawInput.url]
                 .find((value): value is string => typeof value === "string" && value.trim() !== "")
             : undefined;
-        const permission = params.toolCall?.kind ?? (trackedName && trackedName !== "tool" ? trackedName : undefined) ?? "tool";
+        // `other` says nothing; the announced call may carry the tool's name.
+        const requestKind = typeof params.toolCall?.kind === "string" ? params.toolCall.kind as string : undefined;
+        const named = trackedName && trackedName !== "tool" && trackedName !== "other" ? trackedName : undefined;
+        const permission = (requestKind && requestKind !== "other" ? requestKind : undefined) ?? named ?? requestKind ?? "tool";
         const patterns = [params.toolCall?.title ?? trackedTarget ?? tracked?.title ?? "Tool execution"];
         return new Promise((resolve) => { pending.set(requestId, { resolve, options: params.options ?? [], permission, patterns }); emit({ type: "permission/requested", requestId, permission, patterns }); });
     });
@@ -690,7 +737,7 @@ export function createAcpRuntime(
         failed: Map<string, string>,
         send: (servers: AcpMcpServer[]) => Promise<T>,
     ): Promise<T> => {
-        let servers = [...(overlay?.mcpServers ?? [])];
+        let servers = (overlay?.mcpServers ?? []).filter((server) => !options.stdioMcpAtLaunch || !isAcpStdioMcpServer(server));
         for (;;) {
             try {
                 return await send(servers);
@@ -1013,6 +1060,7 @@ export function createAcpRuntime(
             text = "";
             messagePartId = "";
             messagePartOrdinal = 0;
+            noticedFailure = undefined;
             order++;
             return new Promise((resolve) => {
                 resolveAdmission = resolve;
@@ -1063,7 +1111,18 @@ export function createAcpRuntime(
                     for (const event of extra) emit(event);
                     active = false;
                     order++;
-                    emit({ type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed" });
+                    const failed = result.stopReason === "cancelled" ? undefined : noticedFailure;
+                    noticedFailure = undefined;
+                    emit(failed
+                        ? {
+                            type: "turn/stopped",
+                            turnId,
+                            reason: "error",
+                            error: failed.message,
+                            ...(failed.code ? { code: failed.code } : {}),
+                            ...(failed.retry ? { retry: failed.retry } : {}),
+                        }
+                        : { type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed" });
                     for (const cb of lifecycle)
                         cb({ type: "stream-connected", authorityId: rpc.authorityId, generation: rpc.generation });
                 }, async (error) => {

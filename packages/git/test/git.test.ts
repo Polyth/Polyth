@@ -622,6 +622,80 @@ test("push publishes a branch that has no upstream and sets tracking", async () 
   assert.equal((await git.status(dir)).ahead, 0);
 });
 
+const upstreamOf = (dir: string): string =>
+  execFileSync("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], { cwd: dir, stdio: "pipe" })
+    .toString().trim();
+
+test("push publishes a branch whose upstream names another branch", async () => {
+  // A branch started from `origin/main` tracks `origin/main`; a bare
+  // `git push` then refuses because the upstream name does not match the local
+  // branch. Polyth must publish the branch under its own name instead.
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("push", "-qu", "origin", "main");
+  execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: bare });
+  g("checkout", "-q", "-b", "feature/from-main", "origin/main");
+  writeFileSync(join(dir, "feature.txt"), "new work\n");
+  g("add", ".");
+  g("commit", "-qm", "feature work");
+  assert.equal(upstreamOf(dir), "origin/main");
+
+  await git.push(dir, "origin");
+
+  assert.equal(upstreamOf(dir), "origin/feature/from-main");
+  assert.equal(
+    execFileSync("git", ["rev-parse", "origin/feature/from-main"], { cwd: dir, stdio: "pipe" }).toString().trim(),
+    execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, stdio: "pipe" }).toString().trim(),
+  );
+  assert.equal((await git.status(dir)).ahead, 0);
+});
+
+test("sync publishes a branch whose upstream names another branch", async () => {
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("push", "-qu", "origin", "main");
+  execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: bare });
+  g("checkout", "-q", "-b", "fix/from-main", "origin/main");
+  writeFileSync(join(dir, "fix.txt"), "fix\n");
+  g("add", ".");
+  g("commit", "-qm", "fix work");
+
+  await git.sync(dir, "origin");
+
+  assert.equal(upstreamOf(dir), "origin/fix/from-main");
+  assert.equal((await git.status(dir)).ahead, 0);
+});
+
+test("pull retargets a differently named upstream to the same-named remote branch", async () => {
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("push", "-qu", "origin", "main");
+  execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: bare });
+  g("checkout", "-q", "-b", "feature/track", "origin/main");
+  writeFileSync(join(dir, "feature.txt"), "work\n");
+  g("add", ".");
+  g("commit", "-qm", "feature work");
+  g("push", "-qu", "origin", "feature/track");
+  g("branch", "--set-upstream-to", "origin/main");
+  assert.equal(upstreamOf(dir), "origin/main");
+
+  await git.pull(dir, "origin");
+
+  assert.equal(upstreamOf(dir), "origin/feature/track");
+});
+
 const divergedRemote = () => {
   const dir = repo();
   const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));

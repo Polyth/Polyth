@@ -14,7 +14,7 @@ import type {
   SshRemoteHarnessDto,
   SshRemoteHarnessesDto,
 } from "@polyth/contracts";
-import { harnessConfigSource, REMOTE_HARNESS_PATH, shq } from "./index.ts";
+import { harnessConfigSource, harnessPlacement, REMOTE_HARNESS_PATH, shq } from "./index.ts";
 
 export { REMOTE_HARNESS_PATH };
 
@@ -26,6 +26,8 @@ export interface RemoteHarnessTarget {
   installCommand?: string;
   sessions: boolean;
   localConfig: boolean;
+  /** The backend can run it on this machine with its tools on the host. */
+  localPlacement: boolean;
   setupUrl?: string;
 }
 
@@ -66,6 +68,7 @@ export async function remoteHarnessTargets(
         ...(binary && remote?.installCommand?.trim() ? { installCommand: remote.installCommand.trim() } : {}),
         sessions: remote?.sessions === true,
         localConfig: remote?.localConfig === true,
+        localPlacement: remote?.sessions === true && remote?.localPlacement === true,
         ...(descriptor.setupUrl ? { setupUrl: descriptor.setupUrl } : {}),
       }];
     });
@@ -107,7 +110,7 @@ export const parseProbe = (stdout: string): Map<string, BinaryFact> => {
 
 const dtoFor = (
   target: RemoteHarnessTarget,
-  connection: Pick<SshConnectionDto, "harnessConfig">,
+  connection: Pick<SshConnectionDto, "harnessConfig" | "harnessPlacement">,
   fact: BinaryFact | undefined,
   message?: string,
 ): SshRemoteHarnessDto => ({
@@ -120,6 +123,9 @@ const dtoFor = (
   sessions: target.sessions,
   configSource: harnessConfigSource(connection, target.harnessId),
   localConfig: target.localConfig,
+  // A stored exception for a harness that cannot run here means nothing.
+  placement: target.localPlacement ? harnessPlacement(connection, target.harnessId) : "host",
+  localPlacement: target.localPlacement,
   ...(target.setupUrl ? { setupUrl: target.setupUrl } : {}),
   ...(message ? { message } : {}),
 });

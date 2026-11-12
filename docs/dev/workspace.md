@@ -70,6 +70,29 @@ base branch is sent. Single-repository Projects show no repository control.
 The Files header indicator edits an open ordinary session's membership; it is
 omitted from isolated session headers.
 
+**Repository scope in the navigator.** `sessionRepositoryScope`
+(`packages/contracts/src/workspace.ts`, browser-safe) is the one rule for
+whether a session is scoped to a subset: a snapshot with mode `all`, or no
+workspace, is the whole Project; an explicit snapshot (mode `subset`, or the
+older absent mode) is a subset of the ids it lists; given the Project's current
+registrations, a subset listing every one of them is the whole Project again.
+Summaries never carry `workspace`; they carry the derived
+`SessionProjection.repositoryScope = { repositoryIds }` (ids only, never paths,
+branches or isolation evidence), present only for a subset. Both producers
+derive it with the helper: `sessionSummary()` (WebSocket summaries) and the
+SQL listing in `packages/session` (which reads the workspace as an extra column
+and drops it). A summary row answers from `repositoryScope`, a full projection
+from `workspace`, so a stale cached workspace never outranks a newer summary.
+`SessionSummaryQuery.repositoryId` narrows a page to sessions whose subset
+includes that id (`sessionInRepositoryScope`); a delegated child follows its
+root parent (a recursive step inside the same Space and Project). The HTTP
+route accepts it only with `projectId`, at most `REPOSITORY_SCOPE_ID_MAX`
+characters, and reads the Project through the gateway-scoped service to fill
+the internal `projectRepositoryIds`; an unknown, foreign or one-repository
+Project, or an id it does not register, leaves the filter unapplied (a foreign
+Project still answers 404). The navigator chips that use it, the row mark and
+New chat under a chip are described in [ui.md](ui.md) ("Repository chips").
+
 Picking another project in that row retargets the unsent chat, it does not
 navigate (`moveNewSessionDraftToProject` in `store.ts`): the New Chat surface
 stays, the live text plus link/browser-context attachments move, and the
@@ -235,6 +258,14 @@ registered. A restore or the next runtime epoch then starts there instead of in
 the missing path. An in-flight publication or corrupt record is kept. A live
 checkout or a branch with unmerged commits is kept too: restore the session to
 merge or discard it.
+
+An active isolate proves its line of work by the recorded base commit in its
+history (`inspectOwned`, `packages/git/src/managedWorktrees.ts`). When the
+target branch itself is rewritten (rebased onto its remote, force-pulled), an
+agent's rebase onto the new target drops that commit; the isolate still counts
+as owned when it meets the target branch at a commit the old base does not
+contain. A branch reset back to history at or before the base, or one sharing
+no history with the target, stays `unowned` with reason `base-mismatch`.
 
 A session that is leaving (deleted, or cleaned up by Settings → Sessions → Cleanup
 when "Skip isolated sessions" is off) proves ownership by its marker, branch name
@@ -621,6 +652,35 @@ files, and stale tree responses cannot publish into a different scope. Files and
 toolbars use `WorkspaceSurfaceHeader`; Terminal keeps repository selection in
 its tab strip. ModuleView continues to own the window title and close controls.
 Features own their content and scoped CSS.
+
+Source Control in a multi-repository Project lists every registered
+repository, not only the open chat's selection
+(`packages/git/widgets/sourceControlRepositories.ts`): the chat's own rows come
+first and the rest follow under *Other project repositories* in the repository
+picker (phone: the option detail). A repository outside the chat is read and
+changed in the Project's own checkout — its git calls carry no `sessionId` — so
+browsing it never edits the chat's workspace or touches its isolation. The
+stored repository choice stays keyed by the open chat. A chat whose workspace
+does not resolve still fails closed.
+
+A multi-repository Project can be rooted in a plain folder that holds its
+repositories: adding repositories keeps that folder as the `primary` row, so it
+stays a workspace member without Git. Source Control never stops on "This folder
+isn't a Git repository" for it. A status read that says `isRepo: false` marks the
+folder (`packages/git/widgets/notGitFolders.ts`, page lifetime, cleared by a
+later read that finds Git). `sourceControlGitRepositories` then drops it, and the
+view, its picker and the *All repositories* overview open on a real repository.
+The Canvas *Recent changes* card does the same for a chat that runs in that
+folder. The empty state remains only when no member has Git.
+
+Files keeps the Project's own folder reachable. When a multi-repository chat's
+workspace leaves out the root folder (it chose some repositories only, or the
+root is no longer registered), Files adds a *Project folder* row with the
+reserved selector `PROJECT_ROOT_FOLDER_ID` (`project-root`,
+`@polyth/contracts/workspace`, `workspaceOmitsProjectRoot`). Only the Files
+routes accept it (`rootOf` in `packages/files/src/serverEntry.ts`, after it has
+checked that the session belongs to the Project). Git, editor and session-edit
+routes still resolve real workspace members, so the row carries no Git status.
 
 Source Control display preferences (`packages/git/widgets/gitPrefs.ts`) are
 account-wide defaults edited under Settings → Source Control → Display and

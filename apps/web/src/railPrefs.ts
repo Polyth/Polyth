@@ -79,6 +79,15 @@ export function setRailWidth(id: string, width: number): void {
   persist();
 }
 
+/** First-open widths for surfaces whose content needs more than the shared
+ *  default. A width the person set by resizing always wins. */
+export const RAIL_WIDTH_DEFAULTS: Readonly<Record<string, number>> = {
+  // Notifications: "Mark all read" and "Clear notifications" share one line
+  // in the longer locales too (uk and de need ~365px), not only in English.
+  "slot:notification-centre": 380,
+};
+
 export function railWidthOf(id: string | null): number {
-  return (id !== null ? prefs.widths[id] : undefined) ?? RAIL_WIDTH_DEFAULT;
+  if (id === null) return RAIL_WIDTH_DEFAULT;
+  return prefs.widths[id] ?? RAIL_WIDTH_DEFAULTS[id] ?? RAIL_WIDTH_DEFAULT;
 }

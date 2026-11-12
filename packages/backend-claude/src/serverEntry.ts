@@ -1,18 +1,23 @@
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { HarnessProvider, HarnessRegistry, HarnessVersionStore, SmallModelCompletionRequest } from "@polyth/contracts";
 import { releaseHarnessProcessExecution } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimTarget } from "@polyth/harness-runtime/executable-discovery";
 import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
-import { execRemoteHarness, probeRemoteHarness, remoteHarnessLaunch, resolveRemoteHarnessHost, type RemoteProcessHost } from "@polyth/harness-runtime/remote-host";
+import { execRemoteHarness, probeRemoteHarness, readRemoteFileBytes, remoteHarnessLaunch, remoteHarnessPlacement, resolveRemoteHarnessHost, type RemoteProcessHost } from "@polyth/harness-runtime/remote-host";
+import { createRemoteWorkspace } from "@polyth/harness-runtime/remote-workspace";
+import { restrictingRulesFromSettings, type WorkspacePolicyRules } from "@polyth/permissions/workspace-policy";
 import { createHarnessAccountFamily, harnessCommandLine, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { vendorScriptInstallCommand } from "@polyth/harness-runtime/installers";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { readClaudeAuthReport } from "./authStatus.ts";
-import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES } from "./index.ts";
-import { gateClaudeAgentTools, hasPolythAgentToolsMcp } from "./mcpReadiness.ts";
+import { claudeAuthFingerprint, createClaudeRuntime, discoverClaudeModels, invalidateClaudeModelCache, CLAUDE_CAPABILITIES, type ClaudeRemoteWorkspace } from "./index.ts";
+import { openRemoteHandsSession } from "./remoteHands.ts";
+import { claudeAgentToolsTimeoutMs, gateClaudeAgentTools, hasPolythAgentToolsMcp } from "./mcpReadiness.ts";
 import { createClaudeNativePlugins } from "./nativePlugins.ts";
 import { claudeConfigDir, createClaudePreferences, nativeSkillsUnsupported } from "./preferences.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
@@ -67,6 +72,47 @@ export const CLAUDE_VERSION_STORE: HarnessVersionStore = {
     },
     entry: /^[0-9]+\.[0-9]+\.[0-9]+$/,
 };
+/** Harness id whose placement an SSH connection stores; extra accounts follow it. */
+const CLAUDE_FAMILY = "claude";
+/** Largest project file read from a host for one attachment. */
+const REMOTE_ATTACHMENT_MAX_BYTES = 32 * 1024 * 1024;
+
+/** The person's own restricting permission rules (`deny`, `ask`) from their
+ *  Claude Code settings on this machine. Claude Code applies them to its
+ *  native tools only, so Polyth applies them to the remote ones. */
+export const claudeLocalRestrictingRules = async (configDir: string): Promise<WorkspacePolicyRules> => {
+    try {
+        return restrictingRulesFromSettings(JSON.parse(await readFile(join(configDir, "settings.json"), "utf8")));
+    }
+    catch {
+        return {};
+    }
+};
+
+/** What a runtime needs to work on a project that lives on `remote` while
+ *  Claude Code runs here: the placeholder directory, and per native session
+ *  the host tools, Polyth's command policy and the delivery bridge. */
+export const claudeRemoteWorkspace = (input: {
+    remote: RemoteProcessHost;
+    /** Absolute project path on the host. */
+    root: string;
+    localCwd: string;
+    localRules: () => Promise<WorkspacePolicyRules>;
+}): ClaudeRemoteWorkspace => ({
+    localCwd: input.localCwd,
+    readFile: (path) => readRemoteFileBytes(input.remote, path, { cwd: input.root, maxBytes: REMOTE_ATTACHMENT_MAX_BYTES }),
+    async open(nativeSessionId, start) {
+        const workspace = createRemoteWorkspace(input.remote, input.root);
+        try {
+            return await openRemoteHandsSession({ workspace, nativeSessionId, resume: start.resume, localRules: await input.localRules() });
+        }
+        catch (error) {
+            workspace.close();
+            throw error;
+        }
+    },
+});
+
 /** SDK protocol markers only; local credentials and config never travel. */
 const REMOTE_CLAUDE_ENV = /^(?:CLAUDE_CODE_ENTRYPOINT|CLAUDE_AGENT_SDK_[A-Z0-9_]+)$/;
 const NATIVE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
@@ -126,6 +172,7 @@ export const titleSafeClaudeSdk = (
             return gateClaudeAgentTools(
                 query,
                 hasPolythAgentToolsMcp(options.mcpServers),
+                { timeoutMs: claudeAgentToolsTimeoutMs({ ...env, ...options.env }) },
             );
         },
         async getSessionInfo(...args: Parameters<typeof sdk.getSessionInfo>) {
@@ -234,6 +281,22 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
         const key = createHash("sha256").update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"])).digest("hex");
         return host.spaceStorage(context.space!).path(`runtime/${harnessId}/${key}.json`);
     };
+    /** A remote project whose connection keeps Claude Code on this machine
+     *  ("harness here, tools on the host"): its SSH host and the local
+     *  placeholder directory the CLI runs in. Undefined for a local project
+     *  and for a connection that runs the CLI on the host. */
+    const placedHere = async (context: Parameters<HarnessProvider["probe"]>[0]): Promise<{ remote: RemoteProcessHost; localCwd: string } | undefined> => {
+        if (!context.remote || !context.space) return undefined;
+        if (await remoteHarnessPlacement(host, context, CLAUDE_FAMILY) !== "local") return undefined;
+        const remote = await resolveRemoteHarnessHost(host, context);
+        if (!remote) return undefined;
+        // One placeholder per project path: Claude Code keys its transcripts on
+        // the working directory, so a project's chats stay together and resume.
+        const key = createHash("sha256").update(JSON.stringify([context.projectId, context.cwd])).digest("hex").slice(0, 24);
+        const localCwd = join(host.spaceStorage(context.space).packageDir(host.pluginId), "remote-workspaces", key);
+        mkdirSync(localCwd, { recursive: true });
+        return { remote, localCwd };
+    };
     // Extra accounts are local `CLAUDE_CONFIG_DIR`s; only the default harness
     // runs on a remote host, there on the host's own sign-in.
     const remoteHost = async (context: Parameters<HarnessProvider["probe"]>[0]): Promise<RemoteProcessHost | undefined> => {
@@ -245,14 +308,15 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
     const remoteFingerprint = (remote: RemoteProcessHost) => `remote:${remote.label}`;
     return {
         // Private sessions run with the SDK's `persistSession: false`.
-        descriptor: { id: harnessId, name: "Claude Code", integration: "Agent SDK", priority: 0, setupUrl: "https://code.claude.com/docs/en/setup", installCommand: vendorScriptInstallCommand(CLAUDE_INSTALLER, process.platform), signInCommand: "claude auth login", updateCommand: ["claude", "update"], releaseSource: { kind: "npm", package: "@anthropic-ai/claude-code" }, remoteHost: { binary: CLAUDE_REMOTE_BINARY, installCommand: vendorScriptInstallCommand(CLAUDE_INSTALLER), signInCommand: "claude auth login", ...(account ? {} : { sessions: true }) }, privateSessions: true },
+        descriptor: { id: harnessId, name: "Claude Code", integration: "Agent SDK", priority: 0, setupUrl: "https://code.claude.com/docs/en/setup", installCommand: vendorScriptInstallCommand(CLAUDE_INSTALLER, process.platform), signInCommand: "claude auth login", updateCommand: ["claude", "update"], releaseSource: { kind: "npm", package: "@anthropic-ai/claude-code" }, remoteHost: { binary: CLAUDE_REMOTE_BINARY, installCommand: vendorScriptInstallCommand(CLAUDE_INSTALLER), signInCommand: "claude auth login", ...(account ? {} : { sessions: true, localPlacement: true }) }, privateSessions: true },
         // SDK-hosted sessions do not guarantee a semantic native title. The
         // canonical layer should therefore publish its fallback immediately;
         // an explicit customTitle event may still refine it later.
         staticFeatures: { ...CLAUDE_CAPABILITIES, title: "emulated" },
         versionStore: CLAUDE_VERSION_STORE,
         async probe(context) {
-            if (context.remote) {
+            const here = await placedHere(context);
+            if (context.remote && !here) {
                 if (account) return { harnessId, installed: false, healthy: false, authenticated: "unknown", message: "Extra Claude Code accounts run on this machine only" };
                 try {
                     await loadSdk();
@@ -285,7 +349,10 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
                     invalidateClaudeModelCache({ executable: command, authFingerprint: fingerprint() });
                 }
                 lastAuthenticated = authenticated;
-                return { harnessId, installed: true, healthy: true, authenticated, ...(auth.expiresAt !== undefined ? { authExpiresAt: auth.expiresAt } : {}), version };
+                return {
+                    harnessId, installed: true, healthy: true, authenticated, ...(auth.expiresAt !== undefined ? { authExpiresAt: auth.expiresAt } : {}), version,
+                    ...(here ? { runsHere: true, message: `Runs on this machine; its shell and file tools run on ${here.remote.label}` } : {}),
+                };
             }
             catch (error) {
                 // The reason reaches Providers & Models; without it a CLI
@@ -297,7 +364,8 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
         // Model discovery does not need a conversation: the Agent SDK reports
         // the catalog from its `initialize` control response.
         async discover(context) {
-            const remote = await remoteHost(context);
+            const here = await placedHere(context);
+            const remote = here ? undefined : await remoteHost(context);
             if (remote) {
                 // The SDK's `initialize` lists models even when signed out;
                 // the host's sign-in shows when a turn runs.
@@ -338,7 +406,7 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
             const sdk = await loadTitleSafeClaudeSdk(sdkCommand, env);
             const models = await discoverClaudeModels({
                 query: sdk.query as Parameters<typeof discoverClaudeModels>[0]["query"],
-                cwd: context.cwd,
+                cwd: here ? here.localCwd : context.cwd,
                 executable: command,
                 authFingerprint: fingerprint(),
             });
@@ -364,7 +432,8 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
         async createRuntime(context) {
             if (!context.space)
                 throw Object.assign(new Error("Local Space context required"), { code: "unsupported" });
-            const remote = await remoteHost(context);
+            const here = await placedHere(context);
+            const remote = here ? undefined : await remoteHost(context);
             if (remote) {
                 const authority = await createHarnessProcessAuthority(stateFile(context));
                 try {
@@ -384,14 +453,24 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
             const { command, sdkCommand, env } = await resolveBinary();
             const authority = await createHarnessProcessAuthority(stateFile(context));
             try {
-                const runtime = await createClaudeRuntime(context, await loadTitleSafeClaudeSdk(sdkCommand, env), authority, { harnessId, authFingerprint: fingerprint(), launchPreferences: () => settings.launch(context) });
+                const runtime = await createClaudeRuntime(context, await loadTitleSafeClaudeSdk(sdkCommand, env), authority, {
+                    harnessId,
+                    authFingerprint: fingerprint(),
+                    launchPreferences: () => settings.launch(context),
+                    ...(here ? { remoteWorkspace: claudeRemoteWorkspace({
+                        remote: here.remote,
+                        root: context.cwd,
+                        localCwd: here.localCwd,
+                        localRules: () => claudeLocalRestrictingRules(claudeConfigDir(account?.dir)),
+                    }) } : {}),
+                });
                 const capabilities = runtime.capabilities.bind(runtime);
                 runtime.capabilities = async () => ({ ...await capabilities(), title: "emulated" as const });
                 // Stateless utility inference (commit messages, auditors) must not
                 // open an SDK session or run a tool-capable turn.
                 const smallModel = createClaudeSmallModelRunner({
                     command,
-                    cwd: context.cwd,
+                    cwd: here ? here.localCwd : context.cwd,
                     env,
                 });
                 runtime.completeSmallModel = (request: SmallModelCompletionRequest) => smallModel.complete(request);

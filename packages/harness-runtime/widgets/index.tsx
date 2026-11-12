@@ -116,7 +116,10 @@ export default defineWebPackage((host) => () => {
     group: "Engineering",
     icon: "server",
     order: 20,
-    component: McpPage,
+    // The page needs the host only for one thing: a way into the integration
+    // catalog. It asks `pages.has` first, so a disabled catalog leaves no dead
+    // control behind.
+    component: () => <McpPage host={host} />,
   });
   const disposeMcpItems = host.settings.registerItems([
     {
@@ -142,6 +145,14 @@ export default defineWebPackage((host) => () => {
       description: t("mcp.importDescription"),
       keywords: ["mcp", "import", "json", "mcpServers", "mcp_servers"],
       focusTarget: "mcp.import",
+    },
+    {
+      id: "mcp.catalog",
+      pageId: "mcp",
+      label: t("mcp.catalogAction"),
+      description: t("mcp.catalogDescription"),
+      keywords: ["mcp", "catalog", "integration", "connect", "browse", "linear", "notion", "github"],
+      focusTarget: "mcp.catalog",
     },
     {
       id: "mcp.tools",

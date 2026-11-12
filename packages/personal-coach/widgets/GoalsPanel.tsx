@@ -246,7 +246,7 @@ function GoalDetail({ goal, data, onBack, reload, patchGoals, props }: {
           )}
         >{t("coach.ask.aboutGoal", { title: goal.title })}</Button>
         <Menu label={t("coach.action.moreFor", { title: goal.title })} title={goal.title} entries={menuEntries}>
-          {(trigger: Record<string, unknown>) => (
+          {(trigger) => (
             <Button {...trigger} size="sm" variant="ghost">{t("coach.action.more")}</Button>
           )}
         </Menu>

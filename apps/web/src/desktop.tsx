@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   desktopBridge,
+  type DesktopCaptionButton,
+  type DesktopCaptionGeometry,
   type DesktopCommand,
   type DesktopInfo,
   type DesktopSettings,
+  type DesktopSystemControls,
   type DesktopTitleBarAppearance,
   type DesktopUpdateState,
   type DesktopWindowState,
@@ -12,7 +15,7 @@ import {
 import { runCommand } from "./commands.ts";
 import { registerSlot } from "./slots.ts";
 import { ReadonlyRow, Row, Seg, Toggle } from "./components/settings/parts.tsx";
-import { Button, confirmAlert } from "./components/ui/index.ts";
+import { Button, confirmAlert, Progress } from "./components/ui/index.ts";
 import { POLYTH_MARK_SRC } from "./brandAsset.ts";
 import { DesktopUpdateNotice } from "./desktopUpdateNotice.tsx";
 import { installDesktopKeepAwake } from "./desktopKeepAwake.tsx";
@@ -30,19 +33,22 @@ const DEFAULTS: DesktopSettings = {
   softwareRendering: false,
   reduceAnimations: false,
   controlsPosition: "right",
+  controlsFollowSystem: true,
   controlsTheme: "system",
 };
 
 const UPDATE_CHANNEL_OPTIONS = (): Array<[DesktopSettings["updateChannel"], string]> => [
   ["stable", tr("desktop.settings.channelStable")],
-  ["test", tr("desktop.settings.channelTest")],
   ["nightly", tr("desktop.settings.channelNightly")],
 ];
 const UPDATE_CHANNEL_HINTS: Record<DesktopSettings["updateChannel"], TranslationKey> = {
   stable: "desktop.settings.channelStableHint",
-  test: "desktop.settings.channelTestHint",
   nightly: "desktop.settings.channelNightlyHint",
 };
+
+/** An older desktop shell may still report the retired test channel; it follows stable. */
+const shownUpdateChannel = (channel: string): DesktopSettings["updateChannel"] =>
+  channel === "nightly" ? "nightly" : "stable";
 
 /** The desktop shell marks both <body> (most rules key on it) and <html>:
  *  rules about the document root key on `html[data-desktop-app]` instead of
@@ -55,9 +61,48 @@ const markDesktopApp = (on: boolean): void => {
   else delete document.documentElement.dataset.desktopApp;
 };
 
+const CAPTION_BUTTONS = new Set<DesktopCaptionButton>(["minimize", "maximize", "close"]);
+/** Polyth's own order when the side is chosen by hand: close nearest the
+ *  corner, as left-handed and right-handed window managers both do. */
+const MANUAL_ORDER: Readonly<Record<DesktopSystemControls["side"], DesktopCaptionButton[]>> = {
+  left: ["close", "minimize", "maximize"],
+  right: ["minimize", "maximize", "close"],
+};
+
+/** Linux caption buttons: the desktop environment's own layout (side, order
+ *  and set — GNOME's default is Close alone) while the person follows the
+ *  system and the shell could read it; otherwise the chosen side with all
+ *  three buttons. */
+export function desktopControlLayout(
+  settings: Pick<DesktopSettings, "controlsPosition" | "controlsFollowSystem">,
+  system: DesktopSystemControls | null | undefined,
+): DesktopSystemControls {
+  if (settings.controlsFollowSystem !== false && system && (system.side === "left" || system.side === "right")) {
+    const buttons = Array.isArray(system.buttons)
+      ? system.buttons.filter((button, index, all) => CAPTION_BUTTONS.has(button) && all.indexOf(button) === index)
+      : [];
+    if (buttons.length > 0) return { side: system.side, buttons };
+  }
+  const side = settings.controlsPosition === "left" ? "left" : "right";
+  return { side, buttons: [...MANUAL_ORDER[side]] };
+}
+
+/** The last settings and system layout the chrome was applied from: window
+ *  state events bring the system layout separately from settings. */
+let chromeSettings: DesktopSettings | null = null;
+let chromeSystemControls: DesktopSystemControls | null | undefined;
+
+const applyControlLayout = (): void => {
+  if (!chromeSettings) return;
+  const layout = desktopControlLayout(chromeSettings, chromeSystemControls);
+  document.body.dataset.desktopControlsPosition = layout.side;
+  document.body.style.setProperty("--desktop-controls-count", String(layout.buttons.length));
+};
+
 const applyDesktopChrome = (settings: DesktopSettings): void => {
   markDesktopApp(true);
-  document.body.dataset.desktopControlsPosition = settings.controlsPosition;
+  chromeSettings = settings;
+  applyControlLayout();
   document.body.dataset.desktopControlsTheme = settings.controlsTheme;
   document.body.dataset.desktopLowResource = String(settings.lowResourceMode);
   document.documentElement.dataset.reduceAnimations = String(settings.reduceAnimations);
@@ -98,13 +143,44 @@ type WindowControlsOverlayApi = EventTarget & { getTitlebarAreaRect?: () => DOMR
 const windowControlsOverlay = (): WindowControlsOverlayApi | undefined =>
   (navigator as Navigator & { windowControlsOverlay?: WindowControlsOverlayApi }).windowControlsOverlay;
 
+/** Windows: the overlay's caption buttons as insets from each window edge, in
+ *  CSS px, rounded up. At 125 % and 150 % scaling the 46 DIP buttons land on
+ *  fractional CSS pixels; rounding down left a one-pixel sliver of content
+ *  under the buttons' hover fill. The measured rect is the overlay itself, so
+ *  it is right where the titlebar-area environment variables are missing or
+ *  stale; styles.css prefers these and falls back to env(). */
+export function overlayInsets(area: Pick<DOMRect, "x" | "width"> | undefined, viewportWidth: number): { left: number; right: number } | null {
+  if (!area || !Number.isFinite(area.x) || !Number.isFinite(area.width) || area.width <= 0 || !(viewportWidth > 0)) return null;
+  return {
+    left: Math.max(0, Math.ceil(area.x - 0.01)),
+    right: Math.max(0, Math.ceil(viewportWidth - (area.x + area.width) - 0.01)),
+  };
+}
+
+const publishOverlayInsets = (area: DOMRect | undefined): void => {
+  const { style } = document.body;
+  const insets = overlayInsets(area, window.innerWidth);
+  if (!insets) {
+    style.removeProperty("--desktop-wco-left");
+    style.removeProperty("--desktop-wco-right");
+    return;
+  }
+  const left = `${insets.left}px`;
+  const right = `${insets.right}px`;
+  if (style.getPropertyValue("--desktop-wco-left") !== left) style.setProperty("--desktop-wco-left", left);
+  if (style.getPropertyValue("--desktop-wco-right") !== right) style.setProperty("--desktop-wco-right", right);
+};
+
 /** Publish the caption side as data-desktop-caption: styles.css sizes the
  *  caption zone from it and the layouts keep their content out of it. */
 const applyCaptionSide = (): void => {
   const { dataset } = document.body;
   let overlayLeft = 0;
   if (dataset.desktopPlatform === "win32") {
-    try { overlayLeft = windowControlsOverlay()?.getTitlebarAreaRect?.().x ?? 0; } catch { /* no overlay API */ }
+    let area: DOMRect | undefined;
+    try { area = windowControlsOverlay()?.getTitlebarAreaRect?.(); } catch { /* no overlay API */ }
+    overlayLeft = area?.x ?? 0;
+    publishOverlayInsets(area);
   }
   const side = desktopCaptionSide({
     platform: dataset.desktopPlatform,
@@ -129,6 +205,10 @@ const applyWindowState = (state: DesktopWindowState): void => {
   if (state.fullscreen) dataset.desktopFullscreen = "true";
   else delete dataset.desktopFullscreen;
   dataset.desktopFocused = String(state.focused);
+  if ("systemControls" in state) {
+    chromeSystemControls = state.systemControls;
+    applyControlLayout();
+  }
   applyCaptionSide();
 };
 
@@ -138,6 +218,11 @@ const clearWindowState = (): void => {
   delete dataset.desktopFullscreen;
   delete dataset.desktopFocused;
   delete dataset.desktopCaption;
+  chromeSystemControls = undefined;
+  document.body.style.removeProperty("--desktop-controls-count");
+  document.body.style.removeProperty("--desktop-macos-titlebar-inset");
+  document.body.style.removeProperty("--desktop-wco-left");
+  document.body.style.removeProperty("--desktop-wco-right");
 };
 
 const NATIVE_CONTROL_PLATFORMS = new Set(["darwin", "win32"]);
@@ -189,7 +274,11 @@ export const sampleTitleBarAppearance = (app: HTMLElement): DesktopTitleBarAppea
   if (!context) return null;
   const appStyle = getComputedStyle(app);
   const base = parseRgba(appStyle.backgroundColor, context, [0, 0, 0]);
-  const controlInk = getComputedStyle(document.documentElement).getPropertyValue("--text-dim").trim();
+  // An inactive window's caption glyphs recede to the muted ink, as Windows'
+  // own caption buttons and Polyth's Linux buttons do.
+  const inactive = document.body.dataset.desktopFocused === "false";
+  const rootStyle = getComputedStyle(document.documentElement);
+  const controlInk = (inactive ? rootStyle.getPropertyValue("--muted").trim() : "") || rootStyle.getPropertyValue("--text-dim").trim();
   const symbol = parseRgba(controlInk || appStyle.color, context, base);
   // The caption band (--desktop-caption-h, resolved by the zone's own box):
   // on Windows the system's own caption height, never the header's, since
@@ -257,6 +346,62 @@ function NativeTitleBarSync() {
   return null;
 }
 
+/** macOS: the traffic lights are the OS's own and do not scale with page
+ *  zoom, while the header band does. Main centres them on the band in DIP and
+ *  reports where they landed; the caption zone takes that real extent instead
+ *  of a fixed 86 px that was wrong at any zoom but 100 %. Renders nothing. */
+function MacCaptionSync() {
+  const api = desktopBridge()!;
+  useEffect(() => {
+    const syncControls = api.syncCaptionControls;
+    if (!syncControls) return undefined;
+    let frame = 0;
+    let last = "";
+    let live = true;
+    const sync = () => {
+      frame = 0;
+      const measured = document.querySelector<HTMLElement>(".desktop-caption-zone")?.getBoundingClientRect().height
+        || Number.parseFloat(getComputedStyle(document.body).getPropertyValue("--desktop-titlebar-h"));
+      // Before styles apply the band is the title bar's own 52 px.
+      const band = Number.isFinite(measured) && measured > 0 ? measured : 52;
+      // Zoom changes the DIP the band covers without changing its CSS height.
+      const key = `${Math.round(band)}@${window.devicePixelRatio}`;
+      if (key === last) return;
+      last = key;
+      void syncControls.call(api, Math.round(band)).then((geometry) => {
+        if (live) applyMacCaptionGeometry(geometry);
+      }).catch(() => { if (last === key) last = ""; });
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(sync); };
+    const attributes = new MutationObserver(schedule);
+    attributes.observe(document.body, { attributes: true, attributeFilter: ["class", "data-density", "data-desktop-fullscreen"] });
+    window.addEventListener("resize", schedule);
+    schedule();
+    return () => {
+      live = false;
+      if (frame) cancelAnimationFrame(frame);
+      attributes.disconnect();
+      window.removeEventListener("resize", schedule);
+    };
+  }, [api]);
+  return null;
+}
+
+/** The gap between the traffic lights and the first header control. */
+const MAC_CAPTION_GAP = 14;
+
+/** The caption zone's width on macOS from the lights' real extent. */
+export function macCaptionInset(geometry: DesktopCaptionGeometry | null | undefined): number | null {
+  if (!geometry || ![geometry.x, geometry.width].every(Number.isFinite) || geometry.width <= 0) return null;
+  return Math.ceil(geometry.x + geometry.width + MAC_CAPTION_GAP);
+}
+
+const applyMacCaptionGeometry = (geometry: DesktopCaptionGeometry | null): void => {
+  const inset = macCaptionInset(geometry);
+  if (inset === null) document.body.style.removeProperty("--desktop-macos-titlebar-inset");
+  else document.body.style.setProperty("--desktop-macos-titlebar-inset", `${inset}px`);
+};
+
 function WindowControls() {
   const api = desktopBridge()!;
   const [settings, setSettings] = useState(DEFAULTS);
@@ -293,8 +438,10 @@ function WindowControls() {
   const captionZone = typeof document === "undefined" ? zone : createPortal(zone, document.body);
   if (!info) return captionZone;
   if (info.platform === "win32") return <>{captionZone}<NativeTitleBarSync /></>;
+  if (info.platform === "darwin") return <>{captionZone}<MacCaptionSync /></>;
   if (NATIVE_CONTROL_PLATFORMS.has(info.platform)) return captionZone;
 
+  const layout = desktopControlLayout(settings, windowState.systemControls);
   const minimize = (
     <button
       key="minimize"
@@ -331,12 +478,13 @@ function WindowControls() {
       <CaptionGlyph kind="close" />
     </button>
   );
-  // Leading controls follow the left-handed window-manager order (close
-  // first, nearest the corner); trailing controls keep close at the corner.
-  const buttons = settings.controlsPosition === "left" ? [close, minimize, maximize] : [minimize, maximize, close];
+  // The system's own order and set when following it; by hand, close sits
+  // nearest the corner on either side.
+  const byName = { minimize, maximize, close };
+  const buttons = layout.buttons.map((name) => byName[name]);
   const controls = (
     <div
-      className={`desktop-window-controls desktop-window-controls-${settings.controlsPosition}`}
+      className={`desktop-window-controls desktop-window-controls-${layout.side}`}
       data-controls-theme={settings.controlsTheme}
       role="group"
       aria-label={tr("desktop.window.controls")}
@@ -345,6 +493,27 @@ function WindowControls() {
     </div>
   );
   return <>{captionZone}{typeof document === "undefined" ? controls : createPortal(controls, document.body)}</>;
+}
+
+/** The update row's own download bar: the shared Progress primitive, a narrow
+ *  percent readout, and an indeterminate slide until the updater reports its
+ *  first progress tick. The small update window shows the same information. */
+function DownloadProgress({ percent, label }: { percent?: number; label: string }) {
+  const known = typeof percent === "number" && Number.isFinite(percent);
+  const clamped = known ? Math.min(100, Math.max(0, percent)) : 0;
+  return (
+    <div className="desktop-update-progress">
+      <Progress
+        className="desktop-update-progress-bar"
+        value={clamped / 100}
+        indeterminate={!known}
+        label={label}
+      />
+      <span className="desktop-update-progress-percent" aria-hidden="true">
+        {known ? `${Math.floor(clamped)}%` : ""}
+      </span>
+    </div>
+  );
 }
 
 function DesktopSettingsPage() {
@@ -380,9 +549,10 @@ function DesktopSettingsPage() {
     };
   }, [api]);
 
-  const save = <Key extends keyof DesktopSettings>(key: Key, value: DesktopSettings[Key]) => {
+  const save = <Key extends keyof DesktopSettings>(key: Key, value: DesktopSettings[Key]) => saveMany({ [key]: value });
+  const saveMany = (patch: Partial<DesktopSettings>) => {
     setError("");
-    void api.setSettings({ [key]: value }).then((next) => {
+    void api.setSettings(patch).then((next) => {
       setSettings(next);
       applyDesktopChrome(next);
     }).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
@@ -390,10 +560,6 @@ function DesktopSettingsPage() {
 
   const updateAction = () => {
     setError("");
-    if (update.phase === "downloading") {
-      void api.showUpdateProgress?.().catch(() => {});
-      return;
-    }
     const work = update.phase === "available"
       ? api.downloadUpdate()
       : update.phase === "downloaded"
@@ -443,9 +609,18 @@ function DesktopSettingsPage() {
             itemId="desktop.controlsPosition"
           >
             <Seg
-              value={settings.controlsPosition}
-              options={[["left", tr("settings.pages.promptNavigatorSideLeft")], ["right", tr("settings.pages.promptNavigatorSideRight")]]}
-              onChange={(value) => save("controlsPosition", value)}
+              value={settings.controlsFollowSystem ? "system" : settings.controlsPosition}
+              options={[
+                // "Auto" follows the desktop's own button layout; a shell
+                // older than that setting offers only the two sides.
+                ...(typeof settings.controlsFollowSystem === "boolean" ? [["system", tr("settings.pages.auto")] as [string, string]] : []),
+                ["left", tr("settings.pages.promptNavigatorSideLeft")],
+                ["right", tr("settings.pages.promptNavigatorSideRight")],
+              ]}
+              onChange={(value) => {
+                if (value === "system") save("controlsFollowSystem", true);
+                else saveMany({ controlsPosition: value === "left" ? "left" : "right", controlsFollowSystem: false });
+              }}
             />
           </Row>
           <Row
@@ -517,10 +692,10 @@ function DesktopSettingsPage() {
       ) : (
         <Row
           label={tr("desktop.settings.updateChannel")}
-          hint={tr(UPDATE_CHANNEL_HINTS[settings.updateChannel])}
+          hint={tr(UPDATE_CHANNEL_HINTS[shownUpdateChannel(settings.updateChannel)])}
           itemId="desktop.updateChannel"
         >
-          <Seg value={settings.updateChannel} options={UPDATE_CHANNEL_OPTIONS()} onChange={(value) => save("updateChannel", value)} label={tr("desktop.settings.updateChannel")} />
+          <Seg value={shownUpdateChannel(settings.updateChannel)} options={UPDATE_CHANNEL_OPTIONS()} onChange={(value) => save("updateChannel", value)} label={tr("desktop.settings.updateChannel")} />
         </Row>
       )}
       <Row
@@ -544,28 +719,32 @@ function DesktopSettingsPage() {
       >
         <Toggle on={settings.reduceAnimations} onChange={(value) => save("reduceAnimations", value)} label={tr("desktop.settings.reduceMotion")} />
       </Row>
-      <Row label={tr("desktop.settings.updateStatus")} hint={update.message} itemId="desktop.updates">
+      <Row
+        label={tr("desktop.settings.updateStatus")}
+        hint={update.phase === "downloading"
+          ? <div className="desktop-update-status"><span>{update.message}</span><DownloadProgress percent={update.percent} label={update.message || tr("desktop.settings.updateStatus")} /></div>
+          : update.message}
+        itemId="desktop.updates"
+      >
         <div className="desktop-update-action">
-          {update.phase === "downloading" && <progress max={100} value={update.percent ?? 0} />}
-          <Button
-            size="sm"
-            busy={update.phase === "checking" || update.phase === "installing"}
-            disabled={update.phase === "checking" || update.phase === "installing" || update.phase === "disabled"
-              || (update.phase === "downloading" && !api.showUpdateProgress)}
-            onClick={updateAction}
-          >
-            {update.phase === "available"
-              ? update.version ? tr("desktop.settings.downloadVersion", { version: update.version }) : tr("desktop.settings.downloadUpdate")
-              : update.phase === "downloaded"
-                ? tr("desktop.settings.restartInstall")
-                : update.phase === "checking"
-                  ? tr("desktop.settings.checking")
-                  : update.phase === "downloading"
-                    ? tr("desktop.settings.showProgress")
+          {update.phase !== "downloading" && (
+            <Button
+              size="sm"
+              busy={update.phase === "checking" || update.phase === "installing"}
+              disabled={update.phase === "checking" || update.phase === "installing" || update.phase === "disabled"}
+              onClick={updateAction}
+            >
+              {update.phase === "available"
+                ? update.version ? tr("desktop.settings.downloadVersion", { version: update.version }) : tr("desktop.settings.downloadUpdate")
+                : update.phase === "downloaded"
+                  ? tr("desktop.settings.restartInstall")
+                  : update.phase === "checking"
+                    ? tr("desktop.settings.checking")
                     : update.phase === "installing"
                       ? tr("desktop.settings.installing")
                       : tr("desktop.settings.checkNow")}
-          </Button>
+            </Button>
+          )}
         </div>
       </Row>
       {!remote && (

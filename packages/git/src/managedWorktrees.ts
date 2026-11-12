@@ -545,10 +545,27 @@ export function createManagedWorktrees(git: GitService) {
       return { status: "unowned", reason: "target-mismatch" };
     }
     if ((ref.baseCommit !== undefined && marker.baseCommit !== ref.baseCommit)
-      || !(await git.isAncestor(root, marker.baseCommit, listed.head))) {
+      || !(await descendsFromOrigin(root, marker, listed.head))) {
       return { status: "unowned", reason: "base-mismatch" };
     }
     return { status: "owned", worktree: { path: listed.path, branch: ref.worktreeBranch, head: listed.head, meta: marker } };
+  };
+
+  /** The isolate's line of work still grows from where Polyth placed it. The
+   * plain proof is the recorded base commit in its history. A target branch
+   * that was itself rewritten (rebased onto its remote, force-pulled) drops
+   * that commit from every honest rebase onto it: the isolate then meets the
+   * target only on the target's new line, at a commit the old base does not
+   * contain. That is the same line of work moved forward, so it proves the
+   * same thing. A branch reset back to history at or before the base, or one
+   * with no history in common with the target, still fails closed. */
+  const descendsFromOrigin = async (root: string, marker: ManagedWorktreeMeta, head: string): Promise<boolean> => {
+    if (await git.isAncestor(root, marker.baseCommit, head)) return true;
+    const target = await git.readRef(root, `refs/heads/${marker.targetBranch}`).catch(() => null);
+    if (!target) return false;
+    const shared = await git.mergeBase(root, head, target).catch(() => "");
+    if (!shared) return false;
+    return !(await git.isAncestor(root, shared, marker.baseCommit));
   };
 
   /** Claim a planned creation. A receipt left by a create that crashed before

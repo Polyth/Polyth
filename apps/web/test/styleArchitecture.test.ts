@@ -149,6 +149,11 @@ test("Corner rounding reaches every pill, and the last notch is one geometry on 
   // A pill squares with the setting; only --radius-circle keeps its shape.
   assert.match(tokens, /--radius-round:\s*max\(calc\(14px \* var\(--corner-radius-scale\)\), var\(--radius-max-pill\)\)/);
   assert.match(tokens, /--radius-circle:\s*999px/);
+  // A switch is a full pill at the default rounding and joins the shared
+  // last-notch geometry; only --radius-circle keeps its shape at every notch.
+  assert.match(tokens, /--radius-switch:\s*max\(calc\(6\.25px \* var\(--corner-radius-scale\)\), var\(--radius-max-pill\)\)/);
+  assert.match(glass, /html\[data-theme-style="liquid-glass"\] \.switch \{\s*width:\s*40px;\s*\}/,
+    "the liquid-glass switch button shares its 40px track box, so the focus ring follows the capsule");
   for (const [css, round] of [[fluent, "--fluent-round"], [macos, "--macos-round"], [glass, "--lg-round"]] as const) {
     for (const [role, max] of [
       ["control", "control"], ["card", "card"], ["surface", "surface"], ["sheet", "sheet"],
@@ -157,6 +162,12 @@ test("Corner rounding reaches every pill, and the last notch is one geometry on 
       assert.match(css, new RegExp(`--radius-${role}:\\s*max\\(calc\\(\\d+px \\* var\\(${round}\\)\\), var\\(--radius-max-${max}\\)\\)`), `${round} ${role}`);
     }
   }
+  // The project and branch chips sit on one baseline: the shared .chip hover
+  // lift must not move a context chip, and its surface cue is the only change.
+  assert.match(styles, /\.context-selector \.picker-chip:hover:where\(:not\(:disabled\)\) \{[^}]*transform:\s*none;/,
+    "context chips keep their baseline on hover instead of lifting like a standalone chip");
+  assert.match(styles, /\.context-selector \.picker-chip:hover:where\(:not\(:disabled\)\) svg \{ color:\s*var\(--faint\); \}/,
+    "a context chip keeps its project or branch glyph ink on hover instead of taking the accent");
   // Controls beside the composer's edge never freeze into a circle of their own.
   assert.match(styles, /\.composer-simple \.composer-rail \.send \{[^}]*border-radius:\s*var\(--radius-round\)/);
   assert.match(styles, /\.composer-simple \.composer-stop-primary \{[^}]*border-radius:\s*var\(--radius-round\)/);
@@ -245,7 +256,7 @@ test("tablet-class width is a container-query layout state, not a media pile", a
   );
   assert.match(
     bandBody,
-    /\.app-shell:not\(:has\(\.railbar-open\)\):not\(:has\(\.railbar\[data-rail-motion="exiting"\]\)\)[\s\S]*?padding-inline-end:/,
+    /\.app-shell:not\(:has\(\.railbar-open:not\(\.railbar-dynamic\)\)\):not\(:has\(\.railbar\[data-rail-motion="exiting"\]:not\(\.railbar-dynamic\)\)\)[\s\S]*?padding-inline-end:/,
     "chat surfaces reserve a lane for the affordance so nothing renders beneath it",
   );
 });

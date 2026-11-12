@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Stats } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { GIT_BINARY_ENV, resolvedExecutableDirectory } from "@polyth/kernel/executable";
 import { WINDOWS_NODE_DIR, WINDOWS_NPM_PREFIX } from "./installers.ts";
 
@@ -133,6 +133,8 @@ export const wellKnownHarnessExecutableDirectories = (
       under("scoop", "shims"),
       join(programFiles, "nodejs"),
       join(programData, "chocolatey", "bin"),
+      // `winget install` links portable packages here (GitHub Copilot CLI).
+      local("Microsoft", "WinGet", "Links"),
       local("Microsoft", "WindowsApps"),
     ].filter((entry): entry is string => Boolean(entry));
   }
@@ -289,8 +291,23 @@ export const discoverHarnessExecutable = async (
     return { searched };
   }
 
+  // On Windows a copy Polyth installed itself wins over a hand-made `.cmd`
+  // wrapper found earlier (one over another app's bundled CLI): nothing can
+  // update through such a wrapper, and installing Polyth's copy is how a
+  // person hands the CLI over. npm's and pnpm's own shims keep their place.
+  // ponytail: the installed copy's existence is the choice; add a stored
+  // per-harness preference if someone needs to go back to the wrapper.
+  const managed = async (hit: HarnessExecutableSearchHit): Promise<HarnessExecutableSearchHit> => {
+    const launcher = hit.launcherPath ?? hit.executablePath;
+    const localAppData = env.LOCALAPPDATA?.trim();
+    if ((options.platform ?? process.platform) !== "win32" || !localAppData || !/\.(?:cmd|bat)$/i.test(launcher)) return hit;
+    const prefix = join(localAppData, ...WINDOWS_NPM_PREFIX);
+    if (resolve(dirname(launcher)) === resolve(prefix) || await windowsCmdShimFile(launcher)) return hit;
+    return await scanDirectories(binary, [prefix], "well-known", options, []) ?? hit;
+  };
+
   const fromPath = await scanDirectories(binary, splitPath(inheritedPath(env, options.platform ?? process.platform)), "path", options, searched);
-  if (fromPath) return { hit: fromPath, searched };
+  if (fromPath) return { hit: await managed(fromPath), searched };
 
   const fromWellKnown = await scanDirectories(
     binary,
@@ -299,7 +316,7 @@ export const discoverHarnessExecutable = async (
     options,
     searched,
   );
-  if (fromWellKnown) return { hit: fromWellKnown, searched };
+  if (fromWellKnown) return { hit: await managed(fromWellKnown), searched };
 
   const login = await probeHarnessLoginShellPath(options);
   if (!login) return { searched };
@@ -369,17 +386,77 @@ const SHIM_TARGET = /"%~?dp0%?\\([^"%]+)"/gi;
  * or for anything unreadable.
  */
 export const windowsCmdShimTarget = async (shimPath: string, options: { scripts?: boolean } = {}): Promise<string | undefined> => {
+  const candidate = await windowsCmdShimFile(shimPath);
+  if (!candidate || !(options.scripts ? /\.(?:exe|com|m?js)$/i : /\.(?:exe|com)$/i).test(candidate)) return undefined;
+  return candidate;
+};
+
+/** The file an npm/pnpm Windows `.cmd` shim runs, whatever its type: npm
+ *  shims a package `bin` with no extension (a `#!/usr/bin/env node` script)
+ *  as well as `.js`/`.exe` ones. Undefined for anything unreadable. */
+export const windowsCmdShimFile = async (shimPath: string): Promise<string | undefined> => {
   if (!/\.(?:cmd|bat)$/i.test(shimPath)) return undefined;
   try {
     if ((await stat(shimPath)).size > SHIM_SIZE_LIMIT) return undefined;
     const text = await readFile(shimPath, "utf8");
-    const targets = [...text.matchAll(SHIM_TARGET)]
+    const target = [...text.matchAll(SHIM_TARGET)]
       .map((match) => match[1]!.trim())
-      .filter((target) => !/(?:^|\\)node\.exe$/i.test(target));
-    const target = targets.at(-1);
-    if (!target || !(options.scripts ? /\.(?:exe|com|m?js)$/i : /\.(?:exe|com)$/i).test(target)) return undefined;
+      .filter((entry) => !/(?:^|\\)node\.exe$/i.test(entry))
+      .at(-1);
+    if (!target) return undefined;
     const candidate = join(dirname(shimPath), ...target.split("\\"));
     return (await stat(candidate)).isFile() ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Programs a wrapper starts its real target with, never the target itself. */
+const WRAPPER_INTERPRETER = /^(?:node|cmd|powershell|pwsh|wsl|bash|sh|start|call)(?:\.exe)?$/i;
+/** A quoted string, or a bare word, of a `.cmd` line. */
+const WRAPPER_TOKEN = /"([^"\r\n]+)"|([^\s"&|<>()=]+)/g;
+
+/**
+ * The file a Windows `.cmd` launcher starts, for a launcher npm did not
+ * write as well: a wrapper somebody (or another tool) put on PATH that names
+ * the real program by an absolute path, `%USERPROFILE%\…` or `%~dp0\…`
+ * (`"C:\Users\me\AppData\Roaming\npm\codex.cmd" %*`). An npm/pnpm shim
+ * resolves as `windowsCmdShimFile` does. Undefined when the launcher names no
+ * existing file. The result says where a launcher leads; it is never run.
+ * `kind: "folder"` returns the folder the launcher names instead, for one
+ * that picks its program at call time (a shim over the Codex desktop app's
+ * `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`).
+ */
+export const windowsCmdWrapperTarget = async (
+  shimPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+  kind: "file" | "folder" = "file",
+): Promise<string | undefined> => {
+  const shim = kind === "file" ? await windowsCmdShimFile(shimPath) : undefined;
+  if (shim) return shim;
+  if (!/\.(?:cmd|bat)$/i.test(shimPath)) return undefined;
+  try {
+    if ((await stat(shimPath)).size > SHIM_SIZE_LIMIT) return undefined;
+    const own = dirname(shimPath);
+    const variable = (name: string): string | undefined => {
+      const key = Object.keys(env).find((entry) => entry.toLowerCase() === name.toLowerCase());
+      return key ? env[key] : undefined;
+    };
+    const expand = (token: string): string => token
+      .replace(/%~dp0\\?|%dp0%\\?/gi, `${own}${sep}`)
+      .replace(/%([A-Za-z_][\w()]*)%/g, (whole, name: string) => variable(name) ?? whole);
+    let found: string | undefined;
+    for (const line of (await readFile(shimPath, "utf8")).split(/\r?\n/)) {
+      if (/^\s*(?:@?rem\b|::)/i.test(line)) continue;
+      for (const match of line.matchAll(WRAPPER_TOKEN)) {
+        const candidate = expand((match[1] ?? match[2])!.trim());
+        if (!isAbsolute(candidate) || WRAPPER_INTERPRETER.test(basename(candidate))) continue;
+        if (resolve(candidate) === resolve(shimPath)) continue;
+        const isKind = (entry: Stats): boolean => kind === "file" ? entry.isFile() : entry.isDirectory();
+        if (await stat(candidate).then(isKind, () => false)) found = resolve(candidate);
+      }
+    }
+    return found;
   } catch {
     return undefined;
   }

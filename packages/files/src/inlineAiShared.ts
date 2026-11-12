@@ -9,6 +9,32 @@ export const DEFAULT_FIX_PROMPT =
 
 export type InlineAiAction = "explain" | "fix";
 
+/**
+ * Sent with every Explain/Fix request, whatever the user's own prompt says. The
+ * prompt names a file path, and a model that believes it has tools answers a
+ * path by "reading" it: the reply was a written-out Read call instead of an
+ * explanation.
+ */
+export const INLINE_AI_SYSTEM_PROMPT =
+  "You help with a selection from a file open in an editor. You have no tools and cannot open files or run commands. " +
+  "The selected text in the request is everything you get, so work from it alone. Reply with the answer itself, " +
+  "never with a tool call or markup that imitates one.";
+
+/**
+ * Markup a model writes when it tries to call a tool in plain text, or invents
+ * the tool's result (`<tool_use_error>`, `<function_results>`) after one.
+ */
+const TOOL_CALL_MARKUP = /<\/?(?:antml:)?(?:invoke|parameter|function_(?:calls|results)|tool_(?:call|use|result)\w*)\b/i;
+
+/**
+ * True when a reply contains a tool call written as text that the selection did
+ * not already contain, so it is an attempt to use a tool rather than an answer.
+ * A selection that itself contains such markup keeps its legitimate fixes.
+ */
+export function replyIsToolCall(reply: string, selection: string): boolean {
+  return TOOL_CALL_MARKUP.test(reply) && !TOOL_CALL_MARKUP.test(selection);
+}
+
 export interface InlineAiSettings {
   explainPrompt: string;
   fixPrompt: string;

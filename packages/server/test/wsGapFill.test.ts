@@ -135,12 +135,12 @@ test("summary subscribers refresh the selected draft outside the navigator page 
 
 test("a scoped summary subscriber also sees every project's active rows so the rail status is live", async (t) => {
   const other = { ...proj, id: "outside", projectId: "p2", title: "Other project", status: "working" as const, updatedAt: 2 };
-  const queries: Array<{ projectId?: string; attentionOnly?: boolean }> = [];
+  const queries: Array<{ projectId?: string; railStatus?: boolean }> = [];
   const sessions = {
     replayPage: async () => ({ events: [], cursor: 0, highWater: 0, complete: true }),
-    summaries: async (query: { projectId?: string; attentionOnly?: boolean }) => {
+    summaries: async (query: { projectId?: string; railStatus?: boolean }) => {
       queries.push(query);
-      return query.attentionOnly
+      return query.railStatus
         ? { sessions: [{ ...other, summary: true as const, draftPreview: "never sent" }], complete: true, revision: 1 }
         : { sessions: [{ ...proj, summary: true as const }], complete: true, revision: 1 };
     },
@@ -167,8 +167,8 @@ test("a scoped summary subscriber also sees every project's active rows so the r
   assert.equal(row?.status, "working");
   assert.equal(row?.summary, true);
   assert.equal(row?.draft, undefined, "another project travels only as a summary");
-  assert.ok(queries.some((query) => query.attentionOnly === true && query.projectId === undefined),
-    "the snapshot asks the Space for active rows, not one project's page");
+  assert.ok(queries.some((query) => query.railStatus === true && query.projectId === undefined),
+    "the snapshot asks the Space for the rail's rows, not one project's page");
 
   // A turn ending in another project reaches the rail without opening it.
   broadcast.projection({ ...other, status: "idle" });
@@ -186,16 +186,16 @@ test("a reconnect re-reads the rows the client still shows as active, whose end 
   // "ended" finished while the phone slept, in another project and already
   // read on another device: no active-rows query returns it any more.
   const ended = { ...proj, id: "ended", projectId: "p2", status: "idle" as const, updatedAt: 5, summary: true as const };
-  const queries: Array<{ projectId?: string; attentionOnly?: boolean; ids?: readonly string[] }> = [];
+  const queries: Array<{ projectId?: string; railStatus?: boolean; ids?: readonly string[] }> = [];
   const sessions = {
     replayPage: async () => ({ events: [], cursor: 0, highWater: 0, complete: true }),
-    summaries: async (query: { projectId?: string; attentionOnly?: boolean; ids?: readonly string[] }) => {
+    summaries: async (query: { projectId?: string; railStatus?: boolean; ids?: readonly string[] }) => {
       queries.push(query);
       if (query.ids) {
         // A store returns only rows the reader may see; "foreign" is not one.
         return { sessions: [ended, { ...proj, id: "unasked", summary: true as const }], complete: true, revision: 1 };
       }
-      return query.attentionOnly
+      return query.railStatus
         ? { sessions: [{ ...proj, id: "busy", projectId: "p2", status: "working" as const, summary: true as const }], complete: true, revision: 1 }
         : { sessions: [{ ...proj, summary: true as const }], complete: true, revision: 1 };
     },
@@ -230,7 +230,7 @@ test("a reconnect re-reads the rows the client still shows as active, whose end 
 test("the navigator snapshot carries the reader's pinned chats beyond the recency page", async (t) => {
   const recent = { ...proj, id: "recent", updatedAt: 9, summary: true as const };
   const oldPin = { ...proj, id: "old-pin", updatedAt: 1, pinned: { position: 0 }, summary: true as const };
-  const queries: Array<{ pinned?: boolean; attentionOnly?: boolean }> = [];
+  const queries: Array<{ pinned?: boolean; railStatus?: boolean }> = [];
   const sessions = {
     replayPage: async () => ({ events: [], cursor: 0, highWater: 0, complete: true }),
     summaries: async (query: { pinned?: boolean }) => {
@@ -255,7 +255,7 @@ test("the navigator snapshot carries the reader's pinned chats beyond the recenc
   }
   assert.deepEqual(list.sessions?.map((row) => row.id), ["recent", "old-pin"], "pinned rows join once, after the page");
   assert.deepEqual(
-    queries.filter((query) => query.attentionOnly !== true).map((query) => query.pinned === true),
+    queries.filter((query) => query.railStatus !== true).map((query) => query.pinned === true),
     [false, true],
     "the project page reads recency, then pinned; the cross-project activity read is separate",
   );

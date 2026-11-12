@@ -27,7 +27,8 @@ import {
   removeProject,
   renameProject,
 } from "../../init.ts";
-import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
+import { resolveSessionStatus } from "../../sessionStatus.ts";
+import { sessionLeadMark, sessionLeadState, type SessionLeadMark } from "../../sessionLead.ts";
 import { canMoveSession } from "../../sessionMove.ts";
 import { draftTitleSource, sessionDraftMark } from "../../sessionDraft.ts";
 import { fullSessionTitle } from "../../format.ts";
@@ -64,15 +65,20 @@ import { useModalSurface } from "../a11y/Dialog.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import Badge from "../ui/Badge.tsx";
 import SlotHost from "../slots/SlotHost.ts";
+import { excludedSections, useNavigatorSections } from "../sidebar/navigatorSections.ts";
+import { RepositoryFilterChips, RepositoryMark, repositoryMarkLabel } from "../sidebar/RepositoryFilter.tsx";
+import {
+  filterRepositoriesOf, newChatOptions, sessionMatchesRepositoryFilter, sessionRepositoryMark, useRepositoryFilters,
+  type FilterRepository,
+} from "../../repositoryFilter.ts";
 import {
   AddProjectIcon,
   ArchiveIcon,
   CheckIcon,
   MentionIcon,
-  MoreVerticalIcon,
+  MoreIcon,
   NewChatIcon,
   PeopleIcon,
-  PinIcon,
   SelectIcon,
   SharedIcon,
 } from "../ui/icons.ts";
@@ -120,6 +126,7 @@ import {
   readNavigatorState,
   SHOW_ALL_PROJECTS_KEY,
   writeNavigatorState,
+  setNavigatorSectionHidden,
 } from "../../navigatorState.ts";
 import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../../workspaceArrange.ts";
 import "./MobileNavigator.css";
@@ -208,28 +215,33 @@ function statusIcon(kind: MobileStatusKind) {
 }
 
 /** Leading state mark. Every row reserves its slot so titles align down the
- *  list whatever the state; an idle row leaves it empty. Decorative: the
- *  open button's accessible name already carries the status label. */
-function leadStatus(status: SessionRowStatus, conversation = false) {
-  if (conversation) {
-    return <span className="mobile-nav-session-state is-conversation"><UiIcon icon={PeopleIcon} size="sm" /></span>;
-  }
-  switch (status.kind) {
+ *  list whatever the state; an idle row leaves it empty and a pinned one at
+ *  rest shows its pin. Decorative: the open button's accessible name already
+ *  carries the status label and pinned-ness. `mark` comes from
+ *  sessionLeadMark, the same decision that sets the row's `data-lead`. */
+function leadMark(mark: SessionLeadMark | null) {
+  switch (mark) {
+    case "people":
+      return <span className="mobile-nav-session-state is-conversation"><UiIcon icon={PeopleIcon} size="sm" /></span>;
+    case "opening":
+      return <span className="ui-spinner ui-spinner--sm" />;
     case "working":
       return <span className="mobile-nav-running-ring" />;
     case "needs-reply":
     case "epoch-pending":
     case "reconciling":
     case "unknown":
-      return <span className="mobile-nav-session-state is-attention">{statusIcon(status.kind)}</span>;
+      return <span className="mobile-nav-session-state is-attention">{statusIcon(mark)}</span>;
     case "needs-approval":
-      return <span className="mobile-nav-session-state is-attention is-approval">{statusIcon(status.kind)}</span>;
+      return <span className="mobile-nav-session-state is-attention is-approval">{statusIcon(mark)}</span>;
     case "failed":
-      return <span className="mobile-nav-session-state is-failed">{statusIcon(status.kind)}</span>;
+      return <span className="mobile-nav-session-state is-failed">{statusIcon(mark)}</span>;
     case "rate-limited":
-      return <span className="mobile-nav-session-state is-limited">{statusIcon(status.kind)}</span>;
+      return <span className="mobile-nav-session-state is-limited">{statusIcon(mark)}</span>;
     case "unread":
       return <span className="mobile-nav-unread-dot" />;
+    case "pin":
+      return <span className="mobile-nav-lead-pin"><Icon.pin /></span>;
     default:
       return null;
   }
@@ -253,6 +265,7 @@ function SessionRow({
   childActivity,
   childrenExpanded = false,
   onToggleChildren,
+  repositoryMark,
 }: {
   session: SessionProjection;
   active: boolean;
@@ -264,6 +277,8 @@ function SessionRow({
   childActivity?: SubagentActivity;
   childrenExpanded?: boolean;
   onToggleChildren?: () => void;
+  /** A subset session's repositories, and the project's active chip. */
+  repositoryMark?: { repositories: FilterRepository[]; active?: string };
 }) {
   const childCount = childActivity?.total ?? 0;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -293,6 +308,8 @@ function SessionRow({
   const opening = useStore((state) => state.openingSessionId === session.id);
   const selection = useContext(RowSelection);
   const selecting = selection.active;
+  // One decision for the status slot's mark and the row's data-lead flag.
+  const rowLead = sessionLeadMark({ status: rowStatus, opening, conversation, pinned: session.pinned !== undefined });
   const selected = selecting && selection.ids.has(session.id);
 
   useEffect(() => setTitle(session.title), [session.title]);
@@ -520,6 +537,7 @@ function SessionRow({
       </div>
       <div
         className={`mobile-nav-session-row${active ? " is-active" : ""}${draftMark ? " is-draft" : ""}${selecting ? " is-selecting" : ""}${selected ? " is-selected" : ""}${session.pinned ? " is-pinned" : ""}${unread ? " is-unread" : ""}${rowStatus.kind === "failed" ? " is-failed" : ""}${childCount > 0 ? " has-subagents" : ""}`}
+        data-lead={sessionLeadState(rowLead, selecting)}
         style={{ transform: `translateX(${document.documentElement.dir === "rtl" ? -swipeX : swipeX}px)` }}
       >
         {renaming ? (
@@ -549,7 +567,7 @@ function SessionRow({
                 if (node) menuReturnRef.current = node;
               }}
               className="mobile-nav-session-main"
-              aria-label={`${displayTitle}, ${draftMark ? `${draftLabel}, ` : ""}${rowStatus.label}`}
+              aria-label={`${displayTitle}, ${draftMark ? `${draftLabel}, ` : ""}${repositoryMark ? `${repositoryMarkLabel(repositoryMark.repositories)}, ` : ""}${session.pinned ? `${tr("sidebar.sessionlist.pinnedChats")}, ` : ""}${rowStatus.label}`}
               aria-current={active ? "page" : undefined}
               aria-busy={opening || undefined}
               aria-pressed={selecting ? selected : undefined}
@@ -576,7 +594,7 @@ function SessionRow({
               <span className="mobile-nav-session-lead" aria-hidden="true">
                 {selecting
                   ? <span className={`mobile-nav-select-mark${selected ? " is-selected" : ""}`}>{selected && <UiIcon icon={CheckIcon} size="sm" />}</span>
-                  : opening ? <span className="ui-spinner ui-spinner--sm" /> : leadStatus(rowStatus, conversation)}
+                  : leadMark(rowLead)}
               </span>
               <span className="mobile-nav-session-heading">
                 {/* dir="auto": a title in the other script direction truncates
@@ -600,9 +618,13 @@ function SessionRow({
                   </button>
                 )}
               </span>
-              {/* Meta: running clock, then identity (package badges, pin)
-                  always last so those icons line up at the trailing edge. */}
+              {/* Meta: running clock, then identity (package badges) always
+                  last so those icons line up at the trailing edge. A pinned
+                  chat's pin lives in the status slot. */}
               <span className="mobile-nav-session-trailing">
+                {repositoryMark && (
+                  <RepositoryMark repositories={repositoryMark.repositories} active={repositoryMark.active} />
+                )}
                 {!conversation && rowStatus.kind === "working" && (
                   <span className="mobile-nav-duration" aria-hidden="true">{workingDuration(rowStatus.elapsedMs)}</span>
                 )}
@@ -633,13 +655,6 @@ function SessionRow({
                       <UiIcon icon={SharedIcon} size="sm" />
                     </span>
                   )}
-                  {session.pinned && (
-                    <span
-                      className="mobile-nav-pin-icon"
-                      aria-label={tr("sidebar.sessionlist.pinnedChats")}
-                      title={tr("sidebar.sessionlist.pinnedChats")}
-                    ><UiIcon icon={PinIcon} size="sm" /></span>
-                  )}
                 </span>
               </span>
             </span>
@@ -664,11 +679,40 @@ function SessionRow({
         >
           {(trigger) => (
             <button className="mobile-nav-more" aria-label={tr("common.more")} {...trigger}>
-              <UiIcon icon={MoreVerticalIcon} />
+              <UiIcon icon={MoreIcon} />
             </button>
           )}
         </Menu>
       </div>
+    </div>
+  );
+}
+
+/** Server pages of one project narrowed to a repository chip. The phone's own
+ *  pages cover every project at once, so a chip that matches few chats would
+ *  otherwise wait on pages of rows it hides. Offers more once every loaded
+ *  match is shown. */
+function RepositoryFilterPages({ projectId, repositoryId, query, attentionOnly, from, to, enabled, offerMore }: {
+  projectId: string;
+  repositoryId: string;
+  query: string;
+  attentionOnly: boolean;
+  from: string;
+  to: string;
+  enabled: boolean;
+  offerMore: boolean;
+}) {
+  const pages = useSessionSummaryPages({ projectId, repositoryId, query: query || undefined, attentionOnly, archived: false,
+    ...(from ? { fromTime: new Date(`${from}T00:00:00`).getTime() } : {}),
+    ...(to ? { toTime: new Date(`${to}T23:59:59.999`).getTime() } : {}),
+  }, enabled);
+  if (!offerMore || !pages.hasMore) return null;
+  return (
+    <div className="mobile-nav-pagination">
+      <button type="button" className="mobile-nav-more-sessions" disabled={pages.busy} onClick={() => void pages.more()}>
+        {tr("sidebar.sessionlist.showMoreSessions")}
+        <Icon.chevronDown />
+      </button>
     </div>
   );
 }
@@ -869,6 +913,10 @@ export default function MobileNavigator() {
   const grouping = useSessionGrouping();
   const sessionSort = useSessionSortMode();
   const arrangementEntries = useSessionArrangementEntries();
+  // Package sections (agents) the list options can hide. The phone has no
+  // action rows, so nothing moves under one.
+  const navSections = useNavigatorSections();
+  const hiddenSections = excludedSections(navSections.sections, navSections.state, []);
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => loadExpanded(activeProjectId));
   const [showAllProjects, setShowAllProjects] = useState<ReadonlySet<string>>(loadShowAll);
   const [expandedSubagents, setExpandedSubagents] = useState<ReadonlySet<string>>(new Set());
@@ -1067,6 +1115,9 @@ export default function MobileNavigator() {
     for (const list of result.values()) list.sort(compareSessionNavigation);
     return result;
   }, [sessions]);
+  const sessionsById = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
+  // Each multi-repository project's chosen repository chip (repositoryFilter.ts).
+  const repositoryFilters = useRepositoryFilters(projects);
   // Delegated children ride inside their parent; a child whose parent has not
   // loaded yet is withheld while that parent is read.
   const delegatedChildren = useMemo(
@@ -1259,6 +1310,20 @@ export default function MobileNavigator() {
       onSelect: () => setAttentionOnly((value) => !value),
     },
     ...arrangementEntries,
+    ...(navSections.sections.length === 0 ? [] : [
+      "separator" as const,
+      { heading: tr("sidebar.showInList") },
+      ...navSections.sections.map((section): MenuEntry => {
+        const shown = !navSections.state.hidden.includes(section.id);
+        return {
+          id: `navigator-section:${section.id}`,
+          label: section.label,
+          kind: "checkbox",
+          checked: shown,
+          onSelect: () => setNavigatorSectionHidden(section.id, shown),
+        };
+      }),
+    ]),
   ];
 
   // Sort and filters live in the search field; a choice away from the default
@@ -1428,11 +1493,26 @@ export default function MobileNavigator() {
             // A search reaches the private chats; otherwise they keep to their row.
             const all = [...projectSessions.get(project.id) ?? [], ...(searchMode ? roomSessions : [])];
             const needle = query.trim().toLocaleLowerCase();
-            const dated = all.filter((session) => sessionMatchesDateFilter(session, dateFilter));
+            // A repository chip narrows this project's own chats; a delegated
+            // child follows its parent, and the project's status pills still
+            // count every chat, so work under another chip is never hidden.
+            const filterRepositories = filterRepositoriesOf(project);
+            const activeRepository = repositoryFilters.get(project.id);
+            const filterRepositoryIds = filterRepositories.map((repository) => repository.id);
+            const inRepository = (session: SessionProjection) => !activeRepository
+              || session.projectId !== project.id
+              || sessionMatchesRepositoryFilter(session, activeRepository, filterRepositoryIds, sessionsById);
+            const repositoryMarkFor = (session: SessionProjection) => {
+              const marked = session.projectId === project.id ? sessionRepositoryMark(session, filterRepositories) : undefined;
+              return marked ? { repositories: marked, active: activeRepository } : undefined;
+            };
+            const datedAll = all.filter((session) => sessionMatchesDateFilter(session, dateFilter));
+            const dated = activeRepository ? datedAll.filter(inRepository) : datedAll;
             const projectMatches = `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle);
-            const matching = needle && !projectMatches
-              ? dated.filter((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle))
-              : dated;
+            const matchingAll = needle && !projectMatches
+              ? datedAll.filter((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle))
+              : datedAll;
+            const matching = activeRepository ? matchingAll.filter(inRepository) : matchingAll;
             const pinned = matching.filter((session) => session.pinned !== undefined);
             const normal = matching.filter((session) => session.pinned === undefined);
             const expanded = searchMode || soloPersonal !== null || expandedProjects.has(project.id);
@@ -1464,7 +1544,7 @@ export default function MobileNavigator() {
               { ancestors: false },
             ));
             const { active: activeCount, waiting: waitingCount, unread: completedCount, failed: failedCount, limited: limitedCount } =
-              projectSessionStatusCounts(searchMode ? matching : [...matching, ...roomSessions], now);
+              projectSessionStatusCounts(searchMode ? matchingAll : [...matchingAll, ...roomSessions], now);
             // Counts are shown as status pills, never as concatenated words:
             // "3 active" only reads correctly in English.
             const statusLabel = [
@@ -1502,6 +1582,7 @@ export default function MobileNavigator() {
                     })}
                     childrenExpanded={expandedChildren}
                     onToggleChildren={() => toggleSubagents(node.item.id)}
+                    repositoryMark={repositoryMarkFor(node.item)}
                   />
                   {expandedChildren && node.children.length > 0 && (
                     <div className="mobile-nav-subagent-children">
@@ -1664,7 +1745,7 @@ export default function MobileNavigator() {
                     <button
                       className="mobile-nav-project-action"
                       aria-label={tr("sidebar.newChatInValue", { value: project.name || project.path })}
-                      onClick={() => { startFreshSession(project.id); setSidebarOpen(false); }}
+                      onClick={() => { startFreshSession(project.id, newChatOptions(project)); setSidebarOpen(false); }}
                     >
                       <UiIcon icon={NewChatIcon} size="lg" />
                     </button>
@@ -1676,7 +1757,7 @@ export default function MobileNavigator() {
                     >
                       {(trigger) => (
                         <button className="mobile-nav-project-action" aria-label={tr("common.more")} {...trigger}>
-                          <UiIcon icon={MoreVerticalIcon} size="lg" />
+                          <UiIcon icon={MoreIcon} size="lg" />
                         </button>
                       )}
                     </Menu>
@@ -1688,8 +1769,16 @@ export default function MobileNavigator() {
                     {!searchMode && (
                       <SlotHost
                         slot="sidebar.project.leading"
-                        context={{ projectId: project.id, activeSessionId, surface: "phone", onNavigate: () => setSidebarOpen(false) }}
+                        exclude={hiddenSections}
+                        context={{ projectId: project.id, activeSessionId, surface: "phone", placement: "project", onNavigate: () => setSidebarOpen(false) }}
                       />
+                    )}
+                    {/* The chips filter chats only, so they sit below the
+                        project's leading groups (agents) and directly above
+                        its chats. A search keeps a chosen chip, so it stays
+                        in sight to undo. */}
+                    {filterRepositories.length > 0 && (!searchMode || activeRepository) && (
+                      <RepositoryFilterChips projectId={project.id} repositories={filterRepositories} active={activeRepository} variant="phone" />
                     )}
                     {pinned.length > 0 && (
                       <div className="mobile-nav-pinned" aria-label={tr("sidebar.sessionlist.pinnedChats")}>
@@ -1704,6 +1793,7 @@ export default function MobileNavigator() {
                             now={now}
                             pinnedSessions={pinnedSessions}
                             onChanged={() => refreshProject(node.item.projectId)}
+                            repositoryMark={repositoryMarkFor(node.item)}
                           />
                         ))}
                       </div>
@@ -1742,6 +1832,18 @@ export default function MobileNavigator() {
                         )}
                         {!searchMode && <MobileArchiveLink projectId={project.id} />}
                       </div>
+                    )}
+                    {activeRepository && (
+                      <RepositoryFilterPages
+                        projectId={project.id}
+                        repositoryId={activeRepository}
+                        query={query}
+                        attentionOnly={attentionOnly}
+                        from={from}
+                        to={to}
+                        enabled={drawerOpen || peeking}
+                        offerMore={showAll && hiddenCount === 0}
+                      />
                     )}
                     {!searchMode && !selectMode && (
                       <PrivateRoomGroup project={project} expanded={(roomId) => expandedProjects.has(roomId)} onToggle={toggleProject}>

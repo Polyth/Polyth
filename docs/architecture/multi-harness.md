@@ -19,7 +19,7 @@ flowchart TD
   REG --> AG[backend-antigravity: Gemini stream]
   REG --> CMD[backend-commandcode: headless stream]
   REG --> PI[backend-pi: native RPC]
-  ACP --> PROFILES[Cursor, fx, Grok Build and OMP profiles]
+  ACP --> PROFILES[Cursor, fx, Grok Build, OMP, DeepSeek and GitHub Copilot profiles]
   OC --> AUTH[Owned process supervision and release receipts]
   CX --> AUTH
   CC --> AUTH
@@ -60,6 +60,7 @@ Every local CLI harness except OpenCode and fx can run several native logins. Th
 | `cursor` | `XDG_CONFIG_HOME=<dir>/config`, a link-back overlay of `~/.config` whose `cursor` entry is private (Linux only; elsewhere the CLI ignores it) | `agent status --format json` |
 | `grok` | `GROK_HOME=<dir>` (`auth.json`, config, sessions, skills); the server's own `XAI_API_KEY` is removed from an account's environment, because the CLI lets that key win over a browser sign-in | `grok models`: first line `You are not authenticated.` = signed out, `You are using XAI_API_KEY.` = signed in with plan "API key"; a crash, timeout or empty output is `unknown`. The probe reports the same answer, so ACP model discovery (keyed on it) re-reads right after a sign-in or expiry |
 | `deepseek` | `DSH_HOME=<dir>` (credential store, `.env`, profiles and sessions); the server's own `DEEPSEEK_API_KEY` is removed from an account's environment, because dsh lets the launch environment win over every store | none: `dsh` has no sign-in report, so status is `unknown` and the first turn verifies the key; the sign-in command is Polyth's hidden-input helper that writes `$DSH_HOME/.env` |
+| `copilot` | `COPILOT_HOME=<dir>` (account list, settings, plugins, skills and sessions; the token itself is in the system keychain when there is one); the server's own `COPILOT_GITHUB_TOKEN`, `GH_TOKEN` and `GITHUB_TOKEN` are removed from an account's environment, because the CLI lets an environment token win over every stored login | none as a command. The Accounts list starts the ACP agent and reads its answer to `session/new`: `-32000 Authentication required` = signed out, a created session = signed in, anything else `unknown`. A token or an own model provider (`COPILOT_PROVIDER_BASE_URL`) in the launch environment is reported as signed in without starting the agent. The installation probe never starts the agent, so it says `unknown` unless the environment answers |
 | `omp`, `pi` | `PI_CODING_AGENT_DIR=<dir>` | `omp models`, `PI_OFFLINE=1 pi --list-models` |
 | `antigravity` | `HOME=<dir>`, a link-back overlay of the real home with a private `.gemini`; a runtime's private home takes its `.gemini` from there | `agy models` |
 | `commandcode` | `HOME=<dir>`, a link-back overlay with a private `.commandcode` | `command-code status --json` |
@@ -82,7 +83,7 @@ A provider may also answer `HarnessProvider.completeUtility(request)`: one state
 
 Polyth, not the selected harness, owns agent delegation. The only supported product spawn path is the Polyth session-control capability `agent.spawn`. It creates an ordinary canonical session with `parentId` pointing to the caller; nested workers therefore form the same durable session tree that the sidebar, notifications, recovery, authorization and event replay already understand. The caller chooses whether the child shares its checkout or works in its own isolated worktree that it must merge back ([workspace choice](../agents/orchestration.md#choosing-the-workers-workspace)).
 
-The harness registry and runtime pool normalize every provider to `subagents: false` and remove native-only `mode: "subagent"` descriptors before they reach product surfaces. Adapters then use provider-specific defense in depth: Claude disables Agent/Task, owned OpenCode denies its native task permission locally and over SSH, Command Code hides custom subagents and blocks delegation-family tools in its Mod, and Antigravity keeps its PreToolUse bridge active under its native launch bypass (the native CLI still runs PreToolUse hooks with `--dangerously-skip-permissions`). Antigravity denies every native agent surface observed in its CLI 1.2.11 `init` frame before Auto-Approve: `invoke_subagent`, `define_subagent`, `manage_subagents`, `manage_task` and `browser_subagent`, plus a narrow future `<verb>_agent(s)` / `<verb>_subagent(s)` suffix rule. `manage_task` is a conservative deny because only its name, not its exact semantics, was verified. DeepSeek Harness runs with a Polyth `--patch` overlay that disables its in-process subagent providers and every spawning tool (`subagent`, `subagent_fork`, `workflow`, `list_agents`, `send_message`, `interrupt_agent`, Ralph loops); the model's tool roster was verified without them on dsh 0.2.0-rc.2. An SSH host has no copy of the overlay, so a remote DeepSeek leg keeps dsh's native subagents. Codex, Pi and generic ACP already expose no Polyth native-subagent capability. A provider that offers no hard native-disable API is still governed by the mandatory Polyth delegation instruction; the adapter must not claim structural prevention it cannot prove.
+The harness registry and runtime pool normalize every provider to `subagents: false` and remove native-only `mode: "subagent"` descriptors before they reach product surfaces. Adapters then use provider-specific defense in depth: Claude disables Agent/Task, owned OpenCode denies its native task permission locally and over SSH, Command Code hides custom subagents and blocks delegation-family tools in its Mod, and Antigravity keeps its PreToolUse bridge active under its native launch bypass (the native CLI still runs PreToolUse hooks with `--dangerously-skip-permissions`). Antigravity denies every native agent surface observed in its CLI 1.2.11 `init` frame before Auto-Approve: `invoke_subagent`, `define_subagent`, `manage_subagents`, `manage_task` and `browser_subagent`, plus a narrow future `<verb>_agent(s)` / `<verb>_subagent(s)` suffix rule. `manage_task` is a conservative deny because only its name, not its exact semantics, was verified. DeepSeek Harness runs with a Polyth `--patch` overlay that disables its in-process subagent providers and every spawning tool (`subagent`, `subagent_fork`, `workflow`, `list_agents`, `send_message`, `interrupt_agent`, Ralph loops); the model's tool roster was verified without them on dsh 0.2.0-rc.2. An SSH host has no copy of the overlay, so a remote DeepSeek leg keeps dsh's native subagents. GitHub Copilot CLI is started with `--excluded-tools`, which removes its agent tools (`task`, `read_agent`, `list_agents`, `write_agent`, `run_dynamic_workflow`, `dynamic_workflows_manage`) from every session, locally and on an SSH host; the model's tool roster was verified without them on 1.0.109, while its `/fleet` and `/delegate` slash commands remain advertised. Codex, Pi and generic ACP already expose no Polyth native-subagent capability. A provider that offers no hard native-disable API is still governed by the mandatory Polyth delegation instruction; the adapter must not claim structural prevention it cannot prove.
 
 Native-child discovery/recovery code may remain only for compatibility with pre-existing/imported provider state. It is not a creation path for new delegated work.
 
@@ -108,7 +109,7 @@ Source-inspected per adapter:
 | Claude Code | Every `canUseTool` call (command or file path as the pattern). | Tools the SDK's `default` mode allows natively (read-only tools). |
 | Codex | Command and file-change approval requests, and MCP tool approvals (`mcpServer/elicitation/request` marked `codex_approval_kind: "mcp_tool_call"`, as `mcp__<server>__<tool>`). | Actions inside the `workspace-write` sandbox run without a request; only escalations ask, and a file-change request carries a reason rather than its paths. An MCP tool annotated `readOnlyHint` runs without asking. Polyth's own tool server is launched with `default_tools_approval_mode = "approve"` because `invoke` in `agentTools.ts` authorizes each of its calls. A server's own elicitation form has no surface yet and is declined. Codex reports any error answer to the model as "user rejected MCP tool call", so this method must always answer. |
 | OpenCode | Native permission events (patterns and metadata). | Whatever the project's own OpenCode permission config allows natively. |
-| ACP (Cursor, Grok Build, oh-my-pi, fx, generic) | `session/request_permission`. | Only the tool-call kind and title are mapped, so risk is judged from the title. |
+| ACP (Cursor, Grok Build, oh-my-pi, fx, DeepSeek, GitHub Copilot, generic) | `session/request_permission`. | Only the tool-call kind and title are mapped, so risk is judged from the title. |
 | Antigravity | Every gated tool, through the PreToolUse bridge under the native launch bypass. | Workspace reads/edits and the turn's staged attachments, which the bridge allows itself. |
 | Command Code | Polyth package tools only. | Native built-in tools: Auto-Approve maps to native `auto-accept` (the hold cannot see them); otherwise native `dont-ask` denies what would prompt. |
 | Pi | Polyth package tools only. | Pi's built-in tools: the adapter has no approval bridge, so they run without Polyth approval whatever the toggle says. |
@@ -228,7 +229,46 @@ the descriptor's `updateCommand` argv (the CLI's own `update`/`upgrade`), resolv
 by harness executable discovery and run without a shell (a Windows npm `.cmd`/`.bat`
 shim goes through `cmd.exe` with its path quoted; the argv is fixed descriptor words),
 stdin closed, a 10-minute timeout and a 4 KB output tail. A launch Node refuses up
-front is a failed run (`exitCode: null`), not a 500. It ignores per-harness binary overrides such as
+front is a failed run (`exitCode: null`), not a 500; a failed run's output ends with
+`Program: <launcher path>`, the copy discovery chose. When the descriptor's
+`releaseSource` is npm and the launcher is npm's global install of that package
+(`<prefix>\<bin>.cmd` shimming into `<prefix>\node_modules\<pkg>` on Windows,
+`<prefix>/bin/<bin>` into `<prefix>/lib/node_modules/<pkg>` elsewhere;
+`npmGlobalPrefixOf`; a Windows shim may point at a `.js`, an `.exe` or an
+extensionless script), the server does not run the CLI's updater at all: it
+runs `npm install -g <pkg>@<distTag|latest>` with `npm_config_prefix=<prefix>`,
+the same way the CLI was installed. Self-updaters guess how they were installed
+and refuse when the guess fails: Pi asks `npm root -g`, whose prefix is npm's
+own and not Polyth's (`%LOCALAPPDATA%\Polyth\npm`, `~/.local`), and reports
+"not managed by a global npm install"; Codex reports "Could not detect the
+Codex installation method". If no npm is found, the CLI's updater runs with
+that `npm_config_prefix`. On Windows the launcher may also be a `.cmd` wrapper
+on PATH that is not npm's shim (`~\.local\bin\codex.cmd`): it is followed, up
+to two hops, to the file it starts (`windowsCmdWrapperTarget`: an absolute,
+`%VAR%` or `%~dp0` path), and the npm prefix is taken from there when npm's own
+shim for the package sits in that prefix. A failed self-update through such a
+wrapper adds `It starts: <target>` after the `Program:` line, or `It starts a
+program in: <folder>` for a shim that picks its program at call time (one over
+the Codex desktop app's `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`),
+and says the copy is updated by the app that installed it (`wrapperNote`).
+Settings does not wait for that failure: `GET /api/harnesses/updates` marks such
+a copy `external` (`externalHarnessCopy`: a Windows `.cmd`/`.bat` launcher that
+is neither an npm/pnpm shim nor a wrapper over the package's npm install, with
+`launcher`, what it starts in `location`, and the owning app's name when the
+descriptor's `externalApps` recognises that path). The Runtime tab then replaces
+the Update row with two plain choices: update it in that app and check again, or
+install Polyth's own copy through the ordinary install dialog (which ends in the
+sign-in step when one is needed). The hero's Update button becomes "How to
+update" and opens that tab; the list row offers no update. Once Polyth's copy
+exists in `%LOCALAPPDATA%\Polyth\npm`, `discoverHarnessExecutable` prefers it
+over any `.cmd`/`.bat` launcher that is not an npm/pnpm shim, on PATH or in a
+well-known folder, so every backend runs and updates that copy from then on;
+the other copy is left untouched. There is no stored switch back: removing
+Polyth's copy returns discovery to the wrapper. A copy npm did not install (a standalone or WinGet
+binary) keeps its own updater. An update argv that already runs the package
+manager (DeepSeek's `npm install -g @deepseek-ai/dsh@latest`) is kept and names
+the installed command in `releaseSource.bin`, whose install supplies the
+prefix. It ignores per-harness binary overrides such as
 `POLYTH_GROK_BIN`, and running runtimes keep the old binary until restarted.
 On Windows a running program's file cannot be replaced, so before the updater
 (and before a local install, which a reinstall is) the server releases every idle
@@ -553,9 +593,9 @@ Attach, Sync, source-advanced and source-diverged are intentionally absent. Rein
 How the child's native session gets that history depends on the runtime:
 
 - **Native branch.** When the runtime offers `branchSession`/`branchSessionOperation` and does not report `capabilities().fork === false` (today OpenCode), Polyth runs a durable `session-fork` operation on the source and the child binds to the verified native copy (`historyBaseline: "copied"`).
-- **Continuity fork.** Every other runtime (Claude Code, Codex, Pi, ACP, Antigravity, Cursor, DeepSeek…), and a native branch that definitively refuses with `history-mismatch`, `unsupported` or `capability-unsupported`, gets a continuity fork. The prefix is followed by an ignorable `session/snapshot-imported` marker with `{ mode: "fork", fromSessionId, copiedThroughSeq }` and the child has no native session, binding or leg yet. Like a Snapshot import, its first use creates a fresh native session (`session-create`), the leg starts with `bootstrap: "continuity"`, and the first confirmed prompt carries the prefix through the recovery builder with a fork note (reason `fork`). So the continuity limits above apply: the native model sees a bounded recovery bundle, not a full native transcript. Nothing is mutated on the source or its runtime, so there is no outcome to reconcile. An `unknown` native-branch outcome still reconciles and never falls back.
+- **Continuity fork.** Every other runtime (Claude Code, Codex, Pi, ACP, Antigravity, Cursor, DeepSeek…), and a native branch that definitively refuses with `history-mismatch`, `unsupported` or `capability-unsupported`, gets a continuity fork. So does a source that is not at rest, on any harness: a running turn, a waiting request, queued messages, an unresolved operation, a `reconciling` / `epoch-pending` / `unknown` status, or a runtime that cannot be reached. Such a source is never wired, branched, stopped or written to. Whatever the copied prefix leaves open is closed in the child only, before the marker: `tool/error` for each running call, `question/expired` / `permission/expired` / `secret/expired` (`reason: "forked"`) for each open request, and `turn/stopped` (`reason: "aborted"`) for the open turn, so the child opens idle. The prefix is followed by an ignorable `session/snapshot-imported` marker with `{ mode: "fork", fromSessionId, copiedThroughSeq }` and the child has no native session, binding or leg yet. Like a Snapshot import, its first use creates a fresh native session (`session-create`), the leg starts with `bootstrap: "continuity"`, and the first confirmed prompt carries the prefix through the recovery builder with a fork note (reason `fork`). So the continuity limits above apply: the native model sees a bounded recovery bundle, not a full native transcript. Nothing is mutated on the source or its runtime, so there is no outcome to reconcile. An `unknown` native-branch outcome still reconciles and never falls back.
 
-A fork of the first prompt has an empty prefix and simply gets a fresh native session. Isolated sessions, active rewinds, running turns and open requests are refused as before.
+A fork of the first prompt has an empty prefix and simply gets a fresh native session. Fork refuses only where there is no history or workspace to hand over: an archived or isolated session, an import whose history is not complete, and a per-message fork during an active rewind. The web client offers Fork in every other state (`forkAvailability`, `apps/web/src/messageActions.ts`).
 
 ## Harness matrix
 
@@ -573,6 +613,7 @@ Capabilities below describe the Polyth adapters, not everything each native prod
 | fx | `fx acp`. [Official ACP interface](https://fx.sh/docs/using-fx/acp) | Thin shared-ACP profile and native sign-in hint. Not installed in the verification environment; no live execution claim. Authentication unknown; excluded from Auto. |
 | Grok Build | `grok agent stdio` through the shared ACP v1 adapter. [xAI announcement](https://x.ai/news/grok-build-cli) | Shipped as an explicit ACP profile, off by default (In progress). It receives the same session-scoped MCP overlay as other ACP harnesses. Live-checked 2026-11-09 with 1.0.77 on aarch64: signed out, `initialize` lists auth method `grok.com` and `session/new` answers `-32000 Authentication required`, which discovery maps to `auth-required`; vendor `_x.ai/*` notifications (one carries every configured MCP server with its env values) are dropped by the adapter and never persisted. 1.0.30 crashes with `SIGILL` on that CPU. A signed-in turn and native tool invocation still lack live evidence. |
 | DeepSeek | `dsh --profile acp --patch <overlay>` (`@deepseek-ai/dsh`, DeepSeek Harness) through the shared ACP v1 adapter. [Repository](https://github.com/deepseek-ai/deepseek-harness) | Verified against dsh 0.2.0-rc.2 with a real executable and a local fake of the DeepSeek Messages endpoint (`packages/backend-deepseek/test/dsh.integration.test.ts`); no paid DeepSeek turn was run. The model select's opaque route values (`["deepseek-official","deepseek-v4-pro"]`) are shown and persisted as plain DeepSeek ids through the profile's model-id codec; `reasoning_effort` (`off`/`low`/`high`/`max`) is the thought level. dsh's ACP wire carries committed messages only (no deltas), so a long first response is silent there: admission is proven from dsh's own session log, which records the prompt's turn at once. Per-response `usage/recorded` (exact non-cached input, output and cache counters) and the turn's failure classification come from that log and from dsh's `turn failed: <reason>` errors (`auth-expired`, `rate-limited`/`overloaded` with resume, `quota-exhausted`, `model-unavailable`); `usage_update` supplies native occupancy against the 1,000,000-token window. Tool names come from dsh's ACP `title` (its `kind` is always `other`); `todo_write` becomes a task snapshot; sandbox escalations reach Polyth as permission requests named by tool and command. dsh refuses a whole `session/new` when one MCP server is unusable, so stdio commands are resolved to absolute paths before launch and a server dsh names as failed is left out (recorded `failed`) and the session is created without it. Native transcripts (`$DSH_HOME/sessions/**/session.v4.jsonl[.zstd]`, read with a Zstandard frame walker; Node ≥ 22.15) feed Snapshot import. Limits: images are refused (dsh's ACP profile advertises none), there is no native compaction, fork or question surface over ACP, `deepseek-v4-flash` is only the profile's default route — dsh drops it from the select once another model is chosen and refuses switching back — and authentication is `unknown` until a turn runs. Manual selection only, excluded from Auto. |
+| GitHub Copilot | `copilot --acp --stdio` (`@github/copilot`, public preview) through the shared ACP v1 adapter. [ACP server reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/acp-server) | Verified against Copilot CLI 1.0.109 on Linux aarch64 with the real executable and a local fake model provider (`COPILOT_PROVIDER_BASE_URL`); no GitHub sign-in and no paid turn was run, and the macOS and Windows builds were not run. Models come from the `model` config option, `reasoning_effort` is the thought level, and the CLI streams deltas. The prompt result carries only a turn total with cache reads folded into the input, so per-response `usage/recorded` is read from the CLI's `session-state/<id>/events.jsonl` (`session.usage_record`, cache reads taken out of the input); `usage_update` supplies native occupancy. The CLI reports its own failures as an `Error: …` message chunk without a `messageId` and then answers `end_turn`; the profile's notice hook turns that into a failed turn with a classified cause (`auth-expired`, `rate-limited`/`overloaded` with resume, `quota-exhausted`, `model-unavailable`, `context-full`) and hides its `Info: …` lines. `--excluded-tools` removes its agent tools; `--no-auto-update` leaves updates to Settings. Its ACP server refuses stdio MCP servers on `session/new` (`Rejecting non-http/sse MCP server … from client`), so the profile's `launchStdioMcp` hook writes them to an owner-only file under the Space's `runtime/copilot/` storage and starts the process with `--additional-mcp-config=@<file>`; the Polyth agent tools were seen in the model's tool roster as `polyth-agent-tools-<tool>` and `polyth_todo` ran through an isolated Polyth server. A permission request of kind `other` is named by the announced tool. Signed out, `session/new` answers `-32000 Authentication required`, which discovery maps to `auth-required`. Resume uses `session/load`. Details: `packages/backend-copilot/README.md`. |
 | Pi | Native `pi --mode rpc` plus the documented CLI extension API. [Official RPC docs](https://pi.dev/docs/latest/rpc) | Native RPC sessions, streaming, models, images, commands, exact resume and `get_session_stats` context occupancy are implemented. Each final assistant `message_end` carries that one LLM call's provider-reported `usage`; it is recorded as additive per-turn usage (input/output/cache counters, with Pi's `reasoning` left out because it is already inside `output`) and its catalog-priced `cost.total` as a derived cost. Cumulative streaming `message_update.usage` is not recorded. Pi carries image blocks only, so a text file is declared `emulated` and delivered by Polyth's guarded server-side prompt projection; binary/PDF/audio attachments stay refused. Polyth package tools are registered by a private `--extension`; a supervising FD relay keeps the scoped bearer outside Pi's environment and generated extension. Extension discovery and individual invocation publish separate evidence. Pi does not derive a title natively, so the adapter runs a bounded tool-free throwaway process for the first prompt and writes the result with `set_session_name`; a native name already stored in the session file is surfaced on resume. The throwaway process keeps extension discovery enabled, because a model provider can be supplied by an installed extension and `--no-extensions` would make `--provider` reject the session's own model. |
 | OMP / oh-my-pi | `omp acp` through the shared ACP v1 adapter. [Repository](https://github.com/can1357/oh-my-pi) | Shipped as an explicit ACP profile rather than assuming Pi RPC compatibility. It receives the shared session-scoped MCP overlay; authentication and native tool invocation still require profile-specific live evidence. |
 
@@ -648,7 +689,7 @@ Desktop and mobile activity details share `sessionMetrics.contextUsageLabel`:
 partial counts remain visible with an unknown limit, fraction-only telemetry
 never invents a token count, and estimated counts retain the `~` mark.
 
-The composer has one model trigger. Its picker hosts the harness choices as tabs above the model catalog. The picker renders a harness tab only when the user enabled it and it is actually usable here (installed, healthy and authorized); a disabled, unauthenticated or setup-incomplete harness is not rendered at all, even when it is the session's resolved route or the pinned target. Such a session keeps its recovery path: no tab is active, a generic status (which does not name the hidden harness) points to choosing another tab or Harness Settings, and the server-side switch algorithm and Settings are unchanged. Roster metadata is process-free but says nothing about readiness, so an enabled entry with no availability snapshot yet stays hidden until its probe answers: the picker never flashes harnesses that are not installed or set up and then drops them. A reopen after the shared caches were emptied (daily refresh, a Settings change, a stale-catalog signal) filters by the last snapshot that account/Space/project received in this page (`useHarnesses`, `packages/harness-runtime/widgets/harnessData.ts`), so it paints the last known usable tabs at once. Unless low-resource mode is active, the Models web package starts bounded read-only catalog discovery for every enabled harness during a cold shell bootstrap. Successful roster, availability and catalog metadata is persisted per account/Space/project for 24 hours, and the legacy aggregate models/agents store used by non-picker surfaces is persisted on the same boundary. Presentation metadata with an `unknown` native-auth state is safe to paint from that cache; execution readiness is rechecked at the switch boundary. Reloading the page is therefore not itself a discovery event: fresh persisted metadata hydrates synchronously with zero catalog HTTP requests. A successful complete warm records its own expiry, so a long-lived page refreshes from that timestamp rather than restarting a 24-hour clock on every F5; explicit Harness Settings refresh/configuration changes invalidate the same cache family. Installing or removing a harness package invalidates it too: the set of harness-owning packages is recorded beside the metadata, and stored metadata carrying a different set — or none at all — is dropped at load, before the shell paints from it. A harness added while a client was away therefore appears on that client's next load instead of after the 24-hour expiry. The context-free bootstrap request is server-scoped and aliases successful results only into the context returned by its snapshot (the authoritative server snapshot remains cwd-scoped); a restored context fills only genuinely missing entries. Failed discovery flights are evicted rather than freezing a transient error until reload. A live session catalog that answers empty is evicted too: it never hides the last known warm list on a later mount, and a transient runtime-empty answer gets four bounded retries (1.2/3/7/15 s) before only the normal Reconnect/foreground/online signals remain. An authoritative account-hidden empty (`code: "models-hidden"`) is neither retried nor replaced with stale rows and routes to Harness Settings instead of Reconnect (`packages/models/widgets/runtimeCatalog.ts`, `packages/models/src/serverEntry.ts`). Changing a tab is therefore a browser-local next-turn choice that normally paints the already-warm model list synchronously; it never publishes a switch or submits a prompt. A catalog probe may open a temporary provider metadata connection, but it does not bind a canonical execution leg. OpenCode first discovers against the requested project/cwd; if and only if that local project authority is fenced by an outcome-unknown release, it may read host-global providers from the separately keyed local configuration authority. That fallback cannot create a canonical session, release the fence, start a turn, or stand in for a remote host. The submitted message carries that route intent; only then does the server run the safe switch algorithm above, create or replace the execution runtime, and publish its transition and timeline evidence. Roster metadata supplies the tabs' labels, logos and order; availability decides which of them are shown. Post-submit transition controls remain available for recovery and escalation, while the separate idle harness trigger is gone. On phones the same sheet also owns role, thinking, and profile controls.
+The composer has one model trigger. Its picker hosts the harness choices as tabs above the model catalog. The picker renders a harness tab only when the user enabled it and it is actually usable here (installed, healthy and authorized); a disabled, unauthenticated or setup-incomplete harness is not rendered at all, even when it is the session's resolved route or the pinned target. Such a session keeps its recovery path: no tab is active, a generic status (which does not name the hidden harness) points to choosing another tab or Harness Settings, and the server-side switch algorithm and Settings are unchanged. Roster metadata is process-free but says nothing about readiness, so an enabled entry with no availability snapshot yet stays hidden until its probe answers: the picker never flashes harnesses that are not installed or set up and then drops them. An open after the shared caches were emptied (daily refresh, a Settings change, a stale-catalog signal, a harness package change) or after a reload filters by the last availability rows that account/Space/project received in this browser, from any reader including the shell's catalog warm (`peekLastKnownHarnessSnapshots`, kept for seven days outside the invalidated cache family; `useHarnesses`, `packages/harness-runtime/widgets/harnessData.ts`), so it paints the last known usable tabs at once and revalidates behind them. Those rows never revive a harness the current roster no longer lists, and the switch boundary re-verifies readiness. A project this browser has never read paints the latest rows a local project in the same account and Space received, because harness policy is per Space and availability is per host; its own first answer replaces them. A remote project's rows never stand in for another project, another Space never lends its rows, and only a Space this browser has never read anything in waits for its first probe. The browser cannot tell a new remote project from a local one before that probe, so a new remote project briefly shows the Space's local rows until its own answer arrives. Unless low-resource mode is active, the Models web package starts bounded read-only catalog discovery for every enabled harness during a cold shell bootstrap. Successful roster, availability and catalog metadata is persisted per account/Space/project for 24 hours, and the legacy aggregate models/agents store used by non-picker surfaces is persisted on the same boundary. Presentation metadata with an `unknown` native-auth state is safe to paint from that cache; execution readiness is rechecked at the switch boundary. Reloading the page is therefore not itself a discovery event: fresh persisted metadata hydrates synchronously with zero catalog HTTP requests. A successful complete warm records its own expiry, so a long-lived page refreshes from that timestamp rather than restarting a 24-hour clock on every F5; explicit Harness Settings refresh/configuration changes invalidate the same cache family. Installing or removing a harness package invalidates it too: the set of harness-owning packages is recorded beside the metadata, and stored metadata carrying a different set — or none at all — is dropped at load, before the shell paints from it. A harness added while a client was away therefore appears on that client's next load instead of after the 24-hour expiry. The context-free bootstrap request is server-scoped and aliases successful results only into the context returned by its snapshot (the authoritative server snapshot remains cwd-scoped); a restored context fills only genuinely missing entries. Failed discovery flights are evicted rather than freezing a transient error until reload. A live session catalog that answers empty is evicted too: it never hides the last known warm list on a later mount, and a transient runtime-empty answer gets four bounded retries (1.2/3/7/15 s) before only the normal Reconnect/foreground/online signals remain. An authoritative account-hidden empty (`code: "models-hidden"`) is neither retried nor replaced with stale rows and routes to Harness Settings instead of Reconnect (`packages/models/widgets/runtimeCatalog.ts`, `packages/models/src/serverEntry.ts`). Changing a tab is therefore a browser-local next-turn choice that normally paints the already-warm model list synchronously; it never publishes a switch or submits a prompt. A catalog probe may open a temporary provider metadata connection, but it does not bind a canonical execution leg. OpenCode first discovers against the requested project/cwd; if and only if that local project authority is fenced by an outcome-unknown release, it may read host-global providers from the separately keyed local configuration authority. That fallback cannot create a canonical session, release the fence, start a turn, or stand in for a remote host. The submitted message carries that route intent; only then does the server run the safe switch algorithm above, create or replace the execution runtime, and publish its transition and timeline evidence. Roster metadata supplies the tabs' labels, logos and order; availability decides which of them are shown. Post-submit transition controls remain available for recovery and escalation, while the separate idle harness trigger is gone. On phones the same sheet also owns role, thinking, and profile controls.
 
 For a new conversation, the composer owns the harness tab and execution draft as one transition: it marks the chosen harness immediately and clears any model, agent, profile, or thinking choice owned by the previous harness before target catalog discovery completes.
 
@@ -952,6 +993,7 @@ confined folder of one skill; it never reaches a client.
 | Antigravity | `.agents/skills`, `_agents/skills` | `~/.gemini/config/skills` | not listed | `agy -p /skills` |
 | Cursor | `.cursor/skills`, `.agents/skills`, `.claude/skills`, `.codex/skills` | the same under `~` | `~/.cursor/skills-cursor` | CLI bundle |
 | Grok Build | `.grok/skills`, `.claude/skills`, `.cursor/skills` | `$GROK_HOME/skills`, `~/.claude/skills`, `~/.cursor/skills` | | CLI help |
+| GitHub Copilot | `.github/skills`, `.agents/skills`, `.claude/skills` | `$COPILOT_HOME/skills`, `~/.agents/skills` | | `copilot skill --help` |
 | OMP | `.omp`, `.agents`, `.agent`, `.claude`, `.codex`, `.opencode`, `.github` (each `/skills`) | `$PI_CODING_AGENT_DIR/skills`, `~/.agents`, `~/.agent`, `~/.codex`, `~/.config/opencode` (each `/skills`) | | Its discovery providers; `~/.claude/skills` is opt-in there |
 | Command Code | `.commandcode/skills`, `.agents/skills` | `~/.commandcode/skills`, `~/.agents/skills` | | CLI bundle |
 
@@ -979,9 +1021,9 @@ other harnesses, and stays one row.
 
 **A managed skill carries its files.** `installCopy` stores every file in a
 content-addressed bundle (`skill-bundles/<sha256>`, freed when no skill points at
-it). Delivery is unchanged for the capability contract except for two optional
-fields: `skill.bundleDir`, and `excludedHarnessIds` on the capability base, which
-`targetsHarness` honors before planning.
+it). Delivery is unchanged for the capability contract except for three optional
+fields: `skill.bundleDir`, and on the capability base `excludedHarnessIds` and
+`harnessRule`, which `targetsHarness` honors before planning.
 
 - Native projections receive the instructions with a leading `Base directory for
   this skill:` line, because the copy they materialize has no folder of its own.
@@ -990,13 +1032,37 @@ fields: `skill.bundleDir`, and `excludedHarnessIds` on the capability base, whic
 - Prompt projections (`renderCapabilityText`) receive the description and that
   pointer, never the whole text, so a long skill does not weigh on every prompt.
 - A remote target gets the instructions alone: the files live on this host.
-- Each skill keeps `offHarnesses`, an exclusion list rather than an allowlist, so
-  a harness added later receives it by default.
+- Each skill keeps a **reach** (`SkillReachDto`, pure logic in
+  `packages/commands/src/skillReach.ts`): a default of `all` (every harness,
+  including one added later), `some` (only those named) or `none` (no harness,
+  choices kept), then optional rules per harness **family** and per harness,
+  each `off`, `on` (offered as a skill) or `always`. The most specific rule
+  wins: harness, then family, then the default. A family is
+  `HarnessAccountsRef.family`, the default harness id its accounts share
+  (`claude` for `claude` and `claude-work`); a harness without accounts is its
+  own family, so an account added later follows its family's rule. Choosing
+  `some` keeps the skill exactly where it works now; choosing `all` clears every
+  `off`; a rule equal to the broader one is dropped, so every stored rule is a
+  real choice. Older files kept `offHarnesses`, an exclusion list; it is read as
+  `all` plus `off` rules and replaced by `reach` on the next change.
+- Delivery turns the reach into a generic `CapabilityHarnessRule`
+  (`@polyth/contracts`, resolved with `harnessRuleAllows` and `harnessFamilyOf`
+  against the provider's descriptor), so the provisioner needs no skill
+  knowledge. `always` adds an `instruction` capability holding the skill's text
+  (with its bundle pointer), targeted only where the mode is `always`, next to
+  the skill itself. A skill with blocked tools cannot be `always` (its text
+  would reach the model without the tool block), and the page does not offer it.
+  `none` delivers nothing and hides the skill's `/name` alias; that alias is
+  harness-agnostic prompt text, so a per-harness `off` does not hide it.
+- `POST /api/skills/library/reach` takes `{ name, scope, projectId?, default }`,
+  `{ …, family: { id, mode } }` or `{ …, harness: { id, mode } }` (`mode: null`
+  removes the rule) with the same role checks as other managed writes, and
+  stores it against the revision it was worked out from (`conflict` otherwise).
 
 **From any chat, in any harness.** Every harness has the agent-tool bridge, so
 `polyth_skills` (read-only, auto-approved: list, search, read) and
 `polyth_skills_manage` (mutating, never auto-approved, needs an acting person:
-install, adopt, update, remove) are the one path that reaches them all. `read`
+install, adopt, update, reach, remove) are the one path that reaches them all. `read`
 lets an agent follow a skill that only another harness has, including on a remote
 target with no access to this host's folders.
 
@@ -1118,7 +1184,7 @@ The runtime pool decides (`forSession` in `packages/harness-runtime/src/index.ts
 | Claude Code (all accounts) | Agent SDK `persistSession: false` | No `getSessionInfo` reads. The authority is per process (`generation-only`), so a new process always takes the epoch path with canonical continuity. |
 | Codex (all accounts) | `thread/start` `ephemeral: true` | Its binding is `generation-only` instead of `verified`. Codex 0.163 refuses `thread/resume` ("no rollout found"), `includeTurns` and `thread/name/set` on these threads. So `ensureSession` refuses a foreign thread id, reconcile falls back to the turn-less read (`partial`), and the hidden title turn is skipped (`title: "emulated"`). |
 | Pi (all accounts) | `--no-session` | The native id is `get_state.sessionId` (there is no session file). `ensureSession` never calls `switch_session`. |
-| OpenCode, ACP profiles, Antigravity, Command Code, DeepSeek | none | Not offered. Command Code has `--no-session`, but it starts a process per turn that resumes from disk, so no context would survive between turns. |
+| OpenCode, ACP profiles, Antigravity, Command Code, DeepSeek, GitHub Copilot | none | Not offered. Command Code has `--no-session`, but it starts a process per turn that resumes from disk, so no context would survive between turns. |
 
 When a private leg's process ends, its native conversation is gone. The
 existing binding-mismatch path (`markOwnedEpochPending`) then starts a fresh
@@ -1171,7 +1237,7 @@ and the browser never sends a command string:
   Finder- or service-launched server still finds the CLI.
 - **Browser elsewhere.** A request that is not direct loopback (phone, Polyth
   Link, another computer, a proxied origin) gets `deviceSignInCommand` where
-  the CLI has one: `codex login --device-auth`, `grok login --device-auth`. A
+  the CLI has one: `codex login --device-auth`, `grok login --device-auth`, `copilot login --device-code`. A
   `localhost` callback never reaches that browser. Claude's paste-code flow
   and Cursor's polling flow work anywhere.
 - **Who.** Installing, or replacing a shared login, needs harness management.
@@ -1347,7 +1413,7 @@ Install commands assume no preparation and run unattended: per user, no sudo or
 administrator rights, no question asked (stdin is not a terminal). Each is
 built for the server's platform when the package loads; a harness without an
 installer for that platform declares none, and Settings shows its setup guide.
-Harnesses published on npm (Codex, OpenCode, Pi, Command Code, DeepSeek) build
+Harnesses published on npm (Codex, OpenCode, Pi, Command Code, DeepSeek, GitHub Copilot) build
 theirs with `npmCliInstallCommand` (`@polyth/harness-runtime/installers`):
 
 - **macOS/Linux, locally and on SSH hosts:** a POSIX `sh -c` script that uses
@@ -1426,7 +1492,7 @@ resume over SSH. Such a remote leg runs on the host's own sign-in and native
 configuration: local account directories, API keys and env never cross —
 only SDK protocol markers (`CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_AGENT_SDK_*`) —
 except for Pi's `local` configuration below.
-Extra accounts of a multi-account family stay local-only. Limits
+Extra accounts of a multi-account family stay local-only on such a leg. Limits
 (source-inspected and fixture-tested with a local stand-in host, not
 live-verified against a real SSH server): no Polyth capability delivery
 (MCP bridge, instructions) to these legs, no local print-mode utility
@@ -1434,6 +1500,73 @@ completion, no native-history import for Claude/Cursor/Pi, no Command Code attac
 release proof (a switch away is withdrawn at once with that error rather than
 guessed, and the chat stays on the remote leg), and a remote CLI that ignores
 stdin EOF can outlive a killed local client.
+
+### Harness here, tools on the host
+
+A connection can instead keep a harness on this machine
+(`SshConnectionDto.harnessPlacement`, `host` by default; Settings → SSH remotes
+→ a server → *Which copy runs*). It is offered for backends that declare
+`remoteHost.localPlacement`; today that is Claude Code. The CLI then runs
+locally on this machine's sign-in (the default one or an extra account), and
+only its shell and file tools reach the host, so the host needs no harness, no
+Node and no login. `remoteHarnessPlacement` answers the question for a backend;
+a probe reports `runsHere`, and install and sign-in then target this machine.
+
+- **Tools.** `@polyth/harness-runtime/remote-workspace` runs `bash`, `read`,
+  `write`, `edit`, `grep` and `glob` on the host, each as one bounded POSIX
+  command over `RemoteHost.processCommand` with every value passed as a
+  positional parameter. An edit is computed here and written with a SHA-256
+  compare-and-swap; writes are atomic and keep the file mode. `bash`, `grep`
+  and `glob` run behind a guard: the script's stdin is a lifeline, and when the
+  local client goes away (cancel, timeout, closed session) the guard ends the
+  command's process group on the host. Without `setsid` on the host only the
+  command itself is ended.
+- **Launch.** Claude Code runs in an empty placeholder directory under the
+  package's Space storage (one per project path, so transcripts group and
+  resume). Its native shell, file, worktree and plan-mode tools are disallowed,
+  and the six tools are served in-process as `mcp__workspace__*`
+  (`backend-claude/src/sdkMcpServer.ts`, a minimal JSON-RPC server, so the
+  package needs neither zod nor the MCP SDK of its own).
+- **Command policy.** Claude Code's rules, plan mode and edit modes do not
+  reach tools it did not ship: it asks about every call, and neither a
+  `Bash(rm:*)` deny nor plan mode applies. `@polyth/permissions/workspace-policy`
+  decides instead, in a `PreToolUse` hook and again in `canUseTool`: a read
+  that stays inside the workspace (or a temp directory) and names no secret
+  path is allowed without a question, including a short list of read-only
+  shell commands; `deny` and `ask` rules in Claude Code's settings syntax are
+  applied, from the person's own settings on this machine and from the
+  project's `.claude/settings.json` and `settings.local.json` on the host;
+  while Claude Code is in plan mode every change is refused. Everything else
+  is asked through the session's ordinary permission flow under the native
+  name (`Bash` with the command, `Edit`/`Write`/`Read` with the absolute host
+  path, and the host as metadata), so rules, the risk assessment, Auto-Approve
+  and Judgment treat it like a local call. `allow` rules from either settings
+  file are never read: a project's files may narrow what an agent does, not
+  widen it.
+- **Delivery bridge.** `backend-claude/src/remoteBridge.ts` reads the
+  project's own Claude Code files on the host at each native session start
+  (one round trip, plus one per level of `@imports`, three levels at most).
+  `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and their imports join the
+  system prompt; a nested `CLAUDE.md` joins the first tool result that touches
+  its folder; skills are listed with their host paths and read with the remote
+  tools; command hooks for `SessionStart`, `UserPromptSubmit`, `PreToolUse` and
+  `PostToolUse` run on the host in the project, with the native tool name and
+  absolute paths in their input. A hook can refuse a call (exit 2, `deny`,
+  `block`) or hand it to a person (`ask`); its `allow` is ignored. Nothing from
+  the project runs on this machine.
+
+Limits: `.claude/commands`, `agents`, `rules`, `.mcp.json`, other hook events
+and non-command hooks are not delivered (logged once per session start); a
+skill is read by the model, so there is no Skill tool call, slash invocation or
+`allowed-tools` for it; a `UserPromptSubmit` hook cannot take a prompt back,
+its objection reaches the model as context; a search rooted above a denied
+folder still reads it; Polyth's own capability delivery stays off for remote
+projects, as does native-history import and cross-harness release proof; the
+host's global `~/.claude` is not read, this machine's is. Unit-tested with a
+local stand-in host and live-verified on 2026-11-12 against one SSH host
+without Claude Code (Haiku, five turns through `createClaudeRuntime`); the
+Settings control and the provider's placement lookup are covered by unit tests
+and a rendered screenshot, not by a live server run.
 
 Each connection stores per-harness configuration exceptions
 (`SshConnectionDto.harnessConfig`); a harness that is not listed uses `local`.

@@ -1,7 +1,6 @@
 import type {
   CapabilityInstallationScope,
   SkillAdoptInput,
-  SkillAvailabilityInput,
   SkillCatalogDetailDto,
   SkillCatalogDto,
   SkillCatalogInstallInput,
@@ -11,6 +10,7 @@ import type {
   SkillInstallationInput,
   SkillLibraryDetailDto,
   SkillLibraryDto,
+  SkillReachInput,
 } from "@polyth/contracts/capability-installations";
 import { createApiTransport } from "@polyth/web-sdk";
 
@@ -52,8 +52,8 @@ export const skillsApi = {
     api.post<{ ok: boolean }>("/api/skills/catalog/refresh", id ? { id } : {}),
   adopt: (input: SkillAdoptInput) =>
     api.post<SkillInstallationDto>("/api/skills/library/adopt", input),
-  availability: (input: SkillAvailabilityInput) =>
-    api.post<SkillInstallationDto>("/api/skills/library/availability", input),
+  reach: (input: SkillReachInput) =>
+    api.post<SkillInstallationDto>("/api/skills/library/reach", input),
   update: (scope: CapabilityInstallationScope, name: string, projectId?: string) =>
     api.post<SkillInstallationDto>("/api/skills/library/update", { scope, name, ...owner(projectId) }),
   save: (scope: CapabilityInstallationScope, input: SkillInstallationInput, projectId?: string | null) =>

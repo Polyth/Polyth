@@ -217,7 +217,7 @@ export interface MutationGuards {
 export type ActionAvailability = { enabled: true } | { enabled: false; reason: string };
 
 function mutationAvailability(
-  action: "Revert" | "Fork",
+  action: "Revert",
   g: MutationGuards,
   opts: { allowWorking?: boolean } = {},
 ): ActionAvailability {
@@ -241,8 +241,15 @@ function mutationAvailability(
  * interrupt + backend branch. */
 export const revertAvailability = (g: MutationGuards): ActionAvailability =>
   mutationAvailability("Revert", g, { allowWorking: true });
-/** Fork uses the same idle/waiting/queue/archive/active-rewind guards. */
-export const forkAvailability = (g: MutationGuards): ActionAvailability => mutationAvailability("Fork", g);
+/** Fork copies canonical history into a new chat and leaves the source
+ * alone, so a running turn, a waiting request, queued messages or a
+ * recovering session never block it. The server closes whatever the copied
+ * history leaves open. Only an archived chat or an active revert refuse. */
+export const forkAvailability = (g: MutationGuards): ActionAvailability => {
+  if (g.archived) return { enabled: false, reason: "Fork unavailable in an archived session" };
+  if (g.rewindActive) return { enabled: false, reason: tr("messageActions.restoreOrReplaceCurrentRevertFirst") };
+  return { enabled: true };
+};
 
 export function guardsFromModel(
   model: Pick<RenderModel, "turn" | "permissions" | "questions" | "secrets" | "rewind">,

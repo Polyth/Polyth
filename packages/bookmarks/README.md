@@ -10,7 +10,7 @@ names it, and without it the chat is exactly as it was.
 | Surface | Seam | What it does |
 | --- | --- | --- |
 | Under an answer | `session.message.actions` | An ordinary quick action: Settings > Chat > Buttons and bars puts it on the bar, in the More menu or off. On touch it starts in More, like every other answer action. `meta.messageAction.menuLabel` makes the row say Bookmark or Remove bookmark. |
-| The list | `host.surfaces.register`, `host.capabilities.register` | A page on a phone, a pane beside Chat on a computer, opened from the Workspace tile or the right rail. A name goes to its place in the chat; the arrow opens the saved text. |
+| The list | `host.surfaces.register`, `host.capabilities.register` | A page on a phone, a pane beside Chat on a computer, opened from the Workspace tile or the right rail. A name goes to its place in the chat; the arrow opens the saved text. Right-click, long press (touch) or Shift+F10 on a row opens a menu with Copy and Remove; Remove has the usual undo. |
 | The chat's bookmark icon | `session.prompt.tabs` | The floating icon that opens the prompt list gains tabs Bookmarks, Links and Prompts once the chat has a bookmark. The icon then fills, and shows in that chat though its setting is off. Before the first bookmark the popover is today's list plus one row that bookmarks the latest answer. |
 | A text selection | `session.selection.actions` | Bookmark beside Quote and Copy, in the floating toolbar and the touch dock. It keeps the selected passage as Markdown, so links and code survive. |
 | The walk | `session.composer.before` | One line above the composer while walking: position, title, previous, next, end (Alt+Up and Alt+Down on a keyboard). Its title opens the list. |

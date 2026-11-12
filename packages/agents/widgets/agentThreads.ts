@@ -14,8 +14,9 @@ export type ConversationItem =
     pending?: "sending" | "queued";
     attachmentCount?: number;
   }
-  /** What a run said. */
-  | { kind: "report"; key: string; run: ScheduleRunDto }
+  /** What a run said. `compact`: read before, and newer reports followed it,
+   *  so it shows as its headline until opened. */
+  | { kind: "report"; key: string; run: ScheduleRunDto; compact?: true }
   /** Quiet checks and skipped wakes in a row, as one line. */
   | { kind: "quiet"; key: string; runs: ScheduleRunDto[] }
   /** The run working now, at the end of its conversation. */
@@ -191,6 +192,17 @@ export function conversationDays(
       thread.items.push({ kind: "new", key: "new" });
     }
     thread.items.push({ kind: "report", key: run.runId, run });
+  }
+
+  // History reads as headlines: a report already read folds to its line once
+  // a newer one follows. Answers to the person stay open (they are the
+  // conversation), and so does the newest report.
+  const reports = days.flatMap(dayItems)
+    .filter((item): item is Extract<ConversationItem, { kind: "report" }> => item.kind === "report");
+  for (const item of reports.slice(0, -1)) {
+    const { run } = item;
+    if (run.input || run.attachments?.length || isUnread({ ...task, seenAt }, run)) continue;
+    item.compact = true;
   }
 
   // Waiting messages: the server's queue first, then what this page sent.

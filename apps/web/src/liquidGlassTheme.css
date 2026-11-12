@@ -151,9 +151,12 @@ html[data-theme-style="liquid-glass"] :is(.sidebar, .app > .header, .railbar, .s
 /* ---- toolbar: glass capsules and circles --------------------------------- */
 /* Toolbar items float as Liquid Glass: grouped items share one capsule, a
    lone glyph is a circle, the session title is a capsule. */
-html[data-theme-style="liquid-glass"] :is(.view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .sidebar-search) {
+html[data-theme-style="liquid-glass"] :is(.view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger) {
   border-radius: var(--lg-radius-capsule);
 }
+/* The navigator search is a field in the navigator's row grid, not a toolbar
+   capsule: it keeps --radius-card so Settings → corner rounding applies. */
+html[data-theme-style="liquid-glass"] .sidebar-search { border-radius: var(--radius-card); }
 /* Segments inside a capsule are capsules, so the selected plate stays
    concentric with the group. */
 html[data-theme-style="liquid-glass"] :is(.view-switcher-pill .view-icon, .workspace-mode-switch button) { border-radius: var(--lg-radius-capsule); }
@@ -168,6 +171,13 @@ html[data-theme-style="liquid-glass"] body:not([data-glass="off"]) :is(
   .desktop-session-status-trigger
 ) {
   box-shadow: var(--lg-rim), var(--shadow-sm);
+}
+/* While the navigator search holds focus its material keeps the style's rim
+   and takes the accent ring: the rule above out-specifies the field's base
+   :focus-within state, which otherwise leaves focus to the bare input. */
+html[data-theme-style="liquid-glass"] body:not([data-glass="off"]) .sidebar-search:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: var(--lg-rim), var(--shadow-sm), 0 0 0 2px var(--accent-wash);
 }
 
 /* ---- overlays: menu, popover, tooltip, dialog ---------------------------- */
@@ -387,7 +397,11 @@ html[data-theme-style="liquid-glass"] .ui-checkbox input:focus-visible + .ui-che
 }
 
 /* Switch: a 40×22 capsule whose white pill knob (24×18) rides on a soft
-   shadow; on, the track takes the accent. */
+   shadow; on, the track takes the accent. The button, track and focus ring
+   share the track's box so the rounded edge is one contour. */
+html[data-theme-style="liquid-glass"] .switch {
+  width: 40px;
+}
 html[data-theme-style="liquid-glass"] .switch-track {
   width: 40px;
   height: 22px;

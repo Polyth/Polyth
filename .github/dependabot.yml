@@ -8,6 +8,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # @types/node follows the declared runtime (.nvmrc / engines), not the
+    # newest Node; raise it together with .nvmrc.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
@@ -30,6 +35,16 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    # opaque-ke 4.0.1 (Link pairing) is built on digest 0.10 and rand_core
+    # 0.6: OsRng and Sha512 are passed straight into it, so these move only
+    # together with an opaque-ke release on the newer traits.
+    ignore:
+      - dependency-name: sha2
+        versions: [">=0.11"]
+      - dependency-name: hmac
+        versions: [">=0.13"]
+      - dependency-name: rand
+        versions: [">=0.9"]
     groups:
       cargo-minor-and-patch:
         update-types: [minor, patch]
@@ -40,6 +55,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    # The node image follows .nvmrc and the rust image follows
+    # rust-toolchain.toml; both majors/toolchains move with those files.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: rust
     groups:
       docker-images:
         patterns: ["*"]

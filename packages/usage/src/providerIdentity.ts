@@ -48,6 +48,7 @@ const KNOWN_HARNESSES: Readonly<Record<string, string>> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   commandcode: "Command Code",
+  copilot: "GitHub Copilot",
   cursor: "Cursor",
   fx: "FX",
   grok: "Grok Build",

@@ -419,22 +419,38 @@ function ledgerServer() {
   let ledgers: RemoteAlertLedgers = { host: null, space: null };
   const saves: RemoteAlertLedgersUpdate[] = [];
   let failLoads = 0;
+  let failSaves = 0;
+  let gate: Promise<void> | null = null;
   return {
     saves,
     get ledgers() { return ledgers; },
     failNextLoads(count: number) { failLoads = count; },
+    failNextSaves(count: number) { failSaves = count; },
+    /** Holds every write's answer until the returned release is called. */
+    holdSaves() {
+      let release!: () => void;
+      gate = new Promise((resolve) => { release = resolve; });
+      return () => { gate = null; release(); };
+    },
     store: {
       load: async () => {
         if (failLoads > 0) {
           failLoads -= 1;
           throw Object.assign(new Error("connection lost"), { status: 0 });
         }
-        return ledgers;
+        return { host: ledgers.host, space: ledgers.space };
       },
       save: async (update: RemoteAlertLedgersUpdate) => {
+        if (failSaves > 0) {
+          failSaves -= 1;
+          throw Object.assign(new Error("connection lost"), { status: 0 });
+        }
         saves.push(update);
+        const previous = { host: ledgers.host, space: ledgers.space };
         if (update.host) ledgers = { ...ledgers, host: ledgers.host ? mergeAlertLedgers(ledgers.host, update.host) : update.host };
-        return ledgers;
+        const answer = { host: ledgers.host, space: ledgers.space, previous };
+        if (gate) await gate;
+        return answer;
       },
     } satisfies NonNullable<UsageAlertsDeps["ledgerStore"]>,
   };
@@ -468,6 +484,61 @@ test("a relaunch with empty storage does not repeat an alert the person already 
   await settle();
   assert.deepEqual(later.shown.map((input) => input.title), ["Claude 5-hour limit reached"]);
   laterController.dispose();
+});
+
+test("two devices that judge the same limit at once show it only once", async () => {
+  // Both read the person's ledger before either wrote, e.g. both saw the turn stop.
+  const server = ledgerServer();
+  const desktop = harness();
+  const phone = harness();
+  for (const device of [desktop, phone]) device.setProviders([source([win({ used: 100 })])]);
+  const release = server.holdSaves();
+  const desktopController = createUsageAlerts({ ...desktop.deps, ledgerStore: server.store });
+  const phoneController = createUsageAlerts({ ...phone.deps, ledgerStore: server.store });
+  await settle();
+  assert.equal(server.saves.length, 2, "both claimed the announcement");
+  assert.equal(desktop.shown.length + phone.shown.length, 0, "nothing is on screen before the claim is answered");
+  release();
+  await settle();
+  assert.deepEqual(desktop.shown.map((input) => input.title), ["Claude 5-hour limit reached"], "the first claim shows it");
+  assert.equal(phone.shown.length, 0, "the second finds it announced");
+
+  // A later, lower reading on one device still reaches the person.
+  phone.setProviders([source([win({ used: 100, resetsAt: NOW + 7 * HOUR })])]);
+  await phoneController.check();
+  assert.deepEqual(phone.shown.map((input) => input.title), ["Claude 5-hour limit reached"], "a new period is news again");
+  desktopController.dispose();
+  phoneController.dispose();
+});
+
+test("a reopened app does not repeat an alert whose claim was answered", async () => {
+  const server = ledgerServer();
+  const first = harness();
+  first.setProviders([source([win({ used: 92 })])]);
+  const firstController = createUsageAlerts({ ...first.deps, ledgerStore: server.store });
+  await settle();
+  assert.equal(first.shown.length, 1);
+  firstController.dispose();
+  // Opened again straight away, on the same device or another one.
+  for (let open = 0; open < 2; open += 1) {
+    const again = harness();
+    again.setProviders([source([win({ used: 93 })])]);
+    const controller = createUsageAlerts({ ...again.deps, ledgerStore: server.store });
+    await settle();
+    assert.equal(again.shown.length, 0);
+    controller.dispose();
+  }
+});
+
+test("an alert whose claim cannot be written is still shown", async () => {
+  const server = ledgerServer();
+  server.failNextSaves(1);
+  const h = harness();
+  h.setProviders([source([win({ used: 100 })])]);
+  const controller = createUsageAlerts({ ...h.deps, ledgerStore: server.store });
+  await settle();
+  assert.deepEqual(h.shown.map((input) => input.title), ["Claude 5-hour limit reached"], "a missed limit notice costs more than a repeat");
+  controller.dispose();
 });
 
 test("a page waits for the person's ledger before it alerts", async () => {

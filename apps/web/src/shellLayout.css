@@ -53,6 +53,16 @@ body[data-shell-layout="bare"] .app:has(> .header[data-shell-bar="title"]) {
    the navigator. Its chat frame is still the workspace's own — centred in
    the whole workspace, as Chat centres itself — less the reserve on each
    side, so the title stays over the chat. */
+/* The reserves are lengths the bar can animate: a window that opens, leaves
+   or changes presentation moves the bar's end (and everything laid out from
+   it) on the window clock, instead of stepping it. */
+@property --shell-bar-reserve-left { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --shell-bar-reserve-right { syntax: "<length>"; inherits: true; initial-value: 0px; }
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app > .header {
+  transition:
+    --shell-bar-reserve-left var(--motion-window) var(--motion-window-ease),
+    --shell-bar-reserve-right var(--motion-window) var(--motion-window-ease);
+}
 body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app > .header {
   --shell-bar-pad-left: var(--space-3);
   --shell-bar-pad-right: var(--space-3);
@@ -84,18 +94,33 @@ body[data-shell-layout="columns"] .app > .header:not([data-top-rail-surface="flo
 /* Island: the bar is a transparent frame; its content is one glass capsule
    (the shared .ui-glass-island material) centred over the workspace. */
 body[data-shell-layout="columns"][data-shell-bar="island"] .app > .header {
-  /* The frame spans the whole workspace and pads symmetrically, so the
-     capsule centres on the chat column rather than on what the launcher
-     strip leaves of the workspace. */
-  --shell-bar-pad-left: calc(var(--space-4) + max(var(--shell-bar-reserve-left, 0px), var(--shell-bar-reserve-right, 0px)));
-  --shell-bar-pad-right: var(--shell-bar-pad-left);
+  /* The frame spans the whole workspace. Its two side tracks share what the
+     capsule leaves, so the capsule centres on the chat column rather than on
+     what the launcher strip leaves of the workspace; each track is at least
+     its side's reserve, so a floating window too wide for that moves the
+     capsule into the room beside it (and narrows it there) instead of
+     covering it. Symmetric padding of the larger reserve outgrew the bar
+     under a wide window and pushed the whole capsule beneath it. */
+  --shell-bar-pad-left: 0px;
+  --shell-bar-pad-right: 0px;
+  display: grid;
+  grid-template-columns:
+    minmax(calc(var(--space-4) + var(--shell-bar-reserve-left, 0px)), 1fr)
+    minmax(0, max-content)
+    minmax(calc(var(--space-4) + var(--shell-bar-reserve-right, 0px)), 1fr);
+  column-gap: 0;
   left: var(--shell-bar-left, 0px);
   right: var(--shell-bar-right, 0px);
-  justify-content: center;
   padding-block: 0;
   pointer-events: none;
 }
 .app > .header > .shell-island {
+  grid-column: 2;
+  /* The last resort, when even the narrowed capsule has less room than its
+     title and actions need: they end at its edge, not under the window.
+     Inline only: nothing here is taller than the capsule, and its menus are
+     portals. */
+  overflow-x: clip;
   pointer-events: auto;
   position: relative;
   display: flex;
@@ -112,6 +137,13 @@ body[data-shell-layout="columns"][data-shell-bar="island"] .app > .header {
   flex: none;
   max-width: none;
   gap: var(--space-1);
+}
+/* A capsule narrower than its content gives up the title's width first (it
+   shrinks a hundred times as fast, down to its minimum), then the tools and
+   tabs, which scroll in place (styles.css); the actions keep theirs. */
+.app > .header > .shell-island .header-left-cluster {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .shell-island .header-divider { display: none; }
 /* Inside the capsule every group shares the capsule's surface: no plates or
@@ -134,7 +166,7 @@ body[data-shell-layout="columns"][data-shell-bar="island"] .app > .header {
 .shell-island .desktop-session-status {
   position: relative;
   inset: auto;
-  flex: 0 1 auto;
+  flex: 0 100 auto;
   width: auto;
   min-width: calc(var(--control-h) * 3);
   max-width: calc(var(--chat-measure) * 0.6);
@@ -185,13 +217,24 @@ body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > 
    "2026 workspace shell"); the tablet band floats it as a cluster instead,
    so only the full-width strip takes the floating inset. */
 @container app-shell (min-width: 1401px) {
-  body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:not(.railbar-open) {
+  body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:not(.railbar-open):not([data-rail-motion="exiting"]) {
     inset-block: var(--shell-edge);
     inset-inline-end: var(--shell-edge);
   }
 }
-/* A pinned window joins the end column: in flow, with the same inset. */
-body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar.railbar-open:not(:has(> .rail-fullscreen)) {
+/* The tablet band's cluster morph (styles.css, rail-host-dock) starts from
+   the cluster's inset; this layout adds its own margin to an open host. */
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar {
+  --rail-host-inset: var(--shell-edge);
+  /* Where the launcher column starts, and where a full-window layer does
+     (below): the strip beside a layer stays on the column's line. */
+  --rail-column-top: var(--shell-edge);
+  --rail-layer-top: var(--shell-edge);
+}
+/* A pinned window joins the end column: in flow, with the same inset. A
+   leaving window keeps that box until it is gone, so nothing steps when the
+   departure starts. */
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(:has(> .rail-fullscreen)) {
   margin-block: var(--shell-edge);
   margin-inline-end: var(--shell-edge);
 }
@@ -202,7 +245,29 @@ body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > 
   inset-inline-end: var(--shell-edge);
 }
 body[data-shell-layout="columns"] .app-shell > .railbar:has(> .rail-fullscreen) {
+  --rail-layer-top: var(--shell-bar-block);
   top: var(--shell-bar-block);
+}
+/* The layer steps down for the bar; the launcher column does not. The strip
+   reaches back up to where it stands idle, beside the bar, so no launcher
+   moves as the layer opens or closes. */
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:has(> .rail-fullscreen) > .plugin-strip {
+  margin-block-start: calc(var(--rail-column-top) - var(--rail-layer-top));
+}
+/* Floating columns keep the launcher card's far edge and corners under the
+   layer, so the strip stands exactly where it does idle, and the layer is a
+   card too: it rounds both of its free corners. */
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:has(> .rail-fullscreen) {
+  border-inline-end: 1px solid transparent;
+  border-start-end-radius: min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface)))));
+  border-end-end-radius: min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface)))));
+}
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:has(> .rail-fullscreen) > .plugin-strip {
+  border-start-end-radius: inherit;
+  border-end-end-radius: inherit;
+}
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:has(> .rail-fullscreen) > .rail-fullscreen {
+  border-end-start-radius: var(--look-column-radius, var(--radius-surface));
 }
 
 /* Floating columns are cards: every corner rounded, and the launcher strip's
@@ -226,16 +291,48 @@ body[data-shell-floating="false"]:is([data-shell-layout="columns"], [data-shell-
 body[data-shell-floating="false"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar {
   --rail-strip-gutter-start: var(--space-2);
   --rail-strip-gutter-end: var(--space-2);
+  --rail-cluster-gutter: var(--space-2);
 }
 @container app-shell (min-width: 1401px) {
-  body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:not(.railbar-open) {
+  /* The card keeps its frame under a floating window (the window leaves the
+     host's box, styles.css): only the corners the window attaches to square. */
+  body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:not(:has(> .rail-fullscreen)):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) {
     border-inline-end-width: 1px;
-    border-radius: var(--radius-surface);
+    border-radius: min(var(--radius-surface), var(--rail-host-radius-cap, var(--radius-surface)));
+  }
+  body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar.railbar-open.railbar-dynamic {
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
   }
 }
-body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar.railbar-open > .plugin-strip {
-  border-start-end-radius: var(--radius-card);
-  border-end-end-radius: var(--radius-card);
+/* A window shares the card: the frame closes on the far side with the card's
+   own corners (the strip paints inside the frame's edge, so its corners are
+   the frame's less that edge: an inherited radius left a hairline crescent
+   in each), and a docked window rounds the two it brings. */
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(:has(> .rail-fullscreen)) > .plugin-strip {
+  border-start-end-radius: calc(min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))))) - 1px);
+  border-end-end-radius: calc(min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))))) - 1px);
+}
+/* A bottom or narrow dock re-grids the host across the workspace, but the
+   launcher card stays a card: the host keeps the far edge the strip stands
+   inside, and the strip draws it (the block edges are styles.css's). */
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:is(.railbar-dock-bottom, .railbar-pinned-narrow) {
+  border-inline-end-width: 1px;
+}
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:is(.railbar-dock-bottom, .railbar-pinned-narrow) > .rail-icon-col.plugin-strip {
+  box-shadow:
+    0 -1px 0 var(--rail-frame-line, var(--hair-solid)),
+    0 1px 0 var(--rail-frame-line, var(--hair-solid)),
+    calc(var(--stack-dir, 1) * 1px) 0 0 var(--rail-frame-line, var(--hair-solid));
+}
+/* The docked frame is as wide as its window, so the corners the window
+   brings round in full. */
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(.railbar-dynamic):not(:has(> .rail-fullscreen)):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) {
+  border-start-start-radius: var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))) !important;
+  border-end-start-radius: var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))) !important;
+}
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(.railbar-dynamic) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow) {
+  border-end-start-radius: calc(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))) - 1px);
 }
 /* A floating window spans the floating column, which never meets the
    window's edge: its foot rounds like its head. */
@@ -274,24 +371,51 @@ body[data-shell-floating="false"]:is([data-shell-layout="columns"], [data-shell-
 @container app-shell (min-width: 1401px) {
   /* Air and Obsidian start-align their classic strip as a short cluster;
      an absolutely placed box honours align-self, so stretch it back. */
-  body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:not(.railbar-open) {
+  body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:not(.railbar-open):not([data-rail-motion="exiting"]) {
     align-self: stretch !important;
     height: auto !important;
     margin: 0 !important;
   }
-  body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:not(.railbar-open) {
-    border-radius: var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))) !important;
+  body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:not(:has(> .rail-fullscreen)):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) {
+    border-radius: min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))))) !important;
   }
-  body[data-shell-floating="false"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:not(.railbar-open) {
+  body[data-shell-floating="false"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:not(:has(> .rail-fullscreen)):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) {
     border-start-end-radius: 0 !important;
     border-end-end-radius: 0 !important;
     border-start-start-radius: var(--look-rail-radius, var(--radius-surface)) !important;
     border-end-start-radius: var(--look-rail-radius, var(--radius-surface)) !important;
   }
+  body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar.railbar-open.railbar-dynamic {
+    border-start-start-radius: 0 !important;
+    border-end-start-radius: 0 !important;
+  }
 }
-body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar.railbar-open:not(:has(> .rail-fullscreen)) {
+@container app-shell (min-width: 961px) and (max-width: 1400px) {
+  /* The tablet band's cluster stands on its own inset (styles.css). An
+     island look's margins would add to it idle and drop as a window opens:
+     the cluster jumped sideways in the first frame of every arrival. */
+  body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:not(.railbar-open):not([data-rail-motion="exiting"]) {
+    margin: 0 !important;
+  }
+}
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(:has(> .rail-fullscreen)) {
   margin-block: var(--shell-edge) !important;
   margin-inline: 0 var(--shell-edge) !important;
+  /* The margins place the column; a look's own height (Line and Editorial
+     state 100%) would push it past the shell's foot by twice the edge. */
+  height: auto !important;
+}
+/* The layer is placed by its insets (above): a look's island margins would
+   move the launcher column as the layer opens. */
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:has(> .rail-fullscreen) {
+  margin: 0 !important;
+  height: auto !important;
+}
+/* And the launcher card keeps its far corners beside it: a look that squares
+   its flush column (Line, Editorial) squared the floating card too. */
+body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell > .railbar:has(> .rail-fullscreen) {
+  border-start-end-radius: min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))))) !important;
+  border-end-end-radius: min(var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))), var(--rail-host-radius-cap, var(--look-strip-radius, var(--look-column-radius, var(--radius-surface))))) !important;
 }
 
 /* ---- the navigator column: docked groups, account -------------------------- */
@@ -376,6 +500,10 @@ body:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app
   background: var(--surface-divider);
 }
 .shell-dock--actions[data-orientation="vertical"]::after { content: none; }
+/* The project rail spaces every tile one Icon spacing apart; a docked group
+   there needs no seam on top of that. */
+.sidebar-project-rail > .shell-dock[data-orientation="vertical"]::before,
+.sidebar-project-rail > .shell-dock[data-orientation="vertical"]::after { content: none; }
 /* In the launcher strip, actions settle at its foot. */
 .plugin-strip > .shell-dock--actions { margin-block-start: auto; padding-block-end: var(--space-1); }
 .plugin-strip > .shell-dock--tools { padding-block-start: var(--space-1); }
@@ -471,9 +599,20 @@ body.desktop-app:is([data-shell-layout="columns"], [data-shell-layout="bare"]):n
   margin-block-start: var(--desktop-caption-band) !important;
 }
 /* The navigator under the zone: its content starts where the band ends. */
-body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(ltr) > .sidebar,
-body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(rtl) > .sidebar {
+body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(ltr) > .sidebar:not(.collapsed, .sidebar--rail-collapsed),
+body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(rtl) > .sidebar:not(.collapsed, .sidebar--rail-collapsed) {
   padding-block-start: calc(var(--desktop-caption-h) - var(--shell-edge));
+}
+/* A collapsed navigator (46–49 px) is narrower than the zone it sits under —
+   the traffic lights alone span 18–70 px, Polyth's Linux cluster 124 px, the
+   Windows overlay 138 px — so the caption controls would straddle its edge,
+   half on the card and half off it. Like the launcher column, it starts
+   below the band, level with the workspace, and the band above it stays one
+   clear title bar the controls sit on, as in a native window whose sidebar
+   is hidden. The step glides with the width (.sidebar--animate-width). */
+body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(ltr) > .sidebar:is(.collapsed, .sidebar--rail-collapsed),
+body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(rtl) > .sidebar:is(.collapsed, .sidebar--rail-collapsed) {
+  margin-block-start: var(--desktop-caption-band) !important;
 }
 /* The navigator away from the zone keeps the title bar's drag band and no
    more: where the caption band reaches lower (Floating columns, the island)
@@ -494,8 +633,8 @@ body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], 
    window's host (in flow when pinned, an overlay when floating — the margin
    moves both), the full-height idle strip, and the tablet band's cluster.
    At the restated column geometry's id strength, above every look. */
-body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(ltr) > .railbar.railbar-open:not(.railbar-dock-bottom):not(.railbar-pinned-narrow):not(:has(> .rail-fullscreen)),
-body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(rtl) > .railbar.railbar-open:not(.railbar-dock-bottom):not(.railbar-pinned-narrow):not(:has(> .rail-fullscreen)) {
+body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(ltr) > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow):not(:has(> .rail-fullscreen)),
+body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(rtl) > .railbar:is(.railbar-open, [data-rail-motion="exiting"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow):not(:has(> .rail-fullscreen)) {
   margin-block-start: var(--desktop-caption-band) !important;
 }
 /* A bottom or narrow dock re-grids the host across the workspace column at
@@ -511,8 +650,8 @@ body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], 
 }
 @container app-shell (min-width: 1401px) {
   /* (A closing bottom or narrow dock keeps its relative host in the grid.) */
-  body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(ltr) > .railbar:not(.railbar-open):not(.railbar-dock-bottom):not(.railbar-pinned-narrow),
-  body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(rtl) > .railbar:not(.railbar-open):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) {
+  body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(ltr) > .railbar:not(.railbar-open):not([data-rail-motion="exiting"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow),
+  body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\#) .app-shell:dir(rtl) > .railbar:not(.railbar-open):not([data-rail-motion="exiting"]):not(.railbar-dock-bottom):not(.railbar-pinned-narrow) {
     inset-block-start: var(--desktop-caption-band) !important;
   }
 }
@@ -545,7 +684,14 @@ body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], 
 /* The full-window layer spans the workspace on either side, so it always
    leaves the band (and with it the bar) to the window. */
 body.desktop-app:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell > .railbar:has(> .rail-fullscreen) {
+  --rail-layer-top: var(--desktop-caption-band);
   top: var(--desktop-caption-band);
+}
+/* Under the caption zone the launcher column starts below the band too (the
+   rules above), so there the strip beside a layer has nowhere to reach. */
+body.desktop-app[data-desktop-caption="right"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(ltr) > .railbar,
+body.desktop-app[data-desktop-caption="left"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app-shell:dir(rtl) > .railbar {
+  --rail-column-top: var(--desktop-caption-band);
 }
 /* Without a title the bare workspace still leaves the band to the window. */
 body.desktop-app[data-shell-layout="bare"] .app {

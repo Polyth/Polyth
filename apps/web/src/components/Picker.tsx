@@ -266,15 +266,20 @@ export default function Picker({
             />
           )}
           <div role="listbox" aria-label={label} aria-multiselectable={multi || undefined}>
-            {shown.map((it) => (
-              <SheetRow
-                key={it.id || "(default)"}
-                title={it.label}
-                {...(itemIcon ? { icon: itemIcon(it) } : {})}
-                {...(it.detail ? { meta: it.detail } : {})}
-                selected={isCurrent(it.id)}
-                onClick={() => pick(it.id)}
-              />
+            {shown.map((it, n) => (
+              <Fragment key={it.id || "(default)"}>
+                {/* Same group headings as the popover, so a grouped list reads alike on a phone. */}
+                {it.group !== "" && (n === 0 || shown[n - 1]!.group !== it.group) && (
+                  <div className="picker-group" role="presentation">{it.group}</div>
+                )}
+                <SheetRow
+                  title={it.label}
+                  {...(itemIcon ? { icon: itemIcon(it) } : {})}
+                  {...(it.detail ? { meta: it.detail } : {})}
+                  selected={isCurrent(it.id)}
+                  onClick={() => pick(it.id)}
+                />
+              </Fragment>
             ))}
             {shown.length === 0 && (
               <p className="sheet-empty">

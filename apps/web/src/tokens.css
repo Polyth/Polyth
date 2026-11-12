@@ -67,6 +67,7 @@
   --accent-ink: #0a0f1a;
   --accent-hi: #8fb3ff;
   --accent-text: #7aa2f7;
+  --accent-on-wash: #7aa2f7;
   --accent-wash: rgba(122, 162, 247, 0.13);
   --accent-line: rgba(122, 162, 247, 0.32);
   --focus-wash: rgba(122, 162, 247, 0.1);
@@ -184,6 +185,14 @@
   --composer-stack-control: 26px;
   --composer-stack-reach: calc(max(var(--composer-stack-row), var(--hit-min)) - var(--composer-stack-row));
 
+  /* Navigator highlight pill: the air between a pill's edge and the content
+     it frames (state mark or title at the start, the last mark at the end),
+     the same on both sides. Desktop pills grow outward into the list gutters
+     to reach it, so no title or mark moves; 10px is the most the trailing
+     side affords (8px gutter, marks 4px inside the row, 2px kept clear of
+     the scrollbar). The phone row fill reaches it within its own edge. */
+  --nav-pill-air: 10px;
+
   /* icon size scale (UI action glyphs) */
   --icon-sm: 16px;
   --icon-md: 18px;
@@ -228,8 +237,12 @@
      at every setting: spinners, avatars, radios, status dots. */
   --radius-round: max(calc(14px * var(--corner-radius-scale)), var(--radius-max-pill));
   --radius-circle: 999px;
-  /* A switch track and its thumb square together, on every platform style. */
-  --radius-switch: calc(5.6px * var(--corner-radius-scale));
+  /* A switch track and its thumb: full at the default rounding and at the
+     last notch, and they square together as Rounding drops. 6.25px only
+     becomes the track half-height at the default 1.8 scale; the max floor
+     keeps the switch in the shared last-notch geometry instead of freezing at
+     its own smaller radius. */
+  --radius-switch: max(calc(6.25px * var(--corner-radius-scale)), var(--radius-max-pill));
 
   /* Deprecated radius aliases. Do not use in new CSS. */
   --radius: var(--radius-control);

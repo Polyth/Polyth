@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import type { ModelDescriptor, ModelRef, Project } from "@polyth/contracts";
 import ModelPicker from "@polyth/models/model-picker";
 import { readHarnessSnapshots } from "@polyth/models/runtime-catalog";
@@ -13,6 +13,7 @@ import MyNotes, { type Notify } from "./MyNotes.tsx";
 import ReflectPanel from "./ReflectPanel.tsx";
 import { reflectStrings } from "./reflectStrings.ts";
 import { englishTranslate, enumLabel, type Translate } from "./i18n.ts";
+import { ActionMenu, Btn, Check, Choice, Glyph, TabPane, TabStrip, TextArea, TextField, type MenuItem } from "./ui.tsx";
 
 type Context = {
   projectId: string;
@@ -91,7 +92,41 @@ function WithProject({ template, name }: { template: string; name: string }) {
   return <>{parts.map((part, index) => index === 0 ? part : <Fragment key={index}><strong>{name}</strong>{part}</Fragment>)}</>;
 }
 
-export default function MemorySettings({ projectId, project, mobile, locale, translate, notify, onBack, onClose }: Context) {
+/** One settings line: what it is on the left, its control on the right; the
+ *  control drops under the text in a narrow container. */
+function Setting({ label, hint, children, plain, narrow }: { label: string; hint?: string; children: ReactNode; plain?: boolean; narrow?: boolean }) {
+  const Tag = plain ? "div" : "label";
+  return (
+    <Tag className={hint ? "memory-setting memory-setting--hinted" : "memory-setting"}>
+      <span className="memory-setting-copy">
+        <span className="memory-setting-label">{label}</span>
+        {hint && <span className="memory-setting-hint">{hint}</span>}
+      </span>
+      <span className={narrow ? "memory-setting-control memory-setting-control--narrow" : "memory-setting-control"}>{children}</span>
+    </Tag>
+  );
+}
+
+/** A number that is saved once: on Enter or when the field is left, not on
+ *  every digit typed. */
+function NumberSetting({ label, value, min, max, disabled, onCommit }: { label: string; value: number; min: number; max: number; disabled?: boolean; onCommit(value: number): void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => {
+    const next = Math.max(min, Math.min(max, Math.round(Number(draft)) || min));
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
+  };
+  return (
+    <Setting label={label} narrow>
+      <TextField type="number" inputMode="numeric" className="memory-number" value={draft} onChange={setDraft} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") commit(); }} {...(disabled ? { disabled } : {})} />
+    </Setting>
+  );
+}
+
+type Tab = "records" | "rules" | "settings";
+
+export default function MemorySettings({ projectId, project, mobile, locale, translate, notify, onBack }: Context) {
   const [items, setItems] = useState<MemoryListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -110,6 +145,10 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
   const [notice, setNotice] = useState("");
   const [error, setError] = useState<{ kind: string; message: string } | null>(null);
   const [importStage, setImportStage] = useState<ImportStage | null>(null);
+  const [tab, setTab] = useState<Tab>("records");
+  const [selecting, setSelecting] = useState(false);
+  const [pendingRules, setPendingRules] = useState(0);
+  const tabsId = useId();
   const generation = useRef(0);
   const filterEpoch = useRef(0);
   const controller = useRef<AbortController | null>(null);
@@ -119,6 +158,9 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
   const count = (value: number): string => number.format(value);
   const label = (prefix: "memory.category" | "memory.lifecycle", value: string): string => enumLabel(t, prefix, value);
   const errorOf = (cause: unknown) => memoryError(cause, t);
+  // A passing result belongs to the host's notification stack; without a host
+  // it stays on the page.
+  const announce = (text: string) => { if (notify) notify({ kind: "success", title: text }); else setNotice(text); };
 
   useEffect(() => {
     let live = true;
@@ -184,7 +226,7 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
     try {
       const result = await action();
       if (requestProjectId !== projectId || requestGeneration !== generation.current) return;
-      if (done) setNotice(typeof done === "function" ? done(result) : done);
+      if (done) announce(typeof done === "function" ? done(result) : done);
       await load(offset);
     }
     catch (cause) {
@@ -249,7 +291,6 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
         return;
       }
       setBulkRecords(page.items); setSelectedIds(page.items.map((item) => item.id)); setSelectionFilter(filter);
-      setNotice(t("memory.notice.selectedAll", { project: project.name, count: count(page.total) }));
     } catch (cause) {
       if (requestGeneration === generation.current) setError(errorOf(cause));
     } finally {
@@ -299,7 +340,7 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
     if (dirty && !window.confirm(t("memory.confirm.discardDraft"))) return;
     setSelected(null); action();
   };
-  const close = () => leave(onClose);
+  const stopSelecting = () => { setSelecting(false); setSelectedIds([]); setBulkRecords([]); setSelectionFilter(""); };
 
   const updatePolicy = (patch: Partial<Omit<MemoryPolicy, "utilityBudget">> & { utilityBudget?: { maxCalls: number } }) => {
     if (!policy) return;
@@ -360,6 +401,7 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
     void file.text().then((contents) => {
       const records = parseImport(contents, t);
       setImportStage({ name: file.name, records, mode: "merge", preview: null, recoveryReady: false });
+      setTab("records");
       setError(null); setNotice("");
     }).catch((cause) => setError(errorOf(cause)));
   };
@@ -405,164 +447,273 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
   const budgetBytes = Math.max(512, Math.min(RECALL_BYTES, policy?.contextBudget.maxBytes ?? RECALL_BYTES));
   const modeLabel = (mode: "merge" | "replace"): string =>
     t(mode === "merge" ? "memory.import.modeMerge" : "memory.import.modeReplace");
+  const retryable = error && ["offline", "unavailable", "busy", "corrupt"].includes(error.kind);
 
   if (selected) {
+    const field = (name: keyof Omit<Editor, "id" | "revision">, labelKey: string, placeholderKey?: string) => (
+      <label className="memory-field">
+        <span>{t(labelKey)}</span>
+        <TextField value={selected[name]} onChange={(value) => setSelected({ ...selected, [name]: value })} {...(placeholderKey ? { placeholder: t(placeholderKey) } : {})} />
+      </label>
+    );
     return (
       <div className="pkg-memory memory-page memory-editor-page">
-        <div className="memory-page-head memory-editor-head">
-          <button type="button" className="memory-link-button" onClick={() => leave(() => undefined)} disabled={busy}>{t("memory.back")}</button>
+        <div className="memory-page-head">
+          <Btn variant="ghost" icon="back" onClick={() => leave(() => undefined)} disabled={busy}>{t("memory.back")}</Btn>
           <span className="memory-draft-state">{selected.id ? t("memory.editor.revision", { revision: count(selected.revision) }) : t("memory.new")}</span>
-          <button type="button" className="memory-button memory-button-primary" onClick={save} disabled={busy || writesBlocked || !selected.title.trim() || !selected.body.trim()}>{t("memory.save")}</button>
+          <Btn variant="primary" onClick={save} disabled={busy || writesBlocked || !selected.title.trim() || !selected.body.trim()}>{t("memory.save")}</Btn>
         </div>
         {error && <ErrorNotice {...error} />}
-        {error?.kind === "conflict" && <button type="button" className="memory-button" onClick={() => { setSelected(null); setError(null); void load(offset); }}>{t("memory.action.reload")}</button>}
-        {error && ["offline", "unavailable", "busy", "corrupt"].includes(error.kind) && <button type="button" className="memory-button" onClick={() => { setError(null); void load(offset); }}>{t("memory.retry")}</button>}
-        <label className="memory-field">{t("memory.field.title")}<input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} autoFocus /></label>
-        <label className="memory-field">{t("memory.field.body")}<textarea value={selected.body} onChange={(event) => setSelected({ ...selected, body: event.target.value })} rows={mobile ? 9 : 12} /></label>
+        {error?.kind === "conflict" && <div className="memory-actions"><Btn onClick={() => { setSelected(null); setError(null); void load(offset); }}>{t("memory.action.reload")}</Btn></div>}
+        {retryable && <div className="memory-actions"><Btn onClick={() => { setError(null); void load(offset); }}>{t("memory.retry")}</Btn></div>}
+        {field("title", "memory.field.title")}
+        <label className="memory-field">
+          <span>{t("memory.field.body")}</span>
+          <TextArea value={selected.body} onChange={(body) => setSelected({ ...selected, body })} rows={mobile ? 9 : 12} />
+        </label>
         <div className="memory-field-grid">
-          <label className="memory-field">{t("memory.field.category")}<select value={selected.category} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option value="decision">{t("memory.category.decision")}</option><option value="convention">{t("memory.category.convention")}</option><option value="gotcha">{t("memory.category.gotcha")}</option><option value="procedure">{t("memory.category.procedure")}</option><option value="observation">{t("memory.category.observation")}</option></select></label>
-          <label className="memory-field">{t("memory.field.tags")}<input value={selected.tags} onChange={(event) => setSelected({ ...selected, tags: event.target.value })} placeholder={t("memory.field.commaSeparated")} /></label>
-          <label className="memory-field">{t("memory.field.aliases")}<input value={selected.aliases} onChange={(event) => setSelected({ ...selected, aliases: event.target.value })} placeholder={t("memory.field.commaSeparated")} /></label>
-          <label className="memory-field">{t("memory.field.appliesTo")}<input value={selected.applicability} onChange={(event) => setSelected({ ...selected, applicability: event.target.value })} placeholder={t("memory.field.pathsOrContexts")} /></label>
+          <label className="memory-field">
+            <span>{t("memory.field.category")}</span>
+            <Choice
+              label={t("memory.field.category")}
+              value={selected.category}
+              onChange={(category) => setSelected({ ...selected, category })}
+              options={["decision", "convention", "gotcha", "procedure", "observation"].map((value) => ({ value, label: t(`memory.category.${value}`) }))}
+            />
+          </label>
+          {field("tags", "memory.field.tags", "memory.field.commaSeparated")}
+          {field("aliases", "memory.field.aliases", "memory.field.commaSeparated")}
+          {field("applicability", "memory.field.appliesTo", "memory.field.pathsOrContexts")}
         </div>
-        <label className="memory-field">{t("memory.field.sources")}<input value={selected.sources} onChange={(event) => setSelected({ ...selected, sources: event.target.value })} placeholder={t("memory.field.sourceReferences")} /></label>
+        {field("sources", "memory.field.sources", "memory.field.sourceReferences")}
         <p className="memory-help">{t("memory.editor.help")}</p>
       </div>
     );
   }
 
+  const act = (item: MemoryListItem, action: "review" | "pin" | "lock" | "unlock" | "archive" | "forget", done: string) =>
+    void run(() => memoryApi.action(projectId, item.id, action, item.revision), t(done));
+  const rowMenu = (item: MemoryListItem): Array<MenuItem | "separator"> => [
+    { id: "edit", label: t("memory.mine.edit"), onSelect: () => open(item) },
+    { id: "review", label: t("memory.action.markReviewed"), disabled: writesBlocked, onSelect: () => act(item, "review", "memory.notice.reviewed") },
+    { id: "pin", label: t(item.pinned ? "memory.action.unpin" : "memory.action.pin"), disabled: writesBlocked, onSelect: () => act(item, "pin", item.pinned ? "memory.notice.unpinned" : "memory.notice.pinned") },
+    { id: "lock", label: t(item.userLocked ? "memory.action.unlock" : "memory.action.lock"), disabled: writesBlocked, onSelect: () => act(item, item.userLocked ? "unlock" : "lock", item.userLocked ? "memory.notice.unlocked" : "memory.notice.locked") },
+    { id: "archive", label: t("memory.action.archive"), disabled: writesBlocked || item.lifecycle === "archived" || item.lifecycle === "forgotten", onSelect: () => act(item, "archive", "memory.notice.archived") },
+    "separator",
+    {
+      id: "forget", label: t("memory.action.forget"), danger: true, disabled: writesBlocked || item.lifecycle === "forgotten",
+      onSelect: () => { if (window.confirm(t("memory.confirm.forgetOne", { title: item.title, project: project.name }))) act(item, "forget", "memory.notice.forgotten"); },
+    },
+  ];
+  // What a row says under its text: only what sets the record apart. An
+  // active record of unknown age needs no label for either.
+  const facts = (item: MemoryListItem): Array<{ key: string; text: string; strong?: boolean }> => [
+    ...(item.pinned ? [{ key: "pinned", text: t("memory.card.pinned"), strong: true }] : []),
+    { key: "category", text: label("memory.category", item.category) },
+    ...(item.lifecycle !== "active" ? [{ key: "lifecycle", text: label("memory.lifecycle", item.lifecycle) }] : []),
+    ...(item.userLocked ? [{ key: "locked", text: t("memory.card.locked") }] : []),
+    ...(item.freshness && item.freshness !== "current" && item.freshness !== "unknown" ? [{ key: "freshness", text: item.freshness }] : []),
+  ];
+  const lifecycles = ["candidate", "active", "archived", "superseded", "forgotten"];
+  const pickImport = () => importRef.current?.click();
+  const startNew = () => { const next = { ...EMPTY }; setSelected(next); setEditorBaseline(editorKey(next)); };
+
   return (
     <div className="pkg-memory memory-page">
       <div className="memory-page-head">
-        <div>
-          <button type="button" className="memory-link-button" onClick={onBack}>{t("memory.back")}</button>
-          <h2>{t("memory.heading")}</h2>
-          <p><WithProject template={t("memory.intro")} name={project.name} /></p>
-        </div>
-        <button type="button" className="memory-button memory-button-primary" onClick={() => { const next = { ...EMPTY }; setSelected(next); setEditorBaseline(editorKey(next)); }} disabled={writesBlocked}>{t("memory.new")}</button>
+        <Btn variant="ghost" icon="back" onClick={onBack}>{t("memory.back")}</Btn>
+        <Btn variant="primary" icon="plus" onClick={startNew} disabled={writesBlocked}>{t("memory.new")}</Btn>
       </div>
+      <p className="memory-intro"><WithProject template={t("memory.intro")} name={project.name} /></p>
+      <TabStrip
+        idBase={tabsId}
+        label={t("memory.name")}
+        value={tab}
+        onChange={(id) => setTab(id as Tab)}
+        tabs={[
+          { id: "records", label: t("memory.records.heading") },
+          ...(writesBlocked ? [] : [{
+            id: "rules",
+            label: pendingRules > 0
+              ? <span className="memory-tab-count">{t("memory.tab.rules")}<span className="memory-count">{count(pendingRules)}</span></span>
+              : t("memory.tab.rules"),
+          }]),
+          { id: "settings", label: t("memory.tab.settings") },
+        ]}
+      />
       {error && <ErrorNotice {...error} />}
       {notice && <div className="memory-notice memory-notice-success" role="status">{notice}</div>}
-      {loading && <div className="memory-loading" role="status">{t("memory.loading")}</div>}
       {error?.kind === "forbidden" && <p className="memory-help">{t("memory.help.readOnly")}</p>}
       {error?.kind === "unavailable" && <p className="memory-help">{t("memory.help.unavailable")}</p>}
       {error?.kind === "busy" && <p className="memory-help">{t("memory.help.busy")}</p>}
       {error?.kind === "corrupt" && <p className="memory-help">{t("memory.help.corrupt")}</p>}
+      <input ref={importRef} type="file" accept="application/json" hidden aria-label={t("memory.import.fileAria")} onChange={importFile} />
 
-      {!writesBlocked && <ReflectPanel projectId={projectId} project={project} strings={reflectStrings(locale)} memoryOff={policy?.mode === "off"} onMemoryChanged={() => void load(offset)} />}
-
-      <MyNotes projectId={projectId} project={project} translate={t} notify={notify} />
-
-      <section className="memory-section" aria-labelledby="memory-records-heading">
-        <div className="memory-section-head">
-          <div><h3 id="memory-records-heading">{t("memory.records.heading")}</h3><p>{t("memory.records.description")}</p></div>
-          <div className="memory-actions">
-            <button type="button" className="memory-button" onClick={() => void download()} disabled={busy}>{t("memory.export")}</button>
-            <button type="button" className="memory-button" onClick={() => importRef.current?.click()} disabled={busy || writesBlocked}>{t("memory.action.stageImport")}</button>
-            <input ref={importRef} type="file" accept="application/json" hidden aria-label={t("memory.import.fileAria")} onChange={importFile} />
-          </div>
-        </div>
-        <div className="memory-filters">
-          <label className="memory-search">{t("memory.search.label")}<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("memory.search.placeholder")} /></label>
-          <label className="memory-select">{t("memory.filter.lifecycle")}<select value={lifecycle} onChange={(event) => setLifecycle(event.target.value)}><option value="">{t("memory.lifecycle.all")}</option><option value="candidate">{t("memory.lifecycle.candidate")}</option><option value="active">{t("memory.lifecycle.active")}</option><option value="archived">{t("memory.lifecycle.archived")}</option><option value="superseded">{t("memory.lifecycle.superseded")}</option><option value="forgotten">{t("memory.lifecycle.forgotten")}</option></select></label>
-        </div>
-        {importStage && (
-          <div className="memory-import-stage" role="region" aria-label={t("memory.import.regionAria")}>
-            <strong>{t("memory.import.staged", { name: importStage.name })}</strong>
-            <span>{t("memory.import.count", { count: count(importStage.records.length), project: project.name })}</span>
-            <label className="memory-select">{t("memory.import.mode")}<select value={importStage.mode} onChange={(event) => setImportStage({ ...importStage, mode: event.target.value as "merge" | "replace", preview: null, recoveryReady: false })}><option value="merge">{t("memory.import.mergeOption")}</option><option value="replace">{t("memory.import.replaceOption")}</option></select></label>
-            <div className="memory-actions">
-              <button type="button" className="memory-button" onClick={previewImport} disabled={busy || !policy}>{t("memory.action.preview", { mode: modeLabel(importStage.mode) })}</button>
-              {importStage.mode === "replace" && <button type="button" className="memory-button" onClick={() => void download(true)} disabled={busy}>{t("memory.action.downloadRecovery")}</button>}
-              {importStage.preview && <button type="button" className="memory-button memory-button-primary" onClick={commitImport} disabled={busy || importStage.preview.invalid > 0 || (importStage.mode === "replace" && !importStage.recoveryReady)}>{t("memory.action.confirm", { mode: modeLabel(importStage.mode) })}</button>}
-              <button type="button" className="memory-button" onClick={() => setImportStage(null)} disabled={busy}>{t("memory.cancel")}</button>
-            </div>
-            {importStage.preview && <p className="memory-help">{t("memory.import.previewHelp", { duplicates: count(importStage.preview.duplicates), conflicts: count(importStage.preview.conflicts), invalid: count(importStage.preview.invalid) })}</p>}
+      <TabPane idBase={tabsId} id="records" active={tab === "records"}>
+        {policy?.mode === "off" && (
+          <div className="memory-notice memory-notice-info memory-off" role="note">
+            <span>{t("memory.off.notice")}</span>
+            <Btn onClick={() => setTab("settings")}>{t("memory.tab.settings")}</Btn>
           </div>
         )}
-        <div className="memory-bulk-bar">
-          <div className="memory-actions">
-            <label className="memory-check"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={busy || !items.length} /> {t("memory.bulk.selectVisible", { max: count(MAX_PAGE) })}</label>
-            <button type="button" className="memory-button" onClick={() => void selectAllFiltered()} disabled={busy || writesBlocked || !total}>{t("memory.action.selectAll", { count: count(Math.min(total, MAX_BULK)) })}</button>
-            <span className="memory-help">{t("memory.bulk.summary", { total: count(total), max: count(MAX_BULK) })}</span>
+        <section className="memory-records" aria-label={t("memory.records.heading")}>
+          <div className="memory-toolbar">
+            <div className="memory-search ui-field-well">
+              <Glyph name="search" />
+              <TextField type="search" className="memory-search-input" value={query} onChange={setQuery} placeholder={t("memory.search.placeholder")} aria-label={t("memory.search.label")} />
+            </div>
+            <div className="memory-toolbar-end">
+              <Choice
+                label={t("memory.filter.lifecycle")}
+                value={lifecycle}
+                onChange={setLifecycle}
+                align="end"
+                options={[{ value: "", label: t("memory.lifecycle.all") }, ...lifecycles.map((value) => ({ value, label: t(`memory.lifecycle.${value}`) }))]}
+              />
+              <ActionMenu
+                label={t("memory.action.more")}
+                entries={[
+                  { id: "select", label: t("memory.action.select"), disabled: writesBlocked || !items.length, onSelect: () => setSelecting(true) },
+                  "separator",
+                  { id: "export", label: t("memory.export"), disabled: busy, onSelect: () => void download() },
+                  { id: "import", label: t("memory.action.stageImport"), disabled: busy || writesBlocked, onSelect: pickImport },
+                ]}
+              />
+            </div>
           </div>
-          {selectedIds.length > 0 && (
-            <div className="memory-actions">
-              <span className="memory-help">{t("memory.bulk.selected", { project: project.name, count: count(selectedIds.length) })}</span>
-              <button type="button" className="memory-button" onClick={() => bulkAction("archive")} disabled={busy || writesBlocked}>{t("memory.action.archiveSelected")}</button>
-              <button type="button" className="memory-button memory-button-danger" onClick={() => bulkAction("forget")} disabled={busy || writesBlocked}>{t("memory.action.forgetSelected")}</button>
+          {importStage && (
+            <div className="memory-import-stage" role="region" aria-label={t("memory.import.regionAria")}>
+              <div className="memory-import-copy">
+                <strong>{t("memory.import.staged", { name: importStage.name })}</strong>
+                <span>{t("memory.import.count", { count: count(importStage.records.length), project: project.name })}</span>
+              </div>
+              <Choice
+                label={t("memory.import.mode")}
+                value={importStage.mode}
+                onChange={(mode) => setImportStage({ ...importStage, mode: mode as "merge" | "replace", preview: null, recoveryReady: false })}
+                options={[{ value: "merge", label: t("memory.import.mergeOption") }, { value: "replace", label: t("memory.import.replaceOption") }]}
+              />
+              {importStage.preview && <p className="memory-help">{t("memory.import.previewHelp", { duplicates: count(importStage.preview.duplicates), conflicts: count(importStage.preview.conflicts), invalid: count(importStage.preview.invalid) })}</p>}
+              <div className="memory-actions">
+                {importStage.preview
+                  ? <Btn variant="primary" onClick={commitImport} disabled={busy || importStage.preview.invalid > 0 || (importStage.mode === "replace" && !importStage.recoveryReady)}>{t("memory.action.confirm", { mode: modeLabel(importStage.mode) })}</Btn>
+                  : <Btn variant="primary" onClick={previewImport} disabled={busy || !policy}>{t("memory.action.preview", { mode: modeLabel(importStage.mode) })}</Btn>}
+                {importStage.mode === "replace" && <Btn onClick={() => void download(true)} disabled={busy}>{t("memory.action.downloadRecovery")}</Btn>}
+                <Btn variant="ghost" onClick={() => setImportStage(null)} disabled={busy}>{t("memory.cancel")}</Btn>
+              </div>
             </div>
           )}
-        </div>
-        <div className="memory-list" aria-live="polite">
-          {items.length === 0 && !loading ? <p className="memory-empty">{query ? t("memory.empty.noMatch") : t("memory.empty.none")}</p> : items.map((item) => (
-            <article className="memory-card" key={item.id}>
-              <div className="memory-card-main">
-                <label className="memory-card-select"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggleSelected(item.id)} disabled={busy} aria-label={t("memory.card.select", { title: item.title })} /></label>
-                <div className="memory-card-title">
-                  <strong>{item.title}</strong>
-                  {item.pinned && <span className="memory-badge">{t("memory.card.pinned")}</span>}
-                  {item.userLocked && <span className="memory-badge">{t("memory.card.locked")}</span>}
-                </div>
-                <p>{item.snippet}</p>
-                <div className="memory-meta">
-                  <span>{label("memory.category", item.category)}</span>
-                  <span>{label("memory.lifecycle", item.lifecycle)}</span>
-                  <span>{item.freshness}</span>
-                  <span>{t("memory.card.revision", { revision: count(item.revision) })}</span>
-                </div>
+          {selecting && (
+            <div className="memory-bulk-bar" role="group" aria-label={t("memory.action.select")}>
+              <div className="memory-bulk-pick">
+                <Check checked={allVisibleSelected} onChange={toggleVisible} disabled={busy || !items.length} label={t("memory.bulk.selectVisible")} />
+                {total > items.length && <Btn variant="ghost" onClick={() => void selectAllFiltered()} disabled={busy || writesBlocked || !total}>{t("memory.action.selectAll", { count: count(Math.min(total, MAX_BULK)) })}</Btn>}
+                <Btn variant="ghost" onClick={stopSelecting} disabled={busy}>{t("memory.action.done")}</Btn>
               </div>
-              <div className="memory-card-actions">
-                <button type="button" className="memory-button" onClick={() => open(item)} disabled={busy}>{t("memory.review")}</button>
-                <button type="button" className="memory-button" onClick={() => void run(() => memoryApi.action(projectId, item.id, "review", item.revision), t("memory.notice.reviewed"))} disabled={busy || writesBlocked}>{t("memory.action.markReviewed")}</button>
-                <button type="button" className="memory-button" onClick={() => void run(() => memoryApi.action(projectId, item.id, "pin", item.revision), t(item.pinned ? "memory.notice.unpinned" : "memory.notice.pinned"))} disabled={busy || writesBlocked}>{item.pinned ? t("memory.action.unpin") : t("memory.action.pin")}</button>
-                <button type="button" className="memory-button" onClick={() => void run(() => memoryApi.action(projectId, item.id, item.userLocked ? "unlock" : "lock", item.revision), t(item.userLocked ? "memory.notice.unlocked" : "memory.notice.locked"))} disabled={busy || writesBlocked}>{item.userLocked ? t("memory.action.unlock") : t("memory.action.lock")}</button>
-                <button type="button" className="memory-button" onClick={() => void run(() => memoryApi.action(projectId, item.id, "archive", item.revision), t("memory.notice.archived"))} disabled={busy || writesBlocked || item.lifecycle === "archived" || item.lifecycle === "forgotten"}>{t("memory.action.archive")}</button>
-                <button type="button" className="memory-button memory-button-danger" onClick={() => { if (window.confirm(t("memory.confirm.forgetOne", { title: item.title, project: project.name }))) void run(() => memoryApi.action(projectId, item.id, "forget", item.revision), t("memory.notice.forgotten")); }} disabled={busy || writesBlocked || item.lifecycle === "forgotten"}>{t("memory.action.forget")}</button>
+              <div className="memory-bulk-act">
+                <span className="memory-bulk-count" aria-live="polite">{t("memory.bulk.selected", { count: count(selectedIds.length) })}</span>
+                <Btn onClick={() => bulkAction("archive")} disabled={busy || writesBlocked || !selectedIds.length}>{t("memory.action.archive")}</Btn>
+                <Btn variant="danger" onClick={() => bulkAction("forget")} disabled={busy || writesBlocked || !selectedIds.length}>{t("memory.action.forget")}</Btn>
               </div>
-            </article>
-          ))}
-        </div>
-        <div className="memory-pagination">
-          <span>{total ? t("memory.pagination.range", { from: count(offset + 1), to: count(Math.min(offset + items.length, total)), total: count(total) }) : t("memory.pagination.none")}</span>
-          <div>
-            <button type="button" className="memory-button" onClick={() => void load(Math.max(0, offset - MAX_PAGE))} disabled={busy || offset === 0}>{t("memory.previous")}</button>
-            <button type="button" className="memory-button" onClick={() => void load(offset + MAX_PAGE)} disabled={busy || offset + items.length >= total}>{t("memory.next")}</button>
+            </div>
+          )}
+          {loading && items.length === 0 && <p className="memory-loading" role="status">{t("memory.loading")}</p>}
+          {items.length === 0 && !loading
+            ? <p className="memory-empty">{query || lifecycle ? t("memory.empty.noMatch") : t("memory.empty.none")}</p>
+            : (
+              <ul className="memory-list" aria-live="polite" aria-busy={loading || undefined}>
+                {items.map((item) => {
+                  const picked = selectedIds.includes(item.id);
+                  return (
+                    <li className="memory-row" key={item.id} data-picked={selecting && picked ? "true" : undefined}>
+                      {selecting && <Check className="memory-row-check" checked={picked} onChange={() => toggleSelected(item.id)} disabled={busy} label={<span className="memory-sr">{t("memory.card.select", { title: item.title })}</span>} />}
+                      <button type="button" className="memory-row-main" {...(selecting ? { "aria-pressed": picked } : {})} onClick={() => selecting ? toggleSelected(item.id) : open(item)}>
+                        <span className="memory-row-title">{item.title}</span>
+                        <span className="memory-row-snippet">{item.snippet}</span>
+                        <span className="memory-meta">
+                          {facts(item).map((fact) => <span key={fact.key} className={fact.strong ? "memory-meta-strong" : undefined}>{fact.text}</span>)}
+                        </span>
+                      </button>
+                      {!selecting && <ActionMenu label={t("memory.card.actions", { title: item.title })} entries={rowMenu(item)} disabled={busy} />}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          {total > 0 && (
+            <div className="memory-pagination">
+              <span>{t("memory.pagination.range", { from: count(offset + 1), to: count(Math.min(offset + items.length, total)), total: count(total) })}</span>
+              {total > MAX_PAGE && (
+                <div className="memory-actions">
+                  <Btn onClick={() => void load(Math.max(0, offset - MAX_PAGE))} disabled={busy || offset === 0}>{t("memory.previous")}</Btn>
+                  <Btn onClick={() => void load(offset + MAX_PAGE)} disabled={busy || offset + items.length >= total}>{t("memory.next")}</Btn>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+        <MyNotes projectId={projectId} project={project} translate={t} notify={notify} />
+      </TabPane>
+
+      {!writesBlocked && (
+        <TabPane idBase={tabsId} id="rules" active={tab === "rules"}>
+          <ReflectPanel projectId={projectId} project={project} strings={reflectStrings(locale)} memoryOff={policy?.mode === "off"} onMemoryChanged={() => void load(offset)} onPendingChange={setPendingRules} />
+        </TabPane>
+      )}
+
+      <TabPane idBase={tabsId} id="settings" active={tab === "settings"}>
+        <section className="memory-section" aria-labelledby="memory-policy-heading">
+          <div className="memory-section-head"><div><h3 id="memory-policy-heading">{t("memory.policy.heading")}</h3><p>{t("memory.policy.description")}</p></div></div>
+          {policy ? (
+            <div className="memory-settings" aria-disabled={writesBlocked}>
+              {writesBlocked && <p className="memory-help">{t("memory.policy.readOnly")}</p>}
+              <Setting label={t("memory.policy.mode")}>
+                <Choice label={t("memory.policy.mode")} value={policy.mode} disabled={busy || writesBlocked} align="end" onChange={(mode) => updatePolicy({ mode: mode as MemoryPolicy["mode"] })} options={[{ value: "auto", label: t("memory.policy.modeAuto") }, { value: "read-only", label: t("memory.policy.modeReadOnly") }, { value: "off", label: t("memory.policy.modeOff") }]} />
+              </Setting>
+              <NumberSetting label={t("memory.policy.maxRecords")} value={budgetRecords} min={1} max={8} disabled={busy || writesBlocked} onCommit={(maxRecords) => updatePolicy({ contextBudget: { ...policy.contextBudget, maxRecords } })} />
+              <NumberSetting label={t("memory.policy.maxBytes")} value={budgetBytes} min={512} max={RECALL_BYTES} disabled={busy || writesBlocked} onCommit={(maxBytes) => updatePolicy({ contextBudget: { ...policy.contextBudget, maxBytes } })} />
+              <Setting label={t("memory.policy.otherProjects")} hint={t("memory.policy.crossHelp", { project: project.name })}>
+                <Choice label={t("memory.policy.otherProjects")} value={policy.crossProjectRecall ?? "ask"} disabled={busy || writesBlocked} align="end" onChange={(value) => updatePolicy({ crossProjectRecall: value as NonNullable<MemoryPolicy["crossProjectRecall"]> })} options={[{ value: "ask", label: t("memory.policy.crossAsk") }, { value: "allow", label: t("memory.policy.crossAllow") }, { value: "off", label: t("memory.policy.crossOff") }]} />
+              </Setting>
+              <div className="memory-setting memory-setting-check">
+                <Check checked={policy.blockWithoutMemory} disabled={busy || writesBlocked} onChange={(blockWithoutMemory) => updatePolicy({ blockWithoutMemory })} label={t("memory.policy.blockWithoutMemory")} />
+              </div>
+            </div>
+          ) : <p className="memory-help">{t("memory.policy.unavailable")}</p>}
+        </section>
+
+        {policy && (
+          <section className="memory-section" aria-labelledby="memory-harvest-heading">
+            <div className="memory-section-head"><div><h3 id="memory-harvest-heading">{t("memory.policy.harvesting")}</h3><p>{t("memory.policy.reviewHelp")}</p></div></div>
+            <div className="memory-settings" aria-disabled={writesBlocked}>
+              <Setting label={t("memory.policy.harvestReview")}>
+                <Choice label={t("memory.policy.harvestReview")} value={policy.reviewPolicy} disabled={busy || writesBlocked} align="end" onChange={(value) => updatePolicy({ reviewPolicy: value as MemoryPolicy["reviewPolicy"] })} options={[{ value: "low-risk-auto-active", label: t("memory.policy.reviewAuto") }, { value: "manual", label: t("memory.policy.reviewManual") }]} />
+              </Setting>
+              <Setting plain label={t("memory.policy.utilityModel")}>
+                <fieldset className="memory-model-picker" disabled={busy || writesBlocked} aria-label={t("memory.policy.utilityModel")}><ModelPicker models={utilityModels} {...(policy.utilityModel ? { value: policy.utilityModel } : { emptyLabel: t("memory.policy.chooseUtilityModel") })} catalogLoading={utilityModelsLoading} onPick={configureUtilityModel} /></fieldset>
+              </Setting>
+              <NumberSetting label={t("memory.policy.utilityBudget")} value={policy.utilityBudget.maxCalls} min={0} max={10000} disabled={busy || writesBlocked} onCommit={(maxCalls) => updatePolicy({ utilityBudget: { maxCalls } })} />
+              <div className="memory-setting memory-setting-check">
+                <Check checked={policy.utilityModelAllowed} disabled={busy || writesBlocked} onChange={setUtilityEnabled} label={t("memory.policy.utilityConsent")} />
+              </div>
+              <p className="memory-help">{t("memory.policy.readiness", { status: policy.utilityStatus, used: count(policy.utilityBudget.usedCalls), max: count(policy.utilityBudget.maxCalls) })}</p>
+            </div>
+          </section>
+        )}
+
+        <section className="memory-section" aria-labelledby="memory-maintenance-heading">
+          <div className="memory-section-head"><div>
+            <h3 id="memory-maintenance-heading">{t("memory.maintenance.heading")}</h3>
+            <p><WithProject template={t("memory.maintenance.description")} name={project.name} /></p>
+          </div></div>
+          <div className="memory-actions">
+            <Btn onClick={() => void download()} disabled={busy}>{t("memory.export")}</Btn>
+            <Btn onClick={pickImport} disabled={busy || writesBlocked}>{t("memory.action.stageImport")}</Btn>
+            <Btn onClick={() => void download(true)} disabled={busy || !policy}>{t("memory.action.downloadRecovery")}</Btn>
+            <Btn variant="danger" disabled={busy || !policy || writesBlocked} onClick={() => { if (window.confirm(t("memory.confirm.clear", { project: project.name }))) void run(() => memoryApi.clear(projectId, policy?.generation ?? ""), t("memory.notice.cleared")); }}>{t("memory.maintenance.clear")}</Btn>
           </div>
-        </div>
-      </section>
-
-      <section className="memory-section" aria-labelledby="memory-policy-heading">
-        <div className="memory-section-head"><div><h3 id="memory-policy-heading">{t("memory.policy.heading")}</h3><p>{t("memory.policy.description")}</p></div></div>
-        {policy ? (
-          <div className="memory-policy-grid" aria-disabled={writesBlocked}>
-            {writesBlocked && <p className="memory-help">{t("memory.policy.readOnly")}</p>}
-            <label className="memory-field">{t("memory.policy.mode")}<select value={policy.mode} onChange={(event) => updatePolicy({ mode: event.target.value as MemoryPolicy["mode"] })}><option value="auto">{t("memory.policy.modeAuto")}</option><option value="read-only">{t("memory.policy.modeReadOnly")}</option><option value="off">{t("memory.policy.modeOff")}</option></select></label>
-            <label className="memory-field">{t("memory.policy.maxRecords")}<input type="number" min={1} max={8} value={budgetRecords} onChange={(event) => updatePolicy({ contextBudget: { ...policy.contextBudget, maxRecords: Math.max(1, Math.min(8, Number(event.target.value) || 1)) } })} /></label>
-            <label className="memory-field">{t("memory.policy.maxBytes")}<input type="number" min={512} max={RECALL_BYTES} value={budgetBytes} onChange={(event) => updatePolicy({ contextBudget: { ...policy.contextBudget, maxBytes: Math.max(512, Math.min(RECALL_BYTES, Number(event.target.value) || RECALL_BYTES)) } })} /></label>
-            <label className="memory-check"><input type="checkbox" checked={policy.blockWithoutMemory} onChange={(event) => updatePolicy({ blockWithoutMemory: event.target.checked })} /> {t("memory.policy.blockWithoutMemory")}</label>
-            <label className="memory-field">{t("memory.policy.otherProjects")}<select value={policy.crossProjectRecall ?? "ask"} disabled={busy || writesBlocked} onChange={(event) => updatePolicy({ crossProjectRecall: event.target.value as NonNullable<MemoryPolicy["crossProjectRecall"]> })}><option value="ask">{t("memory.policy.crossAsk")}</option><option value="allow">{t("memory.policy.crossAllow")}</option><option value="off">{t("memory.policy.crossOff")}</option></select></label>
-            <p className="memory-help">{t("memory.policy.crossHelp", { project: project.name })}</p>
-            <label className="memory-check"><input type="checkbox" checked={policy.utilityModelAllowed} onChange={(event) => setUtilityEnabled(event.target.checked)} /> {t("memory.policy.utilityConsent")}</label>
-            <div className="memory-field">{t("memory.policy.utilityModel")}<fieldset className="memory-model-picker" disabled={busy || writesBlocked} aria-label={t("memory.policy.utilityModel")}><ModelPicker models={utilityModels} {...(policy.utilityModel ? { value: policy.utilityModel } : { emptyLabel: t("memory.policy.chooseUtilityModel") })} catalogLoading={utilityModelsLoading} onPick={configureUtilityModel} /></fieldset></div>
-            <label className="memory-field">{t("memory.policy.harvestReview")}<select value={policy.reviewPolicy} disabled={busy || writesBlocked} onChange={(event) => updatePolicy({ reviewPolicy: event.target.value as MemoryPolicy["reviewPolicy"] })}><option value="low-risk-auto-active">{t("memory.policy.reviewAuto")}</option><option value="manual">{t("memory.policy.reviewManual")}</option></select></label>
-            <p className="memory-help">{t("memory.policy.reviewHelp")}</p>
-            <label className="memory-field">{t("memory.policy.utilityBudget")}<input type="number" min={0} max={10000} value={policy.utilityBudget.maxCalls} onChange={(event) => updatePolicy({ utilityBudget: { maxCalls: Math.max(0, Math.min(10000, Number(event.target.value) || 0)) } })} /></label>
-            <p className="memory-help">{t("memory.policy.readiness", { status: policy.utilityStatus, used: count(policy.utilityBudget.usedCalls), max: count(policy.utilityBudget.maxCalls) })}</p>
-          </div>
-        ) : <p className="memory-help">{t("memory.policy.unavailable")}</p>}
-      </section>
-
-      <section className="memory-section memory-danger-zone" aria-labelledby="memory-maintenance-heading">
-        <h3 id="memory-maintenance-heading">{t("memory.maintenance.heading")}</h3>
-        <p><WithProject template={t("memory.maintenance.description")} name={project.name} /></p>
-        <div className="memory-actions">
-          <button type="button" className="memory-button" onClick={() => void download(true)} disabled={busy || !policy}>{t("memory.action.downloadRecovery")}</button>
-          <button type="button" className="memory-button memory-button-danger" disabled={busy || !policy || writesBlocked} onClick={() => { if (window.confirm(t("memory.confirm.clear", { project: project.name }))) void run(() => memoryApi.clear(projectId, policy?.generation ?? ""), t("memory.notice.cleared")); }}>{t("memory.maintenance.clear")}</button>
-        </div>
-      </section>
-
-      <div className="memory-footer-actions"><button type="button" className="memory-button" onClick={close}>{t("memory.close")}</button></div>
+        </section>
+      </TabPane>
     </div>
   );
 }

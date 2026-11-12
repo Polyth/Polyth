@@ -186,6 +186,7 @@ const harnessDisplayLabels: Readonly<Record<string, string>> = {
   claude: "Claude",
   codex: "Codex",
   commandcode: "Command Code",
+  copilot: "Copilot",
   cursor: "Cursor",
   fx: "FX",
   grok: "Grok",

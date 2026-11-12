@@ -52,6 +52,17 @@ test("chats group under their first marker in the marker list's order", () => {
   resetMarkerState();
 });
 
+test("a list where no chat has a marker draws no lone No marker heading", () => {
+  resetMarkerState();
+  acceptSnapshot({ revision: 1, definitions: [...BUILT_IN_MARKERS], sessions: [] });
+  const grouping = markerGrouping();
+  const arranged = arrangeSessions([session("a", 2), session("b", 1)], grouping, "recent");
+  const groups = sessionGroupsOf(arranged, grouping, context);
+  assert.deepEqual(groups.map((group) => group.label), [null]);
+  assert.deepEqual(groups[0]!.sessions.map((s) => s.id), ["a", "b"]);
+  resetMarkerState();
+});
+
 test("a marker change notifies the active grouping", () => {
   resetMarkerState();
   let calls = 0;

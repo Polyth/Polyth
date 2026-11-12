@@ -96,8 +96,8 @@ export function acceptsContextEvent(item: SlotItem, context: SlotContext): boole
 }
 
 /** Pure element list, keyed by contribution id — exported for DOM-free tests. */
-export function slotHostChildren(slot: UiSlot, context: SlotContext): ReactNode[] {
-  return listSlots(slot).filter((item) => acceptsContextEvent(item, context)).map((item) =>
+export function slotHostChildren(slot: UiSlot, context: SlotContext, exclude: readonly string[] = []): ReactNode[] {
+  return listSlots(slot).filter((item) => !exclude.includes(item.id) && acceptsContextEvent(item, context)).map((item) =>
     createElement(SlotBoundary, { key: item.id, slot, item, context }),
   );
 }
@@ -178,9 +178,10 @@ export function placeableSlotHostChildren(
   context: SlotContext,
   widgets: readonly WidgetDef[],
   layout: WidgetLayout,
+  exclude: readonly string[] = [],
 ): ReactNode[] {
   const items = [...listSlots(slot), ...placedWidgetItems(slot, context, widgets, layout)]
-    .filter((item) => acceptsContextEvent(item, context))
+    .filter((item) => !exclude.includes(item.id) && acceptsContextEvent(item, context))
     .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   return items.map((item) =>
     createElement(SlotBoundary, { key: item.id, slot, item, context }),
@@ -205,17 +206,19 @@ export interface SlotHostProps {
   /** False when the host draws the slot's widgets itself (the new-chat
    *  board), so layout placements are not rendered a second time. */
   placed?: boolean;
+  /** Contribution ids the host shows elsewhere or the person turned off. */
+  exclude?: readonly string[];
 }
 
-export default function SlotHost({ slot, context = {}, customizable = false, placed = true }: SlotHostProps): ReactNode {
+export default function SlotHost({ slot, context = {}, customizable = false, placed = true, exclude }: SlotHostProps): ReactNode {
   useSlotVersion();
   const widgets = useWidgetCatalog();
   const layout = useWidgetLayout();
   const customizeActive = useCustomizeActive(customizable);
   const hostContext = customizable ? { ...context, editing: customizeActive } : context;
   const children = placed
-    ? placeableSlotHostChildren(slot, hostContext, widgets, layout)
-    : slotHostChildren(slot, hostContext);
+    ? placeableSlotHostChildren(slot, hostContext, widgets, layout, exclude)
+    : slotHostChildren(slot, hostContext, exclude);
   if (children.length === 0) return null;
   return createElement(Fragment, null, children);
 }

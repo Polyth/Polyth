@@ -35,7 +35,7 @@ const { activateProject, applyProjectUpsert, beginProjectListRequest, publishPro
 const { default: AgentsPage } = await import("../widgets/AgentsPage.tsx");
 const { default: AgentNavSection } = await import("../widgets/AgentNavSection.tsx");
 const { agentLive } = await import("../widgets/agentLive.ts");
-const { conversationDays } = await import("../widgets/AgentConversation.tsx");
+const { conversationDays, reportLead } = await import("../widgets/AgentConversation.tsx");
 const { dayItems } = await import("../widgets/agentThreads.ts");
 const { BotIcon, AssistIcon } = await import("../../../apps/web/src/components/ui/icons.ts");
 
@@ -185,9 +185,22 @@ test("the conversation reads oldest first: your words before their run, quiet ch
     item.kind === "quiet" ? `quiet×${item.runs.length}` : item.kind === "report" ? item.run.runId : item.kind === "you" ? `you:${item.text}` : item.kind));
   assert.deepEqual(kinds.filter((kind) => kind !== "new").slice(-5), ["r1", "quiet×2", "r4", "you:Check PR #412 again", "r5"]);
   assert.equal(kinds[kinds.indexOf("r4") - 1], "new", "New sits right before the first report the person has not read");
+  const compact = Object.fromEntries(days.flatMap(dayItems).flatMap((item) => item.kind === "report" ? [[item.run.runId, !!item.compact]] : []));
+  assert.deepEqual(compact, { r1: true, r4: false, r5: false },
+    "only a report already read, with a newer one after it, folds to its line; unread reports and answers to the person stay open");
   const pending = conversationDays(digest(), now, [{ text: "And the docs?", at: now }]);
   const last = dayItems(pending.at(-1)!).at(-1)!;
   assert.equal(last.kind === "you" && last.pending, "sending", "a message on its way shows at the end");
+});
+
+test("a report opens on its first paragraph; the rest waits behind Read full report", () => {
+  assert.deepEqual(reportLead("**The source is ready.** Master is 46 behind.\n\n### Sessions\n\n| a | b |\n| - | - |"),
+    { lead: "The source is ready. Master is 46 behind.", rest: "### Sessions\n\n| a | b |\n| - | - |" },
+    "a bold opening sentence reads as prose, not a second headline");
+  assert.deepEqual(reportLead("Done in one line."), { lead: "Done in one line.", rest: "" });
+  assert.deepEqual(reportLead("| a | b |\n| - | - |\n\nAfter."), { lead: "", rest: "| a | b |\n| - | - |\n\nAfter." },
+    "a body that opens with a table has no lead");
+  assert.equal(reportLead("```\ncode\n\nmore\n```").lead, "", "a code block is never cut in two");
 });
 
 test("the conversation shows reports, folds quiet checks, marks what is new and learns from feedback", async () => {
@@ -204,9 +217,23 @@ test("the conversation shows reports, folds quiet checks, marks what is new and 
   assert.match(alert.querySelector(".agent-report-headline")!.textContent ?? "", /Build broken by PR #412/);
   assert.match(alert.textContent ?? "", /Needs attention/);
   assert.ok(alert.previousElementSibling?.classList.contains("agent-new"), "New sits right before the unread report");
-  assert.match(alert.querySelector(".agent-report-notes")!.textContent ?? "", /Noted: the user owns PR #412/);
+  assert.doesNotMatch(alert.querySelector(".agent-report-meta")!.textContent ?? "", /Scheduled/, "a scheduled wake goes without saying");
+  assert.equal(alert.querySelector(".agent-report-notes"), null, "the notes wait behind the report's one link");
+  assert.equal(alert.querySelectorAll(".agent-report-more").length, 1, "one link, never a second one for the notes");
+  const notes = buttonNamed(alert, /^(1 note|Read full report)$/)!;
+  assert.equal(notes.getAttribute("aria-expanded"), "false");
+  await act(async () => { notes.click(); });
+  const kept = alert.querySelector(".agent-report-notes")!;
+  assert.equal(kept.querySelector(".agent-report-notes-label")!.textContent, "Noted", "the notes are a labelled section");
+  assert.equal(kept.querySelector("li")!.textContent, "the user owns PR #412");
+  assert.equal(alert.querySelector(".agent-report-head time")?.textContent?.startsWith("0"), false, "no zero-padded hour");
+  assert.equal(alert.querySelector(".agent-report-facts")!.textContent, "2 min", "what the run cost sits in the footer");
   assert.match(feed.querySelector(".agent-quiet-toggle")!.textContent ?? "", /Quiet checks: 2/);
   const update = [...feed.querySelectorAll(".agent-report")].find((entry) => /3 commits landed/.test(entry.textContent ?? ""))!;
+  assert.equal(update.getAttribute("data-compact"), "line", "a report read before, with a newer one after it, is one line");
+  assert.doesNotMatch(update.textContent ?? "", /Rail drag fix/);
+  await act(async () => { update.querySelector<HTMLButtonElement>(".agent-report-line")!.click(); });
+  assert.match(update.textContent ?? "", /Rail drag fix/, "it opens in place");
   assert.match(update.textContent ?? "", /Heard/, "delivered feedback says so");
   assert.ok(update.compareDocumentPosition(alert) & 4, "older reports come first");
 
@@ -374,6 +401,44 @@ test("agents sit above a project's chats: state marks, news, and a click opens t
   assert.equal(rows()[0]!.querySelector(".agent-nav-btn")!.getAttribute("aria-current"), "page");
   assert.equal(rows()[1]!.classList.contains("active"), false);
   await view.unmount();
+});
+
+test("navigator rows show states and cadence as glyphs: paused is a pause mark, a daily wake a repeat", async () => {
+  resetRegistry();
+  fakeServer([
+    digest({ id: "agent-1", title: "Paused one", enabled: false, history: [] }),
+    digest({ id: "agent-2", title: "Daily one", cadence: { kind: "cron", expression: "0 1 * * *", timeZone: "UTC" },
+      nextRunAt: now + HOUR, heartbeat: undefined, nextBeatAt: undefined, history: [] }),
+    digest({ id: "agent-3", title: "Weekdays", nextRunAt: now + HOUR, heartbeat: undefined, nextBeatAt: undefined, history: [] }),
+  ]);
+  const { host } = fakeHost();
+  const nav = await mounted(createElement(AgentNavSection, { host, context: { projectId: "pr-home" } }));
+  await act(async () => { await delay(30); });
+  const meta = (title: string) => [...nav.container.querySelectorAll(".agent-nav-row")]
+    .find((row) => row.querySelector(".agent-nav-title")!.textContent === title)!.querySelector(".agent-nav-meta")!;
+  assert.equal(meta("Paused one").textContent, "", "no word for a paused agent");
+  assert.equal(!!meta("Paused one").querySelector(".lucide-pause"), true, "a pause glyph instead");
+  assert.equal(!!meta("Daily one").querySelector(".lucide-repeat"), true, "a daily wake leads with a repeat glyph");
+  assert.match(meta("Daily one").textContent ?? "", /\d/, "and keeps its time");
+  assert.equal(!!meta("Weekdays").querySelector(".lucide-calendar-days"), true, "chosen weekdays read as a calendar");
+  await nav.unmount();
+});
+
+test("the phone navigator has no row ⋯: a long press on the row opens the agent's menu", async () => {
+  resetRegistry();
+  fakeServer([digest({ history: [] })]);
+  const { host } = fakeHost();
+  const nav = await mounted(createElement(AgentNavSection, { host, context: { projectId: "pr-home", surface: "phone" } }));
+  await act(async () => { await delay(30); });
+  assert.equal(nav.container.querySelectorAll(".agent-nav-row .agent-nav-more").length, 0, "no ⋯ on a phone row");
+  assert.equal(nav.container.querySelectorAll(".agent-nav-head-action").length, 1, "the group keeps its own menu");
+  const button = nav.container.querySelector<HTMLButtonElement>(".agent-nav-row .agent-nav-btn")!;
+  await act(async () => {
+    button.dispatchEvent(new window.TouchEvent("touchstart", { bubbles: true }) as unknown as Event);
+    await delay(620);
+  });
+  assert.equal(document.querySelectorAll('[role="menu"]').length, 1, "the long press opened the menu");
+  await nav.unmount();
 });
 
 test("a working agent's clocks agree: its row, its status line and its live turn read the same second", async () => {

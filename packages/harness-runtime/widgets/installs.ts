@@ -114,6 +114,11 @@ function follow(projectId: string | null | undefined, job: HarnessInstallDto, pr
 const translate = (key: string, values?: Record<string, string | number>) =>
     boundHost?.ui.locale.translate(`harnessruntime.install.${key}`, values) ?? key;
 
+/** Ask the Harnesses page, already open, to show this harness's install dialog. */
+export function requestHarnessInstall(harnessId: string): void {
+    publish({ ...snapshot, requested: { harnessId, seq: (snapshot.requested?.seq ?? 0) + 1 } });
+}
+
 const openInSettings = (harnessId: string) => {
     publish({ ...snapshot, requested: { harnessId, seq: (snapshot.requested?.seq ?? 0) + 1 } });
     boundHost?.navigation.openSettingsPage("harnesses");

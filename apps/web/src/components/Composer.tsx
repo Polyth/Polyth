@@ -76,7 +76,7 @@ import { activeBrowserAccountId } from "../accountStorage.ts";
 import { assignPersonTones, personToneOf } from "../personIdentity.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachNativeStagedUpload, attachText, attachUpload, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, PASTED_TEXT_NAME, pendingAttachments, recoverNativeStagedUploads, removeAttachment, seedAttachments, usePendingAttachments,
+  addAttachment, attachNativeStagedUpload, attachText, attachUpload, clearAttachments, detachAttachment, insertAttachment, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, PASTED_TEXT_NAME, pendingAttachments, recoverNativeStagedUploads, seedAttachments, usePendingAttachments,
 } from "../attachments.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import {
@@ -4464,7 +4464,15 @@ function ComposerBody({
             )}
     </>
   );
-  const layoutState = composerLayoutState({ phoneLayout, inputFocused, shellMode: shellMode || Boolean(activeMode), hasDraft, railEditing: mobileRailEditing });
+  const layoutInput = { phoneLayout, inputFocused, shellMode: shellMode || Boolean(activeMode), hasDraft, railEditing: mobileRailEditing };
+  // The next message's files are a row of the card, between the model line and
+  // the editor (composer/attachmentTray.ts): the first file opens it, a removed
+  // file keeps its place for a moment as a restore slot, and the row closes
+  // once it holds nothing.
+  const tray = useAttachmentTray(attachments, session?.id ?? `new:${activeProjectId ?? ""}`, composerLayoutState(layoutInput) !== "phone-resting");
+  const trayPresent = tray.slots.length > 0;
+  // A restore slot keeps a phone row engaged, as the file it stands for did.
+  const layoutState = composerLayoutState({ ...layoutInput, hasDraft: hasDraft || trayPresent });
   const expanded = layoutState !== "phone-resting";
   // Auto-grow (§20). The ceiling follows the VISUAL viewport, so an open
   // keyboard shrinks the input instead of pushing the send button offscreen;
@@ -4508,15 +4516,10 @@ function ComposerBody({
   const stateClass = layoutState === "desktop"
     ? ""
     : ` composer-mobile composer-mobile-grid ${presentedExpanded ? "composer-expanded" : "composer-collapsed"}${inputFocused ? " composer-input-active" : ""}${hasDraft ? " composer-has-draft" : ""}`;
-  // The next message's files are a row of the card, between the model line and
-  // the editor (composer/attachmentTray.ts): the first file opens it, the last
-  // one's removal closes it over that card.
-  const tray = useAttachmentTray(attachments, session?.id ?? `new:${activeProjectId ?? ""}`, expanded);
   // Once the row has opened or closed beside a focused editor, the caret is
   // measured again (iOS draws it above the page and left it on the files
   // until the next tap or keystroke). A row that starts to move cancels the
   // frame its first, unmoved commit queued, so the caret waits for the end.
-  const trayPresent = tray.shown.length > 0;
   const trayLayoutSeen = useRef(false);
   useLayoutEffect(() => {
     if (!trayLayoutSeen.current) {
@@ -4527,7 +4530,11 @@ function ComposerBody({
     const frame = requestAnimationFrame(() => inputRef.current?.refreshCaret());
     return () => cancelAnimationFrame(frame);
   }, [tray.motion, trayPresent]);
-  const attachmentTray = tray.shown.length > 0 && (
+  const traySlots = useMemo(() => ({
+    attachments: tray.slots.map((slot) => slot.attachment),
+    removed: new Map(tray.slots.flatMap((slot) => (slot.removed ? [[slot.attachment.id, slot.removed] as const] : []))),
+  }), [tray.slots]);
+  const attachmentTray = trayPresent && (
     <div
       ref={tray.ref}
       className="composer-tray"
@@ -4536,18 +4543,32 @@ function ComposerBody({
       onAnimationEnd={tray.settle}
     >
       <AttachmentPills
-        attachments={tray.shown}
-        onRemove={(id) => {
+        attachments={traySlots.attachments}
+        removed={traySlots.removed}
+        onRemove={(id, width) => {
           const sid = session?.id ?? null;
           if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
-          const last = attachments.length === 1 && attachments[0]?.id === id ? attachments[0] : null;
-          // The removed card's own button goes with the tray: hand focus to
-          // the editor on desktop (a phone would raise its keyboard).
-          const focused = last !== null && !phoneLayout
-            && rootRef.current?.querySelector(".composer-tray")?.contains(document.activeElement);
-          if (last) tray.closeOver(last);
-          removeAttachment(sid, id);
-          if (focused) inputRef.current?.focus();
+          const attachment = pendingAttachments(sid).find((candidate) => candidate.id === id);
+          if (!attachment) return;
+          // A pointer that removed the last file is done with the row: hand
+          // focus to the editor on desktop (a phone would raise its keyboard).
+          // The keyboard's focus stays, on the slot's restore button.
+          const active = document.activeElement;
+          const toEditor = pendingAttachments(sid).length === 1 && !phoneLayout && active !== null
+            && !active.matches(":focus-visible")
+            && rootRef.current?.querySelector(".composer-tray")?.contains(active);
+          tray.remove(attachment, width);
+          detachAttachment(sid, id);
+          if (toEditor) inputRef.current?.focus();
+        }}
+        onRestore={(id) => {
+          const sid = session?.id ?? null;
+          if (promptHistoryNavRef.current.isBrowsing()) promoteHistoryDraft();
+          tray.restore(id, (attachment, index) => {
+            if (insertAttachment(sid, attachment, index)) return true;
+            setUiError(tr("attachments.atMostValueAttachmentsPerMessage", { count: MAX_PENDING_ATTACHMENTS }), null, undefined, "info");
+            return false;
+          });
         }}
       />
     </div>

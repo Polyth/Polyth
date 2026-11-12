@@ -34,7 +34,7 @@ Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configura
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: SlotHost } = await import("../src/components/slots/SlotHost.ts");
-const { desktopCaptionSide, installDesktopIntegration } = await import("../src/desktop.tsx");
+const { desktopCaptionSide, desktopControlLayout, installDesktopIntegration, macCaptionInset, overlayInsets } = await import("../src/desktop.tsx");
 const { registerCommand } = await import("../src/commands.ts");
 type Bridge = import("../src/desktopBridge.ts").PolythDesktopApi;
 type WindowState = import("../src/desktopBridge.ts").DesktopWindowState;
@@ -43,34 +43,37 @@ type Command = import("../src/desktopBridge.ts").DesktopCommand;
 const settings = {
   closeToTray: true, startMinimized: false, launchAtLogin: false, keepAwake: false, automaticUpdates: true,
   updateChannel: "stable" as const, lowResourceMode: false, softwareRendering: false, reduceAnimations: false, controlsPosition: "right" as "left" | "right", controlsTheme: "system" as const,
+  controlsFollowSystem: undefined as boolean | undefined,
 };
 
-function fakeBridge(platform: string, info: Record<string, unknown> = {}) {
+function fakeBridge(platform: string, info: Record<string, unknown> = {}, extra: { state?: Partial<WindowState>; caption?: (band: number) => unknown } = {}) {
   const windowListeners = new Set<(state: WindowState) => void>();
   const commandListeners = new Set<(command: Command) => void>();
   const actions: string[] = [];
   const titlebars: unknown[] = [];
-  const state: WindowState = { maximized: false, fullscreen: false, visible: true, focused: true };
+  const state: WindowState = { maximized: false, fullscreen: false, visible: true, focused: true, ...extra.state };
+  const bands: number[] = [];
   const bridge = {
     getInfo: async () => ({ platform, arch: "x64", appVersion: "0", opencodeVersion: "0", dataDir: "/d", logPath: "/l", packaged: false, trayAvailable: true, canLaunchAtLogin: false, keepAwakeActive: false, lowResourceMode: false, softwareRendering: false, ...info }),
     getSettings: async () => ({ ...settings }),
     getWindowState: async () => ({ ...state }),
     windowAction: async (action: string) => { actions.push(action); return { ...state }; },
     setTitleBarAppearance: async (appearance: unknown) => { titlebars.push(appearance); },
+    ...(extra.caption ? { syncCaptionControls: async (band: number) => { bands.push(band); return extra.caption!(band); } } : {}),
     onSettingsChanged: () => () => {},
     onUpdateState: () => () => {},
     onWindowState: (listener: (state: WindowState) => void) => { windowListeners.add(listener); return () => windowListeners.delete(listener); },
     onCommand: (listener: (command: Command) => void) => { commandListeners.add(listener); return () => commandListeners.delete(listener); },
   } as unknown as Bridge;
   return {
-    bridge, actions, titlebars,
+    bridge, actions, titlebars, bands,
     emitState: (next: Partial<WindowState>) => { for (const l of windowListeners) l({ ...state, ...next }); },
     emitCommand: (command: Command) => { for (const l of commandListeners) l(command); },
   };
 }
 
-async function mount(platform: string) {
-  const fake = fakeBridge(platform);
+async function mount(platform: string, extra: Parameters<typeof fakeBridge>[2] = {}) {
+  const fake = fakeBridge(platform, {}, extra);
   (window as unknown as { polythDesktop?: Bridge }).polythDesktop = fake.bridge;
   document.body.innerHTML = `<div class="app"><header class="header"></header></div><div id="host"></div>`;
   const uninstall = installDesktopIntegration();
@@ -105,6 +108,79 @@ test("Linux renders vector caption buttons with close at the window corner", asy
   try {
     assert.deepEqual(labels(), ["Hide window to tray", "Minimize window", "Maximize window"]);
   } finally { await left.cleanup(); settings.controlsPosition = "right"; }
+});
+
+test("Linux follows the desktop's own button layout: side, order and set", async () => {
+  assert.deepEqual(desktopControlLayout({ controlsPosition: "right", controlsFollowSystem: true }, { side: "left", buttons: ["close"] }), { side: "left", buttons: ["close"] });
+  assert.deepEqual(desktopControlLayout({ controlsPosition: "left", controlsFollowSystem: false }, { side: "right", buttons: ["close"] }), { side: "left", buttons: ["close", "minimize", "maximize"] }, "a chosen side wins");
+  assert.deepEqual(desktopControlLayout({ controlsPosition: "right", controlsFollowSystem: true }, null), { side: "right", buttons: ["minimize", "maximize", "close"] }, "an unreadable layout keeps the chosen side");
+  assert.deepEqual(desktopControlLayout({ controlsPosition: "right", controlsFollowSystem: true }, { side: "left", buttons: ["close", "close", "help" as "close"] }), { side: "left", buttons: ["close"] });
+  assert.deepEqual(desktopControlLayout({ controlsPosition: "right", controlsFollowSystem: true }, { side: "left", buttons: [] }).buttons.length, 3);
+
+  settings.controlsFollowSystem = true;
+  const gnome = await mount("linux", { state: { systemControls: { side: "left", buttons: ["close"] } } });
+  try {
+    assert.deepEqual(labels(), ["Hide window to tray"], "GNOME-style Close alone, on the system's side");
+    assert.ok(document.querySelector(".desktop-window-controls-left"));
+    assert.equal(document.body.dataset.desktopControlsPosition, "left");
+    assert.equal(document.body.dataset.desktopCaption, "left");
+    assert.equal(document.body.style.getPropertyValue("--desktop-controls-count"), "1");
+    // The person changes the layout in their desktop settings: the next
+    // window state carries it, no restart.
+    await act(async () => gnome.emitState({ systemControls: { side: "right", buttons: ["minimize", "maximize", "close"] } }));
+    assert.deepEqual(labels(), ["Minimize window", "Maximize window", "Hide window to tray"]);
+    assert.equal(document.body.dataset.desktopCaption, "right");
+    assert.equal(document.body.style.getPropertyValue("--desktop-controls-count"), "3");
+  } finally { await gnome.cleanup(); settings.controlsFollowSystem = undefined; }
+
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\(var\(--desktop-controls-slot\) \* var\(--desktop-controls-count, 3\)\)/);
+  assert.match(styles, /\(var\(--desktop-controls-gap\) \* \(var\(--desktop-controls-count, 3\) - 1\)\)/);
+});
+
+test("an inactive window's Linux buttons fall flat to a quiet glyph and come back on hover", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = /body\.desktop-app\[data-desktop-focused="false"\] \.desktop-window-button:not\(:hover, :focus-visible, :active\)\s*\{([^}]*)\}/s.exec(styles)?.[1] ?? "";
+  assert.match(rule, /--desktop-window-button-fill:\s*transparent/);
+  assert.match(rule, /--desktop-window-button-shadow:\s*none/);
+  assert.match(rule, /opacity:\s*0\.55/);
+  const button = /\.desktop-window-button\s*\{[^}]*\}/s.exec(styles)?.[0] ?? "";
+  assert.match(button, /opacity var\(--motion-fast\)/, "the change eases rather than snaps");
+  assert.match(button, /box-shadow var\(--motion-fast\)/);
+  // Windows' native glyphs recede with them: the overlay samples the muted ink.
+  const desktop = await readFile(new URL("../src/desktop.tsx", import.meta.url), "utf8");
+  assert.match(desktop, /inactive \? rootStyle\.getPropertyValue\("--muted"\)/);
+});
+
+test("macOS takes the traffic lights' real extent from the window", async () => {
+  assert.equal(macCaptionInset({ x: 18, y: 19, width: 54, height: 14 }), 86, "100 % zoom keeps the old 86 px");
+  assert.equal(macCaptionInset({ x: 22.5, y: 23.75, width: 67.5, height: 17.5 }), 104, "80 % zoom: the lights cover more CSS px");
+  assert.equal(macCaptionInset(null), null);
+  assert.equal(macCaptionInset({ x: Number.NaN, y: 0, width: 54, height: 14 }), null);
+
+  const mac = await mount("darwin", { caption: () => ({ x: 22.5, y: 23.75, width: 67.5, height: 17.5 }) });
+  try {
+    assert.ok(mac.bands.length >= 1, "the renderer tells main the band it centres on");
+    assert.equal(document.body.style.getPropertyValue("--desktop-macos-titlebar-inset"), "104px");
+  } finally { await mac.cleanup(); }
+  assert.equal(document.body.style.getPropertyValue("--desktop-macos-titlebar-inset"), "", "teardown drops the measured inset");
+
+  const older = await mount("darwin");
+  try {
+    assert.equal(document.body.style.getPropertyValue("--desktop-macos-titlebar-inset"), "", "an older shell keeps the CSS default");
+  } finally { await older.cleanup(); }
+});
+
+test("Windows measures the overlay's own rect and rounds it up", async () => {
+  assert.deepEqual(overlayInsets({ x: 0, width: 1000 - 138 }, 1000), { left: 0, right: 138 });
+  // 125 %: three 46 DIP buttons are 110.4 CSS px at a 1.25 page zoom.
+  assert.deepEqual(overlayInsets({ x: 0, width: 889.6 }, 1000), { left: 0, right: 111 });
+  assert.deepEqual(overlayInsets({ x: 92.0004, width: 900 }, 992), { left: 92, right: 0 }, "a mirrored UI, float noise ignored");
+  assert.equal(overlayInsets(undefined, 1000), null);
+  assert.equal(overlayInsets({ x: 0, width: 0 }, 1000), null, "no overlay (fullscreen)");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /--desktop-wco-right-edge: var\(--desktop-wco-right,\s*calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width/s);
+  assert.match(styles, /--desktop-caption-right: calc\(var\(--desktop-wco-right-edge\) \+ min\(var\(--desktop-wco-right-edge\), var\(--space-2\)\)\)/);
 });
 
 test("window state reaches <body> for maximized, fullscreen, and inactive chrome", async () => {
@@ -208,7 +284,7 @@ test("nothing renders under the caption zone in the full-height layouts", async 
   // One geometry contract: a physical width at each top corner, a band height.
   assert.match(styles, /body\.desktop-app\s*\{[^}]*--desktop-caption-left:\s*0px;[^}]*--desktop-caption-right:\s*0px;/s);
   assert.match(styles, /body\.desktop-app\[data-desktop-caption="right"\] \.desktop-caption-zone\s*\{[^}]*width:\s*var\(--desktop-caption-right\)/s);
-  assert.match(styles, /body\.desktop-app\[data-desktop-platform="win32"\]\s*\{[^}]*--desktop-caption-right:\s*calc\([^}]*env\(titlebar-area-width/s);
+  assert.match(styles, /body\.desktop-app\[data-desktop-platform="win32"\]\s*\{[^}]*--desktop-caption-right:\s*calc\([^}]*--desktop-wco-right-edge/s);
   // The overlay is transparent, so the header no longer fakes a solid band.
   assert.doesNotMatch(styles, /\[data-desktop-platform="win32"\] \.app > \.header:not\(\[data-top-rail-surface="floating"\]\)\s*\{[^}]*background/s);
   // The workspace starts where the band ends, above every look: with
@@ -220,8 +296,13 @@ test("nothing renders under the caption zone in the full-height layouts", async 
   const caption = (side: string, dir: string, rest: string) =>
     `body.desktop-app[data-desktop-caption="${side}"]:is([data-shell-layout="columns"], [data-shell-layout="bare"])${rest.startsWith(":not") ? "" : " "}${rest.replace("DIR", dir)}`;
   for (const [side, dir] of [["left", "ltr"], ["right", "rtl"]] as const) {
-    assert.ok(layout.includes(caption(side, dir, ".app-shell:dir(DIR) > .sidebar")), `navigator under a ${side} zone`);
+    assert.ok(layout.includes(caption(side, dir, ".app-shell:dir(DIR) > .sidebar:not(.collapsed, .sidebar--rail-collapsed)")), `navigator under a ${side} zone`);
+    // A collapsed navigator is narrower than the zone: the controls would
+    // straddle its edge, so the whole column starts below the band.
+    assert.ok(layout.includes(caption(side, dir, ":not(#\\#) .app-shell:dir(DIR) > .sidebar:is(.collapsed, .sidebar--rail-collapsed)")), `collapsed navigator under a ${side} zone`);
   }
+  assert.match(layout, /> \.sidebar:is\(\.collapsed, \.sidebar--rail-collapsed\) \{\s*margin-block-start: var\(--desktop-caption-band\) !important;/);
+  assert.match(styles, /\.sidebar--animate-width \{[^}]*margin-block-start var\(--motion-normal\)/s);
   // The navigator away from the zone keeps the title bar's drag band only:
   // the taller caption band is carved out of it.
   for (const [side, dir] of [["right", "ltr"], ["left", "rtl"]] as const) {
@@ -233,13 +314,13 @@ test("nothing renders under the caption zone in the full-height layouts", async 
   assert.match(styles, /body\.desktop-app :is\([^)]*\[role="separator"\]\[aria-valuenow\],[^)]*\)\s*\{\s*-webkit-app-region: no-drag;/s);
   const docks = ":not(.railbar-dock-bottom):not(.railbar-pinned-narrow)";
   for (const [side, dir] of [["right", "ltr"], ["left", "rtl"]] as const) {
-    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar.railbar-open${docks}:not(:has(> .rail-fullscreen))`)), `open window under a ${side} zone`);
-    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar:not(.railbar-open)${docks}`)), `idle strip under a ${side} zone`);
+    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar:is(.railbar-open, [data-rail-motion="exiting"])${docks}:not(:has(> .rail-fullscreen))`)), `open or leaving window under a ${side} zone`);
+    assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar:not(.railbar-open):not([data-rail-motion="exiting"])${docks}`)), `idle strip under a ${side} zone`);
     assert.ok(layout.includes(caption(side, dir, ":not(#\\#) .app-shell:dir(DIR) > .railbar:is(.railbar-dock-bottom, .railbar-pinned-narrow) > .rail-icon-col.plugin-strip")), `docked strip under a ${side} zone`);
     assert.ok(layout.includes(caption(side, dir, `:not(#\\#) .app-shell:dir(DIR) > .railbar[data-rail-motion="exiting"]:not(.railbar-open)${docks}:not(:has(> .rail-fullscreen))`)), `closing tablet window under a ${side} zone`);
   }
-  assert.match(layout, /\.railbar\.railbar-open:not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\):not\(:has\(> \.rail-fullscreen\)\) \{\s*margin-block-start: var\(--desktop-caption-band\) !important;/);
-  assert.match(layout, /\.railbar:not\(\.railbar-open\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\) \{\s*inset-block-start: var\(--desktop-caption-band\) !important;/);
+  assert.match(layout, /\.railbar:is\(\.railbar-open, \[data-rail-motion="exiting"\]\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\):not\(:has\(> \.rail-fullscreen\)\) \{\s*margin-block-start: var\(--desktop-caption-band\) !important;/);
+  assert.match(layout, /\.railbar:not\(\.railbar-open\):not\(\[data-rail-motion="exiting"\]\):not\(\.railbar-dock-bottom\):not\(\.railbar-pinned-narrow\) \{\s*inset-block-start: var\(--desktop-caption-band\) !important;/);
   // A bottom or narrow dock keeps its full-height host: only its strip moves.
   assert.match(layout, /> \.rail-icon-col\.plugin-strip \{\s*inset-block-start: calc\(var\(--desktop-caption-band\) - var\(--shell-edge\)\);\s*height: auto;/);
   // A tablet-band window closes into the cluster below the band, its morph
@@ -248,7 +329,7 @@ test("nothing renders under the caption zone in the full-height layouts", async 
   assert.match(layout, /\.railbar\[data-rail-motion="exiting"\][^{]*\{\s*margin-block-start: var\(--desktop-caption-band\) !important;/);
   assert.match(layout, /\.app-shell:dir\(ltr\) > \.railbar,[^{]*\{\s*--rail-cluster-clear: var\(--desktop-caption-band\);/);
   assert.match(layout, /:not\(\.railbar-open\) > \.rail-icon-col\.plugin-strip \{\s*inset-block-start: var\(--desktop-caption-band\);/);
-  assert.match(layout, /\.app-shell > \.railbar:has\(> \.rail-fullscreen\) \{\s*top: var\(--desktop-caption-band\);/);
+  assert.match(layout, /\.app-shell > \.railbar:has\(> \.rail-fullscreen\) \{\s*--rail-layer-top: var\(--desktop-caption-band\);\s*top: var\(--desktop-caption-band\);/);
   assert.match(layout, /--desktop-caption-band: max\(var\(--shell-bar-block\), var\(--desktop-caption-h\)\)/);
   // Floating columns centre Polyth's Linux caption buttons on their first
   // row; the macOS traffic lights and the Windows caption buttons keep the

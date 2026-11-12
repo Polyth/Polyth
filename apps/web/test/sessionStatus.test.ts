@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ExecutionReleaseProof, HarnessTransition, SessionProjection } from "@polyth/contracts";
 import { SESSION_SUMMARY_FIELDS } from "@polyth/contracts";
-import { resolveSessionStatus, sessionIdsToRefresh } from "../src/sessionStatus.ts";
+import { projectRailMark, resolveSessionStatus, sessionIdsToRefresh } from "../src/sessionStatus.ts";
 import { setLocale } from "../src/i18n/index.ts";
 
 const NOW = 1_000_000_000;
@@ -341,4 +341,22 @@ test("a reconnect re-reads every row still shown as working or waiting, most urg
     session({ id: "a", status: "working", updatedAt: 3 }),
     session({ id: "b", status: "working", updatedAt: 2 }),
   ], 1), ["a"], "bounded");
+});
+
+test("a project's rail mark: a person's attention, then an unread result, then activity", () => {
+  const unread = { questions: 0, permissions: 0, unread: 1 };
+  assert.equal(projectRailMark([session({ status: "idle" })], NOW), null);
+  assert.equal(projectRailMark([session({ status: "working" })], NOW), "working");
+  // The reported case: a finished chat whose reply nobody has read shows a mark.
+  assert.equal(projectRailMark([session({ attention: unread })], NOW), "result");
+  assert.equal(projectRailMark([session({ id: "a", status: "working" }), session({ id: "b", attention: unread })], NOW), "result");
+  // An open question outranks everything, even on a chat that is also running.
+  assert.equal(projectRailMark([
+    session({ id: "a", attention: unread }),
+    session({ id: "b", status: "working", attention: { questions: 1, permissions: 0, unread: 0 } }),
+  ], NOW), "attention");
+  assert.equal(projectRailMark([session({ status: "waiting" })], NOW), "attention");
+  // Subagents and archived chats never mark their project.
+  assert.equal(projectRailMark([session({ parentId: "x", attention: unread })], NOW), null);
+  assert.equal(projectRailMark([session({ status: "archived", attention: unread })], NOW), null);
 });

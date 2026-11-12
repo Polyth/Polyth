@@ -615,6 +615,7 @@ export const bg: GitMessages = {
   "gitview.identity": "Профил",
   "gitview.aheadValue": "{count} напред",
   "gitview.allRepositories": "Всички хранилища",
+  "gitview.otherProjectRepositories": "Други хранилища на проекта",
   "gitview.backToChanges": "Обратно към промените",
   "gitview.backToLog": "Обратно към дневника",
   "gitview.behindValue": "{count} назад",

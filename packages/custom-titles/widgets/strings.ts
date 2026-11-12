@@ -40,6 +40,15 @@ const en = {
   rulesLabel: "Extra rules",
   rulesHint: "Hard rules every title must follow.",
   rulesPlaceholder: "For example: start with a verb; never mention ticket IDs.",
+  styleSectionHint: "Used in every project without its own rules.",
+  projectsTitle: "Projects",
+  projectsHint: "Give a project its own language, style and rules instead of the ones above.",
+  projectOwnLabel: "Own rules for this project",
+  projectOwnHint: "Off: this project uses the rules above. When to name chats and the model are always shared.",
+  projectValueOwn: "Own rules",
+  projectValueShared: "Shared rules",
+  itemProjectsLabel: "Title rules by project",
+  itemProjectsDescription: "Give a project its own title language, style and rules.",
 };
 
 export type CustomTitlesStrings = typeof en;
@@ -83,6 +92,15 @@ const uk = {
   rulesLabel: "Додаткові правила",
   rulesHint: "Жорсткі правила, яких має дотримуватися кожна назва.",
   rulesPlaceholder: "Наприклад: починати з дієслова; ніколи не згадувати номери задач.",
+  styleSectionHint: "Діють у кожному проєкті без власних правил.",
+  projectsTitle: "Проєкти",
+  projectsHint: "Задайте проєкту власні мову, стиль і правила замість наведених вище.",
+  projectOwnLabel: "Власні правила для цього проєкту",
+  projectOwnHint: "Вимкнено: проєкт використовує правила вище. Коли давати назви і модель завжди спільні.",
+  projectValueOwn: "Власні правила",
+  projectValueShared: "Спільні правила",
+  itemProjectsLabel: "Правила назв для проєктів",
+  itemProjectsDescription: "Задайте проєкту власні мову, стиль і правила назв.",
 } satisfies CustomTitlesStrings;
 
 const de = {
@@ -124,6 +142,15 @@ const de = {
   rulesLabel: "Zusätzliche Regeln",
   rulesHint: "Feste Regeln, die jeder Titel befolgen muss.",
   rulesPlaceholder: "Zum Beispiel: mit einem Verb beginnen; niemals Ticket-IDs nennen.",
+  styleSectionHint: "Gilt in jedem Projekt ohne eigene Regeln.",
+  projectsTitle: "Projekte",
+  projectsHint: "Geben Sie einem Projekt eigene Sprache, Stil und Regeln statt der oben stehenden.",
+  projectOwnLabel: "Eigene Regeln für dieses Projekt",
+  projectOwnHint: "Aus: Dieses Projekt verwendet die Regeln oben. Zeitpunkt und Modell sind immer gemeinsam.",
+  projectValueOwn: "Eigene Regeln",
+  projectValueShared: "Gemeinsame Regeln",
+  itemProjectsLabel: "Titelregeln pro Projekt",
+  itemProjectsDescription: "Geben Sie einem Projekt eigene Titelsprache, Stil und Regeln.",
 } satisfies CustomTitlesStrings;
 
 const fr = {
@@ -165,6 +192,15 @@ const fr = {
   rulesLabel: "Règles supplémentaires",
   rulesHint: "Règles strictes que chaque titre doit respecter.",
   rulesPlaceholder: "Par exemple : commencer par un verbe ; ne jamais mentionner d’identifiants de ticket.",
+  styleSectionHint: "Utilisées dans chaque projet sans règles propres.",
+  projectsTitle: "Projets",
+  projectsHint: "Donnez à un projet sa propre langue, son style et ses règles à la place de ceux ci-dessus.",
+  projectOwnLabel: "Règles propres à ce projet",
+  projectOwnHint: "Désactivé : ce projet utilise les règles ci-dessus. Le moment du nommage et le modèle sont toujours communs.",
+  projectValueOwn: "Règles propres",
+  projectValueShared: "Règles communes",
+  itemProjectsLabel: "Règles de titre par projet",
+  itemProjectsDescription: "Donnez à un projet sa propre langue, son style et ses règles de titre.",
 } satisfies CustomTitlesStrings;
 
 const pl = {
@@ -206,6 +242,15 @@ const pl = {
   rulesLabel: "Dodatkowe reguły",
   rulesHint: "Twarde reguły, których musi przestrzegać każdy tytuł.",
   rulesPlaceholder: "Na przykład: zaczynaj od czasownika; nigdy nie wspominaj identyfikatorów zgłoszeń.",
+  styleSectionHint: "Obowiązują w każdym projekcie bez własnych reguł.",
+  projectsTitle: "Projekty",
+  projectsHint: "Nadaj projektowi własny język, styl i reguły zamiast powyższych.",
+  projectOwnLabel: "Własne reguły dla tego projektu",
+  projectOwnHint: "Wyłączone: projekt używa reguł powyżej. Moment nadawania nazw i model są zawsze wspólne.",
+  projectValueOwn: "Własne reguły",
+  projectValueShared: "Wspólne reguły",
+  itemProjectsLabel: "Reguły tytułów dla projektów",
+  itemProjectsDescription: "Nadaj projektowi własny język, styl i reguły tytułów.",
 } satisfies CustomTitlesStrings;
 
 const ptBR = {
@@ -247,6 +292,15 @@ const ptBR = {
   rulesLabel: "Regras extras",
   rulesHint: "Regras rígidas que todo título deve seguir.",
   rulesPlaceholder: "Por exemplo: comece com um verbo; nunca mencione IDs de chamados.",
+  styleSectionHint: "Usadas em todo projeto sem regras próprias.",
+  projectsTitle: "Projetos",
+  projectsHint: "Dê a um projeto idioma, estilo e regras próprios em vez dos acima.",
+  projectOwnLabel: "Regras próprias para este projeto",
+  projectOwnHint: "Desativado: este projeto usa as regras acima. Quando nomear e o modelo são sempre compartilhados.",
+  projectValueOwn: "Regras próprias",
+  projectValueShared: "Regras compartilhadas",
+  itemProjectsLabel: "Regras de títulos por projeto",
+  itemProjectsDescription: "Dê a um projeto idioma, estilo e regras de título próprios.",
 } satisfies CustomTitlesStrings;
 
 const pt = {
@@ -288,6 +342,15 @@ const pt = {
   rulesLabel: "Regras adicionais",
   rulesHint: "Regras rígidas que cada título tem de cumprir.",
   rulesPlaceholder: "Por exemplo: comece com um verbo; nunca mencione identificadores de pedidos.",
+  styleSectionHint: "Usadas em todos os projetos sem regras próprias.",
+  projectsTitle: "Projetos",
+  projectsHint: "Dê a um projeto idioma, estilo e regras próprios em vez dos de cima.",
+  projectOwnLabel: "Regras próprias para este projeto",
+  projectOwnHint: "Desligado: este projeto usa as regras acima. Quando dar nomes e o modelo são sempre partilhados.",
+  projectValueOwn: "Regras próprias",
+  projectValueShared: "Regras partilhadas",
+  itemProjectsLabel: "Regras de títulos por projeto",
+  itemProjectsDescription: "Dê a um projeto idioma, estilo e regras de título próprios.",
 } satisfies CustomTitlesStrings;
 
 const it = {
@@ -329,6 +392,15 @@ const it = {
   rulesLabel: "Regole aggiuntive",
   rulesHint: "Regole rigide che ogni titolo deve seguire.",
   rulesPlaceholder: "Per esempio: inizia con un verbo; non menzionare mai gli ID dei ticket.",
+  styleSectionHint: "Valgono in ogni progetto senza regole proprie.",
+  projectsTitle: "Progetti",
+  projectsHint: "Dai a un progetto lingua, stile e regole propri al posto di quelli sopra.",
+  projectOwnLabel: "Regole proprie per questo progetto",
+  projectOwnHint: "Disattivato: questo progetto usa le regole sopra. Quando assegnare i nomi e il modello sono sempre condivisi.",
+  projectValueOwn: "Regole proprie",
+  projectValueShared: "Regole condivise",
+  itemProjectsLabel: "Regole dei titoli per progetto",
+  itemProjectsDescription: "Dai a un progetto lingua, stile e regole dei titoli propri.",
 } satisfies CustomTitlesStrings;
 
 const es = {
@@ -370,6 +442,15 @@ const es = {
   rulesLabel: "Reglas adicionales",
   rulesHint: "Reglas estrictas que debe cumplir cada título.",
   rulesPlaceholder: "Por ejemplo: empieza con un verbo; nunca menciones identificadores de tickets.",
+  styleSectionHint: "Se usan en todo proyecto sin reglas propias.",
+  projectsTitle: "Proyectos",
+  projectsHint: "Dale a un proyecto su propio idioma, estilo y reglas en lugar de los de arriba.",
+  projectOwnLabel: "Reglas propias para este proyecto",
+  projectOwnHint: "Desactivado: este proyecto usa las reglas de arriba. Cuándo nombrar y el modelo son siempre comunes.",
+  projectValueOwn: "Reglas propias",
+  projectValueShared: "Reglas comunes",
+  itemProjectsLabel: "Reglas de títulos por proyecto",
+  itemProjectsDescription: "Dale a un proyecto su propio idioma, estilo y reglas de título.",
 } satisfies CustomTitlesStrings;
 
 const zhCN = {
@@ -411,6 +492,15 @@ const zhCN = {
   rulesLabel: "额外规则",
   rulesHint: "每个标题都必须遵守的硬性规则。",
   rulesPlaceholder: "例如：以动词开头；绝不要提及工单编号。",
+  styleSectionHint: "用于每个没有独立规则的项目。",
+  projectsTitle: "项目",
+  projectsHint: "为项目设置独立的语言、风格和规则，代替上方的设置。",
+  projectOwnLabel: "此项目使用独立规则",
+  projectOwnHint: "关闭：此项目使用上方的规则。命名时机和模型始终共用。",
+  projectValueOwn: "独立规则",
+  projectValueShared: "共用规则",
+  itemProjectsLabel: "按项目的标题规则",
+  itemProjectsDescription: "为项目设置独立的标题语言、风格和规则。",
 } satisfies CustomTitlesStrings;
 
 const bg = {
@@ -452,6 +542,15 @@ const bg = {
   rulesLabel: "Допълнителни правила",
   rulesHint: "Твърди правила, които всяко заглавие трябва да спазва.",
   rulesPlaceholder: "Например: започвайте с глагол; никога не споменавайте номера на задачи.",
+  styleSectionHint: "Важат във всеки проект без собствени правила.",
+  projectsTitle: "Проекти",
+  projectsHint: "Дайте на проект собствен език, стил и правила вместо горните.",
+  projectOwnLabel: "Собствени правила за този проект",
+  projectOwnHint: "Изключено: проектът използва правилата горе. Кога да се дават имена и моделът винаги са общи.",
+  projectValueOwn: "Собствени правила",
+  projectValueShared: "Общи правила",
+  itemProjectsLabel: "Правила за заглавия по проекти",
+  itemProjectsDescription: "Дайте на проект собствен език, стил и правила за заглавията.",
 } satisfies CustomTitlesStrings;
 
 const ar = {
@@ -493,6 +592,15 @@ const ar = {
   rulesLabel: "قواعد إضافية",
   rulesHint: "قواعد صارمة يجب أن يتبعها كل عنوان.",
   rulesPlaceholder: "مثال: ابدأ بفعل؛ ولا تذكر معرفات التذاكر أبدًا.",
+  styleSectionHint: "تُستخدم في كل مشروع ليست له قواعد خاصة.",
+  projectsTitle: "المشاريع",
+  projectsHint: "امنح مشروعًا لغة وأسلوبًا وقواعد خاصة به بدلًا من التي في الأعلى.",
+  projectOwnLabel: "قواعد خاصة لهذا المشروع",
+  projectOwnHint: "متوقف: يستخدم هذا المشروع القواعد في الأعلى. توقيت التسمية والنموذج مشتركان دائمًا.",
+  projectValueOwn: "قواعد خاصة",
+  projectValueShared: "قواعد مشتركة",
+  itemProjectsLabel: "قواعد العناوين لكل مشروع",
+  itemProjectsDescription: "امنح مشروعًا لغة وأسلوبًا وقواعد خاصة لعناوينه.",
 } satisfies CustomTitlesStrings;
 
 const CATALOGS: Readonly<Record<string, CustomTitlesStrings>> = {

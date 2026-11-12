@@ -29,6 +29,7 @@ import {
   friendlyError,
   isImeComposing,
   type WebPackageHost,
+  type WebSelectOption,
   type WebUiPreferenceAdapter,
   type WidgetDefinition,
   type WidgetPlugin,
@@ -79,6 +80,7 @@ import {
 } from "./scope.ts";
 import {
   currentPreferences,
+  hostUi,
   loadManagement,
   managementSnapshot,
   setTaskTrackerHost,
@@ -112,38 +114,47 @@ import {
   TaskComposer,
   TaskStartOptionsFields,
   takeFieldDraft,
+  taskStartOptions,
   useActiveProjectId,
   useFieldDraft,
   useTaskLinks,
 } from "./work.tsx";
-import {
+
+const {
+  Button,
+  Checkbox,
+  Dialog,
+  EmptyState,
+  IconButton,
+  MediaViewer,
+  Select,
+  Spinner,
+  Tabs,
+  TextInput,
+  Textarea,
+} = hostUi.components;
+const { confirm: confirmAlert } = hostUi;
+const { tab: tabId, panel: tabPanelId } = hostUi.tabIds;
+const {
   AttachmentIcon,
   BoardViewIcon,
-  Button,
   ChatIcon,
   CheckIcon,
-  Checkbox,
   ChevronLeftIcon,
   ChevronRightIcon,
   CloseIcon,
-  confirmAlert,
-  Dialog,
   EditIcon,
   ExternalLinkIcon,
   FileIcon,
-  IconButton,
   LinkIcon,
   ListViewIcon,
   PlusIcon,
   RefreshIcon,
-  Select,
-  type SelectOption,
   SendIcon,
-  TextInput,
-  Textarea,
   UploadIcon,
   ViewOptionsIcon,
-} from "../../../apps/web/src/components/ui/index.ts";
+} = hostUi.iconSet;
+type SelectOption = WebSelectOption;
 
 type BoardView = "kanban" | "list";
 
@@ -480,133 +491,6 @@ function PickMark({ picked }: { picked: boolean }) {
   return <span className={`tt-pick${picked ? " on" : ""}`} aria-hidden="true">{picked && <Icon.check />}</span>;
 }
 
-function ImageLightbox({
-  attachment,
-  allImages,
-  onClose,
-  onSelectImage,
-}: {
-  attachment: TaskTrackerAttachmentDto;
-  allImages?: readonly TaskTrackerAttachmentDto[];
-  onClose: () => void;
-  onSelectImage?: (attachment: TaskTrackerAttachmentDto) => void;
-}) {
-  const images = allImages && allImages.length > 0 ? allImages : [attachment];
-  const currentIndex = images.findIndex((img) => img.id === attachment.id);
-  const index = currentIndex >= 0 ? currentIndex : 0;
-  const current = images[index] ?? attachment;
-  const hasPrev = index > 0;
-  const hasNext = index < images.length - 1;
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const swipe = useRef<{ x: number; y: number } | null>(null);
-
-  // The viewer takes focus while it is open and hands it back on close.
-  useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    overlayRef.current?.querySelector<HTMLElement>(`button[aria-label="${tt("tasktrackers.board.closePreview")}"]`)?.focus();
-    return () => { if (opener?.isConnected) opener.focus(); };
-  }, []);
-
-  useEffect(() => {
-    // Captured first and stopped, so Escape closes only the preview and not
-    // the task detail or window underneath it.
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const step = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
-      if (event.key !== "Escape" && step === 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.key === "Escape") onClose();
-      else if (onSelectImage && images[index + step]) onSelectImage(images[index + step]!);
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [index, images, onClose, onSelectImage]);
-
-  // Portaled: the animated detail panel would otherwise contain the overlay.
-  return createPortal(
-    <div
-      ref={overlayRef}
-      className="tt-lightbox-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={tt("tasktrackers.board.preview", { name: current.name })}
-      data-owns-swipe=""
-      onClick={onClose}
-      // A horizontal swipe pages through the images on touch screens.
-      onPointerDown={(event) => {
-        if (event.pointerType !== "mouse") swipe.current = { x: event.clientX, y: event.clientY };
-      }}
-      onPointerUp={(event) => {
-        const start = swipe.current;
-        swipe.current = null;
-        if (!start || !onSelectImage) return;
-        const dx = event.clientX - start.x;
-        if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(event.clientY - start.y) * 1.5) return;
-        const rtl = document.documentElement.dir === "rtl";
-        const step = (dx < 0) !== rtl ? 1 : -1;
-        const next = images[index + step];
-        if (next) onSelectImage(next);
-      }}
-      onPointerCancel={() => { swipe.current = null; }}
-    >
-      <div className="tt-lightbox-content" onClick={(event) => event.stopPropagation()}>
-        <header className="tt-lightbox-header">
-          <div className="tt-lightbox-title">
-            <span>{current.name}</span>
-            {current.size ? <small>({formatBytes(current.size)})</small> : null}
-          </div>
-          <div className="tt-lightbox-actions">
-            {current.url && (
-              <a
-                href={current.url}
-                target="_blank"
-                rel="noreferrer"
-                className="tt-lightbox-button"
-                title={tt("tasktrackers.board.openOriginal")}
-                aria-label={tt("tasktrackers.board.openOriginal")}
-              >
-                <ExternalLinkIcon size={16} />
-              </a>
-            )}
-            <IconButton icon={CloseIcon} size="sm" label={tt("tasktrackers.board.closePreview")} onClick={onClose} />
-          </div>
-        </header>
-        <div className="tt-lightbox-image-wrap">
-          {hasPrev && onSelectImage && (
-            <button
-              type="button"
-              className="tt-lightbox-nav prev"
-              aria-label={tt("tasktrackers.board.previousImage")}
-              onClick={() => onSelectImage(images[index - 1]!)}
-            >
-              <ChevronLeftIcon size={24} />
-            </button>
-          )}
-          <span className="tt-lightbox-image" key={current.id}>
-            <AttachmentImage src={current.url || current.thumbnailUrl} alt={current.name} eager />
-          </span>
-          {hasNext && onSelectImage && (
-            <button
-              type="button"
-              className="tt-lightbox-nav next"
-              aria-label={tt("tasktrackers.board.nextImage")}
-              onClick={() => onSelectImage(images[index + 1]!)}
-            >
-              <ChevronRightIcon size={24} />
-            </button>
-          )}
-        </div>
-        {images.length > 1 && (
-          <footer className="tt-lightbox-footer">
-            <span>{tt("tasktrackers.board.imageOf", { index: index + 1, total: images.length })}</span>
-          </footer>
-        )}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
 function TaskCard({
   task,
   linked,
@@ -678,26 +562,24 @@ function TaskCard({
   );
 }
 
+/** Every empty, failed or finished board state is the host EmptyState; the
+ *  wrapper only keeps the board's own class for its container rules. */
 function BoardEmpty({
-  icon,
   title,
   body,
   hint,
-  action,
+  actionLabel,
+  onAction,
 }: {
-  icon: ReactNode;
   title: string;
   body: string;
   hint?: string;
-  action?: ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="tt-empty">
-      <span className="tt-empty-icon">{icon}</span>
-      <strong>{title}</strong>
-      <p>{body}</p>
-      {action}
-      {hint && <small className="tt-empty-hint">{hint}</small>}
+      <EmptyState variant="panel" title={title} description={hint ? `${body} ${hint}` : body} actionLabel={actionLabel} onAction={onAction} />
     </div>
   );
 }
@@ -742,7 +624,9 @@ function TaskDetail({
   demo: boolean;
   loading: boolean;
   initialEditing?: boolean;
-  onClose: () => void;
+  /** Leaving the window for the session's chat passes false: focus belongs to
+   *  the chat that takes over, not the card behind the closed window. */
+  onClose: (restoreFocus?: boolean) => void;
   onTaskChanged: (task: TaskTrackerTaskDto, linked?: boolean) => void;
   /** Applies a change to the task wherever the board holds it, without
    *  reopening it: optimistic edits and their rollback. */
@@ -860,19 +744,29 @@ function TaskDetail({
   };
   const dispatch = async () => {
     if (!projectId) return;
+    // The start's own remembered options decide whether the app switches to
+    // the new session, and the window then closes with it.
+    const options = taskStartOptions();
     setBusy("dispatch");
     setError("");
     try {
-      const [result] = await dispatchTasks(projectId, [task], instructions);
+      const [result] = await dispatchTasks(projectId, [task], instructions, options);
       if (!result?.sessionId) throw new Error(result?.error || tt("tasktrackers.board.agentDidNotStart"));
       setStartedSession(result.sessionId);
       setNotice(tt("tasktrackers.board.agentStarted"));
       setInstructions("");
+      if (options.open) onClose(false);
     } catch (cause) {
       setError(messageOf(tt("tasktrackers.board.couldNotStartAgent"), cause));
     } finally {
       setBusy(null);
     }
+  };
+  // Opening a linked session leaves the board: the chat takes over, so the
+  // task window does not stay on top of it.
+  const openInSession = (id: string) => {
+    onClose(false);
+    openSession(id);
   };
   const link = async (startAgent: boolean) => {
     if (!sessionId) return;
@@ -1069,7 +963,7 @@ function TaskDetail({
                 <Icon.external />
               </a>
             )}
-            <IconButton icon={CloseIcon} size="sm" label={tt("tasktrackers.board.closeDetails")} onClick={onClose} />
+            <IconButton icon={CloseIcon} size="sm" label={tt("tasktrackers.board.closeDetails")} onClick={() => onClose()} />
           </span>
         </header>
 
@@ -1109,7 +1003,7 @@ function TaskDetail({
                 <span className="tt-detail-in">{tt("tasktrackers.board.in")}</span>
                 <StatusPill status={task.status} />
                 {linked && <span className="tt-linked-chip"><Icon.link /> {tt("tasktrackers.board.linkedToSession")}</span>}
-                {loading && <span className="tt-detail-loading" role="status"><span className="tt-button-spinner" aria-hidden="true" /> {tt("tasktrackers.board.refreshing")}</span>}
+                {loading && <span className="tt-detail-loading" role="status"><Spinner size="sm" /> {tt("tasktrackers.board.refreshing")}</span>}
               </div>
 
               {(task.assignees.length > 0 || task.labels.length > 0 || due || (task.priority && task.priority.level !== "none")) && (
@@ -1455,7 +1349,7 @@ function TaskDetail({
                   </div>
                 </div>
                 {preferences.agentHandoff && (
-                  <div className="tt-target" role="radiogroup" aria-label={tt("tasktrackers.board.whereAgentWorks")}>
+                  <div className="seg tt-target" role="radiogroup" aria-label={tt("tasktrackers.board.whereAgentWorks")}>
                     {([["new", tt("tasktrackers.board.newSession")], ["current", tt("tasktrackers.board.thisSession")]] as const).map(([id, label]) => (
                       <button
                         key={id}
@@ -1513,7 +1407,7 @@ function TaskDetail({
                   </div>
                 )}
                 {startedSession && (
-                  <Button size="sm" variant="quiet" onClick={() => openSession(startedSession)}>{tt("tasktrackers.board.openNewSession")}</Button>
+                  <Button size="sm" variant="quiet" onClick={() => openInSession(startedSession)}>{tt("tasktrackers.board.openNewSession")}</Button>
                 )}
                 {target === "new" && !projectId && preferences.agentHandoff && <small className="tt-inline-hint">{tt("tasktrackers.board.openProjectForAgents")}</small>}
                 {(target === "current" || !preferences.agentHandoff) && !sessionId && <small className="tt-inline-hint">{tt("tasktrackers.board.openSessionToLink")}</small>}
@@ -1526,7 +1420,7 @@ function TaskDetail({
                     <small>{tt("tasktrackers.board.agentReports")}</small>
                   </div>
                 </div>
-                <AgentSessions links={links} />
+                <AgentSessions links={links} onOpen={openInSession} />
               </section>}
             </aside>
           </div>
@@ -1541,11 +1435,14 @@ function TaskDetail({
       </div>
 
       {previewImage && (
-        <ImageLightbox
-          attachment={previewImage}
-          allImages={images}
+        <MediaViewer
+          items={(images.length > 0 ? images : [previewImage]).map((image) => ({
+            id: image.id,
+            name: image.name,
+            url: image.url || image.thumbnailUrl || "",
+          }))}
+          start={Math.max(0, images.findIndex((image) => image.id === previewImage.id))}
           onClose={() => setPreviewImage(null)}
-          onSelectImage={setPreviewImage}
         />
       )}
     </Dialog>
@@ -1602,34 +1499,31 @@ function FilteredEmpty({
   if (onlyDone) {
     return (
       <BoardEmpty
-        icon={<Icon.check />}
         title={tt("tasktrackers.board.everythingDone")}
         body={tt("tasktrackers.board.completedHidden")}
-        action={<Button size="sm" onClick={onShowCompleted}>{tt("tasktrackers.board.showCompleted")}</Button>}
+        actionLabel={tt("tasktrackers.board.showCompleted")} onAction={onShowCompleted}
       />
     );
   }
   if (searching || assignees.size === 0) {
     return (
       <BoardEmpty
-        icon={<Icon.search />}
         title={tt("tasktrackers.board.noMatches")}
         body={assignees.size > 0
           ? tt("tasktrackers.board.clearSearchOrChoose")
           : tt("tasktrackers.board.clearSearch")}
-        action={<Button size="sm" onClick={onClear}>{tt("tasktrackers.board.clearFilters")}</Button>}
+        actionLabel={tt("tasktrackers.board.clearFilters")} onAction={onClear}
       />
     );
   }
   const unknownMe = assignees.has(ME) && !knowsMe;
   return (
     <BoardEmpty
-      icon={<Icon.filter />}
       title={unknownMe ? tt("tasktrackers.board.unknownAccount") : emptyAssigneeTitle(assignees, people)}
       body={unknownMe
         ? tt("tasktrackers.board.unknownAccountBody", { provider: PROVIDER_LABELS[provider] })
         : tt("tasktrackers.board.chooseSomeoneElse")}
-      action={<Button size="sm" onClick={onClear}>{tt("tasktrackers.board.showEveryone")}</Button>}
+      actionLabel={tt("tasktrackers.board.showEveryone")} onAction={onClear}
     />
   );
 }
@@ -1681,7 +1575,7 @@ function ProjectTaskBoard({
   memoryKey,
   activeProjectId,
 }: TaskTrackerBoardProps & { activeProjectId: string | null }) {
-  const providerPanelId = useId();
+  const providerTabsId = `tt-providers${useId().replace(/:/g, "")}`;
   const configuredDefault = config.defaultView === "list" ? "list" : "kanban";
   // The project's choice of what opens, made after the window last showed
   // something, wins over that memory.
@@ -2308,29 +2202,6 @@ function ProjectTaskBoard({
     setBoardsEpoch((value) => value + 1);
     showBoardNotice({ text: tt("tasktrackers.board.created", { name: created.name }) });
   };
-  const handleProviderKeys = (
-    event: ReactKeyboardEvent<HTMLButtonElement>,
-    current: TaskTrackerProvider,
-  ) => {
-    const order: TaskTrackerProvider[] = enabledProviders;
-    const index = order.indexOf(current);
-    const nextIndex = event.key === "ArrowRight"
-      ? (index + 1) % order.length
-      : event.key === "ArrowLeft"
-        ? (index - 1 + order.length) % order.length
-        : event.key === "Home"
-          ? 0
-          : event.key === "End"
-            ? order.length - 1
-            : -1;
-    if (nextIndex < 0) return;
-    event.preventDefault();
-    const next = order[nextIndex]!;
-    chooseProvider(next);
-    event.currentTarget.parentElement
-      ?.querySelector<HTMLButtonElement>(`[data-provider="${next}"]`)
-      ?.focus();
-  };
   const markLinked = (updated: TaskTrackerTaskDto) => {
     setLinkedTasks((current) => current.some((task) =>
       task.provider === updated.provider && task.taskId === updated.id)
@@ -2510,17 +2381,16 @@ function ProjectTaskBoard({
   const truncated = tasks.length >= TASK_PAGE;
 
   if (providers === null && loading === "providers") {
-    return <div className="tt-board tt-loading-state" role="status"><span className="tt-spinner" /> {tt("tasktrackers.board.loadingTrackers")}</div>;
+    return <div className="tt-board tt-loading-state" role="status"><Spinner size="sm" /> {tt("tasktrackers.board.loadingTrackers")}</div>;
   }
 
   if (providers === null) {
     return (
       <div className="tt-board">
         <BoardEmpty
-          icon={<Icon.refresh />}
           title={tt("tasktrackers.board.didNotLoad")}
           body={error || tt("tasktrackers.board.serverNoProviders")}
-          action={<Button size="sm" onClick={() => setLoadEpoch((value) => value + 1)}>{tt("tasktrackers.boards.tryAgain")}</Button>}
+          actionLabel={tt("tasktrackers.boards.tryAgain")} onAction={() => setLoadEpoch((value) => value + 1)}
         />
       </div>
     );
@@ -2530,10 +2400,9 @@ function ProjectTaskBoard({
     return (
       <div className="tt-board">
         <BoardEmpty
-          icon={<Icon.widgets />}
           title={tt("tasktrackers.board.allOff")}
           body={tt("tasktrackers.board.turnOnHint")}
-          action={<Button size="sm" onClick={() => taskTrackerHostNavigate()}>{tt("tasktrackers.board.manageTrackers")}</Button>}
+          actionLabel={tt("tasktrackers.board.manageTrackers")} onAction={() => taskTrackerHostNavigate()}
         />
       </div>
     );
@@ -2546,61 +2415,45 @@ function ProjectTaskBoard({
       aria-busy={loading !== null}
     >
       <header className="tt-board-header">
-        <div className="tt-provider-tabs" role="tablist" aria-label={tt("tasktrackers.board.providerTabs")}>
-          {enabledProviders.map((id) => {
+        <Tabs
+          className="tt-provider-tabs"
+          idBase={providerTabsId}
+          size="sm"
+          label={tt("tasktrackers.board.providerTabs")}
+          value={provider}
+          onChange={(id) => chooseProvider(id as TaskTrackerProvider)}
+          tabs={enabledProviders.map((id) => {
             const info = providers?.find((item) => item.provider === id);
-            return (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                id={`${providerPanelId}-${id}`}
-                aria-controls={providerPanelId}
-                aria-selected={provider === id}
-                tabIndex={provider === id ? 0 : -1}
-                data-provider={id}
-                title={PROVIDER_LABELS[id]}
-                className={provider === id ? "active" : ""}
-                onClick={() => chooseProvider(id)}
-                onKeyDown={(event) => handleProviderKeys(event, id)}
-              >
-                {providerMark(id)}
-                {/* A narrow board keeps only the open tracker's name visible;
-                    the others stay named for assistive technology. */}
-                <span className="tt-provider-name">{PROVIDER_LABELS[id]}</span>
-                <i className={info?.mode === "demo" ? "demo" : info?.configured ? "configured" : ""} aria-hidden="true" />
-                <span className="sr-only">
-                  {info?.mode === "demo" ? tt("tasktrackers.board.demoSandbox") : info?.configured ? tt("tasktrackers.board.configured") : tt("tasktrackers.board.notConfigured")}
+            const state = info?.mode === "demo" ? "demo" : info?.configured ? "configured" : "";
+            return {
+              id,
+              label: (
+                <span className="tt-provider-tab" data-provider={id} title={PROVIDER_LABELS[id]}>
+                  {providerMark(id)}
+                  {/* A narrow board keeps only the open tracker's name visible;
+                      the others stay named for assistive technology. */}
+                  <span className="tt-provider-name">{PROVIDER_LABELS[id]}</span>
+                  <i className={state} aria-hidden="true" />
+                  <span className="sr-only">
+                    {state === "demo" ? tt("tasktrackers.board.demoSandbox") : state ? tt("tasktrackers.board.configured") : tt("tasktrackers.board.notConfigured")}
+                  </span>
                 </span>
-              </button>
-            );
+              ),
+            };
           })}
-        </div>
+        />
         <div className="tt-header-actions">
-          <div className="tt-view-toggle" aria-label={tt("tasktrackers.board.boardView")}>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              iconStart={BoardViewIcon}
-              className={view === "kanban" ? "active" : ""}
-              aria-pressed={view === "kanban"}
-              aria-label={tt("tasktrackers.board.board")}
-              onClick={() => chooseView("kanban")}
-              title={tt("tasktrackers.board.kanbanView")}
-            >{tt("tasktrackers.board.board")}</Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              iconStart={ListViewIcon}
-              className={view === "list" ? "active" : ""}
-              aria-pressed={view === "list"}
-              aria-label={tt("tasktrackers.board.list")}
-              onClick={() => chooseView("list")}
-              title={tt("tasktrackers.board.listView")}
-            >{tt("tasktrackers.board.list")}</Button>
-          </div>
+          <Tabs
+            className="tt-view-toggle"
+            size="sm"
+            label={tt("tasktrackers.board.boardView")}
+            value={view}
+            onChange={(id) => chooseView(id as BoardView)}
+            tabs={[
+              { id: "kanban", label: <span className="tt-view-tab" title={tt("tasktrackers.board.kanbanView")}><BoardViewIcon size={16} aria-hidden="true" /><span className="tt-view-text">{tt("tasktrackers.board.board")}</span></span> },
+              { id: "list", label: <span className="tt-view-tab" title={tt("tasktrackers.board.listView")}><ListViewIcon size={16} aria-hidden="true" /><span className="tt-view-text">{tt("tasktrackers.board.list")}</span></span> },
+            ]}
+          />
           {board && providerReady && canWrite && preferences.agentHandoff && (
             <Button
               size="sm"
@@ -2638,22 +2491,19 @@ function ProjectTaskBoard({
       </header>
 
       <div
-        id={providerPanelId}
+        id={tabPanelId(providerTabsId, provider)}
         className={`tt-provider-panel${providerReady && board ? " tt-provider-panel--filtered" : ""}${providerReady && board && demoMode ? " tt-provider-panel--demo" : ""}`}
         role="tabpanel"
-        aria-labelledby={`${providerPanelId}-${provider}`}
+        aria-labelledby={tabId(providerTabsId, provider)}
       >
         {!providerReady ? (
           <BoardEmpty
-            icon={providerMark(provider)}
             title={tt("tasktrackers.board.connectProvider", { provider: PROVIDER_LABELS[provider] })}
             body={connectCopy(provider).board}
             hint={providerInfo?.requiredEnv.length
               ? tt("tasktrackers.board.adminsEnv", { env: providerInfo.requiredEnv.join(", ") })
               : undefined}
-            action={canWrite
-              ? <Button size="sm" variant="primary" onClick={() => setConnecting(true)}>{tt("tasktrackers.board.connectProvider", { provider: PROVIDER_LABELS[provider] })}</Button>
-              : undefined}
+            actionLabel={canWrite ? tt("tasktrackers.board.connectProvider", { provider: PROVIDER_LABELS[provider] }) : undefined} onAction={() => setConnecting(true)}
           />
         ) : (
           <>
@@ -2773,7 +2623,7 @@ function ProjectTaskBoard({
                   role="status"
                 >
                   <span>{tt("tasktrackers.board.visibleOf", { visible: visibleTasks.length, total: boardTasks.length })}</span>
-                  <button type="button" className="tt-filter-clear" onClick={clearFilters}>{tt("tasktrackers.board.clearFilters")}</button>
+                  <Button type="button" variant="quiet" size="sm" className="tt-filter-clear" onClick={clearFilters}>{tt("tasktrackers.board.clearFilters")}</Button>
                 </p>
               )}
             </div>
@@ -2782,23 +2632,21 @@ function ProjectTaskBoard({
           <div className={`tt-board-content${composing ? " has-detail has-compose" : ""}`}>
             <main className="tt-task-surface" aria-busy={loading === "tasks"}>
               {loading === "tasks" && tasks.length === 0 ? (
-                <div className="tt-loading-state" role="status"><span className="tt-spinner" /> {tt("tasktrackers.board.loadingTasks")}</div>
+                <div className="tt-loading-state" role="status"><Spinner size="sm" /> {tt("tasktrackers.board.loadingTasks")}</div>
               ) : shownBoards.length === 0 && loading !== "boards" ? (
                 boards.length > 0 ? (
                   <BoardEmpty
-                    icon={<Icon.filter />}
                     title={tt("tasktrackers.board.allHiddenTitle")}
                     body={tt("tasktrackers.board.allHiddenBody")}
-                    action={<Button size="sm" onClick={() => setScoping(true)}>{tt("tasktrackers.board.chooseBoardsAction")}</Button>}
+                    actionLabel={tt("tasktrackers.board.chooseBoardsAction")} onAction={() => setScoping(true)}
                   />
                 ) : (
                   <BoardEmpty
-                    icon={<Icon.widgets />}
                     title={tt("tasktrackers.board.noBoardsFound")}
                     body={canWrite
                       ? tt("tasktrackers.board.noBoardsBody", { noun: projectNouns(provider).singular.toLocaleLowerCase() })
                       : tt("tasktrackers.board.noBoardsBodyReadOnly", { noun: projectNouns(provider).singular.toLocaleLowerCase() })}
-                    action={canWrite ? <Button size="sm" onClick={() => setComposingBoard(true)}>{tt("tasktrackers.board.newBoard")}</Button> : undefined}
+                    actionLabel={canWrite ? tt("tasktrackers.board.newBoard") : undefined} onAction={() => setComposingBoard(true)}
                   />
                 )
               ) : view === "kanban" && board && columns && (visibleTasks.length > 0 || tasks.length === 0) ? (
@@ -2819,9 +2667,9 @@ function ProjectTaskBoard({
                   onRemove={(column) => void removeColumn(column)}
                 />
               ) : tasks.length === 0 && board ? (
-                <BoardEmpty icon={<Icon.check />} title={tt("tasktrackers.board.boardIsClear")} body={tt("tasktrackers.board.noOpenTasks")} />
+                <BoardEmpty title={tt("tasktrackers.board.boardIsClear")} body={tt("tasktrackers.board.noOpenTasks")} />
               ) : visibleTasks.length === 0 && waitingForMe ? (
-                <div className="tt-loading-state" role="status"><span className="tt-spinner" /> {tt("tasktrackers.board.findingTasks")}</div>
+                <div className="tt-loading-state" role="status"><Spinner size="sm" /> {tt("tasktrackers.board.findingTasks")}</div>
               ) : visibleTasks.length === 0 ? (
                 <FilteredEmpty
                   provider={provider}
@@ -3036,7 +2884,7 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
   };
 
   if (!sessionId) return <div className="tt-linked-empty"><Icon.link /><span>{tt("tasktrackers.board.openSessionToLink")}</span></div>;
-  if (loading && !linked) return <div className="tt-linked-empty" role="status"><span className="tt-spinner" /> {tt("tasktrackers.board.loadingLinked")}</div>;
+  if (loading && !linked) return <div className="tt-linked-empty" role="status"><Spinner size="sm" /> {tt("tasktrackers.board.loadingLinked")}</div>;
   if (!linked && error) return <div className="tt-linked-empty tt-linked-load-error" role="alert">
     <span>{error}</span>
     <Button size="sm" onClick={() => setReloadKey((value) => value + 1)}>{tt("tasktrackers.boards.tryAgain")}</Button>
@@ -3096,7 +2944,7 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
         </div>
       )}
       {loading && linked && <div className="tt-linked-updating" role="status">
-        <span className="tt-button-spinner" aria-hidden="true" /> {tt("tasktrackers.board.updatingTracker")}
+        <Spinner size="sm" /> {tt("tasktrackers.board.updatingTracker")}
       </div>}
       {linked.completed && <div className="tt-linked-done">
         <span><Icon.check /> {tt("tasktrackers.board.completed")}</span>

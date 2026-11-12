@@ -407,7 +407,7 @@ test("a person's harness choices survive an update and their edit marks the copy
   const rig = await syncedRig();
   const { contentHash } = (await rig.catalog.detail(rig.space, "anthropic:skills/pdf")).skill;
   await rig.catalog.install(rig.space, { id: "anthropic:skills/pdf", contentHash, scope: "space" });
-  await rig.skills.setHarnessEnabled(rig.space, "space", "pdf", "codex", false);
+  await rig.skills.setReach(rig.space, "space", "pdf", { default: "all", harnesses: { codex: "off" } });
   const stored = rig.skills.listManaged(rig.space)[0]!;
   await rig.skills.save(rig.space, "space", {
     name: "pdf",
@@ -417,13 +417,13 @@ test("a person's harness choices survive an update and their edit marks the copy
   });
   const edited = rig.skills.listManaged(rig.space)[0]!;
   assert.equal(edited.modified, true);
-  assert.deepEqual(edited.offHarnesses, ["codex"]);
+  assert.deepEqual(edited.reach, { default: "all", harnesses: { codex: "off" } });
   assert.ok(edited.bundleHash, "an edit keeps the files");
   assert.deepEqual((await rig.catalog.list(rig.space)).skills[0]?.installed, [{ scope: "space", state: "modified" }]);
   await rig.catalog.update(rig.space, "space", "pdf");
   const back = rig.skills.listManaged(rig.space)[0]!;
   assert.equal(back.modified, undefined);
-  assert.deepEqual(back.offHarnesses, ["codex"]);
+  assert.deepEqual(back.reach, { default: "all", harnesses: { codex: "off" } });
 });
 
 test("a different skill keeps its name until a person chooses to replace it", async () => {
@@ -500,17 +500,62 @@ test("a remote target gets the instructions alone, since the files live on this 
   assert.equal(capability.instructions, "Do the thing.");
 });
 
-test("a skill switched off for a harness says so to the provisioner", async () => {
+test("a skill's reach becomes the provisioner's harness rule", async () => {
   const rig = await syncedRig();
   const { contentHash } = (await rig.catalog.detail(rig.space, "anthropic:skills/pdf")).skill;
   await rig.catalog.install(rig.space, { id: "anthropic:skills/pdf", contentHash, scope: "space" });
-  const updated = await rig.skills.setHarnessEnabled(rig.space, "space", "pdf", "cursor", false);
-  assert.deepEqual(updated.offHarnesses, ["cursor"]);
   const capabilities = () => rig.skills.managedCapabilities({ space: rig.space, spaceId: "s1", projectId: "__default__", cwd: rig.base } as HarnessContext);
-  assert.deepEqual(capabilities()[0]?.excludedHarnessIds, ["cursor"]);
-  await rig.skills.setHarnessEnabled(rig.space, "space", "pdf", "cursor", true);
-  assert.equal(capabilities()[0]?.excludedHarnessIds, undefined);
-  await assert.rejects(rig.skills.setHarnessEnabled(rig.space, "space", "pdf", "../x", false), (error) => code(error) === "invalid-input");
+  assert.equal(capabilities()[0]?.harnessRule, undefined, "every harness, as before");
+
+  const updated = await rig.skills.setReach(rig.space, "space", "pdf", { default: "all", harnesses: { cursor: "off" } });
+  assert.deepEqual(updated.reach, { default: "all", harnesses: { cursor: "off" } });
+  assert.deepEqual(capabilities().map((item) => item.kind), ["skill"]);
+  assert.deepEqual(capabilities()[0]?.harnessRule, { default: true, harnesses: { cursor: false } });
+
+  await rig.skills.setReach(rig.space, "space", "pdf", { default: "some", families: { claude: "on" }, harnesses: { "claude-work": "always" } });
+  const [skill, always] = capabilities();
+  assert.deepEqual(skill?.harnessRule, { default: false, families: { claude: true }, harnesses: { "claude-work": true } });
+  assert.ok(always?.kind === "instruction", "always adds the instructions to every session");
+  assert.deepEqual(always.harnessRule, { default: false, families: { claude: false }, harnesses: { "claude-work": true } });
+  assert.match(always.text, /Polyth skill `pdf` is always on/);
+  assert.match(always.text, /Do the thing\./);
+  assert.equal(always.scope, "space");
+
+  await rig.skills.setReach(rig.space, "space", "pdf", { default: "none", families: { claude: "on" } });
+  assert.deepEqual(capabilities(), [], "nowhere means no harness at all");
+  assert.equal(rig.skills.listManaged(rig.space)[0]?.reach?.families?.claude, "on", "the choices are kept");
+
+  await rig.skills.setReach(rig.space, "space", "pdf", { default: "all" });
+  assert.equal(rig.skills.listManaged(rig.space)[0]?.reach, undefined, "every harness stores nothing");
+  await assert.rejects(rig.skills.setReach(rig.space, "space", "pdf", { default: "all", harnesses: { "../x": "off" } } as never), (error) => code(error) === "invalid-input");
+  await assert.rejects(rig.skills.setReach(rig.space, "space", "pdf", { default: "all" }, undefined, 1), (error) => code(error) === "conflict");
+});
+
+test("older files keep their exclusion list until the skill changes", async () => {
+  const rig = await syncedRig();
+  const { contentHash } = (await rig.catalog.detail(rig.space, "anthropic:skills/pdf")).skill;
+  await rig.catalog.install(rig.space, { id: "anthropic:skills/pdf", contentHash, scope: "space" });
+  const file = join(rig.space.storageDir!, "packages", "commands", "skills.json");
+  const doc = JSON.parse(readFileSync(file, "utf8"));
+  doc.skills[0].offHarnesses = ["cursor"];
+  writeFileSync(file, JSON.stringify(doc));
+  const capabilities = () => rig.skills.managedCapabilities({ space: rig.space, spaceId: "s1", projectId: "__default__", cwd: rig.base } as HarnessContext);
+  assert.deepEqual(capabilities()[0]?.harnessRule, { default: true, harnesses: { cursor: false } });
+  assert.deepEqual((await rig.skills.list(rig.space)).find((skill) => skill.name === "pdf")?.reach, { default: "all", harnesses: { cursor: "off" } });
+  const stored = rig.skills.listManaged(rig.space)[0]!;
+  await rig.skills.save(rig.space, "space", { name: "pdf", description: stored.description, instructions: "Edited.", expectedRevision: stored.revision });
+  const after = JSON.parse(readFileSync(file, "utf8")).skills[0];
+  assert.equal(after.offHarnesses, undefined);
+  assert.deepEqual(after.reach, { default: "all", harnesses: { cursor: "off" } });
+});
+
+test("a skill that blocks tools cannot be always on", async () => {
+  const rig = await syncedRig();
+  await rig.skills.save(rig.space, "space", { name: "careful", description: "d", instructions: "i", disallowedTools: ["Bash"] });
+  await assert.rejects(
+    rig.skills.setReach(rig.space, "space", "careful", { default: "all", harnesses: { claude: "always" } }),
+    (error) => code(error) === "invalid-input",
+  );
 });
 
 test("roles decide who installs where, and what the page offers matches", async () => {

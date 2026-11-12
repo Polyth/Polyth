@@ -85,7 +85,7 @@ export const guardedModelSwitcherVisible = (g: AccountGuardrails | null): boolea
 /** Settings pages whose server routes a guarded account cannot reach. */
 const GUARDED_HIDDEN_SETTINGS_PAGES: ReadonlySet<string> = new Set([
   "harnesses", "models", "providers", "packages", "plugins", "users", "tunnel",
-  "mcp", "ssh", "secure-safe", "integrations", "desktop", "monitoring", "task-trackers",
+  "mcp", "ssh", "secure-safe", "desktop", "monitoring", "task-trackers",
   "home-assistant", "permissions",
 ]);
 export const guardedSettingsPageVisible = (g: AccountGuardrails | null, pageId: string): boolean =>

@@ -36,7 +36,7 @@ test("memory settings guards stale project responses and dirty drafts", async ()
   assert.match(messages, /Manual saves are user locked/);
   assert.match(messages, /already delivered native context/);
   assert.match(source, /memory\.bulk\.selectVisible/);
-  assert.match(messages, /visible filtered page/);
+  assert.match(messages, /Select this page/);
   assert.match(source, /memory\.action\.selectAll/);
   assert.match(messages, /Select all \{count\} filtered/);
   assert.match(source, /requestFilterEpoch/);
@@ -44,6 +44,8 @@ test("memory settings guards stale project responses and dirty drafts", async ()
   assert.match(source, /memory\.action\.downloadRecovery/);
   assert.match(messages, /recovery export/);
   const css = await read("../widgets/styles.css");
-  assert.match(css, /max-width: 700px/);
+  // Laid out by its container (a dialog, a phone sheet), never the viewport.
+  assert.match(css, /@container pkg-memory/);
+  assert.doesNotMatch(css, /@media \((max|min)-width/);
   assert.match(css, /prefers-reduced-motion/);
 });

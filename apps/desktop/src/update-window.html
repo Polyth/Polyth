@@ -5,7 +5,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'unsafe-inline'; img-src 'self' file:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'unsafe-inline'; img-src data:">
   <meta name="color-scheme" content="dark light">
   <title>Polyth update</title>
   <style>
@@ -125,7 +125,10 @@
 <body>
   <main class="card">
     <header class="head">
-      <img class="mark" src="../build/icon.png" alt="">
+      <!-- build.ts inlines the app icon here as a data: URL. A relative file
+           path relied on build/ sitting beside dist/ and on the installer not
+           having removed the old copy's files while "Installing…" is shown. -->
+      <img class="mark" src="__POLYTH_UPDATE_MARK__" alt="">
       <h1 id="title">Polyth update</h1>
       <button id="close" class="close" type="button" aria-label="Hide" title="Hide">
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>

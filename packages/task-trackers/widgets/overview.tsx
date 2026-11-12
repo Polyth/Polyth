@@ -4,13 +4,15 @@ import type {
   TaskTrackerStatusCategory,
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
-import { Button } from "../../../apps/web/src/components/ui/index.ts";
+
 import { api } from "./api.ts";
 import { PROVIDER_LABELS, ProviderMark, providerState, stateLabel } from "./brand.tsx";
 import { tt } from "./i18n.ts";
 import { resolveBoard, useProviderScope } from "./scope.ts";
-import { TASK_TRACKER_CHANGED, taskTrackerHost, useManagement } from "./store.ts";
+import { hostUi, TASK_TRACKER_CHANGED, taskTrackerHost, useManagement } from "./store.ts";
 import { TASK_TRACKER_PROVIDERS } from "../src/types.ts";
+
+const { Button, Spinner } = hostUi.components;
 
 export interface ProgressSummary {
   total: number;
@@ -97,7 +99,7 @@ export function TaskTrackerOverview({ projectId = null }: { projectId?: string |
   const providers = TASK_TRACKER_PROVIDERS.filter((provider) =>
     preferences.providers[provider] && (data?.providers ?? []).some((item) => item.provider === provider));
 
-  if (!data) return <div className="tt-overview" role="status"><span className="tt-spinner" /> {tt("tasktrackers.overview.loading")}</div>;
+  if (!data) return <div className="tt-overview" role="status"><Spinner size="sm" /> {tt("tasktrackers.overview.loading")}</div>;
   if (providers.length === 0) {
     return (
       <div className="tt-overview empty">

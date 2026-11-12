@@ -41,6 +41,14 @@ export default defineWebPackage((host) => () => {
         keywords: ["title", "language", "style", "rules"],
         focusTarget: "custom-titles.rules",
       },
+      {
+        id: "custom-titles.projects",
+        pageId: "custom-titles",
+        label: copy.itemProjectsLabel,
+        description: copy.itemProjectsDescription,
+        keywords: ["title", "project", "projects", "rules", "language", "style"],
+        focusTarget: "custom-titles.projects",
+      },
     ],
   });
   const offAction = host.slots.register({

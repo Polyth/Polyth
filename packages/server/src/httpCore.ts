@@ -24,6 +24,7 @@ import {
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
+import { REPOSITORY_SCOPE_ID_MAX } from "@polyth/contracts/workspace";
 import type { RuntimePool } from "./sessions.ts";
 import { parseTurnCommand } from "./turnCommand.ts";
 import {
@@ -829,8 +830,23 @@ async function dispatchHttp(
         if (updatedAfter !== undefined && (!Number.isSafeInteger(updatedAfter) || updatedAfter < 0)) {
           throw Object.assign(new Error("invalid summary boundary"), { code: "invalid-input" });
         }
+        // A repository filter names one of this Project's registrations; the
+        // Project is read through the gateway-scoped service, so a foreign or
+        // unknown Project (or a malformed id) leaves the filter unapplied.
+        const projectIdParam = url.searchParams.get("projectId") ?? undefined;
+        const repositoryIdParam = url.searchParams.get("repositoryId");
+        const repositoryProject = projectIdParam && repositoryIdParam
+          && repositoryIdParam.length <= REPOSITORY_SCOPE_ID_MAX && /^[^\u0000-\u001f]+$/.test(repositoryIdParam)
+          ? await space().projects.get(projectIdParam).catch(() => undefined)
+          : undefined;
+        const repositoryFilter = repositoryProject
+          && (repositoryProject.repositories?.length ?? 0) >= 2
+          && repositoryProject.repositories!.some((repository) => repository.id === repositoryIdParam)
+          ? { repositoryId: repositoryIdParam!, projectRepositoryIds: repositoryProject.repositories!.map((repository) => repository.id) }
+          : {};
         const readSummaries = () => summaries({
-          projectId: url.searchParams.get("projectId") ?? undefined,
+          projectId: projectIdParam,
+          ...repositoryFilter,
           worktreePath: url.searchParams.get("worktreePath") ?? undefined,
           ...(url.searchParams.has("revision") ? { revision: Number(url.searchParams.get("revision")) } : {}),
           query: url.searchParams.get("query") ?? undefined,

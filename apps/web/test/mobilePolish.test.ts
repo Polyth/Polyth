@@ -203,7 +203,7 @@ test("source-control surfaces keep responsive and accessible audit contracts", (
   assert.match(git, /tr\("gitview\.couldntLoadTheFileDiff"\)/);
   assert.match(github, /aria-pressed=\{filter === item\.id\}/);
   assert.match(pullRequest, /reviewBusy/);
-  assert.match(pullRequest, /<MarkdownDoc/);
+  assert.match(pullRequest, /<HostingBody/);
   assert.doesNotMatch(pending, /<details/);
   assert.doesNotMatch(pending, /window\.confirm/);
   assert.match(pending, /confirmAlert/);

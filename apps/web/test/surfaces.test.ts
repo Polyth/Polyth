@@ -8,7 +8,15 @@ import {
   type RailSurface, type RailSurfaceContext,
 } from "../src/surfaces.ts";
 import { registerSlot } from "../src/slots.ts";
-import { RAIL_WIDTH_DEFAULT, clampRailWidth, parseRailPrefs } from "../src/railPrefs.ts";
+import {
+  RAIL_WIDTH_DEFAULT,
+  RAIL_WIDTH_DEFAULTS,
+  clampRailWidth,
+  parseRailPrefs,
+  railWidthOf,
+  replaceRailPrefs,
+  setRailWidth,
+} from "../src/railPrefs.ts";
 
 const surface = (id: string, order: number, extra: Partial<RailSurface> = {}): RailSurface => ({
   id, title: id.toUpperCase(), order, component: () => null, ...extra,
@@ -111,6 +119,18 @@ test("parseRailPrefs round-trips, clamps widths, survives garbage", () => {
   assert.equal(clampRailWidth(10), 240);
   assert.equal(clampRailWidth(10_000), 640);
   assert.equal(RAIL_WIDTH_DEFAULT, 300);
+});
+
+test("railWidthOf: a per-surface first-open width yields to the person's resize", () => {
+  replaceRailPrefs({ lastOpen: null, widths: {} });
+  assert.equal(railWidthOf(null), RAIL_WIDTH_DEFAULT);
+  assert.equal(railWidthOf("files"), RAIL_WIDTH_DEFAULT);
+  // Notifications opens wide enough for both actions on one line (uk/de).
+  assert.equal(railWidthOf("slot:notification-centre"), RAIL_WIDTH_DEFAULTS["slot:notification-centre"]);
+  assert.ok(RAIL_WIDTH_DEFAULTS["slot:notification-centre"]! >= 370);
+  setRailWidth("slot:notification-centre", 260);
+  assert.equal(railWidthOf("slot:notification-centre"), 260);
+  replaceRailPrefs({ lastOpen: null, widths: {} });
 });
 
 test("pluginPanePresentation reads managed plugin geometry as untrusted data", async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
-import { createClaudeSmallModelRunner } from "../src/smallModel.ts";
+import { CLAUDE_UTILITY_SYSTEM_PROMPT, createClaudeSmallModelRunner } from "../src/smallModel.ts";
 
 const fakeChild = (stdout: string, prompts: string[]) => {
   const child = new EventEmitter() as EventEmitter & {
@@ -50,8 +50,11 @@ test("claude utility completion runs a sessionless, tool-free print turn", async
     "--model", "claude-sonnet-4-6",
     "--no-session-persistence",
     "--safe-mode",
+    "--system-prompt", CLAUDE_UTILITY_SYSTEM_PROMPT,
     "--tools", "",
   ]);
+  // A Windows `.cmd` shim refuses these characters in argv.
+  assert.doesNotMatch(CLAUDE_UTILITY_SYSTEM_PROMPT, /["%^&|<>!\r\n]/);
   assert.ok(!argv[0]!.some((arg) => arg.includes("describe the change")));
   assert.ok(prompts[0]!.includes("Be terse."));
   assert.ok(prompts[0]!.includes("describe the change"));

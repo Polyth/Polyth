@@ -3,8 +3,10 @@ import type { ServerPackageHost } from "@polyth/plugins";
 import { resolveWorkspaceContext, workspaceExecutionPath, workspaceRepository } from "@polyth/contracts/workspace";
 import { loadInlineAiSettings, saveInlineAiSettings } from "./inlineAi.ts";
 import {
+  INLINE_AI_SYSTEM_PROMPT,
   MAX_INLINE_AI_SELECTION_CHARS,
   parseModelOverride,
+  replyIsToolCall,
   substituteInlineAiPrompt,
   type InlineAiAction,
 } from "./inlineAiShared.ts";
@@ -117,11 +119,21 @@ export function inlineAiRoutes(
       const result = await host.smallModelComplete(runtime, {
         cwd,
         prompt,
+        systemPrompt: INLINE_AI_SYSTEM_PROMPT,
         model,
         maxOutputTokens: action === "explain" ? 1_024 : 2_048,
         timeoutMs: 120_000,
         purpose: "extension-utility",
       });
+      // Never show a written-out tool call as the explanation, or put it into
+      // the file as the fix.
+      if (replyIsToolCall(result.text, selection)) {
+        request.json(502, {
+          error: "tool-call-reply",
+          message: "The model tried to open the file instead of answering. Try again, or choose another model in Files settings.",
+        });
+        return true;
+      }
       request.json(200, { text: result.text });
       return true;
     }

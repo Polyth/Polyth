@@ -1,7 +1,7 @@
 import type { DesktopUpdateChannel } from "./types.ts";
 import { WORKSTATION_FLAVOR, WORKSTATION_UPDATER_CHANNEL } from "./edition.ts";
 
-export const DESKTOP_UPDATE_CHANNELS: readonly DesktopUpdateChannel[] = ["stable", "test", "nightly"];
+export const DESKTOP_UPDATE_CHANNELS: readonly DesktopUpdateChannel[] = ["stable", "nightly"];
 
 export const resolveUpdaterChannel = (
   platform: NodeJS.Platform = process.platform,
@@ -12,12 +12,13 @@ export const resolveUpdaterChannel = (
 
 /**
  * The release channel a build came from, read from its version: the external
- * builder publishes X.Y.N (stable), X.Y.N-beta (test) and X.Y.N-nightly
+ * builder publishes X.Y.N (stable) and X.Y.N-nightly
  * (scripts/ci/update-feed.mjs). It is the default until the user picks one.
+ * Builds from the retired test channel (X.Y.N-beta) follow stable.
  */
 export const updateChannelForVersion = (version: string): DesktopUpdateChannel => {
   const id = /^\d+\.\d+\.\d+-([0-9A-Za-z-]+)/.exec(version)?.[1];
-  return id === "nightly" ? "nightly" : id === "beta" ? "test" : "stable";
+  return id === "nightly" ? "nightly" : "stable";
 };
 
 /** Build flavor of the macOS 12 package: Electron 43, the last Electron that runs on Monterey. */
@@ -64,9 +65,8 @@ export interface UpdaterChannelConfig {
 
 /**
  * electron-updater's GitHub provider: stable reads /releases/latest, which
- * never returns a prerelease. With prereleases allowed, the `beta` channel
- * takes the newest beta or stable release and a custom `nightly` channel
- * takes only nightly releases.
+ * never returns a prerelease. With prereleases allowed, a custom `nightly`
+ * channel takes only nightly releases.
  *
  * A pinned feed (the macOS 12 build, the workstation edition) is stable only,
  * whatever the chosen channel: with prereleases on, the provider reads the
@@ -80,7 +80,6 @@ export const resolveUpdaterConfig = (
   pinnedChannel: string | null = null,
 ): UpdaterChannelConfig => {
   if (pinnedChannel) return { allowPrerelease: false, channel: pinnedChannel };
-  if (channel === "test") return { allowPrerelease: true, channel: "beta" };
   if (channel === "nightly") return { allowPrerelease: true, channel: "nightly" };
   return { allowPrerelease: false, channel: resolveUpdaterChannel(platform, arch) ?? "latest" };
 };

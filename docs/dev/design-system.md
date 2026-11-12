@@ -420,7 +420,13 @@ hint, permission → warning, subagent → info) on a glass card with an unread
 tone dot, in two columns — glyph and text. The date is the last item of the
 meta line (kind … date) and a dead session's note is a line of its own; never
 give the date a column, which at ~100px takes over a third of a ~265px rail
-panel row and leaves the title a sliver. The host's transient error
+panel row and leaves the title a sliver. The panel's action row (Mark all
+read / Clear notifications) is sticky against the rail body's top, painting
+the panel surface over the gutter, so it stays reachable as the list scrolls;
+its buttons share one line. The panel first opens at 380px
+(`RAIL_WIDTH_DEFAULTS` in `apps/web/src/railPrefs.ts`, a resized width wins)
+so both labels fit in the longer locales too (uk/de need ~365px); the row
+wraps only in a pane narrowed below that, never a forced column. The host's transient error
 (`setUiError`), the desktop updater
 (found / downloading / ready, persistent until acted on or closed) and a newer
 web build (Reload / Later) are notifications like any other. Durable,

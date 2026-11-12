@@ -420,6 +420,11 @@ test("the HTTP gateway scopes by the active Space and refuses an unauthorized sw
     assert.equal((await fetch(`${base}/api/sessions/${inWork.sessionId}/activate`, { method: "POST" })).status, 404);
     assert.equal((await fetch(`${base}/api/sessions/summaries?projectId=${inWork.projectId}`)).status, 404);
     assert.equal((await fetch(`${base}/api/sessions/summaries?projectId=invented-project`)).status, 404);
+    // A repository filter on a foreign project neither leaks it nor turns the 404 into a list.
+    assert.equal((await fetch(`${base}/api/sessions/summaries?projectId=${inWork.projectId}&repositoryId=primary`)).status, 404);
+    // On an own project a filter it cannot apply (single repository, unknown id) leaves the list as it was.
+    const ownPage = await (await fetch(`${base}/api/sessions/summaries?projectId=${inHome.projectId}&repositoryId=primary`)).json() as { sessions: Array<{ id: string }> };
+    assert.deepEqual(ownPage.sessions.map((session) => session.id), [inHome.sessionId]);
     assert.equal((await fetch(`${base}/api/sessions/${inWork.sessionId}/compact`, { method: "POST" })).status, 404);
     assert.equal(
       (await fetch(`${base}/api/sessions/${inHome.sessionId}`, {

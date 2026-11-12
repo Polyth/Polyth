@@ -54,6 +54,16 @@ const persistedGlobalModels = createCatalogCache<ModelDescriptor[]>(DAILY_CACHE_
 const persistedGlobalAgents = createCatalogCache<AgentDescriptor[]>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeGlobalAgents.v1"));
 const persistedWarmScopes = createCatalogCache<true>(DAILY_CACHE_MS, 64, Date.now, persistentStorage("polyth.runtimeWarmScopes.v1"));
 const persistedHarnessTopology = persistentStorage("polyth.runtimeHarnessTopology.v1");
+/** The availability rows each account/Space/project last received, kept for
+ *  the harness picker across invalidations and page reloads. Every cache
+ *  above is emptied by an invalidation (daily refresh, a Settings change, a
+ *  stale-catalog signal, a harness package change), and the picker hides a
+ *  harness until its readiness is known, so without this copy it showed no
+ *  harness choices at all until the next probe answered (1–3 s cold). It is
+ *  presentation only: the picker revalidates at once, keeps only harnesses
+ *  in the current roster, and the switch boundary re-verifies readiness. */
+const LAST_KNOWN_HARNESSES_MS = 7 * DAILY_CACHE_MS;
+const lastKnownHarnesses = createCatalogCache<HarnessSnapshot[]>(LAST_KNOWN_HARNESSES_MS, 64, Date.now, persistentStorage("polyth.lastKnownHarnesses.v1"));
 // Stored metadata that predates the topology recorded beside it has unproven
 // provenance: a harness package may have been added while this client was away.
 // Drop it here, at load, because the shell paints from these caches before the
@@ -253,7 +263,24 @@ const rememberHarnessSnapshots = (options: SnapshotRequest, rows: HarnessSnapsho
     keys.add(snapshotPresentationKey({ ...options, projectId: context.projectId, spaceId: context.spaceId, cwd: context.cwd }));
   }
   for (const key of keys) persistedHarnesses.write(key, cached);
+  if (options.harnessId) return;
+  for (const key of keys) lastKnownHarnesses.write(key, cached);
+  // Harness policy is per Space and availability is per host, so the rows a
+  // local project received also describe a local project this browser has
+  // never read in the same Space. A remote project runs its harnesses on
+  // another machine and never stands in for anything else.
+  const spaceId = options.spaceId ?? context?.spaceId;
+  if (spaceId && context?.remote !== true) lastKnownHarnesses.write(spaceLastKnownKey(spaceId), cached);
 };
+const spaceLastKnownKey = (spaceId: string) => JSON.stringify([activeBrowserAccountId(), spaceId, "local-projects"]);
+/** The last availability rows this browser received for the account/Space/
+ *  project, even after an invalidation emptied every cache, or undefined. A
+ *  project it has never read falls back to the latest rows of a local project
+ *  in the same account and Space; without a Space id there is no fallback. */
+export function peekLastKnownHarnessSnapshots(options: Pick<SnapshotRequest, "projectId" | "spaceId">): HarnessSnapshot[] | undefined {
+  return lastKnownHarnesses.peek(snapshotPresentationKey({ projectId: options.projectId, spaceId: options.spaceId }))
+    ?? (options.spaceId ? lastKnownHarnesses.peek(spaceLastKnownKey(options.spaceId)) : undefined);
+}
 const reusablePersistedSnapshots = (rows: HarnessSnapshot[]): boolean =>
   // Metadata is presentation, not execution authority. An `unknown` native
   // auth state (Antigravity is one example) is still useful to paint instantly;

@@ -176,12 +176,13 @@
 }
 /* Over a block (a progress update) the footer is the gap to it, not an extra
    row on top: it sits right under the text and the block follows its last
-   pixel, so a dormant one leaves no blank band either. */
+   pixel, so a dormant one leaves no blank band either. This holds for a hover
+   bar too: the group gap is narrower than the icon track, so a collapsed
+   footer revealed its bar into the block, which is its own stacking context
+   (`isolation: isolate`): it painted over the icons and took their clicks. */
 .timeline > .msg.assistant.progress-update > .chat-response-footer[data-actions-only] {
+  height: auto;
   margin-block: 0 calc(-1 * var(--conversation-group-gap));
-}
-.timeline > .msg.assistant.progress-update > .chat-response-footer[data-actions-only]:has(.chat-action-bar[data-reveal="hover"]) {
-  margin-block-end: 0;
 }
 
 .chat-response-identity {

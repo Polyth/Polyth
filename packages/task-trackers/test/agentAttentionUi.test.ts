@@ -52,6 +52,8 @@ Object.defineProperty(globalThis, "getComputedStyle", {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
+const { hostUi, installTestHost } = await import("./hostUi.ts");
+installTestHost();
 
 type FrameCallback = (time: number) => void;
 
@@ -140,7 +142,7 @@ function harness(initialLinks: TaskTrackerTaskLinkDto[]): Harness {
   api.taskTrackerViewer = async () => undefined as never;
   resetNotifications();
   configureTaskTrackerHost({
-    ui: { icons: {} },
+    ui: hostUi,
     notifications,
     errors: { friendly: (action: string, cause: unknown) => `${action}: ${(cause as Error)?.message ?? ""}` },
     store: {

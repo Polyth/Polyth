@@ -3,6 +3,16 @@
 Custom Titles owns semantic title generation for untitled sessions. Settings
 are stored per Space and exposed through the package's Customize settings page.
 
+The title language, style and extra rules are set once for all projects, and a
+project may have its own: the **Projects** section lists the Space's projects
+with their state, and opening one offers **Own rules for this project**. A
+project's own rules replace the shared ones for that project's chats, including
+its private rooms; every other project keeps the shared ones. When to name chats
+and the generator are always shared. Own rules start as a copy of the shared
+ones and do not follow later shared changes; turning the switch off removes
+them. Saving keeps rules only for projects the Space owns: a deleted or
+another Space's project id is dropped like an unknown one.
+
 - **Fallback after 5 seconds** lets the session harness provide a native title
   first. After that deadline, Custom Titles owns the automatic title.
 - **Always use Custom Titles** starts generation after the first turn's
@@ -70,7 +80,7 @@ When enabled, the package adds **Regenerate title** to the desktop and phone
 session menus. It uses the first non-empty visible user message (or, for a
 workflow parent, the task of its first run); a chat with no sent message yet
 uses the caller's own synced composer draft. It applies the current Space's
-generator, language, style, and rules, regardless of the automatic naming mode.
+generator and the session project's language, style, and rules, regardless of the automatic naming mode.
 The existing title stays intact when generation fails or it changes during generation.
 Successful regeneration uses the canonical rename event path and protects the
 explicitly requested title from later automatic/native naming, including the

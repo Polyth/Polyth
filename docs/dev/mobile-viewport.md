@@ -236,6 +236,22 @@ truth. Electron retains its original frame and transparent-window handling.
     closed projection's whole-app restyle is still in front of it.
     Source-checked in `apps/mobile/test/nativeBridgeLifecycle.test.ts`; the
     Swift is compiled only in CI and is not device-verified.
+  - **No system edge band.** On iOS 26+ a scroll view draws a scroll edge
+    effect (a blurred, tinted band) over its content under the status bar and
+    home indicator. Device report 2026-11-10 (build #231): a grey band the
+    status bar's height over the page, the launch veil included. The same
+    controller hides all four edge effects of the WebView's scroll view; the
+    page paints its own chrome behind the bars. Source-checked in the same
+    test; device-verified 2026-11-10 (1.2.327).
+  - **Safe area after a load.** WebKit can give a freshly loaded document a
+    zero `env(safe-area-inset-*)` until the WebView's next visible-rect
+    update. Device report 2026-11-10: the phone bar sat under the status bar
+    on launch until a keyboard or navigation moved the WebView. The same
+    controller nudges the WebView's frame (and puts it back) after every
+    finished load and on appear, so WebKit sends the current insets. Never
+    from `viewSafeAreaInsetsDidChange`: the WebView is the root view, so the
+    nudge changes its safe area and re-enters that hook (1.2.329 crashed at
+    launch that way). Device-verified 2026-11-10 (1.2.330).
   - **Only composer docks ride.** A Settings, navigator or module field takes
     the frame at once, as before: those layers anchor to the frame variables.
     Reduced motion (OS or in-app) never rides.
@@ -530,6 +546,19 @@ The frame variables are correct in both models, so the contract is:
   layer that stopped short would show the bottom of the composer in the
   accessory band. `tokens.css` holds the default; `mobileViewport.ts`
   publishes it, band included, with the rest of the frame.
+- **Keyboard open in the native app** (`body[data-keyboard-source="native"]`):
+  the WebView itself ends at the keyboard, so its own edges are the band and
+  every layer above keeps `top: 0; bottom: 0` with no frame arithmetic. On an
+  iPhone (2026-11-10) a package window placed by the frame shrank to its
+  status-bar padding while its own field held the keyboard, and the chat showed
+  in its place, although the chat chain on the same frame stood right. Since the
+  composer was right, the bottom edge was right, so the top was the suspect
+  value (never reproduced in Chromium). For the ~0.45 s before the deferred iOS
+  resize lands, the layer's foot sits behind the keyboard. Pinned in
+  `mobileViewportLayers.test.ts` ("in the native app … keeps the WebView's
+  edges"). A temporary three-finger-tap geometry overlay (`viewportProbe.ts`,
+  native app only) collects the device values. Remove it once the cause is
+  confirmed.
 - **Keyboard closed**: untouched. `inset: 0` is the one box that reaches the
   physical screen edge no measurement can, which is the same reason the
   installed-app `100vh` fill exists.

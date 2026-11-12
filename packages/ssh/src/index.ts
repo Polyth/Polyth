@@ -37,6 +37,7 @@ import type {
   SshConnectionState,
   SshConnectionStatusDto,
   SshHarnessConfigSource,
+  SshHarnessPlacement,
 } from "@polyth/contracts";
 
 export interface SshExecResult { code: number; stdout: string; stderr: string }
@@ -169,6 +170,8 @@ interface StoredConnection {
   identityFile?: string;
   /** Only `remote` exceptions are stored; absent means `local`. */
   harnessConfig?: Record<string, "remote">;
+  /** Only `local` exceptions are stored; absent means `host`. */
+  harnessPlacement?: Record<string, "local">;
   /** Installation connections only; absent = the instance owner alone. */
   access?: SshAccessList;
   createdAt: number;
@@ -332,6 +335,28 @@ const normalizeHarnessConfig = (value: unknown): Record<string, "remote"> | unde
   }
   return Object.keys(next).length ? next : undefined;
 };
+
+/** Keeps only the `local` exceptions: `host` is the default and is never
+ * stored, so a harness added later runs where it always has. */
+const normalizeHarnessPlacement = (value: unknown): Record<string, "local"> | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) throw invalid("harnessPlacement must be an object");
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 64) throw invalid("harnessPlacement has too many entries");
+  const next: Record<string, "local"> = {};
+  for (const [harnessId, placement] of entries) {
+    if (!HARNESS_ID_RE.test(harnessId)) throw invalid(`invalid harness id: ${harnessId.slice(0, 64)}`);
+    if (placement !== "host" && placement !== "local") throw invalid('harness placement must be "host" or "local"');
+    if (placement === "local") next[harnessId] = "local";
+  }
+  return Object.keys(next).length ? next : undefined;
+};
+
+/** Where one harness runs for a stored connection's projects. */
+export const harnessPlacement = (
+  connection: Pick<SshConnectionDto, "harnessPlacement"> | undefined,
+  harnessId: string,
+): SshHarnessPlacement => connection?.harnessPlacement?.[harnessId] === "local" ? "local" : "host";
 
 /** Configuration source of one harness on a stored connection. */
 export const harnessConfigSource = (
@@ -644,6 +669,9 @@ export function createSshService(options: SshServiceOptions): SshService {
       ...(conn.harnessConfig && Object.keys(conn.harnessConfig).length
         ? { harnessConfig: { ...conn.harnessConfig } }
         : {}),
+      ...(conn.harnessPlacement && Object.keys(conn.harnessPlacement).length
+        ? { harnessPlacement: { ...conn.harnessPlacement } }
+        : {}),
       createdAt: conn.createdAt,
       ...(person
         ? { owner: "person" as const, ownerUserId: person, keyUploaded: hasKey(person, conn.id) }
@@ -797,6 +825,9 @@ export function createSshService(options: SshServiceOptions): SshService {
     const harnessConfig = input.harnessConfig === undefined && previous
       ? previous.harnessConfig
       : normalizeHarnessConfig(input.harnessConfig);
+    const placement = input.harnessPlacement === undefined && previous
+      ? previous.harnessPlacement
+      : normalizeHarnessPlacement(input.harnessPlacement);
     const fallbackName = user ? `${user}@${host}` : host;
     const name = input.name === undefined && previous ? previous.name : (short(input.name, 120) || fallbackName);
     return {
@@ -805,6 +836,7 @@ export function createSshService(options: SshServiceOptions): SshService {
       ...(user ? { user } : {}),
       ...(authMode === "identity-file" && identityFile ? { identityFile } : {}),
       ...(harnessConfig ? { harnessConfig } : {}),
+      ...(placement ? { harnessPlacement: placement } : {}),
       ...(previous?.access ? { access: previous.access } : {}),
     };
   };

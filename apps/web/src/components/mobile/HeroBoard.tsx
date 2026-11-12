@@ -10,6 +10,7 @@ import { adoptLegacyHeroPlacements, heroItemsFor, updateHeroBoard, updateHeroBoa
 import { presentationScopeId } from "../../projectInterfaceScope.ts";
 import { getState } from "../../store.ts";
 import { useWidgetCatalog, widgetIsAvailable } from "../../widgets/catalog.ts";
+import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import {
   setWidgetVisible,
   updateWidgetLayout,
@@ -54,7 +55,8 @@ export function HeroBoardItems({ projectId }: { projectId: string | null }) {
   return heroItemsFor(board, projectId).map((item) => {
     const widget = byId.get(item.widget);
     // A package that is not loaded keeps its item; it returns with the package.
-    if (!widget) return null;
+    // So does a widget that has stopped offering the board slot.
+    if (!widget || !supportedWidgetSlots(widget).includes(HERO_SLOT)) return null;
     const context = { projectId, sessionId: null, config: item.config, ...(composerModel ? { composerModel } : {}) };
     if (!editing && !widgetIsAvailable(widget, context)) return null;
     return (

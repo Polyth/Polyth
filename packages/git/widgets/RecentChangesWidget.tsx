@@ -1,8 +1,12 @@
-import { openChanges } from "../../../apps/web/src/store.ts";
+import { useEffect, useMemo } from "react";
+import { workspaceExecutionPath } from "@polyth/contracts/workspace";
+import { openChanges, useStore } from "../../../apps/web/src/store.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
 import { EmptyState, ProjectRequiredEmpty } from "../../../apps/web/src/components/ui/index.ts";
 import { useGitStatus } from "./gitStatusStore.ts";
+import { markGitFolder, useNotGitFolders } from "./notGitFolders.ts";
+import { sourceControlGitRepositories, sourceControlRepositories } from "./sourceControlRepositories.ts";
 import { StatusChip, fileIdentity, statusLabel } from "./sourceControlParts.tsx";
 
 const PREVIEW = 6;
@@ -18,7 +22,31 @@ export default function RecentChangesWidget({
   projectId: string | null;
   sessionId: string | null;
 }) {
-  const status = useGitStatus(projectId, true, sessionId);
+  const executionStatus = useGitStatus(projectId, true, sessionId);
+  const project = useStore((state) => state.projectRegistry.projects.find((candidate) => candidate.id === projectId) ?? null);
+  const session = useStore((state) => state.sessions.find((candidate) => candidate.id === sessionId) ?? null);
+  const notGitPaths = useNotGitFolders();
+  // A multi-repository project may run its chats in a plain folder holding the
+  // repositories. Then the card summarizes the first member that has Git.
+  const executionPath = useMemo(() => {
+    if (!project || (sessionId && !session)) return null;
+    try { return workspaceExecutionPath(project, session); } catch { return null; }
+  }, [project, session, sessionId]);
+  const fallback = useMemo(() => {
+    if (!project || executionStatus?.isRepo !== false || !executionPath) return null;
+    const rows = sourceControlRepositories(project, session) ?? [];
+    if (rows.length < 2) return null;
+    const known = new Set([...notGitPaths, executionPath]);
+    return sourceControlGitRepositories(rows, known).find((row) => !known.has(row.path) && row.state === "ready") ?? null;
+  }, [executionPath, executionStatus?.isRepo, notGitPaths, project, session]);
+  const fallbackStatus = useGitStatus(projectId, true, fallback?.outsideSession ? null : sessionId, fallback?.repositoryId ?? null, !!fallback);
+  useEffect(() => {
+    if (executionPath && executionStatus && project?.repositories && project.repositories.length > 1) markGitFolder(executionPath, executionStatus.isRepo !== false);
+  }, [executionPath, executionStatus, project]);
+  useEffect(() => {
+    if (fallback && fallbackStatus) markGitFolder(fallback.path, fallbackStatus.isRepo !== false);
+  }, [fallback, fallbackStatus]);
+  const status = fallback ? fallbackStatus : executionStatus;
 
   if (!projectId) {
     return (

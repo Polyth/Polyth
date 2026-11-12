@@ -122,7 +122,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-source:hover { background: var(--surface-overlay-hover); }
+  .skills-source:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 }
 .skills-source:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .skills-source.is-selected {
@@ -259,7 +259,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-card:hover {
+  .skills-card:hover:where(:not(:disabled)) {
     background: var(--surface-overlay-hover);
     box-shadow: var(--shadow-sm);
     transform: translateY(-1px);
@@ -369,7 +369,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-chip:hover { background: var(--surface-overlay); }
+  .skills-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay); }
 }
 .skills-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .skills-chip[aria-pressed="true"] {
@@ -408,7 +408,7 @@
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-harness-chip:hover { background: var(--surface-overlay-hover); color: var(--text); }
+  .skills-harness-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
 }
 .skills-harness-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .skills-harness-chip[aria-pressed="true"] {
@@ -484,7 +484,7 @@
   cursor: pointer;
 }
 @media (hover: hover) {
-  .skills-back:hover { background: var(--surface-overlay); color: var(--text); }
+  .skills-back:hover:where(:not(:disabled)) { background: var(--surface-overlay); color: var(--text); }
 }
 .skills-back:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
@@ -656,6 +656,52 @@ html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
 }
 .skills-harness.is-quiet .skills-harness-name { color: var(--muted); font-weight: 400; }
 .skills-harness.is-quiet .skills-harness-dot { opacity: 0.45; }
+/* A managed skill's reach: one default, then the families and accounts that
+   differ. A mode menu is wider than a switch, so the control column follows it. */
+.skills-reach {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  margin-block-end: var(--space-3);
+}
+.skills-reach .skills-tab-hint { margin: 0; }
+.skills-harnesses.is-reach .skills-harness {
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 0;
+  padding-block: var(--space-2);
+}
+.skills-harnesses.is-reach .skills-harness-name { grid-column: 1; grid-row: 1; }
+.skills-harnesses.is-reach .skills-harness-state { grid-column: 1; grid-row: 2; text-align: start; }
+.skills-harnesses.is-reach .skills-harness-state:empty { display: none; }
+.skills-harnesses.is-reach .skills-harness-control { grid-column: 2; grid-row: 1 / span 2; }
+.skills-harnesses.is-reach .skills-harness.is-member .skills-harness-state { padding-inline-start: var(--space-4); }
+.skills-harness.is-member .skills-harness-name {
+  padding-inline-start: var(--space-4);
+  font-weight: 500;
+}
+.skills-harness.is-member { border-top-color: var(--surface-divider, var(--border-soft)); }
+.skills-harness.is-family .skills-harness-name { font-weight: 600; }
+.skills-harness .picker-select.skills-mode { min-width: 9.5rem; }
+.skills-reach-differs { color: var(--muted); }
+.skills-reset {
+  margin-inline-start: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+.skills-reset:focus-visible { outline: none; border-radius: var(--radius-control); box-shadow: 0 0 0 2px var(--focus-ring); }
+@media (hover: hover) {
+  .skills-reset:hover { text-decoration: underline; }
+}
+.skills-reach-summary {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
 .skills-harness.is-absent {
   display: block;
   min-height: 0;
@@ -708,7 +754,7 @@ html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
   transition: background-color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  .skills-file-head:hover { background: var(--raised); }
+  .skills-file-head:hover:where(:not(:disabled)) { background: var(--raised); }
 }
 .skills-file-head:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus-ring); }
 .skills-file-path {
@@ -811,4 +857,5 @@ html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
   }
   .skills-harness-state { grid-column: 1; grid-row: 2; text-align: start; }
   .skills-harness-control { grid-column: 2; grid-row: 1 / span 2; }
+  .skills-harness .picker-select.skills-mode { min-width: 0; }
 }

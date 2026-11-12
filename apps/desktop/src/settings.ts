@@ -16,10 +16,13 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   softwareRendering: false,
   reduceAnimations: false,
   controlsPosition: "right",
+  controlsFollowSystem: true,
   controlsTheme: "system",
 };
 
-const UPDATE_CHANNELS = new Set<unknown>(["stable", "test", "nightly"]);
+const UPDATE_CHANNELS = new Set<unknown>(["stable", "nightly"]);
+/** The test channel was retired; installs that picked it follow stable. */
+const RETIRED_UPDATE_CHANNELS = new Set<unknown>(["test"]);
 
 /** `defaults` lets the caller supply the running build's own update channel. */
 export function normalizeDesktopSettings(value: unknown, defaults: DesktopSettings = DEFAULT_DESKTOP_SETTINGS): DesktopSettings {
@@ -45,7 +48,7 @@ export function normalizeDesktopSettings(value: unknown, defaults: DesktopSettin
       : defaults.automaticUpdates,
     updateChannel: UPDATE_CHANNELS.has(raw.updateChannel)
       ? raw.updateChannel as DesktopSettings["updateChannel"]
-      : defaults.updateChannel,
+      : RETIRED_UPDATE_CHANNELS.has(raw.updateChannel) ? "stable" : defaults.updateChannel,
     lowResourceMode: typeof raw.lowResourceMode === "boolean"
       ? raw.lowResourceMode
       : defaults.lowResourceMode,
@@ -58,6 +61,11 @@ export function normalizeDesktopSettings(value: unknown, defaults: DesktopSettin
     controlsPosition: raw.controlsPosition === "left" || raw.controlsPosition === "right"
       ? raw.controlsPosition
       : defaults.controlsPosition,
+    // Shells before this setting had only a side: a person who moved the
+    // buttons to the left chose that; the untouched default follows the system.
+    controlsFollowSystem: typeof raw.controlsFollowSystem === "boolean"
+      ? raw.controlsFollowSystem
+      : raw.controlsPosition === "left" ? false : defaults.controlsFollowSystem,
     controlsTheme: raw.controlsTheme === "dark" || raw.controlsTheme === "light" || raw.controlsTheme === "system"
       ? raw.controlsTheme
       : defaults.controlsTheme,

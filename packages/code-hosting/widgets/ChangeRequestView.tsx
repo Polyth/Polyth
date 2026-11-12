@@ -6,6 +6,7 @@ import type { ChangeRequestComment, ChangeRequestDetail, ChangeRequestFile } fro
 import type { HostingStatus } from "@polyth/code-hosting";
 import { parsePrDiffLines, splitPrDiff } from "@polyth/git/diff";
 import { supportedMergeStrategies, supportedReviewEvents, useCodeHosting, useCodeHostingStore } from "./context.tsx";
+import HostingBody from "./HostingBody.tsx";
 import ReplyPanel from "./ReplyPanel.tsx";
 
 type Translator = (key: string, values?: Record<string, string | number>) => string;
@@ -138,7 +139,7 @@ export default function ChangeRequestView(props: { number: number; onClose: () =
 
 function ChangeRequestDetailView({ number, onClose }: { number: number; onClose: () => void }) {
   const { client, host, provider } = useCodeHosting();
-  const { Button, Checkbox, Select, Tabs, Textarea, TextInput, EmptyState, MarkdownDoc } = host.ui.components;
+  const { Button, Checkbox, Select, Tabs, Textarea, TextInput, EmptyState } = host.ui.components;
   const Icon = host.ui.icons;
   const t = provider.t;
   const getLocale = host.ui.locale.get;
@@ -590,7 +591,7 @@ function ChangeRequestDetailView({ number, onClose }: { number: number; onClose:
                 </div>
               ) : (
                 <div className="pr-body markdown-body">
-                  {detail.body ? <MarkdownDoc text={stripCursorMarkers(detail.body)} keyBase={`pr-${detail.number}-body`} /> : <p>{t("pullrequestview.noDescriptionWasProvided")}</p>}
+                  {detail.body ? <HostingBody host={host} text={stripCursorMarkers(detail.body)} keyBase={`pr-${detail.number}-body`} /> : <p>{t("pullrequestview.noDescriptionWasProvided")}</p>}
                 </div>
               )}
 
@@ -753,7 +754,7 @@ function ChangeRequestDetailView({ number, onClose }: { number: number; onClose:
                         <a href={comment.url} target="_blank" rel="noreferrer" className="muted">{comment.createdAt ? new Date(comment.createdAt).toLocaleString(getLocale()) : ""}</a>
                       </header>
                       {comment.path && <div className="pr-comment-location mono">{comment.path}{comment.line ? `:${comment.line}` : ""}</div>}
-                      <div className="pr-comment-body markdown-body"><MarkdownDoc text={stripCursorMarkers(comment.body)} keyBase={`pr-comment-${comment.id}`} /></div>
+                      <div className="pr-comment-body markdown-body"><HostingBody host={host} text={stripCursorMarkers(comment.body)} keyBase={`pr-comment-${comment.id}`} /></div>
                     </div>
                   </article>
                 ))}
@@ -761,7 +762,7 @@ function ChangeRequestDetailView({ number, onClose }: { number: number; onClose:
               {status?.capabilities?.discussions && discussions.map((discussion) => (
                 <section key={discussion.id} className="pr-review-form pr-discussion">
                   <strong>{t("hosting.threads")}{discussion.resolved ? ` · ${t("hosting.resolve")}` : ""}</strong>
-                  {discussion.comments.map(comment => <div key={comment.id}><strong>{comment.author}</strong>{comment.path && <span className="muted mono"> {comment.path}:{comment.line}</span>}<MarkdownDoc text={comment.body} keyBase={`thread-${discussion.id}-${comment.id}`} /></div>)}
+                  {discussion.comments.map(comment => <div key={comment.id}><strong>{comment.author}</strong>{comment.path && <span className="muted mono"> {comment.path}:{comment.line}</span>}<HostingBody host={host} text={comment.body} keyBase={`thread-${discussion.id}-${comment.id}`} /></div>)}
                   <Textarea rows={2} value={discussionDrafts[discussion.id] ?? ""} aria-label={t("hosting.replyPlaceholder")} placeholder={t("hosting.replyPlaceholder")} onChange={(event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDiscussionDrafts((drafts) => ({ ...drafts, [discussion.id]: event.target.value }))} />
                   <div className="pr-review-actions">
                     {status.capabilities?.reply && <Button size="sm" busy={discussionBusy === discussion.id} onClick={() => void replyToDiscussion(discussion.id)}>{t("hosting.reply")}</Button>}

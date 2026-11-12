@@ -1,8 +1,9 @@
 // The attachment tray on the REAL Composer in a new chat: the next message's
 // files are a row of the card between the model line and the editor, and the
-// card grows to hold them — and shrinks when the last one goes — on one
+// card grows to hold them — and shrinks once the row holds nothing — on one
 // continuous edge. The editor and Send never move; the model line and the
-// project row ride the card's rising top edge (composer/attachmentTray.ts,
+// project row ride the card's rising top edge. A removed file keeps its place
+// for a moment as a restore slot (composer/attachmentTray.ts,
 // composerAdaptive.css "Attachment tray").
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -21,6 +22,13 @@ const ORIGIN = "http://composer-attachment-tray.test";
 
 const TSX = { id: "tsx", name: "AttachmentPills.tsx", mime: "text/plain", size: 5_210, kind: "file", path: "apps/web/src/components/AttachmentPills.tsx" };
 const PDF = { id: "pdf", name: "composer-spec.pdf", mime: "application/pdf", size: 2_480_000, kind: "file", path: "_inbox/composer-spec.pdf" };
+const PICTURE = {
+  id: "png", name: "screen.png", mime: "image/svg+xml", size: 18_200, kind: "image", path: "_inbox/screen.png",
+  url: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#345"/></svg>')}`,
+};
+const LOG = { id: "log", name: "server.log", mime: "text/plain", size: 912, kind: "file", path: "_inbox/server.log" };
+/** How long a slot offers (ATTACHMENT_RESTORE_MS), and a little more. */
+const OFFER_OVER_MS = 8_100;
 
 let browser: Browser | null = null;
 let html = "";
@@ -49,7 +57,7 @@ async function fixture(): Promise<string> {
     import Composer from "./components/Composer.tsx";
     import { api } from "@polyth/session/web-api";
     import { activateProject, applyProjectUpsert, setModels, startNewSession } from "./store.ts";
-    import { addAttachment, clearAttachments, removeAttachment } from "./attachments.ts";
+    import { addAttachment, clearAttachments, pendingAttachments, removeAttachment } from "./attachments.ts";
     api.listWorktrees = async () => [{ path: "/repo", branch: "master", head: "0000000", isMain: true }];
     api.gitBranches = async () => ({ current: "master", branches: [{ name: "master", current: true }] });
     applyProjectUpsert({ id: "polyth", path: "/projects/polyth", name: "Polyth", createdAt: 0, defaults: { isolation: "workspace" } });
@@ -61,6 +69,7 @@ async function fixture(): Promise<string> {
       add: (ref) => addAttachment(null, ref),
       remove: (id) => removeAttachment(null, id),
       clear: () => clearAttachments(null),
+      ids: () => pendingAttachments(null).map((ref) => ref.id),
     };
     createRoot(document.querySelector(".hero-dock")).render(createElement(Composer));
   `;
@@ -90,13 +99,15 @@ async function fixture(): Promise<string> {
 }
 
 type Probe = {
-  __tray: { add(ref: unknown): void; remove(id: string): void; clear(): void };
+  __tray: { add(ref: unknown): void; remove(id: string): void; clear(): void; ids(): string[] };
   __scrub: Animation[];
 };
 
 async function open(initial: unknown[] = [], options: { reducedMotion?: "reduce"; outsideCaret?: boolean } = {}): Promise<Page> {
   assert.ok(browser);
   const page = await browser.newPage({ viewport: { width: 1180, height: 760 } });
+  // The page's timers run on a clock the test can move past a slot's offer.
+  await page.clock.install();
   if (options.reducedMotion) await page.emulateMedia({ reducedMotion: options.reducedMotion });
   // Chromium paints its own caret; iOS WebKit, which draws it above the page,
   // is the engine that supports -webkit-touch-callout. Every selection change
@@ -133,6 +144,27 @@ const sample = (page: Page) => page.evaluate((): Sample => {
     pill: Number(getComputedStyle(document.querySelector(".composer-tray .attachment-pill") ?? document.body).opacity),
   };
 });
+
+type Slot = { id: string; removed: boolean; left: number; width: number };
+
+/** The row's cards and restore slots, in order. */
+const row = (page: Page) => page.evaluate((): Slot[] => [...document.querySelectorAll<HTMLElement>(".composer-tray .attachment-pill")].map((card) => {
+  const box = card.getBoundingClientRect();
+  return { id: card.dataset.attachment ?? "", removed: card.classList.contains("att-removed"), left: Math.round(box.left * 10) / 10, width: Math.round(box.width * 10) / 10 };
+}));
+
+const order = (slots: Slot[]) => slots.map((slot) => (slot.removed ? `(${slot.id})` : slot.id));
+
+const remove = (page: Page, id: string) => page.locator(`.attachment-pill[data-attachment="${id}"] .att-remove`).click({ force: true });
+
+/** Past the moment a click on a slot still counts as the removal's own double click. */
+const pastSlip = (page: Page) => page.waitForTimeout(450);
+
+/** The pointer leaves the row, and its slots' time passes. */
+async function offerEnds(page: Page) {
+  await page.mouse.move(8, 8);
+  await page.clock.runFor(OFFER_OVER_MS);
+}
 
 /** Freeze the animations a change started inside the composer on one clock
  *  and step them; finish them after. */
@@ -225,24 +257,131 @@ test("a file card names its type with its extension, and a later file enters on 
   await page.close();
 });
 
-test("removing the last file closes the row over it; a send takes the files at once", { skip: !CHROME }, async () => {
+test("the remove control sits in its card's top corner, clear of the middle", { skip: !CHROME }, async () => {
+  const page = await open([PICTURE, TSX]);
+  for (const id of ["png", "tsx"]) {
+    const card = page.locator(`.attachment-pill[data-attachment="${id}"]`);
+    await card.hover();
+    const box = await card.evaluate((element) => {
+      const own = element.getBoundingClientRect();
+      const control = element.querySelector(".att-remove")!.getBoundingClientRect();
+      return { top: control.top - own.top, end: own.right - control.right, bottom: control.bottom - own.top, start: control.left - own.left, height: own.height, width: own.width };
+    });
+    assert.ok(box.top >= 0 && box.top <= 2 && box.end >= 0 && box.end <= 2, `${id}: the control is in the card's top-end corner (${box.top}, ${box.end})`);
+    assert.ok(box.bottom <= box.height / 2 && box.start >= box.width / 2, `${id}: and stays out of the card's middle`);
+  }
+  // A click on the middle of a picture opens it, not the control.
+  const hit = await page.locator('.attachment-pill[data-attachment="png"]').evaluate((element) => {
+    const own = element.getBoundingClientRect();
+    return document.elementFromPoint(own.left + own.width / 2, own.top + own.height / 2)?.closest("button")?.className;
+  });
+  assert.equal(hit, "attachment-open");
+  await page.close();
+});
+
+test("a removed file keeps its place as a restore slot and goes back where it was", { skip: !CHROME }, async () => {
+  const page = await open([PICTURE, TSX, PDF, LOG]);
+  const before = await row(page);
+  assert.deepEqual(order(before), ["png", "tsx", "pdf", "log"]);
+
+  await remove(page, "tsx");
+  const slotted = await row(page);
+  assert.deepEqual(order(slotted), ["png", "(tsx)", "pdf", "log"], "the file's slot stays where its card was");
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Probe).__tray.ids()), ["png", "pdf", "log"], "the draft no longer holds it");
+  for (const [index, slot] of slotted.entries()) {
+    assert.ok(Math.abs(slot.left - before[index]!.left) <= 0.5 && Math.abs(slot.width - before[index]!.width) <= 0.5,
+      `nothing moves under the pointer (${slot.id}: ${slot.left}/${slot.width} vs ${before[index]!.left}/${before[index]!.width})`);
+  }
+  const restore = page.locator('.attachment-pill[data-attachment="tsx"] .att-restore');
+  assert.match(await restore.getAttribute("aria-label") ?? "", /AttachmentPills\.tsx/, "the slot names the file it puts back");
+
+  // The second click of a double click on remove lands on the slot: it is not a restore.
+  await restore.click();
+  assert.deepEqual(order(await row(page)), ["png", "(tsx)", "pdf", "log"], "a slip's second click does not undo it");
+
+  // Slots keep their places among each other, and each file returns to its own.
+  await remove(page, "png");
+  await remove(page, "log");
+  assert.deepEqual(order(await row(page)), ["(png)", "(tsx)", "pdf", "(log)"]);
+  await pastSlip(page);
+  await page.locator('.attachment-pill[data-attachment="log"] .att-restore').click();
+  assert.deepEqual(order(await row(page)), ["(png)", "(tsx)", "pdf", "log"]);
+  await restore.click();
+  assert.deepEqual(order(await row(page)), ["(png)", "tsx", "pdf", "log"]);
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Probe).__tray.ids()), ["tsx", "pdf", "log"], "the draft holds the files in the row's order");
+  await page.locator('.attachment-pill[data-attachment="png"] .att-restore').click();
+  const restored = await row(page);
+  assert.deepEqual(order(restored), ["png", "tsx", "pdf", "log"]);
+  assert.deepEqual(restored.map((slot) => slot.left), before.map((slot) => slot.left), "and the row is as it was");
+  assert.equal(await page.locator(".attachment-pill.att-fresh").count(), 0, "a file that came back does not enter again");
+  await page.close();
+});
+
+test("a slot nobody takes leaves on its own, but not from under the pointer or the keyboard", { skip: !CHROME }, async () => {
+  const page = await open([TSX, PDF, LOG]);
+  const height = (await sample(page)).height;
+  await remove(page, "pdf");
+  await pastSlip(page);
+
+  // The pointer still rests on the row: the slot waits.
+  await page.clock.runFor(OFFER_OVER_MS);
+  assert.deepEqual(order(await row(page)), ["tsx", "(pdf)", "log"], "a row under the pointer keeps its slot");
+
+  await offerEnds(page);
+  await page.waitForFunction(() => !document.querySelector(".composer-tray .att-removed"));
+  assert.deepEqual(order(await row(page)), ["tsx", "log"]);
+  assert.equal(await page.locator(".composer-tray[data-motion]").count(), 0, "the row stays open for its files");
+  assert.ok(Math.abs((await sample(page)).height - height) <= 0.5, "and the card keeps its height");
+
+  // The keyboard: remove moves focus to the slot's restore button, which
+  // holds the slot, and restoring hands focus back to the card.
+  await page.locator('.attachment-pill[data-attachment="tsx"] .attachment-open').focus();
+  await page.keyboard.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement?.className), "att-remove");
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(() => document.activeElement?.className), "att-restore", "focus follows the card into its slot");
+  await offerEnds(page);
+  assert.deepEqual(order(await row(page)), ["(tsx)", "log"], "a slot the keyboard is on stays");
+  await page.keyboard.press("Enter");
+  assert.deepEqual(order(await row(page)), ["tsx", "log"]);
+  assert.equal(await page.evaluate(() => document.activeElement?.className), "attachment-open", "and back to the card");
+  await page.close();
+});
+
+test("the last file's slot holds the row open, then the row closes over it; a send takes the files at once", { skip: !CHROME }, async () => {
   const page = await open([TSX]);
   const full = await sample(page);
   await page.evaluate((ref) => (window as unknown as Probe).__tray.add(ref), PDF);
   await page.evaluate(() => (window as unknown as Probe).__tray.remove("pdf"));
   assert.equal(await page.locator(".composer-tray[data-motion]").count(), 0, "a file that is not the last leaves the row open");
+  assert.equal(await page.locator(".composer-tray .att-removed").count(), 0, "a file the draft dropped by itself leaves no slot");
 
-  const steps = await scrub(page, () => page.locator(".attachment-pill .att-remove").click({ force: true }), 200);
+  await remove(page, "tsx");
+  assert.deepEqual(order(await row(page)), ["(tsx)"]);
+  assert.equal(await page.locator(".composer-tray[data-motion]").count(), 0, "the row waits with the slot");
+  assert.ok(Math.abs((await sample(page)).height - full.height) <= 0.5, "and the card keeps its height");
+
+  // Restored: the row never moved.
+  await pastSlip(page);
+  await page.locator(".att-restore").click();
+  assert.deepEqual(order(await row(page)), ["tsx"]);
+  assert.equal(await page.locator(".composer-tray[data-motion]").count(), 0, "a restored file does not open the row again");
+
+  await remove(page, "tsx");
+  const steps = await scrub(page, () => offerEnds(page), 200);
   assert.equal(steps[0]!.motion, "close");
   const closed = await sample(page);
   assert.equal(await page.locator(".composer-tray").count(), 0, "the row is gone once it has closed");
   assertEdge(steps, full.height, closed.height, "closing");
 
   await page.evaluate((ref) => (window as unknown as Probe).__tray.add(ref), TSX);
+  await page.evaluate((ref) => (window as unknown as Probe).__tray.add(ref), PDF);
   await page.evaluate(() => { for (const animation of document.getAnimations()) animation.finish(); });
   await page.waitForFunction(() => !document.querySelector(".composer-tray[data-motion]"));
+  await remove(page, "pdf");
+  assert.deepEqual(order(await row(page)), ["tsx", "(pdf)"]);
   await page.evaluate(() => (window as unknown as Probe).__tray.clear());
-  assert.equal(await page.locator(".composer-tray").count(), 0, "files a send takes leave with it, without a closing row");
+  assert.equal(await page.locator(".composer-tray").count(), 0, "files a send takes leave with it, slots included, without a closing row");
   await page.close();
 });
 
@@ -284,6 +423,7 @@ test("on iOS the focused editor's caret is measured again once the row has opene
   await page.keyboard.press("Backspace");
   assert.equal((await caret(page)).value, "");
   await page.locator(".attachment-pill .att-remove").click({ force: true });
+  await offerEnds(page);
   await page.waitForSelector(".composer-tray[data-motion=close]");
   await page.evaluate(() => { for (const animation of document.getAnimations()) animation.pause(); });
   await editor.focus();
@@ -328,7 +468,9 @@ test("reduced motion opens and closes the row at once", { skip: !CHROME }, async
   assert.equal(opened.motion, null);
   assert.ok(opened.height - empty.height >= 40, "the row is open on the first frame");
   await page.locator(".attachment-pill .att-remove").click({ force: true });
+  assert.equal(await page.locator(".composer-tray .att-removed").count(), 1, "the removed file leaves its slot");
+  await offerEnds(page);
   await page.waitForFunction(() => !document.querySelector(".composer-tray"));
-  assert.ok(Math.abs((await sample(page)).height - empty.height) <= 0.5, "and closed on the next");
+  assert.ok(Math.abs((await sample(page)).height - empty.height) <= 0.5, "and closed at once when the slot's time is up");
   await page.close();
 });

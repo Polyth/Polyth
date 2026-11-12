@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HarnessRosterItem, HarnessSnapshot } from "@polyth/contracts";
 import { isNetworkFailure, onConnectionRestored } from "@polyth/contracts/transport-retry";
-import { peekHarnessRoster, peekHarnessSnapshots, readHarnessRoster, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
+import { peekHarnessRoster, peekHarnessSnapshots, peekLastKnownHarnessSnapshots, readHarnessRoster, readHarnessSnapshots, useCatalogRevision } from "@polyth/models/runtime-catalog";
 import { activeBrowserAccountId } from "@polyth/web/account-storage";
 
 export const canExecute = (row: HarnessSnapshot): boolean => row.policy.enabled
@@ -13,20 +13,6 @@ export const canExecute = (row: HarnessSnapshot): boolean => row.policy.enabled
   // rechecks it; hiding it here makes recovery impossible from the picker.
   && !["auth-required", "setup-required", "partially-configured", "incompatible", "offline", "not-installed"]
     .includes(row.availability.state);
-
-/** The snapshot rows each account/Space/project scope last received in this
- *  page. ModelPicker mounts its header slot only while the popover is open,
- *  so component state does not survive a close; an invalidation empties the
- *  shared caches. Without this, a reopen right after one had no availability
- *  to filter by and painted harnesses that cannot run until the probe
- *  answered. Presentation only: the switch boundary re-verifies readiness. */
-const lastSnapshotsByScope = new Map<string, HarnessSnapshot[]>();
-const LAST_SNAPSHOT_SCOPES = 16;
-const rememberScopeSnapshots = (scope: string, rows: HarnessSnapshot[]) => {
-  lastSnapshotsByScope.delete(scope);
-  lastSnapshotsByScope.set(scope, rows);
-  while (lastSnapshotsByScope.size > LAST_SNAPSHOT_SCOPES) lastSnapshotsByScope.delete(lastSnapshotsByScope.keys().next().value!);
-};
 
 /** `settings`: the Harnesses page revalidates instead of trusting stored rows,
  *  and its selected harness waits for a native readiness check. The picker
@@ -59,7 +45,6 @@ export function useHarnesses(projectId?: string | null, spaceId?: string, harnes
       }
       if (seq !== requestSeq.current) return;
       setResult({ key, scope, rows });
-      rememberScopeSnapshots(scope, rows);
       setError("");
       setUnreachable(false);
     } catch (cause) {
@@ -84,16 +69,27 @@ export function useHarnesses(projectId?: string | null, spaceId?: string, harnes
   // empty picker until it is reopened. The failed read cached nothing.
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => unreachable ? onConnectionRestored(retry) : undefined, [unreachable, retry]);
+  const knownRoster = rosterResult?.key === key
+    ? rosterResult.rows
+    : peekHarnessRoster({ projectId, spaceId }) ?? (rosterResult?.scope === scope ? rosterResult.rows : undefined);
+  const roster = knownRoster ?? [];
   // An invalidation empties the caches while the replacement request is still
   // in flight. Same account/Space/project means the rows this instance already
-  // painted stay true enough to keep the selected harness visible and marked;
-  // a different scope falls back to nothing rather than showing foreign rows.
+  // painted stay true enough to keep the selected harness visible and marked.
+  // A fresh mount (ModelPicker mounts this slot only while it is open) paints
+  // the last rows this browser received for the same scope, which survive
+  // invalidations and reloads, instead of an empty picker until the probe
+  // answers. A harness the current roster no longer lists is not revived from
+  // them; a different scope never borrows another's rows.
+  const lastKnown = () => {
+    const rows = peekLastKnownHarnessSnapshots({ projectId, spaceId }) ?? [];
+    if (!knownRoster) return rows;
+    const listed = new Set(knownRoster.map((row) => row.identity.id));
+    return rows.filter((row) => listed.has(row.identity.id));
+  };
   const rows = result?.key === key
     ? result.rows
     : peekHarnessSnapshots({ projectId, spaceId })
-      ?? (result?.scope === scope ? result.rows : lastSnapshotsByScope.get(scope) ?? []);
-  const roster = rosterResult?.key === key
-    ? rosterResult.rows
-    : peekHarnessRoster({ projectId, spaceId }) ?? (rosterResult?.scope === scope ? rosterResult.rows : []);
+      ?? (result?.scope === scope ? result.rows : lastKnown());
   return { rows, roster, error, unreachable, loading, refresh, retry };
 }

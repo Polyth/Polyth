@@ -10,6 +10,7 @@ import type {
 import { rankSkillMatches } from "../src/skillSearch.ts";
 import {
   availabilityOf,
+  harnessGroups,
   catalogView,
   defaultInstallScope,
   formatBytes,
@@ -85,6 +86,8 @@ test("one click installs where the person can write, or nowhere", () => {
 const harness = (id: string, over: Partial<SkillHarnessDto> = {}): SkillHarnessDto => ({
   id,
   name: id,
+  family: id,
+  familyName: id,
   delivery: "native",
   enforcesBlockedTools: false,
   nativeSkills: "listed",
@@ -109,9 +112,36 @@ const native = (harnessId: string, over: Partial<SkillLibraryEntryDto["natives"]
 });
 
 test("a managed skill reaches every harness that takes skills, unless switched off", () => {
-  const rows = availabilityOf(managedEntry({ offHarnesses: ["b"] }), [harness("a"), harness("b"), harness("c", { delivery: "none" })]);
+  const rows = availabilityOf(managedEntry({ reach: { default: "all", harnesses: { b: "off" } } }), [harness("a"), harness("b"), harness("c", { delivery: "none" })]);
   assert.deepEqual(rows.map((row) => row.state), ["polyth", "off", "unsupported"]);
+  assert.deepEqual(rows.map((row) => row.mode), ["on", "off", undefined]);
+  assert.deepEqual(rows.map((row) => row.source), ["default", "harness", undefined]);
   assert.equal(usableCount(rows), 1);
+});
+
+test("accounts of one harness are drawn as one family, in the harnesses' order", () => {
+  const harnesses = [
+    harness("claude", { family: "claude", familyName: "Claude Code" }),
+    harness("codex"),
+    harness("claude-work", { family: "claude", familyName: "Claude Code", accountLabel: "Work" }),
+  ];
+  const entry = managedEntry({ reach: { default: "some", families: { claude: "on" }, harnesses: { "claude-work": "always" } } });
+  const rows = availabilityOf(entry, harnesses);
+  assert.deepEqual(rows.map((row) => [row.harness.id, row.mode, row.source]), [
+    ["claude", "on", "family"],
+    ["codex", "off", "default"],
+    ["claude-work", "always", "harness"],
+  ]);
+  const groups = harnessGroups(rows);
+  assert.deepEqual(groups.map((group) => [group.family, group.name, group.rows.map((row) => row.harness.id)]), [
+    ["claude", "Claude Code", ["claude", "claude-work"]],
+    ["codex", "codex", ["codex"]],
+  ]);
+});
+
+test("a skill that reaches nowhere is off for every harness", () => {
+  const rows = availabilityOf(managedEntry({ reach: { default: "none", harnesses: { a: "always" } } }), [harness("a")]);
+  assert.deepEqual(rows.map((row) => [row.state, row.mode, row.source]), [["off", "off", "none"]]);
 });
 
 test("a skill with blocked tools reaches only harnesses that can enforce them", () => {
@@ -144,7 +174,7 @@ test("the library groups by what a person can do, and filters by harness", () =>
     access,
     harnesses: [harness("a"), harness("b")],
     skills: [
-      managedEntry({ offHarnesses: ["b"] }),
+      managedEntry({ reach: { default: "all", harnesses: { b: "off" } } }),
       { name: "mine", title: "Mine", description: "", natives: [native("b", { nativeName: "mine" })] },
       { name: "system", title: "System", description: "", natives: [native("a", { source: "bundled", nativeName: "system" })] },
       { name: "folder", title: "Folder", description: "", natives: [], discoveredIn: "project-agents" },

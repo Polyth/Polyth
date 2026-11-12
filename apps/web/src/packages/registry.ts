@@ -1,6 +1,5 @@
 import { api } from "@polyth/session/web-api";
 import { invalidateRuntimeCatalogs, reconcileHarnessTopology } from "@polyth/models/runtime-catalog";
-import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
@@ -25,7 +24,6 @@ type PackageInstaller = () => () => void;
 
 const builtinInstallers = new Map<string, PackageInstaller>([
   ["mcp", installMcpPackage],
-  ["integrations", installIntegrationsPackage],
 ]);
 
 const aliases = new Map<string, string>([

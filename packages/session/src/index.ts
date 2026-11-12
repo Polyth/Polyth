@@ -6,8 +6,9 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { installWorkspaceReferences, projectionUsesWorkspace, workspaceReferences } from "./workspaceReferences.ts";
 
-import { MODEL_VISIBLE_TYPES, SESSION_SUMMARY_FIELDS, formatBrowserContextForModel, sessionDraftPreview, clampPromptHistoryLimit, normalizeSessionPerson } from "@polyth/contracts";
+import { MODEL_VISIBLE_TYPES, RAIL_STATUS_LIMIT_MAX, RAIL_STATUS_UNREAD_PER_PROJECT, SESSION_SUMMARY_FIELDS, formatBrowserContextForModel, sessionDraftPreview, clampPromptHistoryLimit, normalizeSessionPerson } from "@polyth/contracts";
 import { withImmediateTransaction, type SyncOnly } from "./syncTransaction.ts";
+import { REPOSITORY_SCOPE_ID_MAX, sessionRepositoryScope, type SessionRepositoryScope, type SessionWorkspace } from "@polyth/contracts/workspace";
 import type {
   AgentProfile,
   AttachmentRef,
@@ -2975,12 +2976,24 @@ export function createStore(dbPath: string): Store {
     );
   }
 
+  /** Ids-only scope of a stored workspace snapshot; its paths, branches and
+   *  isolation evidence never leave this function. */
+  function summaryRepositoryScope(raw: string | null): SessionRepositoryScope | undefined {
+    if (!raw) return undefined;
+    try {
+      return sessionRepositoryScope({ workspace: JSON.parse(raw) as SessionWorkspace });
+    } catch {
+      return undefined;
+    }
+  }
+
   function summaries(input: SessionSummaryQuery): Promise<SessionSummaryPage> {
     const revision = Number((prep("SELECT revision FROM session_catalog_revision WHERE space_id = ?").get(input.spaceId ?? "") as { revision: number } | undefined)?.revision ?? 0);
     if (input.revision !== undefined && input.revision !== revision) throw Object.assign(new Error("session catalog changed"), { code: "catalog-changed" });
     // `sharing` is a per-reader decoration added above the store; never stored.
     // `draftPreview` is derived from the stored draft below.
-    const fields = SESSION_SUMMARY_FIELDS.filter((key) => !["isolationSummary", "attention", "autoAccept", "autoAcceptAll", "sharing", "draftPreview"].includes(key));
+    // `repositoryScope` is derived below from the workspace, without its paths.
+    const fields = SESSION_SUMMARY_FIELDS.filter((key) => !["isolationSummary", "attention", "autoAccept", "autoAcceptAll", "sharing", "draftPreview", "repositoryScope"].includes(key));
     const conditions = ["COALESCE(space_id, '') = ?"];
     const args: Array<string | number> = [input.spaceId ?? ""];
     if (input.projectId !== undefined) { conditions.push("project_id = ?"); args.push(input.projectId); }
@@ -3006,6 +3019,52 @@ export function createStore(dbPath: string): Store {
       conditions.push(`(json_extract(data, '$.status') IN ('working','waiting','reconciling','unknown','epoch-pending') OR EXISTS(SELECT 1 FROM attention_open a WHERE a.session_id = projections.session_id) OR EXISTS(SELECT 1 FROM events e WHERE e.session_id = projections.session_id AND e.type = 'assistant/message' AND e.seq > ${cursor}))`);
       if (input.personId !== undefined) args.push(input.personId);
     }
+    if (input.railStatus) {
+      // Same cursor rule as `unreadFor`: no cursor means read (NULL compares
+      // false), unlike attentionOnly's COALESCE-to-0. Muted chats never count.
+      const own = input.personId !== undefined;
+      const cursor = own
+        ? "COALESCE((SELECT p.read_seq FROM session_person_state p WHERE p.session_id = pr.session_id AND p.user_id = ? AND p.read_seq IS NOT NULL), (SELECT r.seq FROM session_read r WHERE r.session_id = pr.session_id))"
+        : "(SELECT r.seq FROM session_read r WHERE r.session_id = pr.session_id)";
+      const muted = own
+        ? " AND COALESCE((SELECT p.muted FROM session_person_state p WHERE p.session_id = pr.session_id AND p.user_id = ?), 0) = 0"
+        : "";
+      conditions.push(`(json_extract(data, '$.status') IN ('working','waiting','reconciling','unknown','epoch-pending') OR EXISTS(SELECT 1 FROM attention_open a WHERE a.session_id = projections.session_id) OR session_id IN (
+        SELECT session_id FROM (
+          SELECT pr.session_id AS session_id, ROW_NUMBER() OVER (PARTITION BY pr.project_id ORDER BY CAST(json_extract(pr.data, '$.updatedAt') AS INTEGER) DESC, pr.session_id DESC) AS rn
+          FROM projections pr
+          WHERE COALESCE(pr.space_id, '') = ? AND json_extract(pr.data, '$.parentId') IS NULL AND json_extract(pr.data, '$.status') <> 'archived'${muted}
+            AND EXISTS(SELECT 1 FROM events e WHERE e.session_id = pr.session_id AND e.type = 'assistant/message' AND e.seq > ${cursor})
+        ) WHERE rn <= ${RAIL_STATUS_UNREAD_PER_PROJECT}))`);
+      // Placeholders appear in this order: space, muted person, cursor person.
+      args.push(input.spaceId ?? "");
+      if (own) args.push(input.personId!, input.personId!);
+    }
+    if (input.repositoryId !== undefined && input.projectId !== undefined) {
+      // Mirrors sessionInRepositoryScope (contracts/workspace.ts): an explicit
+      // subset (mode `subset`, or the older absent mode) that lists the id and
+      // does not list every current Project repository. A delegated child
+      // follows its root parent, so a nested tree is listed whole or not at
+      // all. Every step stays inside this Space and Project.
+      const projectIds = [...new Set(input.projectRepositoryIds ?? [])];
+      const covers = projectIds.length > 0
+        ? ` AND EXISTS(SELECT 1 FROM json_each(?) want WHERE want.value NOT IN (SELECT json_extract(have.value, '$.repositoryId') FROM json_each(root.data, '$.workspace.repositories') have WHERE json_extract(have.value, '$.repositoryId') IS NOT NULL))`
+        : "";
+      conditions.push(`session_id IN (WITH RECURSIVE scoped(id) AS (
+        SELECT root.session_id FROM projections root
+        WHERE COALESCE(root.space_id, '') = ? AND root.project_id = ?
+          AND (json_extract(root.data, '$.parentId') IS NULL OR NOT EXISTS(SELECT 1 FROM projections up WHERE up.session_id = json_extract(root.data, '$.parentId') AND COALESCE(up.space_id, '') = COALESCE(root.space_id, '') AND up.project_id = root.project_id))
+          AND json_type(root.data, '$.workspace') = 'object'
+          AND COALESCE(json_extract(root.data, '$.workspace.mode'), 'subset') <> 'all'
+          AND EXISTS(SELECT 1 FROM json_each(root.data, '$.workspace.repositories') member WHERE json_extract(member.value, '$.repositoryId') = ?)${covers}
+        UNION
+        SELECT child.session_id FROM projections child JOIN scoped ON json_extract(child.data, '$.parentId') = scoped.id
+        WHERE COALESCE(child.space_id, '') = ? AND child.project_id = ?
+      ) SELECT id FROM scoped)`);
+      args.push(input.spaceId ?? "", input.projectId, input.repositoryId.slice(0, REPOSITORY_SCOPE_ID_MAX));
+      if (projectIds.length > 0) args.push(JSON.stringify(projectIds));
+      args.push(input.spaceId ?? "", input.projectId);
+    }
     if (input.pinned) {
       // Mirrors personalizeRow: a person's own choice (pin_position -1 is an
       // explicit unpin) wins over the shared pre-v21 pin.
@@ -3018,15 +3077,17 @@ export function createStore(dbPath: string): Store {
         conditions.push("json_extract(data, '$.pinned') IS NOT NULL");
       }
     }
-    const limit = Math.min(100, Math.max(1, Number.isSafeInteger(input.limit) ? input.limit! : 50));
-    const sql = `SELECT json_object('isolationSummary', json_extract(data, '$.isolation.kind'), ${fields.map((key) => `'${key}', json_extract(data, '$.${key}')`).join(",")}) AS summary, substr(json_extract(data, '$.draft'), 1, 4096) AS draft FROM projections
+    const limit = Math.min(input.railStatus ? RAIL_STATUS_LIMIT_MAX : 100, Math.max(1, Number.isSafeInteger(input.limit) ? input.limit! : 50));
+    const sql = `SELECT json_object('isolationSummary', json_extract(data, '$.isolation.kind'), ${fields.map((key) => `'${key}', json_extract(data, '$.${key}')`).join(",")}) AS summary, substr(json_extract(data, '$.draft'), 1, 4096) AS draft, json_extract(data, '$.workspace') AS workspace FROM projections
       WHERE ${conditions.join(" AND ")} ORDER BY CAST(json_extract(data, '$.updatedAt') AS INTEGER) DESC, session_id DESC LIMIT ?`;
-    const rows = sqlitePrepare(sql).all(...args, limit + 1) as Array<{ summary: string; draft: string | null }>;
+    const rows = sqlitePrepare(sql).all(...args, limit + 1) as Array<{ summary: string; draft: string | null; workspace: string | null }>;
     const sessions = rows.slice(0, limit).map((row) => {
       const draftPreview = sessionDraftPreview(row.draft);
+      const repositoryScope = summaryRepositoryScope(row.workspace);
       return {
         ...Object.fromEntries(Object.entries(JSON.parse(row.summary)).filter(([, value]) => value !== null)), summary: true,
         ...(draftPreview ? { draftPreview } : {}),
+        ...(repositoryScope ? { repositoryScope } : {}),
       } as SessionProjection;
     });
     const last = sessions.at(-1);

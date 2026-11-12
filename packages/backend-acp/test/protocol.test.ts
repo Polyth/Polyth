@@ -880,3 +880,111 @@ test("ACP plan updates publish canonical task snapshots only during a turn", asy
     finish({ stopReason: "end_turn" });
     await new Promise(resolve => setImmediate(resolve));
 });
+
+test("an agent's own notice chunks are not dialogue, and a failure notice ends the turn as failed", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "copilot", undefined, "Copilot", {
+        agentNotice: (update) => {
+            if (update.messageId) return undefined;
+            const text = String((update.content as { text?: unknown } | undefined)?.text ?? "");
+            if (text.startsWith("Error: ")) return { kind: "error", message: text.slice(7), code: "rate-limited", retry: { scope: "rate", provider: "p", retryable: true } };
+            return text.startsWith("Info: ") ? { kind: "drop" } : undefined;
+        },
+    });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const chunk = (text: string, messageId?: string) => f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text }, ...(messageId ? { messageId } : {}) },
+    });
+    const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+    // A notice proves the agent took the prompt.
+    const first = rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "one");
+    chunk("Info: Request failed due to a transient API error. Retrying...");
+    assert.equal((await first).kind, "confirmed");
+    chunk("Partial answer.", "m1");
+    chunk("Error: rate limit reached");
+    finish({ stopReason: "end_turn" });
+    await settle();
+    assert.deepEqual(events.filter((event) => event.type === "assistant/message"), [
+        { type: "assistant/message", partId: "one", text: "Partial answer." },
+    ]);
+    assert.deepEqual(events.filter((event) => event.type === "turn/stopped"), [{
+        type: "turn/stopped", turnId: "one", reason: "error", error: "rate limit reached", code: "rate-limited",
+        retry: { scope: "rate", provider: "p", retryable: true },
+    }]);
+
+    // The failure belongs to its own turn; a cancelled turn stays aborted.
+    events.length = 0;
+    const second = rt.startTurnOperation!({ sessionId: "canonical", text: "again" }, "two");
+    chunk("Fine.", "m2");
+    assert.equal((await second).kind, "confirmed");
+    finish({ stopReason: "end_turn" });
+    await settle();
+    assert.deepEqual(events.filter((event) => event.type === "turn/stopped"), [{ type: "turn/stopped", turnId: "two", reason: "completed" }]);
+    events.length = 0;
+    const third = rt.startTurnOperation!({ sessionId: "canonical", text: "stop" }, "three");
+    chunk("Error: interrupted");
+    assert.equal((await third).kind, "confirmed");
+    finish({ stopReason: "cancelled" });
+    await settle();
+    assert.deepEqual(events.filter((event) => event.type === "turn/stopped"), [{ type: "turn/stopped", turnId: "three", reason: "aborted" }]);
+    assert.equal(events.some((event) => event.type === "assistant/chunk" || event.type === "assistant/message"), false);
+});
+
+test("stdio MCP servers given at launch are left out of session/new; a permission request of kind 'other' is named by its announced tool", async () => {
+    const { acpOverlays } = await import("../src/provisioner.ts");
+    const f = fakeRpc();
+    const ctx = { ...context, sessionId: "launch-mcp" };
+    let created: { mcpServers?: unknown } | undefined;
+    f.handle(async (method, params) => {
+        if (method === "session/new") { created = params as { mcpServers?: unknown }; return { sessionId: "native" }; }
+        if (method === "session/prompt") return new Promise(() => {});
+        return {};
+    });
+    acpOverlays.set(ctx, {
+        mcpHttp: true,
+        mcpServers: [
+            { name: "polyth-agent-tools", command: "/usr/bin/node", args: ["tools.mjs"], env: [{ name: "TOKEN", value: "secret" }] },
+            { type: "http", name: "docs", url: "https://example.test/mcp", headers: [] },
+        ],
+    }, "copilot", { desiredRevision: "r1", capabilityIds: [] });
+    const rt = createAcpRuntime(ctx, f.rpc, "copilot", undefined, "Copilot", { stdioMcpAtLaunch: true, toolNameFromTitle: true });
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "launch-mcp", title: "x", cwd: "/tmp" }, "create");
+    assert.deepEqual(created?.mcpServers, [{ type: "http", name: "docs", url: "https://example.test/mcp", headers: [] }]);
+
+    const admission = rt.startTurnOperation!({ sessionId: "launch-mcp", text: "task" }, "submit");
+    // Copilot CLI 1.0.109: an MCP call is announced with its qualified name
+    // as the title, and the permission request repeats only kind `other`.
+    f.emit("session/update", { sessionId: "native", update: { sessionUpdate: "tool_call", toolCallId: "call_1", title: "polyth-agent-tools-polyth_todo", kind: "other", status: "pending", rawInput: { todos: [] } } });
+    assert.equal((await admission).kind, "confirmed");
+    void f.request("session/request_permission", {
+        sessionId: "native",
+        toolCall: { toolCallId: "call_1", title: "polyth_todo", kind: "other", status: "pending" },
+        options: [{ optionId: "allow_once", kind: "allow_once" }],
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((event) => event.type === "permission/requested"), [
+        { type: "permission/requested", requestId: "call_1", permission: "polyth-agent-tools-polyth_todo", patterns: ["polyth_todo"] },
+    ]);
+    // A meaningful kind still wins over the announced name.
+    f.emit("session/update", { sessionId: "native", update: { sessionUpdate: "tool_call", toolCallId: "call_2", title: "write file", kind: "execute", status: "pending", rawInput: { command: "echo hi > x" } } });
+    void f.request("session/request_permission", {
+        sessionId: "native",
+        toolCall: { toolCallId: "call_2", title: "echo hi > x", kind: "execute" },
+        options: [{ optionId: "allow_once", kind: "allow_once" }],
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(events.filter((event) => event.type === "permission/requested").at(-1)?.permission, "execute");
+    await rt.dispose();
+});

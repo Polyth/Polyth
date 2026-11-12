@@ -340,7 +340,9 @@ test("the composer says the message goes on in the conversation, and sends a new
   const chip = () => view.container.querySelector<HTMLButtonElement>(".agent-thread-chip")!;
   assert.equal(chip().dataset.target, "continue");
   assert.match(chip().textContent ?? "", /Continues from \d\d:\d\d/);
-  assert.ok(view.container.querySelector('.agent-thread[data-opening="start"] .agent-thread-head'), "the answered alert opens a conversation");
+  assert.ok(view.container.querySelector('.agent-thread[data-opening="start"]'), "the answered alert opens a conversation");
+  assert.match(view.container.querySelector('.agent-day .agent-divider[data-opening="start"]')?.textContent ?? "", /new conversation/,
+    "a conversation that opens the day is said on the day's line");
 
   await act(async () => { chip().click(); await delay(10); });
   const fresh = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => /Start a new conversation/.test(item.textContent ?? ""))!;

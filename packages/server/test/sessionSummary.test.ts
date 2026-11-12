@@ -49,3 +49,16 @@ test("a navigator summary marks a draft with its bounded first line only", () =>
   assert.equal(sessionSummary({ ...full, draft: " \n " } as SessionProjection).draftPreview, undefined);
   assert.equal(sessionSummary({ ...full, draft: undefined } as SessionProjection).draftPreview, undefined);
 });
+
+test("a navigator summary carries a subset's repository ids, never its paths", () => {
+  const subset = sessionSummary({ ...full, workspace: { mode: "subset", repositories: [
+    { repositoryId: "api", path: "/secret/api", branch: "feature/api" },
+    { repositoryId: "web", path: "/secret/web" },
+  ] } } as SessionProjection);
+  assert.deepEqual(subset.repositoryScope, { repositoryIds: ["api", "web"] });
+  assert.ok(!JSON.stringify(subset).includes("/secret/"));
+  assert.ok(!JSON.stringify(subset).includes("feature/api"));
+  const whole = sessionSummary({ ...full, workspace: { mode: "all", repositories: [{ repositoryId: "api", path: "/a" }] } } as SessionProjection);
+  assert.equal(whole.repositoryScope, undefined);
+  assert.equal(sessionSummary({ ...full, workspace: undefined } as SessionProjection).repositoryScope, undefined);
+});

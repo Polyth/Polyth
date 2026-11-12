@@ -1,5 +1,8 @@
-/* Package-owned gallery web styles. Scoped under .gallery-* and limited to
-   canonical tokens so density, transparency, and font preferences inherit. */
+/* Package-owned gallery web styles. Controls are host primitives (Button,
+   IconButton, Menu, Checkbox, Textarea, EmptyState, Dialog); this file only
+   lays them out and draws the image content. Scoped under .gallery-* and
+   limited to canonical tokens so density, transparency, motion and font
+   preferences inherit. */
 .gallery-widget {
   container-type: inline-size;
   container-name: gallery;
@@ -18,35 +21,27 @@
   pointer-events: none;
 }
 
+.gallery-center {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-4);
+}
+
 /* ---------------------------------------------------------------- toolbar */
 .gallery-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--surface-activity, var(--panel));
-}
-
-.gallery-folder-control {
-  position: relative;
-  min-width: 0;
+  box-shadow: inset 0 -1px 0 var(--borderless-edge);
 }
 
 .gallery-folder-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  max-width: 220px;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-overlay-hover, transparent);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--font-meta);
-  cursor: pointer;
+  min-width: 0;
+  max-width: min(240px, 60cqi);
 }
 
 .gallery-folder-label {
@@ -55,205 +50,113 @@
   white-space: nowrap;
 }
 
-/* Full-surface dismiss targets are not controls: `button.` outranks the core
-   button hover and press skin, so the scrim never repaints under the pointer. */
-button.gallery-picker-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  transform: none;
-  cursor: default;
-}
-
-.gallery-folder-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 41;
-  display: flex;
-  flex-direction: column;
-  min-width: 200px;
-  max-height: 280px;
-  overflow: auto;
-  padding: var(--space-1);
-  border: 1px solid var(--material-glass-border, var(--border-soft));
-  border-radius: var(--radius-control);
-  background: var(--material-glass, var(--panel));
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
-}
-
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .gallery-folder-menu {
-    background: radial-gradient(140% 140% at 50% 50%,
-      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-fill), transparent) 0%,
-      color-mix(in srgb, var(--material-glass) var(--material-glass-readable-edge), transparent) 100%);
-    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
-  }
-}
-
-.gallery-folder-menu button {
-  padding: var(--space-1) var(--space-2);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--font-meta);
-  text-align: left;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .gallery-folder-menu button:hover:where(:not(:disabled)) {
-    background: var(--surface-overlay-hover, rgba(127, 127, 127, 0.12));
-  }
-}
-
-.gallery-folder-menu-empty {
-  padding: var(--space-1) var(--space-2);
-  color: var(--muted);
-  font-size: var(--font-meta);
-}
-
-.gallery-crumbs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  padding: 0 var(--space-1) var(--space-1);
-  border-bottom: 1px solid var(--border-soft);
-  margin-bottom: var(--space-1);
-}
-
-.gallery-crumbs button {
-  padding: 2px 4px;
-  color: var(--muted);
-}
-
-.gallery-crumbs button:last-child {
-  color: var(--text);
-}
-
 .gallery-count {
   color: var(--muted);
   font-size: var(--font-meta);
   font-variant-numeric: tabular-nums;
 }
 
-.gallery-text-button {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--font-meta);
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .gallery-text-button:hover:where(:not(:disabled)) {
-    color: var(--text);
-    background: var(--surface-overlay-hover, rgba(127, 127, 127, 0.12));
-  }
-}
-
-.gallery-recursive {
-  display: inline-flex;
+.gallery-recursive.ui-checkbox {
   align-items: center;
-  gap: var(--space-1);
-  margin-left: auto;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  cursor: pointer;
+  margin-inline-start: auto;
 }
+
+.gallery-recursive.ui-checkbox .ui-checkbox-box { margin-top: 0; }
 
 /* ------------------------------------------------------------------- grid */
 .gallery-scroll {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: var(--space-2);
+  padding: var(--space-3);
 }
 
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: var(--space-3);
 }
 
+/* Visible by default: the entrance only adds motion, so reduced motion (and
+   a missed animation) still shows every tile. */
 .gallery-tile {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  opacity: 0;
-  animation: gallery-rise 0.32s var(--motion-ease, ease) forwards;
+  gap: var(--space-1);
+  animation: gallery-rise var(--motion-surface) var(--motion-ease) both;
 }
 
-.gallery-tile-open {
+/* An image card, not a control skin: `button.` outranks the shared button
+   hover/press fills (liquid glass paints plain buttons white on hover). */
+button.gallery-tile-open {
   position: relative;
   display: block;
   width: 100%;
   aspect-ratio: 1 / 1;
   padding: 0;
-  border: 1px solid var(--border-soft);
+  border: 0;
   border-radius: var(--radius-control);
   overflow: hidden;
-  background: var(--surface-activity, rgba(0, 0, 0, 0.15));
+  background: var(--surface-overlay);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
   cursor: zoom-in;
-  transition: transform 0.28s var(--motion-ease, ease), box-shadow 0.28s var(--motion-ease, ease), border-color 0.2s ease;
+  transform: none;
+  transition: box-shadow var(--motion-fast) var(--motion-ease);
 }
 
 .gallery-tile-open img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scale(1.001);
-  transition: transform 0.45s var(--motion-ease, ease), filter 0.3s ease;
+  transition: transform var(--motion-surface) var(--motion-ease);
 }
 
-.gallery-tile:hover .gallery-tile-open,
-.gallery-tile:focus-within .gallery-tile-open {
-  transform: translateY(-2px);
-  border-color: var(--accent);
-  box-shadow: var(--material-glass-highlight), var(--shadow-sm);
+@media (hover: hover) {
+  .gallery-tile:hover button.gallery-tile-open {
+    background: var(--surface-overlay);
+    box-shadow: 0 0 0 2px var(--accent), var(--shadow-md);
+  }
+  .gallery-tile:hover .gallery-tile-open img { transform: scale(1.04); }
 }
 
-.gallery-tile:hover .gallery-tile-open img,
-.gallery-tile:focus-within .gallery-tile-open img {
-  transform: scale(1.08);
+button.gallery-tile-open:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-md);
 }
 
-.gallery-tile.is-selected .gallery-tile-open {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
+.gallery-tile.is-selected button.gallery-tile-open {
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .gallery-tile-badge {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
-  min-width: 18px;
-  padding: 1px 5px;
-  border-radius: var(--radius-round, 999px);
+  inset-inline-end: var(--space-1);
+  inset-block-end: var(--space-1);
+  min-width: 20px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-round);
   background: var(--accent);
   color: var(--accent-ink);
-  font-size: 11px;
+  font-size: var(--font-meta);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
 
+/* The select box is small on the image, but its hit area is a full tap
+   target in the tile's corner. */
 .gallery-tile-select {
   position: absolute;
-  top: 6px;
-  left: 6px;
+  inset-block-start: 0;
+  inset-inline-start: 0;
   z-index: 2;
-  display: inline-flex;
+  display: grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
   cursor: pointer;
 }
 
@@ -264,18 +167,24 @@ button.gallery-picker-backdrop {
 }
 
 .gallery-tile-select-box {
-  width: 18px;
-  height: 18px;
-  border: 1px solid var(--material-glass-border, var(--border-soft));
-  border-radius: calc(5px * var(--corner-radius-scale));
-  background: var(--material-glass, rgba(0, 0, 0, 0.35));
-  transition: background 0.15s ease, border-color 0.15s ease;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--material-glass-border);
+  border-radius: var(--radius-round);
+  background: var(--material-glass-strong);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
 }
 
 .gallery-tile-select input:checked + .gallery-tile-select-box {
   border-color: var(--accent);
   background: var(--accent);
-  box-shadow: inset 0 0 0 3px var(--material-glass, rgba(0, 0, 0, 0.35));
+  box-shadow: inset 0 0 0 4px var(--material-glass-strong);
+}
+
+.gallery-tile-select input:focus-visible + .gallery-tile-select-box {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .gallery-tile-name {
@@ -293,38 +202,16 @@ button.gallery-picker-backdrop {
   font-size: var(--font-meta);
 }
 
-.gallery-status.is-error {
-  color: var(--red, #e5484d);
-}
-
-.gallery-status.is-ok {
-  color: var(--accent);
-}
-
-.gallery-empty {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-4);
-  color: var(--muted);
-  font-size: var(--font-meta);
-  text-align: center;
-}
-
-.gallery-empty strong {
-  color: var(--text);
-}
+.gallery-status.is-error { color: var(--red); }
+.gallery-status.is-ok { color: var(--accent); }
 
 /* ------------------------------------------------------------------- send */
 .gallery-send {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--border-soft);
-  background: var(--surface-activity, var(--panel));
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  box-shadow: inset 0 1px 0 var(--borderless-edge);
 }
 
 .gallery-send-row {
@@ -336,271 +223,32 @@ button.gallery-picker-backdrop {
 .gallery-instruction {
   flex: 1;
   min-width: 0;
-  resize: vertical;
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--panel);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--font-meta);
 }
 
 .gallery-model {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 180px;
+  width: 200px;
   color: var(--muted);
   font-size: var(--font-meta);
 }
 
-.gallery-model .picker {
-  width: 100%;
-}
-
-.gallery-model .model-picker-trigger {
-  max-width: 100%;
-}
+.gallery-model .picker { width: 100%; }
+.gallery-model .model-picker-trigger { max-width: 100%; }
 
 .gallery-send-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
 }
 
 .gallery-attach-count {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--muted);
   font-size: var(--font-meta);
   font-variant-numeric: tabular-nums;
-}
-
-.gallery-send-button {
-  padding: var(--space-1) var(--space-3);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font: inherit;
-  font-size: var(--font-meta);
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
-
-@media (hover: hover) {
-  .gallery-send-button:hover:not(:disabled) {
-    background: var(--accent-hi);
-    transform: translateY(-1px);
-  }
-}
-
-/* Unavailable reads as the shared neutral disabled chip. */
-.gallery-send-button:disabled {
-  background: var(--control-disabled-bg);
-  color: var(--control-disabled-ink);
-  opacity: 1;
-  filter: none;
-  cursor: default;
-}
-
-/* --------------------------------------------------------------- lightbox */
-.gallery-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: flex;
-  flex-direction: column;
-  color: #fff;
-  animation: gallery-fade 0.18s ease both;
-}
-
-button.gallery-lightbox-backdrop {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  background: rgba(8, 9, 12, 0.78);
-  box-shadow: none;
-  transform: none;
-  cursor: zoom-out;
-}
-
-.gallery-lightbox-topbar {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-}
-
-.gallery-lightbox-counter,
-.gallery-lightbox-name {
-  font-size: var(--font-meta);
-  color: rgba(255, 255, 255, 0.78);
-}
-
-.gallery-lightbox-name {
-  overflow: hidden;
-  max-width: 40vw;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gallery-tool-switch {
-  display: inline-flex;
-  margin-left: auto;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: var(--radius-control);
-  overflow: hidden;
-}
-
-.gallery-tool-button {
-  padding: var(--space-1) var(--space-2);
-  border: 0;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.72);
-  font: inherit;
-  font-size: var(--font-meta);
-  cursor: pointer;
-}
-
-.gallery-tool-button.is-active {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-
-.gallery-include-button {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: var(--radius-control);
-  background: transparent;
-  white-space: nowrap;
-}
-
-.gallery-include-button.is-active {
-  border-color: var(--accent);
-  color: #fff;
-}
-
-/* The lightbox chrome sits on its dark scrim in every theme, so its hover is
-   a light wash rather than the core panel fill, and a chosen tool keeps its
-   accent under the pointer. */
-@media (hover: hover) {
-  .gallery-tool-button:hover:where(:not(:disabled)),
-  .gallery-include-button:hover:where(:not(:disabled)) { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.28); color: #fff; }
-  .gallery-tool-button.is-active:hover:where(:not(:disabled)) { background: var(--accent-hi); color: var(--accent-ink); }
-}
-
-.gallery-icon-button {
-  width: 30px;
-  height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: #fff;
-  font: inherit;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .gallery-icon-button:hover:where(:not(:disabled)) {
-    background: rgba(255, 255, 255, 0.1);
-  }
-}
-
-.gallery-lightbox-body {
-  position: relative;
-  z-index: 2;
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: var(--space-3);
-  padding: 0 var(--space-3);
-}
-
-.gallery-lightbox-stage {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-  overflow: hidden;
-  touch-action: none;
-}
-
-.gallery-lightbox-stage.is-pannable {
-  cursor: grab;
-}
-
-.gallery-lightbox-stage.is-pannable:active {
-  cursor: grabbing;
-}
-
-.gallery-lightbox-frame {
-  position: relative;
-  max-width: 100%;
-  max-height: 100%;
-  transition: transform 0.22s var(--motion-ease, ease);
-  will-change: transform;
-}
-
-.gallery-lightbox-stage.is-pannable .gallery-lightbox-frame {
-  transition: none;
-}
-
-.gallery-lightbox-frame > img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: var(--radius-control);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
-  user-select: none;
-}
-
-.gallery-nav {
-  position: absolute;
-  top: 50%;
-  z-index: 3;
-  width: 40px;
-  height: 64px;
-  transform: translateY(-50%);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: rgba(0, 0, 0, 0.28);
-  color: #fff;
-  font-size: 26px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-@media (hover: hover) {
-  .gallery-nav:hover:where(:not(:disabled)) {
-    background: rgba(0, 0, 0, 0.5);
-  }
-}
-
-.gallery-nav-prev { left: 4px; }
-.gallery-nav-next { right: 4px; }
-
-.gallery-annotate-hint {
-  position: absolute;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 0;
-  padding: 4px 10px;
-  border-radius: var(--radius-round, 999px);
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: var(--font-meta);
-  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------ annotation */
@@ -615,31 +263,32 @@ button.gallery-lightbox-backdrop {
   cursor: crosshair;
 }
 
-.gallery-annotation {
+button.gallery-annotation {
   position: absolute;
   padding: 0;
   border: 0;
   background: transparent;
+  box-shadow: none;
   cursor: pointer;
   pointer-events: auto;
 }
 
-.gallery-annotation.is-point {
+button.gallery-annotation.is-point {
   width: 22px;
   height: 22px;
   transform: translate(-50%, -50%);
 }
 
-.gallery-annotation.is-rect {
+button.gallery-annotation.is-rect {
   border: 2px solid var(--accent);
   border-radius: calc(4px * var(--corner-radius-scale));
   background: color-mix(in srgb, var(--accent) 18%, transparent);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--scrim-media) 40%, transparent);
 }
 
-.gallery-annotation.is-active {
-  border-color: var(--amber, #f5a524);
-  box-shadow: 0 0 0 2px var(--amber, #f5a524);
+button.gallery-annotation.is-active {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 2px var(--amber);
 }
 
 .gallery-annotation.is-point .gallery-annotation-dot {
@@ -647,16 +296,14 @@ button.gallery-lightbox-backdrop {
   width: 14px;
   height: 14px;
   margin: 4px;
-  border: 2px solid #fff;
+  border: 2px solid var(--accent-ink);
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--scrim-media) 45%, transparent);
   animation: gallery-pulse 2s ease-in-out infinite;
 }
 
-.gallery-annotation.is-point.is-active .gallery-annotation-dot {
-  background: var(--amber, #f5a524);
-}
+.gallery-annotation.is-point.is-active .gallery-annotation-dot { background: var(--amber); }
 
 .gallery-annotation-draft {
   position: absolute;
@@ -666,14 +313,11 @@ button.gallery-lightbox-backdrop {
 }
 
 /* ------------------------------------------------------------------ notes */
+/* The notes live in the host viewer's aside (its glass island and scroller). */
 .gallery-notes {
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  padding: var(--space-2);
-  border-radius: var(--radius-surface);
-  background: rgba(20, 21, 26, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  gap: var(--space-2);
 }
 
 .gallery-notes-head {
@@ -681,24 +325,21 @@ button.gallery-lightbox-backdrop {
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-2);
-  margin-bottom: var(--space-2);
 }
 
-.gallery-notes-head h4 {
+.gallery-notes-head h3 {
   margin: 0;
-  font-size: var(--font-heading, 0.95rem);
+  font-size: var(--font-heading);
+  font-weight: 650;
 }
 
-.gallery-notes-head span {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: var(--font-meta);
-}
-
+.gallery-notes-head span,
 .gallery-notes-empty {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--muted);
   font-size: var(--font-meta);
 }
+
+.gallery-notes-empty { margin: 0; }
 
 .gallery-notes-list {
   list-style: none;
@@ -707,18 +348,18 @@ button.gallery-lightbox-backdrop {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  overflow: auto;
 }
 
 .gallery-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   padding: var(--space-1);
-  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
 }
 
-.gallery-note.is-active {
-  border-color: var(--accent);
-}
+.gallery-note.is-active { box-shadow: inset 0 0 0 2px var(--accent); }
 
 .gallery-note-head {
   display: flex;
@@ -729,102 +370,18 @@ button.gallery-lightbox-backdrop {
 .gallery-note-goto {
   flex: 1;
   min-width: 0;
-  padding: 2px 0;
-  border: 0;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.86);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.gallery-note-delete {
-  border: 0;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.55);
-  cursor: pointer;
-}
-
-.gallery-note textarea {
-  width: 100%;
-  margin-top: 4px;
-  resize: vertical;
-  padding: 4px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: calc(6px * var(--corner-radius-scale));
-  background: rgba(0, 0, 0, 0.3);
-  color: #fff;
-  font: inherit;
-  font-size: 12px;
-}
-
-/* -------------------------------------------------------------- filmstrip */
-.gallery-filmstrip {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  gap: 6px;
-  padding: var(--space-2) var(--space-3) var(--space-3);
-  overflow-x: auto;
-}
-
-.gallery-film {
-  flex: 0 0 auto;
-  width: 56px;
-  height: 56px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: calc(8px * var(--corner-radius-scale));
-  overflow: hidden;
-  background: rgba(0, 0, 0, 0.3);
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
-}
-
-@media (hover: hover) {
-  .gallery-film:hover:where(:not(:disabled)) {
-    opacity: 1;
-  }
-}
-
-.gallery-film.is-active {
-  opacity: 1;
-  border-color: var(--accent);
-  transform: translateY(-2px);
-}
-
-.gallery-film img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  justify-content: flex-start;
 }
 
 /* --------------------------------------------------------- container size */
 @container gallery (max-width: 720px) {
-  .gallery-lightbox-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-  .gallery-notes {
-    max-height: 40%;
-  }
-  .gallery-send-row {
-    flex-direction: column;
-  }
-  .gallery-model {
-    width: 100%;
-  }
+  .gallery-send-row { flex-direction: column; align-items: stretch; }
+  .gallery-model { width: 100%; }
 }
 
 @container gallery (max-width: 420px) {
-  .gallery-grid {
-    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-  }
-  .gallery-recursive {
-    margin-left: 0;
-  }
+  .gallery-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--space-2); }
+  .gallery-scroll { padding: var(--space-2); }
 }
 
 @keyframes gallery-rise {
@@ -832,26 +389,16 @@ button.gallery-lightbox-backdrop {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes gallery-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 @keyframes gallery-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4), 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent); }
-  50% { box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4), 0 0 0 8px color-mix(in srgb, var(--accent) 12%, transparent); }
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--scrim-media) 45%, transparent), 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent); }
+  50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--scrim-media) 45%, transparent), 0 0 0 8px color-mix(in srgb, var(--accent) 12%, transparent); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .gallery-tile,
-  .gallery-lightbox,
-  .gallery-annotation.is-point .gallery-annotation-dot {
-    animation: none;
-  }
-  .gallery-tile-open,
-  .gallery-tile-open img,
-  .gallery-lightbox-frame,
-  .gallery-film {
-    transition: none;
-  }
+  .gallery-annotation.is-point .gallery-annotation-dot { animation: none; }
+  .gallery-tile-open img { transition: none; }
 }
+
+:root[data-reduce-animations="true"] .gallery-tile,
+:root[data-reduce-animations="true"] .gallery-annotation.is-point .gallery-annotation-dot { animation: none; }

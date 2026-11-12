@@ -24,6 +24,7 @@ import {
   type ScheduleTask,
 } from "../src/index.ts";
 import { parseAgentFile, serializeAgentFile } from "../src/agentFile.ts";
+import { REPORT_INSTRUCTIONS, REPORT_REMINDER } from "../src/agentReport.ts";
 
 function tempFile(t: { after(fn: () => void): void }): string {
   const dir = mkdtempSync(join(tmpdir(), "polyth-proactive-"));
@@ -78,6 +79,13 @@ test("the last Report line sets the signal and headline; Remember lines become n
 
   assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [] });
   assert.equal(parseAgentReport("All good.").signal, undefined);
+});
+
+test("the protocol says the headline shows above the message, so the message does not repeat it", () => {
+  // The page shows the headline over the report; a body that opens by saying
+  // it again reads twice.
+  assert.match(REPORT_INSTRUCTIONS, /headline is shown above your message, so do not open the message by restating it/);
+  assert.match(REPORT_REMINDER, /do not restate it/);
 });
 
 test("the notebook keeps a person's prose and drops the oldest notes first", () => {

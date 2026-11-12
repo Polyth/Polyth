@@ -2,8 +2,8 @@
 // Erasable TS only (no enums/namespaces) — Node strips types at runtime.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HarnessNativePluginManager, HarnessNativeSkillManager } from "./capabilityInstallations.ts";
-import type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext } from "./workspace.ts";
-export type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext, WorkspaceRepository } from "./workspace.ts";
+import type { ProjectRepository, SessionRepositoryScope, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext } from "./workspace.ts";
+export type { ProjectRepository, SessionRepositoryScope, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext, WorkspaceRepository } from "./workspace.ts";
 import type { CompactionPreference } from "./compactionPolicy.ts";
 export type { CompactionMode, CompactionPreference } from "./compactionPolicy.ts";
 
@@ -2500,6 +2500,11 @@ export interface SessionProjection {
   summary?: true;
   /** Navigator-only isolation marker, without checkout ownership details. */
   isolationSummary?: "git-worktree";
+  /** Navigator-only: the repository ids of a subset session
+   *  (`sessionRepositoryScope` in `@polyth/contracts/workspace`). Present only
+   *  on summaries, where `workspace` stays out; absent means the whole
+   *  Project (or a reader that predates the field). Derived, never stored. */
+  repositoryScope?: SessionRepositoryScope;
   /** Resumable native import; canonical events remain authoritative. */
   historyImport?: { state: "pending" | "in-progress" | "failed" | "complete"; count: number; digest?: string; code?: string };
   id: string; projectId: string; parentId?: string;
@@ -3130,7 +3135,12 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
+
+/** Unread top-level chats per project the rail query returns; enough to show "9+". */
+export const RAIL_STATUS_UNREAD_PER_PROJECT = 10;
+/** Page cap of a `railStatus` summaries read. */
+export const RAIL_STATUS_LIMIT_MAX = 1000;
 
 export interface SessionSummaryQuery {
   projectId?: string;
@@ -3147,6 +3157,13 @@ export interface SessionSummaryQuery {
   query?: string;
   archived?: boolean;
   attentionOnly?: boolean;
+  /** Internal, never read from HTTP: the rows the project rail needs to draw
+   *  its status marks for every project — each chat that is working, waiting,
+   *  or has an open question/permission, plus each project's
+   *  `RAIL_STATUS_UNREAD_PER_PROJECT` newest top-level chats with a reply past
+   *  the reader's own read cursor. A chat with no cursor is read, matching
+   *  `attention.unread`. Raises the page cap to `RAIL_STATUS_LIMIT_MAX`. */
+  railStatus?: boolean;
   /** Only rows the reader pinned: their own pin (v21), else the shared
    *  pre-v21 one. Recency pages never guarantee an old pinned chat. */
   pinned?: boolean;
@@ -3155,6 +3172,15 @@ export interface SessionSummaryQuery {
   ids?: readonly string[];
   fromTime?: number;
   toTime?: number;
+  /** Only sessions whose explicit repository subset includes this Project
+   *  repository id (`sessionInRepositoryScope`); whole-project sessions never
+   *  match. A delegated child follows its root parent. Requires `projectId`;
+   *  at most `REPOSITORY_SCOPE_ID_MAX` characters. */
+  repositoryId?: string;
+  /** Internal, never read from HTTP: the Project's current repository ids,
+   *  which the route reads from the gateway-scoped project. A subset listing
+   *  every one of them is the whole Project and does not match. */
+  projectRepositoryIds?: readonly string[];
 }
 
 export interface SessionSummaryPage {
@@ -4269,7 +4295,15 @@ export type HarnessSelection = { mode: "auto" } | { mode: "pinned"; harnessId: s
  *  say an update exists before running `updateCommand`. Fixed by the backend;
  *  never derived from user input. */
 export type HarnessReleaseSource =
-  | { kind: "npm"; package: string; distTag?: string }
+  | {
+      kind: "npm";
+      package: string;
+      distTag?: string;
+      /** The command this package installs, when `updateCommand` runs a
+       *  package manager instead of the CLI itself (`npm install -g …`): the
+       *  update goes into the npm prefix that command's install lives in. */
+      bin?: string;
+    }
   /** A vendor page (an installer script) whose text names the current
    *  release; the first capture group of `pattern` is the version. */
   | { kind: "page"; url: string; pattern: string };
@@ -4305,6 +4339,9 @@ export interface HarnessDescriptor {
   /** The CLI ships inside the Polyth desktop app and updates with it, so
    *  Settings offers no update of its own. */
   bundled?: boolean;
+  /** Other apps that ship their own copy of this CLI, recognised by a piece
+   *  of the folder that copy lives in, so Settings can name who updates it. */
+  externalApps?: readonly { pathIncludes: string; name: string }[];
   /** Names one of several accounts of the same native harness (for example a
    *  second Claude Code login). The picker keeps the shared logo, gives the
    *  account its own tint and names it on hover. */
@@ -4346,6 +4383,10 @@ export interface HarnessRemoteHostSupport {
   /** The backend can bring this machine's configuration to the host when it
    *  starts there (non-secret, except Pi's API keys on a host with none). */
   localConfig?: boolean;
+  /** The backend can run the harness on THIS machine for a remote project,
+   *  on this machine's sign-in, with its shell and file tools executed on the
+   *  host. The host then needs neither the CLI nor a login. */
+  localPlacement?: boolean;
 }
 /** Where the account list of one multi-account harness family is managed. */
 export interface HarnessAccountsRef {
@@ -4404,6 +4445,10 @@ export interface HarnessProbe {
   message?: string;
   /** Legacy providers may omit this; the registry derives it conservatively. */
   state?: HarnessAvailabilityState;
+  /** For a remote project: the harness runs on THIS machine and only its
+   *  tools reach the host (`SshHarnessPlacement` `local`), so it is installed
+   *  and signed in here. */
+  runsHere?: boolean;
 }
 /** How close a harness sign-in is to its end. `soon` starts 10 days ahead,
  *  as Claude Code's own warning does; `imminent` in the last 48 hours. */
@@ -4544,6 +4589,11 @@ export interface HarnessUpdateStatus {
   reason?: "unsupported" | "remote" | "bundled" | "not-installed" | "unavailable" | "unparsed";
   /** The caller may run this harness's own update command from Settings. */
   canUpdate: boolean;
+  /** The copy in use is a launcher over something neither npm nor Polyth
+   *  installed (a wrapper over another app's bundled CLI), so no updater here
+   *  can replace it: `launcher` is the file found, `location` what it starts
+   *  (a file, or the folder it picks from), `app` who owns that when known. */
+  external?: { launcher: string; location?: string; app?: string };
 }
 export interface HarnessContext {
   /** Server-validated context for provider-owned per-Space storage. */
@@ -4645,6 +4695,31 @@ export interface AgentCapabilityBase {
   projectId?: string;
   /** Harnesses that must not receive this capability. */
   excludedHarnessIds?: string[];
+  /** Which harnesses receive this capability, applied after
+   * `excludedHarnessIds`. Absent means every harness. */
+  harnessRule?: CapabilityHarnessRule;
+}
+
+/** Targets a capability by harness and harness family. The most specific
+ * entry wins: the harness id, then its family (`HarnessAccountsRef.family`, or
+ * the harness's own id when it has no accounts), then `default`. */
+export interface CapabilityHarnessRule {
+  default: boolean;
+  families?: Record<string, boolean>;
+  harnesses?: Record<string, boolean>;
+}
+
+/** The family a harness belongs to for `CapabilityHarnessRule`. */
+export const harnessFamilyOf = (harness: { id: string; accounts?: { family: string } }): string =>
+  harness.accounts?.family ?? harness.id;
+
+/** Whether a capability rule lets this harness receive it. */
+export function harnessRuleAllows(rule: CapabilityHarnessRule | undefined, harness: { id: string; accounts?: { family: string } }): boolean {
+  if (!rule) return true;
+  const own = rule.harnesses?.[harness.id];
+  if (own !== undefined) return own;
+  const family = rule.families?.[harnessFamilyOf(harness)];
+  return family ?? rule.default;
 }
 
 /** Serializable desired-state descriptor. Executors and secret values never appear. */
@@ -5716,8 +5791,18 @@ export interface SshConnectionDto {
   /** Per-harness configuration source on this host. Only exceptions are
    *  stored; a harness that is not listed uses `local`. */
   harnessConfig?: Record<string, SshHarnessConfigSource>;
+  /** Per-harness placement on this host. Only exceptions are stored; a
+   *  harness that is not listed runs on the `host`. */
+  harnessPlacement?: Record<string, SshHarnessPlacement>;
   createdAt: number;
 }
+
+/** Where a harness runs for a project on an SSH host. `host` runs its CLI
+ * there, on the host's own sign-in. `local` runs it on this machine, on this
+ * machine's sign-in, and only its shell and file tools reach the host: nothing
+ * has to be installed or signed in there. Honoured by backends that declare
+ * `HarnessRemoteHostSupport.localPlacement`. */
+export type SshHarnessPlacement = "host" | "local";
 
 /** Where a harness on an SSH host takes its configuration from. `local`
  * layers this machine's non-secret configuration (models, providers, agents)
@@ -5736,6 +5821,8 @@ export interface SshConnectionInput {
   identityFile?: string;
   /** Replaces the stored exceptions; `local` entries are dropped. */
   harnessConfig?: Record<string, SshHarnessConfigSource>;
+  /** Replaces the stored exceptions; `host` entries are dropped. */
+  harnessPlacement?: Record<string, SshHarnessPlacement>;
 }
 
 /** One enabled harness as found on an SSH host. */
@@ -5754,6 +5841,10 @@ export interface SshRemoteHarnessDto {
   configSource: SshHarnessConfigSource;
   /** Whether `local` configuration is actually forwarded for this harness. */
   localConfig: boolean;
+  /** Where its conversations run for this connection's projects. */
+  placement: SshHarnessPlacement;
+  /** Whether the harness can run on this machine with its tools on the host. */
+  localPlacement: boolean;
   setupUrl?: string;
   message?: string;
 }
@@ -6223,6 +6314,8 @@ export const UI_SLOTS = [
   "sidebar.sessions.bulk.actions",
   // Package rows at the top of a project's session list, above pinned chats
   // (for example agents). Context: projectId, activeSessionId, onNavigate?.
+  // `meta.navigatorSection` (NavigatorSectionSlotMeta in @polyth/web-sdk)
+  // makes it hideable and lets it unfold from its capability's action row.
   "sidebar.project.leading",
   // Package-owned floating layers over the whole shell, mounted once (for
   // example transient result cards). A contribution renders nothing until it
@@ -8242,6 +8335,9 @@ export interface HarnessInstallPreviewDto {
   browserOnMachine: boolean;
   /** The harness's own setup guide, for a person who prefers to do it by hand. */
   setupUrl?: string;
+  /** This server starts no installer (the workstation edition): the person
+   *  runs `command` themselves. An Install request would be refused. */
+  manualOnly?: true;
 }
 
 /** Where a background install got to. `queued` = another install on the same

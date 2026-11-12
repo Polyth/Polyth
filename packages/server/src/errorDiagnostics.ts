@@ -1,4 +1,5 @@
 import { readErrorDiagnostics, type ErrorDiagnostics } from "@polyth/contracts";
+import { EDITION_UNAVAILABLE_CODE } from "@polyth/contracts/edition";
 
 // Refusals the router answers before any effect (404/409/413/501, can't-start 503):
 // nothing was applied, so the caller is not in doubt. Any other untagged mutation
@@ -12,6 +13,9 @@ const REFUSED = new Set([
   "restart-deferred", "shutting_down",
   // An owner-set daily limit refuses before anything is sent or created.
   "limit-reached",
+  // The running edition does not offer the action (an install in the
+  // workstation edition): refused before anything starts.
+  EDITION_UNAVAILABLE_CODE,
 ]);
 
 export function httpErrorDiagnostics(error: unknown, method: string, requestId: string): ErrorDiagnostics {

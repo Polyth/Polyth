@@ -1,7 +1,8 @@
 // Settings → SSH remotes. Three views on one page:
 // - the server list (status at a glance, opens a server);
 // - a server: connect/check, the enabled harnesses on that machine (install,
-//   configuration source) and the connection facts;
+//   configuration source, and whether a harness runs there or on this
+//   machine with only its tools on the server) and the connection facts;
 // - the add/edit form.
 // Shared (installation) connections authenticate with the server's SSH agent,
 // config or a private-key FILE PATH. A personal connection (Spaces §14.6)
@@ -11,6 +12,7 @@ import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import type {
   Project,
   SshHarnessConfigSource,
+  SshHarnessPlacement,
   SshRemoteHarnessDto,
   SshRemoteHarnessesDto,
 } from "@polyth/contracts";
@@ -48,6 +50,7 @@ import {
   formToInput,
   harnessStatus,
   nextHarnessConfig,
+  nextHarnessPlacement,
   stateBadge,
   validateSshForm,
   type SshFormValues,
@@ -282,6 +285,20 @@ export default function SshSettings() {
     }
   };
 
+  const setPlacement = async (conn: SshConnectionWithStatus, harnessId: string, placement: SshHarnessPlacement) => {
+    setSavingConfig(harnessId);
+    setError("");
+    try {
+      await api.sshUpdateConnection(conn.id, { harnessPlacement: nextHarnessPlacement(conn.harnessPlacement, harnessId, placement) });
+      await reload();
+      await loadHarnesses(conn.id, false);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setSavingConfig(null);
+    }
+  };
+
   const set = (patch: Partial<SshFormValues>) => setForm((current) => ({ ...current, ...patch }));
 
   // ---- add / edit ----------------------------------------------------------
@@ -477,6 +494,7 @@ export default function SshSettings() {
                       savingConfig={savingConfig === harness.harnessId}
                       onInstall={() => setReview(harness)}
                       onConfig={(source) => void setConfigSource(selected, harness.harnessId, source)}
+                      onPlacement={(placement) => void setPlacement(selected, harness.harnessId, placement)}
                     />
                   ))}
                 </ul>
@@ -664,7 +682,7 @@ export default function SshSettings() {
   );
 }
 
-function HarnessRow({ harness, installing, installDisabled, manageable, savingConfig, onInstall, onConfig }: {
+function HarnessRow({ harness, installing, installDisabled, manageable, savingConfig, onInstall, onConfig, onPlacement }: {
   harness: SshRemoteHarnessDto;
   installing: boolean;
   installDisabled: boolean;
@@ -673,17 +691,21 @@ function HarnessRow({ harness, installing, installDisabled, manageable, savingCo
   savingConfig: boolean;
   onInstall: () => void;
   onConfig: (source: SshHarnessConfigSource) => void;
+  onPlacement: (placement: SshHarnessPlacement) => void;
 }) {
+  // The harness runs on this machine: the server needs neither its CLI nor a
+  // sign-in, so installing it there is not offered.
+  const runsHere = harness.localPlacement && harness.placement === "local";
   const status = installing
     ? { text: tr("ssh.sshsettings.installing"), tone: "muted" as const }
     : harnessStatus(harness);
-  const canInstall = manageable && harness.installed === false && harness.installable;
+  const canInstall = manageable && !runsHere && harness.installed === false && harness.installable;
   return (
     <li className="ssh-harness" data-installed={String(harness.installed)}>
       <div className="ssh-harness-main">
         <span className="ssh-row-copy">
           <strong>{harness.name}</strong>
-          {harness.sessions && <small><span>{tr("ssh.sshsettings.runsRemoteConversations")}</span></small>}
+          {harness.sessions && !runsHere && <small><span>{tr("ssh.sshsettings.runsRemoteConversations")}</span></small>}
         </span>
         <span className="ssh-row-state" data-tone={status.tone}>
           <StatusDot tone={status.tone} />
@@ -695,7 +717,7 @@ function HarnessRow({ harness, installing, installDisabled, manageable, savingCo
               {tr("ssh.sshsettings.install")}
             </Button>
           )}
-          {harness.installed === false && !harness.installable && harness.setupUrl && (
+          {harness.installed === false && !runsHere && !harness.installable && harness.setupUrl && (
             <a className="ui-btn ui-btn--ghost ui-btn--sm" href={harness.setupUrl} target="_blank" rel="noreferrer">
               {tr("ssh.sshsettings.setupGuide")}
               <Icon icon={ExternalLinkIcon} size="sm" />
@@ -704,7 +726,27 @@ function HarnessRow({ harness, installing, installDisabled, manageable, savingCo
         </span>
       </div>
       {harness.message && <p className="ssh-harness-note">{harness.message}</p>}
-      {harness.localConfig && (
+      {harness.localPlacement && (
+        <div className="ssh-harness-config">
+          <span className="ssh-harness-config-label">{tr("ssh.sshsettings.placement")}</span>
+          <Seg<SshHarnessPlacement>
+            value={harness.placement}
+            label={tr("ssh.sshsettings.placementFor", { name: harness.name })}
+            disabled={savingConfig || !manageable}
+            onChange={onPlacement}
+            options={[
+              ["host", tr("ssh.sshsettings.placementHost")],
+              ["local", tr("ssh.sshsettings.placementLocal")],
+            ]}
+          />
+        </div>
+      )}
+      {harness.localPlacement && (
+        <p className="ssh-harness-note">
+          {tr(runsHere ? "ssh.sshsettings.placementLocalNote" : "ssh.sshsettings.placementHostNote", { name: harness.name })}
+        </p>
+      )}
+      {harness.localConfig && !runsHere && (
         <div className="ssh-harness-config">
           <span className="ssh-harness-config-label">{tr("ssh.sshsettings.configuration")}</span>
           <Seg<SshHarnessConfigSource>

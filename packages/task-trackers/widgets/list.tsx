@@ -4,12 +4,14 @@ import type {
   TaskTrackerStatusCategory,
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
-import { ChevronDownIcon } from "../../../apps/web/src/components/ui/index.ts";
+import { hostUi } from "./store.ts";
 import type { ListGrouping } from "./filters.tsx";
 import { PersonAvatar, UnassignedAvatar } from "./glyphs.tsx";
 import { tt } from "./i18n.ts";
 import type { KanbanLane } from "./kanban.tsx";
 import { personKey, taskPeople, type PersonOption } from "./people.ts";
+
+const { ChevronDownIcon } = hostUi.iconSet;
 
 /** One section of the list: a status (in board order) or an assignee. */
 export interface ListGroup {

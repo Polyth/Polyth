@@ -18,6 +18,7 @@ import type {
   HarnessRegistry,
   JsonObject,
 } from "@polyth/contracts";
+import { harnessRuleAllows } from "@polyth/contracts";
 import {
   capabilityRevision,
   desiredBundleRevision,
@@ -193,10 +194,11 @@ const rankId = (id: string): string => {
   return `2:${id}`;
 };
 
-const targetsHarness = (descriptor: AgentCapabilityDescriptor, harnessId: string): boolean => {
-  if (descriptor.excludedHarnessIds?.includes(harnessId)) return false;
+const targetsHarness = (descriptor: AgentCapabilityDescriptor, harness: HarnessProvider["descriptor"]): boolean => {
+  if (descriptor.excludedHarnessIds?.includes(harness.id)) return false;
+  if (!harnessRuleAllows(descriptor.harnessRule, harness)) return false;
   const target = (descriptor as AgentCapabilityDescriptor & { targetHarnessId?: unknown }).targetHarnessId;
-  return target === undefined || target === harnessId;
+  return target === undefined || target === harness.id;
 };
 
 const isDurableApplicationState = (
@@ -681,7 +683,7 @@ export function createCapabilityProvisioningController(opts: {
           lifetime === "session" ? applyContext.sessionId : undefined,
         )
         : undefined;
-      items = (await desired(applyContext, mcpSnapshot)).filter((item) => targetsHarness(item, provider.descriptor.id));
+      items = (await desired(applyContext, mcpSnapshot)).filter((item) => targetsHarness(item, provider.descriptor));
       const desiredRevision = desiredBundleRevision(items);
       if (!provider.provisioner || !support) {
         const next = unsupportedResult(items, "Harness has no capability provisioner");
@@ -787,7 +789,7 @@ export function createCapabilityProvisioningController(opts: {
         ? (ctx, keepRevisions) => provider.provisioner!.release!(ctx, { keepRevisions }) : undefined);
       target = targetOf(context, provider.descriptor.id, lifetime);
       if (!items.length) {
-        try { items = (await desired(context)).filter((item) => targetsHarness(item, provider.descriptor.id)); } catch { items = []; }
+        try { items = (await desired(context)).filter((item) => targetsHarness(item, provider.descriptor)); } catch { items = []; }
       }
       const desiredRevision = desiredBundleRevision(items);
       const reason = sanitize({

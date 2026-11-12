@@ -134,3 +134,20 @@ body[data-desktop-low-resource="true"] .agent-status-dock-state { animation: non
 /* Idle: the agent ended its own turn (its subagents still work). The same
    line holds still: no dot on the mark, no light through the words. */
 .agent-status-dock--idle .agent-status-dock-state { animation: none; background: none; color: var(--muted); }
+
+@media (hover: hover) {
+  button.agent-status-dock:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+    border-color: transparent;
+  }
+  button.agent-status-dock:hover:where(:not(:disabled)) .agent-status-dock-time {
+    color: var(--text-dim);
+  }
+  button.agent-status-dock:hover:where(:not(:disabled)) .agent-status-dock-secondary {
+    color: var(--text-dim);
+  }
+  button.agent-status-dock--idle:hover:where(:not(:disabled)) .agent-status-dock-state {
+    color: var(--text);
+  }
+}
+

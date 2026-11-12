@@ -368,7 +368,7 @@ test("fork validation: assistant targets, invalid seqs, and active rewinds are r
   await store.close();
 });
 
-test("truthful guards: soft rewind is allowed during a live turn while fork stays blocked", async () => {
+test("truthful guards: soft rewind and fork both work during a live turn or a waiting request", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
@@ -383,24 +383,122 @@ test("truthful guards: soft rewind is allowed during a live turn while fork stay
   assert.equal(marker.type, "session/rewound");
   await sessions.clearRewind!(id);
 
-  // A real active turn can stage a soft rewind without affecting execution;
-  // Fork still needs an idle, settled source.
+  // A real active turn can stage a soft rewind without affecting execution,
+  // and Fork copies canonical history without touching the running source.
   await sessions.send(id, { text: "third" });
   await flush();
   const liveMarker = await sessions.rewind!(id, second.seq);
   assert.equal(liveMarker.type, "session/rewound");
   await sessions.clearRewind!(id);
-  await assert.rejects(() => sessions.fork(id, second.seq), /while a turn is running/);
+  const branchesBefore = fake.branchRequests.length;
+  const live = await sessions.fork(id, second.seq);
+  assert.equal(fake.branchRequests.length, branchesBefore);
+  await assertContinuityChild(store, id, live.id, second);
+  assert.equal((await store.projection(id))?.status, "working");
   fake.emit(id, { type: "turn/stopped", reason: "completed" });
   await flush();
 
-  // an unresolved question derived from durable events blocks too
+  // an unresolved question derived from durable events does not block either
   fake.emit(id, { type: "question/asked", requestId: "q1", questions: [] });
   await flush();
-  await assert.rejects(() => sessions.fork(id, second.seq), /while a request is waiting/);
+  const waiting = await sessions.fork(id, second.seq);
+  assert.equal(fake.branchRequests.length, branchesBefore);
+  await assertContinuityChild(store, id, waiting.id, second);
   await sessions.replyQuestion(id, "q1", {});
   const after = await sessions.fork(id, second.seq);
   assert.ok(after.id);
+  await store.close();
+});
+
+test("a whole-session fork taken mid-turn closes the copied turn, tools and requests in the child only", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await seedTwoTurns(fake, sessions, id);
+  await sessions.send(id, { text: "third" });
+  await flush();
+  fake.emit(id, { type: "tool/started", callId: "c1", tool: "bash", input: { command: "sleep 60" } });
+  fake.emit(id, { type: "question/asked", requestId: "q1", questions: [] });
+  await flush();
+  const before = await store.events(id);
+  const openTurn = before.findLast((e) => e.type === "turn/started")!;
+
+  const result = await sessions.fork(id);
+  assert.equal(result.draft, undefined);
+  // The running source is not branched, stopped or written to.
+  assert.equal(fake.branchRequests.length, 0);
+  assert.deepEqual(await store.events(id), before);
+  assert.equal((await store.projection(id))?.status, "waiting");
+
+  const childEvents = await store.events(result.id);
+  assert.deepEqual(childEvents.slice(0, before.length).map((e) => e.type), before.map((e) => e.type));
+  const tail = childEvents.slice(before.length);
+  assert.deepEqual(tail.map((e) => e.type), [
+    "tool/error", "question/expired", "turn/stopped", "session/snapshot-imported", "session/forked",
+  ]);
+  assert.equal((tail[0]!.data as { callId?: string }).callId, "c1");
+  assert.deepEqual(tail[1]!.data, { requestId: "q1", reason: "forked" });
+  assert.deepEqual(tail[2]!.data, { turnId: (openTurn.data as { turnId: string }).turnId, reason: "aborted" });
+  const child = await store.projection(result.id);
+  assert.equal(child?.status, "idle");
+  assert.equal(child?.backendSessionId, undefined);
+
+  // The child gets its own native session at once, while the source turn
+  // is still running.
+  await sessions.send(result.id, { text: "continue here" });
+  await flush();
+  assert.ok(fake.ensured.includes(result.id));
+  await store.close();
+});
+
+test("fork works from a recovering source: unknown, reconciling and epoch-pending", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await seedTwoTurns(fake, sessions, id);
+  const second = (await store.events(id)).filter((e) => e.type === "user/message")[1]!;
+
+  for (const status of ["unknown", "reconciling", "epoch-pending"] as const) {
+    await store.upsertProjection({ ...(await store.projection(id))!, status });
+    const result = await sessions.fork(id, second.seq);
+    await assertContinuityChild(store, id, result.id, second);
+    assert.equal((await store.projection(id))?.status, status);
+  }
+  assert.equal(fake.branchRequests.length, 0);
+  await store.close();
+});
+
+test("fork continues without the source runtime when it cannot be reached", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await seedTwoTurns(fake, sessions, id);
+  const second = (await store.events(id)).filter((e) => e.type === "user/message")[1]!;
+  const project = (await store.projection(id))!.projectId;
+
+  // A restarted server whose harness cannot be started at all.
+  const restarted = createSessionService({
+    store,
+    projects: {
+      list: async () => [], add: async () => { throw new Error("unused"); }, create: async () => { throw new Error("unused"); }, remove: async () => {},
+      get: async (pid) => (pid === project ? { id: project, path: tmpdir(), name: "p", createdAt: 1 } : undefined),
+    },
+    permissions: { evaluate: () => "allow", addRule: () => {}, rules: () => [] } as unknown as PermissionService,
+    broadcast: { event: () => {}, projection: () => {} },
+    queue: store,
+    runtimes: { forProject: async () => { throw Object.assign(new Error("harness is not installed"), { code: "runtime-unavailable" }); } },
+  });
+  const warn = console.warn;
+  const warnings: string[] = [];
+  console.warn = (message: unknown) => { warnings.push(String(message)); };
+  try {
+    const result = await restarted.fork(id, second.seq);
+    await assertContinuityChild(store, id, result.id, second);
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(fake.branchRequests.length, 0);
+  assert.equal(warnings.some((line) => line.includes("continues without its runtime")), true);
   await store.close();
 });
 

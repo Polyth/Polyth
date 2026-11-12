@@ -235,9 +235,17 @@ type HydratedNewSessionRecovery = {
   remaining: RecoverableNewSessionDraft[];
 };
 
+/** The repository chip a navigator's New chat starts under (`ids` undefined
+ * for "All"). It is a default, not a choice: a restored draft that carries its
+ * own repository scope keeps it, and an explicit `repositoryIds` wins. */
+export interface NewChatRepositoryFilter {
+  ids: readonly string[] | undefined;
+}
+
 type StartNewSessionOptions = Omit<NewSessionIntent, "projectId" | "draft"> & {
   draft?: string;
   restoreDraft?: boolean;
+  repositoryFilter?: NewChatRepositoryFilter;
   /** Read-only hydration carries this candidate until the caller's identity
    * fence permits the scoped shelf and attachment promotion. */
   recovery?: HydratedNewSessionRecovery;
@@ -263,6 +271,22 @@ function sessionIntentMetadata(
     ...(repositoryIds !== undefined ? { repositoryIds } : {}),
     ...(isolate !== undefined ? { isolate } : {}),
   };
+}
+
+/** Apply a navigator chip to the metadata of the chat New chat opens. `draft`
+ * is the restored draft with content, if any: its own scope stands. */
+function withRepositoryFilter(
+  metadata: NewSessionIntentMetadata,
+  filter: NewChatRepositoryFilter | undefined,
+  explicit: readonly string[] | undefined,
+  draft: Pick<NewSessionIntentMetadata, "repositoryIds"> | null | undefined,
+): NewSessionIntentMetadata {
+  if (!filter || explicit !== undefined) return metadata;
+  const next = { ...metadata };
+  if (draft?.repositoryIds !== undefined) next.repositoryIds = [...draft.repositoryIds];
+  else if (filter.ids?.length) next.repositoryIds = [...filter.ids];
+  else delete next.repositoryIds;
+  return next;
 }
 
 function hasNewSessionDraftContent(record: { text: string; attachments: readonly unknown[]; nativeStaged?: readonly unknown[] }): boolean {
@@ -437,7 +461,7 @@ export function clearNewSessionDraft(projectId: string, capturedScope?: Persiste
  * draft through startNewSession(). */
 export function startFreshSession(
   projectId: string,
-  options: Omit<NewSessionIntent, "projectId" | "draft"> = {},
+  options: Omit<NewSessionIntent, "projectId" | "draft"> & { repositoryFilter?: NewChatRepositoryFilter } = {},
 ): void {
   if (state.activeProjectId !== projectId) activateProject(projectId);
   const targetScope = newSessionPersistenceScope(projectId);
@@ -455,7 +479,12 @@ export function startFreshSession(
     );
     startNewSession(projectId, {
       draft: restored.text,
-      ...sessionIntentMetadata(options, intent ?? undefined, restored),
+      ...withRepositoryFilter(
+        sessionIntentMetadata(options, intent ?? undefined, restored),
+        options.repositoryFilter,
+        options.repositoryIds,
+        restored,
+      ),
     });
     return;
   }
@@ -613,6 +642,11 @@ export interface AppState {
   editorLocation: EditorLocation | null;
   /** File requested by a changed-file jump into the Changes rail. */
   gitDiffPath: string | null;
+  /** The last explicit `openWorkspacePane(id, resource)` request for a package
+   *  window without a dedicated channel (Files and Git have their own). `seq`
+   *  grows per request so the same resource asked again still lands.
+   *  Presentation only: never history, cleared on project switch. */
+  paneResource: { surfaceId: string; resource: string; seq: number } | null;
   /** Server-resolved runtime feature surface keyed by session id. */
   runtimeFeatures: Record<string, RuntimeFeaturesState | undefined>;
   /** Per-project git worktree topology revision. The server bumps one project
@@ -659,6 +693,7 @@ let state: AppState = {
   editorOpenRequest: null,
   editorLocation: null,
   gitDiffPath: null,
+  paneResource: null,
   runtimeFeatures: {},
   worktreeTopology: {},
 };
@@ -989,6 +1024,7 @@ export function applyProjectAdded(project: Project): void {
     editorRepositoryId: null,
     editorLocation: null,
     gitDiffPath: null,
+    paneResource: null,
   });
   persistClientNavigation(project.id, null);
   setWorkspaceModeProject(project.id);
@@ -1018,6 +1054,7 @@ export function applyProjectRemoved(id: string): void {
     editorRepositoryId: null,
     editorLocation: null,
     gitDiffPath: null,
+    paneResource: null,
   });
   persistClientNavigation(activeProjectId, null);
   setWorkspaceModeProject(activeProjectId);
@@ -1356,6 +1393,14 @@ function applyPaneResource(surfaceId: string, resource: string): Partial<AppStat
   return {};
 }
 
+/** Any other package window receives an explicit request as its `resource`
+ *  prop. A remembered resource is not replayed: reopening a directory from
+ *  the rail starts at its home, not at the last thing it showed. */
+function packagePaneResource(surfaceId: string, resource: string | undefined): Partial<AppState> {
+  if (resource === undefined || surfaceId === "files" || surfaceId === "git") return {};
+  return { paneResource: { surfaceId, resource, seq: (state.paneResource?.seq ?? 0) + 1 } };
+}
+
 /** Open (or keep open) a workspace pane beside Chat. Returns false when the
  *  surface is not a registered, enabled workspace surface. Docked versus
  *  full-screen is decided by the pane host from measured geometry. */
@@ -1380,6 +1425,7 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
     // the session view. Reopening the active surface reuses the instance.
     activeView: "session",
     ...(selectedResource !== undefined ? applyPaneResource(surfaceId, selectedResource) : {}),
+    ...packagePaneResource(surfaceId, resource),
   });
   saveActiveView("session");
   workbenchOpenSurface(surfaceId);
@@ -1677,7 +1723,12 @@ export function startNewSession(
       : options.draft ?? recovered?.text ?? saved?.draft ?? "",
     ...(options.recovery
       ? sessionIntentMetadata(saved ?? undefined, recovered ?? undefined)
-      : sessionIntentMetadata(options, saved ?? undefined, recovered ?? undefined)),
+      : withRepositoryFilter(
+        sessionIntentMetadata(options, saved ?? undefined, recovered ?? undefined),
+        options.repositoryFilter,
+        options.repositoryIds,
+        recovered ?? (saved?.draft ? saved : null),
+      )),
   };
   // Native records live behind an async loopback adapter. Enter the surface
   // immediately, but do not write an empty placeholder over a not-yet-read
@@ -1705,10 +1756,16 @@ export function startNewSession(
       takePreviousNewSessionDraft(projectId, persisted.recovery.scope, persisted.recovery.revision);
     }
     const current = loadScopedDraftRecord(null);
+    const draft = current.updatedAt > 0 ? current.text : persisted?.draft ?? "";
     const next: NewSessionIntent = {
       projectId,
-      draft: current.updatedAt > 0 ? current.text : persisted?.draft ?? "",
-      ...sessionIntentMetadata(options, persisted ?? undefined),
+      draft,
+      ...withRepositoryFilter(
+        sessionIntentMetadata(options, persisted ?? undefined),
+        options.repositoryFilter,
+        options.repositoryIds,
+        draft ? persisted : null,
+      ),
     };
     saveNewSessionDraft(next);
     set({ newSessionIntent: next });

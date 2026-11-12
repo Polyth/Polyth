@@ -479,7 +479,14 @@
   min-block-size: 0;
   color: var(--text);
   font-size: var(--font-meta);
+  /* A column, so the scroll region gets a definite height in a capped host
+     (a board tile) and scrolls there instead of overflowing it. */
+  display: flex;
+  flex-direction: column;
 }
+.usage-limits-widget > .usage-widget-scroll { flex: 1 1 auto; min-block-size: 0; border-radius: inherit; }
+/* The focus ring stays inside the card rather than being cut at its edges. */
+.usage-limits-widget > .usage-widget-scroll:focus-visible { outline-offset: -2px; }
 
 .usage-limits-widget .usage-widget-heading { align-items: center; }
 .usage-limits-widget .usage-widget-heading > div { flex: 0 1 auto; }
@@ -588,7 +595,19 @@
   min-inline-size: 0;
   line-height: var(--font-meta-lh);
 }
-.usage-limits-row-head > span { overflow: hidden; color: var(--text-dim); font-size: var(--font-label); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.usage-limits-row-head > span { color: var(--text-dim); font-size: var(--font-label); font-weight: 550; }
+/* A window's name gets two lines before it ellipsizes ("Third-party Claude
+   Sonnet 4.5 5h" stays readable); the row's tooltip carries the rest. */
+:is(.usage-limits-row-head > span, .usage-limits-row-label) {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  min-inline-size: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
 /* The value is the row's reading: large, in the attention tone when the
    window asks for it (low remaining warns, likely to run out is critical). */
 .usage-limits-row-head > strong {
@@ -782,12 +801,9 @@
 .usage-limits-rows .usage-limits-group > ul { row-gap: var(--space-3); }
 .usage-limits-rows .usage-limits-group > h3 { grid-column: 1 / -1; }
 .usage-limits-row-label {
-  overflow: hidden;
   color: var(--text-dim);
   font-size: var(--font-label);
   font-weight: 550;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .usage-limits-widget[data-compact] .usage-limits-group li > strong {
   justify-self: end;
@@ -874,8 +890,28 @@
    line (the plan badge steps aside), the hero stacks its figure over its
    window, and words break between words rather than letters. */
 @container usage-limits-widget (max-width: 239px) {
-  .usage-limits-widget .usage-limits-plan { display: none; }
-  .usage-limits-widget .usage-widget-heading > div { flex: 1 1 auto; }
+  /* The plan badge and the refresh button step aside so the headline keeps
+     the line; the report still refreshes on its own schedule. */
+  .usage-limits-widget :is(.usage-limits-plan, .usage-widget-heading > button) { display: none; }
+  .usage-limits-widget .usage-widget-heading > div { flex: 1 1 auto; min-inline-size: 0; }
+  /* The headline stacks: the harness, then the model quieter under it,
+     each on its own line, instead of "Claude Code ·…". */
+  .usage-limits-widget .usage-widget-heading strong { display: grid; }
+  .usage-limits-widget .usage-widget-heading strong > span { overflow: hidden; text-overflow: ellipsis; }
+  .usage-limits-widget .usage-widget-heading strong > span + span { color: var(--muted); font-size: var(--font-meta); font-weight: 450; }
+  .usage-limits-widget .usage-widget-heading strong i { display: none; }
+  /* A source name and its plan stack instead of squeezing the plan to "p…". */
+  .usage-limits-group > h3 { flex-wrap: wrap; row-gap: 2px; }
+  .usage-limits-group > h3 > span { flex: 0 1 auto; min-inline-size: 0; overflow-wrap: break-word; }
+  .usage-limits-group > h3 > small { max-inline-size: 100%; }
+  /* Rows: the window's name across the whole first line (two at most, so
+     "Third-party Claude Sonnet 4.5 5h" reads), the meter and reading under it. */
+  .usage-limits-rows .usage-limits-group > ul > li { gap: var(--space-1) var(--space-2); }
+  .usage-limits-rows .usage-limits-row-label { grid-column: 1 / -1; font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+  .usage-limits-rows .usage-limits-group li > :is(.usage-limits-meter, .usage-limits-meter-gap) { grid-column: 1; grid-row: 2; }
+  .usage-limits-widget[data-compact] .usage-limits-rows .usage-limits-group li > strong { grid-column: 2; grid-row: 2; }
+  /* Full rows (a standard-size widget squeezed this narrow): the reading drops under the name. */
+  .usage-limits-row-head { flex-wrap: wrap; }
   .usage-limits-widget[data-compact] .usage-limits-hero { flex-direction: column; align-items: flex-start; gap: var(--space-1); }
   .usage-limits-widget[data-compact] .usage-limits-hero > div > small { overflow-wrap: normal; }
   .usage-limits-widget[data-compact] .usage-limits-chips > li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

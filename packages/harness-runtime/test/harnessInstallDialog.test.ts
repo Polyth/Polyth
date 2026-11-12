@@ -34,6 +34,8 @@ let snapshots: HarnessSnapshot[] = [];
 let jobs: HarnessInstallDto[] = [];
 let readFailure: { status: number; error: string } | undefined;
 let nextJob: HarnessInstallDto | undefined;
+/** The server starts no installer (workstation edition). */
+let manualOnly = false;
 
 const preview: HarnessInstallPreviewDto = {
   harnessId: "antigravity", harnessName: "Antigravity", target: "local", machine: { kind: "local", os: "darwin" },
@@ -69,7 +71,7 @@ globalThis.fetch = (async (input, init) => {
       return json(jobs[0] ?? null);
     }
     if (nextJob) { jobs = [nextJob]; nextJob = undefined; }
-    return json({ preview, job: jobs[0] ?? null });
+    return json({ preview: manualOnly ? { ...preview, manualOnly: true } : preview, job: jobs[0] ?? null });
   }
   if (url.pathname === "/api/harnesses/antigravity/setup-terminal") {
     const action = url.searchParams.get("action");
@@ -287,6 +289,28 @@ test("someone who cannot install is told who can, and nothing starts", async () 
     assert.ok(!requests.some((request) => request.method === "POST"));
   } finally {
     readFailure = undefined;
+    await view.unmount();
+  }
+});
+
+test("a server that starts no installer (workstation edition) offers the command to run by hand, never Install or a terminal", async () => {
+  snapshots = [agy()];
+  jobs = [];
+  readFailure = undefined;
+  manualOnly = true;
+  const view = await mount();
+  try {
+    await click(button(view.container, "Install"));
+    const text = dialog()?.textContent ?? "";
+    assert.match(text, /doesn’t download installers/);
+    assert.match(text, /curl -fsSL https:\/\/antigravity\.google\/cli\/install\.sh \| bash/);
+    assert.equal(dialog()?.querySelector("details")?.hasAttribute("open"), true, "the command is in view");
+    assert.equal(button(dialog() ?? document, "Install"), undefined, "no install button in the dialog");
+    assert.equal(button(dialog() ?? document, "Run in Terminal instead"), undefined, "the terminal install is refused too");
+    assert.ok(dialog()?.querySelector('[data-kind="command"] button'), "the command can be copied");
+    assert.ok(!requests.some((request) => request.method === "POST"));
+  } finally {
+    manualOnly = false;
     await view.unmount();
   }
 });

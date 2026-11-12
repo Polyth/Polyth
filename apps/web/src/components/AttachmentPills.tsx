@@ -1,6 +1,7 @@
 // Attachment pills — removable in the composer, read-only on timeline
 // user messages. Images and browser contexts show a thumbnail when available;
-// a file names its type with its extension instead of a glyph.
+// a file names its type with its extension instead of a glyph. A composer may
+// keep a removed card's place as a restore slot (`removed` / `onRestore`).
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import { browserContextHostPath } from "@polyth/contracts";
@@ -11,6 +12,7 @@ import { formatNumber, tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
 import { motionIsReduced } from "../motionPresence.ts";
 import AttachmentPreview from "./AttachmentPreview.tsx";
+import { UndoIcon } from "./ui/icons.ts";
 
 const KIND_ICONS: Record<string, () => ReactElement> = {
   file: Icon.file,
@@ -182,15 +184,44 @@ function AttachmentThumb({ url }: { url: string }) {
   );
 }
 
-export default function AttachmentPills({ attachments, onRemove }: {
+/** A removed card's restore slot: the width the card had, and whether the
+ *  slot is already on its way out. */
+export interface RemovedAttachmentSlot {
+  width: number;
+  leaving: boolean;
+}
+
+/** A click this soon after the removal is the same slip's second click (a
+ *  double click on remove), not a wish to put the file back. */
+const RESTORE_GUARD_MS = 400;
+
+export default function AttachmentPills({ attachments, onRemove, removed, onRestore }: {
   attachments: AttachmentRef[];
-  /** Present = composer mode (removable); absent = read-only timeline render. */
-  onRemove?: (id: string) => void;
+  /** Present = composer mode (removable); absent = read-only timeline render.
+   *  `width` is the card's, for a restore slot that keeps its place. */
+  onRemove?: (id: string, width: number) => void;
+  /** Cards of `attachments` the person removed that can still be put back, by
+   *  id: each is drawn as a restore button in the card's place. */
+  removed?: ReadonlyMap<string, RemovedAttachmentSlot>;
+  onRestore?: (id: string) => void;
 }) {
   const [previewAt, setPreviewAt] = useState<number | null>(null);
   const { strip, fresh } = useLiveStrip(attachments, Boolean(onRemove));
+  const removedAt = useRef(new Map<string, number>());
+  // Keyboard focus follows the card: from its remove button to the slot's
+  // restore button, and from there back to the card.
+  const focusNext = useRef<{ id: string; target: ".att-restore" | ".attachment-open" } | null>(null);
+  useLayoutEffect(() => {
+    const next = focusNext.current;
+    if (!next) return;
+    focusNext.current = null;
+    const card = [...strip.current?.children ?? []].find((child) => (child as HTMLElement).dataset.attachment === next.id);
+    card?.querySelector<HTMLElement>(next.target)?.focus();
+  });
   if (attachments.length === 0) return null;
-  const preview = previewAt === null ? null : attachments[previewAt];
+  // The preview pages through the cards that are there, not the restore slots.
+  const shown = removed?.size ? attachments.filter((a) => !removed.has(a.id)) : attachments;
+  let shownIndex = -1;
   return (
     <>
       <div ref={strip} className="attachment-pills" aria-label={tr("attachmentpills.attachments")}>
@@ -198,9 +229,43 @@ export default function AttachmentPills({ attachments, onRemove }: {
           const kind = a.kind ?? "file";
           const blocked = kind !== "browser-context" && isBlockedAttachment(a);
           const { title, meta } = cardText(a, kind, blocked);
+          const imagePreview = kind === "image" && a.url && !blocked;
+          const slot = removed?.get(a.id);
+          if (slot) {
+            return (
+              <span
+                key={a.id || i}
+                data-attachment={a.id}
+                className={`attachment-pill att-${kind}${imagePreview ? " att-tile" : ""} att-removed${slot.leaving ? " att-leaving" : ""}`}
+                style={{ "--att-w": `${slot.width}px` } as CSSProperties}
+                inert={slot.leaving ? true : undefined}
+              >
+                <button
+                  type="button"
+                  className="att-restore"
+                  aria-label={tr("attachmentpills.restoreAttachmentValue", { name: title })}
+                  title={tr("attachmentpills.restoreAttachmentValue", { name: title })}
+                  onClick={(event) => {
+                    if (event.timeStamp - (removedAt.current.get(a.id) ?? -Infinity) < RESTORE_GUARD_MS) return;
+                    if (document.activeElement === event.currentTarget) focusNext.current = { id: a.id, target: ".attachment-open" };
+                    onRestore?.(a.id);
+                  }}
+                >
+                  <span className="att-icon" aria-hidden><UndoIcon /></span>
+                  {!imagePreview && (
+                    <span className="att-text">
+                      <span className="att-name">{tr("attachmentpills.restore")}</span>
+                      <span className="att-meta">{title}</span>
+                    </span>
+                  )}
+                </button>
+              </span>
+            );
+          }
+          shownIndex += 1;
+          const at = shownIndex;
           const type = typeLabel(a, kind, blocked);
           const detail = kind === "url" ? a.url : kind === "browser-context" ? meta : a.path;
-          const imagePreview = kind === "image" && a.url && !blocked;
           const KindIcon = KIND_ICONS[kind] ?? Icon.file;
           const LeadIcon = a.name === PASTED_TEXT_NAME ? Icon.text : KindIcon;
           const body = imagePreview ? <AttachmentThumb url={a.url!} /> : (
@@ -219,6 +284,7 @@ export default function AttachmentPills({ attachments, onRemove }: {
           return (
             <span
               key={a.id || i}
+              data-attachment={a.id}
               className={`attachment-pill att-${kind}${imagePreview ? " att-tile" : ""}${blocked ? " att-unavailable" : ""}${fresh.has(a.id) ? " att-fresh" : ""}`}
               style={onRemove ? { "--att-i": i } as CSSProperties : undefined}
             >
@@ -235,7 +301,7 @@ export default function AttachmentPills({ attachments, onRemove }: {
                   aria-haspopup="dialog"
                   aria-label={tr("attachmentpills.previewAttachmentValue", { name: title })}
                   title={tr("attachmentpills.previewAttachmentValue", { name: title })}
-                  onClick={() => setPreviewAt(i)}
+                  onClick={() => setPreviewAt(at)}
                 >{body}</button>
               )}
               {onRemove && (
@@ -244,15 +310,20 @@ export default function AttachmentPills({ attachments, onRemove }: {
                   className="att-remove"
                   aria-label={tr("attachmentpills.removeAttachmentValue", { name: title })}
                   title={tr("attachmentpills.removeAttachment")}
-                  onClick={() => onRemove(a.id)}
+                  onClick={(event) => {
+                    const card = event.currentTarget.parentElement;
+                    removedAt.current.set(a.id, event.timeStamp);
+                    if (onRestore && event.currentTarget.matches(":focus-visible")) focusNext.current = { id: a.id, target: ".att-restore" };
+                    onRemove(a.id, card?.getBoundingClientRect().width ?? 0);
+                  }}
                 ><span className="att-remove-glyph" aria-hidden><Icon.close /></span></button>
               )}
             </span>
           );
         })}
       </div>
-      {preview && previewAt !== null && (
-        <AttachmentPreview attachments={attachments} start={previewAt} onClose={() => setPreviewAt(null)} />
+      {previewAt !== null && shown[previewAt] && (
+        <AttachmentPreview attachments={shown} start={previewAt} onClose={() => setPreviewAt(null)} />
       )}
     </>
   );

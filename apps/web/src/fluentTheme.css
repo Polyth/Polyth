@@ -411,8 +411,9 @@ html[data-theme-style="fluent"] .session-row.active .session-btn::after {
   content: "";
   position: absolute;
   top: calc(50% - var(--fluent-pill-h) / 2);
-  inset-inline-start: calc(var(--session-body-start) - var(--session-pill-inset));
+  inset-inline-start: var(--session-pill-start);
   width: var(--fluent-pill-w);
+  transition: inset-inline-start var(--motion-fast) var(--motion-ease);
   height: var(--fluent-pill-h);
   border-radius: var(--radius-round);
   background: var(--accent);

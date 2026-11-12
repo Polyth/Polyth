@@ -69,7 +69,9 @@ import { registerGrouping } from "../sidebarPrefs.ts";
 import { capabilityRailState, placeCapability, subscribeCapabilityPlacement, unplaceCapability } from "../railPlacement.ts";
 import type { CapabilityTier } from "../capabilityLayout.ts";
 import { notifyCapabilities, registerCapability, type CapabilityDescriptor } from "../capabilities.ts";
-import { registerSurface, type RailSurface } from "../surfaces.ts";
+import { hasPackageWindow, registerSurface, type RailSurface } from "../surfaces.ts";
+import { useWindowBack } from "../components/ui/windowBack.ts";
+import { hostConfirm, hostIconSet, hostTabIds, hostUiComponents } from "./hostUiParts.tsx";
 import { getPage, registerPage } from "../pages.ts";
 import { registerSettingsItems } from "../settings/registry.ts";
 import { installSettingsPage } from "./settingsPage.ts";
@@ -200,6 +202,7 @@ export const webPackageHost: WebPackageHost = {
   surfaces: {
     register: (definition: SurfaceDefinition) =>
       registerSurface(withDefaultSurfaceContent(definition) as unknown as RailSurface),
+    has: (surfaceId: string) => hasPackageWindow(surfaceId),
   },
   pages: {
     register: (definition: PageDefinition) => {
@@ -210,6 +213,7 @@ export const webPackageHost: WebPackageHost = {
         if (getState().activePage?.pageId === definition.id && !getPage(definition.id)) closePage();
       };
     },
+    has: (pageId: string) => getPage(pageId) !== undefined,
   },
   capabilities: {
     register: (definition: CapabilityDefinition) =>
@@ -362,8 +366,13 @@ export const webPackageHost: WebPackageHost = {
       Select: Select as unknown as WebPackageHost["ui"]["components"]["Select"],
       EmptyState: EmptyState as unknown as WebPackageHost["ui"]["components"]["EmptyState"],
       MarkdownDoc: MarkdownDoc as unknown as WebPackageHost["ui"]["components"]["MarkdownDoc"],
+      ...hostUiComponents,
     },
+    iconSet: hostIconSet,
+    tabIds: hostTabIds,
+    confirm: hostConfirm,
     syntax: { highlight, languageForPath: langOf },
+    useWindowBack,
     locale: { get: getLocale, translate: (key, values) => tr(key as Parameters<typeof tr>[0], values) },
   },
   errors: {

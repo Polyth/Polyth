@@ -9,6 +9,8 @@ import type {
   SkillLibraryEntryDto,
   SkillLibraryNativeDto,
 } from "@polyth/contracts/capability-installations";
+import type { SkillHarnessMode } from "@polyth/contracts/capability-installations";
+import { harnessMode, skillReach, type ReachSource } from "../src/skillReach.ts";
 import { rankSkillMatches } from "../src/skillSearch.ts";
 
 export interface CatalogFilter {
@@ -71,6 +73,9 @@ export interface HarnessAvailability {
   harness: SkillHarnessDto;
   state: HarnessState;
   native?: SkillLibraryNativeDto;
+  /** A managed skill only: what this harness's reach says, and which rule says it. */
+  mode?: SkillHarnessMode;
+  source?: ReachSource;
 }
 
 export function availabilityOf(entry: SkillLibraryEntryDto, harnesses: readonly SkillHarnessDto[]): HarnessAvailability[] {
@@ -78,19 +83,46 @@ export function availabilityOf(entry: SkillLibraryEntryDto, harnesses: readonly 
     const native = entry.natives.find((row) => row.harnessId === harness.id);
     const withNative = native ? { native } : {};
     if (entry.managed) {
-      if (entry.managed.offHarnesses?.includes(harness.id)) return { harness, state: "off" as const, ...withNative };
       const blocked = Boolean(entry.managed.disallowedTools?.length) && !harness.enforcesBlockedTools;
       if (harness.delivery === "none" || blocked) {
         return native?.enabled
           ? { harness, state: "own" as const, native }
           : { harness, state: "unsupported" as const, ...withNative };
       }
-      return { harness, state: "polyth" as const, ...withNative };
+      const { mode, source } = harnessMode(skillReach(entry.managed), harness);
+      return { harness, state: mode === "off" ? "off" as const : "polyth" as const, mode, source, ...withNative };
     }
     if (native) return { harness, state: native.enabled ? "own" as const : "muted" as const, native };
     return { harness, state: "absent" as const };
   });
 }
+
+/** One family's rows: a family with several accounts is drawn as one group. */
+export interface HarnessGroup {
+  family: string;
+  name: string;
+  rows: HarnessAvailability[];
+}
+
+/** Rows in the harnesses' own order, each family gathered at its first account. */
+export function harnessGroups(rows: readonly HarnessAvailability[]): HarnessGroup[] {
+  const groups: HarnessGroup[] = [];
+  const byFamily = new Map<string, HarnessGroup>();
+  for (const row of rows) {
+    const family = row.harness.family || row.harness.id;
+    let group = byFamily.get(family);
+    if (!group) {
+      group = { family, name: row.harness.familyName || row.harness.name, rows: [] };
+      byFamily.set(family, group);
+      groups.push(group);
+    }
+    group.rows.push(row);
+  }
+  return groups;
+}
+
+/** Roughly how many tokens a text costs in every session. */
+export const tokenEstimate = (text: string): number => Math.max(1, Math.round(text.length / 4));
 
 /** Harnesses that can really use a skill right now. */
 export const usableCount = (rows: readonly HarnessAvailability[]): number =>

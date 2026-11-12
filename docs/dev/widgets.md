@@ -248,7 +248,13 @@ export default defineWebPackage((host) => () => {
   (`panelDefaultSize` first); a widget without them keeps a full-width row.
   Every sized tile sits in one card the board draws (`.hero-widget[data-size]`:
   border, card radius, `--surface-1`), so the widget renders content only and
-  fills the tile; it must not draw a second frame of its own. The host's `SlotHost` for that slot renders only registered contributions
+  fills the tile; it must not draw a second frame of its own. A tile is capped
+  at `7 × --control-h-lg` (`large` at 14), so a long list scrolls inside the
+  card instead of growing the tile and stretching its row neighbours; the
+  content child gets `overflow: auto`, and a widget with its own scroll region
+  should size it to the tile (flex column, `min-height: 0`). An item whose
+  widget no longer lists `session.empty.widgets` in its slots is kept but not
+  rendered (Glance and the Usage limits tile are disabled this way for now). The host's `SlotHost` for that slot renders only registered contributions
   (`placed={false}`); a visible layout placement there (an older client, the
   Canvas library) is adopted onto the board as an item of that project and
   hidden in the layout (`adoptLegacyHeroPlacements`). Nothing is added by
@@ -484,6 +490,13 @@ placement and visibility mutations still go through `widgetLayout.ts`.
   service) with an interactive canvas: folder picker, lazy grid, a lightbox
   with zoom/pan and normalized point/zone annotations, and a send flow that
   attaches the selected images to the active session for a chosen model.
+  Its controls are host primitives (`Menu` folder picker, `Button`,
+  `IconButton`, `Checkbox`, `Textarea`, `EmptyState`); the lightbox is a
+  `host.ui.Dialog` (`size="full"`) that paints `--scrim-media` as its own
+  bottom layer (shell looks re-skin every dialog backdrop) and floats its
+  controls on glass islands inside the safe areas, like the host attachment
+  viewer. Grid tiles are visible without their entrance animation, so reduced
+  motion never hides them.
 
 ## 14. Checklist (widget work)
 

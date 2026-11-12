@@ -65,6 +65,8 @@ function fixture(t: test.TestContext) {
     async list(projectId?: string) {
       return [...projections.values()]
         .filter((row) => !projectId || row.projectId === projectId)
+        // As the real list: a chat that failed at startup is hidden.
+        .filter((row) => row.lastTurnAt != null || row.status !== "failed")
         .map((row) => ({ ...row }));
     },
     async sync(projectId: string) { return base.list(projectId); },
@@ -117,5 +119,23 @@ test("closing a project removes the chats it still owns", async t => {
   assert.equal(await f.services.projects.get(project.id), undefined);
   assert.equal(f.security.resources.resource(project.id)?.lifecycle, "deleted");
   assert.equal(f.security.resources.resource(chat.id)?.lifecycle, "deleted");
+  assert.equal(f.projections.size, 0);
+});
+
+test("closing a project also removes chats the list hides", async t => {
+  const f = fixture(t);
+  const path = join(f.root, "work", "failed");
+  mkdirSync(path, { recursive: true });
+  const project = await f.services.projects.add(path, "Failed");
+  const shown = await f.services.sessions.create({ projectId: project.id, title: "Shown" });
+  const failed = await f.services.sessions.create({ projectId: project.id, title: "Failed" });
+  f.projections.set(failed.id, { ...f.projections.get(failed.id)!, status: "failed" });
+
+  await f.services.projects.remove(project.id);
+
+  assert.equal(await f.services.projects.get(project.id), undefined);
+  assert.equal(f.security.resources.resource(project.id)?.lifecycle, "deleted");
+  assert.equal(f.security.resources.resource(shown.id)?.lifecycle, "deleted");
+  assert.equal(f.security.resources.resource(failed.id)?.lifecycle, "deleted");
   assert.equal(f.projections.size, 0);
 });

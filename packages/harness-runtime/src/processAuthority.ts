@@ -32,10 +32,18 @@ type PortableState = PortableProof & {
   /** The Windows Job Object the executor runs in (polyth-job.exe). Once the
    * job is gone, the kernel has ended every process launched in it, which is
    * the release proof a crash otherwise leaves missing. */
-  containment?: WindowsJobContainment;
+  containment?: WindowsJobContainment | ProcessGroupContainment;
 };
 
 type WindowsJobContainment = { kind: "windows-job"; job: string };
+/** macOS (any POSIX host without the Linux supervisor): the executor leads its
+ * own process group and every process it starts inherits a tag naming this
+ * authority, so a later Polyth can find what a crash left behind, end it and
+ * see that nothing remains. `pgid` is recorded once the executor has started. */
+type ProcessGroupContainment = { kind: "process-group"; pgid?: number };
+
+const AUTHORITY_TAG = "POLYTH_RUNTIME_AUTHORITY";
+const authorityTag = (proof: PortableProof): string => `${AUTHORITY_TAG}=${proof.authorityId}.${proof.generation}`;
 
 /** Ends and verifies the Job Object an executor runs in. */
 export interface WindowsJobController {
@@ -84,9 +92,12 @@ const readPortableState = (file: string | undefined): PortableState | undefined 
       || !Number.isFinite(value.hostUptimeSeconds)
       || value.hostUptimeSeconds < 0
       // A job is only ever this authority's own: never probe or end another.
-      || (value.containment !== undefined && (
-        value.containment?.kind !== "windows-job"
-        || value.containment.job !== windowsJobName(value as PortableProof)
+      || (value.containment !== undefined && !(
+        (value.containment?.kind === "windows-job"
+          && value.containment.job === windowsJobName(value as PortableProof))
+        || (value.containment?.kind === "process-group"
+          && (value.containment.pgid === undefined
+            || (Number.isSafeInteger(value.containment.pgid) && value.containment.pgid > 1)))
       ))
     ) {
       throw outcomeUnknown("Portable harness authority state is malformed");
@@ -152,6 +163,102 @@ const runTaskkill = (pid: number): Promise<void> => new Promise((resolve, reject
     else reject(outcomeUnknown(`taskkill exited with ${code ?? "unknown"}`));
   });
 });
+
+type ProcessRow = { pid: number; pgid: number; words: string[] };
+
+const psExecutable = (): string | undefined => ["/bin/ps", "/usr/bin/ps"].find((candidate) => existsSync(candidate));
+
+/** Every process with its group and its environment (`ps e`), or undefined
+ * when the table could not be read. */
+const listProcesses = (): Promise<ProcessRow[] | undefined> => new Promise((resolve) => {
+  const ps = psExecutable();
+  if (!ps) return resolve(undefined);
+  // BSD `-E` and procps `e` both append the environment to the command.
+  const flags = process.platform === "darwin" ? ["-axEww"] : ["axeww"];
+  const child = spawn(ps, [...flags, "-o", "pid=,pgid=,command="], { stdio: ["ignore", "pipe", "ignore"], shell: false });
+  const chunks: Buffer[] = [];
+  const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(undefined); }, 10_000);
+  timer.unref?.();
+  child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+  child.once("error", () => { clearTimeout(timer); resolve(undefined); });
+  child.once("close", (code) => {
+    clearTimeout(timer);
+    if (code !== 0) return resolve(undefined);
+    const rows: ProcessRow[] = [];
+    for (const line of Buffer.concat(chunks).toString("utf8").split("\n")) {
+      const [pid, pgid, ...words] = line.trim().split(/\s+/);
+      if (/^\d+$/.test(pid ?? "") && /^\d+$/.test(pgid ?? "")) rows.push({ pid: Number(pid), pgid: Number(pgid), words });
+    }
+    resolve(rows);
+  });
+});
+
+/** The process table, returned only when it demonstrably shows a child's
+ * environment: a probe child carries a one-off tag and must be listed with it.
+ * A host whose `ps` hides environments would otherwise report "nothing left"
+ * for an executor that is still running. */
+const listProcessesWithEnvironment = async (): Promise<ProcessRow[] | undefined> => {
+  const tag = `${AUTHORITY_TAG}_PROBE=${randomUUID()}`;
+  const [name, value] = tag.split("=") as [string, string];
+  let probe: ChildProcess;
+  try {
+    probe = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], nodeModeSpawnOptions(process.execPath, {
+      env: { ...process.env, [name]: value },
+      stdio: "ignore",
+      shell: false,
+    }));
+  } catch {
+    return undefined;
+  }
+  probe.once("error", () => {});
+  try {
+    // The tag appears once the probe has replaced its image, moments after spawn.
+    for (let attempt = 0; attempt < 20 && probe.pid; attempt += 1) {
+      const rows = await listProcesses();
+      if (!rows) return undefined;
+      if (rows.some((row) => row.pid === probe.pid && row.words.includes(tag))) {
+        return rows.filter((row) => row.pid !== probe.pid);
+      }
+      await sleep(100);
+    }
+    return undefined;
+  } finally {
+    probe.kill("SIGKILL");
+  }
+};
+
+const signalProcess = (target: number, signal: NodeJS.Signals): void => {
+  try { process.kill(target, signal); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+};
+
+/** Ends what a crashed authority left running and returns true only once the
+ * process table shows none of it. A process is this authority's when it
+ * carries the authority's tag; its recorded group is ended as a whole only
+ * while a tagged process is still in it, because a group id that outlived the
+ * executor may by now belong to something unrelated. */
+const releaseProcessGroupExecution = async (prior: PortableState): Promise<boolean> => {
+  const tag = authorityTag(prior);
+  const pgid = prior.containment?.kind === "process-group" ? prior.containment.pgid : undefined;
+  const owned = (rows: ProcessRow[]) => rows.filter((row) => row.words.includes(tag));
+  let rows = await listProcessesWithEnvironment();
+  if (!rows) return false;
+  if (!owned(rows).length) return true;
+  const ownsGroup = pgid !== undefined && owned(rows).some((row) => row.pgid === pgid);
+  for (const [signal, waitMs] of [["SIGTERM", 1_500], ["SIGKILL", 3_500]] as const) {
+    if (ownsGroup) signalProcess(-pgid, signal);
+    for (const row of owned(rows)) if (!ownsGroup || row.pgid !== pgid) signalProcess(row.pid, signal);
+    const deadline = Date.now() + waitMs;
+    do {
+      await sleep(50);
+      rows = await listProcesses();
+      if (!rows) return false;
+      if (!owned(rows).length && !(ownsGroup && posixGroupAlive(pgid))) return true;
+    } while (Date.now() < deadline);
+  }
+  return false;
+};
 
 /** Quote one argument the way libuv (Node's `spawn`) and the MSVC runtime
  * agree on, so the command line polyth-job.exe starts parses back exactly. */
@@ -240,8 +347,9 @@ export const windowsJobContainment = (): Promise<WindowsJobController | undefine
   return detectedJobs;
 };
 
-/** The executor of a prior authority is provably gone: a reboot since, or its
- * job is gone (ending it first if it somehow still runs). */
+/** The executor of a prior authority is provably gone: a reboot since, its job
+ * is gone, or nothing tagged as its own is left (ending either first if it
+ * somehow still runs). */
 const priorExecutionReleased = async (
   prior: PortableState,
   observedUptime: number,
@@ -252,7 +360,21 @@ const priorExecutionReleased = async (
   // persisted by an earlier process after a host reboot, which proves that the
   // previous local executor and all of its descendants are gone.
   if (observedUptime < prior.hostUptimeSeconds) return true;
-  return Boolean(prior.containment && jobs && await jobs.release(prior.containment.job));
+  if (prior.containment?.kind === "windows-job") return Boolean(jobs && await jobs.release(prior.containment.job));
+  if (prior.containment?.kind === "process-group") {
+    return process.platform !== "win32" && await releaseProcessGroupExecution(prior);
+  }
+  return false;
+};
+
+const unreleasedMessage = (prior: PortableState): string => {
+  if (prior.containment?.kind === "windows-job") {
+    return "The previous harness execution's Windows job could not be verified as ended. Polyth will not start a duplicate executor until it is.";
+  }
+  if (prior.containment?.kind === "process-group") {
+    return "The previous harness run could not be confirmed as stopped, so Polyth will not start a second one beside it. Quit the leftover harness processes or restart the computer.";
+  }
+  return "Previous macOS/Windows harness execution has no crash-safe release proof. Polyth will not start a duplicate executor until the prior execution is explicitly released or the host is rebooted.";
 };
 
 /** Test seam: the macOS/Windows authority with an explicit job controller. */
@@ -265,9 +387,7 @@ export async function createPortableHarnessAuthority(
   const observedUptime = uptime();
   const prior = readPortableState(file);
   if (prior && !await priorExecutionReleased(prior, observedUptime, jobs)) {
-    throw outcomeUnknown(prior.containment
-      ? "The previous harness execution's Windows job could not be verified as ended. Polyth will not start a duplicate executor until it is."
-      : "Previous macOS/Windows harness execution has no crash-safe release proof. Polyth will not start a duplicate executor until the prior execution is explicitly released or the host is rebooted.");
+    throw outcomeUnknown(unreleasedMessage(prior));
   }
 
   const releasedAuthorities = [
@@ -284,7 +404,11 @@ export async function createPortableHarnessAuthority(
     hostUptimeSeconds: observedUptime,
   };
   const containment: WindowsJobContainment | undefined = jobs ? { kind: "windows-job", job: windowsJobName(state) } : undefined;
-  if (containment) state.containment = containment;
+  const group: ProcessGroupContainment | undefined = !containment && process.platform !== "win32"
+    ? { kind: "process-group" }
+    : undefined;
+  state.containment = containment ?? group;
+  if (!state.containment) delete state.containment;
   persistPortableState(file, state);
 
   let child: ChildProcess | undefined;
@@ -294,6 +418,8 @@ export async function createPortableHarnessAuthority(
     generation: state.generation,
     receipts: state.receipts,
     releasedAuthorities: state.releasedAuthorities,
+    // A process group ends a crashed run, but a member can leave it: it is not
+    // the sealed boundary cross-harness switching relies on.
     durable: containment !== undefined,
     spawn(command, args, options = {}) {
       if (child) throw Object.assign(new Error("Authority already owns a process"), { code: "conflict" });
@@ -318,6 +444,9 @@ export async function createPortableHarnessAuthority(
           const invocation = shim ? windowsShimInvocation(command, args) : { command, args };
           child = spawn(invocation.command, invocation.args, {
             ...spawnOptions,
+            // The tag every descendant inherits: what a later Polyth looks for
+            // after a crash. It names the authority and is not a secret.
+            ...(group ? { env: { ...(options.env ?? process.env), [AUTHORITY_TAG]: `${state.authorityId}.${state.generation}` } } : {}),
             shell: shim || options.shell || false,
             // A dedicated POSIX process group lets explicit disposal terminate
             // the normal descendant tree. Windows uses taskkill /T instead.
@@ -327,6 +456,10 @@ export async function createPortableHarnessAuthority(
           });
         }
         pid = child.pid;
+        if (group && pid) {
+          group.pgid = pid;
+          persistPortableState(file, state);
+        }
         return child;
       } catch (error) {
         state.released = true;
@@ -356,11 +489,12 @@ export async function createPortableHarnessAuthority(
  * Linux keeps the existing crash-recoverable supervisor and durable release
  * receipts. Windows runs the executor inside a Job Object (polyth-job.exe), so
  * a job that is gone after a crash proves its whole tree is gone and the next
- * generation starts without waiting for a reboot. Without the helper, and on
- * macOS, an owned process lifecycle with durable mutation receipts and a
- * fail-closed crash fence remains: clean disposal can start another
- * generation; an unclean crash cannot silently duplicate execution, and
- * `durable:false` keeps cross-harness switching blocked.
+ * generation starts without waiting for a reboot. macOS has neither: the
+ * executor leads a process group and its descendants carry the authority's
+ * tag, so after a crash the next generation ends what is left and starts once
+ * the process table shows none of it. That is recovery evidence, not a sealed
+ * boundary, so `durable:false` keeps cross-harness switching blocked there.
+ * Windows without the helper keeps the fail-closed fence until a reboot.
  */
 /** The Desktop app hosts the Polyth server in Electron's main process, so
  * `process.execPath` there is the app binary, which runs a script as Node only
@@ -422,7 +556,7 @@ export async function releaseHarnessProcessExecution(
     return { kind: "rejected", code: "stale-evidence", message: "durable process authority does not match" };
   }
   if (!state.released) {
-    if (!state.containment && uptime() >= state.hostUptimeSeconds) {
+    if (state.containment?.kind !== "windows-job" && uptime() >= state.hostUptimeSeconds) {
       return {
         kind: "rejected",
         code: "unsupported",

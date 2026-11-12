@@ -83,9 +83,10 @@ export const USAGE_WIDGETS: readonly WidgetContributionDescriptor[] = [
     kind: "widget",
     defaultSlot: "workspace.right",
     // `session.empty.widgets` is the new-chat board: there "current" means the
-    // model the composer is about to start on (`composerModel`).
+    // model the composer is about to start on (`composerModel`). Disabled
+    // 2026-11-10: the board tile is not usable yet.
     supportedSlots: [
-      "session.empty.widgets",
+      // "session.empty.widgets",
       "session.composer.before",
       "workspace.left",
       "workspace.main",

@@ -147,8 +147,15 @@ test("phone session rows show one package-owned isolation lock for full, summary
         `${session.id} has exactly one isolation lock, or none when not isolated`);
       assert.equal(row.querySelectorAll(".other-package-badge").length, 1,
         "other package badges remain visible");
+      assert.equal(row.querySelectorAll(".mobile-nav-pin-icon").length, 0, "no trailing pin");
+      if (session.id === "plain") {
+        assert.equal(row.getAttribute("data-lead"), "empty", "an idle unpinned row leaves the slot empty");
+        assert.equal(row.querySelector(".mobile-nav-session-lead")?.childElementCount, 0);
+      }
       if (session.id === "full") {
-        assert.equal(row.querySelectorAll(".mobile-nav-pin-icon").length, 1);
+        // Live state wins the status slot: a working pinned chat shows no pin.
+        assert.equal(row.querySelector(".mobile-nav-lead-pin"), null);
+        assert.equal(row.getAttribute("data-lead"), "mark");
         // Running outranks unread for the leading mark; unread stays as the
         // emphasised title.
         assert.ok(row.querySelector(".mobile-nav-session-lead > .mobile-nav-running-ring"));
@@ -157,6 +164,34 @@ test("phone session rows show one package-owned isolation lock for full, summary
     }
   } finally {
     await act(async () => { root.unmount(); offIsolation(); offOther(); store.setSidebarOpen(false); });
+    sessions.splice(0, sessions.length, ...originalSessions);
+    container.remove();
+  }
+});
+
+test("a pinned phone row at rest shows its pin in the status slot", async () => {
+  const examples: SessionProjection[] = [
+    { ...sessions[0]!, id: "pinned-idle", title: "Pinned idle", pinned: { position: 0 } },
+  ];
+  const originalSessions = [...sessions];
+  sessions.push(...examples);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    seed();
+    store.setSidebarOpen(true);
+    await act(async () => { root.render(createElement(MobileNavigator)); });
+    const row = [...container.querySelectorAll(".mobile-nav-session-title")]
+      .find((node) => node.textContent === "Pinned idle")?.closest(".mobile-nav-session-row");
+    assert.ok(row, "the pinned row is visible");
+    assert.ok(row.querySelector(".mobile-nav-session-lead > .mobile-nav-lead-pin svg"), "a pinned chat at rest shows its pin in the status slot");
+    assert.equal(row.querySelectorAll(".mobile-nav-pin-icon").length, 0, "no trailing pin");
+    assert.equal(row.getAttribute("data-lead"), "mark");
+    assert.match(row.querySelector(".mobile-nav-session-main")?.getAttribute("aria-label") ?? "", /Pinned/,
+      "pinned-ness stays in the accessible name");
+  } finally {
+    await act(async () => { root.unmount(); store.setSidebarOpen(false); });
     sessions.splice(0, sessions.length, ...originalSessions);
     container.remove();
   }

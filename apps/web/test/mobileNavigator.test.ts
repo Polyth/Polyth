@@ -44,6 +44,14 @@ test("a dragged open Navigator is not pinned by its forwards-filling entrance an
   assert.ok(css.indexOf(rule[0]) > css.indexOf('[data-swipe-handoff="open"]:not'));
 });
 
+test("a long press in the Navigator never selects text or raises the iOS callout", async () => {
+  const css = await read("../src/components/mobile/MobileNavigator.css");
+  const root = css.match(/\.mobile-navigator\s*\{\s*-webkit-user-select:\s*none;\s*user-select:\s*none;\s*-webkit-touch-callout:\s*none;\s*\}/);
+  assert.ok(root, "the Navigator root opts out of selection and the callout");
+  assert.match(css, /\.mobile-navigator :is\(input, textarea, \[contenteditable="true"\]\)\s*\{\s*-webkit-user-select:\s*text;\s*user-select:\s*text;/,
+    "search and inline rename stay editable");
+});
+
 test("the session swipe action (Pin to top) stays hidden until actually swiped", async () => {
   const css = await read("../src/components/mobile/MobileNavigator.css");
   // The row only marks the underlay aria-hidden at rest; without a matching
@@ -170,11 +178,10 @@ test("phone session rows render package badges through the shared session-list s
   const toggle = row.indexOf('className="mobile-nav-subagent-toggle"');
   const trailing = row.indexOf('<span className="mobile-nav-session-trailing">');
   const badge = row.indexOf('slot="session.list.badges"');
-  const pin = row.indexOf('className="mobile-nav-pin-icon"');
   assert.ok(lead > 0 && lead < title && title < toggle && toggle < trailing,
     "fixed columns: state mark, then title with its subagent disclosure, then meta");
-  assert.ok(trailing < badge && badge < pin,
-    "package badges and the pin share the trailing identity group, pin last");
+  assert.ok(trailing < badge, "package badges sit in the trailing identity group");
+  assert.doesNotMatch(row, /mobile-nav-pin-icon/, "a pinned chat's pin lives in the status slot, not the trailing group");
   assert.match(row, /context=\{\{ sessionId: session\.id, questions: session\.attention\?\.questions \?\? 0, permissions: session\.attention\?\.permissions \?\? 0 \}\}/);
 });
 
@@ -208,14 +215,21 @@ test("adding a project and starting a chat are visibly different actions", async
   assert.match(source, /id:\s*"isolate"[\s\S]*?openWorktreeSessionDialog\(project\.id\)/);
 });
 
-test("the pin stays outside the session zone while package identity badges use the shared slot", async () => {
+test("the pin lives in the status slot while package identity badges use the shared slot", async () => {
   const [source, css] = await Promise.all([
     read("../src/components/mobile/MobileNavigator.tsx"),
     read("../src/components/mobile/MobileNavigator.css"),
   ]);
 
-  assert.match(source, /className="mobile-nav-session-flags"[\s\S]*?mobile-nav-pin-icon/);
-  assert.match(source, /icon=\{PinIcon\}/);
+  // A pinned chat at rest shows its pin in the status slot; live state wins.
+  assert.match(source, /case "pin":\s*return <span className="mobile-nav-lead-pin"><Icon\.pin \/><\/span>;/);
+  // The same slanted glyph as the Pinned divider, not the upright push-pin.
+  assert.match(source, /mobile-nav-date-divider is-pinned"[^>]*>\s*<span><Icon\.pin \/>/);
+  assert.match(source, /const rowLead = sessionLeadMark\(\{ status: rowStatus, opening, conversation, pinned: session\.pinned !== undefined \}\);/);
+  assert.match(source, /data-lead=\{sessionLeadState\(rowLead, selecting\)\}/);
+  assert.match(source, /: leadMark\(rowLead\)\}/);
+  // Pinned-ness stays in the open button's accessible name.
+  assert.match(source, /\$\{session\.pinned \? `\$\{tr\("sidebar\.sessionlist\.pinnedChats"\)\}, ` : ""\}\$\{rowStatus\.label\}/);
   assert.doesNotMatch(source, /mobile-nav-isolation-icon|icon=\{LockIcon\}/);
   // The open button is an empty full-row surface; marks paint above it.
   assert.match(source, /className="mobile-nav-session-main"[\s\S]*?\n\s*\/>\s*<span className="mobile-nav-session-body">/);
@@ -223,8 +237,18 @@ test("the pin stays outside the session zone while package identity badges use t
   assert.match(css, /\.mobile-nav-session-body\s*\{[^}]*grid-template-columns:\s*var\(--nav-lead-col\) minmax\(0, 1fr\) max-content;[^}]*pointer-events:\s*none;/s);
   assert.match(css, /\.mobile-nav-subagent-toggle\s*\{[^}]*pointer-events:\s*auto;/s);
   assert.match(css, /\.mobile-nav-session-flags\s*\{[^}]*display:\s*inline-flex;/s);
-  assert.match(css, /\.mobile-nav-pin-icon\s*\{[^}]*width:\s*var\(--icon-sm\);[^}]*height:\s*var\(--icon-sm\);/s);
-  // Host marks (pin, sharing) draw at the package badges' glyph size and
+  assert.match(css, /\.mobile-nav-lead-pin\s*\{[^}]*width:\s*var\(--icon-sm\);[^}]*height:\s*var\(--icon-sm\);[^}]*color:\s*color-mix\(in oklab, var\(--accent\) 65%, var\(--muted\)\);[^}]*\}\s*\.mobile-nav-lead-pin svg\s*\{\s*width:\s*100%;\s*height:\s*100%;\s*\}/s);
+  assert.doesNotMatch(css, /mobile-nav-pin-icon/);
+  // The fill is a ::before layer whose start hugs the title when the slot is empty.
+  // The fill reaches --nav-pill-air past the row box, 2px short of the list
+  // edge at most; the swipe clip reaches out with it and pads back.
+  assert.match(css, /--nav-fill-outset:\s*clamp\(0px, calc\(var\(--nav-pill-air, 10px\) - var\(--nav-row-inset\)\), calc\(var\(--nav-edge\) - 2px\)\);/);
+  assert.match(css, /\.mobile-nav-session-swipe\s*\{[^}]*margin-inline:\s*calc\(-1 \* var\(--nav-fill-outset\)\);[^}]*overflow:\s*hidden;/s);
+  assert.match(css, /\.mobile-nav-session-row\[data-lead="empty"\]\s*\{\s*--mobile-nav-fill-start:\s*calc\(var\(--nav-title-start\) - var\(--nav-row-inset\)\);\s*\}/);
+  assert.match(css, /\.mobile-nav-session-row::before\s*\{[^}]*inset-inline:\s*calc\(var\(--mobile-nav-fill-start\) - var\(--nav-fill-outset, 0px\)\) calc\(-1 \* var\(--nav-fill-outset, 0px\)\);[^}]*background:\s*var\(--mobile-nav-fill\);[^}]*inset-inline-start var\(--motion-fast\) var\(--motion-ease\);/s);
+  assert.match(css, /\.mobile-nav-session-row\.is-active\s*\{\s*--mobile-nav-fill:\s*var\(--material-glass\);\s*\}/);
+  assert.match(css, /\.mobile-nav-session-row::before,\s*\.mobile-nav-project-main::before \{ transition: none; \}/, "reduced motion stops the slide");
+  // Host marks (sharing, mention) draw at the package badges' glyph size and
   // weight, so the identity group reads at one optical size.
   assert.match(css, /\.mobile-nav-session-flags \.ui-icon\s*\{[^}]*width:\s*calc\(var\(--icon-sm\) - 3px\);[^}]*stroke-width:\s*2;/s);
 });
@@ -257,13 +281,13 @@ test("phone chats are pinned-first, date-filtered, and grouped without row ages"
   assert.match(source, /arrangeSessions\(roots\.map\(\(node\) => node\.item\), grouping, sessionSort\)/);
   assert.match(source, /\{label && \(\s*<div className="mobile-nav-date-divider"/);
   assert.match(source, /className="mobile-nav-date-divider is-pinned"/);
-  assert.match(source, /className="mobile-nav-pin-icon"/);
+  assert.match(source, /className="mobile-nav-lead-pin"/);
   assert.doesNotMatch(source, /function activityLabel/);
   assert.doesNotMatch(source, /mobile-nav-session-time/);
   // The Pinned caption groups pinned chats; the rows carry no tint (it read
-  // as a second current row) and no pin glyph inside the group.
-  assert.doesNotMatch(css, /\.mobile-nav-session-row\.is-pinned[^{]*\{[^}]*background/);
-  assert.match(css, /\.mobile-nav-pinned \.mobile-nav-pin-icon\s*\{[^}]*display:\s*none;/s);
+  // as a second current row). A resting pin fills the status slot instead of
+  // a trailing glyph.
+  assert.doesNotMatch(css, /\.mobile-nav-session-row\.is-pinned[^{]*\{[^}]*(?:background|--mobile-nav-fill)/);
   // The label is centred between two short hairlines that fade in toward it;
   // the pinned caption keeps the same faint voice and only its glyph takes
   // the accent.

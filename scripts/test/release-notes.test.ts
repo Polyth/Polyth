@@ -25,13 +25,13 @@ test("each channel measures its changes from the right previous release", () => 
     release("v0.1.137-nightly"), release("v0.1.138"), release("v0.1.139-beta", { draft: true }), release("v0.1.150-nightly"),
   ];
   assert.equal(pickBaseRelease(releases, "nightly", "0.1.140-nightly")?.tag_name, "v0.1.137-nightly");
-  // Test notes count from the newest test or stable release.
-  assert.equal(pickBaseRelease(releases, "test", "0.1.140-beta")?.tag_name, "v0.1.138");
+  // Releases of the retired test channel are never a base.
   assert.equal(pickBaseRelease(releases, "stable", "0.1.140")?.tag_name, "v0.1.138");
   assert.equal(pickBaseRelease(releases, "stable", "0.1.131")?.tag_name, "v0.1.130");
   assert.equal(pickBaseRelease(releases, "stable", "0.1.129"), null);
   // A channel's first release counts from the newest older release of any channel.
-  assert.equal(pickBaseRelease([release("v0.1.137"), release("v0.1.139-beta")], "nightly", "0.1.140-nightly")?.tag_name, "v0.1.139-beta");
+  assert.equal(pickBaseRelease([release("v0.1.137"), release("v0.1.139-beta")], "nightly", "0.1.140-nightly")?.tag_name, "v0.1.137");
+  assert.throws(() => pickBaseRelease(releases, "test", "0.1.140-beta"), /stable, nightly/);
 });
 
 test("the hidden marker records the exact source", () => {
@@ -117,10 +117,10 @@ test("notes are collected from the marked source range and rendered by section",
       "Document the channels", "fix(desktop): keep updates on the chosen channel", "Add view tabs to the header",
     ]);
     const notes = renderReleaseNotes({
-      channel: "test", version: "0.1.140-beta", commits, base, basis, source,
+      channel: "stable", version: "0.1.140", commits, base, basis, source,
       repository: "o/r", date: new Date("2026-10-14T12:00:00Z"),
     });
-    assert.match(notes, /^\*\*Test\*\* · 14 October 2026 · built from `[0-9a-f]{9}`/);
+    assert.match(notes, /^\*\*Stable\*\* · 14 October 2026 · built from `[0-9a-f]{9}`/);
     assert.match(notes, /\*\*3 changes\*\* since \[v0\.1\.137\]\(https:\/\/github\.com\/o\/r\/releases\/tag\/v0\.1\.137\)\./);
     assert.match(notes, /### ✨ New\n\n- \*\*Add view tabs to the header\*\*\n  <br><sub>Tabs sit in the header\.<\/sub>/);
     assert.match(notes, /### 🐛 Fixes\n\n- \*\*Keep updates on the chosen channel\*\*\n/);
