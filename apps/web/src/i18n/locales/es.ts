@@ -106,6 +106,8 @@ export const es: AppMessages = {
   "attachmentpills.previousAttachment": "Archivo adjunto anterior",
   "attachmentpills.removeAttachment": "Eliminar archivo adjunto",
   "attachmentpills.removeAttachmentValue": "Eliminar archivo adjunto {name}",
+  "attachmentpills.restore": "Restaurar",
+  "attachmentpills.restoreAttachmentValue": "Restaurar archivo adjunto {name}",
   "attachmentpills.zoomIn": "Ampliar",
   "attachmentpills.zoomOut": "Reducir",
   "attachmentpills.zoomReset": "Restablecer zoom",

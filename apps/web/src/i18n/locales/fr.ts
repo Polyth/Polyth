@@ -106,6 +106,8 @@ export const fr: AppMessages = {
   "attachmentpills.previousAttachment": "Pièce jointe précédente",
   "attachmentpills.removeAttachment": "Supprimer la pièce jointe",
   "attachmentpills.removeAttachmentValue": "Supprimer la pièce jointe {name}",
+  "attachmentpills.restore": "Rétablir",
+  "attachmentpills.restoreAttachmentValue": "Rétablir la pièce jointe {name}",
   "attachmentpills.zoomIn": "Zoom avant",
   "attachmentpills.zoomOut": "Zoom arrière",
   "attachmentpills.zoomReset": "Réinitialiser le zoom",

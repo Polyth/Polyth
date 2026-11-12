@@ -2245,11 +2245,27 @@ the *attachment tray* — between the model line and the editor, in a new chat
 and an open one alike (never above the project row). `AttachmentPills` draws
 quiet cards: a file names its type with its extension in a neutral glyph (the
 accent stays on Send), a previewable image is a bare tile, and remove shows
-on hover or keyboard focus with a fine pointer (always on touch). The row does
+on hover or keyboard focus with a fine pointer (always on touch). Remove sits
+inside the card's top-end corner, clear of the middle a click to open the file
+aims at (never hung off the corner: the scrolling row would crop it); on a
+phone a card gives it a whole tap target as its own end zone and a picture
+tile its top-end quarter. A removed file keeps its place for 8 s
+(`ATTACHMENT_RESTORE_MS`) as a *restore slot*: a dashed button of the card's
+exact width, so nothing shifts under the pointer and a slip is one click to
+take back, at the place the file had. The draft drops the file at once
+(`detachAttachment`; a send never carries a slot) and the slot's click puts it
+back (`insertAttachment`); a browser capture is discarded only when its slot
+goes. A click within 400 ms of the removal is the same double click and is
+ignored. A slot waits while the pointer rests on the row or the keyboard's
+focus is in it (focus moves from remove to the slot's button and, on restore,
+back to the card), then collapses out of the row; a send, a recalled prompt or
+another chat takes the slots with the files. The row does
 not wrap: cards narrow to a readable name, then the row scrolls sideways and
 fades into the edge it is scrolled away from (`data-overflow-start|end`); a
 card that arrives past the visible end scrolls into view. The first file
-*opens* the tray and removing the last one *closes* it over that card
+*opens* the tray and a row left with only restore slots *closes* over them
+once the newest has had its time; until then the slot holds the row (and a
+phone row's engagement) as the file did
 (`useAttachmentTray`, `apps/web/src/composer/attachmentTray.ts`;
 composerAdaptive.css "Attachment tray"): the row's track eases between `0fr`
 and `1fr` (`--motion-surface` open, `--motion-normal` close), so the card
@@ -2271,7 +2287,8 @@ files until the next tap or keystroke. The field steps its selection away and
 back in one task (an empty field steps its value), only on an engine that
 supports `-webkit-touch-callout`, only while focused and not composing.
 `apps/web/test/composerAttachmentTray.test.ts` scrubs the real Composer
-through both changes and counts the caret refresh.
+through both changes, removes and restores files in place, and counts the
+caret refresh.
 
 **Context pie:** an open session also shows its context-window share as a
 quiet pie on the model line, right after the thinking-effort chip (after the

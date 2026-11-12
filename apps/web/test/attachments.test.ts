@@ -12,7 +12,7 @@ const mem = new Map<string, string>();
 };
 
 const {
-  addAttachment, attachBrowserContext, attachNativeStagedUpload, attachText, clearAttachments, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
+  addAttachment, attachBrowserContext, attachNativeStagedUpload, attachText, clearAttachments, detachAttachment, insertAttachment, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
   removeAttachment, seedAttachments, takeAttachments,
 } = await import("../src/attachments.ts");
 const { buildModel } = await import("../src/reduce.ts");
@@ -297,6 +297,64 @@ test("discarding a browser-context chip deletes managed artifacts", async () => 
     assert.ok(calls.some((call) => call === "DELETE /api/browser/artifacts?id=shot-del"));
     assert.ok(calls.some((call) => call === "DELETE /api/browser/artifacts?id=crop-del"));
   } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a detached file keeps what it points at and goes back where it was", async () => {
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(`${init?.method ?? "GET"} ${String(input)}`);
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  const session = "sess-detach";
+  try {
+    clearAttachments(session);
+    const first = ref({ id: "first", path: "first.txt" });
+    const last = ref({ id: "last", path: "last.txt" });
+    addAttachment(session, first);
+    assert.equal(attachBrowserContext(session, {
+      id: "ctx-keep",
+      type: "element",
+      browserSessionId: "b1",
+      projectId: "p1",
+      frameRevision: 2,
+      url: "https://example.com/settings",
+      title: "Settings",
+      viewport: { width: 390, height: 844 },
+      capturedAt: "2026-09-06T00:00:00.000Z",
+      screenshot: { id: "shot-keep", mime: "image/jpeg", size: 12 },
+    }).ok, true);
+    addAttachment(session, last);
+
+    const detached = detachAttachment(session, "ctx-keep");
+    await Promise.resolve();
+    assert.equal(detached?.id, "ctx-keep");
+    assert.deepEqual(pendingAttachments(session).map((item) => item.id), ["first", "last"]);
+    assert.deepEqual(calls, [], "its capture stays: the tray may still put the file back");
+    assert.equal(detachAttachment(session, "ctx-keep"), undefined, "a file the draft no longer holds is not detached twice");
+
+    assert.equal(insertAttachment(session, detached!, 1), true);
+    assert.deepEqual(pendingAttachments(session).map((item) => item.id), ["first", "ctx-keep", "last"]);
+    assert.equal(insertAttachment(session, detached!, 0), true, "a file the draft already holds is not added twice");
+    assert.equal(pendingAttachments(session).length, 3);
+
+    // The same file added again in the meantime is the one the draft keeps.
+    const again = detachAttachment(session, "first")!;
+    addAttachment(session, ref({ id: "first-again", path: "first.txt" }));
+    assert.equal(insertAttachment(session, again, 0), true);
+    assert.deepEqual(pendingAttachments(session).map((item) => item.id), ["ctx-keep", "last", "first-again"]);
+
+    const beyond = detachAttachment(session, "last")!;
+    assert.equal(insertAttachment(session, beyond, 99), true, "a place past the end is the end");
+    assert.equal(pendingAttachments(session).at(-1)?.id, "last");
+
+    seedAttachments(session, Array.from({ length: MAX_PENDING_ATTACHMENTS }, (_, index) => ref({ id: `full-${index}`, path: `full-${index}.txt` })));
+    assert.equal(insertAttachment(session, ref({ id: "over", path: "over.txt" }), 0), false, "a full draft takes nothing back");
+    assert.equal(pendingAttachments(session).length, MAX_PENDING_ATTACHMENTS);
+  } finally {
+    clearAttachments(session);
     globalThis.fetch = originalFetch;
   }
 });

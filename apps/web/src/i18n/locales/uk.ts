@@ -106,6 +106,8 @@ export const uk: AppMessages = {
   "attachmentpills.previousAttachment": "Попереднє вкладення",
   "attachmentpills.removeAttachment": "Видалити вкладення",
   "attachmentpills.removeAttachmentValue": "Видалити вкладення {name}",
+  "attachmentpills.restore": "Повернути",
+  "attachmentpills.restoreAttachmentValue": "Повернути вкладення {name}",
   "attachmentpills.zoomIn": "Збільшити",
   "attachmentpills.zoomOut": "Зменшити",
   "attachmentpills.zoomReset": "Скинути масштаб",

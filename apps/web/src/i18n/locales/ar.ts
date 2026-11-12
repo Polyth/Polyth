@@ -106,6 +106,8 @@ export const ar: AppMessages = {
   "attachmentpills.previousAttachment": "المرفق السابق",
   "attachmentpills.removeAttachment": "إزالة المرفق",
   "attachmentpills.removeAttachmentValue": "إزالة المرفق {name}",
+  "attachmentpills.restore": "استعادة",
+  "attachmentpills.restoreAttachmentValue": "استعادة المرفق {name}",
   "attachmentpills.zoomIn": "تكبير",
   "attachmentpills.zoomOut": "تصغير",
   "attachmentpills.zoomReset": "إعادة ضبط التكبير",

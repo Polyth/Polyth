@@ -106,6 +106,8 @@ export const zhCN: AppMessages = {
   "attachmentpills.previousAttachment": "上一个附件",
   "attachmentpills.removeAttachment": "移除附件",
   "attachmentpills.removeAttachmentValue": "移除附件{name}",
+  "attachmentpills.restore": "恢复",
+  "attachmentpills.restoreAttachmentValue": "恢复附件{name}",
   "attachmentpills.zoomIn": "放大",
   "attachmentpills.zoomOut": "缩小",
   "attachmentpills.zoomReset": "重置缩放",

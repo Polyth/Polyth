@@ -365,6 +365,11 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.attachment
   border: 1px solid var(--look-option-edge) !important;
   box-shadow: none !important;
 }
+/* A removed attachment's restore slot stays an emptied, dashed outline. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .attachment-pill.att-removed {
+  background: transparent !important;
+  border-style: dashed !important;
+}
 
 /* Push buttons. The default (quiet) button is the look's option and a
    destructive one its red wash, without the platform style's plate or the

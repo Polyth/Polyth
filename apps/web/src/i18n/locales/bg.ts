@@ -106,6 +106,8 @@ export const bg: AppMessages = {
   "attachmentpills.previousAttachment": "Предишен прикачен файл",
   "attachmentpills.removeAttachment": "Премахване на прикачения файл",
   "attachmentpills.removeAttachmentValue": "Премахване на прикачения файл {name}",
+  "attachmentpills.restore": "Връщане",
+  "attachmentpills.restoreAttachmentValue": "Връщане на прикачения файл {name}",
   "attachmentpills.zoomIn": "Увеличаване",
   "attachmentpills.zoomOut": "Намаляване",
   "attachmentpills.zoomReset": "Нулиране на мащаба",

@@ -90,31 +90,53 @@ export function pendingAttachments(sessionId: string | null | undefined): Attach
   return e.refs.length > 0 ? e.refs : EMPTY;
 }
 
+/** The same file/range, the same link or the same browser context. */
+function sameAttachment(left: AttachmentRef, right: AttachmentRef): boolean {
+  if (left.id === right.id) return true;
+  if (left.kind === "browser-context" || right.kind === "browser-context") {
+    return left.kind === "browser-context" && right.kind === "browser-context" && left.id === right.id;
+  }
+  if (left.kind === "url" || right.kind === "url") return left.url === right.url;
+  return left.path === right.path && (left.repositoryId ?? "primary") === (right.repositoryId ?? "primary")
+    && JSON.stringify(left.range ?? null) === JSON.stringify(right.range ?? null);
+}
+
 export function addAttachment(sessionId: string | null | undefined, ref: AttachmentRef): boolean {
   const key = keyOf(sessionId);
   const cur = entry(key, sessionId).refs;
   if (cur.length >= MAX_PENDING_ATTACHMENTS) return false;
-  // dedupe: same file/range, same link, or same browser context id is a no-op
-  const dup = cur.some((r) => {
-    if (r.id === ref.id) return true;
-    if (r.kind === "browser-context" || ref.kind === "browser-context") {
-      return r.kind === "browser-context" && ref.kind === "browser-context" && r.id === ref.id;
-    }
-    if (r.kind === "url" || ref.kind === "url") return r.url === ref.url;
-    return r.path === ref.path && (r.repositoryId ?? "primary") === (ref.repositoryId ?? "primary")
-      && JSON.stringify(r.range ?? null) === JSON.stringify(ref.range ?? null);
-  });
-  if (dup) return true;
+  // dedupe: an attachment the draft already holds is a no-op
+  if (cur.some((r) => sameAttachment(r, ref))) return true;
   set(sessionId, [...cur, ref]);
   return true;
 }
 
-export function removeAttachment(sessionId: string | null | undefined, id: string): void {
+/** Take a file out of the draft and keep what it points at: the composer's
+ *  tray may still put it back (`insertAttachment`), and discards it itself
+ *  once it no longer offers to. */
+export function detachAttachment(sessionId: string | null | undefined, id: string): AttachmentRef | undefined {
   const key = keyOf(sessionId);
   const refs = entry(key, sessionId).refs;
   const removed = refs.find((r) => r.id === id);
-  set(sessionId, refs.filter((r) => r.id !== id));
-  discardBrowserArtifacts(removed);
+  if (removed) set(sessionId, refs.filter((r) => r.id !== id));
+  return removed;
+}
+
+/** Put a detached file back at the place it had among the draft's files. */
+export function insertAttachment(sessionId: string | null | undefined, ref: AttachmentRef, index: number): boolean {
+  const key = keyOf(sessionId);
+  const cur = entry(key, sessionId).refs;
+  // Added again in the meantime: the draft already holds it.
+  if (cur.some((r) => sameAttachment(r, ref))) return true;
+  if (cur.length >= MAX_PENDING_ATTACHMENTS) return false;
+  const next = cur.slice();
+  next.splice(Math.max(0, Math.min(index, next.length)), 0, ref);
+  set(sessionId, next);
+  return true;
+}
+
+export function removeAttachment(sessionId: string | null | undefined, id: string): void {
+  discardBrowserArtifacts(detachAttachment(sessionId, id));
 }
 
 /** Best-effort delete of managed capture files when a draft chip is discarded. */

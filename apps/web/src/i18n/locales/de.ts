@@ -106,6 +106,8 @@ export const de: AppMessages = {
   "attachmentpills.previousAttachment": "Vorheriger Anhang",
   "attachmentpills.removeAttachment": "Anhang entfernen",
   "attachmentpills.removeAttachmentValue": "Anhang {name} entfernen",
+  "attachmentpills.restore": "Wiederherstellen",
+  "attachmentpills.restoreAttachmentValue": "Anhang {name} wiederherstellen",
   "attachmentpills.zoomIn": "Vergrößern",
   "attachmentpills.zoomOut": "Verkleinern",
   "attachmentpills.zoomReset": "Zoom zurücksetzen",

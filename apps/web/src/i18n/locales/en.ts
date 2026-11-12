@@ -109,6 +109,8 @@ export const en = {
   "attachmentpills.previousAttachment": "Previous attachment",
   "attachmentpills.removeAttachment": "Remove attachment",
   "attachmentpills.removeAttachmentValue": "Remove attachment {name}",
+  "attachmentpills.restore": "Restore",
+  "attachmentpills.restoreAttachmentValue": "Restore attachment {name}",
   "attachmentpills.zoomIn": "Zoom in",
   "attachmentpills.zoomOut": "Zoom out",
   "attachmentpills.zoomReset": "Reset zoom",

@@ -91,6 +91,11 @@
   box-shadow: none;
 }
 
+/* A removed file's restore slot: the card's place, emptied (styles.css). */
+.composer-tray .attachment-pill.att-removed {
+  background: transparent;
+}
+
 /* Remove shows on the card under the pointer or keyboard focus; touch keeps it. */
 @media (hover: hover) and (pointer: fine) {
   .composer-tray .attachment-pill .att-remove {
