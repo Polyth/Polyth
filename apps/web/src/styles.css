@@ -1221,7 +1221,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-nav-new {
   height: 36px;
   background: var(--accent-wash);
-  color: var(--accent);
+  /* --accent is tuned as a fill; as text on its own wash it can drop to
+     about 2.5:1 (a deep blue on a dark sidebar). */
+  color: var(--accent-on-wash);
 }
 .sidebar-nav-hint {
   flex: none;

@@ -782,7 +782,8 @@ const blend = (fg: string, bg: string, amount: number): string => {
   return `#${to2(mix(fr, br))}${to2(mix(fg_, bg_))}${to2(mix(fb, bb))}`;
 };
 
-/** Signal foreground adjusted against the real 18% wash on every app surface. */
+/** Signal (or accent) foreground adjusted against the real 18% wash on every
+ *  given app surface. */
 const signalOnWash = (signal: string, surfaces: string[], lighten: boolean): string => {
   let lightness = rgbToHsl(signal)[2];
   let color = signal;
@@ -863,6 +864,9 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--text": t.text, "--text-dim": t.textDim, "--muted": t.muted, "--faint": t.faint,
     "--accent": t.accent, "--accent-ink": t.accentInk, "--accent-hi": t.accentHi,
     "--accent-text": textOnSurfaces(t.accent, [t.bg, t.panel, t.elevated], dark),
+    // Accent text that sits on its own wash (13%/12% at rest, 18% under the
+    // pointer): checked against the stronger wash so both states hold 4.5:1.
+    "--accent-on-wash": signalOnWash(t.accent, [t.bg, t.panel, t.elevated], dark),
     "--accent-wash": rgba(t.accent, dark ? 0.13 : 0.12),
     "--accent-line": rgba(t.accent, dark ? 0.32 : 0.4),
     "--focus-wash": rgba(t.accent, 0.1),

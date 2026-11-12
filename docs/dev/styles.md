@@ -130,6 +130,7 @@ these inks.
 | `--accent-ink` | Text or glyph on a solid accent. |
 | `--accent-hi` | Highlight end of an accent treatment. |
 | `--accent-text` | The accent as small text: `theme.ts` moves its lightness (hue kept) only until it holds 4.5:1 on `--bg`, `--panel` and `--elevated`. `--accent` is tuned as a fill under `--accent-ink` and can be unreadable as text (macOS 27's dark blue is 3.5:1 on its window), and any accent colour can be chosen. |
+| `--accent-on-wash` | Accent text or glyph on its own `--accent-wash` (the navigator's New chat row). `theme.ts` moves its lightness until it holds 4.5:1 on the 18% hover wash over `--bg`, `--panel` and `--elevated`; `--accent-text` is measured on bare surfaces and slips under 4.5:1 once the wash sits behind it. |
 | `--accent-wash` | Subtle accent background. |
 | `--accent-line` | Accent-tinted boundary. |
 | `--focus-wash` | Outer focus halo. |
