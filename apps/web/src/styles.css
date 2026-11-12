@@ -10756,20 +10756,23 @@ min-height: var(--tap);
 }
 
 .notification-centre { display: flex; flex-direction: column; gap: 10px; }
-/* The actions are the panel's one fixed row: the rail body (--space-3 gutter)
-   is the scrollport, so the bar sticks to its top, paints the panel surface
-   over the gutter and keeps both buttons reachable however far the list
-   scrolls. They share one line whenever it fits and wrap only in a genuinely
-   narrow pane — never a forced column at a comfortable width. */
+/* The actions are the panel's one fixed row: the rail body is the scrollport,
+   so the bar sticks to its top, paints the panel surface over the body's
+   gutter (the module content padding) and keeps both buttons reachable however
+   far the list scrolls. They share one line: the panel opens at a width that
+   fits both labels (RAIL_WIDTH_DEFAULTS in railPrefs.ts), and the row wraps
+   only in a pane narrowed below that — never a forced column. */
 .ntc-toolbar {
+  --ntc-gutter-block: var(--module-content-block, var(--space-3));
+  --ntc-gutter-inline: var(--module-content-inline, var(--space-3));
   position: sticky;
-  top: calc(-1 * var(--space-3));
+  top: calc(-1 * var(--ntc-gutter-block));
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3)) 0;
-  padding: var(--space-3);
+  margin: calc(-1 * var(--ntc-gutter-block)) calc(-1 * var(--ntc-gutter-inline)) 0;
+  padding: var(--ntc-gutter-block) var(--ntc-gutter-inline);
   background: var(--panel);
 }
 .ntc-toolbar > button { flex: 1 1 auto; }
