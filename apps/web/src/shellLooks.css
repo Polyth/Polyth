@@ -1008,13 +1008,13 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.scrim.s
   backdrop-filter: var(--look-scrim-blur) !important;
 }
 
-/* 3b. In-flow cards: agent question, isolated-changes card. The lines above
-   the composer (agent status, its subagents, edited files) take their shape
-   from Chat settings → Status above the composer, not from the look: a line
-   stays a line, a capsule one pill, and the tab a row of the composer's
-   header stack in the look's composer material (3c). */
+/* 3b. In-flow cards: agent question, isolated-changes card, provider-limit
+   notice. The lines above the composer (agent status, its subagents, edited
+   files) take their shape from Chat settings → Status above the composer, not
+   from the look: a line stays a line, a capsule one pill, and the tab a row of
+   the composer's header stack in the look's composer material (3c). */
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .empty-state--compact, .empty-state--panel) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :where(.question-card, .isolation-card, .turn-rate-limit, .empty-state--compact, .empty-state--panel) {
   background: var(--look-card) !important;
   backdrop-filter: var(--look-card-blur, none) !important;
   border: 1px solid var(--look-card-edge) !important;
@@ -1265,7 +1265,7 @@ body[data-shell-look="paper"]:not(#\#) .execution-status-icon {
 
 /* Agent question / isolated changes: a passage under a rule, options as plain rows. */
 
-body[data-shell-look="paper"]:not(#\#) :is(.question-card, .isolation-card) {
+body[data-shell-look="paper"]:not(#\#) :is(.question-card, .isolation-card, .turn-rate-limit) {
   border-top: 1px solid var(--look-line) !important;
   padding-inline: 0 !important;
 }
@@ -1283,7 +1283,7 @@ body[data-shell-look="paper"]:not(#\#) .question-actions {
   border-top: 1px solid var(--look-line) !important;
 }
 
-body[data-shell-look="paper"]:not(#\#) .isolation-card :is(.ui-btn--quiet) {
+body[data-shell-look="paper"]:not(#\#) :is(.isolation-card, .turn-rate-limit) :is(.ui-btn--quiet, .picker-chip) {
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -1525,6 +1525,12 @@ body[data-shell-look="line"]:not(#\#) :is(.question-actions, .isolation-card-act
 }
 
 body[data-shell-look="line"]:not(#\#) .ui-btn--quiet {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--look-line-strong) !important;
+}
+
+/* The provider-limit model chip stands with those quiet buttons. */
+body[data-shell-look="line"]:not(#\#) .turn-rate-limit .picker-chip {
   background: transparent !important;
   box-shadow: inset 0 0 0 1px var(--look-line-strong) !important;
 }
@@ -2494,7 +2500,7 @@ html:not([data-background="none"]) body[data-shell-look="obsidian"][data-glass="
 
 /* Rimmed glass: shell surfaces, floating surfaces and in-flow cards share it. */
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher-pill, .workspace-mode-switch, .desktop-session-status-trigger, .md-code-block, .msg.user .bubble, .question-card, .isolation-card, .turn-rate-limit) {
   border: 1px solid transparent !important;
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
@@ -2513,7 +2519,7 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.dialog-panel, .modal.settings-she
   background: linear-gradient(var(--look-fill-overlay), var(--look-fill-overlay)) padding-box, var(--look-rim) border-box !important;
 }
 
-body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card) {
+body[data-shell-look="obsidian"]:not(#\#) :is(.question-card, .isolation-card, .turn-rate-limit) {
   border-radius: calc(18px * var(--look-round)) !important;
 }
 
@@ -2842,13 +2848,19 @@ body[data-shell-look="editorial"]:not(#\#) .execution-status-icon {
 
 /* Question / isolation / dialogs: set between rules, serif heads. */
 
-body[data-shell-look="editorial"]:not(#\#) :is(.question-card, .isolation-card) {
+body[data-shell-look="editorial"]:not(#\#) :is(.question-card, .isolation-card, .turn-rate-limit) {
   border-top: 1px solid var(--look-line) !important;
   border-bottom: 1px solid var(--look-line) !important;
   padding-inline: 0 !important;
 }
 
 body[data-shell-look="editorial"]:not(#\#) :is(.question-item-title, .isolation-card-title, .isolation-card h3, .ui-dialog-title, .dialog-panel h2, .settings-pane-head h2, .notify-title, .hero h2) {
+  font-family: var(--look-serif) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em;
+}
+
+body[data-shell-look="editorial"]:not(#\#) .turn-rate-limit .ui-notice-heading {
   font-family: var(--look-serif) !important;
   font-weight: 600 !important;
   letter-spacing: -0.005em;
