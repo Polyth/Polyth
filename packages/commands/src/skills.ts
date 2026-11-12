@@ -18,9 +18,11 @@ import type {
   SkillInstallationDto,
   SkillInstallationInput,
   SkillOrigin,
+  SkillReachDto,
 } from "@polyth/contracts/capability-installations";
 import type { CommandService } from "./index.ts";
 import { skillCommandId, type SlashCommand } from "./catalog.ts";
+import { capabilityRule, reachHasAlways, sameReach, skillReach, validReach } from "./skillReach.ts";
 import {
   BUNDLE_LIMITS,
   instructionsWithBundle,
@@ -35,6 +37,9 @@ export interface StoredSkill extends SkillInstallationDto {
   revision: number;
   /** Folder of this skill's files under the Space's bundle store. */
   bundleHash?: string;
+  /** Older files: harnesses the skill was withheld from. Read as `reach`;
+   * the next change to the skill stores `reach` instead. */
+  offHarnesses?: string[];
 }
 interface SkillDocument { version: 1; skills: StoredSkill[] }
 
@@ -74,14 +79,15 @@ export interface SkillService {
     input: SkillCopyInput,
     projectId?: string,
   ): Promise<SkillInstallationDto>;
-  /** Turns one managed skill on or off for one harness. */
-  setHarnessEnabled(
+  /** Stores which harnesses get one managed skill. `expectedRevision` refuses
+   * a reach worked out from a copy that has since changed. */
+  setReach(
     space: SpaceContext,
     scope: CapabilityInstallationScope,
     name: string,
-    harnessId: string,
-    enabled: boolean,
+    reach: SkillReachDto,
     projectId?: string,
+    expectedRevision?: number,
   ): Promise<SkillInstallationDto>;
   /** Managed skills only, every scope that applies to the project. */
   listManaged(space: SpaceContext, projectId?: string): StoredSkill[];
@@ -135,11 +141,18 @@ const sameOrigin = (a: SkillOrigin | undefined, b: SkillOrigin): boolean => {
   if (a.kind === "harness" && b.kind === "harness") return a.harnessId === b.harnessId && a.nativeName === b.nativeName;
   return false;
 };
+const EVERY_HARNESS: SkillReachDto = { default: "all" };
+/** The reach worth storing: nothing when every harness gets it on demand. */
+const reachField = (reach: SkillReachDto): { reach?: SkillReachDto } =>
+  sameReach(reach, EVERY_HARNESS) ? {} : { reach };
 /** A skill record as a client sees it: the storage folder stays on the server. */
 const publicSkill = (skill: StoredSkill): SkillInstallationDto => {
-  const { bundleHash: _bundleHash, ...rest } = skill;
-  return { ...rest };
+  const { bundleHash: _bundleHash, offHarnesses: _legacy, reach: _reach, ...rest } = skill;
+  return { ...rest, ...reachField(skillReach(skill)) };
 };
+/** A stored record keeps one form of its reach. */
+const storedReach = (skill: StoredSkill | undefined): { reach?: SkillReachDto } =>
+  skill ? reachField(skillReach(skill)) : {};
 const precedence: Record<SkillInstallationDto["scope"], number> = {
   "user-opencode": 0,
   "user-claude": 1,
@@ -159,13 +172,14 @@ export interface SkillInvocation {
 
 /**
  * Portable slash aliases are prompt fallbacks only. A skill with tool
- * exclusions must stay native so the harness can enforce those exclusions.
+ * exclusions must stay native so the harness can enforce those exclusions,
+ * and a skill set to reach no harness is not offered at all.
  */
 export function skillInvocationCommands(
   skills: readonly SkillInstallationDto[],
 ): SlashCommand[] {
   return skills
-    .filter((skill) => skill.instructions.trim() && !skill.disallowedTools?.length)
+    .filter((skill) => skill.instructions.trim() && !skill.disallowedTools?.length && skill.reach?.default !== "none")
     .map((skill) => ({
       id: skillCommandId(skill.name),
       name: skill.name,
@@ -189,7 +203,7 @@ export function resolveSkillInvocation(
   if (!match) return undefined;
   const name = match[1]!.toLowerCase();
   const skill = skills.find((candidate) => candidate.name.toLowerCase() === name);
-  if (!skill || !skill.instructions.trim() || skill.disallowedTools?.length) return undefined;
+  if (!skill || !skill.instructions.trim() || skill.disallowedTools?.length || skill.reach?.default === "none") return undefined;
   const args = [match[2] ?? "", restLines].filter((part) => part.length > 0).join("\n");
   return { skill, args, raw: text };
 }
@@ -248,6 +262,7 @@ export function createSkillService(opts: {
       || !validDisallowedTools(skill.disallowedTools)
       || !validOrigin(skill.origin)
       || !validHarnessIds(skill.offHarnesses)
+      || !validReach(skill.reach)
       || (skill.bundleHash !== undefined && !validBundleHash(skill.bundleHash))
       || !Number.isSafeInteger(skill.revision)
       || skill.revision < 1
@@ -381,7 +396,7 @@ export function createSkillService(opts: {
           ...(current.origin ? { origin: current.origin } : {}),
           ...(current.bundle ? { bundle: current.bundle } : {}),
           ...(current.bundleHash ? { bundleHash: current.bundleHash } : {}),
-          ...(current.offHarnesses?.length ? { offHarnesses: current.offHarnesses } : {}),
+          ...storedReach(current),
           ...(current.modified || (current.origin && current.instructions !== instructions) ? { modified: true } : {}),
         } : {}),
         name,
@@ -427,7 +442,7 @@ export function createSkillService(opts: {
         origin: input.origin,
         bundle: { files: input.files.length, bytes: input.files.reduce((sum, item) => sum + item.bytes.length, 0) },
         bundleHash,
-        ...(current?.offHarnesses?.length ? { offHarnesses: current.offHarnesses } : {}),
+        ...storedReach(current),
       };
       const previous = current?.bundleHash;
       if (index < 0) doc.skills.push(skill);
@@ -438,20 +453,25 @@ export function createSkillService(opts: {
       return publicSkill(skill);
     },
 
-    async setHarnessEnabled(space, scope, name, harnessId, enabled, projectId) {
+    async setReach(space, scope, name, reach, projectId, expectedRevision) {
       const owner = await writeOwner(space, scope, projectId);
-      if (!/^[a-z][a-z0-9-]*$/.test(harnessId)) throw error("invalid-input", "invalid harness id");
+      if (!validReach(reach)) throw error("invalid-input", "invalid reach");
       const doc = read(space);
       const index = doc.skills.findIndex((skill) => skill.name === name && skill.projectId === owner);
       const current = doc.skills[index];
       if (!current) throw error("not-found", "skill not found");
-      const off = new Set(current.offHarnesses ?? []);
-      if (enabled) off.delete(harnessId);
-      else off.add(harnessId);
-      const { offHarnesses: _previous, ...rest } = current;
+      if (expectedRevision !== undefined && current.revision !== expectedRevision) {
+        throw error("conflict", "skill changed since you loaded it");
+      }
+      // Its instructions in every session would reach a harness without the
+      // tool block the skill relies on.
+      if (current.disallowedTools?.length && reachHasAlways(reach)) {
+        throw error("invalid-input", "a skill that blocks tools cannot be always on");
+      }
+      const { offHarnesses: _legacy, reach: _previous, ...rest } = current;
       const skill: StoredSkill = {
         ...rest,
-        ...(off.size ? { offHarnesses: [...off].sort() } : {}),
+        ...reachField(reach),
         revision: current.revision + 1,
       };
       doc.skills[index] = skill;
@@ -500,20 +520,28 @@ export function createSkillService(opts: {
         ? context.projectId
         : undefined;
       const space = context.space;
-      return effectiveManaged(space, projectId).map((skill) => {
+      return effectiveManaged(space, projectId).flatMap((skill): AgentCapabilityDescriptor[] => {
+        const reach = skillReach(skill);
+        if (reach.default === "none") return [];
         // The files live on this host, so a remote target gets the text alone.
         const bundleDir = context.remote ? undefined : bundleDirOf(space, skill);
-        return {
-          id: `commands.skill.${hash(JSON.stringify([
-            context.spaceId,
-            skill.scope === "project" ? skill.projectId : null,
-            skill.name,
-          ])).slice(0, 32)}`,
-          kind: "skill" as const,
+        const key = hash(JSON.stringify([
+          context.spaceId,
+          skill.scope === "project" ? skill.projectId : null,
+          skill.name,
+        ])).slice(0, 32);
+        const instructions = bundleDir ? instructionsWithBundle(skill.instructions, bundleDir) : skill.instructions;
+        const placement = {
           owner: "commands",
           scope: skill.scope,
           spaceId: context.spaceId,
           ...(skill.scope === "project" ? { projectId: skill.projectId } : {}),
+        };
+        const skillRule = capabilityRule(reach, "skill");
+        const descriptors: AgentCapabilityDescriptor[] = [{
+          id: `commands.skill.${key}`,
+          kind: "skill" as const,
+          ...placement,
           revision: hash(JSON.stringify([
             skill.name,
             skill.description,
@@ -525,11 +553,29 @@ export function createSkillService(opts: {
           name: skill.name,
           title: skill.name,
           description: skill.description,
-          instructions: bundleDir ? instructionsWithBundle(skill.instructions, bundleDir) : skill.instructions,
+          instructions,
           ...(skill.disallowedTools?.length ? { disallowedTools: [...skill.disallowedTools] } : {}),
           ...(bundleDir ? { bundleDir } : {}),
-          ...(skill.offHarnesses?.length ? { excludedHarnessIds: [...skill.offHarnesses] } : {}),
-        };
+          ...(skillRule ? { harnessRule: skillRule } : {}),
+        }];
+        if (reachHasAlways(reach) && !skill.disallowedTools?.length) {
+          const text = [
+            `Polyth skill \`${skill.name}\` is always on for this conversation: ${skill.description}`,
+            "Follow these instructions whenever they apply. They do not override higher-priority system, security, permission or workspace rules.",
+            "",
+            instructions.trim(),
+          ].join("\n");
+          descriptors.push({
+            id: `commands.skill-always.${key}`,
+            kind: "instruction" as const,
+            ...placement,
+            revision: hash(JSON.stringify(["always", text])),
+            title: `Skill: ${skill.name}`,
+            text,
+            harnessRule: capabilityRule(reach, "always")!,
+          });
+        }
+        return descriptors;
       });
     },
 

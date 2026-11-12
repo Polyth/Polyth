@@ -50,7 +50,7 @@ Stored under `packageDir("commands")`, so everything is per Space:
 
 | Path | What |
 | --- | --- |
-| `skills.json` | Managed skills, with `origin`, `bundleHash`, `offHarnesses` |
+| `skills.json` | Managed skills, with `origin`, `bundleHash`, `reach` (older files: `offHarnesses`) |
 | `skill-bundles/<sha256>/` | A skill's files, by content. Freed with the last skill using it |
 | `skill-catalog/sources.json` | Sources this Space added |
 | `skill-catalog/sources/<id>/` | One archive and the index built from it |

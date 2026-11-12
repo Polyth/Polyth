@@ -4673,6 +4673,31 @@ export interface AgentCapabilityBase {
   projectId?: string;
   /** Harnesses that must not receive this capability. */
   excludedHarnessIds?: string[];
+  /** Which harnesses receive this capability, applied after
+   * `excludedHarnessIds`. Absent means every harness. */
+  harnessRule?: CapabilityHarnessRule;
+}
+
+/** Targets a capability by harness and harness family. The most specific
+ * entry wins: the harness id, then its family (`HarnessAccountsRef.family`, or
+ * the harness's own id when it has no accounts), then `default`. */
+export interface CapabilityHarnessRule {
+  default: boolean;
+  families?: Record<string, boolean>;
+  harnesses?: Record<string, boolean>;
+}
+
+/** The family a harness belongs to for `CapabilityHarnessRule`. */
+export const harnessFamilyOf = (harness: { id: string; accounts?: { family: string } }): string =>
+  harness.accounts?.family ?? harness.id;
+
+/** Whether a capability rule lets this harness receive it. */
+export function harnessRuleAllows(rule: CapabilityHarnessRule | undefined, harness: { id: string; accounts?: { family: string } }): boolean {
+  if (!rule) return true;
+  const own = rule.harnesses?.[harness.id];
+  if (own !== undefined) return own;
+  const family = rule.families?.[harnessFamilyOf(harness)];
+  return family ?? rule.default;
 }
 
 /** Serializable desired-state descriptor. Executors and secret values never appear. */

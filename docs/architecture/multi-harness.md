@@ -1021,9 +1021,9 @@ other harnesses, and stays one row.
 
 **A managed skill carries its files.** `installCopy` stores every file in a
 content-addressed bundle (`skill-bundles/<sha256>`, freed when no skill points at
-it). Delivery is unchanged for the capability contract except for two optional
-fields: `skill.bundleDir`, and `excludedHarnessIds` on the capability base, which
-`targetsHarness` honors before planning.
+it). Delivery is unchanged for the capability contract except for three optional
+fields: `skill.bundleDir`, and on the capability base `excludedHarnessIds` and
+`harnessRule`, which `targetsHarness` honors before planning.
 
 - Native projections receive the instructions with a leading `Base directory for
   this skill:` line, because the copy they materialize has no folder of its own.
@@ -1032,13 +1032,37 @@ fields: `skill.bundleDir`, and `excludedHarnessIds` on the capability base, whic
 - Prompt projections (`renderCapabilityText`) receive the description and that
   pointer, never the whole text, so a long skill does not weigh on every prompt.
 - A remote target gets the instructions alone: the files live on this host.
-- Each skill keeps `offHarnesses`, an exclusion list rather than an allowlist, so
-  a harness added later receives it by default.
+- Each skill keeps a **reach** (`SkillReachDto`, pure logic in
+  `packages/commands/src/skillReach.ts`): a default of `all` (every harness,
+  including one added later), `some` (only those named) or `none` (no harness,
+  choices kept), then optional rules per harness **family** and per harness,
+  each `off`, `on` (offered as a skill) or `always`. The most specific rule
+  wins: harness, then family, then the default. A family is
+  `HarnessAccountsRef.family`, the default harness id its accounts share
+  (`claude` for `claude` and `claude-work`); a harness without accounts is its
+  own family, so an account added later follows its family's rule. Choosing
+  `some` keeps the skill exactly where it works now; choosing `all` clears every
+  `off`; a rule equal to the broader one is dropped, so every stored rule is a
+  real choice. Older files kept `offHarnesses`, an exclusion list; it is read as
+  `all` plus `off` rules and replaced by `reach` on the next change.
+- Delivery turns the reach into a generic `CapabilityHarnessRule`
+  (`@polyth/contracts`, resolved with `harnessRuleAllows` and `harnessFamilyOf`
+  against the provider's descriptor), so the provisioner needs no skill
+  knowledge. `always` adds an `instruction` capability holding the skill's text
+  (with its bundle pointer), targeted only where the mode is `always`, next to
+  the skill itself. A skill with blocked tools cannot be `always` (its text
+  would reach the model without the tool block), and the page does not offer it.
+  `none` delivers nothing and hides the skill's `/name` alias; that alias is
+  harness-agnostic prompt text, so a per-harness `off` does not hide it.
+- `POST /api/skills/library/reach` takes `{ name, scope, projectId?, default }`,
+  `{ …, family: { id, mode } }` or `{ …, harness: { id, mode } }` (`mode: null`
+  removes the rule) with the same role checks as other managed writes, and
+  stores it against the revision it was worked out from (`conflict` otherwise).
 
 **From any chat, in any harness.** Every harness has the agent-tool bridge, so
 `polyth_skills` (read-only, auto-approved: list, search, read) and
 `polyth_skills_manage` (mutating, never auto-approved, needs an acting person:
-install, adopt, update, remove) are the one path that reaches them all. `read`
+install, adopt, update, reach, remove) are the one path that reaches them all. `read`
 lets an agent follow a skill that only another harness has, including on a remote
 target with no access to this host's folders.
 

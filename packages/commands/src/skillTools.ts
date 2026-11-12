@@ -9,8 +9,15 @@ import type {
   SpaceContext,
   ToolExecutionContext,
 } from "@polyth/contracts";
-import type { CapabilityInstallationScope, SkillLibraryEntryDto } from "@polyth/contracts/capability-installations";
+import type {
+  CapabilityInstallationScope,
+  SkillHarnessDto,
+  SkillHarnessMode,
+  SkillLibraryEntryDto,
+  SkillReachDefault,
+} from "@polyth/contracts/capability-installations";
 import type { SkillCatalog } from "./skillCatalog.ts";
+import { harnessMode, skillReach } from "./skillReach.ts";
 import { rankSkillMatches } from "./skillSearch.ts";
 import type { HarnessVisibility, SkillLibrary } from "./skillLibrary.ts";
 import type { SkillService } from "./skills.ts";
@@ -40,13 +47,19 @@ export interface SkillToolDeps {
   visibleTo(space: SpaceContext): (provider: HarnessProvider) => boolean;
 }
 
-const where = (entry: SkillLibraryEntryDto, names: ReadonlyMap<string, string>): string => {
+const where = (entry: SkillLibraryEntryDto, harnesses: readonly SkillHarnessDto[]): string => {
+  const names = new Map(harnesses.map((harness) => [harness.id, harness.name]));
   const parts: string[] = [];
   if (entry.managed) {
-    const off = entry.managed.offHarnesses ?? [];
-    parts.push(off.length
-      ? `every harness except ${off.map((id) => names.get(id) ?? id).join(", ")}`
-      : "every harness");
+    const reach = skillReach(entry.managed);
+    const modes = harnesses.map((harness) => ({ harness, mode: harnessMode(reach, harness).mode }));
+    const on = modes.filter((row) => row.mode !== "off");
+    const always = modes.filter((row) => row.mode === "always").map((row) => row.harness.name);
+    if (reach.default === "none") parts.push("no harness (switched off everywhere)");
+    else if (reach.default === "all" && on.length === modes.length) parts.push("every harness, including ones added later");
+    else if (reach.default === "all") parts.push(`every harness except ${modes.filter((row) => row.mode === "off").map((row) => row.harness.name).join(", ")}`);
+    else parts.push(on.length ? `only ${on.map((row) => row.harness.name).join(", ")}` : "no harness yet");
+    if (always.length) parts.push(`always in context for ${always.join(", ")}`);
   }
   const own = entry.natives.filter((native) => native.enabled).map((native) => names.get(native.harnessId) ?? native.harnessId);
   if (own.length) parts.push(`${own.join(", ")} (its own)`);
@@ -63,9 +76,8 @@ export function createSkillTools(deps: SkillToolDeps): AgentCapabilityContributi
 
     if (action === "list") {
       const library = await deps.library.list(space, projectId, visible);
-      const names = new Map(library.harnesses.map((harness) => [harness.id, harness.name]));
       const rows = library.skills.slice(0, 200).map((entry) =>
-        `- ${entry.name}: ${entry.description || "(no description)"}\n  Available in: ${where(entry, names)}`);
+        `- ${entry.name}: ${entry.description || "(no description)"}\n  Available in: ${where(entry, library.harnesses)}`);
       return { output: rows.length ? rows.join("\n") : "No skills here yet. Use action search to look through the catalog." };
     }
 
@@ -155,12 +167,36 @@ export function createSkillTools(deps: SkillToolDeps): AgentCapabilityContributi
       const skill = await deps.library.update(space, scope, name, owner, visible);
       return { output: `Updated ${skill.name}.` };
     }
+    if (action === "reach") {
+      if (!name) throw fail("invalid-input", "name is required");
+      const reachDefault = text(input.reach);
+      const family = text(input.family);
+      const harnessId = text(input.harnessId);
+      const modeText = text(input.mode);
+      const mode = modeText === "default" ? null : modeText;
+      if (mode !== null && mode !== "off" && mode !== "on" && mode !== "always" && (family || harnessId)) {
+        throw fail("invalid-input", "mode must be off, on, always or default");
+      }
+      const base = { name, scope, ...(owner ? { projectId: owner } : {}) };
+      const change = reachDefault
+        ? { ...base, default: reachDefault as SkillReachDefault }
+        : family
+          ? { ...base, family: { id: family, mode: mode as SkillHarnessMode | null } }
+          : harnessId
+            ? { ...base, harness: { id: harnessId, mode: mode as SkillHarnessMode | null } }
+            : undefined;
+      if (!change) throw fail("invalid-input", "give reach, or family or harnessId with mode");
+      await deps.library.setReach(space, change, visible);
+      const library = await deps.library.list(space, projectId, visible);
+      const entry = library.skills.find((row) => row.name === name);
+      return { output: `${name} now reaches ${entry ? where(entry, library.harnesses) : "the harnesses you chose"}. New chats get the change.` };
+    }
     if (action === "remove") {
       if (!name) throw fail("invalid-input", "name is required");
       const removed = await deps.skills.remove(space, scope, name, owner);
       return { output: removed ? `Removed ${name}.` : `${name} is not installed in this scope.` };
     }
-    throw fail("invalid-input", "action must be install, adopt, update or remove");
+    throw fail("invalid-input", "action must be install, adopt, update, reach or remove");
   };
 
   return [
@@ -197,19 +233,22 @@ export function createSkillTools(deps: SkillToolDeps): AgentCapabilityContributi
         kind: "tool",
         owner: "commands",
         scope: "deployment",
-        revision: "1",
+        revision: "2",
         name: SKILLS_MANAGE_TOOL_NAME,
-        description: "Change which skills Polyth gives every harness; use only when the person asks. install: a catalog skill (id and contentHash from polyth_skills read). adopt: copy a skill one harness has so every harness gets it. update and remove: an installed skill by name. scope defaults to this project; space reaches everyone in this Space.",
+        description: "Change which skills Polyth gives every harness; use only when the person asks. install: a catalog skill (id and contentHash from polyth_skills read). adopt: copy a skill one harness has so every harness gets it. update and remove: an installed skill by name. reach: where an installed skill works: reach all (every harness, also ones added later), some (only those chosen) or none; or one harnessId or harness family with mode off, on (offered when needed), always (its instructions in every chat) or default (follow the broader rule). scope defaults to this project; space reaches everyone in this Space.",
         inputSchema: {
           type: "object",
           additionalProperties: false,
           required: ["action"],
           properties: {
-            action: { type: "string", enum: ["install", "adopt", "update", "remove"] },
+            action: { type: "string", enum: ["install", "adopt", "update", "reach", "remove"] },
             id: { type: "string", maxLength: 600 },
             contentHash: { type: "string", maxLength: 64, description: "The hash polyth_skills read reported, so what was read is what gets installed." },
             harnessId: { type: "string", maxLength: 128 },
             name: { type: "string", maxLength: 200 },
+            reach: { type: "string", enum: ["all", "some", "none"], description: "reach: which harnesses get the skill unless a harness or family says otherwise." },
+            family: { type: "string", maxLength: 128, description: "reach: a harness family, the default harness id its accounts share (claude for claude and claude-work)." },
+            mode: { type: "string", enum: ["off", "on", "always", "default"], description: "reach: with harnessId or family." },
             scope: { type: "string", enum: ["project", "space"] },
           },
         },

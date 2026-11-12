@@ -4274,7 +4274,20 @@ is what only this page can answer. Facts are plain type, not pills. Every harnes
 row states how the skill reaches it: *Native skill*, *Read when needed*, or the
 harness's own copy, and harnesses without it collapse to one line. Switches appear
 only where Polyth can truly act; a harness that loads its own skills says *Always
-on*. The page says what installing does and does not do, and warns only for
+on*.
+
+A managed skill's *Harnesses* tab opens with its reach: a `Seg` of *All
+harnesses / Only chosen / Nowhere* with one sentence on what that means for
+harnesses added later. Below it, accounts of one harness are one group: a family
+row (name, account count, its own mode) with each account indented under it.
+Every row that Polyth can deliver to has a mode `Select` (*Off / When needed /
+Always*; *Always* names its cost as an estimated token count and is absent for a
+skill that blocks tools), with the delivery or cost on a second meta line. An
+account whose own rule differs from its family says so with a *Reset* text
+button. A row that is off for Polyth but still loads the harness's own copy says
+so instead of a bare *Off*. *Nowhere* keeps every row visible but disabled, and
+a closing line counts where the skill works and says changes apply to new chats
+(`ReachPanel`, `.skills-reach`, `.skills-harnesses.is-reach`). The page says what installing does and does not do, and warns only for
 invisible characters.
 
 Source pictures come through the server as checked data URLs, never from the
