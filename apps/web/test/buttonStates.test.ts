@@ -280,3 +280,60 @@ test("a tap never repaints a button: the base hover is pointer-only and nothing 
   // filled, selected or colored button stays readable under the finger.
   assert.match(styles, /button:active:where\(:not\(:disabled, \[aria-disabled="true"\], \.ui-btn\)\) \{\n  box-shadow: inset 0 0 0 100vmax var\(--surface-overlay-strong\);/);
 });
+
+/** Innermost `selectors { declarations }` blocks of a stylesheet. */
+function declarationBlocks(css: string): Array<{ selectors: string[]; body: string }> {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  return [...text.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, prelude, body]) => ({
+    selectors: splitTop(prelude!.slice(prelude!.lastIndexOf(";") + 1).trim(), /,/),
+    body: body!,
+  }));
+}
+
+const squash = (selector: string) => selector.replace(/\s*([>+~])\s*/g, " $1 ").replace(/\s+/g, " ").trim();
+
+/**
+ * Buttons whose press is painted on a pseudo-element (a circle round a glyph
+ * in a taller target, an inset plate in a full-width row) but which still get
+ * the shared press wash: an inset shadow over the button's whole box, so a
+ * square or row-sized wash shows round the shape the press is meant to have.
+ */
+export function pseudoPressLeaks(css: string, buttons: Set<string>): string[] {
+  const blocks = declarationBlocks(css);
+  const cleared = blocks.filter((block) => /box-shadow:\s*none/.test(block.body)).flatMap((block) => block.selectors.map(squash));
+  const found: string[] = [];
+  for (const block of blocks) {
+    if (!/background|opacity/.test(block.body)) continue;
+    for (const selector of block.selectors) {
+      const base = /^(.*?)::?(?:before|after)$/.exec(selector)?.[1];
+      if (!base) continue;
+      const last = splitTop(base, /[\s>+~]/).at(-1) ?? "";
+      if (!/:active(?![\w-])/.test(topLevel(last)) || /:disabled(?![\w-])/.test(topLevel(last))) continue;
+      const own = last.replace(/:(?:not|has|where|is)\((?:[^()]|\([^()]*\))*\)/g, "");
+      const button = /(^|[^\w-])button(?![\w-])/.test(own)
+        || [...own.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].some(([, name]) => buttons.has(name!) || BUTTON_NAME.test(name!));
+      if (!button) continue;
+      const wanted = squash(base);
+      if (!cleared.some((rule) => rule === wanted || rule.endsWith(` ${wanted}`))) {
+        found.push(`${selector}  — the shared inset press wash still fills the button's box`);
+      }
+    }
+  }
+  return found;
+}
+
+test("a press drawn on a pseudo-element clears the shared box-wide press wash", () => {
+  const buttons = new Set(["tool"]);
+  const leak = ".bar > .tool:active:where(:not(:disabled))::before { background: red; }";
+  assert.equal(pseudoPressLeaks(leak, buttons).length, 1, "the circle press alone leaves a square wash round it");
+  assert.deepEqual(pseudoPressLeaks(`${leak}\n.bar > .tool:active:where(:not(:disabled)) { box-shadow: none; }`, buttons), []);
+  assert.deepEqual(pseudoPressLeaks(`${leak}\n.nav .bar>.tool:active:where(:not(:disabled)) { box-shadow: none; }`, buttons), [],
+    "a more specific clearing rule counts");
+  assert.deepEqual(pseudoPressLeaks(".row:active .tool::before { background: red; }", buttons), [], "an ancestor's press is not the button's");
+  assert.deepEqual(pseudoPressLeaks(".card:active::before { background: red; }", buttons), [], "only buttons get the shared wash");
+  const roots = sourceRoots();
+  const classes = buttonClasses(roots.flatMap((dir) => files(dir, (name) => /\.tsx?$/.test(name) && !name.endsWith(".d.ts"))));
+  const found = roots.flatMap((dir) => files(dir, (name) => name.endsWith(".css")))
+    .flatMap((file) => pseudoPressLeaks(readFileSync(file, "utf8"), classes).map((line) => `${relative(root, file)}: ${line}`));
+  assert.deepEqual(found, []);
+});

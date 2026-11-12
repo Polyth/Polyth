@@ -581,6 +581,14 @@ button.mobile-nav-place:active:where(:not(:disabled)) {
   background-color: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
+/* The circle is the press. The shared press wash (styles.css: an inset
+   shadow over the button's box) would fill the whole square target round
+   it. */
+.mobile-nav-tools > .mobile-nav-tool:active:where(:not(:disabled)),
+.mobile-nav-project-action:active:where(:not(:disabled)) {
+  box-shadow: none;
+}
+
 /* The field is the tools' height, so the whole bar shares one centre line
    and one outline height. */
 .mobile-nav-search {

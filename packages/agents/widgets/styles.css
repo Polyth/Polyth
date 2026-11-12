@@ -937,6 +937,9 @@
   opacity: 1;
 }
 .agent-nav .agent-nav-btn:active:where(:not(:disabled))::before { background: color-mix(in srgb, var(--session-blue, var(--accent)) 9%, transparent); opacity: 1; }
+/* The ::before plate is the press; the shared inset press wash would fill
+   the whole row box round it. */
+.agent-nav .agent-nav-btn:active:where(:not(:disabled)) { box-shadow: none; }
 .agent-nav .agent-nav-btn:focus-visible { outline: 0; }
 .agent-nav .agent-nav-btn:focus-visible::before { opacity: 1; box-shadow: inset 0 0 0 2px var(--focus-ring); }
 
