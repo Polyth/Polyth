@@ -235,9 +235,17 @@ type HydratedNewSessionRecovery = {
   remaining: RecoverableNewSessionDraft[];
 };
 
+/** The repository chip a navigator's New chat starts under (`ids` undefined
+ * for "All"). It is a default, not a choice: a restored draft that carries its
+ * own repository scope keeps it, and an explicit `repositoryIds` wins. */
+export interface NewChatRepositoryFilter {
+  ids: readonly string[] | undefined;
+}
+
 type StartNewSessionOptions = Omit<NewSessionIntent, "projectId" | "draft"> & {
   draft?: string;
   restoreDraft?: boolean;
+  repositoryFilter?: NewChatRepositoryFilter;
   /** Read-only hydration carries this candidate until the caller's identity
    * fence permits the scoped shelf and attachment promotion. */
   recovery?: HydratedNewSessionRecovery;
@@ -263,6 +271,22 @@ function sessionIntentMetadata(
     ...(repositoryIds !== undefined ? { repositoryIds } : {}),
     ...(isolate !== undefined ? { isolate } : {}),
   };
+}
+
+/** Apply a navigator chip to the metadata of the chat New chat opens. `draft`
+ * is the restored draft with content, if any: its own scope stands. */
+function withRepositoryFilter(
+  metadata: NewSessionIntentMetadata,
+  filter: NewChatRepositoryFilter | undefined,
+  explicit: readonly string[] | undefined,
+  draft: Pick<NewSessionIntentMetadata, "repositoryIds"> | null | undefined,
+): NewSessionIntentMetadata {
+  if (!filter || explicit !== undefined) return metadata;
+  const next = { ...metadata };
+  if (draft?.repositoryIds !== undefined) next.repositoryIds = [...draft.repositoryIds];
+  else if (filter.ids?.length) next.repositoryIds = [...filter.ids];
+  else delete next.repositoryIds;
+  return next;
 }
 
 function hasNewSessionDraftContent(record: { text: string; attachments: readonly unknown[]; nativeStaged?: readonly unknown[] }): boolean {
@@ -437,7 +461,7 @@ export function clearNewSessionDraft(projectId: string, capturedScope?: Persiste
  * draft through startNewSession(). */
 export function startFreshSession(
   projectId: string,
-  options: Omit<NewSessionIntent, "projectId" | "draft"> = {},
+  options: Omit<NewSessionIntent, "projectId" | "draft"> & { repositoryFilter?: NewChatRepositoryFilter } = {},
 ): void {
   if (state.activeProjectId !== projectId) activateProject(projectId);
   const targetScope = newSessionPersistenceScope(projectId);
@@ -455,7 +479,12 @@ export function startFreshSession(
     );
     startNewSession(projectId, {
       draft: restored.text,
-      ...sessionIntentMetadata(options, intent ?? undefined, restored),
+      ...withRepositoryFilter(
+        sessionIntentMetadata(options, intent ?? undefined, restored),
+        options.repositoryFilter,
+        options.repositoryIds,
+        restored,
+      ),
     });
     return;
   }
@@ -1694,7 +1723,12 @@ export function startNewSession(
       : options.draft ?? recovered?.text ?? saved?.draft ?? "",
     ...(options.recovery
       ? sessionIntentMetadata(saved ?? undefined, recovered ?? undefined)
-      : sessionIntentMetadata(options, saved ?? undefined, recovered ?? undefined)),
+      : withRepositoryFilter(
+        sessionIntentMetadata(options, saved ?? undefined, recovered ?? undefined),
+        options.repositoryFilter,
+        options.repositoryIds,
+        recovered ?? (saved?.draft ? saved : null),
+      )),
   };
   // Native records live behind an async loopback adapter. Enter the surface
   // immediately, but do not write an empty placeholder over a not-yet-read
@@ -1722,10 +1756,16 @@ export function startNewSession(
       takePreviousNewSessionDraft(projectId, persisted.recovery.scope, persisted.recovery.revision);
     }
     const current = loadScopedDraftRecord(null);
+    const draft = current.updatedAt > 0 ? current.text : persisted?.draft ?? "";
     const next: NewSessionIntent = {
       projectId,
-      draft: current.updatedAt > 0 ? current.text : persisted?.draft ?? "",
-      ...sessionIntentMetadata(options, persisted ?? undefined),
+      draft,
+      ...withRepositoryFilter(
+        sessionIntentMetadata(options, persisted ?? undefined),
+        options.repositoryFilter,
+        options.repositoryIds,
+        draft ? persisted : null,
+      ),
     };
     saveNewSessionDraft(next);
     set({ newSessionIntent: next });

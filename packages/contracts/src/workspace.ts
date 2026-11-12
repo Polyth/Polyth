@@ -60,6 +60,74 @@ export interface SessionWorkspace {
   }>;
 }
 
+/** Navigator-safe repository scope of a subset session: registration ids
+ * only, never paths, branches or isolation evidence. Absent means the
+ * session works on the whole Project. */
+export interface SessionRepositoryScope {
+  repositoryIds: string[];
+}
+
+/** Longest repository id a scope or a summary filter carries. */
+export const REPOSITORY_SCOPE_ID_MAX = 200;
+/** Most ids a derived scope keeps; a Project registers far fewer. */
+const REPOSITORY_SCOPE_IDS_MAX = 64;
+
+const scopeId = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= REPOSITORY_SCOPE_ID_MAX;
+
+/** The repository subset a session is scoped to, or undefined for a
+ * whole-project session. One rule for every producer and reader:
+ *
+ * - a workspace snapshot with mode `all`, or no workspace at all, is the
+ *   whole Project;
+ * - an explicit snapshot (mode `subset`, or the older absent mode) is a
+ *   subset of the ids it lists;
+ * - when the caller knows the Project's current registrations, a subset that
+ *   lists every one of them is the whole Project again.
+ *
+ * Accepts a full projection (`workspace`) or a navigator summary
+ * (`repositoryScope`). A summary row (`summary: true`) answers from its derived
+ * field only, so a stale cached `workspace` merged under it never wins. */
+export function sessionRepositoryScope(
+  source: {
+    summary?: boolean;
+    workspace?: Pick<SessionWorkspace, "mode" | "repositories"> | null;
+    repositoryScope?: { repositoryIds?: readonly unknown[] } | null;
+  } | null | undefined,
+  projectRepositoryIds?: readonly string[],
+): SessionRepositoryScope | undefined {
+  if (!source) return undefined;
+  let raw: readonly unknown[] | undefined;
+  const workspace = source.summary === true ? undefined : source.workspace;
+  if (workspace && typeof workspace === "object") {
+    if (workspace.mode === "all" || !Array.isArray(workspace.repositories)) return undefined;
+    raw = workspace.repositories.map((row) => (row && typeof row === "object" ? row.repositoryId : undefined));
+  } else if (source.repositoryScope && Array.isArray(source.repositoryScope.repositoryIds)) {
+    raw = source.repositoryScope.repositoryIds;
+  }
+  if (!raw) return undefined;
+  const ids: string[] = [];
+  for (const value of raw) {
+    if (!scopeId(value) || ids.includes(value)) continue;
+    ids.push(value);
+    if (ids.length >= REPOSITORY_SCOPE_IDS_MAX) break;
+  }
+  if (ids.length === 0) return undefined;
+  if (projectRepositoryIds && projectRepositoryIds.length > 0
+    && projectRepositoryIds.every((id) => ids.includes(id))) return undefined;
+  return { repositoryIds: ids };
+}
+
+/** Whether a session belongs under one repository's filter: its explicit
+ * subset includes `repositoryId`. Whole-project sessions never match. */
+export function sessionInRepositoryScope(
+  source: Parameters<typeof sessionRepositoryScope>[0],
+  repositoryId: string,
+  projectRepositoryIds?: readonly string[],
+): boolean {
+  return sessionRepositoryScope(source, projectRepositoryIds)?.repositoryIds.includes(repositoryId) === true;
+}
+
 /** Omitted repositoryIds selects all repositories at the time of mutation.
  * Paths and isolation evidence can only be supplied by the checkout owner. */
 export interface SessionWorkspaceSelection {

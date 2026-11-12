@@ -14,7 +14,11 @@ test("desktop conversation rows use the people glyph and skip agent status cues"
   assert.match(icons, /UsersRound as PeopleIcon/);
   assert.match(source, /PeopleIcon/);
   assert.match(source, /s\.purpose === "conversation"/);
-  assert.match(source, /\{conversation\s*\? <span className="session-lead-mark people" aria-hidden="true"><UiIcon icon=\{PeopleIcon\} size="sm" \/><\/span>\s*: <LeadStatus status=\{rowStatus\} opening=\{opening\} \/>\}/);
+  // The shared lead decision names a conversation's kind instead of agent state.
+  const lead = await read("../src/sessionLead.ts");
+  assert.match(lead, /if \(conversation\) return "people";/);
+  assert.match(source, /sessionLeadMark\(\{ status: rowStatus, opening, conversation, pinned: s\.pinned !== undefined \}\)/);
+  assert.match(source, /case "people":\s*return <span className="session-lead-mark people" aria-hidden="true"><UiIcon icon=\{PeopleIcon\} size="sm" \/><\/span>;/);
   assert.match(source, /const leadDescription = conversation \? undefined : statusDescription\(rowStatus, opening\);/);
   assert.match(source, /\{!conversation && <ElapsedBadge status=\{rowStatus\} \/>\}/);
 });
@@ -31,6 +35,7 @@ test("phone conversation rows use the people glyph and no duration", async () =>
   const source = await read("../src/components/mobile/MobileNavigator.tsx");
   assert.match(source, /PeopleIcon/);
   assert.match(source, /session\.purpose === "conversation"/);
-  assert.match(source, /leadStatus\(rowStatus, conversation\)/);
+  assert.match(source, /sessionLeadMark\(\{ status: rowStatus, opening, conversation, pinned: session\.pinned !== undefined \}\)/);
+  assert.match(source, /case "people":\s*return <span className="mobile-nav-session-state is-conversation">/);
   assert.match(source, /\{!conversation && rowStatus\.kind === "working" && \(/);
 });

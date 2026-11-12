@@ -218,6 +218,7 @@ when the locale switches between LTR and RTL.
 | `--package-window-header-h` | Shared compact package-window header height. |
 | `--package-window-resize-hit` | In-frame resize hit area; host-owned, never package-overridden. |
 | `--hit-min` | Density seam: extra hit-area floor. 0px on fine pointers; core raises it to `--tap` under coarse pointers. Use in `max()` with the control's visual size. |
+| `--nav-pill-air` | Navigator highlight pills (chat, agent and action rows; the phone row fill): the air between the pill edge and its first and last content, the same on both sides. Desktop pills reach it by growing outward into the list gutters, so content never moves. |
 | `--nav-tool-step` | Phone Navigator only (set on `.mobile-navigator`): width of the toolbar's inner tools: the full `--tap` floor, so each tool keeps a 44px box. Their glyphs are placed by ink (`--nav-tool-gap`), not centred in it. |
 
 Controls use the smallest visual height appropriate to their density while
@@ -987,6 +988,28 @@ red/amber, amber, green, green/blue, blue, purple, red/purple — and
 `--person-tone-ink` (`--bg`) for a monogram's letters on it. Any element that
 names a person sets the attribute (`personIdentity.ts` picks the tone) and
 reads `var(--person-tone)`; never hard-code a person's colour.
+A repository of a multi-repository Project uses the same eight signal-derived
+tones: `[data-repository-tone="0"…"7"]` sets `--repository-tone`, assigned by
+the repository's position in the Project (primary first: blue, amber, purple,
+green, teal, rose, orange, red; `repositoryFilter.ts`). A `.repository-dot`
+must stay vivid and keep at least 3:1 against every row fill (rest, hover,
+selected, pinned) in every look and platform style. In dark modes it is the
+tone lifted 12% toward white in oklch (hue kept). Light signal tokens are dark
+text colours (Mist's `--amber` is `#785400`), so mixing them toward `--text`
+or black turns amber brown and blue navy; a light dot instead takes only the
+token's hue (`oklch(from var(--repository-tone) L C h)`) at a per-tone
+lightness and chroma inside sRGB (`--repository-dot-l` / `-c`, amber's hue
+turned 10° toward orange by `--repository-dot-dh`), tuned on the darkest
+light selected fill (luminance about 0.67, Mist + monolith / macOS). Measured
+in Chromium over 10 presets × light/dark × every platform style × every look ×
+rest/hover/selected/pinned × glass matte/off/clear, the lowest dot-to-fill
+ratio is 3.21:1 in light (selected amber) and 3.59:1 in dark (macOS 27 hover
+blue). Without relative colour support it falls back to the tone
+deepened 8% toward black. Mist light, for example, paints red `#cc342c`,
+orange `#b95113`, amber `#a06605`, green `#25811c`, teal `#097e84`, blue
+`#0f71c2`, purple `#8652d2`, rose `#bd3a80`. A repository chip's chosen state is
+an accent fill, accent ink and weight (no border needed, so it reads with
+borders hidden).
 
 ### Terminal
 

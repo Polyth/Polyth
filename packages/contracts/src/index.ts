@@ -2,8 +2,8 @@
 // Erasable TS only (no enums/namespaces) — Node strips types at runtime.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HarnessNativePluginManager, HarnessNativeSkillManager } from "./capabilityInstallations.ts";
-import type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext } from "./workspace.ts";
-export type { ProjectRepository, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext, WorkspaceRepository } from "./workspace.ts";
+import type { ProjectRepository, SessionRepositoryScope, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext } from "./workspace.ts";
+export type { ProjectRepository, SessionRepositoryScope, SessionWorkspace, SessionWorkspaceSelection, WorkspaceContext, WorkspaceRepository } from "./workspace.ts";
 import type { CompactionPreference } from "./compactionPolicy.ts";
 export type { CompactionMode, CompactionPreference } from "./compactionPolicy.ts";
 
@@ -2500,6 +2500,11 @@ export interface SessionProjection {
   summary?: true;
   /** Navigator-only isolation marker, without checkout ownership details. */
   isolationSummary?: "git-worktree";
+  /** Navigator-only: the repository ids of a subset session
+   *  (`sessionRepositoryScope` in `@polyth/contracts/workspace`). Present only
+   *  on summaries, where `workspace` stays out; absent means the whole
+   *  Project (or a reader that predates the field). Derived, never stored. */
+  repositoryScope?: SessionRepositoryScope;
   /** Resumable native import; canonical events remain authoritative. */
   historyImport?: { state: "pending" | "in-progress" | "failed" | "complete"; count: number; digest?: string; code?: string };
   id: string; projectId: string; parentId?: string;
@@ -3130,7 +3135,7 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
 
 /** Unread top-level chats per project the rail query returns; enough to show "9+". */
 export const RAIL_STATUS_UNREAD_PER_PROJECT = 10;
@@ -3167,6 +3172,15 @@ export interface SessionSummaryQuery {
   ids?: readonly string[];
   fromTime?: number;
   toTime?: number;
+  /** Only sessions whose explicit repository subset includes this Project
+   *  repository id (`sessionInRepositoryScope`); whole-project sessions never
+   *  match. A delegated child follows its root parent. Requires `projectId`;
+   *  at most `REPOSITORY_SCOPE_ID_MAX` characters. */
+  repositoryId?: string;
+  /** Internal, never read from HTTP: the Project's current repository ids,
+   *  which the route reads from the gateway-scoped project. A subset listing
+   *  every one of them is the whole Project and does not match. */
+  projectRepositoryIds?: readonly string[];
 }
 
 export interface SessionSummaryPage {

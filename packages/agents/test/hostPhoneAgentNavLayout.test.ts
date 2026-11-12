@@ -182,3 +182,18 @@ test("phone Agents group mirrors in RTL", { skip: !CHROME }, async () => {
     rtl[key].forEach((x, i) => near(x, ltr[key][i]!, `${key} mirror`));
   }
 });
+
+// Desktop: an agent row under the navigator's Agents action ends its meta on
+// the host's one trailing axis, where a chat row's marks end.
+test("desktop agent rows end on the navigator's shared trailing inset", async () => {
+  const [host, own] = await Promise.all([read("../../../apps/web/src/styles.css"), read("../widgets/styles.css")]);
+  assert.match(host, /--nav-trailing-inset:\s*4px;/);
+  assert.match(host, /\.session-row-body\s*\{[\s\S]*?padding-inline:\s*var\(--session-body-start\) var\(--nav-trailing-inset, 4px\);/);
+  assert.match(own, /\.agent-nav \.agent-nav-btn\s*\{[\s\S]*?padding-inline:\s*var\(--agent-nav-indent\) var\(--nav-trailing-inset, 4px\);/);
+  // Its pill takes the chat rows' extents (the --nav-pill-air outsets), and
+  // the current row's pill has the hover pill's extent; only paint differs.
+  assert.match(own, /--agent-nav-pill:\s*var\(--session-pill-inset, 6px\);\s*(\/\*[\s\S]*?\*\/\s*)?--agent-nav-pill-end:\s*var\(--session-pill-end, 0px\);/);
+  assert.match(own, /\.agent-nav \.agent-nav-btn::before\s*\{[^}]*inset-inline:\s*calc\(var\(--agent-nav-indent\) - var\(--agent-nav-pill\)\) var\(--agent-nav-pill-end\);/);
+  assert.doesNotMatch(own, /\.agent-nav \.agent-nav-row\.active \.agent-nav-btn::before\s*\{[^}]*inset/);
+  assert.match(host, /--session-pill-end:\s*calc\(var\(--nav-trailing-inset\) - var\(--nav-pill-air\)\);/);
+});

@@ -1240,6 +1240,59 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   animation: mobile-nav-section-in var(--motion-normal) var(--motion-ease) both;
 }
 
+/* Repository chips (styles.css owns the chip): on the rows' lead column, one
+   line that scrolls sideways, directly above the project's chats. A chip is
+   drawn at the small-control height (28px in the macOS styles); a transparent
+   ::after makes its target --repository-chip-target tall. The scroller clips
+   overflow, so its 4px block padding is where the target grows into.
+   Spacing is one 8px rhythm step on both sides, at every density, measured
+   box to box. An open leading group (agents) already ends on that step, so
+   the row pulls its top padding back over it; after the project header or a
+   folded group (`data-collapsed`, which ends flush) it adds 4px instead.
+   Below, a caption (Pinned, a date) keeps 4px of its own air and a first chat
+   row gets 4px more, so the chips sit 8px from either. */
+.mobile-navigator .repository-filter[data-variant="phone"] {
+  --repository-chip-target: max(36px, var(--control-h-sm));
+  gap: var(--space-2);
+  padding-block: var(--space-1);
+  padding-inline: var(--nav-row-inset);
+  scroll-padding-inline: var(--nav-row-inset);
+}
+.mobile-navigator .repository-filter[data-variant="phone"] {
+  margin-block-start: var(--space-1);
+}
+.mobile-navigator :not([data-collapsed]) + .repository-filter[data-variant="phone"] {
+  margin-block-start: calc(var(--space-1) * -1);
+}
+.mobile-navigator .repository-filter[data-variant="phone"] + :is(.mobile-nav-pinned, .mobile-nav-date-group) > .mobile-nav-date-divider:first-child {
+  padding-block-start: var(--space-1);
+}
+.mobile-navigator .repository-filter[data-variant="phone"] + .mobile-nav-date-group > :first-child:not(.mobile-nav-date-divider) {
+  margin-block-start: var(--space-1);
+}
+.mobile-navigator .repository-filter[data-variant="phone"] .repository-filter-chip {
+  position: relative;
+  min-block-size: var(--control-h-sm);
+  padding-inline: var(--space-3);
+}
+.mobile-navigator .repository-filter[data-variant="phone"] .repository-filter-chip::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 50%;
+  block-size: var(--repository-chip-target);
+  translate: 0 -50%;
+}
+.mobile-navigator .repository-filter[data-variant="phone"] .repository-filter-chip:has(.repository-dot) {
+  padding-inline-start: calc(var(--space-3) - 2px);
+}
+/* A row's repository mark keeps its aliases short; on the narrowest phones
+   they give way to the running clock or a draft, leaving the dots. */
+.mobile-nav-session-trailing .repository-mark-text { max-inline-size: 9ch; }
+@media (max-width: 380px) {
+  .mobile-nav-session-trailing:has(.mobile-nav-duration, .session-draft-slot) .repository-mark-text { display: none; }
+}
+
 /* An expanded project with nothing to list says so, aligned with the session
    titles, instead of opening onto an empty gap. */
 .mobile-nav-project-empty {
@@ -1305,9 +1358,16 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 /* ---- session rows ------------------------------------------------------- */
 
 .mobile-nav-session-swipe {
+  /* The row fill keeps --nav-pill-air before its first mark and after its
+     last, like the desktop pill: it reaches this far past the row box, at
+     most to 2px short of the list's edge (and not at all where the grid
+     already gives that air, as inside Air's islands). The swipe clip reaches
+     out with it and pads back, so no column moves. */
+  --nav-fill-outset: clamp(0px, calc(var(--nav-pill-air, 10px) - var(--nav-row-inset)), calc(var(--nav-edge) - 2px));
   position: relative;
   min-height: var(--nav-row-session);
-  padding-inline-start: calc(min(var(--mobile-nav-tree-depth, 0), 3) * var(--nav-tree-indent));
+  margin-inline: calc(-1 * var(--nav-fill-outset));
+  padding-inline: calc(var(--nav-fill-outset) + min(var(--mobile-nav-tree-depth, 0), 3) * var(--nav-tree-indent)) var(--nav-fill-outset);
   overflow: hidden;
   border-radius: var(--radius-control);
   touch-action: pan-y;
@@ -1315,7 +1375,8 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 
 .mobile-nav-session-underlay {
   position: absolute;
-  inset: 0;
+  inset-block: 0;
+  inset-inline: var(--nav-fill-outset, 0px);
   display: flex;
   justify-content: space-between;
   align-items: stretch;
@@ -1348,14 +1409,36 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   min-height: var(--nav-row-session);
   border-radius: var(--radius-control);
   background: transparent;
-  transition: transform 150ms cubic-bezier(.2,.75,.2,1), background-color var(--motion-fast) var(--motion-ease);
+  transition: transform 150ms cubic-bezier(.2,.75,.2,1);
+  /* The fill (current, selected, failed) is painted by ::before so it can
+     start --nav-row-inset before the status mark, or, when the status slot
+     shows nothing (data-lead="empty", from sessionLeadMark), the same inset
+     before the title. Only the fill moves; the columns stay put. */
+  --mobile-nav-fill: transparent;
+  --mobile-nav-fill-start: 0px;
+}
+.mobile-nav-session-row[data-lead="empty"] {
+  --mobile-nav-fill-start: calc(var(--nav-title-start) - var(--nav-row-inset));
+}
+.mobile-nav-session-row::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block: 0;
+  inset-inline: calc(var(--mobile-nav-fill-start) - var(--nav-fill-outset, 0px)) calc(-1 * var(--nav-fill-outset, 0px));
+  border-radius: inherit;
+  background: var(--mobile-nav-fill);
+  pointer-events: none;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    inset-inline-start var(--motion-fast) var(--motion-ease);
 }
 
 /* A finger moving the row moves it 1:1 (a transform transition would trail
    it); the transition only settles the row when the finger lets go. Only a
    row that moves holds its own compositing layer. */
 .mobile-nav-session-swipe.is-dragging > .mobile-nav-session-row {
-  transition: background-color var(--motion-fast) var(--motion-ease);
+  transition: none;
 }
 
 .mobile-nav-session-swipe:is(.is-swiped, .is-dragging) > .mobile-nav-session-row {
@@ -1363,14 +1446,14 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 }
 
 .mobile-nav-session-row.is-active {
-  background: var(--material-glass);
+  --mobile-nav-fill: var(--material-glass);
 }
 
 /* Pinned rows carry no tint: their group's caption already says it, and a
    tint read as a second current row. A failed row keeps a faint warm wash,
    quieter than the current row; its red mark carries the state. */
 .mobile-nav-session-row.is-failed:not(.is-active) {
-  background: color-mix(in srgb, var(--red) 6%, transparent);
+  --mobile-nav-fill: color-mix(in srgb, var(--red) 6%, transparent);
 }
 
 /* Subagent disclosure: a pill right after the title text, never at the row
@@ -1526,12 +1609,24 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   background: var(--accent);
 }
 .mobile-nav-select-mark .ui-icon { width: 12px; height: 12px; stroke-width: 2.6; }
-.mobile-nav-session-row.is-selected { background: var(--accent-wash); }
+.mobile-nav-session-row.is-selected { --mobile-nav-fill: var(--accent-wash); }
 .mobile-nav-select-toggle.is-active { color: var(--accent); }
 .mobile-nav-select-toggle.is-active::before { background-color: var(--accent-wash); }
 .mobile-navigator .session-bulk-actions { padding: 2px var(--space-3) var(--space-2); }
 .mobile-navigator .session-bulk-actions :is(.ui-btn, .ui-icon-btn) { min-height: var(--tap); }
 .mobile-navigator .session-bulk-actions .ui-icon-btn { min-width: var(--tap); }
+
+/* A pinned chat at rest: its pin fills the status slot (live state wins).
+   Same slanted glyph as the Pinned divider, at the other lead marks' size,
+   in the desktop pin's quiet ink: pinning is a place, not a state. */
+.mobile-nav-lead-pin {
+  display: inline-grid;
+  place-items: center;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: color-mix(in oklab, var(--accent) 65%, var(--muted));
+}
+.mobile-nav-lead-pin svg { width: 100%; height: 100%; }
 
 .mobile-nav-session-lead .ui-spinner {
   width: 14px;
@@ -1548,11 +1643,11 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 
 /* A row with no marks: the title runs to the marks' edge, but the subagent
    pill is a real control and stays clear of the ⋯ control's tucked edge. */
-.mobile-nav-session-body:not(:has(.mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags:not(:empty))) .mobile-nav-subagent-toggle {
+.mobile-nav-session-body:not(:has(.session-repository-mark, .mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags:not(:empty))) .mobile-nav-subagent-toggle {
   margin-inline-end: var(--nav-mark-tuck);
 }
 
-/* Identity marks: package badges, then the pin, at the trailing edge. */
+/* Identity marks (package badges) at the trailing edge. */
 .mobile-nav-session-flags {
   display: inline-flex;
   align-items: center;
@@ -1574,22 +1669,12 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 }
 
 /* Identity marks (isolation, merge, sharing) are secondary metadata that
-   repeats down the list; they step back behind the titles. The pin is a
-   choice the person made and keeps its accent. */
-.mobile-navigator .mobile-nav-session-flags > :not(.mobile-nav-pin-icon) {
+   repeats down the list; they step back behind the titles. */
+.mobile-navigator .mobile-nav-session-flags > * {
   opacity: var(--nav-quiet-mark);
 }
 
-.mobile-nav-pin-icon {
-  display: inline-grid;
-  flex: 0 0 var(--icon-sm);
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  place-items: center;
-}
-
-.mobile-nav-pin-icon { color: var(--accent); }
-/* Someone else can open this chat: quiet beside the accent pin. */
+/* Someone else can open this chat: a quiet mark. */
 .mobile-nav-shared-icon {
   display: inline-grid;
   flex: 0 0 var(--icon-sm);
@@ -1609,18 +1694,12 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   color: var(--session-blue, var(--accent));
 }
 
-/* Host marks (pin, sharing) take the package badges' glyph size and weight,
+/* Host marks (sharing, mention) take the package badges' glyph size and weight,
    so every identity mark in the group reads at one optical size. */
 .mobile-nav-session-flags .ui-icon {
   width: calc(var(--icon-sm) - 3px);
   height: calc(var(--icon-sm) - 3px);
   stroke-width: 2;
-}
-
-/* Inside the Pinned group the caption already says it; the pin glyph would
-   say it a third time. */
-.mobile-navigator .mobile-nav-pinned .mobile-nav-pin-icon {
-  display: none;
 }
 
 .mobile-nav-session-title {
@@ -1656,27 +1735,17 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 
 /* Marks end on their column under New chat, clear of the dots; a row
    showing none keeps its title out to --nav-title-end. */
-.mobile-nav-session-trailing:has(.mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags > *) {
+.mobile-nav-session-trailing:has(.session-repository-mark, .mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags > *) {
   margin-inline-end: calc(var(--nav-mark-end) - var(--nav-title-end));
 }
 
-.mobile-navigator .mobile-nav-pinned .mobile-nav-session-trailing:not(:has(.mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags > :not(.mobile-nav-pin-icon))) {
-  margin-inline-end: 0;
-}
-
-.mobile-nav-session-trailing > :is(.mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags) {
+.mobile-nav-session-trailing > :is(.session-repository-mark, .mobile-nav-duration, .session-draft-slot, .mobile-nav-session-flags) {
   margin-inline-start: var(--space-2);
 }
 
 .mobile-nav-session-trailing > :first-child { margin-inline-start: var(--space-3); }
 
 .mobile-nav-session-trailing:empty { display: none; }
-
-/* In the Pinned group the pin is hidden; marks holding nothing else would
-   keep their lead-in and push the clock off the marks' edge. */
-.mobile-navigator .mobile-nav-pinned .mobile-nav-session-flags:not(:has(> :not(.mobile-nav-pin-icon))) {
-  display: none;
-}
 
 .mobile-nav-duration {
   color: var(--accent);
@@ -1927,6 +1996,7 @@ body[data-hide-borders="true"] .mobile-nav-running-ring {
   .mobile-nav-running-ring,
   .mobile-nav-project-status.is-running .mobile-nav-state-icon { animation: none; }
   .mobile-nav-session-row,
+  .mobile-nav-session-row::before,
   .mobile-nav-project-main::before { transition: none; }
 }
 

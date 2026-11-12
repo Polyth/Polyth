@@ -6,6 +6,8 @@ import {
   workspaceRepository,
   workspaceExecutionPath,
   workspaceOmitsProjectRoot,
+  sessionRepositoryScope,
+  sessionInRepositoryScope,
   type ProjectRepository,
 } from "../src/workspace.ts";
 
@@ -228,4 +230,32 @@ test("Files offers the project folder only when a multi-repository workspace hid
     { id: "web", alias: "web", path: "/stack/web" }, { id: "api", alias: "api", path: "/stack/api" },
   ] };
   assert.equal(workspaceOmitsProjectRoot(unregistered, resolveWorkspaceContext(unregistered).repositories), true);
+});
+
+test("repository scope: whole project, subset, covering subset, missing workspace and legacy no-mode", () => {
+  const rows = (...ids: string[]) => ids.map((repositoryId) => ({ repositoryId, path: `/checkouts/${repositoryId}`, branch: "feature" }));
+  const project = ["api", "web", "docs"];
+  assert.equal(sessionRepositoryScope({ workspace: { mode: "all", repositories: rows("api") } }, project), undefined);
+  assert.deepEqual(sessionRepositoryScope({ workspace: { mode: "subset", repositories: rows("api", "web") } }, project), { repositoryIds: ["api", "web"] });
+  // Listing every current registration is the whole project again.
+  assert.equal(sessionRepositoryScope({ workspace: { mode: "subset", repositories: rows("docs", "api", "web") } }, project), undefined);
+  // Without the registration set the snapshot is taken at its word.
+  assert.deepEqual(sessionRepositoryScope({ workspace: { mode: "subset", repositories: rows("docs", "api", "web") } }), { repositoryIds: ["docs", "api", "web"] });
+  // A registration removed since the snapshot does not make it cover the project.
+  assert.deepEqual(sessionRepositoryScope({ workspace: { mode: "subset", repositories: rows("api", "gone") } }, ["api", "web"]), { repositoryIds: ["api", "gone"] });
+  assert.equal(sessionRepositoryScope({}, project), undefined);
+  assert.equal(sessionRepositoryScope({ workspace: null }, project), undefined);
+  assert.equal(sessionRepositoryScope(undefined, project), undefined);
+  assert.deepEqual(sessionRepositoryScope({ workspace: { repositories: rows("web") } }, project), { repositoryIds: ["web"] });
+  assert.equal(sessionRepositoryScope({ workspace: { repositories: [] } }, project), undefined);
+  // Ids only: the result never carries a path or branch.
+  assert.ok(!JSON.stringify(sessionRepositoryScope({ workspace: { repositories: rows("web") } })).includes("/checkouts/"));
+  // A summary answers from its derived field; a stale merged workspace never wins.
+  assert.deepEqual(sessionRepositoryScope({ summary: true, repositoryScope: { repositoryIds: ["web"] }, workspace: { mode: "all", repositories: rows("api") } }, project), { repositoryIds: ["web"] });
+  assert.equal(sessionRepositoryScope({ summary: true, workspace: { mode: "subset", repositories: rows("api") } }, project), undefined);
+  // Malformed ids are dropped, duplicates collapse.
+  assert.deepEqual(sessionRepositoryScope({ repositoryScope: { repositoryIds: ["api", "api", "", 3, "x".repeat(201)] } }), { repositoryIds: ["api"] });
+  assert.equal(sessionInRepositoryScope({ workspace: { mode: "subset", repositories: rows("api", "web") } }, "web", project), true);
+  assert.equal(sessionInRepositoryScope({ workspace: { mode: "subset", repositories: rows("api", "web") } }, "docs", project), false);
+  assert.equal(sessionInRepositoryScope({ workspace: { mode: "all", repositories: rows("api") } }, "api", project), false);
 });

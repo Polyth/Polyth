@@ -1791,17 +1791,64 @@ The command palette
   A session whose isolated branch was merged shows a green branch icon
   instead, from the durable `isolationMerge` receipt (a navigator summary
   field) — it outranks the lock while post-merge cleanup is still pending.
-  The phone host renders its pin, runtime status, and unread mark separately;
-  it must not add a second isolation lock.
+  The phone host renders its runtime status, unread mark and resting pin in
+  the row's status slot; it must not add a second isolation lock.
 - **Desktop session row geometry:** the open button (`.session-btn`) is an
   empty, full-row hit surface; `.session-row-body` paints above it with
   `pointer-events: none` in three fixed columns — a state mark reserved on
-  every row (running, needs reply/approval, failed, unread; empty when idle),
-  the title followed directly by the subagent disclosure (a real button,
+  every row (running, needs reply/approval, failed, unread; a pinned chat at
+  rest shows its pin there; empty when an unpinned chat is idle), the title
+  followed directly by the subagent disclosure (a real button,
   ArrowRight/ArrowLeft on the row also toggles it), then meta: worktree pill,
-  running clock, and the identity group (`session.list.badges`, then pin) at
-  the trailing edge so those icons line up down the list. The row hover card
-  spells out the state the mark shows.
+  running clock, and the identity group (`session.list.badges`) at the
+  trailing edge so those icons line up down the list. Live state always wins
+  the state column; the pin returns when it clears, the row stays in the
+  Pinned section, and the row's description names it pinned (the lead pin is
+  `aria-hidden`). Pinning is a place, not a state, so the lead pin stays below
+  the live marks that replace it: on desktop it is the trailing pin's size
+  (`--icon-sm - 3px`), centred, in `color-mix(in oklab, var(--accent) 65%,
+  var(--muted))` in the standard look (≥ 3:1 against the pinned, hover and
+  selected fills in every preset, light and dark, measured in Chromium);
+  shell looks use their quiet ink. Desktop and phone both draw the Pinned
+  divider's slanted glyph (`Icon.pin`) in that same ink; the phone sizes it
+  `--icon-sm` like its other status marks. One decision, `sessionLeadMark` (`apps/web/src/sessionLead.ts`),
+  renders the mark and sets the row's `data-lead` (`mark` / `empty` /
+  `select`) on desktop and phone alike, so the two cannot drift. The highlight
+  pill (`.session-btn::before`: hover, press, selection, keyboard focus, the
+  pinned resting fill, Fluent's accent bar) keeps `--nav-pill-air` (10px,
+  `tokens.css`) between its edge and the content on both sides: it starts at
+  `--session-pill-start`, `--session-pill-inset` (= the air) before the state
+  mark or, for `data-lead="empty"`, before the title
+  (`--session-title-start - --session-pill-inset`), and ends
+  `--session-pill-end` (`--nav-trailing-inset - --nav-pill-air`, -6px) past
+  the row box, 10px after the trailing marks. Every state shares that one
+  extent; only paint differs (focus is a 2px ring inside the pill). The pill
+  grows outward into the list gutters (`--nav-pill-outset-start/-end` on
+  `.sidebar`: 2px into the 8px start gutter, 6px into the end gutter), so no
+  title or mark moves; 10px is the most the end side affords while staying
+  2px clear of the scrollbar. Agent rows under the navigator's Agents action
+  (`--agent-nav-pill`/`--agent-nav-pill-end`) and the action rows (New chat
+  included; their own box is the pill, reaching the outsets with negative
+  margins and padding them back) share those extents, and the unfolded
+  section's scroll box reaches out the same way so it does not cut them. On
+  coarse pointers the swipe clip is a `clip-path` widened by the outsets
+  instead of the row box. Only the pill's start moves between the two
+  starts, sliding with `--motion-fast` (off under reduced motion and the
+  reduce-animations/low-resource settings); the columns never shift. Themes
+  and shell looks restyle the pill's paint, never its extent. The phone row
+  paints its fill (current, selected, failed) on
+  `.mobile-nav-session-row::before` with the same rule: the same air before
+  the status mark (or the title when the slot is empty) and after the ⋯
+  glyph, reaching `--nav-fill-outset` past the row box (at most 2px short of
+  the list edge, so 9px on phones up to 360px wide, and not at all where the
+  grid already gives that air, as in Air's islands); the swipe clip
+  (`.mobile-nav-session-swipe`) reaches out with it and pads back. Trailing
+  marks end on `--nav-trailing-inset` (4px inside the row box), shared with
+  the agent rows; the never-scrolling header block (`.sidebar-nav-block`)
+  reserves the same scrollbar gutter as the scrolling chat list, so agent
+  and chat marks end on one axis with classic
+  and overlay scrollbars alike. The row hover card spells out the state the
+  mark shows.
 - **Delegated children (desktop and phone):** a session with a `parentId`
   (an `agent.spawn` subagent, a workflow unit) is listed only inside its
   listed parent's disclosure, pinned parents included, and never takes a row
@@ -1920,6 +1967,62 @@ not inherited by forks or delegated children. The Agents runner sets it on an
 agent's own sessions (label = agent name) and Monitoring on its incident chats
 (`monitoring`/`alert`/"Monitoring"). Lists use it to leave automation out on
 request and to draw it as automation rather than as a person's chat.
+
+**Repository chips (multi-repository Projects).** A Project with two or more
+registered repositories shows one chip row at the top of its open session
+list in the desktop sidebar (`SessionList`, tree and rail), and in the phone
+navigator below the project's leading groups (agents) and directly above its
+chats (pinned caption or first chat row), because the chips filter chats
+only. On the phone the chips sit one 8px step from whatever is above (project
+header, folded or open agents group) and below (a caption's text or the first
+chat row), at every density. While the chip row is shown the desktop project
+header drops its "N repos" count; the count (and its alias · path tooltip)
+returns when the project is closed or replaced by a search, and the chips'
+tooltips carry the paths (All lists every alias · path, a chip its own). Chips:
+All, then each repository in project order with the primary first,
+each a coloured dot and its alias (`components/sidebar/RepositoryFilter.tsx`;
+rules in `apps/web/src/repositoryFilter.ts`). One-repository Projects and
+private rooms show nothing and their layout does not change. The row is a
+`role="toolbar"` of `aria-pressed` buttons with one tab stop (arrow keys,
+Home/End, mirrored in RTL); it never wraps or shrinks and scrolls sideways
+without a scrollbar. Chips carry no counts: loaded pages are partial. A chip
+lists the chats whose explicit repository subset includes it
+(`sessionRepositoryScope`, [workspace.md](workspace.md)); whole-project chats,
+and subsets covering every current repository, show only under All. Delegated
+children follow their parent. The pinned section, worktree groups, Group by,
+the date and Needs attention filters combine with it; under a chip a linked
+worktree with no matching chat is hidden. The desktop list sends the chip as
+`repositoryId` with its project's summary pages; the phone, whose own pages
+span every project, reads one extra filtered page set for a project under a
+chip and offers more once its loaded matches are shown. A search keeps a
+chosen chip and shows its row so it can be undone; with All a search shows no
+chips. The phone project's status pills still count every chat. The choice is
+a device preference per project (`polyth.sidebar.repositoryFilter`, navigator
+state, never history or synced settings); a chip whose repository is no longer
+registered reads as All and its entry is cleared. A project's New chat actions
+(sidebar project row, New chat row, compact drawer, rail and the phone's New
+chat) start under the chip (`newChatOptions` → `startFreshSession`'s
+`repositoryFilter`): an unsent chat without content takes `[id]`, or no scope
+under All; a restored draft with its own scope keeps it, one without a scope
+takes the chip. A subset chat's row carries a mark in its meta column: up to
+three whole dots side by side (a 2px gap, never overlapping: overlapping dots
+read as a half-moon status glyph) then `+n`, and the aliases joined by `+`
+(`role="img"`, "Repository: api" / "Repositories: api, web", also in the row's
+hover card and its button's description); whole-project rows carry none. Under
+a chip the list already names its repository, so a column of identical dots
+would only be noise: a row scoped to that repository alone draws no mark, and
+a wider scope draws only its other repositories after a plus, with their
+aliases (`+ • api` under `web`, `+ •• api, infra` for two; dots capped at three
+then `+n`; `repositoryMarkParts`). The aliases follow the same narrow-width
+rules as under All, so a tight row degrades to `+ •`. The accessible name, the
+hover card and the button's description still list the full scope; with no
+mark drawn the description is a hidden element. Phone chips are drawn at the
+small-control height (28px in the macOS styles) with a transparent `::after`
+making a 36px target inside the chip row's block padding. In a narrow sidebar the title keeps the room: below
+17.5rem of list width the aliases drop when the worktree pill, running clock,
+draft mark or subagent count shares the row, below 14.5rem always (container `session-list`); on
+phones the aliases are capped at 9ch and drop for a running clock or draft on
+screens up to 380px. Covered by `apps/web/test/repositoryFilter.test.ts`.
 
 Session grouping and order live in the list options' **Sessions** section as
 two drill-in rows, **Group by** and **Sort by**, each naming its current

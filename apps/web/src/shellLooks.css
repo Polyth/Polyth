@@ -246,7 +246,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.ac
 
 /* Pinning is a place, not a state: the pinned section and its pins stay in
    quiet ink so accent is left for what is live (a running session's timer). */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-pinned-divider, .session-pin-icon) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-pinned-divider, .session-lead-pin, .mobile-nav-lead-pin) {
   color: var(--look-ink-quiet);
 }
 
@@ -764,16 +764,21 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-navigat
   backdrop-filter: var(--look-phone-layer-blur) !important;
 }
 
+/* The row's fill layer (::before) starts where MobileNavigator.css puts it:
+   before the status mark, or before the title when the slot is empty. */
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active:not(.is-selected) {
-  background: var(--look-phone-select);
-  box-shadow: var(--look-phone-select-edge);
+  --mobile-nav-fill: var(--look-phone-select);
   border-radius: var(--look-select-radius);
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active:not(.is-selected)::before {
+  box-shadow: var(--look-phone-select-edge);
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .mobile-nav-session-row.is-active::after {
   content: "";
   position: absolute;
-  inset-inline-start: 0;
+  inset-inline-start: var(--mobile-nav-fill-start, 0px);
   top: 50%;
   width: 3px;
   height: calc(var(--icon-md) + 2px);

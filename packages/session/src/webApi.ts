@@ -1064,7 +1064,7 @@ export const api = {
   listSessions: (projectId: string, init?: RequestInit) => jfetch<SessionProjection[]>(`/api/sessions?projectId=${encodeURIComponent(projectId)}`, init),
   listSessionSummaries: (input: import("@polyth/contracts").SessionSummaryQuery, signal?: AbortSignal) => {
     const query = new URLSearchParams();
-    for (const key of ["projectId", "worktreePath", "revision", "query", "limit", "archived", "attentionOnly", "pinned", "fromTime", "toTime"] as const) {
+    for (const key of ["projectId", "worktreePath", "revision", "query", "limit", "archived", "attentionOnly", "pinned", "fromTime", "toTime", "repositoryId"] as const) {
       if (input[key] !== undefined) query.set(key, String(input[key]));
     }
     if (input.cursor) { query.set("cursorId", input.cursor.id); query.set("cursorTime", String(input.cursor.updatedAt)); }

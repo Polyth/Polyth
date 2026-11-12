@@ -610,6 +610,14 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   --nav-gutter: 8px;
   --nav-glyph-inset: 8px;
   --nav-text-inset: 32px;
+  /* Where a row's trailing marks end inside its highlight: chat rows and
+     agent rows share it, so their last icons stand in one column. */
+  --nav-trailing-inset: 4px;
+  /* How far a highlight pill reaches past the row box into each gutter so
+     that --nav-pill-air stands between it and the content on both sides:
+     chat, agent and action rows (New chat included) share these extents. */
+  --nav-pill-outset-start: calc(var(--nav-pill-air) - var(--nav-glyph-inset));
+  --nav-pill-outset-end: calc(var(--nav-pill-air) - var(--nav-trailing-inset));
   --nav-indent-project: var(--nav-glyph-inset);
   --nav-indent-worktree: var(--nav-glyph-inset);
   --nav-indent-session: var(--nav-glyph-inset);
@@ -1149,17 +1157,28 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding: 6px var(--nav-gutter) 8px;
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
+  /* The chat list below scrolls and loses its scrollbar's width at the
+     trailing edge; this block never scrolls. Both reserve the same gutter
+     (zero with overlay scrollbars), so agent and chat rows end on one axis. */
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
 }
-.sidebar-nav-block + .side-scroll { padding-block-start: var(--space-2); }
+.sidebar-nav-block + .side-scroll { padding-block-start: var(--space-2); scrollbar-gutter: stable; }
 .sidebar-nav-row {
+  /* The row's own box is its pill: it reaches the shared outsets past the
+     block's content edges and pads them back, so glyph, label and trailing
+     controls keep their places. --nav-row-end is the room its end keeps. */
+  --nav-row-end: 10px;
   position: relative;
   display: flex;
   align-items: center;
-  width: 100%;
+  width: calc(100% + var(--nav-pill-outset-start) + var(--nav-pill-outset-end));
   min-width: 0;
   height: 32px;
   margin: 0;
-  padding: 0 10px 0 var(--nav-glyph-inset);
+  margin-inline: calc(-1 * var(--nav-pill-outset-start)) calc(-1 * var(--nav-pill-outset-end));
+  padding: 0;
+  padding-inline: calc(var(--nav-glyph-inset) + var(--nav-pill-outset-start)) calc(var(--nav-row-end) + var(--nav-pill-outset-end));
   border: 0;
   border-radius: var(--radius-card);
   background: transparent;
@@ -1187,6 +1206,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   line-height: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sidebar-nav-row:focus-visible {
+  /* Rings inside the pill: the pill already reaches into the gutter. */
+  outline-offset: -2px;
+  box-shadow: none;
 }
 .sidebar-nav-new {
   height: 36px;
@@ -1223,7 +1247,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   color: var(--muted);
 }
 .sidebar-nav-actions-edit svg { width: 14px; height: 14px; }
-.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-row:first-child { padding-inline-end: 34px; }
+.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-row:first-child { --nav-row-end: 34px; }
 /* An action row that owns a package section (agents): the row opens the
    capability, a chevron on its trailing edge unfolds the section under it,
    and folded the row carries the section's short summary. On the first row
@@ -1234,10 +1258,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   flex-direction: column;
   min-width: 0;
 }
-.sidebar-nav-item > .sidebar-nav-row { padding-inline-end: 34px; }
-.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item:first-child > .sidebar-nav-row { padding-inline-end: 64px; }
-.sidebar-nav-item[data-empty] > .sidebar-nav-row { padding-inline-end: 10px; }
-.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item[data-empty]:first-child > .sidebar-nav-row { padding-inline-end: 34px; }
+.sidebar-nav-item > .sidebar-nav-row { --nav-row-end: 34px; }
+.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item:first-child > .sidebar-nav-row { --nav-row-end: 64px; }
+.sidebar-nav-item[data-empty] > .sidebar-nav-row { --nav-row-end: 10px; }
+.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item[data-empty]:first-child > .sidebar-nav-row { --nav-row-end: 34px; }
 .sidebar-nav-summary {
   display: inline-flex;
   flex: none;
@@ -1267,7 +1291,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    place instead of pushing the chats away. */
 .sidebar-nav-section {
   max-height: min(40vh, 320px);
+  /* Its scroll box clips sideways too: it reaches the pill outsets into the
+     gutters and pads them back, so its rows' pills are not cut at the edge. */
+  margin-inline: calc(-1 * var(--nav-pill-outset-start)) calc(-1 * var(--nav-pill-outset-end));
   padding-block-start: 2px;
+  padding-inline: var(--nav-pill-outset-start) var(--nav-pill-outset-end);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1701,7 +1729,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-weight: 600;
   text-align: left;
 }
-.session-worktree-toggle::before { inset-inline: calc(var(--nav-worktree-row-indent, var(--nav-indent-worktree)) - var(--session-pill-inset, 6px)) 4px; }
+.session-worktree-toggle::before { inset-inline: calc(var(--nav-worktree-row-indent, var(--nav-indent-worktree)) - var(--nav-glyph-inset)) 4px; }
 .session-worktree-toggle > * { position: relative; z-index: 1; }
 @media (hover: hover) {
   .session-worktree-toggle:hover:where(:not(:disabled)) { color: var(--text); background: transparent; }
@@ -1788,9 +1816,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    fall through, except for its own real controls (subagent disclosure).
    The body has three fixed columns so every mark keeps its place whatever
    the title length: state mark | title (+ disclosure) | meta.
-   Horizontal rhythm, from the list edge: the highlight pill reaches 4px past
-   the row start (mirroring its overhang on the trailing side), the state mark
-   sits --session-pill-inset inside it, and the title follows one gap later. */
+   Horizontal rhythm, from the list edge: the state mark starts at the glyph
+   inset and the title one gap later; the highlight pill reaches past the row
+   box into the gutters so --nav-pill-air stands before the mark (or title)
+   and after the last trailing mark. */
 .session-org,
 .private-room-row,
 .private-room-chats,
@@ -1799,7 +1828,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   --session-lead-size: calc(var(--nav-session-size, 15px) * .94);
   /* The state mark starts at the glyph inset and the title on the text axis. */
   --session-lead-gap: calc(var(--nav-text-inset) - var(--nav-glyph-inset) - var(--session-lead-size));
-  --session-pill-inset: var(--nav-glyph-inset);
+  /* The pill stands --nav-pill-air before the state mark (or the title) and
+     after the last trailing mark, reaching into the gutters to do so. */
+  --session-pill-inset: var(--nav-pill-air);
+  --session-pill-end: calc(var(--nav-trailing-inset) - var(--nav-pill-air));
   /* Trailing footprint the ⋯ trigger claims while it is shown (its inset +
      target); the grid's column gap keeps the title clear of it. */
   --session-menu-size: 28px;
@@ -1814,10 +1846,18 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .session-row {
   --session-body-start: var(--nav-session-row-indent, var(--nav-indent-session));
   --session-title-start: calc(var(--session-body-start) + var(--session-lead-size) + var(--session-lead-gap));
+  /* Where the highlight pill starts: --session-pill-inset before the state
+     mark. A row whose state column shows nothing (data-lead="empty", set from
+     the same decision that renders the mark) hugs its title instead, with the
+     same inset before it. Only the pill moves; every column stays put. */
+  --session-pill-start: calc(var(--session-body-start) - var(--session-pill-inset));
   position: relative;
   min-height: var(--nav-row-session);
   margin: 0;
   padding: 0;
+}
+.session-row[data-lead="empty"] {
+  --session-pill-start: calc(var(--session-title-start) - var(--session-pill-inset));
 }
 .session-subagent-parent { position: relative; }
 .session-subagent-children {
@@ -1853,21 +1893,35 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   cursor: pointer;
 }
 .session-btn::before {
-  inset-inline: calc(var(--session-body-start) - var(--session-pill-inset)) 0;
+  inset-inline: var(--session-pill-start) var(--session-pill-end, 0px);
+  /* The start slides when the state column fills or clears; the global
+     reduced-motion and reduce-animations rules switch every transition off. */
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease),
+    inset-inline-start var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
   .session-btn:hover:where(:not(:disabled)) { background: transparent; }
 }
 .session-row:hover .session-btn::before { background: color-mix(in srgb, var(--session-blue, var(--accent)) 6%, transparent); opacity: 1; }
+/* Hover, selection, press, focus and the pinned fill share one extent; only
+   their paint differs. */
 .session-row.active .session-btn::before {
-  inset-block: 0;
-  inset-inline: calc(var(--session-body-start) - var(--session-pill-inset)) -2px;
   background: var(--material-glass);
   opacity: 1;
 }
 .session-row.pinned:not(.active) .session-btn::before {
   background: var(--material-glass-medium);
   opacity: 1;
+}
+/* Keyboard focus rings the pill itself (inside its edge, so it stays clear of
+   the scrollbar), not the wider row box under it. */
+.session-btn:focus-visible { outline: none; box-shadow: none; }
+.session-btn:focus-visible::before {
+  opacity: 1;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .session-row-body {
   position: relative;
@@ -1881,8 +1935,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
      mirrors the state mark's inset inside the highlight. The ⋯ trigger takes
      --session-menu-slot only while it is shown (rules below). */
   padding-block: 0;
-  /* Trailing meta ends 10px inside the pill. */
-  padding-inline: var(--session-body-start) 10px;
+  /* Trailing meta ends on the navigator's one trailing axis, where an agent
+     row's meta ends too. */
+  padding-inline: var(--session-body-start) var(--nav-trailing-inset, 4px);
   color: var(--text);
   font-size: var(--nav-session-size);
   line-height: 1.32;
@@ -1940,6 +1995,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* A conversation's people glyph is a kind mark, not a status badge: no disc. */
 .session-lead-mark.people { background: none; box-shadow: none; }
 .session-lead-mark.people svg { width: 100%; height: 100%; }
+/* A pinned chat at rest: its pin sits centred in the state column (live
+   state wins). Pinning is a place, not a state, so the pin stays smaller and
+   quieter than the spinner or unread dot that may replace it. */
+.session-lead-pin {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: color-mix(in oklab, var(--accent) 65%, var(--muted));
+}
+.session-lead-pin svg { width: calc(var(--icon-sm) - 3px); height: calc(var(--icon-sm) - 3px); }
 .session-lead-dot {
   width: 7px;
   height: 7px;
@@ -2037,7 +2103,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .session-subagent-toggle:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--focus-ring); }
 
 /* Column 3 — meta: worktree pill · running clock · identity marks. Identity
-   (package badges, pin) is always last so those icons line up at one edge. */
+   (package badges) is always last so those icons line up at one edge. A
+   pinned chat's pin lives in the state column (.session-lead-pin). */
 .session-status-zone {
   grid-column: 3;
   width: auto;
@@ -2068,15 +2135,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .session-identity:empty { display: none; }
 .session-identity > * { flex: none; }
-.session-pin-icon {
-  display: inline-grid;
-  width: calc(var(--icon-sm) - 3px);
-  height: calc(var(--icon-sm) - 3px);
-  flex: none;
-  place-items: center;
-  color: var(--accent);
-}
-.session-pin-icon svg { width: 100%; height: 100%; }
 /* Someone else can open this chat: quiet, never louder than the pin. */
 .session-shared-icon {
   display: inline-grid;
@@ -2144,6 +2202,160 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   letter-spacing: 0;
 }
 .session-worktree-label svg { width: 10px; height: 10px; flex: none; }
+
+/* ---- Repository chips and marks (multi-repository projects) ---------------
+   repositoryFilter.ts / sidebar/RepositoryFilter.tsx. A repository's colour is
+   one of the eight signal-derived tones people's colours use, by its order in
+   the project (primary first): blue, amber, purple, green, teal, rose, orange,
+   red. Colour is never alone: a chip has its alias, a mark its accessible
+   name.
+   A dot must stay vivid and keep >= 3:1 against every row fill (rest, hover,
+   selected, pinned) in every look and platform style. Dark modes lift the
+   tone 12% toward white in oklch, keeping its hue. Light modes cannot use the
+   tone as is: light signal tokens are dark text colours (Mist's --amber is
+   #785400), so a dot takes only the token's hue and draws it at a per-tone
+   oklch lightness and chroma (--repository-dot-l/-c) inside sRGB, tuned to
+   ~3.2:1 or more on the darkest light selected fill (luminance .67); amber's
+   hue turns 10deg toward orange (--repository-dot-dh) so it reads amber, not
+   mustard. Without relative colour the light dot falls back to the tone
+   deepened 8% toward black. Measured in Chromium; see docs/dev/styles.md. */
+[data-repository-tone] { --repository-tone: var(--muted); --repository-dot-c: 0; }
+[data-repository-tone="0"] { --repository-tone: var(--red); --repository-dot-l: .56; --repository-dot-c: .19; }
+[data-repository-tone="1"] { --repository-tone: color-mix(in oklab, var(--red) 52%, var(--amber)); --repository-dot-l: .56; --repository-dot-c: .15; }
+[data-repository-tone="2"] { --repository-tone: var(--amber); --repository-dot-l: .56; --repository-dot-c: .12; --repository-dot-dh: -10; }
+[data-repository-tone="3"] { --repository-tone: var(--green); --repository-dot-l: .53; --repository-dot-c: .16; }
+[data-repository-tone="4"] { --repository-tone: color-mix(in oklab, var(--green) 45%, var(--blue)); --repository-dot-l: .54; --repository-dot-c: .09; }
+[data-repository-tone="5"] { --repository-tone: var(--blue); --repository-dot-l: .54; --repository-dot-c: .15; }
+[data-repository-tone="6"] { --repository-tone: var(--purple); --repository-dot-l: .56; --repository-dot-c: .19; }
+[data-repository-tone="7"] { --repository-tone: color-mix(in oklab, var(--red) 55%, var(--purple)); --repository-dot-l: .56; --repository-dot-c: .18; }
+.repository-dot {
+  --repository-dot-size: calc(var(--nav-meta-size, var(--font-meta)) * .6);
+  display: inline-block;
+  flex: none;
+  inline-size: var(--repository-dot-size);
+  block-size: var(--repository-dot-size);
+  border-radius: var(--radius-circle, 50%);
+  background: color-mix(in oklch, var(--repository-tone, var(--muted)) 88%, white);
+}
+:root[data-appearance="light"] .repository-dot {
+  background: color-mix(in oklch, var(--repository-tone, var(--muted)) 92%, black);
+}
+@supports (color: oklch(from red l c h)) {
+  :root[data-appearance="light"] .repository-dot {
+    background: oklch(from var(--repository-tone, var(--muted)) var(--repository-dot-l, .56) var(--repository-dot-c, 0) calc(h + var(--repository-dot-dh, 0)));
+  }
+}
+
+/* The chip row: All, then each repository. One line that scrolls sideways
+   and never wraps or shrinks inside the list's flex column. Chips start on the
+   rows' state-mark column, so the row sits on the list's own grid. */
+.repository-filter {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* Room for the focus ring inside the scroller's clip. */
+  padding-block: 3px var(--space-1);
+  padding-inline: var(--nav-indent-session, var(--nav-glyph-inset)) var(--nav-glyph-inset);
+}
+.repository-filter::-webkit-scrollbar { display: none; }
+.repository-filter-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-1) + 1px);
+  min-block-size: max(calc(var(--nav-meta-size, var(--font-meta)) + 10px), calc(var(--nav-row-session) * .58));
+  margin: 0;
+  padding-block: 0;
+  padding-inline: calc(var(--space-2) + 2px);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--nav-meta-size, var(--font-meta));
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.repository-filter-chip:has(.repository-dot) { padding-inline-start: calc(var(--space-2) - 1px); }
+.repository-filter-chip-label { max-inline-size: 16ch; overflow: hidden; text-overflow: ellipsis; }
+@media (hover: hover) {
+  .repository-filter-chip[aria-pressed="false"]:hover:where(:not(:disabled)) {
+    background: color-mix(in srgb, var(--text) 10%, transparent);
+    color: var(--text-dim);
+  }
+}
+.repository-filter-chip[aria-pressed="false"]:active:where(:not(:disabled)) { background: color-mix(in srgb, var(--text) 13%, transparent); }
+/* The chosen chip is told by its fill, its ink and its weight, so it reads
+   with borders hidden and in every look. */
+.repository-filter-chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 17%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--accent-text, var(--accent));
+  font-weight: 650;
+}
+.repository-filter-chip:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+.repository-filter-chip[aria-pressed="true"]:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent), 0 0 0 2px var(--focus-ring);
+}
+
+/* A row's mark: whole dots side by side, "+n" past three, then the aliases.
+   Under a chip it draws only the scope's other repositories after a plus
+   ("+ • api"), or nothing for a scope of that chip alone. */
+.session-repository-mark {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-inline-size: 0;
+  color: var(--muted);
+  font-size: var(--nav-meta-size, var(--font-meta));
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.repository-dots { display: inline-flex; align-items: center; flex: none; gap: 2px; }
+.repository-mark-plus { flex: none; margin-inline-end: -1px; line-height: 1; }
+.repository-mark-more {
+  margin-inline-start: -2px;
+  font-variant-numeric: tabular-nums;
+}
+.repository-mark-text {
+  min-inline-size: 0;
+  max-inline-size: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-hover-card-repositories { display: inline-flex; align-items: center; gap: 2px; }
+
+/* Narrow lists give the title the room first. The mark's aliases go once
+   another meta item (worktree pill, running clock, draft) shares the row, then
+   altogether; the dots, a chip's plus and the accessible name stay ("+ •").
+   The list is the size container, so the rule follows the sidebar's width,
+   not the window's. */
+.sidebar .session-org { container: session-list / inline-size; }
+@container session-list (max-width: 17.5rem) {
+  .session-status-zone:has(.session-worktree-label, .session-elapsed, .session-draft-slot) .repository-mark-text,
+  /* The subagent count rides the title column, not the status zone. */
+  .session-row-body:has(.session-subagent-toggle) .repository-mark-text { display: none; }
+  .session-status-zone .repository-mark-text { max-inline-size: 7ch; }
+}
+@container session-list (max-width: 14.5rem) {
+  .session-status-zone .repository-mark-text { display: none; }
+}
 
 .session-row.search-result,
 .session-row.search-result .session-row-body { min-height: calc(var(--nav-row-session) + 12px); }
@@ -2216,7 +2428,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
     display: flex;
     visibility: hidden;
   }
-  .session-row.has-subagents:is(:hover, :has(:focus-visible), .menu-open) .session-row-body { padding-inline-end: 10px; }
+  .session-row.has-subagents:is(:hover, :has(:focus-visible), .menu-open) .session-row-body { padding-inline-end: var(--nav-trailing-inset, 4px); }
 }
 .session-menu-trigger[aria-expanded="true"] { color: var(--text); background: var(--panel); }
 @media (hover: hover) {
@@ -14507,12 +14719,16 @@ button[aria-busy="true"] { position: relative; }
 }
 @media (pointer: coarse), (max-width: 480px) {
 .session-row { touch-action: pan-y; }
-  .session-row:not(.menu-open) { overflow: hidden; border-radius: var(--radius-control); }
+  /* The swipe clip follows the pill's reach into the gutters rather than the
+     row box, so the highlight keeps its air; swiped content still stops there. */
+  .session-row:not(.menu-open) {
+    clip-path: inset(0 calc(-1 * var(--nav-pill-outset-end, 0px)) 0 calc(-1 * var(--nav-pill-outset-start, 0px)) round var(--radius-control));
+  }
+  .session-row:not(.menu-open):dir(rtl) {
+    clip-path: inset(0 calc(-1 * var(--nav-pill-outset-start, 0px)) 0 calc(-1 * var(--nav-pill-outset-end, 0px)) round var(--radius-control));
+  }
   .session-menu-trigger { inset-inline-end: 0; width: var(--tap); height: var(--tap); }
   .sidebar .session-org { --session-menu-slot: var(--tap); }
-  /* The swipe clip ends the highlight at the row box; the pill already starts
-     at the row box (--session-pill-inset = --nav-glyph-inset), so the grid
-     tokens need no override here. */
 }
 
 

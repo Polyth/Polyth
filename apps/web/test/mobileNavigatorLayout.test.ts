@@ -101,7 +101,7 @@ const fixture = `<nav class="mobile-navigator" style="animation:none">
   </div>
   <div class="mobile-nav-scroll" style="animation:none">
     ${project("open", "polyth", "", `
-      <div class="mobile-nav-pinned">${session("Pinned and running", "", `<span class="mobile-nav-pin-icon">${svg}</span>`, 0, "3h")}</div>
+      <div class="mobile-nav-pinned">${session("Pinned and running", `<span class="mobile-nav-running-ring"></span>`, "", 0, "3h")}</div>
       ${session("Running a session whose title is long enough to truncate before its clock", "", "", 0, "42m")}
       ${session("Plain session title long enough to truncate before its subagent count", "", "", 4)}
       ${session("Running session", `<span class="mobile-nav-running-ring"></span>`, `<span class="isolation-list-badge" id="flag">${svg}</span>`)}
@@ -458,3 +458,71 @@ test("a pressed project lights its whole line, not the button's box", { skip: !C
     await cdp.detach();
   }
 });
+
+// The current row's fill keeps --nav-pill-air (10px) before the status mark
+// and after the ⋯ glyph, like the desktop pill; with the slot empty
+// (data-lead="empty") the same air before the title. It reaches past the row
+// box to get there (the swipe clip reaches out with it), never closer than
+// 2px to the screen edge: a small phone's narrower edge caps it at 9px. No
+// column moves, in either direction.
+for (const dir of ["ltr", "rtl"] as const) for (const width of [390, 360]) {
+  test(`phone row fill keeps the pill air and hugs the title when the slot is empty (${dir}, ${width}px)`, { skip: !CHROME }, async () => {
+    assert.ok(page);
+    await page.setViewportSize({ width, height: 844 });
+    const row = (lead: "empty" | "mark", mark: string) => `<div class="mobile-nav-session-swipe"><div class="mobile-nav-session-row is-active" data-lead="${lead}">
+      <button class="mobile-nav-session-main"></button>
+      <span class="mobile-nav-session-body">
+        <span class="mobile-nav-session-lead">${mark}</span>
+        <span class="mobile-nav-session-heading"><span class="mobile-nav-session-title" dir="auto">Title</span></span>
+        <span class="mobile-nav-session-trailing"><span class="mobile-nav-session-flags"></span></span>
+      </span>
+      <button class="mobile-nav-more">${lucide(MoreIcon, "md")}</button>
+    </div></div>`;
+    await page.setContent(`<!doctype html><html dir="${dir}"><head><style>${css}</style><style>html,body{margin:0}*,*::before{transition:none!important}</style></head><body><nav class="mobile-navigator" style="animation:none"><div class="mobile-nav-scroll" style="animation:none"><div class="mobile-nav-project is-expanded"><div class="mobile-nav-project-body">
+      ${row("empty", "")}
+      ${row("mark", `<span class="mobile-nav-lead-pin">${svg}</span>`)}
+    </div></div></div></nav></body></html>`);
+    const result = await page.evaluate(() => {
+      const rtl = document.documentElement.dir === "rtl";
+      const vw = document.documentElement.clientWidth;
+      const rows = [...document.querySelectorAll<HTMLElement>(".mobile-nav-session-row")];
+      return rows.map((row) => {
+        const box = row.getBoundingClientRect();
+        const before = getComputedStyle(row, "::before");
+        const fill = { l: box.left + parseFloat(before.left), r: box.right - parseFloat(before.right) };
+        const swipe = row.parentElement!.getBoundingClientRect();
+        const r = (el: Element) => el.getBoundingClientRect();
+        const startOf = (el: Element) => (rtl ? r(el).right : r(el).left);
+        const endOf = (el: Element) => (rtl ? r(el).left : r(el).right);
+        const fillStart = rtl ? fill.r : fill.l;
+        const fillEnd = rtl ? fill.l : fill.r;
+        const span = (a: number, b: number) => Math.abs(a - b);
+        const title = row.querySelector(".mobile-nav-session-title")!;
+        const lead = row.querySelector(".mobile-nav-session-lead")!;
+        const dots = row.querySelector(".mobile-nav-more svg")!;
+        return {
+          fill: before.backgroundColor,
+          titleAir: span(startOf(title), fillStart),
+          leadAir: span(startOf(lead), fillStart),
+          endAir: span(endOf(dots), fillEnd),
+          startClear: rtl ? vw - fill.r : fill.l,
+          endClear: rtl ? fill.l : vw - fill.r,
+          withinClip: fill.l >= swipe.left - 0.01 && fill.r <= swipe.right + 0.01,
+          titleStart: startOf(title),
+        };
+      });
+    });
+    const [empty, mark] = result;
+    assert.ok(empty && mark);
+    const air = width > 360 ? 10 : 9;
+    assert.notEqual(empty.fill, "rgba(0, 0, 0, 0)", "the current row paints its fill on ::before");
+    assert.ok(Math.abs(mark.leadAir - air) < 0.5, `air before the mark: ${mark.leadAir}`);
+    assert.ok(Math.abs(empty.titleAir - air) < 0.5, `air before the title when the slot is empty: ${empty.titleAir}`);
+    for (const r of [empty, mark]) {
+      assert.ok(Math.abs(r.endAir - air) < 0.5, `air after the ⋯ glyph: ${r.endAir}`);
+      assert.ok(r.startClear >= 2 - 0.01 && r.endClear >= 2 - 0.01, `the fill stays 2px clear of the screen edge (${r.startClear}, ${r.endClear})`);
+      assert.ok(r.withinClip, "the swipe clip holds the whole fill");
+    }
+    assert.ok(Math.abs(empty.titleStart - mark.titleStart) < 0.5, "the title never moves");
+  });
+}

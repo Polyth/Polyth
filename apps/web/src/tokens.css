@@ -184,6 +184,14 @@
   --composer-stack-control: 26px;
   --composer-stack-reach: calc(max(var(--composer-stack-row), var(--hit-min)) - var(--composer-stack-row));
 
+  /* Navigator highlight pill: the air between a pill's edge and the content
+     it frames (state mark or title at the start, the last mark at the end),
+     the same on both sides. Desktop pills grow outward into the list gutters
+     to reach it, so no title or mark moves; 10px is the most the trailing
+     side affords (8px gutter, marks 4px inside the row, 2px kept clear of
+     the scrollbar). The phone row fill reaches it within its own edge. */
+  --nav-pill-air: 10px;
+
   /* icon size scale (UI action glyphs) */
   --icon-sm: 16px;
   --icon-md: 18px;

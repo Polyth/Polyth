@@ -717,6 +717,9 @@
   --agent-nav-gap: var(--session-lead-gap, 6px);
   --agent-nav-row: var(--nav-row-session, 34px);
   --agent-nav-pill: var(--session-pill-inset, 6px);
+  /* Where the pill ends past the row box: the chat rows' end, so a column of
+     chat and agent pills shares both edges. */
+  --agent-nav-pill-end: var(--session-pill-end, 0px);
   --agent-nav-menu: var(--session-menu-size, 28px);
   --agent-nav-size: var(--nav-session-size, var(--font-label));
   /* A state mark or glyph, centred in the leading column. */
@@ -740,6 +743,7 @@
   --agent-nav-mark: var(--nav-status-slot, 18px);
   --agent-nav-hit: 0px;
   --agent-nav-pill: 0px;
+  --agent-nav-pill-end: 0px;
   --agent-nav-menu: var(--tap);
   /* ⋯ draws the chat rows' press circle, inset from the row's end so its
      glyph lands on the navigator's end axis. */
@@ -784,7 +788,7 @@
   min-width: 0;
   min-height: max(calc(var(--agent-nav-row) - 4px), var(--agent-nav-hit));
   padding-block: 0;
-  padding-inline: var(--agent-nav-indent) 4px;
+  padding-inline: var(--agent-nav-indent) var(--nav-trailing-inset, 4px);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -802,7 +806,7 @@
   position: absolute;
   z-index: -1;
   inset-block: 2px;
-  inset-inline: calc(var(--agent-nav-indent) - var(--agent-nav-pill)) 0;
+  inset-inline: calc(var(--agent-nav-indent) - var(--agent-nav-pill)) var(--agent-nav-pill-end);
   border-radius: var(--radius-control);
   opacity: 0;
   transition: opacity var(--motion-fast) var(--motion-ease);
@@ -910,7 +914,7 @@
   width: 100%;
   min-height: max(var(--agent-nav-row), var(--agent-nav-hit));
   padding-block: 0;
-  padding-inline: var(--agent-nav-indent) 4px;
+  padding-inline: var(--agent-nav-indent) var(--nav-trailing-inset, 4px);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -927,7 +931,7 @@
   position: absolute;
   z-index: -1;
   inset-block: 2px;
-  inset-inline: calc(var(--agent-nav-indent) - var(--agent-nav-pill)) 0;
+  inset-inline: calc(var(--agent-nav-indent) - var(--agent-nav-pill)) var(--agent-nav-pill-end);
   border-radius: var(--radius-control);
   opacity: 0;
   pointer-events: none;
@@ -940,9 +944,8 @@
   }
 }
 /* The current row: its page is the one in place of Chat. */
+/* Same extent as the hover pill; only the paint differs. */
 .agent-nav .agent-nav-row.active .agent-nav-btn::before {
-  inset-block: 0;
-  inset-inline-end: -2px;
   background: var(--material-glass);
   opacity: 1;
 }

@@ -225,7 +225,11 @@ test("navigator CSS: one grid, the search field follows corner rounding, labels 
     "the glass theme no longer forces the navigator search into a capsule");
   assert.match(glass, /\.sidebar-search \{ border-radius: var\(--radius-card\); \}/);
   const row = styles.match(/\.sidebar-nav-row \{[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.match(row, /padding: 0 10px 0 var\(--nav-glyph-inset\);/, "glyph at the inset, trailing hint 10px inside");
+  // The row's box is its pill: it reaches the shared outsets into the gutters
+  // and pads them back (logical, so RTL mirrors), glyph at the inset.
+  assert.match(row, /width: calc\(100% \+ var\(--nav-pill-outset-start\) \+ var\(--nav-pill-outset-end\)\);/);
+  assert.match(row, /margin-inline: calc\(-1 \* var\(--nav-pill-outset-start\)\) calc\(-1 \* var\(--nav-pill-outset-end\)\);/);
+  assert.match(row, /padding-inline: calc\(var\(--nav-glyph-inset\) \+ var\(--nav-pill-outset-start\)\) calc\(var\(--nav-row-end\) \+ var\(--nav-pill-outset-end\)\);/, "glyph at the inset, trailing hint 10px inside the row box");
   assert.match(row, /line-height: 1\.385;/, "18px line at 13px");
   assert.match(styles, /\.sidebar-nav-glyph \{[\s\S]*?width: calc\(var\(--nav-text-inset\) - var\(--nav-glyph-inset\)\);/,
     "labels start on the text axis");

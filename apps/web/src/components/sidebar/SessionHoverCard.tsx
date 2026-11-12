@@ -3,6 +3,8 @@ import { Icon } from "../../icons.tsx";
 import { Tooltip } from "../ui/index.ts";
 import "./SessionHoverCard.css";
 import { tr } from "../../i18n/index.ts";
+import type { FilterRepository } from "../../repositoryFilter.ts";
+import { repositoryMarkLabel } from "./RepositoryFilter.tsx";
 
 export interface SessionHoverCardProps {
   title: string;
@@ -10,6 +12,8 @@ export interface SessionHoverCardProps {
   branch?: string | null;
   path?: string | null;
   isolated?: boolean;
+  /** A subset session's repositories, in chip order. */
+  repositories?: readonly FilterRepository[];
   /** Current row state, spelled out (the row itself shows only a mark). */
   status?: { label: string; tone: string };
   children: ReactNode;
@@ -25,6 +29,7 @@ export default function SessionHoverCard({
   branch,
   path,
   isolated = false,
+  repositories,
   status,
   children,
 }: SessionHoverCardProps) {
@@ -51,6 +56,16 @@ export default function SessionHoverCard({
               <div className="session-hover-card-row">
                 <span className="session-hover-card-icon"><Icon.package /></span>
                 <span className="session-hover-card-value">{project}</span>
+              </div>
+            )}
+            {repositories && repositories.length > 0 && (
+              <div className="session-hover-card-row" aria-label={repositoryMarkLabel(repositories)}>
+                <span className="session-hover-card-icon session-hover-card-repositories" aria-hidden="true">
+                  {repositories.slice(0, 3).map((repository) => (
+                    <span key={repository.id} className="repository-dot" data-repository-tone={repository.tone} />
+                  ))}
+                </span>
+                <span className="session-hover-card-value">{repositories.map((repository) => repository.alias).join(" + ")}</span>
               </div>
             )}
             {branchName && (

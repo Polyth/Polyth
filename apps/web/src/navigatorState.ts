@@ -36,6 +36,9 @@ export const NAVIGATOR_ACTIONS_KEY = "polyth.sidebar.navigatorActions";
  *  with `meta.navigatorSection`): which are hidden, and which are folded under
  *  their action row (JSON object). */
 export const NAVIGATOR_SECTIONS_KEY = "polyth.sidebar.navigatorSections";
+/** Repository chip chosen per multi-repository project (JSON object of
+ *  project id → repository id; absent = All). */
+export const REPOSITORY_FILTER_KEY = "polyth.sidebar.repositoryFilter";
 
 export type NavigatorStateKey =
   | typeof EXPANDED_PROJECTS_KEY
@@ -45,7 +48,8 @@ export type NavigatorStateKey =
   | typeof PROJECT_ORDER_KEY
   | typeof MOBILE_RAIL_MAP_KEY
   | typeof NAVIGATOR_ACTIONS_KEY
-  | typeof NAVIGATOR_SECTIONS_KEY;
+  | typeof NAVIGATOR_SECTIONS_KEY
+  | typeof REPOSITORY_FILTER_KEY;
 
 const RECORD_KIND: Record<NavigatorStateKey, string> = {
   [EXPANDED_PROJECTS_KEY]: "navigator-open-projects",
@@ -56,6 +60,7 @@ const RECORD_KIND: Record<NavigatorStateKey, string> = {
   [MOBILE_RAIL_MAP_KEY]: "mobile-composer-rail",
   [NAVIGATOR_ACTIONS_KEY]: "navigator-actions",
   [NAVIGATOR_SECTIONS_KEY]: "navigator-sections",
+  [REPOSITORY_FILTER_KEY]: "navigator-repository-filter",
 };
 const KEYS = Object.keys(RECORD_KIND) as NavigatorStateKey[];
 

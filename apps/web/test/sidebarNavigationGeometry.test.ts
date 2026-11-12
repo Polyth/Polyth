@@ -18,7 +18,7 @@ test("session rows reserve one status zone and expose an aligned action menu", a
   // identity icons share one trailing edge).
   const body = row.indexOf('<span className="session-row-body">');
   const lead = row.indexOf('<span className="session-lead"', body);
-  const leadStatus = row.indexOf("<LeadStatus status={rowStatus} opening={opening} />", lead);
+  const leadStatus = row.indexOf("<LeadMark mark={leadMark} />", lead);
   const title = row.indexOf('<span className="session-title">', lead);
   const titleText = row.indexOf('className="session-title-text"', title);
   const disclosure = row.indexOf('className="session-subagent-toggle"', titleText);
@@ -76,12 +76,13 @@ test("sidebar geometry links worktree and session type while density controls ro
     "session counters scale proportionally with the title size");
   assert.doesNotMatch(css, /\.project-card\.active::before/,
     "the active project does not receive a row highlight");
-  assert.match(css, /\.session-row\.active \.session-btn::before\s*\{[\s\S]*?inset-block:\s*0;[\s\S]*?inset-inline:\s*calc\(var\(--session-body-start\) - var\(--session-pill-inset\)\) -2px;/,
-    "the active session highlight is taller and wider than its hover surface");
-  // Horizontal rhythm (one grid with the header rows): the pill starts at the
-  // row box, the state mark one glyph inset in and the title on the text
-  // axis. Children, rename text and "show more" all share the title axis.
-  assert.match(css, /\.session-org,\s*\.private-room-row,\s*\.private-room-chats,[^{]*?\.sidebar-nav-section\s*\{[\s\S]*?--session-lead-gap:\s*calc\(var\(--nav-text-inset\) - var\(--nav-glyph-inset\) - var\(--session-lead-size\)\);[\s\S]*?--session-pill-inset:\s*var\(--nav-glyph-inset\);/);
+  assert.doesNotMatch(css, /\.session-row\.active \.session-btn::before\s*\{[^}]*inset/,
+    "the current row's pill has the hover pill's extent; only its paint differs");
+  // Horizontal rhythm (one grid with the header rows): the state mark one
+  // glyph inset in and the title on the text axis; the pill keeps
+  // --nav-pill-air before the mark and after the trailing marks.
+  // Children, rename text and "show more" all share the title axis.
+  assert.match(css, /\.session-org,\s*\.private-room-row,\s*\.private-room-chats,[^{]*?\.sidebar-nav-section\s*\{[\s\S]*?--session-lead-gap:\s*calc\(var\(--nav-text-inset\) - var\(--nav-glyph-inset\) - var\(--session-lead-size\)\);[\s\S]*?--session-pill-inset:\s*var\(--nav-pill-air\);\s*--session-pill-end:\s*calc\(var\(--nav-trailing-inset\) - var\(--nav-pill-air\)\);/);
   assert.match(css, /\.session-row\s*\{[\s\S]*?--session-body-start:\s*var\(--nav-session-row-indent, var\(--nav-indent-session\)\);/);
   assert.match(css, /\.session-subagent-children\s*\{[\s\S]*?--nav-session-row-indent:\s*calc\(var\(--nav-indent-session\) \+ var\(--session-lead-size\) \+ var\(--session-lead-gap\)\);/,
     "a child's state mark sits under its parent's title");
@@ -93,8 +94,13 @@ test("sidebar geometry links worktree and session type while density controls ro
   // A day caption labels the group beneath it: the gap above is density air,
   // the gap below is a hairline, so a chat cannot read as the next day's.
   assert.match(css, /\.session-date-divider\s*\{[\s\S]*?padding:\s*calc\(var\(--space-2\) \* var\(--density-scale\)\) var\(--space-2\) 1px;/, "a date heading sits closer to its own day than to the one above");
-  assert.match(css, /\.session-row-body\s*\{[\s\S]*?padding-inline:\s*var\(--session-body-start\) 10px;/,
-    "row geometry is logical so RTL mirrors it; trailing meta ends 10px inside the row, like the header rows");
+  assert.match(css, /\.session-row-body\s*\{[\s\S]*?padding-inline:\s*var\(--session-body-start\) var\(--nav-trailing-inset, 4px\);/,
+    "row geometry is logical so RTL mirrors it; trailing meta ends on the navigator's shared trailing axis");
+  assert.match(css, /--nav-trailing-inset:\s*4px;/, "one trailing inset for chat and agent rows");
+  // The never-scrolling header block (agent rows live there) reserves the same
+  // scrollbar gutter as the scrolling chat list, so the trailing axes cannot drift.
+  assert.match(css, /\.sidebar-nav-block\s*\{[\s\S]*?overflow-y:\s*hidden;\s*scrollbar-gutter:\s*stable;/);
+  assert.match(css, /\.sidebar-nav-block \+ \.side-scroll\s*\{[^}]*scrollbar-gutter:\s*stable;/);
   // The ⋯ trigger never paints over the title or the subagent disclosure:
   // whenever it is shown it takes its own trailing slot.
   assert.match(css, /--session-menu-slot:\s*calc\(2px \+ var\(--session-menu-size\)\);/);
@@ -150,4 +156,46 @@ test("search results are flat and retain project and worktree context", async ()
   assert.match(sessions, /className="session-org session-search-mode"/);
   assert.match(sessions, /`\$\{searchProjectName\} · \$\{worktreeNameForSession\(session\)\}`/);
   assert.match(sessions, /className="session-search-context"/);
+});
+
+test("the highlight pill hugs the title when the state column is empty, and a resting pin fills that column", async () => {
+  const [styles, fluent, macos, liquid, looks, sessions, lead] = await Promise.all([
+    source("../src/styles.css"),
+    source("../src/fluentTheme.css"),
+    source("../src/macosTheme.css"),
+    source("../src/liquidGlassTheme.css"),
+    source("../src/shellLooks.css"),
+    source("../src/components/sidebar/SessionList.tsx"),
+    source("../src/sessionLead.ts"),
+  ]);
+  // One start variable: --session-pill-inset before the state mark, or the
+  // same inset before the title when the column shows nothing.
+  assert.match(styles, /\.session-row\s*\{[^}]*--session-pill-start:\s*calc\(var\(--session-body-start\) - var\(--session-pill-inset\)\);/);
+  assert.match(styles, /\.session-row\[data-lead="empty"\]\s*\{\s*--session-pill-start:\s*calc\(var\(--session-title-start\) - var\(--session-pill-inset\)\);\s*\}/);
+  // Hover, press, focus, selection and the pinned fill share one extent.
+  assert.match(styles, /\.session-btn::before\s*\{\s*inset-inline:\s*var\(--session-pill-start\) var\(--session-pill-end, 0px\);[^}]*inset-inline-start var\(--motion-fast\) var\(--motion-ease\);/);
+  assert.match(styles, /\.session-btn:focus-visible::before\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\);[^}]*outline-offset:\s*-2px;/,
+    "keyboard focus rings the pill, not the row box");
+  assert.doesNotMatch(styles, /\.session-btn::before\s*\{[^}]*inset-inline:\s*calc\(var\(--session-body-start\)/,
+    "no rule pins the pill to the state column directly");
+  // The global reduced-motion and reduce-animations rules switch the slide off.
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\*, \*::before, \*::after\s*\{\s*transition: none !important;/);
+  assert.match(styles, /html\[data-reduce-animations="true"\], body\[data-desktop-low-resource="true"\]\) \*::before,[^{]*\{[^}]*transition: none !important;/);
+  // OS styles and looks restyle the pill's paint, never its start; Fluent's
+  // accent bar follows the same start.
+  assert.match(fluent, /\.session-row\.active \.session-btn::after\s*\{[^}]*inset-inline-start:\s*var\(--session-pill-start\);/);
+  for (const css of [fluent, macos, liquid, looks]) {
+    assert.doesNotMatch(css, /\.session-btn::before\s*\{[^}]*inset/, "a theme never moves the pill start");
+  }
+  // The pin is a state-column mark, quiet accent; looks keep it in quiet ink.
+  assert.match(styles, /\.session-lead-pin\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*color:\s*color-mix\(in oklab, var\(--accent\) 65%, var\(--muted\)\);/);
+  // Sized like the old trailing pin, centred in the column: quieter than a live mark.
+  assert.match(styles, /\.session-lead-pin svg\s*\{\s*width:\s*calc\(var\(--icon-sm\) - 3px\);\s*height:\s*calc\(var\(--icon-sm\) - 3px\);\s*\}/);
+  assert.match(looks, /:is\(\.session-pinned-divider, \.session-lead-pin, \.mobile-nav-lead-pin\)\s*\{\s*color:\s*var\(--look-ink-quiet\);/);
+  assert.doesNotMatch(styles, /\.session-pin-icon/);
+  assert.doesNotMatch(sessions, /session-pin-icon/, "the trailing pin is gone");
+  // data-lead comes from the same decision that renders the mark.
+  assert.match(sessions, /data-lead=\{sessionLeadState\(leadMark, selectMode\)\}/);
+  assert.match(sessions, /<LeadMark mark=\{leadMark\} \/>/);
+  assert.match(lead, /default:\s*return pinned \? "pin" : null;/, "a pin only shows when no live state does");
 });

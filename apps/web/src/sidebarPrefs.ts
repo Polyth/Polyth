@@ -9,6 +9,7 @@ import {
   PROJECT_ORDER_KEY,
   PROJECT_SORT_KEY,
   readNavigatorState,
+  REPOSITORY_FILTER_KEY,
   SESSION_VISIBLE_COUNTS_KEY,
   subscribeNavigatorStateHydrated,
   writeNavigatorState,
@@ -17,7 +18,7 @@ import { sessionActivityAt, sessionDateGroupLabel, sessionDateInputValue } from 
 import { sessionDraftLine } from "./sessionDraft.ts";
 import { resolveSessionStatus } from "./sessionStatus.ts";
 
-export { PROJECT_ORDER_KEY, PROJECT_SORT_KEY, SESSION_VISIBLE_COUNTS_KEY };
+export { PROJECT_ORDER_KEY, PROJECT_SORT_KEY, REPOSITORY_FILTER_KEY, SESSION_VISIBLE_COUNTS_KEY };
 
 export const GROUPING_KEY = "polyth.sidebar.groupingMode";
 
@@ -619,6 +620,76 @@ export function permuteManualProjects(ordered: readonly string[], shown: readonl
   const next = shown.filter((id) => ordered.includes(id));
   let cursor = 0;
   return ordered.map((id) => (visible.has(id) ? next[cursor++] ?? id : id));
+}
+
+// ---- per-project repository chip (multi-repository projects) -----------------
+// Which repository a project's session list is narrowed to. A pure device
+// preference (navigatorState.ts): never history, never synced. An absent entry
+// is "All". Whether the stored id is still a registration of the project is the
+// reader's check (repositoryFilter.ts), which clears an entry that no longer is.
+
+const REPOSITORY_FILTER_PROJECTS_MAX = 500;
+const REPOSITORY_FILTER_ID_MAX = 200;
+
+function parseRepositoryFilters(raw: string | null): Readonly<Record<string, string>> {
+  try {
+    const value = JSON.parse(raw ?? "null") as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const filters: Record<string, string> = {};
+    for (const [projectId, repositoryId] of Object.entries(value).slice(0, REPOSITORY_FILTER_PROJECTS_MAX)) {
+      if (!projectId || typeof repositoryId !== "string" || !repositoryId || repositoryId.length > REPOSITORY_FILTER_ID_MAX) continue;
+      filters[projectId] = repositoryId;
+    }
+    return filters;
+  } catch {
+    return {};
+  }
+}
+
+let storedRepositoryFilters = parseRepositoryFilters(readNavigatorState(REPOSITORY_FILTER_KEY));
+const repositoryFilterListeners = new Set<() => void>();
+subscribeNavigatorStateHydrated(() => {
+  storedRepositoryFilters = parseRepositoryFilters(readNavigatorState(REPOSITORY_FILTER_KEY));
+  for (const l of [...repositoryFilterListeners]) l();
+});
+
+/** The stored repository chip of a project; undefined means All. */
+export function getRepositoryFilter(projectId: string): string | undefined {
+  return storedRepositoryFilters[projectId];
+}
+
+/** Choose a project's repository chip; undefined goes back to All. */
+export function setRepositoryFilter(projectId: string, repositoryId: string | undefined): void {
+  if (storedRepositoryFilters[projectId] === repositoryId) return;
+  const next = { ...storedRepositoryFilters };
+  if (repositoryId === undefined || !repositoryId || repositoryId.length > REPOSITORY_FILTER_ID_MAX) delete next[projectId];
+  else next[projectId] = repositoryId;
+  storedRepositoryFilters = next;
+  writeNavigatorState(REPOSITORY_FILTER_KEY, JSON.stringify(next));
+  for (const l of [...repositoryFilterListeners]) l();
+}
+
+/** Every project's stored chip (project id → repository id). */
+export function useStoredRepositoryFilters(): Readonly<Record<string, string>> {
+  return useSyncExternalStore(
+    (cb) => {
+      repositoryFilterListeners.add(cb);
+      return () => { repositoryFilterListeners.delete(cb); };
+    },
+    () => storedRepositoryFilters,
+    () => storedRepositoryFilters,
+  );
+}
+
+export function useStoredRepositoryFilter(projectId: string): string | undefined {
+  return useSyncExternalStore(
+    (cb) => {
+      repositoryFilterListeners.add(cb);
+      return () => { repositoryFilterListeners.delete(cb); };
+    },
+    () => storedRepositoryFilters[projectId],
+    () => undefined,
+  );
 }
 
 // Project ids and per-project pagination stay on this device (see

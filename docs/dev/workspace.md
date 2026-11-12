@@ -70,6 +70,29 @@ base branch is sent. Single-repository Projects show no repository control.
 The Files header indicator edits an open ordinary session's membership; it is
 omitted from isolated session headers.
 
+**Repository scope in the navigator.** `sessionRepositoryScope`
+(`packages/contracts/src/workspace.ts`, browser-safe) is the one rule for
+whether a session is scoped to a subset: a snapshot with mode `all`, or no
+workspace, is the whole Project; an explicit snapshot (mode `subset`, or the
+older absent mode) is a subset of the ids it lists; given the Project's current
+registrations, a subset listing every one of them is the whole Project again.
+Summaries never carry `workspace`; they carry the derived
+`SessionProjection.repositoryScope = { repositoryIds }` (ids only, never paths,
+branches or isolation evidence), present only for a subset. Both producers
+derive it with the helper: `sessionSummary()` (WebSocket summaries) and the
+SQL listing in `packages/session` (which reads the workspace as an extra column
+and drops it). A summary row answers from `repositoryScope`, a full projection
+from `workspace`, so a stale cached workspace never outranks a newer summary.
+`SessionSummaryQuery.repositoryId` narrows a page to sessions whose subset
+includes that id (`sessionInRepositoryScope`); a delegated child follows its
+root parent (a recursive step inside the same Space and Project). The HTTP
+route accepts it only with `projectId`, at most `REPOSITORY_SCOPE_ID_MAX`
+characters, and reads the Project through the gateway-scoped service to fill
+the internal `projectRepositoryIds`; an unknown, foreign or one-repository
+Project, or an id it does not register, leaves the filter unapplied (a foreign
+Project still answers 404). The navigator chips that use it, the row mark and
+New chat under a chip are described in [ui.md](ui.md) ("Repository chips").
+
 Picking another project in that row retargets the unsent chat, it does not
 navigate (`moveNewSessionDraftToProject` in `store.ts`): the New Chat surface
 stays, the live text plus link/browser-context attachments move, and the

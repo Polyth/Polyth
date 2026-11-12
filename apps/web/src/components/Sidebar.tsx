@@ -15,6 +15,7 @@ import { useSessionSummaryPages } from "../useSessionSummaryPages.ts";
 import { useElementWidth } from "../useElementWidth.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
+import { filterRepositoriesOf, newChatOptions } from "../repositoryFilter.ts";
 import SessionDateFilterControls from "./sidebar/SessionDateFilterControls.tsx";
 import SessionSelectionBar from "./sidebar/SessionSelectionBar.tsx";
 import { useSessionArrangementEntries } from "./sidebar/sessionArrangementEntries.ts";
@@ -1234,7 +1235,7 @@ export default function Sidebar() {
         className="sidebar-rail-new-chat"
         label={tr("sidebar.newChat")}
         onClick={() => {
-          startFreshSession(project.id);
+          startFreshSession(project.id, newChatOptions(project));
           closeDrawer();
         }}
       />
@@ -1254,6 +1255,7 @@ export default function Sidebar() {
         </div>
       );
     }
+    const listOpen = effectiveViewMode === "tree" ? expandedTrees.has(p.id) : !railCollapsed || peek !== null;
     return (
       <div
         className="project-card-shell"
@@ -1262,7 +1264,7 @@ export default function Sidebar() {
         <button
           className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
           aria-current={p.id === activeProjectId ? "true" : undefined}
-          aria-expanded={effectiveViewMode === "tree" ? expandedTrees.has(p.id) : !railCollapsed || peek !== null}
+          aria-expanded={listOpen}
           aria-keyshortcuts={reorderable ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
           onContextMenu={(event) => onProjectContextMenu(event, p.id, "card")}
           onClick={(event) => {
@@ -1287,7 +1289,10 @@ export default function Sidebar() {
           <span className="project-meta">
             <span className="project-name-line">
               <span className="project-name" title={p.personal ? p.name : p.path}>{p.name || p.path}</span>
-              {(p.repositories?.length ?? 0) > 1 && <span className="project-repository-count" title={p.repositories!.map((row) => `${row.alias} · ${row.path}`).join("\n")}>{tr("sidebar.repositoryCount", { count: p.repositories!.length })}</span>}
+              {/* An open project's chip row already lists its repositories
+                  (and their paths in its tooltips), so the count shows only
+                  while the list is closed or replaced by a search. */}
+              {(p.repositories?.length ?? 0) > 1 && !(listOpen && query.trim() === "" && filterRepositoriesOf(p).length > 0) && <span className="project-repository-count" title={p.repositories!.map((row) => `${row.alias} · ${row.path}`).join("\n")}>{tr("sidebar.repositoryCount", { count: p.repositories!.length })}</span>}
             </span>
             {/* A personal project's folder is server storage, not a place the
                 person picked; its path would only be noise. */}
@@ -1301,7 +1306,7 @@ export default function Sidebar() {
             aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
             onClick={(event) => {
               event.stopPropagation();
-              startFreshSession(p.id);
+              startFreshSession(p.id, newChatOptions(p));
               closeDrawer();
             }}
           ><Icon.plus /></button>
@@ -1574,7 +1579,7 @@ export default function Sidebar() {
                     icon={ComposeIcon}
                     label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
                     className="sidebar-drawer-tool sidebar-drawer-tool-compose"
-                    onClick={() => { startFreshSession(project.id); closeDrawer(); }}
+                    onClick={() => { startFreshSession(project.id, newChatOptions(project)); closeDrawer(); }}
                   />
                 )}
                 <Menu
@@ -1699,7 +1704,7 @@ export default function Sidebar() {
               label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
               className="sidebar-new-session"
               onClick={() => {
-                startFreshSession(project.id);
+                startFreshSession(project.id, newChatOptions(project));
                 closeDrawer();
               }}
             />
@@ -1725,7 +1730,7 @@ export default function Sidebar() {
             <NavigatorNewChat
               label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
               onStart={() => {
-                startFreshSession(project.id);
+                startFreshSession(project.id, newChatOptions(project));
                 closeDrawer();
               }}
             />

@@ -19,6 +19,7 @@ import { markSessionPerformance } from "../../sessionPerformance.ts";
 import { collectSessionSummaries } from "../../sessionSummaryPages.ts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
+import { sessionLeadMark, sessionLeadState, type SessionLeadMark } from "../../sessionLead.ts";
 import { fmtSessionElapsed, fullSessionTitle } from "../../format.ts";
 import { draftTitleSource, sessionDraftMark } from "../../sessionDraft.ts";
 import { friendlyError } from "../../settings.ts";
@@ -68,19 +69,29 @@ import { childrenByParent, isNavigatorRoot, listedAncestors } from "../../sessio
 import { useSessionParentPending } from "../../sessionParents.ts";
 import { sessionActivityState, subagentActivity, subagentActivityTone, type SubagentActivity } from "../../subagentActivity.ts";
 import { SubagentCount, subagentActivityLabel } from "./SubagentCount.tsx";
+import { RepositoryFilterChips, RepositoryMark, repositoryMarkLabel } from "./RepositoryFilter.tsx";
+import {
+  filterRepositoriesOf, sessionMatchesRepositoryFilter, sessionRepositoryMark, useRepositoryFilter,
+  type FilterRepository,
+} from "../../repositoryFilter.ts";
 
 const INLINE_LABEL_LIMIT = 6;
 const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
   branch?.startsWith("polyth/isolate/") === true;
 
-/** Leading status mark. Every row reserves this one fixed slot so titles
- *  align down the list whatever the state; an idle row leaves it empty. */
-function LeadStatus({ status, opening }: { status: SessionRowStatus; opening: boolean }) {
-  if (opening) return <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />;
-  switch (status.kind) {
+/** Leading state mark. Every row reserves this one fixed slot so titles
+ *  align down the list whatever the state; an idle row leaves it empty and a
+ *  pinned one at rest shows its pin. `mark` comes from sessionLeadMark, the
+ *  same decision that sets the row's `data-lead`. */
+function LeadMark({ mark }: { mark: SessionLeadMark | null }) {
+  switch (mark) {
+    case "people":
+      return <span className="session-lead-mark people" aria-hidden="true"><UiIcon icon={PeopleIcon} size="sm" /></span>;
+    case "opening":
+      return <span className="ui-spinner ui-spinner--sm" aria-hidden="true" />;
     case "working":
     case "reconciling":
-      return <span className={`session-lead-spinner ${status.kind}`} aria-hidden="true" />;
+      return <span className={`session-lead-spinner ${mark}`} aria-hidden="true" />;
     case "needs-reply":
       return <span className="session-lead-mark reply" aria-hidden="true"><Icon.question /></span>;
     case "needs-approval":
@@ -88,13 +99,16 @@ function LeadStatus({ status, opening }: { status: SessionRowStatus; opening: bo
       return <span className="session-lead-mark approval" aria-hidden="true"><UiIcon icon={ShieldAlertIcon} size="sm" /></span>;
     case "failed":
     case "epoch-pending":
-      return <span className={`session-lead-mark ${status.kind}`} aria-hidden="true">!</span>;
+      return <span className={`session-lead-mark ${mark}`} aria-hidden="true">!</span>;
     case "unknown":
       return <span className="session-lead-mark unknown" aria-hidden="true">?</span>;
     case "rate-limited":
       return <span className="session-lead-mark rate-limited" aria-hidden="true"><UiIcon icon={TimerIcon} size="sm" /></span>;
     case "unread":
       return <span className="session-lead-dot" aria-hidden="true" />;
+    case "pin":
+      // Decorative: the row's description names the pin (see pinnedId).
+      return <span className="session-lead-pin" aria-hidden="true"><Icon.pin /></span>;
     default:
       return null;
   }
@@ -175,14 +189,19 @@ interface RowProps {
   shiftQuick: boolean;
   /** Present when this session has delegated children in the list. */
   subagents?: SubagentDisclosure;
+  /** A subset session's repositories (absent for a whole-project session);
+   *  `active` is the chip the list is narrowed to, if any. */
+  repositoryMark?: { repositories: FilterRepository[]; active?: string };
 }
 
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin,
-  projectName, branch, workspacePath, contextLabel, pinnedWorktreeLabel, shiftQuick, subagents,
+  projectName, branch, workspacePath, contextLabel, pinnedWorktreeLabel, shiftQuick, subagents, repositoryMark,
 }: RowProps) {
   const statusId = useId();
+  const repositoryMarkId = useId();
+  const pinnedId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   const [labelQuery, setLabelQuery] = useState("");
@@ -375,6 +394,9 @@ function SessionRow({
   const draftMark = sessionDraftMark(s, s.id === activeSessionId);
   const draftLabel = tr("sidebar.sessionlist.draft");
   const leadDescription = conversation ? undefined : statusDescription(rowStatus, opening);
+  // One decision for the state column's mark and the row's data-lead flag.
+  const leadMark = sessionLeadMark({ status: rowStatus, opening, conversation, pinned: s.pinned !== undefined });
+  const pinnedLabel = tr("sidebar.sessionlist.pinnedChats");
   const actionsLabel = tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") });
   const checkedLabels = s.labelIds ?? [];
   const normalizedLabelQuery = labelQuery.trim().toLocaleLowerCase(getLocale());
@@ -469,6 +491,7 @@ function SessionRow({
       className={`session-row ${rowStatus.kind}${draftMark ? " draft" : ""}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${s.pinned ? " pinned" : ""}${menuOpen ? " menu-open" : ""}${shiftQuick && !renaming ? " shift-quick" : ""}${selectMode ? " selecting" : ""}${subagents ? " has-subagents" : ""}${subagents?.expanded ? " subagents-open" : ""}`}
       style={swipeX === null ? undefined : { "--session-swipe-x": `${swipeX}px` } as CSSProperties}
       data-swipe={swipeX !== null ? "dragging" : swipeRevealed ? "revealed" : "closed"}
+      data-lead={sessionLeadState(leadMark, selectMode)}
       onPointerDown={startSwipe}
       onPointerMove={moveSwipe}
       onPointerUp={finishSwipe}
@@ -502,12 +525,13 @@ function SessionRow({
           branch={branch}
           path={workspacePath}
           isolated={isIsolatedSession(s)}
+          repositories={repositoryMark?.repositories}
           {...(leadDescription ? { status: { label: leadDescription, tone: opening ? "working" as const : rowStatus.kind } } : {})}
         >
           <button
             ref={sessionBtnRef}
             className="session-btn"
-            aria-describedby={leadDescription ? statusId : undefined}
+            aria-describedby={[leadDescription ? statusId : "", s.pinned ? pinnedId : "", repositoryMark ? repositoryMarkId : ""].filter(Boolean).join(" ") || undefined}
             aria-current={s.id === activeSessionId ? "true" : undefined}
             aria-expanded={swipeRevealed}
             aria-busy={opening || undefined}
@@ -585,11 +609,11 @@ function SessionRow({
         <span className="session-row-body">
           <span className="session-lead" id={statusId}>
             {leadDescription && <span className="sr-only">{leadDescription}</span>}
-            {/* A conversation has no agent state: the slot names its kind. */}
-            {conversation
-              ? <span className="session-lead-mark people" aria-hidden="true"><UiIcon icon={PeopleIcon} size="sm" /></span>
-              : <LeadStatus status={rowStatus} opening={opening} />}
+            <LeadMark mark={leadMark} />
           </span>
+          {/* Pinned-ness is named here whatever the state column shows, since
+              live state hides the lead pin. */}
+          {s.pinned && <span className="sr-only" id={pinnedId}>{pinnedLabel}</span>}
           <span className="session-title">
             <span className="session-title-text">{displayTitle}</span>
             {subagents && (
@@ -619,6 +643,9 @@ function SessionRow({
                 {pinnedWorktreeLabel.length <= 12 && <span>{pinnedWorktreeLabel}</span>}
               </span>
             )}
+            {repositoryMark && (
+              <RepositoryMark id={repositoryMarkId} repositories={repositoryMark.repositories} active={repositoryMark.active} />
+            )}
             {!conversation && <ElapsedBadge status={rowStatus} />}
             {draftMark && <span aria-hidden="true" className="session-draft-slot"><Badge tone="accent" className="session-draft-mark">{draftLabel}</Badge></span>}
             <span className="session-identity">
@@ -647,13 +674,6 @@ function SessionRow({
                   <UiIcon icon={SharedIcon} size="sm" />
                 </span>
               )}
-              {s.pinned && (
-                <span
-                  className="session-pin-icon"
-                  title={tr("sidebar.sessionlist.pinnedChats")}
-                  aria-label={tr("sidebar.sessionlist.pinnedChats")}
-                ><Icon.pin /></span>
-              )}
             </span>
           </span>
         </span>
@@ -661,7 +681,7 @@ function SessionRow({
       {!renaming && (
         <Menu
           label={actionsLabel}
-          title={pinnedWorktreeLabel ? `${displayTitle} · ${pinnedWorktreeLabel}` : displayTitle}
+          title={[displayTitle, pinnedWorktreeLabel, repositoryMark ? repositoryMarkLabel(repositoryMark.repositories) : ""].filter(Boolean).join(" · ")}
           align="end"
           open={menuOpen}
           onOpenChange={setMenuOpen}
@@ -806,6 +826,12 @@ export default function SessionList({
     [sessionsRaw, pendingSends, activeSessionId],
   );
   const project = useStore((st) => st.projectRegistry.projects.find((candidate) => candidate.id === projectId));
+  // Repository chips: a multi-repository project's list can be narrowed to the
+  // chats scoped to one repository (repositoryFilter.ts).
+  const filterRepositories = useMemo(() => filterRepositoriesOf(project), [project]);
+  const storedRepositoryFilter = useRepositoryFilter(projectId, project);
+  const activeRepository = filterRepositories.length > 0 ? storedRepositoryFilter : undefined;
+  const projectRepositoryIds = useMemo(() => filterRepositories.map((repository) => repository.id), [filterRepositories]);
   const openingSessionId = useStore((st) => st.openingSessionId);
   // Narrow subscription: rows only need each session's derived title (its
   // first user message). Selecting the whole events map re-rendered the whole
@@ -850,8 +876,10 @@ export default function SessionList({
     return { projectId, query: query || undefined, attentionOnly, archived: false,
       ...(from ? { fromTime: new Date(`${from}T00:00:00`).getTime() } : {}),
       ...(to ? { toTime: new Date(`${to}T23:59:59.999`).getTime() } : {}),
+      // The server applies the chip too, so a page is never mostly hidden rows.
+      ...(activeRepository ? { repositoryId: activeRepository } : {}),
     };
-  }, [projectId, query, attentionOnly, dateFilter]);
+  }, [projectId, query, attentionOnly, dateFilter, activeRepository]);
   const pages = useSessionSummaryPages(summaryQuery);
   const [visibleCounts, setVisibleCounts] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
@@ -909,12 +937,17 @@ export default function SessionList({
       .sort(compareSessionNavigation),
     [laneSessions, projectId],
   );
+  const projectSessionsById = useMemo(
+    () => new Map(projectSessions.map((session) => [session.id, session])),
+    [projectSessions],
+  );
   const needle = query.trim().toLowerCase();
   const matchesFilters = (session: SessionProjection) => {
     if (
       needle
       && !`${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle)
     ) return false;
+    if (activeRepository && !sessionMatchesRepositoryFilter(session, activeRepository, projectRepositoryIds, projectSessionsById)) return false;
     if (!sessionMatchesDateFilter(session, dateFilter)) return false;
     if (!attentionOnly) return true;
     return session.status === "working"
@@ -1022,7 +1055,7 @@ export default function SessionList({
   const mainSessions = visibleByWorktree.get(SESSION_MAIN_WORKTREE_KEY) ?? [];
   const allMainSessions = allByWorktree.get(SESSION_MAIN_WORKTREE_KEY) ?? [];
   const knownWorktreePaths = new Set(worktrees.filter((worktree) => !worktree.isMain).map((worktree) => worktree.path));
-  const worktreeGroups = [
+  const allWorktreeGroups = [
     ...worktrees.filter((worktree) => !worktree.isMain).map((worktree) => ({
       key: worktree.path,
       label: worktree.branch || worktreeLabel(null, worktree.path),
@@ -1040,6 +1073,11 @@ export default function SessionList({
         worktree: null,
       })),
   ];
+  // Narrowed to one repository, a linked worktree without a matching chat
+  // would only be an empty heading.
+  const worktreeGroups = activeRepository
+    ? allWorktreeGroups.filter((group) => group.allSessions.length > 0)
+    : allWorktreeGroups;
 
   const togglePin = async (session: SessionProjection) => {
     try {
@@ -1070,6 +1108,7 @@ export default function SessionList({
     const checkout = s.worktreePath
       ? worktrees.find((worktree) => worktree.path === s.worktreePath)
       : mainWorktree;
+    const markedRepositories = sessionRepositoryMark(s, filterRepositories);
     return (
       <SessionRow
         key={s.id}
@@ -1095,9 +1134,13 @@ export default function SessionList({
         pinnedWorktreeLabel={pinnedWorktreeLabel}
         shiftQuick={shiftQuick}
         subagents={subagents}
+        repositoryMark={markedRepositories ? { repositories: markedRepositories, active: activeRepository } : undefined}
       />
     );
   };
+  const repositoryChips = filterRepositories.length > 0 && (
+    <RepositoryFilterChips projectId={projectId} repositories={filterRepositories} active={activeRepository} />
+  );
 
   const worktreeNameForSession = (session: SessionProjection): string => {
     const key = worktreeKey(session);
@@ -1222,6 +1265,8 @@ export default function SessionList({
     );
     return (
       <div className="session-org session-search-mode">
+        {/* A search keeps a chosen chip, so it stays in sight to undo. */}
+        {activeRepository && repositoryChips}
         {pinnedResults.length > 0 && (
           <div className="session-pinned" aria-label={tr("sidebar.sessionlist.pinnedChats")}>
             <div className="session-date-divider session-pinned-divider" role="separator">
@@ -1239,6 +1284,7 @@ export default function SessionList({
 
   return (
     <div className="session-org">
+      {repositoryChips}
       <SlotHost
         slot="sidebar.project.leading"
         {...(leadingExclude ? { exclude: leadingExclude } : {})}
