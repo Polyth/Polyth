@@ -126,6 +126,7 @@ export function appendToNotebook(
 export const REPORT_INSTRUCTIONS = [
   "Finish your final message with one line:",
   "Report: quiet|update|alert — <headline, under 12 words>",
+  "The headline is shown above your message, so do not open the message by restating it: start with what follows from it.",
   "- quiet: nothing new that deserves the user's time; the run is filed silently.",
   "- update: a result worth reading.",
   "- alert: something needs the user's attention soon.",
@@ -134,4 +135,4 @@ export const REPORT_INSTRUCTIONS = [
 
 /** The same protocol, as a reminder in a continuing session. */
 export const REPORT_REMINDER =
-  "Finish with \"Report: quiet|update|alert — <headline>\"; add \"Remember: <note>\" lines for anything later runs should know.";
+  "Finish with \"Report: quiet|update|alert — <headline>\" (shown above your message: do not restate it there); add \"Remember: <note>\" lines for anything later runs should know.";

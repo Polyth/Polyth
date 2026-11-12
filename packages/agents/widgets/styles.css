@@ -1225,6 +1225,7 @@
 .agents-page .agent-head-tabs {
   width: var(--agents-column);
   margin: var(--space-3) auto 0;
+  padding-block-end: var(--space-1);
 }
 .agents-page .agent-head-tabs .ui-tabs { width: max-content; max-width: 100%; }
 .agents-page .agent-tab-dirty { display: inline-flex; align-items: center; gap: var(--space-1); }
@@ -1256,8 +1257,9 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable both-edges;
-  /* The newest lines meet the dock under a soft edge, as in a chat. */
-  mask-image: linear-gradient(to bottom, transparent 0, black var(--space-4), black calc(100% - var(--space-4)), transparent 100%);
+  /* Lines leave under the header through a soft edge, well clear of its
+     tabs, and meet the dock under another, as in a chat. */
+  mask-image: linear-gradient(to bottom, transparent 0, black var(--space-6), black calc(100% - var(--space-4)), transparent 100%);
 }
 .agents-page .agent-feed-column {
   display: flex;
@@ -1267,6 +1269,8 @@
   min-height: 100%;
   margin-inline: auto;
   padding-block: var(--space-5);
+  /* A short history rests on the composer, as a chat does. */
+  justify-content: flex-end;
 }
 .agents-page .agent-feed-error {
   margin: 0;
@@ -1295,95 +1299,75 @@
   flex-direction: column;
   gap: var(--conversation-message-gap);
 }
-.agents-page .agent-day-label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  /* A day's label belongs to the day: closer to its first line. */
-  margin: 0 0 calc(var(--space-1) - var(--conversation-message-gap) / 2);
-  color: var(--faint);
-  font-size: var(--font-meta);
-  font-weight: 500;
-  line-height: 1;
-}
-.agents-page .agent-day-label::before,
-.agents-page .agent-day-label::after {
-  content: "";
-  flex: 1 1 auto;
-  height: 1px;
-  background: var(--hair);
-}
-.agents-page .agent-new {
+/* More air above a day than below it, so its words belong to what follows. */
+.agents-page .agent-day + .agent-day { margin-block-start: var(--space-4); }
+
+/* A divider in the column: a day, where a conversation begins, or both on
+   one line ("Fri, Oct 23 · new conversation — instructions changed"). Words
+   only, on the column's one start edge; its "open in Chat" waits for a
+   hover at the end. */
+.agents-page .agent-divider {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-block: calc(var(--space-2) * -1);
-  color: var(--accent);
-  font-size: var(--font-meta);
-  font-weight: 600;
-  line-height: 1;
+  min-width: 0;
 }
-.agents-page .agent-new::before {
-  content: "";
+.agents-page .agent-day > .agent-divider { margin-block-end: calc(var(--space-3) - var(--conversation-message-gap)); }
+/* A conversation that begins within a day: the same air as a new day. */
+.agents-page .agent-thread > .agent-divider { margin-block-start: var(--space-4); }
+.agents-page .agent-divider-label {
+  display: flex;
   flex: 1 1 auto;
-  height: 1px;
-  background: var(--accent-line);
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 400;
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-divider-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  text-wrap: balance;
+}
+.agents-page .agent-divider-day { color: var(--text-dim); font-weight: 600; }
+/* On touch, where "open in Chat" always shows at its end, the words never
+   run under it. */
+@media (hover: none), (pointer: coarse) {
+  .agents-page .agent-divider:has(> .agent-divider-open) { padding-inline-end: var(--hit-min); }
+}
+.agents-page .agent-divider-open {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 0;
+  translate: 0 -50%;
+}
+@media (hover: hover) and (pointer: fine) {
+  .agents-page .agent-thread-open { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+  .agents-page :is(.agent-day, .agent-thread):hover .agent-thread-open,
+  .agents-page .agent-divider:focus-within .agent-thread-open { opacity: 1; }
 }
 
-/* ---- Conversations: one spine per session ---------------------------------
+/* ---- Conversations: a ledger ------------------------------------------------
 
-   Each session the agent talked in is a conversation with a spine down its
-   start edge in the agent's colour. A conversation that begins here opens
-   with a filled cap and says why it began; one that comes back after another
-   came between opens with a hollow cap; one that simply goes on past a day
-   label has no cap at all. The agent speaks from the spine (a node per
-   report, its glyph while it works); the person answers from the other side. */
+   Each session the agent talked in is a conversation; where it begins (or
+   comes back) is said on a divider above it. No rail, no nodes: every line
+   starts on the edge the tabs and the composer share, and every time sits at
+   the column's end. The person answers from the other side, as in Chat. */
 .agents-page :is(.agent-conversation, .agent-mark) { --agent-tint: var(--muted); }
 .agents-page :is(.agent-conversation, .agent-mark)[data-color="blue"] { --agent-tint: var(--blue); }
 .agents-page :is(.agent-conversation, .agent-mark)[data-color="green"] { --agent-tint: var(--green); }
 .agents-page :is(.agent-conversation, .agent-mark)[data-color="amber"] { --agent-tint: var(--amber); }
 .agents-page :is(.agent-conversation, .agent-mark)[data-color="purple"] { --agent-tint: var(--purple); }
 .agents-page :is(.agent-conversation, .agent-mark)[data-color="red"] { --agent-tint: var(--red); }
-.agents-page .agent-conversation {
-  --spine-gutter: 36px;
-  --spine-x: 14px;
-  /* Strong enough to read as a line on light palettes, still quiet. */
-  --spine-ink: color-mix(in srgb, var(--agent-tint) 44%, transparent);
-}
 .agents-page .agent-thread {
-  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
-  padding-inline-start: var(--spine-gutter);
-}
-/* The spine is drawn piece by piece, each piece from its item down to the
-   next, so it can stop exactly where the run at work shows its glyph.
-   `:where` keeps this base below the per-piece rules after it (`:is` would
-   take its heaviest argument's weight and overrule the head's own ends,
-   doubling the translucent line where two pieces overlap). */
-.agents-page .agent-thread[data-session] :where(.agent-thread-head, .agent-thread-items > .agent-turn)::after {
-  content: "";
-  position: absolute;
-  inset-block: 0 calc(var(--conversation-message-gap) * -1);
-  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - 1px);
-  width: 2px;
-  background: var(--spine-ink);
-}
-.agents-page .agent-thread[data-session] .agent-thread-head::after {
-  inset-block: calc(var(--font-meta) * var(--font-meta-lh) / 2) calc(var(--space-2) * -1);
-}
-/* A hollow cap sits on the spine's end rather than over its line. */
-.agents-page .agent-thread[data-session] .agent-thread-head:is([data-opening="resume"], [data-opening="upcoming"])::after {
-  inset-block-start: calc(var(--font-meta) * var(--font-meta-lh) / 2 + 5px);
-}
-.agents-page .agent-thread[data-session] .agent-thread-items > .agent-turn:last-child::after { inset-block-end: var(--space-1); }
-.agents-page .agent-thread[data-session] .agent-thread-items > .agent-live::after { content: none; }
-/* Going on from the day before: the spine comes in from above. */
-.agents-page .agent-thread[data-session][data-opening="continued"] .agent-thread-items > .agent-turn:first-child::after {
-  inset-block-start: calc(var(--space-5) * -1);
-  mask-image: linear-gradient(to bottom, transparent, black var(--space-5));
 }
 .agents-page .agent-thread-items {
   display: flex;
@@ -1395,61 +1379,8 @@
   list-style: none;
 }
 .agents-page .agent-turn { position: relative; min-width: 0; }
-
-.agents-page .agent-thread-head {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: var(--space-2);
-  min-width: 0;
-  min-height: calc(var(--font-meta) * var(--font-meta-lh));
-  color: var(--faint);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
-.agents-page .agent-thread-title { color: var(--text-dim); font-weight: 600; }
-.agents-page .agent-thread-detail { min-width: 0; font-variant-numeric: tabular-nums; }
-.agents-page .agent-thread-title + .agent-thread-detail::before { content: "·"; margin-inline-end: var(--space-2); }
-.agents-page .agent-thread-open { margin-block: calc(var(--space-1) * -1); margin-inline-start: auto; }
-.agents-page .agent-spine-cap {
-  position: absolute;
-  z-index: 1;
-  inset-block-start: calc(var(--font-meta) * var(--font-meta-lh) / 2 - 5px);
-  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - 5px);
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--agent-tint);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-tint) 16%, transparent);
-}
-.agents-page .agent-thread-head:is([data-opening="resume"], [data-opening="upcoming"]) .agent-spine-cap {
-  background: transparent;
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--agent-tint) 62%, transparent);
-}
-.agents-page .agent-thread-head[data-opening="upcoming"] .agent-spine-cap { opacity: .7; }
-/* Actions on a conversation's head: shown on hover or focus with a mouse,
-   always on touch. */
-@media (hover: hover) and (pointer: fine) {
-  .agents-page .agent-thread-open { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
-  .agents-page .agent-thread:hover .agent-thread-open,
-  .agents-page .agent-thread-head:focus-within .agent-thread-open { opacity: 1; }
-}
-
-/* A report's node on the spine, level with its first line. */
-.agents-page .agent-spine-node {
-  position: absolute;
-  z-index: 1;
-  inset-block-start: calc(var(--font-meta) * var(--font-meta-lh) / 2 - 3px);
-  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - 3px);
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--agent-tint) 70%, var(--muted));
-}
-.agents-page .agent-report[data-signal="alert"] .agent-spine-node { background: var(--amber); }
-.agents-page .agent-report[data-signal="failed"] .agent-spine-node { background: var(--red); }
-.agents-page .agent-thread .agent-new { margin-block: calc(var(--space-2) * -1); }
+/* Where the page opens: no rule and no word on screen, and no gap of its own. */
+.agents-page .agent-new { height: 0; margin-block-end: calc(var(--conversation-message-gap) * -1); }
 
 /* ---- The agent's mark: its glyph on a round tile; an arc while it works ---- */
 .agents-page .agent-mark,
@@ -1506,17 +1437,15 @@
 .agent-nav .agent-nav-lead .agent-mark .ui-icon { width: calc(var(--agent-nav-mark) * .7); height: calc(var(--agent-nav-mark) * .7); }
 
 /* ---- The run at work, at the end of its conversation ------------------------ */
+/* Its glyph on the column's start edge, the words beside it. */
 .agents-page .agent-live {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--space-3);
   min-height: 28px;
 }
-.agents-page .agent-live-mark {
-  --live-mark: 28px;
-  position: absolute;
-  inset-block-start: 0;
-  inset-inline-start: calc(var(--spine-x) - var(--spine-gutter) - var(--live-mark) / 2);
-}
+.agents-page .agent-live-mark { --live-mark: 24px; display: grid; padding-block-start: 1px; }
 .agents-page .agent-live-mark .agent-mark { --mark: var(--live-mark); }
 .agents-page .agent-live-body { display: grid; gap: 2px; min-width: 0; padding-block-start: 1px; }
 .agents-page .agent-live-line {
@@ -1568,12 +1497,15 @@
 .agents-page .agent-live-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: calc(2px * var(--corner-radius-scale)); }
 /* After the rules above: a container query adds no specificity. */
 @container agents-page (max-width: 520px) {
-  /* A narrower spine on a phone, so the words keep their width. */
-  .agents-page .agent-conversation { --spine-gutter: 30px; --spine-x: 12px; }
-  .agents-page .agent-live-mark { --live-mark: 22px; }
+  /* What a run cost stays in Memory on a phone; the report keeps its feedback. */
+  .agents-page .agent-report-facts { display: none; }
+  .agents-page .agent-live-mark { --live-mark: 20px; }
 }
 
-/* A report: the agent speaking. Prose like an answer in Chat. */
+/* A report: one ledger entry. No surface and no rail. The headline leads
+   with its time at the column's end; the opening paragraph reads on in the
+   same ink; a status word comes first only when one is due. Three sizes
+   (meta, prose, headline) and three inks (text, dim, faint). */
 .agents-page .agent-report {
   display: flex;
   flex-direction: column;
@@ -1585,36 +1517,51 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 var(--space-2);
-  color: var(--muted);
+  margin: 0;
+  color: var(--faint);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
-.agents-page .agent-report-meta time { font-variant-numeric: tabular-nums; }
-.agents-page .agent-report-meta > * + *::before {
-  content: "·";
-  margin-inline-end: var(--space-2);
-  color: var(--faint);
-}
+.agents-page .agent-report-meta > * + *::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); font-weight: 400; }
+/* What the run says about itself: the one coloured word, softened toward the
+   muted ink so a bright palette's yellow never shouts. */
 .agents-page .agent-report-signal { font-weight: 600; }
-.agents-page .agent-report-signal[data-signal="alert"] { color: var(--amber); }
-.agents-page .agent-report-signal[data-signal="failed"] { color: var(--red); }
+.agents-page .agent-report-signal[data-signal="alert"] { color: color-mix(in oklab, var(--amber) 72%, var(--muted)); }
+.agents-page .agent-report-signal[data-signal="failed"] { color: color-mix(in oklab, var(--red) 72%, var(--muted)); }
+.agents-page .agent-report-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  min-width: 0;
+}
 .agents-page .agent-report-headline {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   color: var(--text);
-  font-size: var(--font-response);
+  font-size: calc(var(--font-response) * 1.1);
   font-weight: 600;
-  letter-spacing: -0.006em;
-  line-height: var(--font-response-lh);
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  text-wrap: balance;
 }
-.agents-page .agent-report[data-signal="failed"] .agent-report-headline { color: var(--red); }
+.agents-page .agent-report[data-signal="failed"] .agent-report-headline { color: color-mix(in srgb, var(--red) 70%, var(--text)); }
+/* Every time: the column's end, in quiet figures. */
+.agents-page :is(.agent-report-head, .agent-report-line, .agent-quiet-toggle, .agent-quiet-list) time {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .agents-page .agent-report-events {
   display: grid;
   gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
-  color: var(--muted);
-  font-size: var(--agents-hint);
+  color: var(--faint);
+  font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
 .agents-page .agent-report-wake-note {
@@ -1624,78 +1571,195 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
-.agents-page .agent-report-body { margin-block-start: var(--space-1); }
-.agents-page .agent-report-body[data-folded] {
-  max-height: 14lh;
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, black 70%, transparent);
-}
-.agents-page .agent-report-more {
-  align-self: flex-start;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: var(--agents-hint);
+
+/* The lead and the full report: prose in the headline's ink, one size all
+   the way down. The report's own sections are headings in that size. */
+.agents-page .agent-report-body .bubble { color: var(--text); }
+.agents-page .agent-report-body .bubble > :first-child { margin-block-start: 0; }
+.agents-page .agent-report-body .bubble > :last-child { margin-block-end: 0; }
+.agents-page .agent-report-full { margin-block-start: var(--space-2); }
+.agents-page :is(.agent-report-full .bubble :is(h1, h2, h3, h4, h5, h6), .agent-report-notes-label) {
+  margin: calc(var(--prose-gap) * 1.6) 0 calc(var(--prose-gap) * .4);
+  color: var(--text);
+  font-size: var(--font-response);
   font-weight: 600;
-  cursor: pointer;
+  line-height: 1.35;
 }
+.agents-page .agent-report-full .bubble > :is(h1, h2, h3, h4, h5, h6):first-child { margin-block-start: 0; }
+.agents-page .agent-report-full .md-table { font-size: var(--font-response); line-height: var(--font-meta-lh); }
+.agents-page .agent-report-full .md-table :is(th, td) { padding-block: calc(var(--space-1) * 1.5 * var(--density-scale)); }
+.agents-page .agent-report-full .md-table th {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* A wide table scrolls under a soft end, so a cut-off column reads as more. */
+.agents-page .agent-report-full .md-table-scroll { mask-image: linear-gradient(to left, transparent 0, black var(--space-6)); }
+.agents-page .agent-report-full .md-table-scroll:dir(rtl) { mask-image: linear-gradient(to right, transparent 0, black var(--space-6)); }
+.agents-page .agent-report-full .md-table-scroll:is(:hover, :focus-visible) { mask-image: none; }
+
+/* The notes a run kept: the full report's last section. */
+.agents-page .agent-report-notes ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-dim);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+  overflow-wrap: anywhere;
+}
+.agents-page .agent-report-notes li { display: flex; gap: var(--space-2); }
+.agents-page .agent-report-notes li::before { content: "–"; flex: none; color: var(--faint); }
+
 /* What went wrong, as the system said it: a quiet detail under plain words. */
 .agents-page .agent-report-error {
   margin: 0;
-  color: var(--muted);
+  color: var(--faint);
   overflow-wrap: anywhere;
-  font-size: var(--agents-hint);
+  font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
   white-space: pre-wrap;
 }
-.agents-page .agent-report-notes {
-  display: grid;
-  gap: var(--space-1);
-  margin: var(--space-1) 0 0;
-  padding: 0;
-  list-style: none;
-  color: var(--muted);
-  font-size: var(--agents-hint);
-  line-height: var(--font-meta-lh);
-}
-.agents-page .agent-report-notes li { display: flex; align-items: flex-start; gap: var(--space-2); }
-.agents-page .agent-report-notes .ui-icon { flex: none; margin-block-start: 1px; color: var(--faint); }
-/* Actions under a report: shown on hover or focus with a mouse, always on touch. */
+
+/* The footer: one quiet link, then (on hover) feedback and what the run
+   cost at the end. */
 .agents-page .agent-report-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-  margin-inline-start: calc(var(--space-1) * -1);
+  gap: var(--space-1) var(--space-4);
+  min-width: 0;
 }
+.agents-page .agent-report-more {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: var(--font-meta-lh);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+/* On touch the link keeps its size; its target reaches the tap height. */
+.agents-page :is(.agent-report-more, .agent-report-fold)::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((24px - var(--hit-min)) / 2)) calc(var(--space-1) * -1);
+}
+.agents-page .agent-report-more[aria-expanded="true"] { color: var(--text-dim); }
+@media (hover: hover) {
+  .agents-page .agent-report-more:hover:where(:not(:disabled)) { color: var(--text); }
+}
+.agents-page :is(.agent-report-more, .agent-report-fold, .agent-report-line, .agent-quiet-toggle):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+.agents-page .agent-report-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-inline-start: auto;
+}
+.agents-page .agent-report-actions { display: inline-flex; align-items: center; gap: 0; }
 .agents-page .agent-report-heard {
-  padding-inline: var(--space-2);
+  padding-inline: var(--space-1);
   color: var(--faint);
   font-size: var(--font-meta);
   white-space: nowrap;
 }
-.agents-page .agent-report-facts { color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agents-page .agent-report-facts {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 @media (hover: hover) and (pointer: fine) {
-  .agents-page .agent-report-foot { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
-  .agents-page .agent-report:hover .agent-report-foot,
-  .agents-page .agent-report:has(:focus-visible, [aria-expanded="true"]) .agent-report-foot,
-  .agents-page .agent-report-foot:has([aria-pressed="true"]) { opacity: 1; }
+  /* With no link to sit beside, they take no room: they show in the gap
+     under the report. */
+  .agents-page .agent-report-foot:not([data-link]) {
+    align-items: flex-start;
+    height: 0;
+    margin-block-start: calc(var(--space-1) * -1);
+  }
+  .agents-page :is(.agent-report-actions, .agent-report-facts) { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
+  .agents-page .agent-report:hover :is(.agent-report-actions, .agent-report-facts),
+  .agents-page .agent-report:focus-within :is(.agent-report-actions, .agent-report-facts),
+  .agents-page .agent-report-actions[data-verdict] { opacity: 1; }
+}
+/* Touch has no hover to wait for: only the newest report offers feedback,
+   besides any report that was given some. */
+@media (hover: none), (pointer: coarse) {
+  .agents-page .agent-report:not([data-latest]) .agent-report-actions:not([data-verdict]) { display: none; }
 }
 .agents-page .agent-report-note {
   display: flex;
-  flex: 1 0 100%;
   gap: var(--space-2);
-  margin-block-start: var(--space-1);
+  margin-block-start: var(--space-2);
 }
 .agents-page .agent-report-note .ui-input { flex: 1 1 auto; }
 
-/* The person's words, as in Chat, from the other side of the spine. */
+/* A report read before, with newer ones after it: one row, its headline at
+   the start and its time at the end. Runs of rows (and quiet checks) sit
+   together like a list; the whole row is the target. */
+.agents-page :is(.agent-report-line, .agent-quiet-toggle) {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+  padding-inline: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.agents-page .agent-report-line { padding-block: calc((max(28px, var(--hit-min)) - var(--font-response) * 1.4) / 2); }
+.agents-page .agent-report-line-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-response);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.agents-page .agent-report[data-signal="failed"] .agent-report-line-title { color: color-mix(in srgb, var(--red) 70%, var(--text)); }
+.agents-page .agent-report-fold {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .agents-page .agent-report-line:hover:where(:not(:disabled)) .agent-report-line-title { color: var(--text); }
+  .agents-page .agent-report-fold:hover:where(:not(:disabled)) time { color: var(--text); }
+}
+.agents-page :is(.agent-report[data-compact="line"], .agent-quiet) + :is(.agent-report[data-compact="line"], .agent-quiet) {
+  margin-block-start: calc(var(--conversation-message-gap) * -1);
+}
+
+/* The person's words, as in Chat, from the other side; no outline, so the
+   bubble is the one soft shape on the page. */
 .agents-page .agent-you { gap: var(--space-1); }
-.agents-page .agent-you .bubble { white-space: pre-wrap; }
+.agents-page .agent-you .bubble { border-color: transparent; white-space: pre-wrap; }
 .agents-page .agent-you[data-pending] .bubble { opacity: .72; }
-.agents-page .agent-you[data-pending="queued"] .bubble { border-style: dashed; }
+.agents-page .agent-you[data-pending="queued"] .bubble { border-style: dashed; border-color: var(--hair-strong); }
 .agents-page .agent-you-files { display: flex; justify-content: flex-end; max-inline-size: 100%; }
 .agents-page .agent-you-meta {
   padding-inline: var(--space-1);
@@ -1704,42 +1768,31 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Quiet checks: one line, open on request. */
-.agents-page .agent-quiet { display: grid; justify-items: start; gap: var(--space-1); }
+/* Quiet checks: a row like a read report's, in the quietest ink. */
+.agents-page .agent-quiet { display: grid; gap: var(--space-1); }
 .agents-page .agent-quiet-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: max(var(--control-h-sm), var(--hit-min));
-  margin-inline-start: calc(var(--space-2) * -1);
-  padding: 0 var(--space-2);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--agents-hint);
-  cursor: pointer;
-}
-@media (hover: hover) {
-  .agents-page .agent-quiet-toggle:hover:where(:not(:disabled)) { color: var(--text-dim); background: var(--surface-overlay-hover); }
-}
-.agents-page .agent-quiet-toggle time { color: var(--faint); font-variant-numeric: tabular-nums; }
-.agents-page .agent-quiet-chevron { color: var(--faint); transition: transform var(--motion-normal) var(--motion-ease); }
-.agents-page .agent-quiet-toggle[aria-expanded="true"] .agent-quiet-chevron { transform: rotate(90deg); }
-.agents-page .agent-quiet-toggle[aria-expanded="false"]:dir(rtl) .agent-quiet-chevron { transform: scaleX(-1); }
-.agents-page .agent-quiet-list {
-  display: grid;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0 0 0 calc(var(--icon-sm) + var(--space-2));
-  list-style: none;
-  color: var(--muted);
+  padding-block: calc((max(28px, var(--hit-min)) - var(--font-meta) * var(--font-meta-lh)) / 2);
+  color: var(--faint);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
-.agents-page .agent-quiet-list li { display: flex; gap: var(--space-3); min-width: 0; }
-.agents-page .agent-quiet-list time { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.agents-page .agent-quiet-label { flex: 1 1 auto; min-width: 0; transition: color var(--motion-fast) var(--motion-ease); }
+@media (hover: hover) {
+  .agents-page .agent-quiet-toggle:hover:where(:not(:disabled)) .agent-quiet-label { color: var(--text-dim); }
+}
+.agents-page .agent-quiet-toggle[aria-expanded="true"] .agent-quiet-label { color: var(--text-dim); }
+.agents-page .agent-quiet-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  list-style: none;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-quiet-list li { display: flex; align-items: baseline; gap: var(--space-4); min-width: 0; }
+.agents-page .agent-quiet-list span { flex: 1 1 auto; min-width: 0; }
 
 /* ---- Dock: what is happening now, what waits, and your message ------------ */
 

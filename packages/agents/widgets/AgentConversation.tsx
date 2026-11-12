@@ -16,7 +16,7 @@ import ActivityTicker, { useTickerKey } from "../../../apps/web/src/components/A
 import AttachmentPills from "../../../apps/web/src/components/AttachmentPills.tsx";
 import { ExecutionIcon } from "../../../apps/web/src/components/ExecutionIcon.tsx";
 import {
-  BookmarkIcon, Button, ChevronRightIcon, GlassDock, Icon,
+  Button, GlassDock, Icon,
   ExternalLinkIcon, SessionIcon, ShieldAlertIcon, TextInput, ThumbsDownIcon, ThumbsUpIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { AgentMark } from "./AgentGlyph.tsx";
@@ -36,7 +36,7 @@ export type { ConversationDay, ConversationItem, ConversationThread } from "./ag
 
 const UNITS = () => ({ s: tr("agents.unitSeconds"), min: tr("agents.unitMinutes"), h: tr("agents.unitHours") });
 const timeOf = (at: number): string =>
-  new Date(at).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
+  new Date(at).toLocaleTimeString(getLocale(), { hour: "numeric", minute: "2-digit" });
 
 /** "Today", "Yesterday", or "Mon, 12 Oct". */
 export function dayLabel(at: number, now = Date.now()): string {
@@ -60,11 +60,13 @@ function momentOf(at: number, now = Date.now()): string {
   return `${date}, ${timeOf(at)}`;
 }
 
-function triggerLabel(run: ScheduleRunDto): string {
+/** Why the run woke, when that is worth a word: a schedule is how an agent
+ *  usually wakes, and an answer sits right under the person's own words. */
+function wakeLabel(run: ScheduleRunDto): string | null {
   if (run.trigger === "heartbeat") return tr("agents.triggerHeartbeat");
   if (run.trigger === "event") return tr("agents.eventRun");
-  if (run.trigger === "manual") return run.input || run.attachments?.length ? tr("agents.answerToYou") : tr("agents.manualRun");
-  return tr("agents.triggerSchedule");
+  if (run.trigger === "manual" && !run.input && !run.attachments?.length) return tr("agents.manualRun");
+  return null;
 }
 
 type Signal = "alert" | "update" | "failed" | "unknown" | "stopped";
@@ -98,11 +100,11 @@ const pillsOf = (files: readonly AgentRunAttachmentDto[], key: string): Attachme
 
 // ---- pieces ------------------------------------------------------------------------
 
-function Feedback({ run, onFeedback }: {
-  run: ScheduleRunDto;
-  onFeedback: (runId: string, verdict: "up" | "down" | null, note?: string) => Promise<void>;
-}) {
-  const verdict = run.feedback?.verdict;
+type OnFeedback = (runId: string, verdict: "up" | "down" | null, note?: string) => Promise<void>;
+
+/** A run's feedback: the verdict buttons and the note a "not useful" asks for.
+ *  The buttons go where the card has room; the note always under the report. */
+function useFeedback(run: ScheduleRunDto, onFeedback: OnFeedback) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState(run.feedback?.note ?? "");
   const [busy, setBusy] = useState(false);
@@ -110,8 +112,15 @@ function Feedback({ run, onFeedback }: {
     setBusy(true);
     try { await onFeedback(run.runId, next, text); } finally { setBusy(false); }
   };
+  return { verdict: run.feedback?.verdict, delivered: !!run.feedback?.delivered, noteOpen, setNoteOpen, note, setNote, busy, send };
+}
+type FeedbackState = ReturnType<typeof useFeedback>;
+
+function FeedbackButtons({ feedback }: { feedback: FeedbackState }) {
+  const { verdict, busy, send, setNoteOpen } = feedback;
   return (
-    <>
+    // A given verdict stays in view; the buttons otherwise wait for a hover.
+    <span className="agent-report-actions" data-verdict={verdict}>
       <ChatActionButton
         icon={ThumbsUpIcon}
         label={tr("agents.useful")}
@@ -136,42 +145,80 @@ function Feedback({ run, onFeedback }: {
       />
       {verdict && (
         <span className="agent-report-heard">
-          {run.feedback?.delivered ? tr("agents.feedbackHeard") : tr("agents.feedbackPending")}
+          {feedback.delivered ? tr("agents.feedbackHeard") : tr("agents.feedbackPending")}
         </span>
       )}
-      {noteOpen && (
-        <form
-          className="agent-report-note"
-          onSubmit={(event: FormEvent) => {
-            event.preventDefault();
-            void send("down", note.trim() || undefined).then(() => setNoteOpen(false));
-          }}
-        >
-          <TextInput
-            uiSize="sm"
-            value={note}
-            maxLength={500}
-            aria-label={tr("agents.feedbackPlaceholder")}
-            placeholder={tr("agents.feedbackPlaceholder")}
-            onChange={(event) => setNote(event.target.value)}
-          />
-          <Button size="sm" type="submit" disabled={busy}>{tr("agents.feedbackSave")}</Button>
-        </form>
-      )}
-    </>
+    </span>
   );
 }
 
-/** A long report stays folded to a few lines until asked. */
-const LONG_BODY = 900;
+function FeedbackNote({ feedback }: { feedback: FeedbackState }) {
+  const { note, setNote, busy, send, setNoteOpen } = feedback;
+  return (
+    <form
+      className="agent-report-note"
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault();
+        void send("down", note.trim() || undefined).then(() => setNoteOpen(false));
+      }}
+    >
+      <TextInput
+        uiSize="sm"
+        value={note}
+        maxLength={500}
+        aria-label={tr("agents.feedbackPlaceholder")}
+        placeholder={tr("agents.feedbackPlaceholder")}
+        onChange={(event) => setNote(event.target.value)}
+      />
+      <Button size="sm" type="submit" disabled={busy}>{tr("agents.feedbackSave")}</Button>
+    </form>
+  );
+}
 
-/** What a run said: the agent speaking, on the conversation's spine. */
-function Report({ task, run, onFeedback }: {
+/** "38 min · 273K tokens · $6.26": what a run cost, said briefly. */
+function runFacts(run: ScheduleRunDto): string {
+  const tokens = tokenTotal(run.tokens);
+  const locale = getLocale();
+  const count = tokens >= 10_000
+    ? new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: tokens >= 1_000_000 ? 1 : 0 }).format(tokens)
+    : tokens.toLocaleString(locale);
+  return [
+    run.finishedAt ? shortDuration(run.finishedAt - run.startedAt, UNITS()) : null,
+    tokens > 0 ? tr("agents.tokensValue", { count }) : null,
+    run.cost !== undefined && run.cost > 0 ? `$${run.cost.toFixed(run.cost < 0.1 ? 3 : 2)}` : null,
+  ].filter(Boolean).join(" · ");
+}
+
+/** A report's opening paragraph, shown under its headline, and the rest,
+ *  shown on request. A body that opens with a heading, list, table, quote or
+ *  code has no lead: all of it is the rest. A bold opening sentence (most
+ *  often the headline said again) reads as plain prose in the lead. */
+export function reportLead(body: string): { lead: string; rest: string } {
+  const text = body.trim();
+  const gap = /\n[ \t]*\n/.exec(text);
+  const first = gap ? text.slice(0, gap.index) : text;
+  const rest = gap ? text.slice(gap.index + gap[0].length).trim() : "";
+  const fences = first.match(/^\s*(```|~~~)/gm)?.length ?? 0;
+  if (!first || fences % 2 === 1 || /^\s*(#|\||```|~~~|>|[-*+]\s|\d+[.)]\s)/.test(first)) return { lead: "", rest: text };
+  return { lead: first.replace(/^\*\*([^*\n]+)\*\*/, "$1").replace(/^__([^_\n]+)__/, "$1"), rest };
+}
+
+/** What a run said, as a ledger entry: the headline with its time at the
+ *  column's end, then its opening paragraph. A status word comes first only
+ *  when one is due. The rest of the report, with the notes it kept as its last
+ *  section, opens from one quiet link; feedback and cost show on hover. A
+ *  report read before, with newer ones after it, is one line until opened. */
+function Report({ task, run, compact, latest, onFeedback }: {
   task: ScheduleTaskDto;
   run: ScheduleRunDto;
-  onFeedback: (runId: string, verdict: "up" | "down" | null, note?: string) => Promise<void>;
+  compact?: boolean;
+  /** The newest report on the page: on touch, the one that offers feedback. */
+  latest?: boolean;
+  onFeedback: OnFeedback;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(!compact);
+  const [full, setFull] = useState(false);
+  const feedback = useFeedback(run, onFeedback);
   const signal = signalOf(run);
   const headline = headlineOf(run);
   const body = run.summary?.trim() ?? "";
@@ -179,27 +226,65 @@ function Report({ task, run, onFeedback }: {
   const shownBody = !run.headline && body.split("\n")[0]?.replace(/^#+\s*/, "").trim() === headline
     ? body.split("\n").slice(1).join("\n").trim()
     : body;
-  const long = shownBody.length > LONG_BODY || shownBody.split("\n").length > 14;
-  const tokens = tokenTotal(run.tokens);
-  const took = run.finishedAt ? shortDuration(run.finishedAt - run.startedAt, UNITS()) : null;
-  const facts = [
-    took,
-    tokens > 0 ? tr("agents.tokensValue", { count: tokens.toLocaleString(getLocale()) }) : null,
-    run.cost !== undefined && run.cost > 0 ? `$${run.cost.toFixed(run.cost < 0.1 ? 3 : 2)}` : null,
-  ].filter(Boolean).join(" · ");
+  const { lead, rest } = reportLead(shownBody);
+  const facts = runFacts(run);
+  const notes = run.remembered ?? [];
+  const wake = wakeLabel(run);
+  const at = new Date(run.startedAt).toISOString();
+  const markdown = (text: string, part: string) => (
+    <div className={`msg assistant agent-report-body agent-report-${part}`}>
+      <div className="bubble">
+        <MarkdownDoc
+          text={text}
+          keyBase={`agent-${run.runId}-${part}`}
+          resourceContext={{ projectId: task.projectId, sessionId: run.sessionId ?? null }}
+        />
+      </div>
+    </div>
+  );
+
+  const time = <time dateTime={at}>{timeOf(run.startedAt)}</time>;
+  if (!open) {
+    return (
+      <li className="agent-turn agent-report" data-signal={signal} data-compact="line">
+        <button type="button" className="agent-report-line" aria-expanded={false} onClick={() => setOpen(true)}>
+          <span className="agent-report-line-title">{headline}</span>
+          {time}
+        </button>
+      </li>
+    );
+  }
+
+  // Said only when it is news: what went wrong, or why the run woke.
+  const status = [
+    signal === "alert" ? <span key="signal" className="agent-report-signal" data-signal="alert">{tr("agents.signalAlert")}</span> : null,
+    signal === "failed" && run.headline ? <span key="signal" className="agent-report-signal" data-signal="failed">{tr("agents.runFailed")}</span> : null,
+    wake ? <span key="wake" className="agent-report-wake">{wake}</span> : null,
+    run.late ? <span key="late" className="agent-report-wake">{tr("agents.lateRun")}</span> : null,
+    run.backup ? <span key="backup" className="agent-report-wake">{tr("agents.ranOnBackupValue", { count: run.backup })}</span> : null,
+  ].filter(Boolean);
+  // One link: the rest of the report (its notes last), or the notes alone.
+  const more = rest || notes.length > 0;
+  const moreLabel = full ? tr("agents.showLess")
+    : rest ? tr("agents.readFullReport")
+      : tr(notes.length === 1 ? "agents.notesOneValue" : "agents.notesValue", { count: notes.length });
+  const tools = run.status === "ok" || facts;
   return (
-    <li className="agent-turn agent-report" data-signal={signal}>
-      <span className="agent-spine-node" aria-hidden="true" />
-      <header className="agent-report-meta">
-        <time dateTime={new Date(run.startedAt).toISOString()}>{timeOf(run.startedAt)}</time>
-        <span>{triggerLabel(run)}</span>
-        {signal === "alert" && <span className="agent-report-signal" data-signal="alert">{tr("agents.signalAlert")}</span>}
-        {signal === "failed" && run.headline && <span className="agent-report-signal" data-signal="failed">{tr("agents.runFailed")}</span>}
-        {run.late && <span>{tr("agents.lateRun")}</span>}
-        {run.backup ? <span>{tr("agents.ranOnBackupValue", { count: run.backup })}</span> : null}
-        {facts && <span className="agent-report-facts">{facts}</span>}
-      </header>
-      <h3 className="agent-report-headline">{headline}</h3>
+    <li
+      className="agent-turn agent-report"
+      data-signal={signal}
+      data-compact={compact ? "open" : undefined}
+      data-latest={latest || undefined}
+    >
+      {status.length > 0 && <p className="agent-report-meta">{status}</p>}
+      <div className="agent-report-head">
+        <h3 className="agent-report-headline">{headline}</h3>
+        {compact ? (
+          <button type="button" className="agent-report-fold" aria-expanded aria-label={tr("agents.showLess")} onClick={() => setOpen(false)}>
+            {time}
+          </button>
+        ) : time}
+      </div>
       {run.note || run.events?.length ? (
         <ul className="agent-report-events">
           {/* The wake script's words, which may quote event data: what woke
@@ -209,38 +294,31 @@ function Report({ task, run, onFeedback }: {
           {(run.events?.length ?? 0) > 3 && <li>{tr("agents.moreEventsValue", { count: run.events!.length - 3 })}</li>}
         </ul>
       ) : null}
-      {shownBody && (
-        <div className="msg assistant agent-report-body" data-folded={long && !expanded ? "" : undefined}>
-          <div className="bubble">
-            <MarkdownDoc
-              text={shownBody}
-              keyBase={`agent-${run.runId}`}
-              resourceContext={{ projectId: task.projectId, sessionId: run.sessionId ?? null }}
-            />
-          </div>
-        </div>
-      )}
-      {long && (
-        <button type="button" className="agent-report-more" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-          {expanded ? tr("agents.showLess") : tr("agents.showMore")}
-        </button>
+      {lead && markdown(lead, "lead")}
+      {rest && full && markdown(rest, "full")}
+      {full && notes.length > 0 && (
+        <section className="agent-report-notes" aria-label={tr("agents.remembered")}>
+          <h4 className="agent-report-notes-label">{tr("agents.remembered")}</h4>
+          <ul>{notes.map((note) => <li key={note}>{note}</li>)}</ul>
+        </section>
       )}
       {run.error && signal !== "stopped" && <p className="agent-report-error">{run.error}</p>}
-      {run.remembered?.length ? (
-        <ul className="agent-report-notes" aria-label={tr("agents.remembered")}>
-          {run.remembered.map((note) => (
-            <li key={note}>
-              <Icon icon={BookmarkIcon} size="sm" />
-              <span>{tr("agents.rememberedValue", { note })}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {run.status === "ok" && (
-        <footer className="agent-report-foot">
-          <Feedback run={run} onFeedback={onFeedback} />
+      {(more || tools) && (
+        <footer className="agent-report-foot" data-link={more || undefined}>
+          {more && (
+            <button type="button" className="agent-report-more" aria-expanded={full} onClick={() => setFull(!full)}>
+              {moreLabel}
+            </button>
+          )}
+          {tools && (
+            <span className="agent-report-tools">
+              {run.status === "ok" && <FeedbackButtons feedback={feedback} />}
+              {facts && <span className="agent-report-facts">{facts}</span>}
+            </span>
+          )}
         </footer>
       )}
+      {feedback.noteOpen && <FeedbackNote feedback={feedback} />}
     </li>
   );
 }
@@ -283,16 +361,15 @@ function QuietFold({ runs }: { runs: ScheduleRunDto[] }) {
   return (
     <li className="agent-turn agent-quiet" data-open={open || undefined}>
       <button type="button" className="agent-quiet-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <Icon icon={ChevronRightIcon} size="sm" className="agent-quiet-chevron" />
-        <span>{label}</span>
+        <span className="agent-quiet-label">{label}</span>
         <time>{range}</time>
       </button>
       {open && (
         <ol className="agent-quiet-list">
           {runs.map((run) => (
             <li key={run.runId}>
-              <time dateTime={new Date(run.startedAt).toISOString()}>{timeOf(run.startedAt)}</time>
               <span>{run.status === "skipped" ? run.error ?? tr("agents.runSkipped") : run.summary?.split("\n")[0] || tr("agents.signalQuiet")}</span>
+              <time dateTime={new Date(run.startedAt).toISOString()}>{timeOf(run.startedAt)}</time>
             </li>
           ))}
         </ol>
@@ -379,41 +456,58 @@ const FRESH_KEYS: Partial<Record<string, Parameters<typeof tr>[0]>> = {
   unavailable: "agents.freshUnavailable",
 };
 
-/** Where a conversation begins, or where an earlier one comes back. */
-function ThreadHead({ opening, sessionId, onOpenSession }: {
-  opening: ThreadOpening;
-  sessionId?: string;
-  onOpenSession?: (sessionId: string) => void;
-}) {
-  const now = Date.now();
-  let title = "";
-  let detail = "";
+/** Why a conversation begins here, or that an earlier one comes back. */
+function openingWords(opening: ThreadOpening): { title: string; detail: string } {
   if (opening.kind === "start") {
     const run = opening.run;
-    title = tr("agents.threadStarted");
     // The run that opened it says when and why it woke right below; the head
     // only says why a new conversation began when one could have gone on.
     const reason = run.fresh && run.fresh !== "none" ? run.fresh : run.rotated;
     const why = reason ? FRESH_KEYS[reason] : undefined;
-    detail = why ? tr(why) : "";
-  } else if (opening.kind === "resume") {
-    title = tr("agents.threadResumed");
-    detail = opening.since ? tr("agents.threadSinceValue", { time: momentOf(opening.since, now) }) : "";
-  } else {
-    title = tr("agents.threadStarting");
+    return { title: tr("agents.threadStarted"), detail: why ? tr(why) : "" };
   }
+  if (opening.kind === "resume") {
+    return {
+      title: tr("agents.threadResumed"),
+      detail: opening.since ? tr("agents.threadSinceValue", { time: momentOf(opening.since, Date.now()) }) : "",
+    };
+  }
+  return { title: tr("agents.threadStarting"), detail: "" };
+}
+
+/** A divider across the conversation: a day, where a conversation begins, or
+ *  both on one line when a conversation opens the day. */
+function Divider({ day, opening, sessionId, onOpenSession, heading }: {
+  day?: string;
+  opening?: ThreadOpening;
+  sessionId?: string;
+  onOpenSession?: (sessionId: string) => void;
+  heading?: boolean;
+}) {
+  const words = opening ? openingWords(opening) : null;
+  const locale = getLocale();
+  // After the day, the opening reads on as part of one phrase.
+  const title = words && day ? words.title.charAt(0).toLocaleLowerCase(locale) + words.title.slice(1) : words?.title;
+  const Label = heading ? "h2" : "p";
   return (
-    <div className="agent-thread-head" data-opening={opening.kind}>
-      <span className="agent-spine-cap" aria-hidden="true" />
-      <span className="agent-thread-title">{title}</span>
-      {detail && <span className="agent-thread-detail">{detail}</span>}
+    <div className="agent-divider" data-opening={opening?.kind}>
+      <Label className="agent-divider-label">
+        {/* One phrase, so a narrow column wraps it as words, not as columns. */}
+        <span className="agent-divider-text">
+          {day && <span className="agent-divider-day">{day}</span>}
+          {title && <span className="agent-divider-opening">{day ? " · " : ""}{title}</span>}
+          {words?.detail && <span className="agent-divider-detail">{" — "}{words.detail}</span>}
+        </span>
+      </Label>
       {sessionId && onOpenSession && (
-        <ChatActionButton
-          icon={SessionIcon}
-          className="agent-thread-open"
-          label={tr("agents.openConversation")}
-          onClick={() => onOpenSession(sessionId)}
-        />
+        <span className="agent-divider-open">
+          <ChatActionButton
+            icon={SessionIcon}
+            className="agent-thread-open"
+            label={tr("agents.openConversation")}
+            onClick={() => onOpenSession(sessionId)}
+          />
+        </span>
       )}
     </div>
   );
@@ -513,11 +607,15 @@ function PermissionRequests({ host, task, run, requests, onOpenSession }: {
   );
 }
 
-function Thread({ agent, thread, onOpenSession, onFeedback }: {
+function Thread({ agent, thread, headless, latest, onOpenSession, onFeedback }: {
   agent: ScheduleTaskDto;
   thread: ConversationThread;
+  /** The key of the newest report on the page. */
+  latest?: string;
+  /** Its opening is said on the day's divider above it. */
+  headless?: boolean;
   onOpenSession?: (sessionId: string) => void;
-  onFeedback: (runId: string, verdict: "up" | "down" | null, note?: string) => Promise<void>;
+  onFeedback: OnFeedback;
 }) {
   const live = thread.items.some((item) => item.kind === "live");
   return (
@@ -528,8 +626,8 @@ function Thread({ agent, thread, onOpenSession, onFeedback }: {
       data-live={live || undefined}
       data-opening={thread.loose ? undefined : thread.opening?.kind ?? "continued"}
     >
-      {thread.opening && (
-        <ThreadHead
+      {thread.opening && !headless && (
+        <Divider
           opening={thread.opening}
           {...(thread.sessionId ? { sessionId: thread.sessionId } : {})}
           {...(onOpenSession ? { onOpenSession } : {})}
@@ -538,7 +636,8 @@ function Thread({ agent, thread, onOpenSession, onFeedback }: {
       <ol className="agent-thread-items">
         {thread.items.map((item) => {
           if (item.kind === "new") {
-            return <li key={item.key} className="agent-turn agent-new" role="separator"><span>{tr("agents.newBadge")}</span></li>;
+            // No rule: the page opens here, and a reader of the page hears it.
+            return <li key={item.key} className="agent-turn agent-new" role="separator" aria-label={tr("agents.newBadge")} />;
           }
           if (item.kind === "you") {
             return (
@@ -557,7 +656,16 @@ function Thread({ agent, thread, onOpenSession, onFeedback }: {
           if (item.kind === "live") {
             return <LiveTurn key={item.key} agent={agent} run={item.run} {...(onOpenSession ? { onOpenSession } : {})} />;
           }
-          return <Report key={item.key} task={agent} run={item.run} onFeedback={onFeedback} />;
+          return (
+            <Report
+              key={item.key}
+              task={agent}
+              run={item.run}
+              compact={!!item.compact}
+              latest={item.key === latest}
+              onFeedback={onFeedback}
+            />
+          );
         })}
       </ol>
     </section>
@@ -619,6 +727,7 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
 
   const days = useMemo(() => conversationDays(agent, openedSeenAt, pending), [agent, openedSeenAt, pending]);
   const empty = days.length === 0;
+  const latestReport = days.flatMap(dayItems).findLast((item) => item.kind === "report")?.key;
 
   // Read a moment after the reports are on screen.
   const newest = newestReportAt(agent);
@@ -734,20 +843,33 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
               <p>{tr("agents.feedEmptyBody")}</p>
             </div>
           )}
-          {days.map((day) => (
-            <section className="agent-day" key={day.key} aria-label={dayLabel(day.at)}>
-              <h2 className="agent-day-label"><span>{dayLabel(day.at)}</span></h2>
-              {day.threads.map((thread) => (
-                <Thread
-                  key={thread.key}
-                  agent={agent}
-                  thread={thread}
-                  {...(openSession ? { onOpenSession: openSession } : {})}
-                  onFeedback={feedback}
+          {days.map((day) => {
+            // A conversation that opens the day is said on the day's line.
+            const first = day.threads[0];
+            const joined = first?.opening && first.opening.kind !== "upcoming" ? first : undefined;
+            return (
+              <section className="agent-day" key={day.key} aria-label={dayLabel(day.at)}>
+                <Divider
+                  heading
+                  day={dayLabel(day.at)}
+                  {...(joined?.opening ? { opening: joined.opening } : {})}
+                  {...(joined?.sessionId ? { sessionId: joined.sessionId } : {})}
+                  {...(joined && openSession ? { onOpenSession: openSession } : {})}
                 />
-              ))}
-            </section>
-          ))}
+                {day.threads.map((thread) => (
+                  <Thread
+                    key={thread.key}
+                    agent={agent}
+                    thread={thread}
+                    headless={thread === joined}
+                    {...(latestReport ? { latest: latestReport } : {})}
+                    {...(openSession ? { onOpenSession: openSession } : {})}
+                    onFeedback={feedback}
+                  />
+                ))}
+              </section>
+            );
+          })}
         </div>
       </div>
 
