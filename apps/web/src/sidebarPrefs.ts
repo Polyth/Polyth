@@ -321,6 +321,9 @@ export function sessionGroupsOf<T extends SessionProjection>(
       groups.push({ key, label, sessions: [session] });
     }
   }
+  // Every chat landed in the empty-key bucket ("No marker", "No agent"…): a
+  // lone heading for "none of them" says nothing, so the list draws none.
+  if (groups.length === 1 && groups[0]!.key === "") groups[0]!.label = null;
   return groups;
 }
 

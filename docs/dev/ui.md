@@ -1942,7 +1942,8 @@ presentation, synced in `core.sidebar` (`grouping`, `sessionSort`); the former
 written for older clients. Packages contribute groupings with
 `host.sessions.registerGrouping({ id, label, keyOf, labelOf?, rankOf?,
 subscribe? })` — pure functions of a session and the package's own state; the
-host draws headings and rows. A stored package grouping waits for its package
+host draws headings and rows. When every chat in a list has the empty key (no
+marker, no agent…), that lone group draws no heading. A stored package grouping waits for its package
 to register and reads as None meanwhile. Chat markers add "Marker".
 
 `session.selection.actions` adds an action to a transcript selection, beside
