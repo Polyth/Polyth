@@ -3,11 +3,13 @@ import { test } from "node:test";
 import {
   createResumeScheduler,
   planResume,
+  providerStatedWait,
   rateLimitNoticeHint,
   REQUEST_RETRY_BACKOFF_SEC,
   REQUEST_RETRY_MAX_ATTEMPTS,
   RESUME_FALLBACK_BACKOFF_SEC,
   RESUME_MIN_WAIT_SEC,
+  withProviderStatedWait,
 } from "../src/resume.ts";
 
 const NOW = 1_700_000_000_000;
@@ -169,6 +171,42 @@ test("Command Code rate-limit notices retain their provider wait", () => {
     { scope: "rate", provider: "commandcode", retryAfterSec: 28 },
   );
   assert.equal(rateLimitNoticeHint("rate limits are worth monitoring"), null);
+});
+
+test("a provider-stated reset in the error text replaces the blind fallback ladder", () => {
+  // Live OpenCode Go 429 relayed by Pi: the adapter classified the failure but
+  // carried no wait, so attempt 29 used to wait 15 min against a ~2 h window.
+  const error = '429: {"type":"GoUsageLimitError","message":"OpenCode Go usage limit reached (5-hour, resets in 1h 51m). To keep going now, turn on Extra Usage."}';
+  const hint = withProviderStatedWait({ scope: "rate", provider: "opencode-go", retryable: true }, error, NOW);
+  assert.deepEqual(hint, { scope: "rate", provider: "opencode-go", retryable: true, retryAfterSec: 6660 });
+  const state = planResume({ hint, userMessageSeq: 5, previous: { attempt: 28, userMessageSeq: 5 }, now: NOW });
+  assert.equal(state!.resumeAt, NOW + 6660_000);
+  assert.equal(state!.attempt, 29);
+});
+
+test("providerStatedWait reads the common provider phrasings and ignores vague ones", () => {
+  assert.deepEqual(providerStatedWait("Rate limit reached. Please try again in 20s.", NOW), { retryAfterSec: 20 });
+  assert.deepEqual(providerStatedWait("Too many requests; retry after 2 minutes and 30 seconds", NOW), { retryAfterSec: 150 });
+  assert.deepEqual(providerStatedWait("quota window resets in 1:05:00", NOW), { retryAfterSec: 3900 });
+  assert.deepEqual(providerStatedWait("Please try again in 500ms", NOW), { retryAfterSec: 1 });
+  const at = new Date(NOW + 90 * 60_000).toISOString();
+  assert.deepEqual(providerStatedWait(`usage limit hit, resets at ${at}`, NOW), { resetAt: NOW + 90 * 60_000, retryAfterSec: 5400 });
+  assert.equal(providerStatedWait("Upstream provider is temporarily unavailable. Please try again in a moment.", NOW), undefined);
+  assert.equal(providerStatedWait("429 too many requests", NOW), undefined);
+  assert.equal(providerStatedWait(`resets at ${new Date(NOW - 60_000).toISOString()}`, NOW), undefined);
+});
+
+test("an adapter-parsed wait, a bounded request retry or a final stop keep their own hint", () => {
+  const text = "rate limited, resets in 2h";
+  const parsed = { scope: "rate" as const, retryAfterSec: 30 };
+  assert.equal(withProviderStatedWait(parsed, text, NOW), parsed);
+  const reset = { scope: "rate" as const, resetAt: NOW + 1000 };
+  assert.equal(withProviderStatedWait(reset, text, NOW), reset);
+  const request = { scope: "request" as const, retryable: true };
+  assert.equal(withProviderStatedWait(request, text, NOW), request);
+  const final = { scope: "quota" as const, retryable: false };
+  assert.equal(withProviderStatedWait(final, text, NOW), final);
+  assert.deepEqual(withProviderStatedWait({ scope: "rate" }, undefined, NOW), { scope: "rate" });
 });
 
 test("scheduler fires once after the delay and can be cancelled", async () => {

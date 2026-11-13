@@ -135,6 +135,7 @@ import {
   createResumeScheduler,
   planResume,
   rateLimitNoticeHint,
+  withProviderStatedWait,
   RESUME_FALLBACK_BACKOFF_SEC,
 } from "./resume.ts";
 import {
@@ -5300,10 +5301,13 @@ export function createSessionService(deps: {
         let retry: RateLimitRetry | undefined;
         if (effectiveReason === "error" && ev.retry) {
           const eventsForResume = await store.events(sessionId);
+          // Adapters that only classify the failure leave the wait to us; the
+          // provider usually states it in the message ("resets in 1h 51m").
+          const hint = withProviderStatedWait(ev.retry, ev.error);
           if (sideEffects) {
-            retry = await scheduleResume(sessionId, ev.retry, eventsForResume);
+            retry = await scheduleResume(sessionId, hint, eventsForResume);
           } else {
-            const state = await plannedResumeState(sessionId, ev.retry, eventsForResume);
+            const state = await plannedResumeState(sessionId, hint, eventsForResume);
             retry = state ? retryFromResumeState(state) : undefined;
           }
         }
