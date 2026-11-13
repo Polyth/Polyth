@@ -273,16 +273,28 @@ capability reasons and catalog states, and a hairline closes the list with
 setting, and catalog details sit below labels so they cannot squeeze them off
 the edge.
 
-**Drafts.** Pressing and holding Send (500 ms, idle Send and the running-turn
-delivery button alike) keeps the message as a draft instead of sending it. A
-draft is an ordinary canonical session, never a separate list or menu. On a new
-chat the hold creates the chat through the same path as Send (route, workspace
+**Drafts.** Pressing and holding Send (idle Send and the running-turn delivery
+button alike) keeps the message as a draft instead of sending it. The gesture
+is a preference, not a constant (Settings > Chat > Send with): **Hold Send to
+save a draft** switches it on or off, and **Hold length** moves it between
+250 ms and 2 s in 50 ms steps (install default 500 ms; `sendHold.ts`). Turning
+it off makes every press send at once and removes the "hold to save" hint from
+Send's tooltip, while the chosen length is kept for when it is turned back on.
+The row's summary names the current state ("hold 500 ms" / "no hold") for the
+device the row is read on, and its length row carries a specimen Send that runs
+the chosen hold for real, so the duration can be felt before leaving Settings.
+The ring around Send is drawn over the chosen length (`--send-hold-ms`), on
+both Send variants. The gesture is pointer-only: there is no keyboard
+equivalent for "keep as a draft" yet, and the trial Send is decorative for
+assistive tech because the track announces its value. A draft is an ordinary
+canonical session, never a separate list or menu. On a new chat the hold
+creates the chat through the same path as Send (route, workspace
 target, lane, auto-approve), moves the text and attachment pills into that
 chat's scoped draft record, saves the draft to the server at once
 (`saveDraftToServerNow`) and stays on the cleared new chat; no turn, echo or
 spawn surface starts. In an open chat the text stays in the composer and is
-saved at once. A ring draws around Send over the hold and Send shows a check
-for a beat; there is no notification, because the result is visible in place.
+saved at once. Once kept, Send shows a check for a beat; there is no
+notification, because the result is visible in place.
 A release before the hold completes sends: touch/pen Send is admitted on
 `pointerup` (pointerdown is cancelled so the editor keeps focus; a finger slid
 off Send does not send), and the click that ends a hold is swallowed. An empty

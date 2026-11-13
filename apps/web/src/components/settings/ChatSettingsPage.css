@@ -424,3 +424,99 @@ html[dir="rtl"] .chat-preview-thought:not([data-open]) svg { transform: scaleX(-
   background: var(--accent);
   color: var(--accent-ink);
 }
+
+/* Hold-to-keep-as-a-draft: the length track (a shared size stepper, in ms)
+   beside a specimen Send that runs the chosen hold for real. The specimen is
+   the point of the row — a number alone cannot say whether 1200 ms feels long —
+   so it keeps the accent disc of the real button and its ring, and never sends
+   anything. It is decorative for assistive tech; the track announces the value. */
+.chat-hold-field {
+  /* A stacked disclosure row aligns its controls to the start, so the field
+     claims the row's width before laying its two pieces out. */
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+/* This row has no size specimen of its own — the trial Send beside it is that
+   specimen — so the stepper drops its empty specimen column instead of leaving
+   a gap between the track and the millisecond readout. */
+.chat-hold-field .size-stepper { grid-template-columns: auto minmax(96px, 1fr) auto auto; }
+.chat-hold-field .size-stepper-specimen { display: none; }
+.chat-hold-specimen {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.chat-hold-send {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* The real Send's own size, so the trial answers "how does my button feel".
+     Its finger target still reaches the shared minimum through ::after. */
+  width: var(--composer-action-size, 34px);
+  height: var(--composer-action-size, 34px);
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--inset-hi);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  /* A quick settle on release; the press itself follows the chosen length
+     below, so the disc shrinks in step with its ring. */
+  transition: transform var(--motion-surface) var(--motion-ease);
+}
+.chat-hold-send[data-state="holding"] {
+  transform: scale(0.94);
+  transition: transform var(--send-hold-ms, 500ms) var(--motion-ease);
+}
+/* The ring is a box, not a bare SVG: an SVG resolves a percentage height
+   against its own intrinsic box instead of this one, which drew an oval. */
+.chat-hold-ring {
+  position: absolute;
+  inset: -4px;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+  color: var(--context-liquid-tone, var(--accent));
+  opacity: 0;
+  transform: rotate(-90deg);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
+.chat-hold-ring circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  vector-effect: non-scaling-stroke;
+}
+.chat-hold-send[data-state="holding"] .chat-hold-ring { opacity: 1; }
+.chat-hold-send[data-state="holding"] .chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
+.chat-hold-ring circle {
+  animation: send-hold-fill var(--send-hold-ms, 500ms) linear forwards;
+}
+@keyframes chat-hold-kept { from { transform: scale(.86); } to { transform: none; } }
+/* Reduced motion still shows the arm and the result: the ring is drawn whole
+   and the check appears, with no scaling and no fill-in animation. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-hold-send[data-state="holding"] .chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
+.chat-hold-ring circle { stroke-dashoffset: 0; }
+  .chat-hold-send[data-state="holding"] { transform: none; }
+}
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .chat-hold-send[data-state="holding"] .chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
+.chat-hold-ring circle { stroke-dashoffset: 0; }
+@media (max-width: 700px) {
+  .chat-hold-caption { white-space: normal; }
+}

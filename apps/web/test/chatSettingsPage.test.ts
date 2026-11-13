@@ -606,3 +606,46 @@ test("a disclosure row settles without an animation to wait for, and a control r
     container.remove();
   }
 });
+
+test("the Send row owns the hold-to-draft gesture: its off switch, its length and its summary", async () => {
+  resetPrefs();
+  setUiSettings({ sendHoldDraft: true, sendHoldDraftMs: UI_DEFAULTS.sendHoldDraftMs });
+  const { container, unmount } = await mount({ itemId: "chat.sendHoldDraft" });
+  try {
+    assert.deepEqual(openRows(container), ["send"], "the routed row opens itself");
+    const head = rowHead(container, "send")?.textContent ?? "";
+    assert.match(head, /hold 500 ms/, "the summary names the gesture without opening the row");
+    const holdToggle = container.querySelector<HTMLButtonElement>('[data-settings-item="chat.sendHoldDraft"] button[role="switch"]');
+    assert.equal(holdToggle?.getAttribute("aria-checked"), "true");
+    const track = container.querySelector<HTMLInputElement>('[data-settings-item="chat.sendHoldDuration"] input[type="range"]');
+    assert.ok(track, "the length track sits under its switch");
+    assert.equal(track.min, "250");
+    assert.equal(track.max, "2000");
+    assert.equal(track.step, "50");
+    assert.equal(track.getAttribute("aria-valuetext"), "500 ms");
+
+    await act(async () => {
+      // React's controlled input tracks the value it last rendered, so the
+      // native setter (not the property) is what a real slider moves.
+      const setValue = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")?.set;
+      setValue?.call(track, "1200");
+      track.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+    });
+    assert.equal(getUiSettings().sendHoldDraftMs, 1200, "the track writes the chosen length");
+    assert.match(rowHead(container, "send")?.textContent ?? "", /hold 1200 ms/);
+
+    await click(holdToggle ?? null);
+    assert.equal(getUiSettings().sendHoldDraft, false, "the switch turns the gesture off");
+    assert.equal(hasItem(container, "chat.sendHoldDuration"), false, "an off gesture hides its length");
+    assert.match(rowHead(container, "send")?.textContent ?? "", /no hold/);
+    assert.equal(getUiSettings().sendHoldDraftMs, 1200, "turning it off keeps the person's length for later");
+
+    await click(container.querySelector('[data-settings-item="chat.sendHoldDraft"] button[role="switch"]'));
+    assert.equal(getUiSettings().sendHoldDraft, true);
+    const restored = container.querySelector<HTMLInputElement>('[data-settings-item="chat.sendHoldDuration"] input[type="range"]');
+    assert.equal(restored?.value, "1200", "and turning it back on restores it");
+  } finally {
+    setUiSettings({ sendHoldDraft: UI_DEFAULTS.sendHoldDraft, sendHoldDraftMs: UI_DEFAULTS.sendHoldDraftMs });
+    await unmount();
+  }
+});

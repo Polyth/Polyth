@@ -195,6 +195,7 @@ import {
 } from "@polyth/models/web-prefs";
 import { hiddenModelMatcher } from "@polyth/models";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { sendHoldMs } from "../sendHold.ts";
 import { isResizableImage, shouldAskImageSize } from "../imageUploadSize.ts";
 import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
@@ -294,8 +295,6 @@ async function loadComposerCatalog(projectId: string): Promise<ComposerCatalogRe
 
 const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
 const MODEL_WARNING_DELAY_MS = 8_000;
-/** Press and hold Send keeps the message as a draft chat instead. */
-const SEND_HOLD_MS = 500;
 /** How long Send shows its "kept as a draft" check after a hold. */
 const SEND_PARKED_MS = 1_400;
 
@@ -1403,6 +1402,11 @@ function ComposerBody({
   const sendShortcut = isPhone ? settings.mobileSendShortcut : settings.desktopSendShortcut;
   const sendKey = sendShortcut === "none" ? `${modKeyLabel()}↵` : sendShortcut === "shift-enter" ? "⇧↵" : "↵";
   const uiPrefs = useUiSettings();
+  // The hold that turns Send into "keep as a draft" is the person's setting
+  // (Settings > Chat): its length, or off entirely. A ref keeps the pointer
+  // callbacks — which are created once — reading the current value.
+  const sendHoldRef = useRef(0);
+  sendHoldRef.current = sendHoldMs(uiPrefs);
   const promptHistoryNav = usePromptHistory({
     sessionId: session?.id ?? null,
     projectId: activeProjectId,
@@ -3319,8 +3323,11 @@ function ComposerBody({
   );
   const canParkRef = useRef<() => boolean>(() => false);
   // People mode sends a person message, never a draft chat: holding Send there
-  // must not announce a saved draft while the message goes out to people.
-  canParkRef.current = () => !peopleModeRef.current && !activeModeRef.current && !queueEdit && !creatingSession && !sendPending && !compactPending
+  // must not announce a saved draft while the message goes out to people. The
+  // gesture itself is a setting: its length is the person's, and 0 turns it
+  // off, in which case a press is never a hold.
+  canParkRef.current = () => sendHoldRef.current > 0
+    && !peopleModeRef.current && !activeModeRef.current && !queueEdit && !creatingSession && !sendPending && !compactPending
     && Boolean(sessionIdRef.current || activeProjectId)
     && ((inputRef.current?.getText() ?? text).trim() !== "" || attachments.length > 0);
   const holdRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean }>({ timer: null, fired: false });
@@ -3341,7 +3348,8 @@ function ComposerBody({
     const hold = holdRef.current;
     if (hold.timer !== null) clearTimeout(hold.timer);
     hold.fired = false;
-    if (!canParkRef.current()) return;
+    const holdMs = sendHoldRef.current;
+    if (holdMs <= 0 || !canParkRef.current()) return;
     setHolding(true);
     hold.timer = setTimeout(() => {
       hold.timer = null;
@@ -3357,7 +3365,7 @@ function ComposerBody({
         parkedTimerRef.current = null;
         setParked(false);
       }, SEND_PARKED_MS);
-    }, SEND_HOLD_MS);
+    }, holdMs);
   }, []);
   const onPrimaryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
@@ -4313,6 +4321,13 @@ function ComposerBody({
   const runningPrimaryTitle = !queueEdit && !rewindActive && followUp === "queue"
     ? tr("composer.queueMessageUntilTheCurrentResponseFinishes")
     : runningPrimaryLabel;
+  // The ring is drawn by CSS over the person's own hold length. With the
+  // gesture off there is no ring at all, so nothing is published and no
+  // "hold to save" hint is promised.
+  const sendHoldStyle = sendHoldRef.current > 0
+    ? { "--send-hold-ms": `${sendHoldRef.current}ms` } as CSSProperties
+    : undefined;
+  const holdHint = uiPrefs.sendHoldDraft ? ` · ${tr("composer.holdToSaveDraft")}` : "";
   const runningPrimaryGlyph = queueEdit
     ? <CheckIcon />
     : !rewindActive && followUp === "queue"
@@ -4420,11 +4435,17 @@ function ComposerBody({
             onKeyDown={onPrimaryKeyDown}
             onClick={onPrimaryClick}
             data-holding={holding || undefined}
+            style={sendHoldStyle}
             aria-label={runningPrimaryTitle}
-            title={withContextLabel(runningPrimaryTitle)}
+            title={withContextLabel(`${runningPrimaryTitle}${holdHint}`)}
           >
             {runningPrimaryGlyph}
             <span className="composer-action-label">{runningPrimaryLabel}</span>
+            <span className="send-hold-ring" aria-hidden="true">
+              <svg viewBox="0 0 48 48">
+                <circle cx="24" cy="24" r="22.5" pathLength="100" />
+              </svg>
+            </span>
           </button>
           <Menu
             label={tr("composer.moreActiveRunActions")}
@@ -4477,13 +4498,16 @@ function ComposerBody({
         onContextMenu={(event) => event.preventDefault()} onKeyDown={onPrimaryKeyDown} onClick={onPrimaryClick}
         data-holding={holding || undefined}
         data-parked={parked || undefined}
-        title={`${shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")} (${sendKey}) · ${tr("composer.holdToSaveDraft")}`}
+        style={sendHoldStyle}
+        title={`${shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")} (${sendKey})${holdHint}`}
         aria-label={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
         disabled={sendDisabled && !parked}>
         <span className="send-plane" aria-hidden="true">{parked ? <Icon.check /> : <Icon.send />}</span>
-        <svg className="send-hold-ring" viewBox="0 0 48 48" aria-hidden="true">
-          <circle cx="24" cy="24" r="22.5" pathLength="100" />
-        </svg>
+        <span className="send-hold-ring" aria-hidden="true">
+          <svg viewBox="0 0 48 48">
+            <circle cx="24" cy="24" r="22.5" pathLength="100" />
+          </svg>
+        </span>
       </button>
             )}
     </>

@@ -26,6 +26,7 @@ import {
   type ChatRowId,
 } from "./chatSettingsModel.ts";
 import MessageActionsEditor, { useMessageActionRows } from "./MessageActionsEditor.tsx";
+import SendHoldField from "./SendHoldField.tsx";
 import { DisclosureRow, ItemList, NumberField, ResetLink, Row, Section, Seg, Toggle } from "./parts.tsx";
 import "./ShellLookPicker.css";
 import "./ChatSettingsPage.css";
@@ -290,9 +291,15 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
     options.find(([id]) => id === value)?.[1] ?? "";
   const desktopKey = settings.desktopSendShortcut === "enter" ? "Enter" : "Shift+Enter";
   const phoneSend = optionLabel(mobileSendOptions, settings.mobileSendShortcut);
-  const sendValue = `${desktopKey} · ${settings.mobileSendShortcut === "none"
-    ? tr("settings.chatPage.sendPhoneButton")
-    : tr("settings.chatPage.sendPhoneKey", { key: phoneSend })}`;
+  // The summary is what fits the row's value column on the narrowest pane, so
+  // it names one device's key — the one the row is being read on — plus the
+  // hold, and never all three at once.
+  const holdValue = ui.sendHoldDraft
+    ? tr("settings.chatPage.sendHoldSummary", { ms: String(ui.sendHoldDraftMs) })
+    : tr("settings.chatPage.sendHoldSummaryOff");
+  const sendValue = `${device === "phone"
+    ? (settings.mobileSendShortcut === "none" ? tr("settings.chatPage.sendPhoneButton") : phoneSend)
+    : desktopKey} · ${holdValue}`;
   const userActions = useMessageActionRows("user");
   const replyActions = useMessageActionRows("assistant");
   const actionsValue = (rows: typeof userActions) => {
@@ -470,6 +477,23 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                     }}
                   />
                 </Row>
+                <Row label={tr("settings.chatPage.sendHoldDraft")} hint={tr("settings.chatPage.sendHoldDraftHint")} itemId="chat.sendHoldDraft">
+                  <Toggle
+                    on={ui.sendHoldDraft}
+                    onChange={(sendHoldDraft) => setUiSettings({ sendHoldDraft })}
+                    label={tr("settings.chatPage.sendHoldDraft")}
+                  />
+                </Row>
+                {/* The length is only meaningful while the gesture exists, so it
+                    follows the switch instead of sitting greyed out beside it. */}
+                {ui.sendHoldDraft && (
+                  <Row label={tr("settings.chatPage.sendHoldDuration")} hint={tr("settings.chatPage.sendHoldDurationHint")} itemId="chat.sendHoldDuration" layout="stacked">
+                    <SendHoldField
+                      ms={ui.sendHoldDraftMs}
+                      onChange={(sendHoldDraftMs) => setUiSettings({ sendHoldDraftMs })}
+                    />
+                  </Row>
+                )}
               </DisclosureRow>
               <DisclosureRow
                 {...rowProps("followUp")}

@@ -3,6 +3,7 @@
 // source because older builds shared it with product-level settings.
 import { useSyncExternalStore } from "react";
 import { parseImageUploadPreference, type ImageUploadPreference } from "./imageUploadSize.ts";
+import { parseSendHoldMs, SEND_HOLD_DEFAULT_MS } from "./sendHold.ts";
 import type { NotificationKind, PromptHistoryScope } from "@polyth/contracts";
 import { clampPromptHistoryLimit, parsePromptHistoryScope, PROMPT_HISTORY_DEFAULT_LIMIT } from "@polyth/contracts";
 import {
@@ -229,6 +230,12 @@ export interface UiSettings {
   /** Composer target control visibility. */
   showGoals: boolean;
   showQuickActions: boolean;
+  /** Pressing and holding Send keeps the message as a draft instead of sending
+   *  it; off makes Send send at once (docs/dev/ui.md, "Drafts"). */
+  sendHoldDraft: boolean;
+  /** How long that hold takes, in ms (`sendHold.ts`). Kept while the gesture
+   *  is off, so turning it back on restores the person's own length. */
+  sendHoldDraftMs: number;
   /** The opt-in status bar under the workspace; off until the user turns it on. */
   statusBar: StatusBarMode;
   /** Phone swipe navigation (Navigator, Workspace, package Back). */
@@ -329,6 +336,8 @@ export const UI_DEFAULTS: UiSettings = {
   showAutoApprove: true,
   showGoals: true,
   showQuickActions: true,
+  sendHoldDraft: true,
+  sendHoldDraftMs: SEND_HOLD_DEFAULT_MS,
   statusBar: "off",
   swipeNavigation: "surface",
   sharedPinnedWindow: true,
@@ -498,6 +507,8 @@ export function parseUiSettings(raw: string | null): UiSettings {
       showAutoApprove: data.showAutoApprove !== false,
       showGoals: data.showGoals !== false,
       showQuickActions: data.showQuickActions !== false,
+      sendHoldDraft: data.sendHoldDraft !== false,
+      sendHoldDraftMs: parseSendHoldMs(data.sendHoldDraftMs),
       statusBar: STATUS_BAR_MODES.includes(data.statusBar as StatusBarMode)
         ? data.statusBar as StatusBarMode
         : UI_DEFAULTS.statusBar,

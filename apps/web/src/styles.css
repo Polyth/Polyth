@@ -5654,12 +5654,14 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   transition: border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
 }
-.size-stepper-track:hover::-webkit-slider-thumb,
+.size-stepper-track:hover::-webkit-slider-thumb { border-color: var(--accent); transform: scale(1.12); }
 .size-stepper-track:hover::-moz-range-thumb { border-color: var(--accent); transform: scale(1.12); }
 /* A 4px track cannot carry a usable focus outline, so focus reads on the
    thumb instead. */
 .size-stepper-track:focus-visible { outline: none; box-shadow: none; }
-.size-stepper-track:focus-visible::-webkit-slider-thumb,
+/* Split per engine: Chromium drops a whole selector list that contains a
+   pseudo-element it does not know, which left the focused thumb invisible. */
+.size-stepper-track:focus-visible::-webkit-slider-thumb { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-wash); }
 .size-stepper-track:focus-visible::-moz-range-thumb { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-wash); }
 .size-stepper-specimen {
   display: grid; place-items: center; flex: none; min-width: var(--space-5);
@@ -9912,19 +9914,19 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
 .send-plane { display: inline-grid; place-items: center; }
 .send-plane svg { width: 19px; height: 19px; }
 /* Press and hold Send keeps the message as a draft chat. A hairline ring
-   draws around Send over the 500 ms hold (SEND_HOLD_MS) while the button
-   settles a touch; once kept, the plane turns into a check for a beat. The
-   platform long-press callout and text selection stay out of the gesture. */
+   draws around Send over the person's hold length (`--send-hold-ms`, published
+   by the composer from `sendHold.ts`) while the button settles a touch; once
+   kept, the plane turns into a check for a beat. The platform long-press
+   callout and text selection stay out of the gesture. A reduced-motion profile
+   still gets the ring, drawn whole as the hold is armed: it is the only sign
+   that the press was read as a hold. */
 :is(.send, .composer-delivery) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .composer-rail .send { position: relative; overflow: visible; }
-/* The doubled class outranks the rail's icon sizing (phone `.send svg`). */
-.composer-rail .send > svg.send-hold-ring.send-hold-ring {
-  position: absolute;
-  inset: -4px;
-  width: calc(100% + 8px);
-  height: calc(100% + 8px);
-  max-width: none;
-}
+/* The ring is a box, not a bare SVG: an SVG resolves a percentage height
+   against its own intrinsic box, which drew the ring as an oval on any button
+   that was not square. */
+.composer-rail .send > .send-hold-ring { position: absolute; inset: -4px; display: block; max-width: none; }
+.send-hold-ring > svg { display: block; width: 100%; height: 100%; }
 .send-hold-ring {
   overflow: visible;
   pointer-events: none;
@@ -9943,10 +9945,10 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
   vector-effect: non-scaling-stroke;
 }
 .send[data-holding] .send-hold-ring { opacity: 1; }
-.send[data-holding] .send-hold-ring circle { animation: send-hold-fill 500ms linear forwards; }
+.send[data-holding] .send-hold-ring circle { animation: send-hold-fill var(--send-hold-ms, 500ms) linear forwards; }
 :is(.composer-rail, .composer-send-split) :is(.send, .composer-delivery)[data-holding] {
   transform: scale(0.94);
-  transition: transform 500ms var(--motion-ease);
+  transition: transform var(--send-hold-ms, 500ms) var(--motion-ease);
 }
 .send[data-parked] .send-plane svg { animation: send-parked-pop var(--motion-surface) var(--motion-ease); }
 @keyframes send-hold-fill { to { stroke-dashoffset: 0; } }
@@ -9954,9 +9956,13 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
 /* Without motion the hold still shows: the ring is drawn whole at once. */
 @media (prefers-reduced-motion: reduce) {
   .send[data-holding] .send-hold-ring circle { stroke-dashoffset: 0; }
+  /* A whole ring would read as "already kept", so the armed state is drawn
+     quiet and the check at the end is the completion cue. */
+  .send[data-holding] .send-hold-ring { opacity: .35; }
   :is(.composer-rail, .composer-send-split) :is(.send, .composer-delivery)[data-holding] { transform: none; }
 }
 :is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .send[data-holding] .send-hold-ring circle { stroke-dashoffset: 0; }
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .send[data-holding] .send-hold-ring { opacity: .35; }
 body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display: none !important; }
 
 /* Canvas tiles and right-side workspace editor. */
