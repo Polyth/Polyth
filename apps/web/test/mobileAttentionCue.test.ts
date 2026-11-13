@@ -151,7 +151,7 @@ test("deriveAttentionCue returns null when no state changes occur", () => {
   assert.equal(cue, null);
 });
 
-test("mobile header layout positions arrow at far right with adequate margins and attention styles", async () => {
+test("mobile header title has no arrow, keeps its context on a quiet line, and keeps attention styles", async () => {
   const { readFile } = await import("node:fs/promises");
   const [styles, mobileHeaderCss, mobileHeaderTsx] = await Promise.all([
     readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
@@ -159,15 +159,25 @@ test("mobile header layout positions arrow at far right with adequate margins an
     readFile(new URL("../src/components/mobile/MobileSessionHeader.tsx", import.meta.url), "utf8"),
   ]);
 
-  // Arrow stays in the final column with or without an attention dot.
-  assert.match(styles, /\.mobile-session-selector\s*>\s*svg,\s*\.mobile-session-selector-arrow\s*\{\s*grid-column:\s*-2;/);
+  // The whole title is the control: no dropdown arrow beside it.
+  assert.doesNotMatch(mobileHeaderTsx, /mobile-session-selector-arrow|Icon\.chevronDown/);
+  assert.doesNotMatch(styles, /mobile-session-selector-arrow/);
+  assert.doesNotMatch(mobileHeaderCss, /mobile-session-selector-arrow/);
 
-  // Status slot stays beside the title, before the arrow.
-  assert.match(styles, /\.mobile-island-text\s*\.session-header-status/);
-  assert.match(mobileHeaderTsx, /<span className="mobile-island-title-text">\{activeTitleText\}<\/span>\s*\{!attentionCue && \(\s*<span className="session-header-status">/);
+  // Package status marks lead the name inside its own text (one centred group
+  // on the title's baseline, inked and sized from the title); the owner's name
+  // alone takes a quiet line under it.
+  assert.match(mobileHeaderTsx, /<span className="mobile-island-title-text">\s*\{!attentionCue && \(\s*<span className="session-header-status">[\s\S]*?<\/span>\s*\)\}\s*\{activeTitleText\}\s*<\/span>/);
+  assert.match(mobileHeaderTsx, /\{activeTitleText\}\s*<\/span>[\s\S]*?\{!attentionCue && !conversation && session\?\.sharing\?\.owner && \(\s*<span className="mobile-island-owner"/);
+  assert.doesNotMatch(mobileHeaderTsx, /mobile-island-meta/);
+  assert.match(styles, /\.mobile-island-text \{[^}]*flex-direction: column;/);
+  assert.match(styles, /\.mobile-island-title-text > \.session-header-status \{[^}]*display: inline-flex;[^}]*color: var\(--muted\);/);
+  assert.match(styles, /\.mobile-island-title-text > \.session-header-status > \* \{ color: inherit; \}/);
+  assert.match(styles, /\.mobile-island-title-text > \.session-header-status svg \{ width: \.85em; height: \.85em;/);
+  assert.match(styles, /\.mobile-island-text > \.mobile-island-owner \{[^}]*color: var\(--muted\);[^}]*font-size: var\(--font-meta\);/);
 
   // Title reserves a leading column only for an attention dot.
-  assert.match(styles, /\.mobile-session-selector\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) var\(--icon-md\);/);
+  assert.match(styles, /\.mobile-session-selector\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
   assert.match(styles, /\.mobile-session-title-island\[data-leading-indicator\] \.mobile-session-selector\s*\{[^}]*grid-template-columns:\s*var\(--icon-md\) minmax\(0, 1fr\) var\(--icon-md\);/);
   assert.match(styles, /\.mobile-session-selector\s*\{[^}]*gap:\s*var\(--space-2\);/);
   assert.match(mobileHeaderTsx, /data-leading-indicator=\{attentionCue \? "true" : undefined\}/);

@@ -245,8 +245,7 @@ test("glass overlays and transparent session titles obey effect and text setting
           <div class="mobile-float-navigation"></div>
           <div class="mobile-session-title-island"><div class="mobile-session-title-row">
             <button class="mobile-session-selector">
-              <span class="mobile-island-text"><span class="mobile-island-title-text">Компактний прозорий заголовок поточної сесії з повною назвою</span></span>
-              <span class="mobile-session-selector-arrow">⌄</span>
+              <span class="mobile-island-text"><span class="mobile-island-title-text"><span class="session-header-status"></span>Компактний прозорий заголовок поточної сесії з повною назвою</span></span>
             </button>
           </div></div>
           <div class="mobile-float-actions"><button>+</button><button>⌘</button></div>

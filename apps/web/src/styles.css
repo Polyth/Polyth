@@ -14910,7 +14910,7 @@ color: var(--muted);
     gap: var(--space-1);
   }
   /* The glass island is inline-flex: stretch the row across it so the title
-     centres in the whole pill and the arrow reaches the far edge, and let the
+     centres in the whole pill, and let the
      island's own min-height (border included) size it like its neighbours. */
   .mobile-session-title-island > .mobile-session-title-row { flex: 1 1 auto; height: auto; align-self: stretch; align-items: stretch; }
   .mobile-session-floats[data-title-mode="button"] .mobile-session-selector { min-height: 0; height: auto; }
@@ -14920,7 +14920,7 @@ color: var(--muted);
     width: 100%;
     height: 100%;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) var(--icon-md);
+    grid-template-columns: minmax(0, 1fr);
     align-items: center;
     gap: var(--space-2);
     padding: 0 var(--space-3);
@@ -14951,14 +14951,17 @@ color: var(--muted);
   .mobile-session-selector[data-live="true"] {
     border-color: color-mix(in srgb, var(--accent-line) 70%, var(--border-soft));
   }
+  /* The title, and under it one quiet line of context. No arrow: the whole
+     title is the control, and the line only appears when it has something. */
   .mobile-island-text {
     grid-column: 1;
     min-width: 0;
     width: 100%;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: var(--space-1);
+    gap: 0;
     overflow: hidden;
     text-align: center;
     text-overflow: ellipsis;
@@ -14978,13 +14981,35 @@ color: var(--muted);
     overflow-wrap: anywhere;
     text-wrap: balance;
   }
-  .mobile-island-text .session-header-status {
-    flex: none;
+  .mobile-island-text > * { max-width: 100%; }
+  /* Package marks lead the name inside its text: one centred group on the
+     title's baseline, sized and inked from the title itself (a desktop
+     mark's colour and box do not follow it here). */
+  .mobile-island-title-text > .session-header-status {
     display: inline-flex;
     align-items: center;
+    gap: .2em;
+    margin-inline-end: .3em;
+    vertical-align: -.1em;
+    color: var(--muted);
   }
-  .mobile-island-text .session-header-status:empty {
-    display: none;
+  .mobile-island-title-text > .session-header-status:empty { display: none; }
+  .mobile-island-title-text > .session-header-status > * { color: inherit; }
+  .mobile-island-title-text > .session-header-status > :has(> svg:only-child) { width: auto; height: auto; }
+  .mobile-island-title-text > .session-header-status svg { width: .85em; height: .85em; stroke-width: 2.4; }
+  /* Someone else's chat: the owner's name, a quiet line under the title. */
+  .mobile-island-text > .mobile-island-owner {
+    color: var(--muted);
+    font-size: var(--font-meta);
+    font-weight: 400;
+    line-height: var(--font-meta-lh);
+  }
+  /* With that line the name keeps to one line, so both fit the bar. */
+  .mobile-island-text:has(> .mobile-island-owner) .mobile-island-title-text {
+    display: block;
+    max-height: none;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .mobile-session-floats[data-title-mode="button"] .mobile-island-title-text {
     display: block;
@@ -14993,8 +15018,6 @@ color: var(--muted);
     text-overflow: ellipsis;
   }
   .mobile-session-selector > .mobile-island-dot { grid-column: 1; justify-self: center; }
-  .mobile-session-selector > svg,
-  .mobile-session-selector-arrow { grid-column: -2; justify-self: center; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
   .mobile-island-dot {
     width: var(--space-2);
     height: var(--space-2);

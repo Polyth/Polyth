@@ -699,7 +699,8 @@ stays the authority and refuses anything the UI should not have offered.
   otherwise says whether the Space or specific people can open it. Private
   own chats carry no marker.
 - **Header**: someone else's chat names its owner — the desktop caption
-  ("Shared by {name}"), the phone title row after the status slot.
+  ("Shared by {name}"), on the phone the name alone in a quiet line under the
+  title.
 - **Access-shaped chrome**: rename, archive, delete, swipe actions and
   double-click rename need `manage`; below `collaborate` the composer is
   people-only (see "People in a chat").
@@ -1773,7 +1774,10 @@ host.slots.register({
   a contribution must render `null` when the route is not its concern. `ContextPie.tsx`
   mounts `composer.context.details` inside its card; `Header.tsx` and
   `MobileSessionHeader.tsx` mount `session.header.status` beside the shared
-  session status control; `Header.tsx` also mounts `app.header.center`;
+  session status control (on the phone inline before the title text, like a
+  browser address pill's lock, in the same centred line and baseline; marks
+  take a muted ink and a glyph sized from the title, and the title has no
+  dropdown arrow); `Header.tsx` also mounts `app.header.center`;
   `StatusBar.tsx` mounts `app.statusbar.leading/trailing` while the opt-in
   status bar is on (§4.10); `App.tsx` mounts `app.layers` once over the whole
   shell for package-owned floating layers (voice mode, or a renderless

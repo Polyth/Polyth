@@ -4,7 +4,6 @@ import type { SessionEvent, SessionProjection } from "@polyth/contracts";
 import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { displaySessionTitle, fmtDuration, fmtTokens, formatDate, isPlaceholderTitle } from "../../format.ts";
-import { Icon } from "../../icons.tsx";
 import { formatNumber, getLocaleSnapshot, subscribeLocale, tr } from "../../i18n/index.ts";
 import {
   activeSessionsForIsland,
@@ -968,24 +967,29 @@ export default function MobileSessionHeader() {
                   : (taskProgressTitle ? ` task-progress ${taskProgressTitle.tone}` : "")
               }`}
             >
-              <span className="mobile-island-title-text">{activeTitleText}</span>
-              {!attentionCue && (
-                <span className="session-header-status">
-                  <SlotHost
-                    slot="session.header.status"
-                    context={{ projectId: projectId ?? null, sessionId: session?.id ?? null, workspaceMode: "chat" }}
-                  />
-                </span>
-              )}
+              {/* Package status marks lead the name inside its own line of text, the
+                  way a browser's address pill leads with its lock: they share the
+                  title's baseline, centre with it as one group, wrap with it and are
+                  never the part an ellipsis cuts off. */}
+              <span className="mobile-island-title-text">
+                {!attentionCue && (
+                  <span className="session-header-status">
+                    <SlotHost
+                      slot="session.header.status"
+                      context={{ projectId: projectId ?? null, sessionId: session?.id ?? null, workspaceMode: "chat" }}
+                    />
+                  </span>
+                )}
+                {activeTitleText}
+              </span>
+              {/* Whose chat it is: words, so they get a quiet line of their own. */}
               {!attentionCue && !conversation && session?.sharing?.owner && (
-                // The phone title row has room for the name only; its label says whose.
                 <span className="mobile-island-owner" title={tr("sharing.sharedBy", { name: ownerName(session.sharing.owner) })}>
                   <span className="sr-only">{tr("sharing.sharedBy", { name: ownerName(session.sharing.owner) })}</span>
                   <span aria-hidden="true">{ownerName(session.sharing.owner)}</span>
                 </span>
               )}
             </span>
-            {!conversation && <span className="mobile-session-selector-arrow" aria-hidden="true"><Icon.chevronDown /></span>}
           </button>
         </div>
       </TitleContainer>}
