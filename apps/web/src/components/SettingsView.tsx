@@ -7,6 +7,7 @@ import {
   useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { consumePendingSettingsNavigation, setOverlay, type PendingSettingsNavigation } from "../store.ts";
 import { accountStorageGet, accountStorageSet } from "../accountStorage.ts";
 import { listSlots } from "../slots.ts";
@@ -38,7 +39,7 @@ import { useModalSurface } from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import { swipeZoneInHost } from "../shellSwipe.ts";
-import { attachSwipeSurface, parkLeavingLayer } from "../swipeSurface.ts";
+import { animateSettle, attachSwipeSurface, parkLeavingLayer, type SwipeSettle } from "../swipeSurface.ts";
 import { useEdgeSwipeBack } from "../useEdgeSwipeBack.ts";
 import { motionIsReduced, scheduleSurfaceExit } from "../motionPresence.ts";
 import { useExitGhost } from "../exitGhost.ts";
@@ -406,18 +407,38 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           shell.style.removeProperty("transform");
           shell.style.removeProperty("will-change");
         };
+        const at = (travel: number) => ({ transform: `translate3d(${sign * travel}px, 0, 0)` });
+        /** The release spring, while it is taking Settings out. */
+        let spring: { settle: SwipeSettle; animation: Animation } | null = null;
         return {
           paint(travel) {
-            shell.style.transform = `translate3d(${sign * travel}px, 0, 0)`;
+            shell.style.transform = at(travel).transform;
+          },
+          // The release runs on the compositor from the finger's own speed;
+          // closing Settings for real follows under it (swipeSurface.ts).
+          settle(settle) {
+            const animation = animateSettle(shell, settle, at);
+            spring = animation && settle.outcome === "commit" ? { settle, animation } : null;
+            return animation;
           },
           cancel: clear,
           commit({ travel, settleMs }) {
+            const running = spring;
             // The exit ghost carries these on (and the inline position until
             // its animation takes over); with motion off Settings just goes.
-            shell.style.setProperty("--settings-from", `${sign * travel}px`);
+            // Under a spring the ghost's own exit is parked at its end.
+            shell.style.setProperty("--settings-from", running ? `${sign * 100}%` : `${sign * travel}px`);
             if (settleMs > 0) shell.style.setProperty("--settings-settle", `${settleMs}ms`);
             else parkLeavingLayer(shell, `translate3d(${sign * 100}%, 0, 0)`);
-            closeSettings();
+            // Unmounted in this task: the ghost replaces the layer the spring
+            // was moving, and takes the spring over at the same moment of it.
+            flushSync(closeSettings);
+            if (!running) return;
+            const ghost = document.querySelector<HTMLElement>('.settings-scrim[data-exit-ghost="settings"] > .settings-shell');
+            const carried = ghost && animateSettle(ghost, running.settle, at);
+            // By its start, not its current time: that one is a frame old,
+            // and this task (the unmount) may have taken many.
+            if (carried && running.animation.startTime !== null) carried.startTime = running.animation.startTime;
           },
         };
       },

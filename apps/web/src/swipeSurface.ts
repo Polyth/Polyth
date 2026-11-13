@@ -118,7 +118,8 @@ export interface SwipeSession {
    * `!important` transform, no entrance that replays underneath), and where
    * the layer rests afterwards must be where they end. `commit()` and
    * `cancel()` are then called after the animation has started: on a commit,
-   * one frame later; coming home, when it has arrived. Return null (no Web
+   * as soon as it reports so (about a frame); coming home, when it has
+   * arrived. Return null (no Web
    * Animations, nothing to move) to be painted frame by frame instead.
    */
   settle?(settle: SwipeSettle): Animation | readonly Animation[] | null;
@@ -301,7 +302,7 @@ export function animateSettle(
 
 /** How many stalled frames right after a claim are absorbed into the gap (the mount, then its effects). */
 const CLAIM_STALLS_ABSORBED = 2;
-/** How long after a release the commit is delivered when no frame comes (a hidden page). */
+/** How long after a release the commit is delivered when its animations never report a start (a hidden page). */
 const COMMIT_FALLBACK_MS = 120;
 /** Slack after a settle's own duration before it is taken as finished without its event. */
 const SETTLE_FINISH_SLACK_MS = 160;
@@ -583,7 +584,11 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
       return;
     }
     // The layer is already on its way, off the main thread. The commit (a state
-    // change that may cost several frames) comes one frame later, under it.
+    // change that may cost several frames) follows under it, once the
+    // animations report they have started. Not sooner: a commit that restyles
+    // the layer makes the browser re-send its animations to the compositor,
+    // and one whose start time the page has not heard yet is re-sent from its
+    // beginning, so the layer would arrive and then travel a second time.
     const release: SwipeRelease = {
       travel, width: w, velocity, settleMs: curve.durationMs,
       easing: settleEasing({ remaining, velocity, durationMs: curve.durationMs }),
@@ -594,7 +599,6 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     gapFrame = 0;
     let delivered = false;
     let arrived = false;
-    let commitFrame = 0;
     let commitTimer = 0;
     // The animations hold the layer at its destination until the committed
     // state rests there too; only then are they taken back.
@@ -604,7 +608,6 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     const deliver = (): void => {
       if (delivered) return;
       delivered = true;
-      win.cancelAnimationFrame(commitFrame);
       win.clearTimeout(commitTimer);
       pendingCommit = null;
       reset();
@@ -616,12 +619,14 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
       letGo();
     });
     pendingCommit = deliver;
-    commitFrame = win.requestAnimationFrame(() => {
-      // After this frame: the animation has reached the compositor by then.
+    const started = (): void => {
+      if (delivered) return;
+      // In a task of its own, after the frame that confirmed the start.
       win.clearTimeout(commitTimer);
       commitTimer = win.setTimeout(deliver, 0);
-    });
+    };
     commitTimer = win.setTimeout(deliver, COMMIT_FALLBACK_MS);
+    void Promise.all(animations.map((animation) => animation.ready)).then(started, started);
   };
 
   /** A finger lands on a layer that is springing home: it stops where it is and follows this finger. */

@@ -1,8 +1,10 @@
 // The interactive edge-swipe Back controller, driven with real touch/pointer
 // event sequences (happy-dom). The decisions are pinned in mobileGestures.test.ts;
 // this covers what the controller does with them: claiming the touch, painting
-// the drag, handing a release to the exit animation, springing home, and
-// staying out of the way of everything that is not a swipe.
+// the drag, finishing a release (as a spring on both layers where the Web
+// Animations API exists, as a hand-off to the exit animation where it does
+// not), springing home, and staying out of the way of everything that is not
+// a swipe.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
@@ -43,7 +45,9 @@ interface Fixture {
   cancelled: string[];
 }
 
-function fixture(overrides: { enabled?: boolean; withUnder?: boolean } = {}): Fixture {
+interface Spring { el: string; pseudo: string | undefined; frames: Keyframe[]; cancelled: boolean; finish(): void }
+
+function fixture(overrides: { enabled?: boolean; withUnder?: boolean; springs?: Spring[] } = {}): Fixture {
   doc.body.innerHTML = `
     <div id="under"></div>
     <div id="layer"><button id="inner">Row</button></div>
@@ -52,6 +56,22 @@ function fixture(overrides: { enabled?: boolean; withUnder?: boolean } = {}): Fi
   const inner = doc.getElementById("inner")!;
   const under = doc.getElementById("under")!;
   const state: Fixture = { layer, inner, under, backs: 0, enabled: overrides.enabled ?? true, detach: () => {}, cancelled: [] };
+  // Without `springs` the elements have no Web Animations: the CSS hand-off.
+  for (const el of [layer, under]) {
+    Object.defineProperty(el, "animate", {
+      configurable: true,
+      value: overrides.springs && ((frames: Keyframe[], timing: KeyframeAnimationOptions) => {
+        const animation = new dom.EventTarget() as unknown as Spring & EventTarget;
+        Object.assign(animation, {
+          el: el.id, pseudo: timing.pseudoElement, frames, cancelled: false, currentTime: 0,
+          cancel() { animation.cancelled = true; },
+          finish() { animation.dispatchEvent(new dom.Event("finish") as never); },
+        });
+        overrides.springs!.push(animation);
+        return animation;
+      }),
+    });
+  }
   state.detach = attachEdgeSwipeBack({
     layer: () => layer,
     ...(overrides.withUnder === false ? {} : { under: () => under }),
@@ -120,6 +140,107 @@ test("a claimed drag follows the finger, peeks the layer beneath, and a long rel
     assert.equal(f.layer.style.getPropertyValue("--stack-from"), "");
     assert.equal(f.under.style.getPropertyValue("--stack-uncover-from"), "");
     assert.equal(f.under.style.getPropertyValue("--stack-dim-from"), "");
+  } finally {
+    f.detach();
+  }
+});
+
+test("with Web Animations a release springs both layers at once and completes the Back a frame later", async () => {
+  const springs: Spring[] = [];
+  const f = fixture({ springs });
+  try {
+    drag(f.inner, 600, { steps: 8, stepMs: 40 });
+    touch("touchend", f.inner);
+    assert.equal(f.backs, 0, "the release moves the layers first: nothing has changed state yet");
+    assert.deepEqual(springs.map((spring) => [spring.el, spring.pseudo]), [["layer", undefined], ["under", undefined], ["under", "::after"]],
+      "the layer, the layer beneath and its veil share one spring");
+    const [layer, under, veil] = springs;
+    assert.equal(layer!.frames[0]!.transform, "translate3d(592px, 0, 0)", "from where the finger left it…");
+    assert.equal(layer!.frames.at(-1)!.transform, `translate3d(${WIDTH}px, 0, 0)`, "…to off-screen");
+    assert.match(String(under!.frames[0]!.transform), /\* -0\.4\d+\), 0, 0\)$/);
+    assert.match(String(under!.frames.at(-1)!.transform), /\* -0\.0000\), 0, 0\)$/, "the layer beneath comes to rest");
+    assert.equal(veil!.frames.at(-1)!.opacity, "0.0000");
+    assert.equal(f.under.getAttribute("data-peek"), "true", "still peeking until the Back lands");
+
+    await sleep(40);
+    assert.equal(f.backs, 1, "the Back follows about a frame later, under the spring");
+    // No CSS exit may start under the spring: the layer is marked and parked
+    // where the spring ends, the layer beneath keeps peeking, at rest.
+    assert.equal(f.layer.getAttribute("data-swipe-handoff"), "out");
+    assert.equal(f.layer.style.transform, `translate3d(${WIDTH}px, 0, 0)`);
+    assert.equal(f.under.getAttribute("data-peek"), "true");
+    assert.match(f.under.style.getPropertyValue("--stack-peek-x"), /\* -0\.0000\)$/);
+    assert.equal(f.under.style.getPropertyValue("--stack-peek-dim"), "0.0000");
+    // The exit that starts once the spring is over is parked at its end.
+    assert.equal(f.layer.style.getPropertyValue("--stack-from"), "100%");
+    assert.match(f.under.style.getPropertyValue("--stack-uncover-from"), /\* -0\.0000\)$/);
+    assert.equal(f.under.style.getPropertyValue("--stack-dim-from"), "0.0000");
+    assert.equal(f.under.style.getPropertyValue("--stack-uncover-settle"), "1ms", "the settle-back only has to hand input back");
+    assert.equal(springs.some((spring) => spring.cancelled), false, "the spring holds the layers until it has arrived");
+    layer!.finish();
+    assert.equal(springs.every((spring) => spring.cancelled), true, "then the parked styles hold them");
+    await sleep(400);
+    assert.equal(f.layer.hasAttribute("data-swipe-handoff"), false, "the marks go when the spring is over");
+    assert.equal(f.layer.style.transform, "");
+    assert.equal(f.under.hasAttribute("data-peek"), false);
+    assert.equal(f.under.style.getPropertyValue("--stack-peek-x"), "");
+  } finally {
+    f.detach();
+  }
+});
+
+test("a sprung layer that its owner unmounts at once hands the spring to its exit ghost", async () => {
+  const springs: Spring[] = [];
+  const f = fixture({ springs });
+  // The owner: unmounts the layer on Back and leaves a copy of its last frame (exitGhost.ts).
+  const owner: { ghost: HTMLElement | null } = { ghost: null };
+  const carried: Array<{ frames: Keyframe[]; startTime: number | null }> = [];
+  f.detach();
+  f.detach = attachEdgeSwipeBack({
+    layer: () => f.layer,
+    enabled: () => true,
+    onBack: () => {
+      const host = doc.createElement("div");
+      host.setAttribute("data-exit-ghost", "sheet");
+      const ghost = f.layer.cloneNode(true) as HTMLElement;
+      owner.ghost = ghost;
+      Object.defineProperty(ghost, "animate", {
+        value: (frames: Keyframe[]) => { const animation = { frames, startTime: null }; carried.push(animation); return animation; },
+      });
+      host.append(ghost);
+      f.layer.replaceWith(host);
+    },
+  }, doc);
+  try {
+    drag(f.inner, 600, { steps: 8, stepMs: 40 });
+    touch("touchend", f.inner);
+    Object.assign(springs[0]!, { startTime: 1234 });
+    await sleep(40);
+    assert.ok(owner.ghost, "the Back ran");
+    assert.equal(owner.ghost.style.getPropertyValue("--stack-from"), "100%", "the ghost's own exit is parked");
+    assert.equal(carried.length, 1, "and the spring carries on, on the ghost");
+    assert.deepEqual(carried[0]!.frames, springs[0]!.frames);
+    assert.equal(carried[0]!.startTime, 1234, "from the same moment of it");
+  } finally {
+    f.detach();
+  }
+});
+
+test("with Web Animations a short release springs both layers home and navigates nowhere", async () => {
+  const springs: Spring[] = [];
+  const f = fixture({ springs });
+  try {
+    drag(f.inner, 90, { steps: 6, stepMs: 60 });
+    touch("touchend", f.inner, undefined, 300);
+    assert.equal(springs.length, 3);
+    assert.equal(springs[0]!.frames.at(-1)!.transform, "translate3d(0px, 0, 0)", "the layer goes back to rest");
+    assert.match(String(springs[1]!.frames.at(-1)!.transform), /\* -1\.0000\), 0, 0\)$/, "the layer beneath retreats again");
+    assert.equal(springs[2]!.frames.at(-1)!.opacity, "1.0000");
+    springs[0]!.finish();
+    assert.equal(f.backs, 0);
+    assert.equal(f.layer.style.transform, "");
+    assert.equal(f.under.hasAttribute("data-peek"), false);
+    assert.equal(f.layer.style.getPropertyValue("--stack-from"), "", "nothing was handed to an exit");
   } finally {
     f.detach();
   }

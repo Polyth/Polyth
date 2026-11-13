@@ -3550,8 +3550,9 @@ host.surfaces.register({
   - *Interactive Back:* dragging toward the inline end (`edgeSwipeBack.ts`,
     attached by `ModuleView` and the Workspace) makes the layer follow the
     finger while the Workspace peeks in behind it; a release past the commit
-    point, or a flick, hands its position to the same exit animation through
-    `--stack-from`, and anything else springs home. It stands down only while
+    point, or a flick, springs both layers on to the end of the Back from the
+    finger's own speed (see *Release* and *Back under a spring* below), and
+    anything else springs home. It stands down only while
     an Edit item is lifted. Where it may start follows the swipe setting
     below (default: anywhere on the layer). A settle-back that a layer can be
     dragged from next (`stack-uncover` on the Workspace, the Settings list)
@@ -3638,8 +3639,13 @@ host.surfaces.register({
     that implements `settle()` plays it with `animateSettle` — the spring's
     samples as a linear Web Animation, so it runs on the compositor — and the
     controller starts it **in the same task as the release**, before anything
-    else. Only one frame later does it call `commit()`, where the session
-    changes state. That order is the point: opening a surface for real is a
+    else. Only when the animations report that they have started
+    (`Animation.ready`, about a frame; 120ms at most) does it call
+    `commit()`, where the session changes state. Not sooner: a commit that
+    restyles the layer makes the browser re-send its animations to the
+    compositor, and one whose start time the page has not heard yet is
+    re-sent from its beginning, so the layer arrived and then travelled a
+    second time. That order is the point: opening a surface for real is a
     React commit that makes it modal, moves focus and marks Chat inert, which
     can cost several frames on a long chat, and done first it showed as the
     layer freezing between the finger and its settle. The animation holds the
@@ -3653,9 +3659,37 @@ host.surfaces.register({
     inherited custom property is written on these surfaces at a release: one
     restyles the whole subtree. Where the Web Animations API is missing, and
     with motion off, there is no settle and the layer lands at once.
-  - *CSS hand-off (Back, phone Settings, the tablet drawer):* a session
-    without `settle()` commits in the release's task and hands its position
-    to a CSS animation of its own: where the finger left the layer
+  - *No CSS animation may start under a spring (the rule that makes the
+    above hold):* a CSS animation that begins on an element, for a property
+    the compositor is already animating there, makes the browser re-send the
+    spring, and for one frame the layer shows where the page last computed
+    it, which after a long commit is far behind. So the committed state must
+    not start an entrance, exit or settle-back on a sprung element until the
+    spring is over; whatever starts then must already be at its end.
+  - *Back under a spring (`edgeSwipeBack.ts`: package windows, the
+    Workspace, the Workspace's Add page, a Settings page, `swipeBack`
+    sheets):* `settle()` springs the layer, the moving parts of the layer
+    beneath (`underMotion`, one element or several) and its veil (`underDim`,
+    default the first part's `::after`) together. The peek rules position the
+    layer beneath **without `!important`** so those animations outrank them,
+    and are not tied to the covered phase. `commit()` then marks the layer
+    `data-swipe-handoff="out"` (`animation: none !important`, one rule in
+    `stackNavigation.css`) and parks it by its inline transform where the
+    spring ends, keeps the layer beneath peeking at rest (its veil swallows
+    taps meanwhile), and calls `onBack()`, which `useEdgeSwipeBack` runs in
+    `flushSync`: outside an event React would otherwise render a frame
+    later. Both marks go after the spring's duration; the exit and
+    settle-back that start then are parked at their end (`--stack-from: 100%`,
+    `--stack-uncover-from` at rest, a 1ms settle-back) and are never seen. A
+    layer whose owner unmounts it at once leaves an exit ghost
+    (`exitGhost.ts`): the spring is started again on the ghost with the same
+    `startTime` (not `currentTime`, which is a frame old and, after the
+    unmount, many frames behind). Dismissing phone Settings by swipe does the
+    same with its own ghost.
+  - *CSS hand-off (the tablet drawer; every Back where the Web Animations
+    API is missing):* a session without `settle()` commits in the release's
+    task and hands its position to a CSS animation of its own: where the
+    finger left the layer
     (`--stack-from`), a duration for the rest of the travel
     (`--stack-out-settle`, `--stack-uncover-settle`; `settleDurationMs` — the
     share of the distance left, never slower than the finger, at least 120ms,

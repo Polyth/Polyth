@@ -16,9 +16,13 @@
  * Reduced-motion and low-resource modes are handled by the global
  * `animation: none !important` rules, and release the unmount immediately.
  *
- * `--stack-from` lets an interactive gesture hand its release position to the
- * exit so the layer carries on from where the finger left it. A released swipe
- * also shortens the motion to the rest of its travel (`--stack-out-settle`,
+ * A released Back swipe is finished by the swipe controller's spring, not by
+ * these animations (edgeSwipeBack.ts): the exit then only starts once the
+ * spring is over, parked at its end (`--stack-from: 100%`); see
+ * `data-swipe-handoff="out"` and the peek rules below. Where the Web
+ * Animations API is missing the exit itself carries the layer on:
+ * `--stack-from` lets the gesture hand its release position to the exit so the
+ * layer continues from where the finger left it. That hand-off also shortens the motion to the rest of its travel (`--stack-out-settle`,
  * `--stack-uncover-settle`) and bends the start of the curve to the finger's
  * speed (`--stack-swipe-ease`), so a flick is never slowed down, a slow release
  * never leaps, and the two layers still finish together; a tap keeps
@@ -196,16 +200,21 @@
 
   /* While a finger pulls the package away, the covered Workspace peeks in
      behind it: shown, and positioned by the gesture (edgeSwipeBack.ts) through
-     two custom properties instead of the retreat animation. */
-  body .sheet-backdrop[data-stack="covered"][data-peek] > .workspace-panel-sheet.sheet {
+     two custom properties instead of the retreat animation. No `!important`
+     on the position: the release spring animates over it. The peek outlasts
+     the Back by the length of that spring (whatever phase the layer is in by
+     then), so the settle-back does not start under it; its veil keeps
+     swallowing taps meanwhile. */
+  body .sheet-backdrop[data-stack][data-peek] > .workspace-panel-sheet.sheet {
     animation: none !important;
     visibility: visible !important;
-    transform: translate3d(var(--stack-peek-x, 0px), 0, 0) !important;
+    transform: translate3d(var(--stack-peek-x, 0px), 0, 0);
   }
 
-  body .sheet-backdrop[data-stack="covered"][data-peek] > .workspace-panel-sheet.sheet::after {
+  body .sheet-backdrop[data-stack][data-peek] > .workspace-panel-sheet.sheet::after {
     animation: none !important;
-    opacity: var(--stack-peek-dim, 1) !important;
+    opacity: var(--stack-peek-dim, 1);
+    pointer-events: auto;
   }
 
   body .sheet-backdrop[data-stack="revealed"] > .workspace-panel-sheet.sheet::after {
@@ -217,6 +226,16 @@
     animation-duration: var(--stack-uncover-settle, var(--motion-stack));
     animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
+}
+
+/* Swiped Back under a spring (edgeSwipeBack.ts): the spring is already taking
+   the layer out, so its exit must not start underneath. A CSS animation that
+   begins on a layer the compositor is moving makes the browser re-send the
+   spring, a frame late. The mark lasts only as long as the spring; the
+   layer's inline transform parks it meanwhile. An exit ghost of such a layer
+   is a new element: it plays its (parked) exit as usual. */
+[data-swipe-handoff="out"]:not([data-exit-ghost], [data-exit-ghost] *) {
+  animation: none !important;
 }
 
 /* A claimed drag is direct manipulation: nothing under the finger selects.

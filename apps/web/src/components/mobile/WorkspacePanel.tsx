@@ -687,7 +687,8 @@ export default function WorkspacePanel({ onClose, closing = false, stackPhase, p
     layer: () => galleryPage.current,
     under: () => sheet,
     // The grid's head and body play the settle-back; the sheet only carries the values.
-    underMotion: () => sheet?.querySelector<HTMLElement>(":scope > .sheet-head") ?? null,
+    underMotion: () => [...(sheet?.querySelectorAll<HTMLElement>(":scope > .sheet-head, :scope > .sheet-body") ?? [])],
+    underDim: () => sheet?.querySelector<HTMLElement>(":scope > .workspace-gallery-veil") ?? null,
     onBack: closeGallery,
   });
 

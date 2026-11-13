@@ -44,10 +44,11 @@
 }
 
 /* While a finger pulls the page away, the editor peeks in behind it
-   (edgeSwipeBack.ts positions it through two custom properties). */
-.workspace-panel-sheet.is-gallery-open[data-peek] > :is(.sheet-head, .sheet-body) {
+   (edgeSwipeBack.ts positions it through two custom properties; the release
+   spring animates over them, and the peek lasts until that spring is over). */
+.workspace-panel-sheet[data-peek] > :is(.sheet-head, .sheet-body) {
   visibility: visible !important;
-  transform: translate3d(var(--stack-peek-x, 0px), 0, 0) !important;
+  transform: translate3d(var(--stack-peek-x, 0px), 0, 0);
   animation: none !important;
 }
 
@@ -66,7 +67,8 @@
 }
 
 .workspace-panel-sheet[data-peek] > .workspace-gallery-veil {
-  opacity: var(--stack-peek-dim, 1) !important;
+  opacity: var(--stack-peek-dim, 1);
+  pointer-events: auto;
   animation: none !important;
 }
 

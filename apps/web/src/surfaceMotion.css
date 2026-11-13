@@ -233,11 +233,12 @@
      by the gesture (edgeSwipeBack.ts) instead of the retreat animation. */
   .settings-shell > .settings-nav[data-peek] {
     visibility: visible !important;
-    transform: translate3d(var(--stack-peek-x, 0px), 0, 0) !important;
+    transform: translate3d(var(--stack-peek-x, 0px), 0, 0);
     animation: none !important;
   }
   .settings-shell > .settings-nav[data-peek]::after {
-    opacity: var(--stack-peek-dim, 1) !important;
+    opacity: var(--stack-peek-dim, 1);
+    pointer-events: auto;
     animation: none !important;
   }
 
