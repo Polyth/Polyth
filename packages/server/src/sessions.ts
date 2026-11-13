@@ -13275,6 +13275,9 @@ export function createSessionService(deps: {
         ? options.source.trim().slice(0, 64)
         : undefined;
       const endedPause = await withSessionLock(sessionId, async () => {
+        // Stop ends a wait for a provider limit too: the countdown would
+        // otherwise resend the last message after the person stopped the work.
+        await clearResume(sessionId, "user");
         // Stop on a paused session ends the pause: the work is over.
         if ((await store.projection(sessionId))?.paused && !turnActive(sessionId)) {
           return endPause(sessionId, "stopped", source);

@@ -222,6 +222,28 @@ test("cancelResume clears the plan and records turn/resume-cancelled", async () 
   await h.store.close();
 });
 
+test("Stop on a session waiting out a limit cancels the resume timer", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "keep going" });
+  await flush();
+  h.emit(id, LIMIT_STOP);
+  await flush();
+  assert.ok((await h.store.projection(id))?.resume, "the limit stop should plan a resume");
+
+  await h.sessions.abort(id, { source: "subagent-dock" });
+  await flush();
+
+  const proj = await h.store.projection(id);
+  assert.equal(proj?.resume, undefined);
+  assert.equal(proj?.autoRetry, undefined);
+  const cancelled = (await h.store.events(id)).find((e) => e.type === "turn/resume-cancelled");
+  assert.equal((cancelled!.data as { reason?: string }).reason, "user");
+  // Nothing was resent: the only started turn is the original send.
+  assert.equal(h.startedTexts.length, 1);
+  await h.store.close();
+});
+
 test("resumeNow re-sends the last user message and switches the session model", async () => {
   const h = harness();
   const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
