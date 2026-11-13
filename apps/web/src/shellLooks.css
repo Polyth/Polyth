@@ -1919,10 +1919,6 @@ body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float
     gap: var(--space-3) var(--space-2);
   }
 
-  body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher {
-    grid-template-rows: calc(var(--icon-xl) + var(--space-3)) calc(2em * var(--font-meta-lh));
-  }
-
   body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher > svg {
     box-sizing: border-box;
     width: calc(var(--icon-xl) + var(--space-3));

@@ -118,23 +118,32 @@
     box-shadow: none;
   }
 
+  /* Every launcher spans two tracks of the panel grid, an icon track and a
+     label track, and passes them down through subgrid. A row's label track
+     is as tall as its longest label: icons stay level across the row, a
+     one-line label centres in the space a two-line neighbour needs, and a
+     row of one-line labels reserves no empty second line. Outside the grid
+     (the lifted copy while arranging) subgrid falls back to auto tracks,
+     centred in the copy's frame. */
   .workspace-panel-sheet .workspace-panel-item--launcher {
     grid-column: span 1;
-    min-height: calc((2 * var(--control-h)) + var(--space-2));
+    grid-row: span 2;
+    display: grid;
+    grid-template-rows: subgrid;
+    row-gap: var(--space-2);
+    align-content: center;
   }
 
-  /* An icon row over a fixed two-line label slot: every tile stacks to the
-     same height, so icons stay level whether or not a label wraps, and the
-     tile fills its row instead of ending at its own content. */
   .workspace-panel-sheet .workspace-panel-launcher {
-    height: 100%;
-    min-height: calc((2 * var(--control-h)) + var(--space-2));
+    grid-row: span 2;
+    min-height: 0;
     display: grid;
-    grid-template-rows: var(--icon-xl) calc(2em * var(--font-meta-lh));
+    grid-template-rows: subgrid;
     align-content: center;
+    align-items: center;
     justify-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-1);
+    row-gap: var(--space-2);
+    padding: var(--space-3) var(--space-1);
     border: 1px solid var(--material-glass-border);
     border-radius: var(--radius-surface);
     color: var(--text-dim);
@@ -153,7 +162,6 @@
   }
 
   .workspace-panel-sheet .workspace-panel-launcher > span {
-    align-self: center;
     display: -webkit-box;
     min-width: 0;
     overflow: hidden;
