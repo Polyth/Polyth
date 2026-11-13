@@ -4886,6 +4886,30 @@ body[data-desktop-low-resource="true"] :is(.sync-catch-up, .sync-catch-up[data-s
 .alert-dialog-body { display: flex; flex-direction: column; gap: var(--space-3); }
 .alert-dialog-body p { margin: 0; color: var(--text-dim); line-height: 1.5; white-space: pre-line; }
 .alert-dialog-body input { width: 100%; }
+/* Anchored confirmation. Phone widths show dialogs as bottom sheets; a
+   confirmation asked from a control on screen (confirmAlert's `origin`, e.g.
+   Delete in a session row's menu) is a card over that control instead, placed
+   by AlertDialog.tsx and grown out of it (surfaceMotion.css). Its backdrop
+   keeps the scrim but not the blur: fading a full-screen backdrop-filter in
+   under a sliding glass sheet is what made that sheet stutter on phones. */
+@media (max-width: 700px) {
+  .dialog-backdrop.alert-anchored-backdrop { align-items: flex-start; }
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .dialog-backdrop.alert-anchored-backdrop {
+    background: var(--scrim);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .dialog-panel.alert-dialog.is-anchored {
+    position: absolute;
+    top: var(--alert-anchor-top, 50%);
+    left: var(--alert-anchor-left, 12px);
+    width: min(400px, calc(100% - 24px - var(--safe-left) - var(--safe-right)));
+    max-height: calc(100% - 2 * max(var(--space-5), var(--safe-top)));
+    border: 1px solid var(--material-glass-border);
+    border-radius: var(--radius-sheet);
+    transform-origin: var(--alert-anchor-origin, 50% 50%);
+  }
+}
 .workspace { position: relative; }
 .view-icon-named { width: auto; gap: 5px; padding: 0 8px; }
 .view-icon-label { font-size: var(--font-meta); font-weight: 650; white-space: nowrap; }

@@ -258,7 +258,7 @@ test("session actions stay a nested menu and can copy the session id", async () 
 
   assert.match(source, /copyText\(session\.id\)/);
   assert.match(source, /id:\s*"copy-id"[\s\S]*?label:\s*tr\("sidebar\.sessionlist\.copySessionId"\)/);
-  assert.match(source, /id:\s*"delete"[\s\S]*?onSelect:\s*\(\) => void remove\(\)/);
+  assert.match(source, /id:\s*"delete"[\s\S]*?onSelect:\s*\(context\) => void remove\(context\?\.origin\)/);
   assert.doesNotMatch(source, /if \(session\.isolation\) return;/,
     "explicit hard-delete stays available while isolation recovery is pending");
   assert.match(source, /session\.isolation[\s\S]*?theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted/,

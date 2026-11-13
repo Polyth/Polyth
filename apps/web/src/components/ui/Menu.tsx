@@ -50,7 +50,13 @@ export interface MenuAction {
   entries?: readonly MenuEntry[];
   /** Current choice, shown at the trailing edge of a drill-in row. */
   value?: string;
-  onSelect: () => void;
+  /** `origin` is the chosen row's viewport rect, read before the menu closes,
+   *  so a follow-up surface (a confirmation) can open where the finger was. */
+  onSelect: (context?: MenuSelectContext) => void;
+}
+
+export interface MenuSelectContext {
+  origin: DOMRect;
 }
 
 /** Non-interactive section heading inside the entry list. */
@@ -194,13 +200,14 @@ export default function Menu({
   const checkable = shownEntries.some((entry) =>
     typeof entry === "object" && !isHeading(entry) && (entry.kind === "radio" || entry.kind === "checkbox"));
 
-  const select = (action: MenuAction) => {
+  const select = (action: MenuAction, row?: HTMLElement) => {
     if (action.disabled) return;
     if (asSheet) tapFeedback();
     if (action.entries) {
       setDrillId(action.id);
       return;
     }
+    const origin = row?.getBoundingClientRect();
     // Checkbox/switch entries stay open for multi-toggle; everything else closes.
     if (action.kind !== "checkbox" && action.kind !== "switch") {
       setOpen(false);
@@ -208,7 +215,7 @@ export default function Menu({
         requestAnimationFrame(() => focusUnlessKeyboardHeld(returnFocusRef?.current ?? triggerRef.current));
       }
     }
-    action.onSelect();
+    action.onSelect(origin ? { origin } : undefined);
   };
 
   const trigger = children({
@@ -274,7 +281,7 @@ export default function Menu({
         data-menu-entry={entry.id}
         className={`${sheet ? "ui-menu-sheet-item" : "ui-menu-item"}${entry.danger ? " ui-menu-item--danger" : ""}${entry.checked && entry.kind !== "switch" ? " ui-menu-item--checked" : ""}`}
         disabled={entry.disabled}
-        onClick={() => select(entry)}
+        onClick={(event) => select(entry, event.currentTarget)}
       >
         {itemContent(entry, sheet ? "lg" : "sm")}
       </button>

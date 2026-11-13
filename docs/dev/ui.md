@@ -3589,12 +3589,30 @@ host.surfaces.register({
     gesture), and the installed Capacitor app keeps every swipe. This is a
     capability decision (`isNativeMobile()` plus `(any-pointer: coarse)`), not
     user-agent or device sniffing, and it is independent of the setting above.
+  - *Session-row quick actions (phone Navigator):* a row reveals an icon tray
+    per side — leading (swipe toward the inline end) and trailing (toward the
+    inline start) — configured in General (`ui.rowSwipeLeading` default
+    `["pin","archive"]`, `ui.rowSwipeTrailing` default `[]`, `ui.rowSwipeFull`
+    default on; items `general.rowSwipeLeading|Trailing|Full`). Choices: pin,
+    archive (manage access), mute (conversations only), delete (manage access);
+    order is kept and the first one is the full-swipe action. The row tracks
+    the finger 1:1, rubber-bands past the tray and settles with the release
+    velocity (a fast flick opens or closes below the distance threshold).
+    Dragging past 60% of the row (again from an open tray) commits the first
+    action with a haptic tick at the threshold and on commit; archive slides the
+    row out first, pin/mute snap back. Delete never commits from a swipe: only
+    its tray button, behind the usual confirmation. Pure maths and setting
+    normalisation: `components/mobile/sessionRowSwipe.ts`. Reduced motion and
+    low-resource mode keep the 1:1 tracking and drop every transition.
   - *Who keeps a touch:* away from the edge a swipe must clear 12px and be
     clearly horizontal (1.6:1) or it gives up; it never starts in editable
     content (`input`, `textarea`, `select`, `contenteditable`, sliders), while
     text is selected, in a subtree marked `data-owns-swipe` (empty = both
     directions, or `toward-end`/`toward-start` for one; a session row owns
-    `toward-end` at rest and both while Pin is showing; an edge start still
+    the directions that have quick actions at rest (`toward-end` by default,
+    both once trailing actions are configured, nothing when none are) and both
+    while a tray is showing; the Navigator still closes from every non-row
+    area, and from a row's side that has no tray; an edge start still
     navigates over any owner), or in one marked `data-no-edge-swipe` (owns
     even the edge). At the moment of decision it
     also yields to an ancestor with `touch-action: none` (drag handles,
@@ -3695,6 +3713,15 @@ host.surfaces.register({
   - *Dialogs* rise into place on wide screens and sink out; at phone widths
     (where they are bottom sheets) they rise from the bottom edge and go back
     down.
+  - *Anchored confirmations:* a `confirmAlert` given an `origin` (the viewport
+    rect of the control it was asked from) is, at phone widths, a card over
+    that control instead of a bottom sheet: `placeAnchoredAlert` (`alerts.ts`)
+    centres it on the control inside the visible band, and it grows out of
+    the control (its `transform-origin`) and shrinks back. Menus pass the chosen
+    row's rect to `onSelect({ origin })`, so a menu's Delete forwards it — the
+    phone Navigator's session menu does. The card's scrim tints in on its
+    colour without a backdrop blur: a fading ancestor cuts the card's glass
+    off from the page until the fade ends, then it snaps.
   - *Phone Settings* is a full-screen layer of the stack grammar on every
     page: page-scoped CSS (`.settings-page-<id>`) never re-sizes the scrim or
     the shell (`mobileViewportLayers.test.ts` renders General and Usage). Opened from
@@ -5582,7 +5609,8 @@ thumbnail strip.
   column's corners survive the largest Corner rounding).
 - Surface motion: `surfaceMotion.test.ts` (Chromium: exit ghosts, phone
   Settings arrival edge, stages and dismissal, the covered Navigator, sheet and
-  dialog edges, the toast, the RTL-mirrored tablet drawer; plus the exit
+  dialog edges, the anchored confirmation (`anchoredAlert.test.ts` places it),
+  the toast, the RTL-mirrored tablet drawer; plus the exit
   wiring), `sheetDrag.test.ts` (drag-to-dismiss), `swipeSurface.test.ts`
   (catch-up, catching a spring-home, lost touches, owners, extent),
   `settingsNavigation.test.ts` "phone Settings knows the edge…" (origin, stage

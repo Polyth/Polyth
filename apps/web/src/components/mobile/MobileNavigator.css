@@ -1388,20 +1388,65 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   overflow: hidden;
 }
 
-/* Not just aria-hidden: without this the "Pin to top" label paints through
- * the row's transparent background at rest, showing on every row. */
+/* Not just aria-hidden: without this the tray buttons paint through the
+ * row's transparent background at rest, showing on every row. */
 .mobile-nav-session-underlay[aria-hidden="true"] {
   visibility: hidden;
 }
 
+/* One tray per swipe side. Its width is the row's travel, so the buttons share
+   exactly the revealed area; the row moves 1:1 with the finger and the tray
+   follows without its own transition. The leading tray sits at the inline
+   start (revealed by a swipe toward the inline end), the trailing one at the
+   inline end, so RTL mirrors without extra rules. */
+.mobile-nav-swipe-tray {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  min-inline-size: 0;
+}
+
 .mobile-nav-swipe-action {
-  width: 82px;
-  padding: 0 var(--space-2);
-  color: var(--muted);
-  background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent);
+  --swipe-tone: var(--muted);
+  flex: 1 1 0;
+  min-inline-size: 0;
+  min-block-size: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--swipe-tone);
+  background: color-mix(in srgb, var(--swipe-tone) 16%, color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent));
   border: 0;
-  font-size: var(--font-meta);
-  font-weight: 600;
+  overflow: hidden;
+}
+.mobile-nav-swipe-action.is-pin { --swipe-tone: var(--accent); }
+.mobile-nav-swipe-action.is-archive { --swipe-tone: var(--green); }
+.mobile-nav-swipe-action.is-mute { --swipe-tone: var(--amber); }
+.mobile-nav-swipe-action.is-delete { --swipe-tone: var(--red); }
+
+/* The glyphs scale and fade in with the reveal, so a half-open tray never
+   shows full-size icons crowding a narrow strip. */
+.mobile-nav-swipe-action > .ui-icon {
+  flex: none;
+  opacity: var(--swipe-progress, 0);
+  transform: scale(calc(0.55 + 0.45 * var(--swipe-progress, 0)));
+}
+
+/* Past the commit threshold the side's first action takes the whole revealed
+   area (the others fold away) and deepens: releasing now runs it. */
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action {
+  transition: flex-grow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+}
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action:not(.is-first) {
+  flex-grow: 0;
+}
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action.is-first {
+  background: color-mix(in srgb, var(--swipe-tone) 30%, color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent));
+}
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action.is-first > .ui-icon {
+  transform: scale(1.2);
+  transition: transform var(--motion-fast) var(--motion-ease);
 }
 
 .mobile-nav-session-row {
@@ -1413,7 +1458,8 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   min-height: var(--nav-row-session);
   border-radius: var(--radius-control);
   background: transparent;
-  transition: transform 150ms cubic-bezier(.2,.75,.2,1);
+  /* Velocity-aware: the row sets --swipe-settle from the release speed. */
+  transition: transform var(--swipe-settle, 220ms) cubic-bezier(.2,.75,.2,1);
   /* The fill (current, selected, failed) is painted by ::before so it can
      start --nav-row-inset before the status mark, or, when the status slot
      shows nothing (data-lead="empty", from sessionLeadMark), the same inset
@@ -1447,6 +1493,21 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 
 .mobile-nav-session-swipe:is(.is-swiped, .is-dragging) > .mobile-nav-session-row {
   will-change: transform;
+}
+
+/* Reduced motion and low-resource mode: the row still follows the finger and
+   lands where it is going, with nothing animated in between. */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav-session-swipe > .mobile-nav-session-row,
+  .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action,
+  .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action > .ui-icon {
+    transition: none;
+  }
+}
+body[data-desktop-low-resource="true"] .mobile-nav-session-swipe > .mobile-nav-session-row,
+body[data-desktop-low-resource="true"] .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action,
+body[data-desktop-low-resource="true"] .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action > .ui-icon {
+  transition: none;
 }
 
 .mobile-nav-session-row.is-active {

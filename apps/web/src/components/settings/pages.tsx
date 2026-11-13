@@ -11,6 +11,7 @@ import {
 } from "../../store.ts";
 import { useOrderedProjects } from "../../projectRecency.ts";
 import { RAIL_SIZE_MAX, RAIL_SIZE_MIN, RAIL_SIZE_STEP, RAIL_SPACING_MAX, RAIL_SPACING_MIN, RAIL_SPACING_STEP, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type StatusBarMode, type SwipeNavigationMode } from "../../uiPrefs.ts";
+import { ROW_SWIPE_ACTION_IDS, ROW_SWIPE_MAX_ACTIONS, type RowSwipeActionId } from "../mobile/sessionRowSwipe.ts";
 import { isAppearanceSyncEnabled, setAppearanceSyncEnabled, subscribeAppearanceSync } from "../../settingsSync.ts";
 import { projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS, interfaceFontLabel, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "../../settings.ts";
@@ -197,9 +198,43 @@ export function GeneralPage() {
             onChange={(swipeNavigation) => setUiSettings({ swipeNavigation })}
           />
         </Row>
+        {/* Quick actions of the Navigator's chat rows. Order is kept: the first is the full-swipe action. */}
+        {(["Leading", "Trailing"] as const).map((side) => {
+          const key = side === "Leading" ? "rowSwipeLeading" : "rowSwipeTrailing";
+          const otherKey = side === "Leading" ? "rowSwipeTrailing" : "rowSwipeLeading";
+          const label = side === "Leading" ? tr("settings.pages.rowSwipeLeading") : tr("settings.pages.rowSwipeTrailing");
+          const current = ui[key];
+          return (
+            <Row key={side} label={label} hint={tr("settings.pages.rowSwipeHint")} itemId={`general.rowSwipe${side}`}>
+              <CheckGroup<RowSwipeActionId>
+                label={label}
+                value={current}
+                columns={2}
+                options={ROW_SWIPE_ACTION_IDS.map((id) => ({ id, label: rowSwipeActionLabel(id) }))}
+                onChange={(next) => {
+                  const kept = current.filter((id) => next.includes(id));
+                  const added = next.filter((id) => !current.includes(id));
+                  const chosen = [...kept, ...added].slice(0, ROW_SWIPE_MAX_ACTIONS);
+                  // One action lives on one side.
+                  setUiSettings({ [key]: chosen, [otherKey]: ui[otherKey].filter((id) => !chosen.includes(id)) });
+                }}
+              />
+            </Row>
+          );
+        })}
+        <Row label={tr("settings.pages.rowSwipeFull")} hint={tr("settings.pages.rowSwipeFullHint")} itemId="general.rowSwipeFull">
+          <Toggle on={ui.rowSwipeFull} onChange={(rowSwipeFull) => setUiSettings({ rowSwipeFull })} label={tr("settings.pages.rowSwipeFull")} />
+        </Row>
       </Section>
     </>
   );
+}
+
+function rowSwipeActionLabel(id: RowSwipeActionId): string {
+  if (id === "pin") return tr("sidebar.sessionlist.pinToTop");
+  if (id === "archive") return tr("common.archive");
+  if (id === "mute") return tr("sidebar.sessionlist.muteConversation");
+  return tr("common.delete");
 }
 
 type ThemeStyleId = Exclude<ThemeStyleChoice, "auto">;

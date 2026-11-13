@@ -45,7 +45,7 @@ import { getLocale, tr } from "../../i18n/index.ts";
 import { friendlyError } from "../../settings.ts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
 import { useHasArchivedSessions } from "../../useHasArchivedSessions.ts";
-import { confirmAlert } from "../../alerts.ts";
+import { confirmAlert, type AlertOrigin } from "../../alerts.ts";
 import {
   archiveSessionWithPolicy,
   renameSessionTitle,
@@ -74,11 +74,14 @@ import {
 import {
   AddProjectIcon,
   ArchiveIcon,
+  BellIcon,
   CheckIcon,
+  DeleteIcon,
   MentionIcon,
   MoreIcon,
   NewChatIcon,
   PeopleIcon,
+  PinIcon,
   SelectIcon,
   SharedIcon,
 } from "../ui/icons.ts";
@@ -129,11 +132,28 @@ import {
   setNavigatorSectionHidden,
 } from "../../navigatorState.ts";
 import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../../workspaceArrange.ts";
+import {
+  availableRowSwipeActions, fullSwipeAction, isCommitting, releaseVelocity, revealProgress,
+  rubberBandOffset, settleDuration, settleRowSwipe, swipeOwnership, trayWidth,
+  type RowSwipeActionId, type VelocitySample,
+} from "./sessionRowSwipe.ts";
 import "./MobileNavigator.css";
 
 const LONG_PRESS_MS = 550;
-const SWIPE_WIDTH = 82;
+/** A drag this long keeps the tap that follows it from opening the chat. */
 const SWIPE_THRESHOLD = 38;
+/** How long a committed archive slides the row out before the action runs. */
+const SWIPE_COMMIT_SLIDE_MS = 180;
+const SWIPE_ACTION_ICONS = { pin: PinIcon, archive: ArchiveIcon, mute: BellIcon, delete: DeleteIcon } as const;
+
+function swipeActionLabel(id: RowSwipeActionId, session: SessionProjection): string {
+  if (id === "pin") return session.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop");
+  if (id === "archive") return tr("common.archive");
+  if (id === "mute") {
+    return session.muted ? tr("sidebar.sessionlist.unmuteConversation") : tr("sidebar.sessionlist.muteConversation");
+  }
+  return tr("common.delete");
+}
 
 /** How long after the navigator comes up the current chat's project is kept
  *  in place while session lists are still arriving. */
@@ -287,6 +307,18 @@ function SessionRow({
   const [swipeX, setSwipeX] = useState(0);
   // A finger is moving the row: it tracks 1:1 until the finger lets go.
   const [rowDragging, setRowDragging] = useState(false);
+  // The finger is past the commit threshold: the side's first action grows.
+  const [swipeCommitting, setSwipeCommitting] = useState(false);
+  // Settle time of the transition that finishes a release (velocity-aware).
+  const [settleMs, setSettleMs] = useState(220);
+  const quickActions = useUiSettings();
+  const swipeVisualRef = useRef(0);
+  const swipeRawRef = useRef<number | null>(null);
+  const swipeSamplesRef = useRef<VelocitySample[]>([]);
+  const swipeCommittingRef = useRef(false);
+  const swipeRowWidthRef = useRef(320);
+  const swipeBusyRef = useRef(false);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeSettledRef = useRef(0);
   const swipedOpenAtStart = useRef(false);
   const swipedDuringTouch = useRef(false);
@@ -315,7 +347,19 @@ function SessionRow({
   useEffect(() => setTitle(session.title), [session.title]);
   useEffect(() => () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
+    if (commitTimer.current) clearTimeout(commitTimer.current);
   }, []);
+
+  /** Bring the row home. `ms` is the settle time; the swipe tray closes with it. */
+  const closeSwipe = (ms = 220) => {
+    swipeBusyRef.current = false;
+    swipeSettledRef.current = 0;
+    swipeVisualRef.current = 0;
+    swipeCommittingRef.current = false;
+    setSwipeCommitting(false);
+    setSettleMs(ms);
+    setSwipeX(0);
+  };
 
   const clearPress = () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
@@ -343,24 +387,33 @@ function SessionRow({
     }
   };
 
-  const archive = async () => {
+  // `slidOut`: a full swipe already moved the row off; keep it there while the
+  // archive runs and bring it back only when it did not happen.
+  const archive = async (slidOut = false) => {
     try {
-      swipeSettledRef.current = 0;
-      setSwipeX(0);
-      if (await archiveSessionWithPolicy(session)) onChanged();
+      if (!slidOut) {
+        swipeSettledRef.current = 0;
+        setSwipeX(0);
+      }
+      if (await archiveSessionWithPolicy(session)) {
+        onChanged();
+        return;
+      }
     } catch (error) {
       setUiError(friendlyError(tr("common.error"), error));
     }
+    if (slidOut) closeSwipe(220);
   };
 
-  const remove = async () => {
+  // `origin`: the Delete control's rect, so the confirmation opens there.
+  const remove = async (origin?: AlertOrigin) => {
     const label = session.title || tr("sidebar.sessionlist.session");
     const activity = session.isolation
       ? ` ${tr("sidebar.sessionlist.theLocalIsolationWorkspaceAndEveryFileInItWillAlsoBePermanentlyDeleted")}`
       : "";
     if (!await confirmAlert(
       tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label, activity }),
-      { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") },
+      { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete"), ...(origin ? { origin } : {}) },
     )) return;
     try {
       await deleteSession(session.id);
@@ -372,8 +425,7 @@ function SessionRow({
 
   const togglePin = async () => {
     // The row moves optimistically; close the swipe tray with it.
-    swipeSettledRef.current = 0;
-    setSwipeX(0);
+    closeSwipe();
     try {
       await toggleSessionPin(session, pinnedSessions);
       successFeedback();
@@ -403,6 +455,13 @@ function SessionRow({
 
   // Rename, archive and delete need manage access to a shared chat.
   const manage = canManageSession(session);
+  // Quick actions the row can offer on each swipe side, per the user's setting.
+  const leadingActions = availableRowSwipeActions(quickActions.rowSwipeLeading, { conversation, manage });
+  const trailingActions = availableRowSwipeActions(quickActions.rowSwipeTrailing, { conversation, manage });
+  const leadTray = trayWidth(leadingActions.length);
+  const trailTray = trayWidth(trailingActions.length);
+  const leadCommit = fullSwipeAction(leadingActions, quickActions.rowSwipeFull);
+  const trailCommit = fullSwipeAction(trailingActions, quickActions.rowSwipeFull);
   const sharedLabel = conversation || !chatReadByOthers(session) ? undefined : sharingMarkerLabel(session.sharing);
   const entries: MenuEntry[] = [
     ...(manage ? [{
@@ -449,7 +508,7 @@ function SessionRow({
         id: "delete",
         label: tr("common.delete"),
         danger: true,
-        onSelect: () => void remove(),
+        onSelect: (context) => void remove(context?.origin),
       },
     ] satisfies MenuEntry[] : []),
   ];
@@ -459,9 +518,13 @@ function SessionRow({
       event.pointerType !== "touch"
       || renaming
       || selecting
+      || swipeBusyRef.current
       || (event.target instanceof Element && event.target.closest(".mobile-nav-subagent-toggle"))
     ) return;
     pointerStart.current = { x: event.clientX, y: event.clientY };
+    swipeRawRef.current = null;
+    swipeSamplesRef.current = [];
+    swipeRowWidthRef.current = event.currentTarget.getBoundingClientRect().width || 320;
     swipedOpenAtStart.current = swipeSettledRef.current !== 0;
     swipedDuringTouch.current = false;
     longPressOpenedRef.current = false;
@@ -482,37 +545,105 @@ function SessionRow({
     if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
     clearPress();
     if (Math.abs(dx) <= Math.abs(dy)) return;
-    // Measured toward the inline end: the row only reveals Pin that way. A
-    // swipe toward the inline start belongs to the Navigator, which closes.
+    // Signed along the inline axis: positive reveals the leading tray, negative
+    // the trailing one. A direction with no tray belongs to the Navigator (it
+    // closes) unless a tray is already open.
     const inline = document.documentElement.dir === "rtl" ? -dx : dx;
     const base = swipedOpenAtStart.current ? swipeSettledRef.current : 0;
-    if (base === 0 && inline <= 0) return;
-    if (Math.abs(dx) >= SWIPE_THRESHOLD) {
-      swipedDuringTouch.current = true;
+    if (base === 0 && ((inline > 0 && leadTray === 0) || (inline < 0 && trailTray === 0) || inline === 0)) return;
+    let raw = base + inline;
+    if ((raw > 0 && leadTray === 0) || (raw < 0 && trailTray === 0)) raw = 0;
+    const tray = raw >= 0 ? leadTray : trailTray;
+    const canCommit = raw >= 0 ? leadCommit !== null : trailCommit !== null;
+    const rowWidth = swipeRowWidthRef.current;
+    if (Math.abs(dx) >= SWIPE_THRESHOLD) swipedDuringTouch.current = true;
+    swipeRawRef.current = raw;
+    swipeSamplesRef.current = [...swipeSamplesRef.current.slice(-7), { x: raw, t: event.timeStamp }];
+    const committing = isCommitting(raw, canCommit, rowWidth);
+    if (committing !== swipeCommittingRef.current) {
+      swipeCommittingRef.current = committing;
+      setSwipeCommitting(committing);
+      if (committing) tapFeedback();
     }
+    const visual = rubberBandOffset(raw, tray, canCommit, rowWidth);
+    swipeVisualRef.current = visual;
     setRowDragging(true);
-    setSwipeX(Math.max(0, Math.min(SWIPE_WIDTH, base + inline)));
+    setSwipeX(visual);
   };
 
-  const onPointerEnd = () => {
+  const runCommit = (action: RowSwipeActionId, sign: 1 | -1) => {
+    swipeBusyRef.current = true;
+    if (action === "archive") {
+      // Slide the row out, then run the archive; it comes back if it did not happen.
+      successFeedback();
+      swipeSettledRef.current = 0;
+      swipeVisualRef.current = sign * swipeRowWidthRef.current;
+      setSettleMs(SWIPE_COMMIT_SLIDE_MS);
+      setSwipeX(swipeVisualRef.current);
+      commitTimer.current = setTimeout(() => {
+        commitTimer.current = null;
+        void archive(true);
+      }, SWIPE_COMMIT_SLIDE_MS);
+      return;
+    }
+    if (action === "pin") void togglePin();
+    else {
+      successFeedback();
+      closeSwipe();
+      void toggleMute();
+    }
+  };
+
+  const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
     clearPress();
     pointerStart.current = null;
     setRowDragging(false);
-    setSwipeX((current) => {
-      const next = current > SWIPE_THRESHOLD ? SWIPE_WIDTH : 0;
-      swipeSettledRef.current = next;
-      return next;
+    const raw = swipeRawRef.current;
+    swipeRawRef.current = null;
+    if (raw === null) return;
+    const side = raw >= 0 ? 1 : -1;
+    const tray = side === 1 ? leadTray : trailTray;
+    const action = side === 1 ? leadCommit : trailCommit;
+    const velocity = releaseVelocity(swipeSamplesRef.current, event.timeStamp);
+    const settle = settleRowSwipe({
+      raw, velocity, tray, rowWidth: swipeRowWidthRef.current,
+      canCommit: action !== null, openAtStart: swipedOpenAtStart.current,
     });
+    if (settle === "commit" && action) {
+      runCommit(action, side);
+      return;
+    }
+    swipeCommittingRef.current = false;
+    setSwipeCommitting(false);
+    const target = settle === "open" ? side * tray : 0;
+    setSettleMs(settleDuration(target - swipeVisualRef.current, velocity));
+    swipeSettledRef.current = target;
+    swipeVisualRef.current = target;
+    setSwipeX(target);
+  };
+
+  // `button`: the tapped tray button; Delete's confirmation opens over it.
+  const runTrayAction = (id: RowSwipeActionId, button: HTMLElement) => {
+    if (id === "pin") void togglePin();
+    else if (id === "archive") void archive();
+    else if (id === "mute") {
+      closeSwipe();
+      void toggleMute();
+    } else void remove(button.getBoundingClientRect());
   };
 
   return (
     <div
       className={`mobile-nav-session-swipe${swipeX !== 0 ? " is-swiped" : ""}${rowDragging ? " is-dragging" : ""}`}
-      // At rest the row owns only its Pin swipe (toward the inline end); a
-      // swipe the other way closes the Navigator. Once Pin is showing, the
-      // drag back is the row's too. Archive lives in the row menu.
-      data-owns-swipe={swipeX === 0 ? "toward-end" : ""}
-      style={{ "--mobile-nav-tree-depth": treeDepth } as CSSProperties}
+      // At rest the row owns only the directions that have a tray; a swipe the
+      // other way closes the Navigator (so with no trailing actions, a swipe
+      // toward the inline start still closes it). Once a tray shows, the drag
+      // back is the row's too. Outside rows the Navigator keeps both.
+      data-owns-swipe={swipeOwnership(leadTray, trailTray, swipeX !== 0)}
+      style={{
+        "--mobile-nav-tree-depth": treeDepth,
+        "--swipe-settle": `${settleMs}ms`,
+      } as CSSProperties}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
@@ -522,18 +653,40 @@ function SessionRow({
         setRowDragging(false);
         swipedOpenAtStart.current = false;
         swipedDuringTouch.current = false;
-        swipeSettledRef.current = 0;
-        setSwipeX(0);
+        swipeRawRef.current = null;
+        closeSwipe();
       }}
     >
       <div className="mobile-nav-session-underlay" aria-hidden={swipeX === 0 || undefined}>
-        <button
-          className="mobile-nav-swipe-action is-leading"
-          tabIndex={swipeX !== 0 ? 0 : -1}
-          onClick={() => void togglePin()}
-        >
-          {session.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")}
-        </button>
+        {(["leading", "trailing"] as const).map((side) => {
+          const actions = side === "leading" ? leadingActions : trailingActions;
+          if (actions.length === 0) return null;
+          const showing = side === "leading" ? swipeX > 0 : swipeX < 0;
+          const tray = side === "leading" ? leadTray : trailTray;
+          return (
+            <div
+              key={side}
+              className={`mobile-nav-swipe-tray is-${side}${showing && swipeCommitting ? " is-committing" : ""}`}
+              style={{
+                inlineSize: showing ? Math.abs(swipeX) : 0,
+                "--swipe-progress": showing ? revealProgress(swipeX, tray) : 0,
+              } as CSSProperties}
+            >
+              {actions.map((id, index) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`mobile-nav-swipe-action is-${id}${index === 0 ? " is-first" : ""}`}
+                  tabIndex={showing ? 0 : -1}
+                  aria-label={swipeActionLabel(id, session)}
+                  onClick={(event) => runTrayAction(id, event.currentTarget)}
+                >
+                  <UiIcon icon={SWIPE_ACTION_ICONS[id]} size="md" />
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </div>
       <div
         className={`mobile-nav-session-row${active ? " is-active" : ""}${draftMark ? " is-draft" : ""}${selecting ? " is-selecting" : ""}${selected ? " is-selected" : ""}${session.pinned ? " is-pinned" : ""}${unread ? " is-unread" : ""}${rowStatus.kind === "failed" ? " is-failed" : ""}${childCount > 0 ? " has-subagents" : ""}`}
@@ -580,11 +733,11 @@ function SessionRow({
                   longPressOpenedRef.current = false;
                   return;
                 }
+                if (swipeBusyRef.current) return;
                 if (swipedOpenAtStart.current || swipedDuringTouch.current || swipeSettledRef.current !== 0) {
                   swipedOpenAtStart.current = false;
                   swipedDuringTouch.current = false;
-                  swipeSettledRef.current = 0;
-                  setSwipeX(0);
+                  closeSwipe();
                   return;
                 }
                 openCurrent();

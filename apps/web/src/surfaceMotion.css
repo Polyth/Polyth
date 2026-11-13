@@ -67,7 +67,9 @@
 /* ---- dialogs -----------------------------------------------------------------
    A dialog rises into place on wide screens and sinks back out. Phone-width
    shells present dialogs as bottom sheets, so there they rise from the bottom
-   edge and go back down it, like every other sheet. */
+   edge and go back down it, like every other sheet — except an anchored
+   confirmation (styles.css "Anchored confirmation"), a card that grows out of
+   the control it was asked from (its transform-origin) and shrinks back. */
 .dialog-backdrop {
   animation: fade var(--motion-normal) var(--motion-ease);
 }
@@ -87,6 +89,34 @@
   .dialog-backdrop[data-exit-ghost="dialog"] > .dialog-panel {
     animation: sheet-slide-out var(--motion-stack) var(--motion-stack-ease) both !important;
   }
+  .dialog-panel.alert-dialog.is-anchored {
+    animation: alert-anchor-in var(--motion-surface) var(--motion-ease) backwards;
+  }
+  .dialog-backdrop[data-exit-ghost="dialog"] > .dialog-panel.alert-dialog.is-anchored {
+    animation: alert-anchor-out var(--motion-fast) var(--motion-ease) both !important;
+  }
+  /* Its scrim tints in and out on its colour, never its opacity: an ancestor
+     below full opacity is the card's backdrop root, so the card's glass would
+     see nothing behind it until the fade ended, then snap to the page. */
+  .dialog-backdrop.alert-anchored-backdrop {
+    animation: alert-scrim-in var(--motion-surface) var(--motion-ease) backwards;
+  }
+  .dialog-backdrop.alert-anchored-backdrop[data-exit-ghost="dialog"] {
+    animation: alert-scrim-out var(--motion-fast) var(--motion-ease) both !important;
+  }
+}
+
+@keyframes alert-scrim-in { from { background-color: transparent; } }
+@keyframes alert-scrim-out { to { background-color: transparent; } }
+
+@keyframes alert-anchor-in {
+  from { opacity: 0; transform: scale(0.6); }
+  45% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes alert-anchor-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.92); }
 }
 
 @keyframes rise-out {

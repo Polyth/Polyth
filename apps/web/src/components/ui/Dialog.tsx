@@ -18,6 +18,7 @@ export interface DialogProps {
   footer?: ReactNode;
   size?: DialogSize;
   className?: string;
+  backdropClassName?: string;
   initialFocus?: string;
   /** Hide the visible header when the content owns its heading. */
   hideHeader?: boolean;
@@ -35,6 +36,7 @@ export default function Dialog({
   footer,
   size = "md",
   className,
+  backdropClassName,
   initialFocus,
   hideHeader = false,
   resolveRestoreFocus,
@@ -47,6 +49,7 @@ export default function Dialog({
       onClose={onClose}
       size={size === "sm" ? "md" : size}
       className={`ui-dialog${size === "sm" ? " ui-dialog--sm" : ""}${className ? ` ${className}` : ""}`}
+      {...(backdropClassName !== undefined ? { backdropClassName } : {})}
       {...(initialFocus !== undefined ? { initialFocus } : {})}
       {...(resolveRestoreFocus !== undefined ? { resolveRestoreFocus } : {})}
       {...(keepKeyboard !== undefined ? { keepKeyboard } : {})}

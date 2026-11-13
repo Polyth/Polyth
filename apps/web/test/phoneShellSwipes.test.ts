@@ -236,15 +236,15 @@ test("a short close drag springs home and keeps the entrance animation from repl
   }
 });
 
-test("a leftward swipe over a session row closes the Navigator; the row keeps only its Pin swipe", async () => {
+test("a leftward swipe over a session row closes the Navigator; the row keeps only its leading swipe by default", async () => {
   const unmount = await mount();
   try {
     await reset();
     await act(async () => { store.setSidebarOpen(true); });
     await waitForRow();
     const row = document.querySelector<HTMLElement>(".mobile-nav-session-swipe")!;
-    assert.equal(row.dataset.ownsSwipe, "toward-end", "at rest the row owns only the Pin direction");
-    assert.equal(row.querySelector(".mobile-nav-swipe-action.is-trailing"), null, "Archive is a menu action, not a swipe");
+    assert.equal(row.dataset.ownsSwipe, "toward-end", "at rest the row owns only the direction that has actions");
+    assert.equal(row.querySelector(".mobile-nav-swipe-tray.is-trailing"), null, "no trailing tray by default (Archive swipes from the leading side)");
     const title = row.querySelector(".mobile-nav-session-title") ?? row;
     pull(title, 700, 300);
     touch("touchend", title);

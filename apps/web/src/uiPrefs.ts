@@ -6,6 +6,7 @@ import { parseImageUploadPreference, type ImageUploadPreference } from "./imageU
 import { parseSendHoldMs, SEND_HOLD_DEFAULT_MS } from "./sendHold.ts";
 import type { NotificationKind, PromptHistoryScope } from "@polyth/contracts";
 import { clampPromptHistoryLimit, parsePromptHistoryScope, PROMPT_HISTORY_DEFAULT_LIMIT } from "@polyth/contracts";
+import { parseRowSwipeActions, parseRowSwipeFull, ROW_SWIPE_DEFAULTS, type RowSwipeActionId } from "./components/mobile/sessionRowSwipe.ts";
 import {
   ASSISTANT_MESSAGE_ACTIONS_DEFAULT,
   cloneMessageActionLayout,
@@ -240,6 +241,12 @@ export interface UiSettings {
   statusBar: StatusBarMode;
   /** Phone swipe navigation (Navigator, Workspace, package Back). */
   swipeNavigation: SwipeNavigationMode;
+  /** Navigator session-row quick actions: a swipe toward the inline end. The first one runs on a full swipe. */
+  rowSwipeLeading: RowSwipeActionId[];
+  /** Navigator session-row quick actions: a swipe toward the inline start. */
+  rowSwipeTrailing: RowSwipeActionId[];
+  /** Whether dragging a row far enough commits its side's first action. */
+  rowSwipeFull: boolean;
   /** While a package window is pinned, opening another one keeps the pinned
    *  frame — same mode, width, edge and strip height; only content changes. */
   sharedPinnedWindow: boolean;
@@ -340,6 +347,9 @@ export const UI_DEFAULTS: UiSettings = {
   sendHoldDraftMs: SEND_HOLD_DEFAULT_MS,
   statusBar: "off",
   swipeNavigation: "surface",
+  rowSwipeLeading: [...ROW_SWIPE_DEFAULTS.leading],
+  rowSwipeTrailing: [...ROW_SWIPE_DEFAULTS.trailing],
+  rowSwipeFull: ROW_SWIPE_DEFAULTS.fullSwipe,
   sharedPinnedWindow: true,
   sharedPinnedWindowVersion: SHARED_PINNED_WINDOW_VERSION,
   mcpServers: [],
@@ -515,6 +525,9 @@ export function parseUiSettings(raw: string | null): UiSettings {
       swipeNavigation: SWIPE_NAVIGATION_MODES.includes(data.swipeNavigation as SwipeNavigationMode)
         ? data.swipeNavigation as SwipeNavigationMode
         : UI_DEFAULTS.swipeNavigation,
+      rowSwipeLeading: parseRowSwipeActions(data.rowSwipeLeading, ROW_SWIPE_DEFAULTS.leading),
+      rowSwipeTrailing: parseRowSwipeActions(data.rowSwipeTrailing, ROW_SWIPE_DEFAULTS.trailing),
+      rowSwipeFull: parseRowSwipeFull(data.rowSwipeFull),
       sharedPinnedWindow: data.sharedPinnedWindowVersion === SHARED_PINNED_WINDOW_VERSION
         ? data.sharedPinnedWindow !== false
         : true,
