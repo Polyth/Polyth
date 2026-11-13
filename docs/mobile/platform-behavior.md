@@ -388,10 +388,32 @@ DNS failure, a refused or unreachable connection, a connect timeout, and the
 service's own `503`, which it answers before calling any provider. A reset,
 a response timeout or any other answer may have reached the phone already,
 so the server never repeats those and does not send a second notification.
+
+An alert that still did not arrive, or that the service or provider refused
+before delivery (a limit, a missing or rejected APNs/FCM credential), waits
+in the server's memory and goes again after 5 s, 15 s, 30 s, 1, 2 and then
+every 5 minutes until its [lifetime](native-push-content.md#push-service)
+ends. A send that succeeds on the same route sends what waits at once. A
+newer alert for the same transition replaces the waiting one, a new
+registration of the phone drops it, and at most 500 wait (oldest dropped). A
+restart forgets them; the inbox row stays either way.
+
 Each change in the service's health is logged once (`[native-push] push
-service … is not delivering: …` and later `… delivers again`). The log line
-names the cause, for example a network code or a missing APNs/FCM
-credential, and never a token or payload.
+service … is not delivering: …` and later `… delivers again`; `own APNs key
+…` for [Own APNs key](#own-apns-key)). The log line names the cause, for
+example a network code or a missing APNs/FCM credential, and never a token or
+payload.
+
+Settings → Notifications shows **Delivery to phones** once the person has a
+registered phone, on the computer as well as on the phone
+(`GET /api/native-push/delivery`, any signed-in principal, own account only).
+It is what the server last saw for each route and platform the person's
+phones use: real sends, plus the service's `GET /v1/health`, checked when the
+page asks and the last observation is older than a minute. That answer says
+whether the service is reachable and holds an APNs key / Firebase account; a
+key Apple or Google rejected shows only after a send. The row names the
+problem (unreachable, rate-limited, no usable key, key rejected) and how many
+alerts wait. A server with neither route reports `route: "none"`.
 
 ### Own APNs key
 

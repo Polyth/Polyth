@@ -69,7 +69,7 @@ test("only exact alert and Live Activity shapes reach a provider", async () => {
 
     setup.ios.result = "permanent";
     assert.deepEqual(await (await setup.send({ to: { platform: "ios", environment: "production", token: IOS }, alert })).json(), { result: "permanent" });
-    assert.deepEqual(await (await fetch(`${setup.url}/v1/health`)).json(), { ok: true });
+    assert.deepEqual(await (await fetch(`${setup.url}/v1/health`)).json(), { ok: true, ios: true, android: true });
     assert.equal((await fetch(`${setup.url}/v1/registrations`, { method: "POST" })).status, 404);
   } finally { await setup.close(); }
 });

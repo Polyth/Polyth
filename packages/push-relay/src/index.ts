@@ -81,6 +81,13 @@ export class PushRelay {
     for (const provider of Object.values(this.providers)) provider?.()?.close?.();
   }
 
+  /** `GET /v1/health`: which platforms it holds a usable provider for, so a
+   *  server can say "no APNs key on the push service" before any send fails. */
+  health(): { ok: true; ios: boolean; android: boolean } {
+    const usable = (platform: "ios" | "android") => { try { return Boolean(this.providers[platform]?.()); } catch { return false; } };
+    return { ok: true, ios: usable("ios"), android: usable("android") };
+  }
+
   async send(input: unknown, sourceIp = "unknown", signal?: AbortSignal): Promise<{ result: ProviderClass }> {
     const request = validateSend(input, Math.floor(this.now() / 1_000));
     const now = this.now();

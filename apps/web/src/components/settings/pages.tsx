@@ -53,7 +53,7 @@ import type {
 import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 import ModelPicker from "@polyth/models/model-picker";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
-import { getLocale, getLocalePreference, LOCALES, LOCALE_NAMES, setLocale, systemLocale, tr, type LocalePreference } from "../../i18n/index.ts";
+import { getLocale, getLocalePreference, LOCALES, LOCALE_NAMES, setLocale, systemLocale, tr, type LocalePreference, type TranslationKey } from "../../i18n/index.ts";
 import {
   projectRemembersModelSelection,
   resolveSessionDefaultModel,
@@ -1212,6 +1212,7 @@ export function NotificationsPage() {
         {/* Browser Web Push can never work inside the native app's WebView
             (no service-worker push); the native row owns delivery there. */}
         {nativePushSettingsAvailable() ? <NativePushRow /> : <PushRow />}
+        <PhonePushDeliveryRow />
       </Section>
       <Section
         title={tr("settings.pages.triggersGroup")}
@@ -1331,6 +1332,43 @@ function NativePushRow() {
       </Row>
       {error && <div className="form-error settings-row-error" role="alert">{error}</div>}
     </>
+  );
+}
+
+type PhonePushDelivery = Awaited<ReturnType<typeof api.nativePushDelivery>>;
+const PHONE_PUSH_PROBLEM: Record<NonNullable<PhonePushDelivery["problem"]>, TranslationKey> = {
+  unreachable: "settings.pages.phonePushUnreachable",
+  "rate-limited": "settings.pages.phonePushRateLimited",
+  "no-credential": "settings.pages.phonePushNoCredential",
+  "credential-rejected": "settings.pages.phonePushCredentialRejected",
+  error: "settings.pages.phonePushError",
+};
+
+/** Whether this person's phones actually get pushes. A registered phone looks
+ *  "on" even when the push service is unreachable or holds no APNs key, so
+ *  the server's observed delivery is shown here, on the computer as well as
+ *  on the phone. Hidden until a phone is registered. */
+function PhonePushDeliveryRow() {
+  const [delivery, setDelivery] = useState<PhonePushDelivery | undefined>();
+  useEffect(() => {
+    let live = true;
+    void api.nativePushDelivery().then((next) => { if (live) setDelivery(next); }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  if (!delivery || delivery.phones === 0) return null;
+  const failing = delivery.state === "failing";
+  const reason = delivery.route === "none"
+    ? tr("settings.pages.phonePushOff")
+    : failing ? tr(PHONE_PUSH_PROBLEM[delivery.problem ?? "error"]) : tr("settings.pages.phonePushOkHint");
+  const hint = failing && delivery.pending > 0 ? `${reason} ${tr("settings.pages.phonePushPending", { count: delivery.pending })}` : reason;
+  return (
+    <Row label={tr("settings.pages.phonePushDelivery")} hint={hint} itemId="notifications.phoneDelivery">
+      {failing
+        ? <Badge tone="warning" dot>{tr("settings.pages.phonePushNotDelivering")}</Badge>
+        : delivery.state === "ok"
+          ? <Badge tone="success" dot>{tr("settings.pages.phonePushDelivering")}</Badge>
+          : <Badge>{tr("settings.pages.phonePushUnknown")}</Badge>}
+    </Row>
   );
 }
 

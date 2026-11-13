@@ -65,8 +65,11 @@ App's own copy. See [Live Activity](platform-behavior.md#live-activity-dynamic-i
 - FCM, only with `sealed`: a data-only message (no `notification`, no
   `android.notification`) with `android.priority = "high"`, `ttl` and
   `data.sealed`; the app posts the notification itself.
-- Lifetime (APNs `apns-expiration`, FCM `ttl`): 5 minutes for task kinds, 12
-  hours for a person's `mention`/`message`. Both people kinds alert on the
+- Lifetime (APNs `apns-expiration`, FCM `ttl`, `pushTtlSeconds` in
+  `packages/push-relay/src/providers.ts`): 12 hours for what a person must act
+  on (`question`, `permission`, `failed`, `mention`, `message`), 1 hour for
+  `completed`, 5 minutes for `subagent`. The server retries an alert no longer
+  than this. Both people kinds alert on the
   Android attention channel; their generic text is "Someone mentioned you" /
   "New message" until the device opens `sealed`. The push service, the Android plugin
   (`pushKind`) and the iOS delegate (`payloadKind`) each refuse a kind they do

@@ -46,10 +46,20 @@ const messageFor = (kind: DeliveryInput["kind"]): { title: string; body: string;
     case "message": return { title: "Polyth", body: "New message", channel: "polyth_attention" };
   }
 };
-/** Task alerts are short-lived hints (the canonical inbox stays the durable
- *  source); a person's message is still worth delivering after a phone was
- *  offline for a while. */
-const ttlSeconds = (kind: DeliveryInput["kind"]): number => kind === "mention" || kind === "message" ? 43_200 : 300;
+/** How long APNs/FCM keep an alert for a phone that is offline (and how long
+ *  a server keeps retrying one the push service never received). Whatever a
+ *  person has to act on (a question, a permission, a failure, a message) is
+ *  still worth seeing after hours in a tunnel or on a plane; a finished task
+ *  stays news for an hour; a delegated task's change only while it happens.
+ *  The canonical inbox stays the durable source either way. */
+export const pushTtlSeconds = (kind: DeliveryInput["kind"]): number => {
+  switch (kind) {
+    case "question": case "permission": case "failed": case "mention": case "message": return 43_200;
+    case "completed": return 3_600;
+    case "subagent": return 300;
+  }
+};
+const ttlSeconds = pushTtlSeconds;
 /** Provider payload ceiling (APNs and FCM both allow 4 KiB); beyond it the sealed text is left out. */
 const MAX_PROVIDER_PAYLOAD_BYTES = 4096;
 const collapseId = (tag: string): string => createHash("sha256").update(tag).digest("base64url").slice(0, 32);

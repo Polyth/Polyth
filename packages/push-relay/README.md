@@ -28,7 +28,9 @@ seconds within a day of now, counts 0–99). Android is `{"platform":
 "android", "token": "<fcm>"}` with an alert. The answer is `200
 {"result": "success"|"permanent"|"auth"|"rate"|"transient"|"config"|"invalid"}`;
 `permanent` means the token is dead and the server drops it. A malformed
-request is 400, a limit 429, overload 503. `GET /v1/health` is `{"ok": true}`.
+request is 400, a limit 429, overload 503. `GET /v1/health` is `{"ok": true, "ios": <bool>, "android": <bool>}`, the
+booleans saying whether the service holds a usable APNs key / Firebase account;
+a Polyth server reads it to tell its owner why phones get nothing.
 
 - Alerts show generic text ("Polyth / A task completed"); `sealed` is the real
   text encrypted by the host for that one device, never decoded here

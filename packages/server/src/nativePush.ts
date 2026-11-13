@@ -17,6 +17,8 @@ import type { ActivityInput, DeliveryInput, Destination, Environment, Platform, 
 import type { RouteHandler } from "./http.ts";
 import { b64u, encryptWebPush } from "./push.ts";
 
+import { pushTtlSeconds } from "@polyth/push-relay/providers";
+
 export { apnsFromDir, apnsKeyPem } from "@polyth/push-relay/providers";
 
 const TIMEOUT_MS = 5_000;
@@ -37,12 +39,40 @@ export interface NativePushAuthority {
   validate(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<boolean>;
 }
 
+/** A provider class, or `unsent`: the push service provably never received
+ *  the request (DNS, refused connection, its own 503), so sending it again
+ *  cannot show the phone a second notification. */
+export type SendResult = ProviderClass | "unsent";
+
 /** Sends to APNs/FCM: the hosted push service (`relaySender`) or this
  *  server's own APNs key (`ApnsProvider` from @polyth/push-relay). */
 export interface PushSender {
-  deliver(destination: Destination, input: DeliveryInput): Promise<ProviderClass>;
-  deliverActivity(destination: Destination, input: ActivityInput): Promise<ProviderClass>;
+  deliver(destination: Destination, input: DeliveryInput): Promise<SendResult>;
+  deliverActivity(destination: Destination, input: ActivityInput): Promise<SendResult>;
+  /** Reachability without sending anything (the push service's `/v1/health`):
+   *  whether it answers and, when it says so, which platforms it holds a usable
+   *  provider credential for. */
+  probe?(): Promise<PushProbe>;
   close?(): void;
+}
+
+export interface PushProbe { reach: "ok" | "unsent" | "transient"; credentials?: Partial<Record<Platform, boolean>> }
+
+/** Why native push is not reaching phones, as Settings names it. */
+export type DeliveryProblem = "unreachable" | "rate-limited" | "no-credential" | "credential-rejected" | "error";
+/** How native push reaches this person's phones (`GET /api/native-push/delivery`). */
+export interface NativePushDelivery {
+  /** This person's phones registered in this Space that may receive push. */
+  phones: number;
+  /** `direct`: this server's own APNs key; `service`: the push service; `none`: neither. */
+  route: "direct" | "service" | "none";
+  /** `unknown` until a send or a reachability check said otherwise. */
+  state: "ok" | "failing" | "unknown";
+  problem?: DeliveryProblem;
+  /** When the state was last observed (ms). */
+  checkedAt?: number;
+  /** This person's alerts waiting for another try. */
+  pending: number;
 }
 
 interface NativeSubscription {
@@ -303,7 +333,7 @@ export function relaySender(origin: string | undefined, fetchFn: typeof fetch = 
     if (classified === "auth") return { result: classified, unsent: false, problem: `${platform === "ios" ? "APNs" : "FCM"} rejected its credential` };
     return { result: classified, unsent: false };
   };
-  const post = async (payload: unknown, platform: Platform): Promise<ProviderClass> => {
+  const post = async (payload: unknown, platform: Platform): Promise<SendResult> => {
     const body = JSON.stringify(payload);
     let outcome = await attempt(body, platform);
     if (outcome.unsent) {
@@ -313,7 +343,25 @@ export function relaySender(origin: string | undefined, fetchFn: typeof fetch = 
     // A dead token or a bad request is about that one phone, not the service.
     if (outcome.problem) report(outcome.problem);
     else if (outcome.result === "success" || outcome.result === "permanent") report("ok");
-    return outcome.result;
+    // Still unsent: the caller may queue it for later without risking a duplicate.
+    return outcome.unsent ? "unsent" : outcome.result;
+  };
+  const probe = async (): Promise<PushProbe> => {
+    try {
+      const response = await fetchFn(new URL("/v1/health", url), {
+        method: "GET", signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error", headers: { accept: "application/json" },
+      });
+      const answer = response.ok ? await response.json().catch(() => undefined) as Record<string, unknown> | undefined : undefined;
+      if (answer?.ok !== true) { report(`answer ${response.status}`); return { reach: response.status === 503 ? "unsent" : "transient" }; }
+      // An older service answers only `{ok: true}`: reachable, credentials untold.
+      const credentials: Partial<Record<Platform, boolean>> = {};
+      for (const platform of ["ios", "android"] as const) if (typeof answer[platform] === "boolean") credentials[platform] = answer[platform] as boolean;
+      return { reach: "ok", credentials };
+    } catch (error) {
+      const code = errorCode(error);
+      report(code ? `network ${code}` : "network error");
+      return { reach: code && UNSENT_CODES.has(code) ? "unsent" : "transient" };
+    }
   };
   const to = (destination: Destination) => ({
     platform: destination.platform, token: destination.providerToken,
@@ -322,6 +370,7 @@ export function relaySender(origin: string | undefined, fetchFn: typeof fetch = 
   return {
     deliver: (destination, alert) => post({ to: to(destination), alert }, destination.platform),
     deliverActivity: (destination, activity) => post({ to: to(destination), activity }, destination.platform),
+    probe,
   };
 }
 
@@ -349,7 +398,42 @@ export interface NativePushService {
   sessionTouched(sessionId: string): void;
   /** Evaluate every tracked island now (heartbeat tick; tests). */
   flushActivities(): Promise<void>;
+  /** How native push reaches this person's phones and whether it works. */
+  delivery(account: { userId: string; spaceId: string }): Promise<NativePushDelivery>;
+  /** Send every queued alert that is due now (retry timer; tests). */
+  flushRetries(): Promise<void>;
   close(): void;
+}
+
+/** Waits between tries of an alert the push service or provider refused
+ *  before delivering; the last one repeats until the alert's lifetime ends. */
+const RETRY_DELAYS_MS: readonly number[] = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
+/** Alerts queued for another try at most, the oldest dropped first. */
+const MAX_PENDING_ALERTS = 500;
+/** A reachability check older than this is repeated when Settings asks. */
+const PROBE_STALE_MS = 60_000;
+/** Results that prove the phone was not shown the alert, so another try
+ *  cannot duplicate it: never received (`unsent`), or refused by the service
+ *  or the provider before delivery (a limit, a missing or rejected credential).
+ *  `transient` may follow an accepted send and is never repeated. */
+const RETRYABLE: ReadonlySet<SendResult> = new Set(["unsent", "rate", "config", "auth"]);
+const PROBLEM_OF: Partial<Record<SendResult, DeliveryProblem>> = {
+  unsent: "unreachable", rate: "rate-limited", config: "no-credential", auth: "credential-rejected", transient: "error",
+};
+type Route = "direct" | "service";
+
+interface PendingAlert {
+  key: string;
+  deviceKey: string;
+  platform: Platform;
+  /** The registration it was sealed for; another one drops it. */
+  subscriptionId: string;
+  providerToken: string;
+  contentKey?: string;
+  input: DeliveryInput;
+  attempts: number;
+  nextAt: number;
+  deadline: number;
 }
 
 export function createNativePushService(opts: {
@@ -364,9 +448,20 @@ export function createNativePushService(opts: {
   now?: () => number;
   /** The named chats as this person sees them; a chat they cannot open is absent. */
   activityViews?: (account: { userId: string; spaceId: string }, sessionIds: string[]) => Promise<Map<string, LiveActivityView>>;
+  /** Health changes of this server's own APNs key (the push service's are
+   *  logged by `relaySender`); never a token or payload. */
+  log?: (line: string) => void;
+  retryDelaysMs?: readonly number[];
 }): NativePushService {
-  const senderFor = (platform: Platform): PushSender | undefined => (platform === "ios" ? opts.apns?.() : undefined) ?? opts.relay;
+  const pick = (platform: Platform): { route: Route; sender: PushSender } | undefined => {
+    const apns = platform === "ios" ? opts.apns?.() : undefined;
+    if (apns) return { route: "direct", sender: apns };
+    return opts.relay ? { route: "service", sender: opts.relay } : undefined;
+  };
+  const senderFor = (platform: Platform): PushSender | undefined => pick(platform)?.sender;
   const now = opts.now ?? Date.now;
+  const log = opts.log ?? ((line: string) => console.warn(line));
+  const retryDelays = opts.retryDelaysMs?.length ? opts.retryDelaysMs : RETRY_DELAYS_MS;
   const base = (entry: Record<string, unknown>): boolean =>
     isText(entry.userId) && isText(entry.spaceId) && isText(entry.deviceId) && isText(entry.deviceEndpointId)
     && isText(entry.hostEndpointId) && Number.isSafeInteger(entry.createdAt) && Number.isSafeInteger(entry.updatedAt);
@@ -418,6 +513,120 @@ export function createNativePushService(opts: {
     return key;
   };
 
+  // --- Delivery health per route and platform, from real sends and the push
+  // service's reachability check. Kept in memory: a restart starts `unknown`.
+  const health = new Map<string, { problem?: DeliveryProblem; at: number }>();
+  const healthKey = (route: Route, platform: Platform) => `${route}:${platform}`;
+  const observe = (route: Route, platform: Platform, result: SendResult | "ok") => {
+    if (result === "invalid") return;
+    const problem = result === "ok" ? undefined : PROBLEM_OF[result];
+    const key = healthKey(route, platform);
+    const previous = health.get(key);
+    health.set(key, { ...(problem ? { problem } : {}), at: now() });
+    if (route === "direct" && previous?.problem !== problem && (previous?.problem || problem)) {
+      log(problem ? `[native-push] own APNs key is not delivering: ${problem}` : `[native-push] own APNs key delivers again (was: ${previous?.problem})`);
+    }
+    // The route works again: what waits for it goes now, not after its backoff.
+    if (!problem) wakeRetries(route, platform);
+  };
+  let probing: Promise<void> | undefined;
+  const probeService = (): Promise<void> => {
+    const relay = opts.relay;
+    if (!relay?.probe) return Promise.resolve();
+    probing ??= relay.probe().then((answer) => {
+      for (const platform of ["ios", "android"] as const) {
+        if (answer.reach !== "ok") { observe("service", platform, answer.reach); continue; }
+        if (answer.credentials?.[platform] === false) { observe("service", platform, "config"); continue; }
+        // Answering clears only network trouble, and holding a credential only
+        // its absence: a rejected key or a limit stays until a send succeeds.
+        const previous = health.get(healthKey("service", platform))?.problem;
+        const cleared = !previous || previous === "unreachable" || previous === "error"
+          || (previous === "no-credential" && answer.credentials?.[platform] === true);
+        if (cleared) observe("service", platform, "ok");
+        else health.set(healthKey("service", platform), { problem: previous, at: now() });
+      }
+    }).catch(() => undefined).finally(() => { probing = undefined; });
+    return probing;
+  };
+
+  // --- Alerts the service or provider refused before delivery wait in memory
+  // and go again with backoff until their provider lifetime ends.
+  const pending = new Map<string, PendingAlert>();
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retrying: Promise<void> | undefined;
+  let closed = false;
+  const scheduleRetries = () => {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    if (closed || retrying || !pending.size) return;
+    let next = Infinity;
+    for (const item of pending.values()) next = Math.min(next, item.nextAt);
+    retryTimer = setTimeout(() => { retryTimer = undefined; void flushRetries(); }, Math.max(0, Math.min(next - now(), 2_147_000_000)));
+    retryTimer.unref?.();
+  };
+  const wakeRetries = (route: Route, platform: Platform) => {
+    let woke = false;
+    const at = now();
+    for (const item of pending.values()) {
+      if (item.platform !== platform || item.nextAt <= at || pick(platform)?.route !== route) continue;
+      item.nextAt = at;
+      woke = true;
+    }
+    if (woke) scheduleRetries();
+  };
+  const enqueue = (entry: NativeSubscription, input: DeliveryInput, kind: NotificationKind, firstAt: number) => {
+    const deviceKey = accountDeviceKey(entry);
+    const key = `${deviceKey}\0${input.tag}`;
+    // A newer alert for the same transition replaces the waiting one.
+    pending.delete(key);
+    while (pending.size >= MAX_PENDING_ALERTS) pending.delete(pending.keys().next().value!);
+    const deadline = firstAt + pushTtlSeconds(kind) * 1_000;
+    const nextAt = now() + retryDelays[0]!;
+    if (nextAt >= deadline) return;
+    pending.set(key, {
+      key, deviceKey, platform: destinationOf(entry).platform, subscriptionId: entry.subscriptionId, providerToken: entry.providerToken,
+      ...(entry.contentKey ? { contentKey: entry.contentKey.p256dh } : {}),
+      input, attempts: 0, nextAt, deadline,
+    });
+    scheduleRetries();
+  };
+  /** One send to one registration; `undefined` when it may not be sent at all. */
+  const deliverTo = async (entry: NativeSubscription, input: DeliveryInput): Promise<SendResult | undefined> => {
+    const hostEndpointId = await verify(entry);
+    const destination = destinationOf(entry);
+    const via = pick(destination.platform);
+    if (!via || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) return undefined;
+    const result = await via.sender.deliver(destination, input).catch((): SendResult => "transient");
+    observe(via.route, destination.platform, result);
+    if (result === "permanent") {
+      // The provider retired the token (app removed or token replaced): stop sending.
+      state.subscriptions = state.subscriptions.filter((row) => row !== entry);
+      save();
+    }
+    return result;
+  };
+  const runRetries = async () => {
+    const at = now();
+    const due = [...pending.values()].filter((item) => item.nextAt <= at);
+    await Promise.all(due.map(async (item) => {
+      if (pending.get(item.key) !== item) return;
+      const entry = state.subscriptions.find((row) => accountDeviceKey(row) === item.deviceKey);
+      // Unregistered, or registered anew (its sealed text was for the old key), or too old to show.
+      if (!entry || entry.subscriptionId !== item.subscriptionId || entry.providerToken !== item.providerToken
+        || entry.contentKey?.p256dh !== item.contentKey || at >= item.deadline) { pending.delete(item.key); return; }
+      const result = await deliverTo(entry, item.input);
+      if (pending.get(item.key) !== item) return;
+      if (!result || !RETRYABLE.has(result)) { pending.delete(item.key); return; }
+      item.attempts++;
+      item.nextAt = now() + retryDelays[Math.min(item.attempts, retryDelays.length - 1)]!;
+      if (item.nextAt >= item.deadline) pending.delete(item.key);
+    }));
+  };
+  const flushRetries = (): Promise<void> => {
+    retrying ??= runRetries().catch(() => undefined).finally(() => { retrying = undefined; scheduleRetries(); });
+    return retrying;
+  };
+
   // --- Live Activity: one evaluation at a time per device, a short settle
   // after a burst of events, and a heartbeat tick that moves the stale date.
   const evaluating = new Map<string, Promise<void>>();
@@ -434,9 +643,9 @@ export function createNativePushService(opts: {
     if (!entry || !track || !opts.activityViews) return;
     const at = now();
     if (at - track.trackedAt > LIVE_ACTIVITY_MAX_MS) { dropTrack(key, track); return; }
-    const sender = senderFor("ios");
+    const via = pick("ios");
     const hostEndpointId = await verify(entry);
-    if (!sender || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) return;
+    if (!via || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) return;
     const views = await opts.activityViews({ userId: entry.userId, spaceId: entry.spaceId }, [track.sessionId, ...track.others]);
     const focus = views.get(track.sessionId);
     const content = liveActivityContent(focus, track.others.map((id) => views.get(id)));
@@ -445,7 +654,7 @@ export function createNativePushService(opts: {
     if (!changed && !ended && at - track.pushedAt < LIVE_ACTIVITY_HEARTBEAT_MS) return;
     const seconds = Math.floor(at / 1_000);
     const startedAt = content.startedAt !== undefined ? Math.floor(content.startedAt / 1_000) : undefined;
-    const result = await sender.deliverActivity(
+    const result = await via.sender.deliverActivity(
       { subscriptionId: "live-activity", version: 1, platform: "ios", environment: entry.environment, channel: "liveactivity", providerToken: entry.providerToken },
       {
         event: ended ? "end" : "update",
@@ -459,7 +668,8 @@ export function createNativePushService(opts: {
         ...(ended ? { dismissAt: focus ? seconds + LIVE_ACTIVITY_DISMISS_MS / 1_000 : seconds } : {}),
         urgent: changed || ended,
       },
-    ).catch((): ProviderClass => "transient");
+    ).catch((): SendResult => "transient");
+    observe(via.route, "ios", result);
     const latest = activities().find((row) => accountDeviceKey(row) === key);
     // The device registered another activity or named another chat meanwhile.
     if (latest !== entry || latest.track !== track) return;
@@ -552,26 +762,21 @@ export function createNativePushService(opts: {
     async send(input) {
       let sent = 0;
       // Every device at once: a slow or unreachable phone must not delay the others.
+      const firstAt = now();
       await Promise.all(state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId).map(async (entry) => {
-        const hostEndpointId = await verify(entry);
-        const destination = destinationOf(entry);
-        const sender = senderFor(destination.platform);
-        if (!sender || !hostEndpointId || hostEndpointId !== entry.hostEndpointId) return;
         let sealed: string | undefined;
         if (entry.contentKey && typeof input.title === "string" && typeof input.body === "string") {
           try { sealed = sealNativeContent(entry.contentKey, input.title, input.body); } catch { /* generic text */ }
         }
-        const result = await sender.deliver(destination, {
+        const alert: DeliveryInput = {
           version: 1, subscriptionId: entry.subscriptionId, notificationId: input.notificationId, kind: input.kind, tag: nativePushTag(input.transitionKey),
           ...(sealed ? { sealed } : {}),
-        }).catch((): ProviderClass => "transient");
-        // Best effort: a failed push is never replayed; the inbox row stays.
+        };
+        const result = await deliverTo(entry, alert);
         if (result === "success") sent++;
-        else if (result === "permanent") {
-          // The provider retired the token (app removed or token replaced): stop sending.
-          state.subscriptions = state.subscriptions.filter((row) => row !== entry);
-          save();
-        }
+        // Provably not shown: it waits and goes again. An uncertain failure is
+        // never repeated (it may already be on the phone); the inbox row stays.
+        else if (result && RETRYABLE.has(result)) enqueue(entry, alert, input.kind, firstAt);
       }));
       return { sent };
     },
@@ -623,9 +828,38 @@ export function createNativePushService(opts: {
       save();
       return true;
     },
+    async delivery(account) {
+      const rows = (await Promise.all(state.subscriptions
+        .filter((row) => row.userId === account.userId && row.spaceId === account.spaceId)
+        .map(async (row) => (await verify(row)) === row.hostEndpointId ? row : undefined)))
+        .filter((row): row is NativeSubscription => Boolean(row));
+      // With no phone yet, report what a new iPhone would use.
+      const platforms = new Set<Platform>(rows.length ? rows.map((row) => destinationOf(row).platform) : ["ios"]);
+      const used = [...platforms].flatMap((platform) => { const via = pick(platform); return via ? [{ route: via.route, platform }] : []; });
+      const keys = new Set(rows.map(accountDeviceKey));
+      const waiting = [...pending.values()].filter((item) => keys.has(item.deviceKey)).length;
+      if (!used.length) return { phones: rows.length, route: "none", state: "failing", pending: waiting };
+      const stale = (key: string) => { const seen = health.get(key); return !seen || now() - seen.at > PROBE_STALE_MS; };
+      if (used.some((use) => use.route === "service" && stale(healthKey("service", use.platform)))) await probeService();
+      const seen = used.map((use) => health.get(healthKey(use.route, use.platform)));
+      const failing = seen.find((entry) => entry?.problem);
+      const at = seen.reduce<number | undefined>((latest, entry) => entry && (latest === undefined || entry.at > latest) ? entry.at : latest, undefined);
+      return {
+        phones: rows.length,
+        route: used.some((use) => use.route === "service") ? "service" : "direct",
+        state: failing ? "failing" : seen.every(Boolean) ? "ok" : "unknown",
+        ...(failing?.problem ? { problem: failing.problem } : {}),
+        ...(at !== undefined ? { checkedAt: at } : {}),
+        pending: waiting,
+      };
+    },
     sessionTouched,
     flushActivities,
+    flushRetries,
     close() {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      pending.clear();
       if (heartbeat) clearInterval(heartbeat);
       for (const timer of settling.values()) clearTimeout(timer);
       settling.clear();
@@ -636,6 +870,11 @@ export function createNativePushService(opts: {
 export function nativePushRoutes(service: NativePushService): RouteHandler {
   return async (rc) => {
     if (!rc.path.startsWith("/api/native-push")) return false;
+    // Whether this person's phones get pushes: also asked from a computer.
+    if (rc.path === "/api/native-push/delivery" && rc.method === "GET") {
+      rc.json(200, await service.delivery({ userId: rc.space.userId, spaceId: rc.space.spaceId }));
+      return true;
+    }
     if (rc.principal.kind !== "paired-device") throw Object.assign(new Error("not allowed"), { code: "forbidden" });
     const account = { userId: rc.space.userId, spaceId: rc.space.spaceId, deviceId: rc.principal.deviceId, deviceEndpointId: rc.principal.deviceEndpointId };
     if (rc.path === "/api/native-push" && rc.method === "GET") { rc.json(200, await service.status(account)); return true; }

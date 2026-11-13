@@ -58,7 +58,7 @@ async function route(relay: PushRelay, options: RelayHttpOptions, request: Incom
   request.once("aborted", () => abort.abort());
   response.once("close", () => { if (!response.writableEnded) abort.abort(); });
   try {
-    if (request.method === "GET" && request.url === "/v1/health") { respond(response, 200, { ok: true }); return; }
+    if (request.method === "GET" && request.url === "/v1/health") { respond(response, 200, relay.health()); return; }
     if (request.method !== "POST" || request.url !== "/v1/send") throw new RelayFault("not-found");
     respond(response, 200, await relay.send(await json(request), sourceOf(request, options.trustedProxy), abort.signal));
   } catch (error) {

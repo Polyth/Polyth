@@ -1239,6 +1239,11 @@ export const api = {
 
   // ---- behavior / system / MCP / managed plugins ----------------------------
   behaviorGet: () => jfetch<{ text: string; revision: string; pathLabel: string }>("/api/settings/behavior"),
+  /** Whether this person's phones get native pushes, and why not (`NativePushDelivery` in packages/server/src/nativePush.ts). */
+  nativePushDelivery: () => jfetch<{
+    phones: number; route: "direct" | "service" | "none"; state: "ok" | "failing" | "unknown";
+    problem?: "unreachable" | "rate-limited" | "no-credential" | "credential-rejected" | "error"; checkedAt?: number; pending: number;
+  }>("/api/native-push/delivery"),
   behaviorPut: (text: string, expectedRevision: string) =>
     jfetch<{ text: string; revision: string; pathLabel: string }>("/api/settings/behavior", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, expectedRevision }) }),
   subagentPolicyGet: () => jfetch<{ enabled: boolean }>("/api/settings/behavior/subagents"),
