@@ -32,6 +32,7 @@ export const ar: ModelsMessages = {
   "modelpicker.pricing": "الأسعار",
   "modelpicker.pricingPerMTok": "{input} إدخال · {output} إخراج لكل مليون رمز",
   "modelpicker.provider": "المزود",
+  "modelpicker.providers": "المزوّدون",
   "modelpicker.reasoning": "الاستدلال",
   "modelpicker.removeFavorite": "إزالة من المفضلة",
   "modelpicker.removeValueFromFavorites": "إزالة {name} من المفضلة",

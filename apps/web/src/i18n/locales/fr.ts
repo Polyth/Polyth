@@ -1456,6 +1456,8 @@ export const fr: AppMessages = {
   "settings.pages.agentProfiles": "Profils d'agents (",
   "settings.pages.agentQuestion": "Question de l'agent",
   "settings.pages.appearance": "Apparence",
+  "settings.pages.syncAppearance": "Synchroniser l'apparence avec le serveur",
+  "settings.pages.syncAppearanceHint": "Synchronisez le thème, les couleurs et la disposition de cet appareil avec votre compte. Désactivez-le pour conserver un aspect distinct sur cet appareil — les changements d'apparence distants sont ignorés et les vôtres ne sont pas partagés. Le réactiver remplace l'aspect de cet appareil par celui de votre compte.",
   "settings.pages.hideBorders": "Masquer les bordures de l’interface",
   "settings.pages.hideBordersHint": "Masque les contours décoratifs des panneaux et les séparateurs. Les bords discrets pour redimensionner le navigateur de sessions et le panneau latéral, ainsi que la bordure de la zone de saisie, restent visibles.",
   "settings.pages.mirrorLayout": "Inverser la disposition",

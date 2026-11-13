@@ -526,3 +526,30 @@ width: 100%;
 @media (hover: none) {
   .model-picker-row.active:not(.current) { background: transparent; }
 }
+
+/* Phone: a held favorite or provider lifts (workspaceArrange.ts). The press
+   sinks a little, the copy rises, the slot stays as a quiet well. */
+.model-picker-quick,
+.model-picker-providers { position: relative; }
+.model-picker-row[data-arrange-pressing],
+.model-provider-section[data-arrange-pressing] > .model-provider-head {
+  scale: .97;
+  transition: scale 300ms cubic-bezier(.2, .8, .3, 1) 70ms;
+}
+.model-picker-row.is-arrange-held,
+.model-provider-section.is-arrange-held {
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+/* A held provider folds its open model list (as a held navigator project
+   hides its chats), so its slot is one row tall. */
+.model-provider-section.is-arrange-held > :not(.model-provider-head) { display: none; }
+.model-picker-row.is-arrange-held > *,
+.model-provider-section.is-arrange-held > * { visibility: hidden; }
+.model-picker-shell .workspace-arrange-ghost-body.is-lifted { transform: scale(1.03); }
+.model-picker-shell .workspace-arrange-ghost-body > * {
+  height: 100%;
+  border-radius: var(--radius-control);
+  background: var(--panel);
+  box-shadow: 0 14px 32px -14px rgb(0 0 0 / .45), 0 3px 10px -5px rgb(0 0 0 / .3);
+}

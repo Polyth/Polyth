@@ -57,6 +57,7 @@ export const bg: TerminalMessages = {
   "terminalview.processExited": "процесът приключи",
   "terminalview.processExitedCodeValue": "процесът приключи (код {code})",
   "terminalview.reconnecting": "Възстановяване",
+  "terminalview.renameValue": "Преименуване на {title}",
   "terminalview.repository": "Хранилище",
   "terminalview.repositoryMissing": "{path} · липсва",
   "terminalview.resetTerminal": "Нулиране на терминала",

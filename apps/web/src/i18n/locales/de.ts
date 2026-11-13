@@ -1456,6 +1456,8 @@ export const de: AppMessages = {
   "settings.pages.agentProfiles": "Agentenprofile (",
   "settings.pages.agentQuestion": "Agentenfrage",
   "settings.pages.appearance": "Erscheinungsbild",
+  "settings.pages.syncAppearance": "Darstellung mit dem Server synchronisieren",
+  "settings.pages.syncAppearanceHint": "Synchronisieren Sie Design, Farben und Layout dieses Geräts mit Ihrem Konto. Schalten Sie es aus, um auf diesem Gerät ein eigenes Erscheinungsbild zu behalten — entfernte Darstellungsänderungen werden ignoriert und Ihre eigenen nicht geteilt. Erneutes Einschalten ersetzt das Erscheinungsbild dieses Geräts durch das Ihres Kontos.",
   "settings.pages.hideBorders": "Oberflächenrahmen ausblenden",
   "settings.pages.hideBordersHint": "Dekorative Panelrahmen und Trennlinien ausblenden. Dezente Kanten zum Ändern der Größe des Sitzungsnavigators und der Seitenleiste sowie der Rahmen des Eingabefelds bleiben sichtbar.",
   "settings.pages.mirrorLayout": "Layout spiegeln",

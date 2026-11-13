@@ -1456,6 +1456,8 @@ export const it: AppMessages = {
   "settings.pages.agentProfiles": "Profili degli agenti (",
   "settings.pages.agentQuestion": "Domanda dell'agente",
   "settings.pages.appearance": "Aspetto",
+  "settings.pages.syncAppearance": "Sincronizza l'aspetto con il server",
+  "settings.pages.syncAppearanceHint": "Sincronizza tema, colori e layout di questo dispositivo con il tuo account. Disattivalo per conservare un aspetto distinto su questo dispositivo: le modifiche remote all'aspetto vengono ignorate e le tue non vengono condivise. Riattivarlo sostituisce l'aspetto di questo dispositivo con quello del tuo account.",
   "settings.pages.hideBorders": "Nascondi i bordi dell’interfaccia",
   "settings.pages.hideBordersHint": "Nasconde i contorni decorativi dei pannelli e i separatori. Restano visibili i bordi tenui per ridimensionare il navigatore delle sessioni e il pannello laterale, oltre al contorno del compositore.",
   "settings.pages.mirrorLayout": "Disposizione speculare",

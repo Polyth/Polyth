@@ -28,6 +28,7 @@ import {
   AddIcon,
   CloseIcon,
   DeleteIcon,
+  EditIcon,
   IconButton,
   RepositoryScopePicker,
   SearchIcon,
@@ -543,6 +544,18 @@ export default function TerminalView({
                   {t.title}
                   {!t.running && <span className="term-tab-dead"> {tr("terminalview.exited")}</span>}
                 </button>
+              )}
+              {/* Touch rename path (desktop double-clicks): CSS shows it only
+                  on the active tab under a coarse pointer. */}
+              {t.id === tab?.id && renaming !== t.id && (
+                <IconButton
+                  icon={EditIcon}
+                  size="sm"
+                  variant="ghost"
+                  className="term-tab-rename-btn"
+                  label={tr("terminalview.renameValue", { title: t.title })}
+                  onClick={() => startRename(t)}
+                />
               )}
               <IconButton
                 icon={CloseIcon}

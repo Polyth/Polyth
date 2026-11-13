@@ -345,6 +345,65 @@
   padding-inline-end: calc(var(--control-h) + var(--space-6));
 }
 
+/* ---- shared Home Screen edit mode for any arrange list ----------------------
+   A list on workspaceArrange.ts whose hold turns editing on (`activate`) marks
+   itself `data-arrange-editing` while editing: its items sway like the phone
+   Workspace's rows and carry a corner badge (− hides, + brings back). */
+[data-arrange-editing] > [data-arrange-id] {
+  position: relative;
+  isolation: isolate;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  animation: workspace-jiggle-row 330ms linear infinite;
+  animation-delay: calc(var(--jiggle-phase, 0) * -47ms);
+}
+
+[data-arrange-editing] > [data-arrange-id].is-arrange-held { animation: none; }
+[data-arrange-editing] > [data-arrange-id]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.arrange-badge {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: calc(-1 * var(--space-2));
+  inset-inline-start: calc(-1 * var(--space-2));
+  display: grid;
+  place-items: center;
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-circle);
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 16%, var(--panel));
+  box-shadow:
+    0 0 0 .5px color-mix(in srgb, var(--text) 22%, transparent),
+    0 2px 6px -1px rgb(0 0 0 / .32);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  animation: workspace-badge-in var(--motion-normal) cubic-bezier(.3, 1.5, .55, 1) both;
+  transition: scale var(--motion-fast) var(--motion-ease);
+}
+.arrange-badge::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--icon-xl) - var(--tap)) / 2);
+}
+.arrange-badge:active:where(:not(:disabled)) { scale: .82; }
+.arrange-badge .ui-icon { stroke-width: 3; }
+.arrange-badge--add { position: static; flex: 0 0 auto; color: #fff; background: var(--green); box-shadow: none; animation: none; }
+.arrange-badge--add::after { content: none; }
+.workspace-arrange-ghost .arrange-badge { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-arrange-editing] > [data-arrange-id] { animation: none; }
+}
+
 /* ---- drag states ------------------------------------------------------------- */
 /* The lifted item's own slot: a faint outline that travels as a hole. */
 .workspace-panel-sheet .workspace-panel-item.is-hole {

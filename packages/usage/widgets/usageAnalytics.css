@@ -133,6 +133,82 @@
   display: none;
 }
 
+/* Phone Home Screen editing (workspaceArrange.ts; sway and badges are the
+   host's shared [data-arrange-editing] rules). A held block sinks a little,
+   the lifted copy rises over its neighbours, its slot stays as a quiet well. */
+.usage-clean-stack { position: relative; }
+/* While editing each block reads as one unit (Overview is a grid of cards):
+   a quiet frame drawn outside the box, so turning editing on moves nothing
+   under the finger; the − sits on the frame's corner. */
+.usage-clean-stack[data-arrange-editing] > .usage-clean-block {
+  border-radius: calc(var(--radius-surface) + 4px);
+  outline: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  outline-offset: 4px;
+}
+/* On the frame's corner, still inside the page gutter on a 390px phone. */
+.usage-clean-stack[data-arrange-editing] > .usage-clean-block > .arrange-badge {
+  inset-block-start: -10px;
+  inset-inline-start: -10px;
+}
+.usage-clean-stack[data-arrange-editing] > .usage-clean-block.is-arrange-held { outline: none; }
+.usage-clean-block[data-arrange-pressing] {
+  scale: .97;
+  transition: scale 300ms cubic-bezier(.2, .8, .3, 1) 70ms;
+}
+.usage-clean-block.is-arrange-held {
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+}
+.usage-clean-block.is-arrange-held > * { visibility: hidden; }
+.usage-clean-stack .workspace-arrange-ghost-body.is-lifted { transform: scale(1.03); }
+.usage-clean-stack .workspace-arrange-ghost-body > .usage-clean-block {
+  height: 100%;
+  border-radius: var(--radius-surface);
+  background: var(--panel);
+  transition: box-shadow var(--motion-normal) var(--motion-ease);
+}
+.usage-clean-stack .workspace-arrange-ghost-body.is-lifted > .usage-clean-block {
+  box-shadow: 0 18px 40px -16px rgb(0 0 0 / .45), 0 4px 12px -6px rgb(0 0 0 / .3);
+}
+.usage-clean-stack[data-arranging] > .usage-clean-block { will-change: transform; }
+.usage-clean-hidden {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-block-start: var(--space-2);
+}
+.usage-clean-hidden > h3 {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+}
+.usage-clean-hidden-row {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.usage-clean-hidden-row:active { scale: .98; }
+.usage-clean-hidden-row > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.usage-clean-hidden-row strong { font-size: var(--font-label); font-weight: 600; }
+.usage-clean-hidden-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- Overview -------------------------------------------------------------- */
 
 .usage-clean-overview {

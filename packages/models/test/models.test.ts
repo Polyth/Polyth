@@ -91,6 +91,10 @@ test("favorite reorder moves a saved favorite ahead of its drop target", () => {
     "p/third", "p/first", "p/second",
   ]);
   assert.equal(reorderFavorite(prefs, "p/missing", "p/first"), prefs);
+  // One step down lands after the target (the phone ↓ path).
+  assert.deepEqual(reorderFavorite(prefs, "p/first", "p/second").favorites, [
+    "p/second", "p/first", "p/third",
+  ]);
 });
 
 test("sortModels floats favorites first, then provider/name order", () => {

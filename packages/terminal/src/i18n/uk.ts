@@ -57,6 +57,7 @@ export const uk: TerminalMessages = {
   "terminalview.processExited": "процес завершився",
   "terminalview.processExitedCodeValue": "процес завершився (код {code})",
   "terminalview.reconnecting": "Повторне підключення",
+  "terminalview.renameValue": "Перейменувати {title}",
   "terminalview.repository": "Репозиторій",
   "terminalview.repositoryMissing": "{path} · відсутній",
   "terminalview.resetTerminal": "Скинути термінал",

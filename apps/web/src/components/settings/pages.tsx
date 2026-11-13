@@ -11,6 +11,7 @@ import {
 } from "../../store.ts";
 import { useOrderedProjects } from "../../projectRecency.ts";
 import { RAIL_SIZE_MAX, RAIL_SIZE_MIN, RAIL_SIZE_STEP, RAIL_SPACING_MAX, RAIL_SPACING_MIN, RAIL_SPACING_STEP, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type StatusBarMode, type SwipeNavigationMode } from "../../uiPrefs.ts";
+import { isAppearanceSyncEnabled, setAppearanceSyncEnabled, subscribeAppearanceSync } from "../../settingsSync.ts";
 import { projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS, interfaceFontLabel, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
@@ -843,9 +844,15 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
   const rightRailSize = tr("settings.pages.rightRailSize");
   const topRailSize = tr("settings.pages.topRailSize");
   const railSpacing = tr("settings.pages.railSpacing");
+  const appearanceSyncOn = useSyncExternalStore(subscribeAppearanceSync, isAppearanceSyncEnabled);
   return (
     <>
       <PageHead title={tr("settings.pages.appearance")} blurb={tr("settings.pages.visualPreferencesSavedInThisBrowserAnd")} />
+      <Section title={tr("settings.account.thisDevice")}>
+        <Row label={tr("settings.pages.syncAppearance")} hint={tr("settings.pages.syncAppearanceHint")} itemId="appearance.sync">
+          <Toggle on={appearanceSyncOn} onChange={setAppearanceSyncEnabled} label={tr("settings.pages.syncAppearance")} />
+        </Row>
+      </Section>
       <Section
         title={tr("settings.pages.shellLook")}
         hint={tr("settings.pages.shellLookHint")}

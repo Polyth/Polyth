@@ -32,6 +32,7 @@ export const bg: ModelsMessages = {
   "modelpicker.pricing": "Цени",
   "modelpicker.pricingPerMTok": "{input} вход · {output} изход на MTok",
   "modelpicker.provider": "Доставчик",
+  "modelpicker.providers": "Доставчици",
   "modelpicker.reasoning": "Разсъждение",
   "modelpicker.removeFavorite": "Премахване от любими",
   "modelpicker.removeValueFromFavorites": "Премахване на {name} от любими",

@@ -1456,6 +1456,8 @@ export const pl: AppMessages = {
   "settings.pages.agentProfiles": "Profile agentów (",
   "settings.pages.agentQuestion": "Pytanie agenta",
   "settings.pages.appearance": "Wygląd",
+  "settings.pages.syncAppearance": "Synchronizuj wygląd z serwerem",
+  "settings.pages.syncAppearanceHint": "Synchronizuj motyw, kolory i układ tego urządzenia z kontem. Wyłącz, aby zachować osobny wygląd na tym urządzeniu — zdalne zmiany wyglądu są ignorowane, a Twoje nie są udostępniane. Ponowne włączenie zastępuje wygląd tego urządzenia wyglądem Twojego konta.",
   "settings.pages.hideBorders": "Ukryj obramowania interfejsu",
   "settings.pages.hideBordersHint": "Ukrywa ozdobne obramowania paneli i separatory. Pozostają delikatne krawędzie do zmiany rozmiaru nawigatora sesji i panelu bocznego oraz obramowanie pola edycji.",
   "settings.pages.mirrorLayout": "Lustrzany układ",

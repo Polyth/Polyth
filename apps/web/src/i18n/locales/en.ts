@@ -1459,6 +1459,8 @@ export const en = {
   "settings.pages.agentProfiles": "Agent profiles (",
   "settings.pages.agentQuestion": "Agent question",
   "settings.pages.appearance": "Appearance",
+  "settings.pages.syncAppearance": "Sync appearance with server",
+  "settings.pages.syncAppearanceHint": "Sync this device's theme, colors and layout with your account. Turn it off to keep a separate look on this device — remote appearance changes are ignored and your own are not shared. Turning it back on replaces this device's look with your account's.",
   "settings.pages.hideBorders": "Hide interface borders",
   "settings.pages.hideBordersHint": "Hide decorative panel outlines and separators. A subtle resize edge for the session navigator and side panel, plus the composer border, remain visible.",
   "settings.pages.mirrorLayout": "Mirror layout",

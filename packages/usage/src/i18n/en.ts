@@ -167,6 +167,8 @@ export const en = {
   "usage.showAll": "Show all {count}",
   "usage.showLess": "Show fewer",
   "usage.showBlock": "Show {block}",
+  "usage.hideBlock": "Hide {block}",
+  "usage.hiddenBlocks": "Hidden",
   "usage.tokenMix": "Token mix",
   "usage.tokenMixDescription": "How recorded tokens split between fresh input, cache and output.",
   "usage.trendVsPrevious": "{value} compared with the previous {period}",

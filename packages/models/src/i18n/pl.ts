@@ -32,6 +32,7 @@ export const pl: ModelsMessages = {
   "modelpicker.pricing": "Cennik",
   "modelpicker.pricingPerMTok": "{input} wejście · {output} wyjście za MTok",
   "modelpicker.provider": "Dostawca",
+  "modelpicker.providers": "Dostawcy",
   "modelpicker.reasoning": "Rozumowanie",
   "modelpicker.removeFavorite": "Usuń z ulubionych",
   "modelpicker.removeValueFromFavorites": "Usuń {name} z ulubionych",

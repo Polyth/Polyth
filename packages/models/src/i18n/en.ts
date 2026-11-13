@@ -34,6 +34,7 @@ export const en = {
   "modelpicker.pricing": "Pricing",
   "modelpicker.pricingPerMTok": "{input} in · {output} out per MTok",
   "modelpicker.provider": "Provider",
+  "modelpicker.providers": "Providers",
   "modelpicker.reasoning": "Reasoning",
   "modelpicker.removeFavorite": "Remove favorite",
   "modelpicker.removeValueFromFavorites": "Remove {name} from favorites",

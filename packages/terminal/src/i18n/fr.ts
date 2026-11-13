@@ -57,6 +57,7 @@ export const fr: TerminalMessages = {
   "terminalview.processExited": "processus sorti",
   "terminalview.processExitedCodeValue": "processus sorti (code {code})",
   "terminalview.reconnecting": "Reconnexion",
+  "terminalview.renameValue": "Renommer {title}",
   "terminalview.repository": "Dépôt",
   "terminalview.repositoryMissing": "{path} · manquant",
   "terminalview.resetTerminal": "Réinitialiser le terminal",

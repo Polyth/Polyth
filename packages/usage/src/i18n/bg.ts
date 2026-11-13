@@ -72,6 +72,8 @@ export const bg: UsageMessages = {
   "usage.showAll": "Показване на всички ({count})",
   "usage.showLess": "Показване на по-малко",
   "usage.showBlock": "Показване на {block}",
+  "usage.hideBlock": "Скрий „{block}“",
+  "usage.hiddenBlocks": "Скрити",
   "usage.tokenMix": "Състав на токените",
   "usage.tokenMixDescription": "Как записаните токени се разпределят между нов вход, кеш и изход.",
   "usage.trendVsPrevious": "{value} спрямо предходните {period}",

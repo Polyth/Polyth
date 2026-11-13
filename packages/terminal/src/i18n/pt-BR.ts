@@ -57,6 +57,7 @@ export const ptBR: TerminalMessages = {
   "terminalview.processExited": "o processo terminou",
   "terminalview.processExitedCodeValue": "o processo terminou (código {code})",
   "terminalview.reconnecting": "Reconectando",
+  "terminalview.renameValue": "Renomear {title}",
   "terminalview.repository": "Repositório",
   "terminalview.repositoryMissing": "{path} · ausente",
   "terminalview.resetTerminal": "Redefinir terminal",

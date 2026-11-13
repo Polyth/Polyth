@@ -228,6 +228,22 @@ the device; project data stays with its owning project.
 | Device navigation or recovery state | `localStorage`/sessionStorage only for active route/session/profile, Chat/Canvas mode, open windows/tabs, Files/Git/Terminal selections, drafts, recent-item history, auth/account recovery, scroll/pending interaction, the workspace Edit toggle, and per-device terminal touch input (pinch size, extra keys, bell vibration; [terminal.md](terminal.md#preferences)) |
 | Shared server setting (other devices must see it) | server/package settings persistence + route |
 
+One appearance-specific exception to the "durable account UI preference" row:
+the Appearance settings page's **Sync appearance with server** toggle
+(`settingsSync.ts`, device-local key `polyth.appearanceSync.v1`, default ON).
+ON preserves the account-owned behavior above. OFF keeps this device's own
+look: the sync boundary neither applies remote appearance changes nor pushes
+this device's, while every other setting keeps syncing. The appearance fields
+are enumerated once as `APPEARANCE_PRODUCT_KEYS` / `APPEARANCE_UI_KEYS` /
+`APPEARANCE_PREFERENCE_IDS` in `settingsSync.ts` and derive from the Appearance
+page's own controls (theme, appearance mode, style, accent, density, text and
+rail sizes, rounding, glass, hide-borders, shell look/layout, wallpaper preset
+and custom themes). Turning OFF freezes the current look; turning ON adopts the
+server's look (not the frozen local one) with no flicker and no push of the
+frozen look. While OFF, the pushed blob carries the server's appearance — never
+the local one — so a server that ignores the flag neither loses its account
+appearance nor receives this device's. The flag itself never reaches the blob.
+
 When two mechanisms look plausible, prefer the one with the smallest blast
 radius: slot contribution over surface, surface over workspace surface,
 settings page over new overlay. A widget is for user-configurable content;

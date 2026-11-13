@@ -1456,6 +1456,8 @@ export const ar: AppMessages = {
   "settings.pages.agentProfiles": "ملفات تعريف الوكلاء (",
   "settings.pages.agentQuestion": "سؤال الوكيل",
   "settings.pages.appearance": "المظهر",
+  "settings.pages.syncAppearance": "مزامنة المظهر مع الخادم",
+  "settings.pages.syncAppearanceHint": "زامن سمة هذا الجهاز وألوانه وتخطيطه مع حسابك. أوقفه لإبقاء مظهر منفصل على هذا الجهاز — تُتجاهل تغييرات المظهر عن بُعد ولا تُشارك تغييراتك. إعادة تشغيله تستبدل مظهر هذا الجهاز بمظهر حسابك.",
   "settings.pages.hideBorders": "إخفاء حدود الواجهة",
   "settings.pages.hideBordersHint": "إخفاء الإطارات الزخرفية والفواصل. تبقى الحواف الخفيفة لتغيير حجم متصفح الجلسات واللوحة الجانبية، وكذلك إطار منطقة كتابة الرسالة.",
   "settings.pages.mirrorLayout": "تخطيط معكوس",

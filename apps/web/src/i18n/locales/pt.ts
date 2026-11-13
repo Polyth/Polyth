@@ -1456,6 +1456,8 @@ export const pt: AppMessages = {
   "settings.pages.agentProfiles": "Perfis de agentes (",
   "settings.pages.agentQuestion": "Pergunta do agente",
   "settings.pages.appearance": "Aspeto",
+  "settings.pages.syncAppearance": "Sincronizar aspeto com o servidor",
+  "settings.pages.syncAppearanceHint": "Sincronize o tema, as cores e a disposição deste dispositivo com a sua conta. Desative para manter um aspeto separado neste dispositivo — as alterações remotas ao aspeto são ignoradas e as suas não são partilhadas. Reativá-lo substitui o aspeto deste dispositivo pelo da sua conta.",
   "settings.pages.hideBorders": "Ocultar contornos da interface",
   "settings.pages.hideBordersHint": "Oculta os contornos decorativos dos painéis e os separadores. Mantêm-se visíveis os bordos subtis para redimensionar o navegador de sessões e o painel lateral, bem como o contorno do compositor.",
   "settings.pages.mirrorLayout": "Disposição espelhada",

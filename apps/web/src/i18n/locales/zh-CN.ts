@@ -1456,6 +1456,8 @@ export const zhCN: AppMessages = {
   "settings.pages.agentProfiles": "代理配置档案（",
   "settings.pages.agentQuestion": "代理提问",
   "settings.pages.appearance": "外观",
+  "settings.pages.syncAppearance": "与服务器同步外观",
+  "settings.pages.syncAppearanceHint": "让此设备的主题、颜色和布局与您的账户保持同步。关闭后可在此设备上保留独立外观——远程外观更改会被忽略，您自己的更改也不会被分享。重新开启后，此设备的外观将被替换为账户的外观。",
   "settings.pages.hideBorders": "隐藏界面边框",
   "settings.pages.hideBordersHint": "隐藏装饰性的面板边框和分隔线。会保留会话导航器和侧面板用于调整大小的浅色边缘，以及输入框边框。",
   "settings.pages.mirrorLayout": "镜像布局",

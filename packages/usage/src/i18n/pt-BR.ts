@@ -72,6 +72,8 @@ export const ptBR: UsageMessages = {
   "usage.showAll": "Mostrar todos ({count})",
   "usage.showLess": "Mostrar menos",
   "usage.showBlock": "Mostrar {block}",
+  "usage.hideBlock": "Ocultar {block}",
+  "usage.hiddenBlocks": "Ocultos",
   "usage.tokenMix": "Composição de tokens",
   "usage.tokenMixDescription": "Como os tokens registrados se dividem entre entrada nova, cache e saída.",
   "usage.trendVsPrevious": "{value} em relação aos {period} anteriores",

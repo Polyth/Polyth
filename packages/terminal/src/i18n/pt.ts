@@ -57,6 +57,7 @@ export const pt: TerminalMessages = {
   "terminalview.processExited": "o processo terminou",
   "terminalview.processExitedCodeValue": "o processo terminou (código {code})",
   "terminalview.reconnecting": "A restabelecer a ligação",
+  "terminalview.renameValue": "Renomear {title}",
   "terminalview.repository": "Repositório",
   "terminalview.repositoryMissing": "{path} · em falta",
   "terminalview.resetTerminal": "Repor terminal",

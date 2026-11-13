@@ -61,7 +61,23 @@ border: none; border-left: 1px solid var(--border-soft); border-radius: 0;
   height: auto; min-height: var(--control-h-sm);
   color: var(--muted); padding: 0; font-size: var(--font-meta); background: transparent;
 }
+.term-tab-group > .term-tab-rename-btn {
+border: none; border-left: 1px solid var(--border-soft); border-radius: 0;
+  align-self: stretch; width: 30px; min-width: 30px;
+  height: auto; min-height: var(--control-h-sm);
+  color: var(--muted); padding: 0; font-size: var(--font-meta); background: transparent;
+  /* Desktop renames by double-clicking the tab; the pencil is the coarse-
+     pointer tap path and stays hidden where the mouse is the primary input. */
+  display: none;
+}
+@media (pointer: coarse) {
+  .term-tab-group > .term-tab-rename-btn {
+    display: inline-grid;
+    place-items: center;
+  }
+}
 .term-tab-x svg,
+.term-tab-rename-btn svg,
 .term-new svg {
 width: var(--icon-sm); height: var(--icon-sm);
 }
@@ -69,8 +85,14 @@ width: var(--icon-sm); height: var(--icon-sm);
   .term-tab-group > .term-tab-x:hover:not(:disabled) {
   color: var(--red); background: transparent; border-color: var(--border-soft);
   }
+  .term-tab-group > .term-tab-rename-btn:hover:not(:disabled) {
+  color: var(--accent-text); background: transparent; border-color: var(--border-soft);
+  }
 }
 .term-tab-group > .term-tab-x:active:not(:disabled) {
+background: transparent; transform: none;
+}
+.term-tab-group > .term-tab-rename-btn:active:not(:disabled) {
 background: transparent; transform: none;
 }
 .term-tab-rename {
@@ -342,6 +364,7 @@ padding-inline: 6px;
 
 .term-tab,
 .term-tab-x,
+.term-tab-rename-btn,
 .term-actions button {
 min-height: var(--tap);
 }
@@ -350,7 +373,8 @@ min-height: var(--tap);
 max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.term-tab-group > .term-tab-x {
+.term-tab-group > .term-tab-x,
+.term-tab-group > .term-tab-rename-btn {
 width: var(--tap); padding: 0;
 }
 
@@ -378,11 +402,13 @@ flex: 0 0 var(--tap); width: var(--tap); height: var(--tap); padding: 0;
 @media (pointer: coarse) {
 .term-tab,
 .term-tab-x,
+.term-tab-rename-btn,
 .term-actions button {
 min-height: var(--tap);
 }
 
 .term-tab-group > .term-tab-x,
+.term-tab-group > .term-tab-rename-btn,
 .term-actions button {
 width: var(--tap); height: var(--tap);
 }

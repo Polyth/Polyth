@@ -1456,6 +1456,8 @@ export const ptBR: AppMessages = {
   "settings.pages.agentProfiles": "Perfis de agentes (",
   "settings.pages.agentQuestion": "Pergunta do agente",
   "settings.pages.appearance": "Aparência",
+  "settings.pages.syncAppearance": "Sincronizar aparência com o servidor",
+  "settings.pages.syncAppearanceHint": "Sincronize o tema, as cores e o layout deste dispositivo com a sua conta. Desative para manter uma aparência separada neste dispositivo — as alterações remotas de aparência são ignoradas e as suas não são compartilhadas. Reativá-lo substitui a aparência deste dispositivo pela da sua conta.",
   "settings.pages.hideBorders": "Ocultar bordas da interface",
   "settings.pages.hideBordersHint": "Oculta os contornos decorativos dos painéis e os separadores. Permanecem visíveis as bordas suaves para redimensionar o navegador de sessões e o painel lateral, além do contorno do compositor.",
   "settings.pages.mirrorLayout": "Layout espelhado",

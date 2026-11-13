@@ -14499,6 +14499,7 @@ width: var(--tap);
   color: var(--text-dim);
 }
 .reorder-control:disabled { opacity: .32; }
+
 @media (pointer: coarse) {
 
   .msg.user .msg-action-btn, .focus-conversation .msg .msg-action-btn, .reorder-control{
@@ -20690,7 +20691,6 @@ body[data-glass="off"] :is(.scrim, .dialog-backdrop, .sheet-backdrop) {
     opacity: 1;
     pointer-events: auto;
   }
-  .pane-tab-group.active > .reorder-controls { display: none; }
 }
 
 /* macOS and Windows own their caption controls: native traffic lights
