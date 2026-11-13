@@ -4279,6 +4279,23 @@ empty or error markup.
   track and clips only during the motion, so focus rings survive at rest.
   `onOpened` fires when it has finished growing: measure then, since a fixed
   delay races a slow first render of the settings inside.
+- **Settings for other devices.** A setting that takes effect on one kind of
+  screen only is declared as a `DeviceBlock({ devices, labels, items, ownSection?, render })`
+  (`components/settings/OtherDevicesSection.tsx`). The device is the shell this
+  screen draws (`useSettingsDevice()`: wide → `desktop`, compact → `tablet`,
+  phone → `phone`); name in `devices` every shell whose code actually reads
+  the setting. Blocks for this device render in their own place
+  (`blocksOnDevice`); the rest wait in one closed `OtherDevicesSection` at the
+  end of the page, titled for those devices ("For desktop and tablet") with
+  their `labels` as the summary line (it wraps between labels only). Opening it
+  shows a one-line note, then the hidden loose rows straight under the group's
+  heading (so a section title still shown on the page is never repeated), then
+  blocks with `ownSection` as whole sections one heading level down
+  (`SectionHeadingLevel`). It is closed on every visit and opens for
+  a `settingsTarget` among its `items`, so search and deep links still land.
+  Nothing is stored about it. General (gestures) and Appearance (window layout,
+  rails, status bar, tablet toolbar) use it; pinned in
+  `apps/web/test/settingsOtherDevices.test.ts`.
 - **Control vocabulary.** Boolean → `Toggle` (never a lone checkbox).
   ≤4 mutually exclusive options → `Seg`. More options → `Select` (from
   `components/ui`). Several independent choices of one kind → `CheckGroup`.

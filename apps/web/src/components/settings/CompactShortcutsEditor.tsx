@@ -1,6 +1,7 @@
 // Settings → Appearance: the ordered tool set pinned to the tablet header.
 // Pinned tools fill whole slots beside the session title; the rest — and
 // every unpinned tool — stay in the header's More menu.
+import { useContext } from "react";
 import { tr } from "../../i18n/index.ts";
 import { useResolvedCapabilities } from "../../capabilities.ts";
 import { Icon as AppIcon } from "../../icons.tsx";
@@ -10,7 +11,7 @@ import {
 } from "../../uiPrefs.ts";
 import { useRailSurfaceModel } from "../ContextRail.tsx";
 import { ChevronDownIcon, ChevronUpIcon, IconButton, MinusIcon, PlusIcon } from "../ui/index.ts";
-import { ResetLink } from "./parts.tsx";
+import { ResetLink, SectionHeadingLevel } from "./parts.tsx";
 import "./CompactShortcutsEditor.css";
 
 interface ShortcutRow {
@@ -54,6 +55,9 @@ export function CompactShortcutsReset() {
 }
 
 export default function CompactShortcutsEditor() {
+  // One level under its section's title, which drops a level inside the
+  // other-devices group.
+  const ListHeading = useContext(SectionHeadingLevel) === 4 ? "h5" : "h4";
   const ui = useUiSettings();
   const catalog = useShortcutCatalog();
   const stored = ui.mobileShortcuts;
@@ -109,7 +113,7 @@ export default function CompactShortcutsEditor() {
       </ol>
       {available.length > 0 && (
         <>
-          <h4 className="compact-shortcuts-heading">{tr("settings.pages.compactShortcutsAvailable")}</h4>
+          <ListHeading className="compact-shortcuts-heading">{tr("settings.pages.compactShortcutsAvailable")}</ListHeading>
           <ul className="compact-shortcuts-list" aria-label={tr("settings.pages.compactShortcutsAvailable")}>
             {available.map((id) => {
               const row = catalog.get(id)!;

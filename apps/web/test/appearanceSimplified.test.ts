@@ -1,6 +1,6 @@
 // Appearance leads each family of sizes with one control and opens the
 // per-part rows on demand (or for a search hit on one of them); the tablet bar
-// waits behind a button outside tablet width; composer buttons and swipe
+// waits in the other-devices group outside tablet width; composer buttons and swipe
 // navigation live on the pages that own them; schemes have one picker.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -156,12 +156,13 @@ test("a rail preset sets every rail; hand-set rails press none and show their si
   }
 });
 
-test("outside tablet width the tablet bar waits behind Show; a link from the bar opens it", async () => {
+test("outside tablet width the tablet bar waits in the other-devices group; a link from the bar opens it", async () => {
   const page = await mount();
   try {
-    assert.ok(present(page.item("appearance.compactShortcuts")));
+    assert.equal(present(page.item("appearance.compactShortcuts")), false);
     assert.equal(present(page.host.querySelector(".compact-shortcuts")), false);
-    await page.click(page.button(tr("settings.pages.showDetails"), '[data-settings-item="appearance.compactShortcuts"]'));
+    await page.click(page.host.querySelector(".settings-other-devices-toggle") as unknown as HTMLButtonElement);
+    assert.ok(present(page.item("appearance.compactShortcuts")));
     assert.ok(present(page.host.querySelector(".compact-shortcuts")));
   } finally {
     await page.unmount();

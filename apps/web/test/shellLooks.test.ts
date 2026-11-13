@@ -155,9 +155,12 @@ test("Appearance leads with the look, then color, platform style, the background
   const order = [
     ...["settings.pages.shellLook", "settings.pages.colorGroup", "settings.pages.themeStyle", "settings.pages.backgroundSurfaces"]
       .map((key) => page.indexOf(`title={tr("${key}")}`)),
-    page.indexOf("<ShellLayoutSection />"),
+    // The window layout is a desktop-only block: in place on a desktop, in the
+    // other-devices group elsewhere (settingsOtherDevices.test.ts).
+    page.indexOf("blocksOnDevice([windowLayoutBlock]"),
     page.indexOf(`title={tr("settings.pages.textGroup")}`),
   ];
+  assert.match(page, /const windowLayoutBlock: DeviceBlock = \{[\s\S]*?render: \(\) => <ShellLayoutSection \/>/);
   for (const [index, at] of order.entries()) assert.ok(at > 0, `section ${index} is missing`);
   assert.deepEqual([...order].sort((a, b) => a - b), order, "Appearance sections are out of order");
   // Transparency and borders belong to the background they sit over.

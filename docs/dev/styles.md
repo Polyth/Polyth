@@ -581,17 +581,19 @@ The Appearance page runs from the whole to the parts: **Look**, **Color**
 workspace background, its **Panel transparency** and **Hide interface
 borders**), **Window layout** (the layout cards with each layout's own
 options, the top bar style and **Mirror layout**), **Text**, **Layout**
-(density, rail size and spacing, rounding, status bar) and the **Tablet
+(density, rounding, rail size and spacing, status bar) and the **Tablet
 toolbar**. `shellLooks.test.ts` pins the section order and which section owns
-each of those rows.
+each of those rows. Settings for another kind of screen leave that order and
+wait closed at the page end (ui.md §4.5 "Settings for other devices"): a
+phone hides Window layout, the rail and status bar rows and the Tablet
+toolbar; a tablet hides Window layout; a desktop hides the Tablet toolbar.
 
 Each family of sizes leads with one control and keeps its per-part rows one
 click under it (`SizeDetails` in `pages.tsx`): **Text size** moves all six
 text sizes by the same step (`shiftTextSizes`; the number shown is the chat
 size), and the rail presets set all four rail values. A settings-search hit
 or deep link on a collapsed row reaches the page as its `settingsTarget` and
-opens that group. The tablet toolbar editor is open at tablet width and waits
-behind *Show* elsewhere. Schemes that ship with a style share its name
+opens that group. Schemes that ship with a style share its name
 (Polyth, Big Sur, macOS 27), so their rows in the picker add "made for the …
 style". Behaviour rows live with their owners: swipe navigation in General,
 the dictation button and composer quick actions in Chat → Composer

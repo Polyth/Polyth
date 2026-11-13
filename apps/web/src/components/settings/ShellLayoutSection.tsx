@@ -130,6 +130,13 @@ function PlaceLabel({ icons, children }: { icons: ReactNode; children: ReactNode
   );
 }
 
+/** Every settings item this section renders, for a group that hides it. */
+export const SHELL_LAYOUT_ITEMS = [
+  "appearance.windowLayout", "appearance.shellBarStyle", "appearance.topRailSurface",
+  "appearance.shellToolsDock", "appearance.shellActionsDock", "appearance.shellTitle",
+  "appearance.floatingColumns", "appearance.mirrorLayout",
+] as const;
+
 export function ShellLayoutSection() {
   const ui = useUiSettings();
   // The palette's own registered hint, so a custom binding shows through.

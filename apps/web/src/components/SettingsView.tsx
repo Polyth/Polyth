@@ -147,7 +147,7 @@ function placePage(id: string, declared: DeclaredGroup): { group: NavGroup; orde
 }
 
 const BUILTIN: PageDef[] = ([
-  { id: "general", label: tr("settingsview.general"), declared: "Workspace", render: () => <GeneralPage /> },
+  { id: "general", label: tr("settingsview.general"), declared: "Workspace", render: (target) => <GeneralPage {...(target ? { settingsTarget: target } : {})} /> },
   { id: "appearance", label: tr("settingsview.appearance"), declared: "Workspace", render: (target) => <AppearancePage {...(target ? { settingsTarget: target } : {})} /> },
   { id: "chat", label: tr("settingsview.chat"), declared: "Workspace", render: (target) => <ChatPage {...(target ? { settingsTarget: target } : {})} /> },
   { id: "notifications", label: tr("settingsview.notifications"), declared: "Workspace", render: () => <NotificationsPage /> },

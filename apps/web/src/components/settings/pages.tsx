@@ -25,7 +25,8 @@ import { desktopBridge } from "../../desktopBridge.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { CheckGroup, EmptyState, ErrorState, PageHead, ResetLink, Row, SaveBar, Section, Seg, SizeStepper, Toggle } from "./parts.tsx";
 import CompactShortcutsEditor, { CompactShortcutsReset } from "./CompactShortcutsEditor.tsx";
-import { ShellLayoutSection } from "./ShellLayoutSection.tsx";
+import { ShellLayoutSection, SHELL_LAYOUT_ITEMS } from "./ShellLayoutSection.tsx";
+import { blocksOnDevice, OtherDevicesSection, useSettingsDevice, type DeviceBlock } from "./OtherDevicesSection.tsx";
 import {
   HEADER_SIZE_MAX, HEADER_SIZE_MIN, RAIL_PRESETS, railPresetOf, railPresetSizes, shiftTextSizes,
   type RailPreset, type TextSizes,
@@ -147,14 +148,77 @@ function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   );
 }
 
-export function GeneralPage() {
+export function GeneralPage({ settingsTarget }: { settingsTarget?: SettingsNavigationTarget } = {}) {
   const settings = useStore((s) => s.settings);
   const ui = useUiSettings();
+  const device = useSettingsDevice();
   const languageOptions: { value: LocalePreference; label: string }[] = [
     { value: "system", label: tr("settings.pages.languageSystem", { language: LOCALE_NAMES[systemLocale()] }) },
     ...LOCALES.map((locale) => ({ value: locale, label: LOCALE_NAMES[locale] })),
   ];
   const languagePreference = getLocalePreference();
+  const gesturesGroup = tr("settings.pages.gesturesGroup");
+  // How the touch shells answer a swipe: behaviour, not appearance. Screen
+  // swipes work in the phone and tablet shells (shellSwipe.ts); chat-row
+  // swipes belong to the phone Navigator (Navigation.tsx, MobileNavigator).
+  const gestures: DeviceBlock[] = [
+    {
+      devices: ["phone", "tablet"],
+      labels: [tr("settings.pages.swipeNavigation")],
+      items: ["general.swipeNavigation"],
+      render: () => (
+        <Row label={tr("settings.pages.swipeNavigation")} hint={tr("settings.pages.swipeNavigationHint")} itemId="general.swipeNavigation">
+          <Seg<SwipeNavigationMode>
+            label={tr("settings.pages.swipeNavigation")}
+            value={ui.swipeNavigation}
+            options={[
+              ["surface", tr("settings.pages.swipeNavigationSurface")],
+              ["edge", tr("settings.pages.swipeNavigationEdge")],
+              ["off", tr("settings.pages.swipeNavigationOff")],
+            ]}
+            onChange={(swipeNavigation) => setUiSettings({ swipeNavigation })}
+          />
+        </Row>
+      ),
+    },
+    {
+      devices: ["phone"],
+      labels: [tr("settings.devices.rowSwipes")],
+      items: ["general.rowSwipeLeading", "general.rowSwipeTrailing", "general.rowSwipeFull"],
+      render: () => (
+        <>
+          {/* Quick actions of the Navigator's chat rows. Order is kept: the first is the full-swipe action. */}
+          {(["Leading", "Trailing"] as const).map((side) => {
+            const key = side === "Leading" ? "rowSwipeLeading" : "rowSwipeTrailing";
+            const otherKey = side === "Leading" ? "rowSwipeTrailing" : "rowSwipeLeading";
+            const label = side === "Leading" ? tr("settings.pages.rowSwipeLeading") : tr("settings.pages.rowSwipeTrailing");
+            const current = ui[key];
+            return (
+              <Row key={side} label={label} hint={tr("settings.pages.rowSwipeHint")} itemId={`general.rowSwipe${side}`}>
+                <CheckGroup<RowSwipeActionId>
+                  label={label}
+                  value={current}
+                  columns={2}
+                  options={ROW_SWIPE_ACTION_IDS.map((id) => ({ id, label: rowSwipeActionLabel(id) }))}
+                  onChange={(next) => {
+                    const kept = current.filter((id) => next.includes(id));
+                    const added = next.filter((id) => !current.includes(id));
+                    const chosen = [...kept, ...added].slice(0, ROW_SWIPE_MAX_ACTIONS);
+                    // One action lives on one side.
+                    setUiSettings({ [key]: chosen, [otherKey]: ui[otherKey].filter((id) => !chosen.includes(id)) });
+                  }}
+                />
+              </Row>
+            );
+          })}
+          <Row label={tr("settings.pages.rowSwipeFull")} hint={tr("settings.pages.rowSwipeFullHint")} itemId="general.rowSwipeFull">
+            <Toggle on={ui.rowSwipeFull} onChange={(rowSwipeFull) => setUiSettings({ rowSwipeFull })} label={tr("settings.pages.rowSwipeFull")} />
+          </Row>
+        </>
+      ),
+    },
+  ];
+  const gesturesHere = blocksOnDevice(gestures, device);
   return (
     <>
       <PageHead title={tr("settings.pages.general")} blurb={tr("settings.pages.applicationBasicsAndBrowserLocalBehavior")} />
@@ -185,47 +249,9 @@ export function GeneralPage() {
         <Row label={tr("settings.pages.relativeTimestamps")} hint={tr("settings.pages.showSessionActivityAs2mAgoInstead")} itemId="general.relativeTime">
           <Toggle on={settings.relativeTime} onChange={(relativeTime) => updateSettings({ relativeTime })} label={tr("settings.pages.relativeTimestamps")} />
         </Row>
-        {/* How the phone shell answers a swipe: behaviour, not appearance. */}
-        <Row label={tr("settings.pages.swipeNavigation")} hint={tr("settings.pages.swipeNavigationHint")} itemId="general.swipeNavigation">
-          <Seg<SwipeNavigationMode>
-            label={tr("settings.pages.swipeNavigation")}
-            value={ui.swipeNavigation}
-            options={[
-              ["surface", tr("settings.pages.swipeNavigationSurface")],
-              ["edge", tr("settings.pages.swipeNavigationEdge")],
-              ["off", tr("settings.pages.swipeNavigationOff")],
-            ]}
-            onChange={(swipeNavigation) => setUiSettings({ swipeNavigation })}
-          />
-        </Row>
-        {/* Quick actions of the Navigator's chat rows. Order is kept: the first is the full-swipe action. */}
-        {(["Leading", "Trailing"] as const).map((side) => {
-          const key = side === "Leading" ? "rowSwipeLeading" : "rowSwipeTrailing";
-          const otherKey = side === "Leading" ? "rowSwipeTrailing" : "rowSwipeLeading";
-          const label = side === "Leading" ? tr("settings.pages.rowSwipeLeading") : tr("settings.pages.rowSwipeTrailing");
-          const current = ui[key];
-          return (
-            <Row key={side} label={label} hint={tr("settings.pages.rowSwipeHint")} itemId={`general.rowSwipe${side}`}>
-              <CheckGroup<RowSwipeActionId>
-                label={label}
-                value={current}
-                columns={2}
-                options={ROW_SWIPE_ACTION_IDS.map((id) => ({ id, label: rowSwipeActionLabel(id) }))}
-                onChange={(next) => {
-                  const kept = current.filter((id) => next.includes(id));
-                  const added = next.filter((id) => !current.includes(id));
-                  const chosen = [...kept, ...added].slice(0, ROW_SWIPE_MAX_ACTIONS);
-                  // One action lives on one side.
-                  setUiSettings({ [key]: chosen, [otherKey]: ui[otherKey].filter((id) => !chosen.includes(id)) });
-                }}
-              />
-            </Row>
-          );
-        })}
-        <Row label={tr("settings.pages.rowSwipeFull")} hint={tr("settings.pages.rowSwipeFullHint")} itemId="general.rowSwipeFull">
-          <Toggle on={ui.rowSwipeFull} onChange={(rowSwipeFull) => setUiSettings({ rowSwipeFull })} label={tr("settings.pages.rowSwipeFull")} />
-        </Row>
       </Section>
+      {gesturesHere.length > 0 && <Section title={gesturesGroup}>{gesturesHere}</Section>}
+      <OtherDevicesSection device={device} blocks={gestures} target={settingsTarget?.itemId} />
     </>
   );
 }
@@ -774,7 +800,6 @@ const TEXT_SIZE_ITEMS = new Set([
 const RAIL_SIZE_ITEMS = new Set([
   "appearance.leftRailSize", "appearance.rightRailSize", "appearance.topRailSize", "appearance.railSpacing",
 ]);
-const TABLET_ITEMS = new Set([COMPACT_SHORTCUTS_SETTINGS_ITEM]);
 const RAIL_PRESET_NAMES = {
   compact: "settings.pages.railSizeCompact",
   standard: "settings.pages.railSizeStandard",
@@ -819,17 +844,12 @@ function useOpenForTarget(items: ReadonlySet<string>, target: string | undefined
 export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNavigationTarget } = {}) {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
-  const shellMode = useShellMode();
+  const device = useSettingsDevice();
   const target = settingsTarget?.itemId;
   const railPreset = railPresetOf(ui);
   // Hand-set rails open their own sizes, so the numbers stay in view.
   const [textOpen, setTextOpen] = useOpenForTarget(TEXT_SIZE_ITEMS, target);
   const [railOpen, setRailOpen] = useOpenForTarget(RAIL_SIZE_ITEMS, target, railPreset === null);
-  // The tablet bar only draws at tablet width; elsewhere it waits behind a
-  // button, and a link from the bar itself opens it.
-  const tabletWidth = shellMode === "compact";
-  const [tabletOpen, setTabletOpen] = useOpenForTarget(TABLET_ITEMS, target);
-  const tabletShown = tabletWidth || tabletOpen;
   const textSizes: TextSizes = {
     fontSize: settings.fontSize,
     chatFontSize: settings.chatFontSize,
@@ -880,6 +900,87 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
   const topRailSize = tr("settings.pages.topRailSize");
   const railSpacing = tr("settings.pages.railSpacing");
   const appearanceSyncOn = useSyncExternalStore(subscribeAppearanceSync, isAppearanceSyncEnabled);
+  const statusBar = tr("settings.pages.statusBar");
+  // Settings of one kind of screen. The window layout and its mirror apply to
+  // the wide shell only (shellLayout.ts, App.tsx); rails and the status bar to
+  // every shell with a Sidebar (Navigation.tsx, App.tsx); the tablet toolbar to
+  // the compact header (compactHeaderFit.ts).
+  const windowLayoutBlock: DeviceBlock = {
+    devices: ["desktop"],
+    labels: [tr("settings.shellLayout.title")],
+    items: SHELL_LAYOUT_ITEMS,
+    ownSection: true,
+    // The window's shape: the layout, its top bar and the mirror.
+    render: () => <ShellLayoutSection />,
+  };
+  const railsBlock: DeviceBlock = {
+    devices: ["desktop", "tablet"],
+    labels: [railSize, statusBar],
+    items: ["appearance.railSizes", ...RAIL_SIZE_ITEMS, "appearance.statusBar"],
+    render: () => (
+      <>
+        <Row label={railSize} hint={tr("settings.pages.railSizeHint")} itemId="appearance.railSizes">
+          {/* Hand-set rails match no preset, so no segment is pressed. */}
+          <Seg<RailPreset | "custom">
+            value={railPreset ?? "custom"}
+            label={railSize}
+            options={RAIL_PRESETS.map((preset) => [preset, tr(RAIL_PRESET_NAMES[preset])])}
+            onChange={(preset) => { if (preset !== "custom") setUiSettings(railPresetSizes(preset)); }}
+          />
+        </Row>
+        <SizeDetails open={railOpen} onToggle={() => setRailOpen(!railOpen)} label={tr("settings.pages.railSizesEach")}>
+          <Row label={leftRailSize} hint={tr("settings.pages.leftRailSizeHint")} itemId="appearance.leftRailSize">
+            <RailSizeRange value={ui.leftRailSize} label={leftRailSize} onChange={(leftRailSize) => setUiSettings({ leftRailSize })} />
+          </Row>
+          <Row label={rightRailSize} hint={tr("settings.pages.rightRailSizeHint")} itemId="appearance.rightRailSize">
+            <RailSizeRange value={ui.rightRailSize} label={rightRailSize} onChange={(rightRailSize) => setUiSettings({ rightRailSize })} />
+          </Row>
+          <Row label={topRailSize} hint={tr("settings.pages.topRailSizeHint")} itemId="appearance.topRailSize">
+            <RailSizeRange value={ui.topRailSize} label={topRailSize} onChange={(topRailSize) => setUiSettings({ topRailSize })} />
+          </Row>
+          <Row label={railSpacing} hint={tr("settings.pages.railSpacingHint")} itemId="appearance.railSpacing">
+            <SizeStepper
+              value={ui.railSpacing}
+              min={RAIL_SPACING_MIN}
+              max={RAIL_SPACING_MAX}
+              step={RAIL_SPACING_STEP}
+              label={railSpacing}
+              unit="px"
+              onChange={(railSpacing) => setUiSettings({ railSpacing })}
+            />
+          </Row>
+        </SizeDetails>
+        <Row label={statusBar} hint={tr("settings.pages.statusBarHint")} itemId="appearance.statusBar">
+          <Seg<StatusBarMode>
+            label={statusBar}
+            value={ui.statusBar}
+            options={[
+              ["off", tr("settings.pages.statusBarOff")],
+              ["workflows", tr("settings.pages.statusBarWorkflows")],
+              ["always", tr("settings.pages.statusBarAlways")],
+            ]}
+            onChange={(statusBar) => setUiSettings({ statusBar })}
+          />
+        </Row>
+      </>
+    ),
+  };
+  const tabletBlock: DeviceBlock = {
+    devices: ["tablet"],
+    labels: [tr("settings.pages.compactShortcuts")],
+    items: [COMPACT_SHORTCUTS_SETTINGS_ITEM],
+    ownSection: true,
+    render: () => (
+      <Section
+        title={tr("settings.pages.compactShortcuts")}
+        hint={tr("settings.pages.compactShortcutsHint")}
+        itemId={COMPACT_SHORTCUTS_SETTINGS_ITEM}
+        action={<CompactShortcutsReset />}
+      >
+        <CompactShortcutsEditor />
+      </Section>
+    ),
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.appearance")} blurb={tr("settings.pages.visualPreferencesSavedInThisBrowserAnd")} />
@@ -936,8 +1037,7 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
           />
         </Row>
       </Section>
-      {/* The window's shape: the layout, its top bar and the mirror. */}
-      <ShellLayoutSection />
+      {blocksOnDevice([windowLayoutBlock], device)}
       <Section
         title={tr("settings.pages.textGroup")}
         action={<ResetLink disabled={fontSizesAreDefault} onClick={resetFontSizes} />}
@@ -1047,37 +1147,6 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
             ["compact", tr("settings.pages.compact")],
           ]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
         </Row>
-        <Row label={railSize} hint={tr("settings.pages.railSizeHint")} itemId="appearance.railSizes">
-          {/* Hand-set rails match no preset, so no segment is pressed. */}
-          <Seg<RailPreset | "custom">
-            value={railPreset ?? "custom"}
-            label={railSize}
-            options={RAIL_PRESETS.map((preset) => [preset, tr(RAIL_PRESET_NAMES[preset])])}
-            onChange={(preset) => { if (preset !== "custom") setUiSettings(railPresetSizes(preset)); }}
-          />
-        </Row>
-        <SizeDetails open={railOpen} onToggle={() => setRailOpen(!railOpen)} label={tr("settings.pages.railSizesEach")}>
-          <Row label={leftRailSize} hint={tr("settings.pages.leftRailSizeHint")} itemId="appearance.leftRailSize">
-            <RailSizeRange value={ui.leftRailSize} label={leftRailSize} onChange={(leftRailSize) => setUiSettings({ leftRailSize })} />
-          </Row>
-          <Row label={rightRailSize} hint={tr("settings.pages.rightRailSizeHint")} itemId="appearance.rightRailSize">
-            <RailSizeRange value={ui.rightRailSize} label={rightRailSize} onChange={(rightRailSize) => setUiSettings({ rightRailSize })} />
-          </Row>
-          <Row label={topRailSize} hint={tr("settings.pages.topRailSizeHint")} itemId="appearance.topRailSize">
-            <RailSizeRange value={ui.topRailSize} label={topRailSize} onChange={(topRailSize) => setUiSettings({ topRailSize })} />
-          </Row>
-          <Row label={railSpacing} hint={tr("settings.pages.railSpacingHint")} itemId="appearance.railSpacing">
-            <SizeStepper
-              value={ui.railSpacing}
-              min={RAIL_SPACING_MIN}
-              max={RAIL_SPACING_MAX}
-              step={RAIL_SPACING_STEP}
-              label={railSpacing}
-              unit="px"
-              onChange={(railSpacing) => setUiSettings({ railSpacing })}
-            />
-          </Row>
-        </SizeDetails>
         <Row label={tr("settings.pages.cornerRounding")} hint={tr("settings.pages.cornerRoundingHint")} itemId="appearance.rounding">
           <SizeStepper
             value={ui.rounding}
@@ -1088,43 +1157,10 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
             onChange={(rounding) => setUiSettings({ rounding })}
           />
         </Row>
-        <Row label={tr("settings.pages.statusBar")} hint={tr("settings.pages.statusBarHint")} itemId="appearance.statusBar">
-          <Seg<StatusBarMode>
-            label={tr("settings.pages.statusBar")}
-            value={ui.statusBar}
-            options={[
-              ["off", tr("settings.pages.statusBarOff")],
-              ["workflows", tr("settings.pages.statusBarWorkflows")],
-              ["always", tr("settings.pages.statusBarAlways")],
-            ]}
-            onChange={(statusBar) => setUiSettings({ statusBar })}
-          />
-        </Row>
+        {blocksOnDevice([railsBlock], device)}
       </Section>
-      <Section
-        title={tr("settings.pages.compactShortcuts")}
-        hint={tr("settings.pages.compactShortcutsHint")}
-        itemId={COMPACT_SHORTCUTS_SETTINGS_ITEM}
-        action={(
-          <>
-            {tabletShown && <CompactShortcutsReset />}
-            {!tabletWidth && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="settings-disclosure-toggle"
-                iconEnd={tabletOpen ? ChevronUpIcon : ChevronDownIcon}
-                aria-expanded={tabletOpen}
-                onClick={() => setTabletOpen(!tabletOpen)}
-              >
-                {tabletOpen ? tr("settings.pages.hideDetails") : tr("settings.pages.showDetails")}
-              </Button>
-            )}
-          </>
-        )}
-      >
-        {tabletShown && <CompactShortcutsEditor />}
-      </Section>
+      {blocksOnDevice([tabletBlock], device)}
+      <OtherDevicesSection device={device} blocks={[windowLayoutBlock, railsBlock, tabletBlock]} target={target} />
     </>
   );
 }

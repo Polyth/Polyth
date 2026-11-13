@@ -21096,6 +21096,46 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
 .settings-section.is-danger .settings-section-title { color: var(--red); }
 .settings-section.is-danger .settings-section-head { border-bottom-color: color-mix(in srgb, var(--red) 30%, var(--hair)); }
 .settings-reset-link.ui-btn--ghost { color: var(--accent); padding-inline: var(--space-2); }
+/* Settings for other devices (OtherDevicesSection): one closed group at the
+   page end, read as a section head that opens. The hairline sits on the
+   heading so the button's hover wash can reach past the text edge. Inside,
+   the hidden sections keep their own look one heading level down. */
+.settings-other-devices-heading {
+  margin: 0; font: inherit;
+  border-bottom: 1px solid var(--hair);
+}
+.settings-other-devices-toggle {
+  display: flex; align-items: center; gap: var(--space-3);
+  width: calc(100% + 2 * var(--space-2)); min-height: max(var(--hit-min), 40px);
+  margin: 0 calc(-1 * var(--space-2)) var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit;
+  font: inherit; text-align: start; cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .settings-other-devices-toggle:hover { background: var(--surface-overlay-hover); }
+  .settings-other-devices-toggle:hover .settings-other-devices-chevron { color: var(--text-dim); }
+}
+.settings-other-devices-toggle:active { background: var(--surface-overlay-hover); }
+.settings-other-devices-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.settings-other-devices-label { white-space: nowrap; }
+.settings-other-devices-chevron {
+  flex: none; display: grid; place-items: center; color: var(--faint);
+  transition: transform var(--motion-normal) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.settings-other-devices[data-open="true"] .settings-other-devices-chevron { transform: rotate(180deg); }
+.settings-other-devices-note {
+  margin: var(--space-3) 0 0; max-width: 68ch;
+  color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
+.settings-other-devices-rows { margin-top: var(--space-2); }
+.settings-other-devices-body > .settings-section:first-of-type { margin-top: var(--space-4); }
+.settings-other-devices-body[data-motion="opening"] { animation: settings-other-devices-open var(--motion-normal) var(--motion-ease) both; }
+@keyframes settings-other-devices-open {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
 
 /* ItemList / ItemRow — a grouped list of like items (Packages). One quiet
    surface; every row keeps the same trailing geometry (controls, then a
