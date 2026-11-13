@@ -288,6 +288,17 @@ A release before the hold completes sends: touch/pen Send is admitted on
 off Send does not send), and the click that ends a hold is swallowed. An empty
 composer or a queued-message edit never starts a hold.
 
+**What counts as on Send.** The disc is 36px; its touch box is larger (the
+`::after` grown to `--hit-min`), and the browser also gives Send a press that
+lands a few pixels outside that box. Since touch Send does not wait for the
+click, `releaseSends` (`apps/web/src/composer/sendRelease.ts`) decides what the
+click would have: a finger that did not travel (`SEND_TAP_SLOP_PX`) sends
+wherever the browser let it land, and one that travelled sends if it lifted over
+Send's hit-tested box. Never judge the release against the drawn disc alone:
+that left the ring between the disc and the touch box dead, about 40% of the
+target, with Send showing the press and sending nothing.
+`composerSendTouchTarget.test.ts` taps the box with real touches.
+
 **IME composition.** Phone keyboards (Gboard and others) keep the word being
 typed in an open IME composition, and `AdaptiveTextInput` commits draft edits
 (`onTextChange`) only when it ends. Send, the mode and People send buttons
@@ -298,7 +309,10 @@ the word (focus changes are not reported for it), so the sent text and the
 submit-time clear see the final draft. A composition the browser drops without
 `compositionend` (Chromium does so when script writes `value`) is closed by the
 next non-composition `input` or by blur, never left to ignore later typing.
-Enter during a composition still never sends.
+Enter during a composition still never sends. Text the platform writes without
+any `input` event (dictation and some phone keyboards have) is committed at the
+field's next caret move, key release or focus, so Send's enabled state cannot
+stay behind a draft the field visibly holds.
 
 Both navigators and the new chat's recent list show drafts among all chats
 with an accent **Draft** `Badge` (`apps/web/src/sessionDraft.ts`). A chat that

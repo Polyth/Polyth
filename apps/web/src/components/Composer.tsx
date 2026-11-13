@@ -177,6 +177,7 @@ import {
   subscribeComposerContributions,
 } from "../composer/contributions.ts";
 import { detectModeTrigger, isModeLeaveKey, modeText } from "../composer/modes.ts";
+import { releaseSends } from "../composer/sendRelease.ts";
 import "../composer/composerModes.css";
 import { announce } from "./a11y/live.tsx";
 import { successFeedback } from "../haptics.ts";
@@ -3310,7 +3311,12 @@ function ComposerBody({
   // the keyboard stays open for the next message. The delayed click from the
   // same gesture is consumed so it cannot send twice. Mouse holds swallow
   // their click; keyboard activation retains the normal click path.
-  const primaryActivationRef = useRef({ touch: false, keyboard: false, staleTouchClick: false });
+  // Every press the browser gives to Send sends on release, wherever in its
+  // touch box it landed; only a finger that left Send does not
+  // (composer/sendRelease.ts).
+  const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; down: { x: number; y: number } | null }>(
+    { touch: false, keyboard: false, staleTouchClick: false, down: null },
+  );
   const canParkRef = useRef<() => boolean>(() => false);
   // People mode sends a person message, never a draft chat: holding Send there
   // must not announce a saved draft while the message goes out to people.
@@ -3365,6 +3371,7 @@ function ComposerBody({
     activation.touch = true;
     activation.keyboard = false;
     activation.staleTouchClick = false;
+    activation.down = { x: event.clientX, y: event.clientY };
     event.preventDefault();
     startHold();
   }, [startHold]);
@@ -3372,15 +3379,32 @@ function ComposerBody({
     const held = holdRef.current.fired;
     cancelHold();
     if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    const down = primaryActivationRef.current.down;
+    primaryActivationRef.current.down = null;
     if (held) return;
-    // A finger that slid off Send before lifting changed its mind.
-    const rect = event.currentTarget.getBoundingClientRect();
-    const inside = event.clientX >= rect.left && event.clientX <= rect.right
-      && event.clientY >= rect.top && event.clientY <= rect.bottom;
-    if (inside || (rect.width === 0 && rect.height === 0)) send();
+    // A finger that slid off Send before lifting changed its mind. A touch is
+    // captured by the button it began on, so the event's target cannot tell;
+    // the page is hit-tested where the finger lifted instead.
+    const control = event.currentTarget;
+    const under = control.ownerDocument.elementFromPoint?.(event.clientX, event.clientY) ?? null;
+    if (releaseSends({
+      down,
+      up: { x: event.clientX, y: event.clientY },
+      rect: control.getBoundingClientRect(),
+      overControl: under ? control.contains(under) : null,
+    })) send();
   }, [cancelHold, send]);
+  // Leaving ends a hold; the browser taking the touch for a pan ends the
+  // gesture. No click follows a cancelled touch, so nothing is left to
+  // consume: forget it, or it would swallow the next pointerless click
+  // (an assistive activation). A leave is not that: it precedes the click.
+  const onPrimaryPointerLeave = useCallback(() => {
+    cancelHold();
+  }, [cancelHold]);
   const onPrimaryPointerCancel = useCallback(() => {
     cancelHold();
+    primaryActivationRef.current.touch = false;
+    primaryActivationRef.current.down = null;
   }, [cancelHold]);
   const onPrimaryKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -4391,7 +4415,7 @@ function ComposerBody({
             onPointerDown={onPrimaryPointerDown}
             onPointerUp={onPrimaryPointerUp}
             onPointerCancel={onPrimaryPointerCancel}
-            onPointerLeave={onPrimaryPointerCancel}
+            onPointerLeave={onPrimaryPointerLeave}
             onContextMenu={(event) => event.preventDefault()}
             onKeyDown={onPrimaryKeyDown}
             onClick={onPrimaryClick}
@@ -4449,7 +4473,7 @@ function ComposerBody({
       )
             ) : (
       <button className="send" onPointerDown={onPrimaryPointerDown} onPointerUp={onPrimaryPointerUp}
-        onPointerCancel={onPrimaryPointerCancel} onPointerLeave={onPrimaryPointerCancel}
+        onPointerCancel={onPrimaryPointerCancel} onPointerLeave={onPrimaryPointerLeave}
         onContextMenu={(event) => event.preventDefault()} onKeyDown={onPrimaryKeyDown} onClick={onPrimaryClick}
         data-holding={holding || undefined}
         data-parked={parked || undefined}

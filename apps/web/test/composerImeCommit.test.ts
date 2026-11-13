@@ -130,6 +130,47 @@ test("finishComposition commits the word for a Send tap without a focus change",
   await unmount();
 });
 
+test("text the platform wrote without an input event is committed at the next sign of life", async () => {
+  const { committed, handle, ta, unmount } = await mount();
+  ta.focus();
+  // Dictation and some phone keyboards have changed the field silently: the
+  // host kept an empty draft and Send stayed disabled over visible text.
+  ta.value = "надиктований текст";
+  assert.equal(committed.length, 0, "nothing told the host yet");
+  fire(document as unknown as HTMLTextAreaElement, "selectionchange");
+  assert.equal(committed.at(-1), "надиктований текст", "a caret move commits what the field holds");
+
+  committed.length = 0;
+  fire(document as unknown as HTMLTextAreaElement, "selectionchange");
+  fire(ta, "keyup");
+  assert.equal(committed.length, 0, "an observed edit is never committed twice");
+
+  ta.value = "ще слово";
+  fire(ta, "keyup");
+  assert.equal(committed.at(-1), "ще слово", "so does a lifted key");
+
+  // A word still being composed is the keyboard's: only its end commits it.
+  committed.length = 0;
+  fire(ta, "compositionstart");
+  compose(ta, "ще слово і");
+  fire(document as unknown as HTMLTextAreaElement, "selectionchange");
+  fire(ta, "keyup");
+  assert.equal(committed.length, 0, "a composition is left alone");
+  assert.equal(handle.current?.isComposing(), true);
+  fire(ta, "compositionend");
+
+  // A programmatic write is already the host's own text.
+  committed.length = 0;
+  handle.current?.replaceText("history", undefined, { silent: true });
+  fire(document as unknown as HTMLTextAreaElement, "selectionchange");
+  assert.equal(committed.length, 0, "a silent recall stays silent");
+  await unmount();
+
+  ta.value = "after unmount";
+  fire(document as unknown as HTMLTextAreaElement, "selectionchange");
+  assert.equal(committed.length, 0, "the listener goes with the field");
+});
+
 test("unmounting mid-composition releases the live text", async () => {
   const { live, ta, unmount } = await mount();
   fire(ta, "compositionstart");
